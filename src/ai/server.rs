@@ -349,6 +349,11 @@ fn aggregate_doctrine_blackboards(
             scored.push(crate::messages::ScoredObjective {
                 id: "retreat".to_string(),
                 score: retreat_score,
+                // The empty anchor is intentional: the anchors map is not in
+                // scope here, and per PRD #685 the consumer (`operate_helm` /
+                // `resolve_helm_target_position`) resolves an empty/unknown
+                // anchor to the ship's `AiMemory.home_position` (spawn), which
+                // is the designed fallback retreat position. Not a bug.
                 directive: crate::messages::AiDirective::Retreat {
                     anchor: String::new(),
                 },

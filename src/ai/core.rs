@@ -480,6 +480,30 @@ pub fn operate_helm(
                     )
                 })
             }
+            AiDirective::Retreat { anchor } => {
+                let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
+                // Resolve the retreat anchor by name, falling back to the ship's
+                // home/spawn position when the anchor is empty or unknown. The
+                // synthetic hull-triggered Retreat carries an empty anchor
+                // (see `aggregate_doctrine_blackboards`), so this fallback is
+                // what makes it steer back toward spawn. Retreat therefore
+                // always resolves, so it returns `Some(..)` rather than falling
+                // through to lower-priority directives.
+                let pos = anchors
+                    .get(anchor.as_str())
+                    .copied()
+                    .unwrap_or(memory.home_position);
+                helm_navigate_to(
+                    memory,
+                    world_view,
+                    pos,
+                    waypoint_arrival_radius,
+                    avoidance_buffer,
+                    avoidance_look_ahead_secs,
+                    forward_speed,
+                    target_speed,
+                )
+            }
             _ => None,
         };
         if let Some(result) = result {
@@ -1525,6 +1549,98 @@ mod tests {
             memory.target,
             Some(target_uuid),
             "memory.target must be set by Destroy path, not left None by Patrol"
+        );
+    }
+
+    // ── operate_helm Retreat ──────────────────────────────────────────────
+
+    /// Build a single-objective Retreat scored pool naming `anchor`.
+    fn retreat_pool(anchor: &str, score: f32) -> Vec<crate::messages::ScoredObjective> {
+        vec![crate::messages::ScoredObjective {
+            id: "retreat".into(),
+            score,
+            directive: crate::messages::AiDirective::Retreat {
+                anchor: anchor.into(),
+            },
+            source: crate::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: "retreat".into(),
+                text: "Retreat".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
+            },
+        }]
+    }
+
+    #[test]
+    fn operate_helm_retreat_steers_toward_valid_anchor() {
+        // A Retreat directive with a known anchor name must steer toward that
+        // anchor, mirroring the Reach directive. Anchor "rally" is at
+        // [100, 0, 0] — to the right of a ship at origin facing yaw 0
+        // (forward = (0, -1)), so steering must be positive (see
+        // steer_toward_positive_for_target_to_right).
+        let mut memory = AiMemory::default();
+        let world = world_at_origin();
+        let mut anchors = std::collections::HashMap::new();
+        anchors.insert("rally".to_string(), [100.0, 0.0, 0.0]);
+        let pool = retreat_pool("rally", 50.0);
+
+        let (thrust, steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(thrust > 0.0, "Retreat should thrust toward the anchor");
+        assert!(
+            steering > 0.0,
+            "Retreat anchor to the right must give positive steering"
+        );
+    }
+
+    #[test]
+    fn operate_helm_retreat_falls_back_to_home_position_when_anchor_empty() {
+        // Regression: the synthetic hull-triggered Retreat carries an empty
+        // anchor (see aggregate_doctrine_blackboards). With no matching anchor
+        // in the map, operate_helm must fall back to memory.home_position and
+        // still steer toward it (never falling through to idle). home_position
+        // is at [100, 0, 0] — to the right → positive steering.
+        let mut memory = AiMemory::default();
+        memory.home_position = [100.0, 0.0, 0.0];
+        let world = world_at_origin();
+        let anchors = std::collections::HashMap::new(); // empty → no match
+        let pool = retreat_pool("", 50.0);
+
+        let (thrust, steering) = operate_helm(
+            &mut memory,
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            &empty_registry(),
+            0.6,
+        );
+        assert!(
+            thrust > 0.0,
+            "Retreat with empty anchor should thrust toward home_position"
+        );
+        assert!(
+            steering > 0.0,
+            "home_position to the right must give positive steering"
         );
     }
 

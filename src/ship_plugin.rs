@@ -750,6 +750,16 @@ fn resolve_helm_target_position(
         .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))?;
     match &top.directive {
         AiDirective::Reach { anchor } => anchors.get(anchor.as_str()).copied(),
+        AiDirective::Retreat { anchor } => Some(
+            // Resolve the retreat anchor by name, falling back to the ship's
+            // home/spawn position when the anchor is empty or unknown (the
+            // synthetic hull-triggered Retreat carries an empty anchor). Mirrors
+            // the Retreat arm in `operate_helm`.
+            anchors
+                .get(anchor.as_str())
+                .copied()
+                .unwrap_or(memory.home_position),
+        ),
         AiDirective::Destroy { target } => {
             let uuid = uuid::Uuid::parse_str(target).ok()?;
             world_view
@@ -3456,6 +3466,26 @@ station = "helm"
         }
     }
 
+    fn retreat_scored_objective(anchor: &str, score: f32) -> crate::messages::ScoredObjective {
+        crate::messages::ScoredObjective {
+            id: format!("retreat-{anchor}"),
+            score,
+            directive: crate::messages::AiDirective::Retreat {
+                anchor: anchor.into(),
+            },
+            source: crate::messages::ObjectiveSource::Mission,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: format!("retreat-{anchor}"),
+                text: format!("Retreat to {anchor}"),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::messages::ObjectiveSource::Mission,
+            },
+        }
+    }
+
     fn patrol_scored_objective(anchors: Vec<&str>, score: f32) -> crate::messages::ScoredObjective {
         crate::messages::ScoredObjective {
             id: "obj-defend".into(),
@@ -3544,6 +3574,24 @@ station = "helm"
         assert!(
             last.thrust > 0.0,
             "AI helm must apply positive thrust toward Reach anchor; got {last:?}"
+        );
+    }
+
+    #[test]
+    fn helm_ai_navigates_toward_retreat_objective() {
+        let mut app = test_app();
+        // Place anchor 100 units ahead (positive X) — ship starts at origin.
+        let anchor = "rally-point";
+        set_ship_blackboard_objectives(&mut app, vec![retreat_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        let last = get_last_helm_input(&mut app);
+        assert!(
+            last.thrust > 0.0,
+            "AI helm must apply positive thrust toward Retreat anchor; got {last:?}"
         );
     }
 

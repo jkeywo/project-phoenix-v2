@@ -344,6 +344,17 @@ fn handle_blocks_impulse_region_enter(
 ///
 /// This is a non-modifier side effect that must run after the coordinator so
 /// the effective max reflects the updated modifier state.
+///
+/// # Sanctioned out-of-band `ShipPhysics` writer (issue #699)
+///
+/// `integrate_ship_physics` is the sole *helm-path* writer of
+/// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`. This clamps
+/// `forward_speed` directly and is an intentional exception: it is an
+/// **observer** (`trigger: On<RegionEntered>`), not a scheduled system, so it
+/// can fire at any point and cannot be sequenced relative to the helm
+/// integrator inside a `SimSet` window. It deliberately does not opt into the
+/// debug `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
+/// (`src/ship/state.rs`).
 pub(crate) fn handle_slow_zone_speed_clamp(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,

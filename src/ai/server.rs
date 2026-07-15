@@ -825,6 +825,17 @@ pub(crate) fn advance_objective_cursors(
 /// `ai/core.rs`). The two coexist: low-LOD tracks the waypoint via
 /// `PatrolCursors`, high-LOD via `AiMemory.waypoint_index`. Unifying them is
 /// separate issue #702 work (a known, accepted limitation).
+///
+/// # Sanctioned out-of-band `ShipPhysics` writer (issue #699)
+///
+/// `integrate_ship_physics` is the sole *helm-path* writer of
+/// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`. This system writes
+/// `x`/`z`/`yaw` directly and is an intentional exception: it is filtered to
+/// `Without<AiHighFidelity>`, i.e. exactly the ships that carry no helm intent
+/// components at all, so the helm path cannot serve them and the two writers
+/// can never touch the same entity. It deliberately does not opt into the
+/// debug `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
+/// (`src/ship/state.rs`).
 fn simulate_low_lod_ships(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,

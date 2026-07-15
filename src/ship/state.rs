@@ -11,6 +11,31 @@ use bevy::prelude::Component;
 /// Pure per-entity Component post ship-parity audit; the legacy `Resource`
 /// derive has been dropped since no production code reads a global
 /// `Res<ShipPhysics>`.
+///
+/// # Writer policy (issue #699)
+///
+/// `integrate_ship_physics` (`src/ship_plugin.rs`) is the **sole writer of the
+/// helm path**: it is the only system that turns helm intent
+/// (`ThrustInput`/`SteeringInput`/`LateralThrustInput`/`ImpulseCommand`/
+/// `BoostCommand`) into motion, and the only production caller of
+/// `compute_physics`. Do not add a second helm integrator — extend that one.
+///
+/// It is deliberately **not** the only writer of these fields overall. Four
+/// out-of-band writers are **sanctioned exceptions**. They are corrections and
+/// overrides layered on top of the helm integration rather than competing
+/// integrators, so they are intentionally left as direct writes and do not
+/// opt into the debug helm write-tracker (`HelmPhysicsWriteGuard`):
+///
+/// | Writer | Location | Writes | Why it is exempt |
+/// |---|---|---|---|
+/// | `simulate_low_lod_ships` | `src/ai/server.rs` | `x`, `z`, `yaw` | Dead reckoning for ships demoted out of `AiHighFidelity`. Those ships have no helm intent components at all, so the helm path cannot serve them. |
+/// | `handle_collisions` / `separate_ship_from_collision` | `src/server_app.rs` | `forward_speed`, `x`, `z` | Collision response: a hard stop plus a positional de-overlap. Routing it through helm intent would let the ship integrate *into* geometry for a frame before responding. |
+/// | `tick_blaster_system` recoil (issue #638) | `src/console/weapons/server.rs` | `forward_speed` | An impulse applied by weapons fire, not a helm decision. It adds to whatever the helm integrator produced. |
+/// | `handle_slow_zone_speed_clamp` | `src/regions/server.rs` | `forward_speed` | An **observer** (`trigger: On<RegionEntered>`), not a scheduled system — it can fire at any point, outside any `SimSet` ordering window, so it cannot be sequenced relative to the helm integrator. |
+///
+/// When adding a new writer, prefer helm intent components. Only write these
+/// fields directly if the change is genuinely one of the above shapes — a
+/// correction that must land outside the helm integration — and add a row here.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct ShipPhysics {
     /// X position in world space.

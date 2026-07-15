@@ -808,6 +808,20 @@ fn publish_viewscreen_blackboard(
     }
 }
 
+/// Collision response for ships in contact: applies hull damage, brings the
+/// ship to a hard stop, and de-overlaps it from the collider it hit.
+///
+/// # Sanctioned out-of-band `ShipPhysics` writer (issue #699)
+///
+/// `integrate_ship_physics` is the sole *helm-path* writer of
+/// `ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll`. This system (with
+/// `separate_ship_from_collision`) writes `forward_speed`/`x`/`z` directly and
+/// is an intentional exception: collision response is a correction layered on
+/// top of the helm integration, not a competing integrator. Routing it through
+/// helm intent would let the ship integrate *into* geometry for a frame before
+/// responding. It deliberately does not opt into the debug
+/// `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
+/// (`src/ship/state.rs`).
 fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
@@ -1030,6 +1044,9 @@ fn collider_radius(collider: Option<&ColliderSection>) -> f32 {
     collider.map(|c| c.0.radius.max(0.0)).unwrap_or(0.0)
 }
 
+/// Pushes `physics.x`/`z` out along the contact normal so the ship no longer
+/// overlaps what it hit. Sanctioned out-of-band `ShipPhysics` writer — see
+/// `handle_collisions` and the writer-policy table on `ShipPhysics`.
 fn separate_ship_from_collision(
     physics: &mut ShipPhysicsComponent,
     ship_radius: f32,

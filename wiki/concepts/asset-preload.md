@@ -4,6 +4,7 @@ type: concept
 tags: [assets, gltf, sidecar, preload, lobby, loading-phase, race-condition]
 sources: [
   src/server/asset_preload.rs,
+  src/server/pfx.rs,
   src/server_app.rs,
   src/entities/config_cache.rs,
   src/entities/model_rig.rs,
@@ -13,16 +14,16 @@ sources: [
   server.html,
   client.html,
 ]
-updated: 2026-06-19
+updated: 2026-07-15
 ---
 
 # Asset Preload
 
 Server-side discovery + pre-cache of every renderable asset (GLB scenes,
-radar icon PNGs, model-rig sidecar TOMLs, sub-world TOMLs) referenced by the
-loaded scenario. Runs during the [Lobby phase](./game-phases.md) so models
-are already resident in `Assets<Scene>` / `Assets<Image>` by the time the
-captain presses Engage.
+radar icon PNGs, dust/PFX textures, model-rig sidecar TOMLs, sub-world TOMLs)
+referenced by the loaded scenario. Runs during the [Lobby phase](./game-phases.md)
+so models are already resident in `Assets<Scene>` / `Assets<Image>` by the time
+the captain presses Engage.
 
 Implemented in `src/server/asset_preload.rs:1`. Registered under the `server`
 feature in `src/server_app.rs:239-257`.
@@ -33,10 +34,17 @@ feature in `src/server_app.rs:239-257`.
    loaded `WorldConfig` and every entity template it references (via
    `[asteroid_field].asteroid_type_paths`, `[asteroid_field].cosmetic_type_paths`,
    `[[trigger]]` `LoadWorld`/`SpawnEntity` actions, and `[[comms]]` response
-   actions). Builds an `AssetManifest` of unique GLB / icon / sidecar /
-   sub-world paths.
+   actions). Builds an `AssetManifest` of unique GLB / icon / PFX-texture /
+   sidecar / sub-world paths.
+
+   Dust textures are the one entry that is *not* read straight off the world
+   TOML: `server::pfx::dust_texture_paths` resolves the `[dust]` block through
+   the renderer's own defaults, because a world that declares no
+   `[[dust.layer]]` still renders the built-in near/mid/far layers and their
+   textures are named only in `pfx.rs`.
 2. **Start loading** (`asset_preload.rs:347` `begin_asset_preload`) — calls
-   `asset_server.load(path)` for every GLB and icon, fires
+   `asset_server.load(path)` for every GLB, icon and PFX texture (the latter
+   two share `icon_handles`, both being plain `Handle<Image>`), fires
    `request_sidecar_fetch(path)` for every sidecar (WASM only — JS resolves
    via `set_world_fetch_callback` in `server.html:1384-1405`), and stores the
    resulting handles in `AssetPreloadResource.glb_handles` / `.icon_handles`

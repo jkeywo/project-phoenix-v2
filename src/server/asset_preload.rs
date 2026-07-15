@@ -32,6 +32,8 @@ pub struct AssetManifest {
     pub glb_models: Vec<String>,
     /// Radar icon paths relative to `assets/` (e.g. `"radar_icons/Icon-Destroyer.png"`).
     pub radar_icons: Vec<String>,
+    /// Dust/PFX texture paths relative to `assets/` (e.g. `"pfx/space_mote_soft_disc.png"`).
+    pub pfx_textures: Vec<String>,
     /// Full sidecar paths (e.g. `"assets/models/dynasty_destroyer.model.toml"`).
     pub sidecars: Vec<String>,
     /// Sub-world TOML paths discovered (for tracking purposes; not loaded here).
@@ -217,6 +219,15 @@ fn discover_world_assets(
     for path in &world.extra_worlds {
         if !extra_worlds_out.contains(path) {
             extra_worlds_out.push(path.clone());
+        }
+    }
+
+    // Dust textures. Resolved through the renderer rather than read straight
+    // off `world.dust`, because a world that declares no `[[dust.layer]]`
+    // still gets the built-in layers and their textures.
+    for path in crate::server::pfx::dust_texture_paths(Some(world)) {
+        if !manifest.pfx_textures.contains(&path) {
+            manifest.pfx_textures.push(path);
         }
     }
 }
@@ -409,9 +420,10 @@ pub fn begin_asset_preload(
         glb_handles.push((glb_path.clone(), handle));
     }
 
-    // Start loading radar icons
+    // Start loading radar icons, and the dust textures alongside them — both
+    // are plain `Handle<Image>`, so they share the same load tracking.
     let mut icon_handles = Vec::new();
-    for icon_path in &manifest.radar_icons {
+    for icon_path in manifest.radar_icons.iter().chain(&manifest.pfx_textures) {
         let handle: Handle<Image> = asset_server.load(icon_path);
         icon_handles.push((icon_path.clone(), handle));
     }
@@ -448,12 +460,17 @@ pub fn begin_asset_preload(
                     let handle: Handle<bevy::scene::Scene> = asset_server.load(&path);
                     glb_handles.push((glb_path.clone(), handle));
                 }
-                for icon_path in &manifest_mut.radar_icons {
+                for icon_path in manifest_mut
+                    .radar_icons
+                    .iter()
+                    .chain(&manifest_mut.pfx_textures)
+                {
                     let handle: Handle<Image> = asset_server.load(icon_path);
                     icon_handles.push((icon_path.clone(), handle));
                 }
                 manifest.glb_models.extend(manifest_mut.glb_models);
                 manifest.radar_icons.extend(manifest_mut.radar_icons);
+                manifest.pfx_textures.extend(manifest_mut.pfx_textures);
                 manifest.sidecars.extend(manifest_mut.sidecars);
                 seen_worlds.insert(world_path.clone());
             }
@@ -573,7 +590,9 @@ pub fn poll_asset_preload(
                 ) {
                     Ok(more_worlds) => {
                         new_glbs.extend(manifest.glb_models);
+                        // Dust textures ride the icon path — both are Images.
                         new_icons.extend(manifest.radar_icons);
+                        new_icons.extend(manifest.pfx_textures);
                         new_sidecars.extend(manifest.sidecars);
                         new_sub_worlds.extend(more_worlds);
                         preload.seen_worlds.insert(world_path.clone());
@@ -828,6 +847,65 @@ mod tests {
             .iter()
             .any(|s| s.contains("test_ship.model.toml")));
         assert_eq!(manifest.radar_icons, vec!["radar_icons/Icon-TestShip.png"]);
+    }
+
+    /// A world that declares no `[[dust.layer]]` still renders the built-in
+    /// layers, so their textures must be discovered even though the world file
+    /// never names them.
+    #[test]
+    fn discover_base_assets_preloads_builtin_dust_textures() {
+        let world = WorldConfig {
+            dust: Some(crate::world::config::DustPfxConfig {
+                enabled: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        assert!(
+            !manifest.pfx_textures.is_empty(),
+            "built-in dust layers must contribute textures"
+        );
+        assert!(
+            manifest.pfx_textures.iter().all(|p| p.starts_with("pfx/")),
+            "got {:?}",
+            manifest.pfx_textures
+        );
+    }
+
+    #[test]
+    fn discover_base_assets_skips_dust_textures_when_disabled() {
+        let world = WorldConfig {
+            dust: Some(crate::world::config::DustPfxConfig {
+                enabled: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        assert!(manifest.pfx_textures.is_empty());
+    }
+
+    #[test]
+    fn discover_base_assets_preloads_declared_dust_textures() {
+        let world = WorldConfig {
+            dust: Some(crate::world::config::DustPfxConfig {
+                layers: vec![crate::world::config::DustLayerConfig {
+                    texture: Some("pfx/custom_mote.png".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        assert!(
+            manifest
+                .pfx_textures
+                .contains(&"pfx/custom_mote.png".to_string()),
+            "got {:?}",
+            manifest.pfx_textures
+        );
     }
 
     #[test]

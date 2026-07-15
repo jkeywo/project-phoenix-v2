@@ -66,6 +66,8 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are trigger / comms eligible. |
 | `[[trigger]]` | array of tables | `[]` | World-event handlers (see §1.5). |
 | `[[comms]]` | array of tables | `[]` | Comms dialogue templates (see §1.6). |
+| `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
+| `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
 
 ### `[global]`
 
@@ -84,6 +86,108 @@ and by AI `waypoints = [...]` lists.
 starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 ```
+
+### `[dust]`
+
+Ambient dust motes on the viewscreen. Parsed by `world::config::DustPfxConfig`,
+resolved against renderer defaults in `server::pfx::DustPfxSettings::from_world`.
+
+This is a camera-relative *velocity field*, not world-space particles: speed
+drives density, luminosity and streak length, while the ship's true velocity
+vector (forward **and** lateral) drives direction. Every field is optional; the
+renderer supplies a near/mid/far layer set when the world declares none, so a
+bare `[dust]` block is a valid way to take the defaults.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `true` | Master switch; `false` skips the effect entirely. |
+| `speed_curve_exponent` | f32 | `2.0` | Applied to normalised speed before every ramp. `2.0` keeps the field restrained at low speed and ramps it hard under acceleration. `1.0` is linear. |
+| `low_speed_tint` | `[f32; 3]` | `[0.55, 0.65, 0.75]` | Mote RGB at rest — a cool grey-blue. |
+| `high_speed_tint` | `[f32; 3]` | `[0.95, 0.98, 1.0]` | Mote RGB at full speed — near-white. |
+| `streak_response_secs` | f32 | `0.10` | Smoothing time constant for streak length. |
+| `brightness_response_secs` | f32 | `0.22` | Smoothing time constant for brightness. |
+| `spawn_response_secs` | f32 | `0.50` | Smoothing time constant for density. |
+| `centre_fade_inner` | f32 | `0.15` | Normalised screen radius inside which motes are fully hidden. |
+| `centre_fade_outer` | f32 | `0.55` | Radius beyond which motes are fully visible. |
+| `edge_fade` | f32 | `0.12` | Fraction of the screen half-extent over which motes fade before leaving view. |
+| `turbulence` | f32 | `0.05` | Lateral drift as a fraction of speed. Keep low or the direction stops reading. |
+| `mote_speed_multiplier` | f32 | `2.0` | Apparent mote speed relative to true ship speed. |
+| `[[dust.layer]]` | array of tables | built-in near/mid/far | Depth layers. |
+| `[dust.warp]` | table | disabled | Impulse warp field. |
+
+The three response constants are deliberately staggered — streak length leads,
+brightness follows, density lags — so acceleration reads immediately without
+motes visibly popping into existence. Keep that ordering when retuning.
+
+`centre_fade_*` keeps streaks out of the middle of the viewscreen, where they
+would compete with targeting and navigation, and pushes them into peripheral
+vision where they read as motion.
+
+#### `[[dust.layer]]`
+
+Zero or more depth layers. When present they replace the built-in set and are
+matched to it **by position** — the first block inherits the near layer's
+defaults, the second the mid layer's, the third and beyond the far layer's — so
+author them near-to-far. Declaring one layer therefore yields a single near
+layer, not a near layer plus the built-in mid and far.
+
+Ranged fields are `[at_rest, at_full_speed]` pairs interpolated by the speed
+curve.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | layer default | Authoring label only; the renderer identifies layers by position. |
+| `texture` | string | per layer | Mote texture relative to `assets/`. White RGB with the shape in alpha, so it can be tinted. |
+| `max_motes` | u32 | per layer | Hard cap on live motes. |
+| `spawn_rate` | `[f32; 2]` | per layer | Motes per second. |
+| `opacity` | `[f32; 2]` | per layer | |
+| `brightness` | `[f32; 2]` | per layer | Emissive multiplier; above ~1.0 feeds bloom. |
+| `width` | f32 | per layer | Mote width as a **fraction of screen height**, not world units — scaled by spawn depth so a layer's apparent size is independent of its `depth_band`. Constant with speed; apparent growth comes from `length`. |
+| `length` | `[f32; 2]` | per layer | Streak length as a multiple of `width`. `1.0` renders as a point. |
+| `max_lifetime_secs` | f32 | `0.8` near, `2.0` mid, `4.0` far | Upper bound only. Actual lifetime is the time to transit the volume and pass the camera, so it falls out of speed and `depth_band`; this cap only bites at low speed, where it stops motes hanging in space. |
+| `depth_band` | `[f32; 2]` | per layer | `[min, max]` distance from camera. |
+| `edge_bias` | f32 | per layer | `0.0` uniform, `>0` weights spawns toward screen edges, `<0` toward the centre. |
+| `additive` | bool | per layer | `true` = additive blending, `false` = alpha. Far layers should use alpha; additive stacking at high mote counts fogs the scene. |
+| `glint_texture` | string | near layer only | Optional rare-glint texture. |
+| `glint_chance` | f32 | `0.02` near, else `0.0` | Fraction of motes drawn as glints. Keep at a few percent. |
+
+Built-in layer defaults (`server::pfx::DUST_DEFAULT_LAYERS`):
+
+| Layer | Texture | `max_motes` | `spawn_rate` | `depth_band` | `additive` |
+|---|---|---|---|---|---|
+| near | `pfx/space_mote_streak_head.png` | `24` | `[0, 12]` | `[4, 25]` | `true` |
+| mid | `pfx/space_mote_streak_soft.png` | `160` | `[5, 160]` | `[10, 70]` | `true` |
+| far | `pfx/space_mote_compact_core.png` | `220` | `[10, 250]` | `[40, 150]` | `false` |
+
+#### `[dust.warp]`
+
+The impulse warp field (a dedicated high-speed layer rather than the ordinary
+motes stretched indefinitely). Ramps in off the impulse charge progress and
+fades the ordinary layers out as it takes over.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `false` | Opt-in: an absent `[dust.warp]` means impulse leaves the ordinary layers running. |
+| `texture` | string | `pfx/space_mote_streak_soft.png` | |
+| `motes` | u32 | `40` | |
+| `width` | f32 | `0.07` | |
+| `length_multiplier` | f32 | `60.0` | Streak length at full warp, relative to `width`. |
+| `brightness` | f32 | `3.0` | |
+| `enter_secs` | f32 | `0.4` | Ramp-in time. |
+| `exit_secs` | f32 | `0.6` | Ramp-out time. Timed render-side — disengaging impulse is instantaneous in the simulation, so this is purely visual. |
+
+Minimal example — take every default and switch the warp field on:
+
+```toml
+[dust]
+enabled = true
+
+[dust.warp]
+enabled = true
+```
+
+A tuned example lives in `assets/worlds/combat_test.toml`; `assets/worlds/default.toml`
+is the minimal case above.
 
 ### `[[entity]]`
 

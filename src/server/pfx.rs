@@ -1,6 +1,9 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -41,20 +44,97 @@ const ENGINE_TRAIL_CRUMB_LIFETIME_SECS: f32 = 1.5;
 const ENGINE_TRAIL_MAX_CRUMBS: usize = 200;
 const ENGINE_TRAIL_MIN_CRUMB_DIST: f32 = 0.08;
 
-// Dust mote defaults (overridden by [dust] world config block)
-const DUST_MAX_MOTES: u32 = 120;
-const DUST_MAX_SPAWN_RATE: f32 = 40.0;
-const DUST_SPAWN_RADIUS: f32 = 60.0;
-const DUST_LIFETIME_SECS: f32 = 3.5;
-const DUST_MOTE_RADIUS: f32 = 0.08;
-const DUST_COLOR: [f32; 4] = [0.9, 0.92, 1.0, 0.6];
-const DUST_MIN_OPACITY: f32 = 0.05;
-const DUST_MAX_OPACITY: f32 = 0.6;
-const DUST_EMISSIVE_STRENGTH: f32 = 1.2;
+// Dust mote defaults (overridden by the [dust] world config block).
+const DUST_SHADER: &str = "shaders/dust_mote.wgsl";
+
+const DUST_SPEED_CURVE_EXPONENT: f32 = 2.0;
+const DUST_LOW_SPEED_TINT: [f32; 3] = [0.55, 0.65, 0.75];
+const DUST_HIGH_SPEED_TINT: [f32; 3] = [0.95, 0.98, 1.0];
+// Streak length leads, brightness follows, density lags — see spec §10.
+const DUST_STREAK_RESPONSE_SECS: f32 = 0.10;
+const DUST_BRIGHTNESS_RESPONSE_SECS: f32 = 0.22;
+const DUST_SPAWN_RESPONSE_SECS: f32 = 0.50;
+const DUST_CENTRE_FADE_INNER: f32 = 0.15;
+const DUST_CENTRE_FADE_OUTER: f32 = 0.55;
+const DUST_EDGE_FADE: f32 = 0.12;
+const DUST_TURBULENCE: f32 = 0.05;
 const DUST_MOTE_SPEED_MULTIPLIER: f32 = 2.0;
 /// Fallback max speed when no `HelmConsoleSection` is present on the local ship.
 /// Matches the typical player ship `max_speed` in TOML; never used in normal play.
 const DUST_FALLBACK_MAX_SPEED: f32 = 12.5;
+
+/// Below this fraction of max speed the field is fully idle. Prevents the
+/// "snow in space" read when the ship is station-keeping (spec §4/§20).
+const DUST_IDLE_SPEED_FRAC: f32 = 0.02;
+
+/// How far behind the camera a mote travels before it is recycled. Also the
+/// slack added to transit time so motes live until they are genuinely past.
+const DUST_BEHIND_CAMERA_MARGIN: f32 = 5.0;
+
+// Built-in near/mid/far layers, used when the world TOML declares no
+// `[[dust.layer]]`. Ranged fields are [at_rest, at_full_speed]; figures follow
+// the spec §13 emitter tables. `width` is a fraction of screen height, scaled
+// by spawn depth at runtime — see `dust_view_height_at`.
+const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
+    DustLayerDefaults {
+        texture: "pfx/space_mote_streak_head.png",
+        max_motes: 24,
+        spawn_rate: [0.0, 12.0],
+        opacity: [0.2, 1.0],
+        brightness: [0.8, 3.0],
+        width: 0.03,
+        length: [3.0, 20.0],
+        max_lifetime_secs: 0.8,
+        depth_band: [4.0, 25.0],
+        edge_bias: 0.7,
+        additive: true,
+        glint_texture: Some("pfx/space_mote_glint_4point.png"),
+        glint_chance: 0.02,
+    },
+    DustLayerDefaults {
+        texture: "pfx/space_mote_streak_soft.png",
+        max_motes: 160,
+        spawn_rate: [5.0, 160.0],
+        opacity: [0.1, 0.7],
+        brightness: [0.3, 1.8],
+        width: 0.012,
+        length: [1.0, 12.0],
+        max_lifetime_secs: 2.0,
+        depth_band: [10.0, 70.0],
+        edge_bias: 0.0,
+        additive: true,
+        glint_texture: None,
+        glint_chance: 0.0,
+    },
+    DustLayerDefaults {
+        texture: "pfx/space_mote_compact_core.png",
+        max_motes: 220,
+        spawn_rate: [10.0, 250.0],
+        // Kept below the bloom threshold so distant motes stay subtle and the
+        // screen doesn't white out at speed (spec §8/§20).
+        opacity: [0.03, 0.25],
+        brightness: [0.15, 0.8],
+        width: 0.004,
+        length: [1.0, 5.0],
+        max_lifetime_secs: 4.0,
+        depth_band: [40.0, 150.0],
+        // Spec §13: uniform, with a slight central reduction.
+        edge_bias: 0.1,
+        // Alpha-blended rather than additive: far motes are numerous, and
+        // additive stacking at this density is what fogs the scene.
+        additive: false,
+        glint_texture: None,
+        glint_chance: 0.0,
+    },
+];
+
+const DUST_WARP_TEXTURE: &str = "pfx/space_mote_streak_soft.png";
+const DUST_WARP_MOTES: u32 = 40;
+const DUST_WARP_WIDTH: f32 = 0.018;
+const DUST_WARP_LENGTH_MULTIPLIER: f32 = 40.0;
+const DUST_WARP_BRIGHTNESS: f32 = 1.6;
+const DUST_WARP_ENTER_SECS: f32 = 0.4;
+const DUST_WARP_EXIT_SECS: f32 = 0.6;
 
 pub struct PfxPlugin;
 
@@ -64,6 +144,8 @@ impl Plugin for PfxPlugin {
             .init_resource::<TorpedoPfxState>()
             .init_resource::<BlasterPfxState>()
             .init_resource::<EngineTrailState>()
+            .init_resource::<DustFieldState>()
+            .add_plugins(MaterialPlugin::<DustMoteMaterial>::default())
             .add_systems(
                 Update,
                 (
@@ -73,8 +155,17 @@ impl Plugin for PfxPlugin {
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
-                    spawn_dust_motes.run_if(in_state(GamePhase::InProgress)),
-                    move_dust_motes.run_if(in_state(GamePhase::InProgress)),
+                    // Ordered: state feeds both the emitter and the materials.
+                    tick_dust_state.run_if(in_state(GamePhase::InProgress)),
+                    spawn_dust_motes
+                        .after(tick_dust_state)
+                        .run_if(in_state(GamePhase::InProgress)),
+                    move_dust_motes
+                        .after(tick_dust_state)
+                        .run_if(in_state(GamePhase::InProgress)),
+                    sync_dust_materials
+                        .after(tick_dust_state)
+                        .run_if(in_state(GamePhase::InProgress)),
                 )
                     // These read ship `Transform`/`ShipPhysics`, which
                     // `sync_ship_position` (SimSet::Physics) writes each tick.
@@ -122,9 +213,98 @@ struct PfxFadingMaterial {
     emissive_strength: f32,
 }
 
-/// Marker component distinguishing ambient dust motes from other PFX entities.
+/// Which emitter a live mote belongs to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DustMoteKind {
+    /// Index into `DustPfxSettings::layers`.
+    Layer(usize),
+    Warp,
+}
+
+/// Component distinguishing ambient dust motes from other PFX entities, and
+/// carrying the per-mote variation that would otherwise need a per-mote
+/// material (spec §4: uniform motes read as a flat screen overlay).
 #[derive(Component)]
-struct DustMote;
+struct DustMote {
+    kind: DustMoteKind,
+    /// World-space width of this mote.
+    width: f32,
+    /// Per-mote multiplier on the layer's speed-driven streak length.
+    length_scale: f32,
+    /// Small constant lateral drift, breaking perfect velocity alignment.
+    turbulence: Vec3,
+}
+
+/// Material for one dust layer. Textures are white-with-shape-in-alpha, so the
+/// tint, brightness and opacity uniforms are what make a single material serve
+/// every mote in its layer.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct DustMoteMaterial {
+    #[uniform(0)]
+    tint_r: f32,
+    #[uniform(0)]
+    tint_g: f32,
+    #[uniform(0)]
+    tint_b: f32,
+    #[uniform(0)]
+    brightness: f32,
+    #[uniform(0)]
+    opacity: f32,
+    #[uniform(0)]
+    centre_fade_inner: f32,
+    #[uniform(0)]
+    centre_fade_outer: f32,
+    #[uniform(0)]
+    edge_fade: f32,
+    #[texture(1)]
+    #[sampler(2)]
+    texture: Handle<Image>,
+    /// Additive for near/mid, alpha-blended for far (spec §18).
+    additive: bool,
+}
+
+impl Material for DustMoteMaterial {
+    fn fragment_shader() -> ShaderRef {
+        DUST_SHADER.into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        if self.additive {
+            AlphaMode::Add
+        } else {
+            AlphaMode::Blend
+        }
+    }
+}
+
+/// Unit quad in the XY plane facing +Z, for velocity-aligned mote billboards.
+///
+/// The UVs deliberately run `u = 1` at `-X` to `u = 0` at `+X`, i.e. mirrored
+/// versus the usual convention. `space_mote_streak_head.png` carries its bright
+/// head at the low-U end, and the billboard aligns local +X with the mote's
+/// direction of travel — so without this flip the head would trail the streak
+/// instead of leading it, and the whole field would read as moving backwards.
+fn dust_quad_mesh() -> Mesh {
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![
+            [-0.5, -0.5, 0.0],
+            [0.5, -0.5, 0.0],
+            [0.5, 0.5, 0.0],
+            [-0.5, 0.5, 0.0],
+        ],
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 4])
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vec![[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+    )
+    .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]))
+}
 
 struct BeamEntities {
     body: Entity,
@@ -981,7 +1161,9 @@ fn cleanup_pfx(
     mut torpedo_state: ResMut<TorpedoPfxState>,
     mut blaster_state: ResMut<BlasterPfxState>,
     mut engine_state: ResMut<EngineTrailState>,
+    mut dust_state: ResMut<DustFieldState>,
 ) {
+    dust_state.reset();
     for entity in query.iter() {
         commands.entity(entity).try_despawn();
     }
@@ -1192,165 +1374,837 @@ fn segment_transform(start: Vec3, end: Vec3, radius: f32) -> Transform {
     }
 }
 
-/// Resolved dust config — constants with world-config overrides applied.
-struct DustPfxSettings {
+/// The ship's true world-space velocity, combining forward and lateral motion.
+///
+/// At yaw 0 the ship faces `-Z`, so forward is `(sin y, 0, -cos y)` and
+/// starboard is its right-hand perpendicular, `(cos y, 0, sin y)`. Folding in
+/// `lateral_speed` is what makes the dust field react to strafing — deriving
+/// drift from `forward_speed` alone leaves the field frozen while the ship
+/// slides sideways.
+///
+/// `ShipPhysics` is an XZ-plane model with no vertical component, so Y is
+/// always zero here by construction rather than by omission.
+fn ship_velocity(physics: &ShipPhysics) -> Vec3 {
+    let (sin_y, cos_y) = physics.yaw.sin_cos();
+    let forward = Vec3::new(sin_y, 0.0, -cos_y);
+    let starboard = Vec3::new(cos_y, 0.0, sin_y);
+    forward * physics.forward_speed + starboard * physics.lateral_speed
+}
+
+/// Rotation aligning a mote billboard's local +X with `travel_dir` while
+/// turning its face as close to the camera as possible (spec §6).
+///
+/// Gram-Schmidt: project `to_cam` onto the plane perpendicular to the streak
+/// axis to get the quad normal, then complete the basis. When the mote travels
+/// straight at or away from the camera the projection collapses and there is
+/// no meaningful screen direction; we fall back to an arbitrary perpendicular
+/// rather than emitting a NaN rotation. Those motes sit at the centre of the
+/// screen with near-zero projected length, where the shader's centre fade
+/// hides them anyway.
+fn dust_billboard_rotation(travel_dir: Vec3, to_cam: Vec3) -> Quat {
+    let x = travel_dir.normalize_or_zero();
+    if x == Vec3::ZERO {
+        return Quat::IDENTITY;
+    }
+    let projected = to_cam - x * to_cam.dot(x);
+    let z = projected.normalize_or_zero();
+    let z = if z == Vec3::ZERO {
+        x.any_orthonormal_vector()
+    } else {
+        z
+    };
+    let y = z.cross(x);
+    Quat::from_mat3(&Mat3::from_cols(x, y, z))
+}
+
+/// Reshape a uniform `[-1, 1]` sample toward the edges (`bias > 0`) or the
+/// centre (`bias < 0`). Spec §13 wants near motes weighted to screen edges so
+/// big close streaks stay peripheral.
+fn dust_edge_shape(u: f32, bias: f32) -> f32 {
+    let exponent = (1.0 - bias).clamp(0.05, 4.0);
+    u.signum() * u.abs().powf(exponent)
+}
+
+/// Compile-time shape of a built-in layer, used when the world declares none.
+///
+/// `DustLayerConfig::name` has no counterpart here: it is an authoring label
+/// that makes a `[[dust.layer]]` block readable, and the renderer identifies
+/// layers by position.
+struct DustLayerDefaults {
+    texture: &'static str,
     max_motes: u32,
-    max_spawn_rate: f32,
-    spawn_radius: f32,
-    lifetime_secs: f32,
-    mote_radius: f32,
-    color: [f32; 4],
-    min_opacity: f32,
-    max_opacity: f32,
-    emissive_strength: f32,
+    spawn_rate: [f32; 2],
+    opacity: [f32; 2],
+    brightness: [f32; 2],
+    width: f32,
+    length: [f32; 2],
+    max_lifetime_secs: f32,
+    depth_band: [f32; 2],
+    edge_bias: f32,
+    additive: bool,
+    glint_texture: Option<&'static str>,
+    glint_chance: f32,
+}
+
+/// Interpolate an `[at_rest, at_full_speed]` pair by the curved speed `s`.
+fn dust_ramp(range: [f32; 2], s: f32) -> f32 {
+    range[0] + (range[1] - range[0]) * s
+}
+
+/// Exponential smoothing toward `target`, framerate-independent.
+///
+/// `response_secs` is the time constant: larger means laggier. Used to stagger
+/// streak/brightness/density response so acceleration reads as immediate
+/// without motes popping into existence (spec §10).
+fn dust_smooth(current: f32, target: f32, response_secs: f32, dt: f32) -> f32 {
+    if response_secs <= 0.0 {
+        return target;
+    }
+    let alpha = 1.0 - (-dt / response_secs).exp();
+    current + (target - current) * alpha
+}
+
+/// One resolved layer — defaults with world-config overrides applied.
+#[derive(Clone, Debug)]
+struct DustLayerSettings {
+    texture: String,
+    max_motes: u32,
+    spawn_rate: [f32; 2],
+    opacity: [f32; 2],
+    brightness: [f32; 2],
+    width: f32,
+    length: [f32; 2],
+    max_lifetime_secs: f32,
+    depth_band: [f32; 2],
+    edge_bias: f32,
+    additive: bool,
+    glint_texture: Option<String>,
+    glint_chance: f32,
+}
+
+impl DustLayerSettings {
+    fn from_config(
+        defaults: &DustLayerDefaults,
+        cfg: Option<&crate::world::config::DustLayerConfig>,
+    ) -> Self {
+        Self {
+            texture: cfg
+                .and_then(|c| c.texture.clone())
+                .unwrap_or_else(|| defaults.texture.to_string()),
+            max_motes: cfg.and_then(|c| c.max_motes).unwrap_or(defaults.max_motes),
+            spawn_rate: cfg
+                .and_then(|c| c.spawn_rate)
+                .unwrap_or(defaults.spawn_rate),
+            opacity: cfg.and_then(|c| c.opacity).unwrap_or(defaults.opacity),
+            brightness: cfg
+                .and_then(|c| c.brightness)
+                .unwrap_or(defaults.brightness),
+            width: cfg.and_then(|c| c.width).unwrap_or(defaults.width),
+            length: cfg.and_then(|c| c.length).unwrap_or(defaults.length),
+            max_lifetime_secs: cfg
+                .and_then(|c| c.max_lifetime_secs)
+                .unwrap_or(defaults.max_lifetime_secs),
+            depth_band: cfg
+                .and_then(|c| c.depth_band)
+                .unwrap_or(defaults.depth_band),
+            edge_bias: cfg.and_then(|c| c.edge_bias).unwrap_or(defaults.edge_bias),
+            additive: cfg.and_then(|c| c.additive).unwrap_or(defaults.additive),
+            glint_texture: cfg
+                .and_then(|c| c.glint_texture.clone())
+                .or_else(|| defaults.glint_texture.map(str::to_string)),
+            glint_chance: cfg
+                .and_then(|c| c.glint_chance)
+                .unwrap_or(defaults.glint_chance),
+        }
+    }
+}
+
+/// Resolved warp-layer config (spec §14).
+#[derive(Clone, Debug)]
+struct DustWarpSettings {
+    enabled: bool,
+    texture: String,
+    motes: u32,
+    width: f32,
+    length_multiplier: f32,
+    brightness: f32,
+    enter_secs: f32,
+    exit_secs: f32,
+}
+
+/// Resolved dust config — constants with world-config overrides applied.
+#[derive(Clone, Debug)]
+struct DustPfxSettings {
+    enabled: bool,
+    speed_curve_exponent: f32,
+    low_speed_tint: [f32; 3],
+    high_speed_tint: [f32; 3],
+    streak_response_secs: f32,
+    brightness_response_secs: f32,
+    spawn_response_secs: f32,
+    centre_fade_inner: f32,
+    centre_fade_outer: f32,
+    edge_fade: f32,
+    turbulence: f32,
     mote_speed_multiplier: f32,
+    layers: Vec<DustLayerSettings>,
+    warp: DustWarpSettings,
 }
 
 impl DustPfxSettings {
     fn from_world(world_config: Option<&crate::world::config::WorldConfig>) -> Self {
         let cfg = world_config.and_then(|wc| wc.dust.as_ref());
+
+        // A world either declares its own layers or gets the built-in three.
+        // Declared layers are matched to defaults positionally, so a world can
+        // override just the near layer by declaring one `[[dust.layer]]`.
+        let layers: Vec<DustLayerSettings> = match cfg {
+            Some(c) if !c.layers.is_empty() => c
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(i, layer)| {
+                    let defaults = &DUST_DEFAULT_LAYERS[i.min(DUST_DEFAULT_LAYERS.len() - 1)];
+                    DustLayerSettings::from_config(defaults, Some(layer))
+                })
+                .collect(),
+            _ => DUST_DEFAULT_LAYERS
+                .iter()
+                .map(|d| DustLayerSettings::from_config(d, None))
+                .collect(),
+        };
+
+        let warp_cfg = cfg.and_then(|c| c.warp.as_ref());
+        let warp = DustWarpSettings {
+            // Absent `[dust.warp]` means no warp field, matching the
+            // "optional layer" framing in spec §14.
+            enabled: warp_cfg.and_then(|w| w.enabled).unwrap_or(false),
+            texture: warp_cfg
+                .and_then(|w| w.texture.clone())
+                .unwrap_or_else(|| DUST_WARP_TEXTURE.to_string()),
+            motes: warp_cfg.and_then(|w| w.motes).unwrap_or(DUST_WARP_MOTES),
+            width: warp_cfg.and_then(|w| w.width).unwrap_or(DUST_WARP_WIDTH),
+            length_multiplier: warp_cfg
+                .and_then(|w| w.length_multiplier)
+                .unwrap_or(DUST_WARP_LENGTH_MULTIPLIER),
+            brightness: warp_cfg
+                .and_then(|w| w.brightness)
+                .unwrap_or(DUST_WARP_BRIGHTNESS),
+            enter_secs: warp_cfg
+                .and_then(|w| w.enter_secs)
+                .unwrap_or(DUST_WARP_ENTER_SECS),
+            exit_secs: warp_cfg
+                .and_then(|w| w.exit_secs)
+                .unwrap_or(DUST_WARP_EXIT_SECS),
+        };
+
         Self {
-            max_motes: cfg.and_then(|c| c.max_motes).unwrap_or(DUST_MAX_MOTES),
-            max_spawn_rate: cfg
-                .and_then(|c| c.max_spawn_rate)
-                .unwrap_or(DUST_MAX_SPAWN_RATE),
-            spawn_radius: cfg
-                .and_then(|c| c.spawn_radius)
-                .unwrap_or(DUST_SPAWN_RADIUS),
-            lifetime_secs: cfg
-                .and_then(|c| c.lifetime_secs)
-                .unwrap_or(DUST_LIFETIME_SECS),
-            mote_radius: cfg.and_then(|c| c.mote_radius).unwrap_or(DUST_MOTE_RADIUS),
-            color: cfg.and_then(|c| c.color).unwrap_or(DUST_COLOR),
-            min_opacity: cfg.and_then(|c| c.min_opacity).unwrap_or(DUST_MIN_OPACITY),
-            max_opacity: cfg.and_then(|c| c.max_opacity).unwrap_or(DUST_MAX_OPACITY),
-            emissive_strength: cfg
-                .and_then(|c| c.emissive_strength)
-                .unwrap_or(DUST_EMISSIVE_STRENGTH),
+            enabled: cfg.and_then(|c| c.enabled).unwrap_or(true),
+            speed_curve_exponent: cfg
+                .and_then(|c| c.speed_curve_exponent)
+                .unwrap_or(DUST_SPEED_CURVE_EXPONENT),
+            low_speed_tint: cfg
+                .and_then(|c| c.low_speed_tint)
+                .unwrap_or(DUST_LOW_SPEED_TINT),
+            high_speed_tint: cfg
+                .and_then(|c| c.high_speed_tint)
+                .unwrap_or(DUST_HIGH_SPEED_TINT),
+            streak_response_secs: cfg
+                .and_then(|c| c.streak_response_secs)
+                .unwrap_or(DUST_STREAK_RESPONSE_SECS),
+            brightness_response_secs: cfg
+                .and_then(|c| c.brightness_response_secs)
+                .unwrap_or(DUST_BRIGHTNESS_RESPONSE_SECS),
+            spawn_response_secs: cfg
+                .and_then(|c| c.spawn_response_secs)
+                .unwrap_or(DUST_SPAWN_RESPONSE_SECS),
+            centre_fade_inner: cfg
+                .and_then(|c| c.centre_fade_inner)
+                .unwrap_or(DUST_CENTRE_FADE_INNER),
+            centre_fade_outer: cfg
+                .and_then(|c| c.centre_fade_outer)
+                .unwrap_or(DUST_CENTRE_FADE_OUTER),
+            edge_fade: cfg.and_then(|c| c.edge_fade).unwrap_or(DUST_EDGE_FADE),
+            turbulence: cfg.and_then(|c| c.turbulence).unwrap_or(DUST_TURBULENCE),
             mote_speed_multiplier: cfg
                 .and_then(|c| c.mote_speed_multiplier)
                 .unwrap_or(DUST_MOTE_SPEED_MULTIPLIER),
+            layers,
+            warp,
         }
     }
 }
 
-/// Spawns camera-relative ambient dust motes at a rate proportional to ship speed.
+/// Every texture the dust field can reference for `world`, for asset preload.
+///
+/// The renderer's built-in layers are not spelled out in TOML, so walking the
+/// world file alone would miss them and the textures would load lazily on the
+/// first mote spawn — i.e. pop in mid-flight. Resolving the config here means
+/// preload sees exactly what the emitter will ask for.
+pub fn dust_texture_paths(world: Option<&crate::world::config::WorldConfig>) -> Vec<String> {
+    let cfg = DustPfxSettings::from_world(world);
+    if !cfg.enabled {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for layer in &cfg.layers {
+        out.push(layer.texture.clone());
+        if let Some(glint) = &layer.glint_texture {
+            out.push(glint.clone());
+        }
+    }
+    if cfg.warp.enabled {
+        out.push(cfg.warp.texture.clone());
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Per-layer material handles, built lazily once the textures are known.
+struct DustLayerMaterials {
+    main: Handle<DustMoteMaterial>,
+    glint: Option<Handle<DustMoteMaterial>>,
+}
+
+/// Live state of the dust field: the smoothed speed channels, per-layer spawn
+/// accumulators, and the lazily-built shared assets.
+#[derive(Resource, Default)]
+struct DustFieldState {
+    /// Curved speed, smoothed at three different rates (spec §10). Streak
+    /// length leads so acceleration reads immediately; density lags so motes
+    /// don't visibly pop in.
+    streak_s: f32,
+    brightness_s: f32,
+    spawn_s: f32,
+    /// Warp field ramp, 0 = absent, 1 = full warp.
+    warp_ramp: f32,
+    spawn_acc: Vec<f32>,
+    warp_acc: f32,
+    quad: Option<Handle<Mesh>>,
+    layers: Vec<DustLayerMaterials>,
+    warp_material: Option<Handle<DustMoteMaterial>>,
+}
+
+impl DustFieldState {
+    /// Drop every cached handle so the next world rebuilds against its own
+    /// `[dust]` block rather than reusing the previous world's textures.
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+fn dust_material(
+    texture: Handle<Image>,
+    additive: bool,
+    cfg: &DustPfxSettings,
+) -> DustMoteMaterial {
+    DustMoteMaterial {
+        tint_r: cfg.low_speed_tint[0],
+        tint_g: cfg.low_speed_tint[1],
+        tint_b: cfg.low_speed_tint[2],
+        brightness: 0.0,
+        opacity: 0.0,
+        centre_fade_inner: cfg.centre_fade_inner,
+        centre_fade_outer: cfg.centre_fade_outer,
+        edge_fade: cfg.edge_fade,
+        texture,
+        additive,
+    }
+}
+
+/// Builds the shared quad and the per-layer materials on first use.
+fn ensure_dust_assets(
+    state: &mut DustFieldState,
+    cfg: &DustPfxSettings,
+    asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<DustMoteMaterial>,
+) {
+    if state.quad.is_none() {
+        state.quad = Some(meshes.add(dust_quad_mesh()));
+    }
+    if state.layers.len() != cfg.layers.len() {
+        state.layers =
+            cfg.layers
+                .iter()
+                .map(|layer| DustLayerMaterials {
+                    main: materials.add(dust_material(
+                        asset_server.load(&layer.texture),
+                        layer.additive,
+                        cfg,
+                    )),
+                    glint: layer.glint_texture.as_ref().map(|path| {
+                        materials.add(dust_material(asset_server.load(path), true, cfg))
+                    }),
+                })
+                .collect();
+        state.spawn_acc = vec![0.0; cfg.layers.len()];
+    }
+    if state.warp_material.is_none() {
+        state.warp_material = Some(materials.add(dust_material(
+            asset_server.load(&cfg.warp.texture),
+            true,
+            cfg,
+        )));
+    }
+}
+
+/// How long a mote spawned at `depth` needs to live to transit the volume and
+/// pass behind the camera, capped by `max_secs` (spec §9).
+///
+/// Deriving this from transit time rather than reading a fixed duration is what
+/// makes a mote's whole visible life useful: a fixed lifetime kills fast motes
+/// while they are still distant specks and never lets them stream past. The cap
+/// only bites at low speed, where transit time would otherwise be unbounded and
+/// motes would hang in space.
+fn dust_lifetime(depth: f32, mote_speed: f32, max_secs: f32, jitter: f32) -> f32 {
+    let transit = if mote_speed > 0.01 {
+        (depth + DUST_BEHIND_CAMERA_MARGIN) / mote_speed
+    } else {
+        max_secs
+    };
+    (transit * jitter).min(max_secs).max(0.05)
+}
+
+/// World height spanned by the viewport at `depth` from the camera.
+///
+/// Mote widths are authored as a fraction of screen height, not in world units
+/// (spec §13's "screen-relative units"). Converting through this keeps a mote's
+/// apparent size independent of the depth band it spawned in — otherwise the
+/// far layer, sitting 40–150 units out, is sub-pixel and invisible while the
+/// near layer is whatever its band happens to make it.
+fn dust_view_height_at(depth: f32, fov: f32) -> f32 {
+    2.0 * depth * (fov * 0.5).tan()
+}
+
+/// Normalised speed for the local ship, already through the speed curve.
+///
+/// The ceiling is impulse-inclusive so that ordinary flight occupies the lower
+/// part of the curve and impulse is what drives the field to full white.
+fn dust_speed_fraction(
+    physics: &ShipPhysics,
+    helm: Option<&HelmConsoleSection>,
+    exponent: f32,
+) -> f32 {
+    let max_speed = helm
+        .map(|h| h.0.max_speed)
+        .unwrap_or(DUST_FALLBACK_MAX_SPEED)
+        .max(0.1);
+    let speed = ship_velocity(physics).length();
+    (speed / max_speed).clamp(0.0, 1.0).powf(exponent.max(0.01))
+}
+
+/// Advances the smoothed speed channels and the warp ramp.
+fn tick_dust_state(
+    time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut state: ResMut<DustFieldState>,
+    ship_q: Query<
+        (
+            &ShipPhysics,
+            Option<&HelmConsoleSection>,
+            Option<&crate::simulation::ShipImpulse>,
+        ),
+        With<LocalShip>,
+    >,
+) {
+    let Ok((physics, helm, impulse)) = ship_q.single() else {
+        return;
+    };
+    let cfg = DustPfxSettings::from_world(world_config.as_deref());
+    let dt = time.delta_secs();
+    let target = dust_speed_fraction(physics, helm, cfg.speed_curve_exponent);
+
+    state.streak_s = dust_smooth(state.streak_s, target, cfg.streak_response_secs, dt);
+    state.brightness_s = dust_smooth(state.brightness_s, target, cfg.brightness_response_secs, dt);
+    state.spawn_s = dust_smooth(state.spawn_s, target, cfg.spawn_response_secs, dt);
+
+    // Warp ramp. Charging exposes a 0→1 progress value we can ride directly;
+    // disengage has no engine-side ramp (`cancel_charge` snaps Active → Idle
+    // in one frame), so the spin-down is timed here off `exit_secs`.
+    let warp_target = match impulse.map(|i| i.0.phase) {
+        Some(crate::impulse::ImpulsePhase::Active) => 1.0,
+        Some(crate::impulse::ImpulsePhase::Charging) => {
+            impulse.map(|i| i.0.charge_progress).unwrap_or(0.0)
+        }
+        _ => 0.0,
+    };
+    let warp_response = if warp_target > state.warp_ramp {
+        cfg.warp.enter_secs
+    } else {
+        cfg.warp.exit_secs
+    };
+    state.warp_ramp = if cfg.warp.enabled {
+        dust_smooth(state.warp_ramp, warp_target, warp_response, dt)
+    } else {
+        0.0
+    };
+}
+
+/// Pushes the smoothed speed values into the shared per-layer materials.
+///
+/// This is the whole reason a layer can share one material: everything that
+/// varies with speed is a uniform, so this is a handful of writes per frame
+/// rather than an allocation per mote.
+fn sync_dust_materials(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    state: Res<DustFieldState>,
+    mut materials: ResMut<Assets<DustMoteMaterial>>,
+) {
+    let cfg = DustPfxSettings::from_world(world_config.as_deref());
+
+    // Ordinary layers yield the screen to the warp field as it ramps in.
+    let layer_scale = 1.0 - state.warp_ramp;
+
+    for (i, layer) in cfg.layers.iter().enumerate() {
+        let Some(handles) = state.layers.get(i) else {
+            continue;
+        };
+        let tint = dust_tint(&cfg, state.brightness_s);
+        let brightness = dust_ramp(layer.brightness, state.brightness_s);
+        let opacity = dust_ramp(layer.opacity, state.brightness_s) * layer_scale;
+        for handle in [Some(&handles.main), handles.glint.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(mat) = materials.get_mut(handle) {
+                mat.tint_r = tint[0];
+                mat.tint_g = tint[1];
+                mat.tint_b = tint[2];
+                mat.brightness = brightness;
+                mat.opacity = opacity;
+                mat.centre_fade_inner = cfg.centre_fade_inner;
+                mat.centre_fade_outer = cfg.centre_fade_outer;
+                mat.edge_fade = cfg.edge_fade;
+            }
+        }
+    }
+
+    if let Some(mat) = state
+        .warp_material
+        .as_ref()
+        .and_then(|handle| materials.get_mut(handle))
+    {
+        let tint = cfg.high_speed_tint;
+        mat.tint_r = tint[0];
+        mat.tint_g = tint[1];
+        mat.tint_b = tint[2];
+        mat.brightness = cfg.warp.brightness;
+        mat.opacity = state.warp_ramp;
+        // Warp streaks cross the whole screen, so the centre mask that keeps
+        // ordinary motes out of the targeting area would erase them.
+        mat.centre_fade_inner = 0.0;
+        mat.centre_fade_outer = 0.0;
+        mat.edge_fade = cfg.edge_fade;
+    }
+}
+
+/// Mote tint at the given curved speed: cool grey-blue at rest, near-white at
+/// full speed (spec §7).
+fn dust_tint(cfg: &DustPfxSettings, s: f32) -> [f32; 3] {
+    let lo = cfg.low_speed_tint;
+    let hi = cfg.high_speed_tint;
+    [
+        lo[0] + (hi[0] - lo[0]) * s,
+        lo[1] + (hi[1] - lo[1]) * s,
+        lo[2] + (hi[2] - lo[2]) * s,
+    ]
+}
+
+/// Spawns camera-relative motes for each layer at a rate driven by ship speed.
+#[allow(clippy::too_many_arguments)]
 fn spawn_dust_motes(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    mut spawn_acc: Local<f32>,
-    cam_q: Query<&Transform, With<GameCamera>>,
+    mut state: ResMut<DustFieldState>,
+    asset_server: Res<AssetServer>,
+    cam_q: Query<(&Transform, &Projection), With<GameCamera>>,
     ship_q: Query<(&ShipPhysics, Option<&HelmConsoleSection>), With<LocalShip>>,
-    mote_q: Query<(), With<DustMote>>,
+    mote_q: Query<&DustMote>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<DustMoteMaterial>>,
 ) {
-    let Ok(cam_transform) = cam_q.single() else {
+    let Ok((cam_transform, projection)) = cam_q.single() else {
         return;
     };
     let Ok((physics, helm)) = ship_q.single() else {
         return;
     };
-
     let cfg = DustPfxSettings::from_world(world_config.as_deref());
+    if !cfg.enabled {
+        return;
+    }
 
+    ensure_dust_assets(&mut state, &cfg, &asset_server, &mut meshes, &mut materials);
+
+    let velocity = ship_velocity(physics);
+    // Motes travel opposite the ship, so their leading direction is -V.
+    let travel_dir = (-velocity).normalize_or_zero();
+    if travel_dir == Vec3::ZERO {
+        return;
+    }
+
+    // Station-keeping shows no motes at all. Motes hanging in space at a crawl
+    // are what read as snow rather than as motion (spec §4/§20), and the field
+    // exists to communicate velocity — with no velocity there is nothing to say.
     let max_speed = helm
         .map(|h| h.0.max_speed)
         .unwrap_or(DUST_FALLBACK_MAX_SPEED)
         .max(0.1);
-    let impulse_mult = helm
-        .map(|h| h.0.impulse_speed_multiplier)
-        .unwrap_or(crate::impulse::IMPULSE_SPEED_MULTIPLIER);
-    let speed_abs = physics.forward_speed.abs();
-    let speed_frac = (speed_abs / max_speed).clamp(0.0, 1.0);
-
-    let dt = time.delta_secs();
-    *spawn_acc += cfg.max_spawn_rate * speed_frac * dt;
-
-    let live_count = mote_q.iter().count() as u32;
-    let budget = cfg.max_motes.saturating_sub(live_count);
-    let to_spawn = (*spawn_acc as u32).min(budget);
-    *spawn_acc -= to_spawn as f32;
-    // Prevent unbounded accumulation when at the mote cap — without this the
-    // accumulator grows while all slots are occupied and triggers a burst
-    // the moment slots open up, defeating the rate-based spawning intent.
-    if budget == 0 {
-        *spawn_acc = spawn_acc.min(cfg.max_spawn_rate * dt);
-    }
-
-    if to_spawn == 0 {
+    if velocity.length() / max_speed < DUST_IDLE_SPEED_FRAC {
         return;
     }
+    // Apparent mote speed — what transit-time lifetimes are computed against.
+    let mote_speed = velocity.length() * cfg.mote_speed_multiplier;
 
-    let opacity_ceil = (max_speed * impulse_mult).max(0.001);
-    let opacity_t = (speed_abs / opacity_ceil).clamp(0.0, 1.0);
-    let opacity = cfg.min_opacity + (cfg.max_opacity - cfg.min_opacity) * opacity_t;
+    let dt = time.delta_secs();
+    let (fov, aspect) = match projection {
+        Projection::Perspective(p) => (p.fov, p.aspect_ratio),
+        _ => (std::f32::consts::FRAC_PI_4, 1.777),
+    };
 
-    let color = [cfg.color[0], cfg.color[1], cfg.color[2], opacity];
-    let sphere_mesh = meshes.add(Sphere {
-        radius: cfg.mote_radius,
-    });
-    let cam_pos = cam_transform.translation;
+    let mut live: Vec<u32> = vec![0; cfg.layers.len()];
+    let mut live_warp = 0u32;
+    for mote in mote_q.iter() {
+        match mote.kind {
+            DustMoteKind::Layer(i) if i < live.len() => live[i] += 1,
+            DustMoteKind::Warp => live_warp += 1,
+            _ => {}
+        }
+    }
 
     let mut rng = rand::rng();
-    for _ in 0..to_spawn {
-        let spawn_pos = loop {
-            let v = Vec3::new(
-                rng.random_range(-1.0_f32..1.0),
-                rng.random_range(-1.0_f32..1.0),
-                rng.random_range(-1.0_f32..1.0),
-            );
-            if v.length_squared() <= 1.0 {
-                break cam_pos + v * cfg.spawn_radius;
-            }
-        };
+    let cam_pos = cam_transform.translation;
 
-        let mat = glow_material(
-            &mut materials,
-            color,
-            cfg.emissive_strength,
-            AlphaMode::Blend,
-        );
-        commands.spawn((
-            PfxEntity,
-            DustMote,
-            Mesh3d(sphere_mesh.clone()),
-            MeshMaterial3d(mat.clone()),
-            Transform::from_translation(spawn_pos),
-            PfxLifetime {
-                age: 0.0,
-                lifetime: cfg.lifetime_secs,
-            },
-            PfxFadingMaterial {
-                handle: mat,
-                color,
-                emissive_strength: cfg.emissive_strength,
-            },
-        ));
+    // The ordinary layers stand down while the warp field owns the screen.
+    if state.warp_ramp < 0.99 {
+        for (i, layer) in cfg.layers.iter().enumerate() {
+            let rate = dust_ramp(layer.spawn_rate, state.spawn_s);
+            let to_spawn = dust_take_spawn_budget(
+                &mut state.spawn_acc[i],
+                rate,
+                layer.max_motes.saturating_sub(live[i]),
+                dt,
+            );
+            for _ in 0..to_spawn {
+                let depth = rng.random_range(
+                    layer.depth_band[0]..layer.depth_band[1].max(layer.depth_band[0] + 0.001),
+                );
+                let pos = dust_spawn_position(
+                    cam_pos,
+                    cam_transform,
+                    travel_dir,
+                    depth,
+                    fov,
+                    aspect,
+                    layer.edge_bias,
+                    &mut rng,
+                );
+                let use_glint = layer.glint_chance > 0.0
+                    && state.layers[i].glint.is_some()
+                    && rng.random::<f32>() < layer.glint_chance;
+                let material = if use_glint {
+                    state.layers[i].glint.clone().expect("glint checked above")
+                } else {
+                    state.layers[i].main.clone()
+                };
+                let lifetime = dust_lifetime(
+                    depth,
+                    mote_speed,
+                    layer.max_lifetime_secs,
+                    rng.random_range(0.8..1.2),
+                );
+                commands.spawn((
+                    PfxEntity,
+                    DustMote {
+                        kind: DustMoteKind::Layer(i),
+                        width: layer.width
+                            * dust_view_height_at(depth, fov)
+                            * rng.random_range(0.7..1.3),
+                        length_scale: rng.random_range(0.75..1.25),
+                        turbulence: dust_turbulence(cfg.turbulence, &mut rng),
+                    },
+                    Mesh3d(state.quad.clone().expect("quad built above")),
+                    MeshMaterial3d(material),
+                    Transform::from_translation(pos),
+                    PfxLifetime { age: 0.0, lifetime },
+                ));
+            }
+        }
+    }
+
+    // Warp field (spec §14): a dedicated high-speed layer rather than the
+    // ordinary motes stretched indefinitely.
+    if cfg.warp.enabled && state.warp_ramp > 0.01 {
+        let budget = cfg.warp.motes.saturating_sub(live_warp);
+        let rate = cfg.warp.motes as f32 * 2.0 * state.warp_ramp;
+        let to_spawn = dust_take_spawn_budget(&mut state.warp_acc, rate, budget, dt);
+        let warp_material = state
+            .warp_material
+            .clone()
+            .expect("warp material built above");
+        for _ in 0..to_spawn {
+            let depth = rng.random_range(10.0..90.0);
+            let pos = dust_spawn_position(
+                cam_pos,
+                cam_transform,
+                travel_dir,
+                depth,
+                fov,
+                aspect,
+                0.35,
+                &mut rng,
+            );
+            commands.spawn((
+                PfxEntity,
+                DustMote {
+                    kind: DustMoteKind::Warp,
+                    width: cfg.warp.width
+                        * dust_view_height_at(depth, fov)
+                        * rng.random_range(0.6..1.4),
+                    length_scale: rng.random_range(0.6..1.4),
+                    turbulence: Vec3::ZERO,
+                },
+                Mesh3d(state.quad.clone().expect("quad built above")),
+                MeshMaterial3d(warp_material.clone()),
+                Transform::from_translation(pos),
+                PfxLifetime {
+                    age: 0.0,
+                    lifetime: dust_lifetime(depth, mote_speed, 1.0, rng.random_range(0.8..1.2)),
+                },
+            ));
+        }
     }
 }
 
-/// Moves all live dust motes opposite to ship heading at the ship's current forward_speed.
+/// Draws from a fractional spawn accumulator, returning whole motes to spawn.
+///
+/// Clamping the accumulator at the cap is deliberate: without it the leftover
+/// grows while every slot is occupied and then discharges as a burst the moment
+/// slots free up, which defeats rate-based spawning entirely.
+fn dust_take_spawn_budget(acc: &mut f32, rate: f32, budget: u32, dt: f32) -> u32 {
+    *acc += rate * dt;
+    let to_spawn = (*acc as u32).min(budget);
+    *acc -= to_spawn as f32;
+    if budget == 0 {
+        *acc = acc.min(rate * dt);
+    }
+    to_spawn
+}
+
+/// Small constant lateral drift for one mote (spec §4).
+fn dust_turbulence(strength: f32, rng: &mut impl Rng) -> Vec3 {
+    if strength <= 0.0 {
+        return Vec3::ZERO;
+    }
+    Vec3::new(
+        rng.random_range(-1.0_f32..1.0),
+        rng.random_range(-1.0_f32..1.0),
+        rng.random_range(-1.0_f32..1.0),
+    ) * strength
+}
+
+/// Picks a spawn point inside the view volume at `depth`, offset toward the
+/// side the motes stream in from.
+///
+/// The lateral extent is derived from the camera frustum rather than a fixed
+/// radius so motes cover the view at any depth, and the whole distribution is
+/// pushed along `travel_dir` so motes have room to cross the screen before
+/// expiring. That offset is what makes strafing work: when the ship slides
+/// sideways `travel_dir` is lateral, so motes enter from the beam rather than
+/// from ahead.
+#[allow(clippy::too_many_arguments)]
+fn dust_spawn_position(
+    cam_pos: Vec3,
+    cam_transform: &Transform,
+    travel_dir: Vec3,
+    depth: f32,
+    fov: f32,
+    aspect: f32,
+    edge_bias: f32,
+    rng: &mut impl Rng,
+) -> Vec3 {
+    // Cover appreciably more than the frustum so motes are already alive by the
+    // time they enter view (spec §3).
+    const FRUSTUM_MARGIN: f32 = 1.15;
+    // How far along the incoming direction to bias spawns, as a fraction of the
+    // lateral half-extent.
+    const AHEAD_BIAS: f32 = 0.5;
+
+    let half_h = depth * (fov * 0.5).tan() * FRUSTUM_MARGIN;
+    let half_w = half_h * aspect;
+
+    let u = dust_edge_shape(rng.random_range(-1.0_f32..1.0), edge_bias);
+    let v = dust_edge_shape(rng.random_range(-1.0_f32..1.0), edge_bias);
+
+    let base = cam_pos
+        + cam_transform.forward() * depth
+        + cam_transform.right() * (u * half_w)
+        + cam_transform.up() * (v * half_h);
+
+    base - travel_dir * (half_w * AHEAD_BIAS)
+}
+
+/// Drifts motes opposite the ship's true velocity, aligns each billboard to its
+/// direction of travel, and recycles motes that fall behind the camera.
 fn move_dust_motes(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    state: Res<DustFieldState>,
+    mut commands: Commands,
+    cam_q: Query<&Transform, (With<GameCamera>, Without<DustMote>)>,
     ship_q: Query<&ShipPhysics, With<LocalShip>>,
-    mut mote_q: Query<&mut Transform, With<DustMote>>,
+    mut mote_q: Query<(Entity, &DustMote, &mut Transform)>,
 ) {
+    let Ok(cam_transform) = cam_q.single() else {
+        return;
+    };
     let Ok(physics) = ship_q.single() else {
         return;
     };
     let cfg = DustPfxSettings::from_world(world_config.as_deref());
+
     let dt = time.delta_secs();
-    // Ship forward = (sin(yaw), 0, -cos(yaw)). Dust drifts opposite: (-sin, 0, +cos).
-    let drift = Vec3::new(
-        -physics.yaw.sin() * physics.forward_speed * dt,
-        0.0,
-        physics.yaw.cos() * physics.forward_speed * dt,
-    ) * cfg.mote_speed_multiplier;
-    for mut transform in mote_q.iter_mut() {
-        transform.translation += drift;
+    let velocity = ship_velocity(physics);
+    let speed = velocity.length();
+    // Motes move opposite the ship — this is the entire velocity field.
+    let mote_velocity = -velocity * cfg.mote_speed_multiplier;
+    let travel_dir = mote_velocity.normalize_or_zero();
+
+    let cam_pos = cam_transform.translation;
+    let cam_forward = *cam_transform.forward();
+
+    for (entity, mote, mut transform) in mote_q.iter_mut() {
+        let drift = mote_velocity + mote.turbulence * speed;
+        transform.translation += drift * dt;
+
+        // Recycle once a mote falls behind the camera; it can no longer
+        // contribute and holds a slot the emitter wants back.
+        let behind = (transform.translation - cam_pos).dot(cam_forward);
+        if behind < -DUST_BEHIND_CAMERA_MARGIN {
+            commands.entity(entity).try_despawn();
+            continue;
+        }
+
+        if travel_dir == Vec3::ZERO {
+            continue;
+        }
+        let to_cam = (cam_pos - transform.translation).normalize_or_zero();
+        transform.rotation = dust_billboard_rotation(travel_dir, to_cam);
+
+        let (length_range, s) = match mote.kind {
+            DustMoteKind::Layer(i) => match cfg.layers.get(i) {
+                Some(layer) => (layer.length, state.streak_s),
+                None => continue,
+            },
+            // The warp field only exists at speed, so it stretches with the
+            // ramp rather than with ordinary streak response.
+            DustMoteKind::Warp => ([1.0, cfg.warp.length_multiplier], state.warp_ramp),
+        };
+        let length = mote.width * dust_ramp(length_range, s) * mote.length_scale;
+        transform.scale = Vec3::new(length, mote.width, 1.0);
     }
 }
 
@@ -1477,6 +2331,477 @@ pub fn diff_torpedo_sets(
     let to_spawn: Vec<String> = in_flight_uuids.difference(tracked).cloned().collect();
     let to_despawn: Vec<String> = tracked.difference(in_flight_uuids).cloned().collect();
     (to_spawn, to_despawn)
+}
+
+#[cfg(test)]
+mod dust_tests {
+    use super::*;
+
+    fn physics(yaw: f32, forward: f32, lateral: f32) -> ShipPhysics {
+        ShipPhysics {
+            x: 0.0,
+            z: 0.0,
+            yaw,
+            forward_speed: forward,
+            roll: 0.0,
+            lateral_speed: lateral,
+        }
+    }
+
+    fn settings() -> DustPfxSettings {
+        DustPfxSettings::from_world(None)
+    }
+
+    // --- ship_velocity -----------------------------------------------------
+
+    #[test]
+    fn ship_velocity_at_zero_yaw_points_down_negative_z() {
+        let v = ship_velocity(&physics(0.0, 10.0, 0.0));
+        assert!(
+            (v - Vec3::new(0.0, 0.0, -10.0)).length() < 1e-4,
+            "got {v:?}"
+        );
+    }
+
+    #[test]
+    fn ship_velocity_follows_yaw() {
+        // Yawed 90° to starboard, forward should be +X.
+        let v = ship_velocity(&physics(std::f32::consts::FRAC_PI_2, 10.0, 0.0));
+        assert!((v - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-3, "got {v:?}");
+    }
+
+    /// Regression: dust ignored `lateral_speed` entirely, so the field froze
+    /// while the ship strafed. Pure lateral motion must produce pure lateral
+    /// velocity — at yaw 0, starboard is +X.
+    #[test]
+    fn ship_velocity_reacts_to_pure_strafe() {
+        let v = ship_velocity(&physics(0.0, 0.0, 7.0));
+        assert!(
+            v.length() > 0.0,
+            "strafing with no forward speed must still yield velocity"
+        );
+        assert!((v - Vec3::new(7.0, 0.0, 0.0)).length() < 1e-4, "got {v:?}");
+    }
+
+    #[test]
+    fn ship_velocity_combines_forward_and_lateral() {
+        let v = ship_velocity(&physics(0.0, 3.0, 4.0));
+        // Forward -Z and starboard +X are perpendicular, so the magnitude is
+        // the hypotenuse rather than either component.
+        assert!((v.length() - 5.0).abs() < 1e-4, "got {}", v.length());
+        assert!((v - Vec3::new(4.0, 0.0, -3.0)).length() < 1e-4, "got {v:?}");
+    }
+
+    #[test]
+    fn ship_velocity_reverse_flips_direction() {
+        let v = ship_velocity(&physics(0.0, -6.0, 0.0));
+        assert!((v - Vec3::new(0.0, 0.0, 6.0)).length() < 1e-4, "got {v:?}");
+    }
+
+    #[test]
+    fn ship_velocity_has_no_vertical_component() {
+        // ShipPhysics is an XZ model; a Y drift would be motion the ship is
+        // not making.
+        let v = ship_velocity(&physics(0.9, 8.0, -3.0));
+        assert_eq!(v.y, 0.0);
+    }
+
+    // --- billboard orientation --------------------------------------------
+
+    #[test]
+    fn billboard_aligns_local_x_with_direction_of_travel() {
+        let travel = Vec3::new(0.0, 0.0, -1.0);
+        let to_cam = Vec3::new(0.0, 1.0, 0.0);
+        let rot = dust_billboard_rotation(travel, to_cam);
+        let local_x = rot * Vec3::X;
+        assert!(
+            (local_x - travel).length() < 1e-4,
+            "quad's long axis must follow travel, got {local_x:?}"
+        );
+    }
+
+    #[test]
+    fn billboard_faces_camera_as_closely_as_possible() {
+        let travel = Vec3::new(0.0, 0.0, -1.0);
+        let to_cam = Vec3::new(0.0, 1.0, 0.0);
+        let rot = dust_billboard_rotation(travel, to_cam);
+        let normal = rot * Vec3::Z;
+        // to_cam is already perpendicular to travel, so the quad can face it
+        // exactly.
+        assert!(
+            (normal - to_cam).length() < 1e-4,
+            "quad normal should point at the camera, got {normal:?}"
+        );
+    }
+
+    #[test]
+    fn billboard_basis_stays_orthonormal() {
+        let rot = dust_billboard_rotation(Vec3::new(1.0, 0.0, -2.0), Vec3::new(0.3, 0.9, 0.1));
+        let (x, y, z) = (rot * Vec3::X, rot * Vec3::Y, rot * Vec3::Z);
+        assert!(x.dot(y).abs() < 1e-4);
+        assert!(x.dot(z).abs() < 1e-4);
+        assert!(y.dot(z).abs() < 1e-4);
+        assert!((x.length() - 1.0).abs() < 1e-4);
+    }
+
+    /// A mote heading straight at the camera has no projected direction. The
+    /// Gram-Schmidt projection collapses to zero there, so this must fall back
+    /// rather than produce a NaN rotation — and it is the common case when
+    /// flying forward, not an edge case.
+    #[test]
+    fn billboard_degenerate_head_on_case_is_finite() {
+        let travel = Vec3::new(0.0, 0.0, -1.0);
+        let rot = dust_billboard_rotation(travel, travel);
+        assert!(
+            rot.is_finite(),
+            "head-on mote produced a non-finite rotation"
+        );
+        let local_x = rot * Vec3::X;
+        assert!(
+            (local_x - travel).length() < 1e-4,
+            "fallback must still align with travel, got {local_x:?}"
+        );
+    }
+
+    #[test]
+    fn billboard_zero_velocity_is_identity_not_nan() {
+        let rot = dust_billboard_rotation(Vec3::ZERO, Vec3::Y);
+        assert!(rot.is_finite());
+    }
+
+    // --- speed curves and smoothing ---------------------------------------
+
+    #[test]
+    fn dust_ramp_interpolates_between_rest_and_full_speed() {
+        assert_eq!(dust_ramp([2.0, 10.0], 0.0), 2.0);
+        assert_eq!(dust_ramp([2.0, 10.0], 1.0), 10.0);
+        assert_eq!(dust_ramp([2.0, 10.0], 0.5), 6.0);
+    }
+
+    #[test]
+    fn speed_curve_keeps_the_effect_restrained_at_low_speed() {
+        // Half speed through an S² curve should land well under half strength,
+        // which is the whole point of the exponent (spec §2).
+        let half = dust_speed_fraction(&physics(0.0, 6.25, 0.0), None, 2.0);
+        assert!((half - 0.25).abs() < 1e-3, "got {half}");
+    }
+
+    #[test]
+    fn speed_curve_uses_true_velocity_not_just_forward_speed() {
+        let forward_only = dust_speed_fraction(&physics(0.0, 3.0, 0.0), None, 1.0);
+        let with_strafe = dust_speed_fraction(&physics(0.0, 3.0, 4.0), None, 1.0);
+        assert!(
+            with_strafe > forward_only,
+            "strafing must raise the speed fraction ({with_strafe} vs {forward_only})"
+        );
+    }
+
+    #[test]
+    fn speed_fraction_clamps_at_full_speed() {
+        let s = dust_speed_fraction(&physics(0.0, 999.0, 0.0), None, 2.0);
+        assert!((s - 1.0).abs() < 1e-6, "got {s}");
+    }
+
+    #[test]
+    fn dust_smooth_converges_toward_target() {
+        let mut v = 0.0;
+        for _ in 0..200 {
+            v = dust_smooth(v, 1.0, 0.1, 0.016);
+        }
+        assert!((v - 1.0).abs() < 1e-3, "got {v}");
+    }
+
+    #[test]
+    fn dust_smooth_zero_response_snaps() {
+        assert_eq!(dust_smooth(0.0, 1.0, 0.0, 0.016), 1.0);
+    }
+
+    /// Spec §10: streak length should lead, brightness follow, density lag.
+    /// That ordering is what makes acceleration feel immediate without motes
+    /// visibly popping into existence.
+    #[test]
+    fn response_rates_stagger_streak_then_brightness_then_density() {
+        let cfg = settings();
+        let dt = 0.1;
+        let streak = dust_smooth(0.0, 1.0, cfg.streak_response_secs, dt);
+        let brightness = dust_smooth(0.0, 1.0, cfg.brightness_response_secs, dt);
+        let spawn = dust_smooth(0.0, 1.0, cfg.spawn_response_secs, dt);
+        assert!(
+            streak > brightness && brightness > spawn,
+            "expected streak > brightness > spawn, got {streak} / {brightness} / {spawn}"
+        );
+    }
+
+    // --- tint --------------------------------------------------------------
+
+    #[test]
+    fn tint_runs_cool_grey_blue_to_near_white() {
+        let cfg = settings();
+        let at_rest = dust_tint(&cfg, 0.0);
+        let at_speed = dust_tint(&cfg, 1.0);
+        assert_eq!(at_rest, cfg.low_speed_tint);
+        assert_eq!(at_speed, cfg.high_speed_tint);
+        // "Whiter when fast" means the channels converge, not just brighten.
+        let spread = |c: [f32; 3]| {
+            c.iter().cloned().fold(f32::MIN, f32::max) - c.iter().cloned().fold(f32::MAX, f32::min)
+        };
+        assert!(
+            spread(at_speed) < spread(at_rest),
+            "high-speed tint should be less saturated than the low-speed tint"
+        );
+    }
+
+    // --- spawn budget ------------------------------------------------------
+
+    #[test]
+    fn spawn_budget_accumulates_fractional_motes() {
+        let mut acc = 0.0;
+        // 10/sec for 0.05s = 0.5 motes — nothing yet.
+        assert_eq!(dust_take_spawn_budget(&mut acc, 10.0, 100, 0.05), 0);
+        // Another 0.05s tips it over 1.0.
+        assert_eq!(dust_take_spawn_budget(&mut acc, 10.0, 100, 0.05), 1);
+    }
+
+    /// Without the at-cap clamp the accumulator grows while every slot is
+    /// occupied, then discharges as a burst the moment slots free up.
+    #[test]
+    fn spawn_budget_does_not_bank_motes_while_at_cap() {
+        let mut acc = 0.0;
+        for _ in 0..100 {
+            assert_eq!(dust_take_spawn_budget(&mut acc, 200.0, 0, 0.016), 0);
+        }
+        assert!(
+            acc <= 200.0 * 0.016 + 1e-6,
+            "accumulator banked up to {acc}"
+        );
+    }
+
+    // --- edge bias ---------------------------------------------------------
+
+    #[test]
+    fn edge_bias_pushes_samples_toward_the_screen_edges() {
+        // Near layer weights spawns to the edges so big close streaks stay
+        // peripheral (spec §13).
+        let biased = dust_edge_shape(0.5, 0.7);
+        assert!(biased > 0.5, "expected outward push, got {biased}");
+        assert!(biased <= 1.0);
+    }
+
+    #[test]
+    fn edge_bias_zero_is_uniform_and_preserves_sign() {
+        assert!((dust_edge_shape(0.5, 0.0) - 0.5).abs() < 1e-5);
+        assert!((dust_edge_shape(-0.5, 0.0) + 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn edge_bias_negative_pulls_samples_toward_the_centre() {
+        assert!(dust_edge_shape(0.5, -1.0) < 0.5);
+    }
+
+    // --- screen-relative sizing --------------------------------------------
+
+    /// Layer widths are fractions of screen height, not world units. Treating
+    /// them as world units makes the far layer (40–150 units out, width 0.006)
+    /// sub-pixel and invisible, which is exactly what happened first time.
+    #[test]
+    fn view_height_grows_with_depth() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let near = dust_view_height_at(10.0, fov);
+        let far = dust_view_height_at(100.0, fov);
+        assert!(
+            (far / near - 10.0).abs() < 1e-3,
+            "should scale linearly with depth"
+        );
+    }
+
+    #[test]
+    fn screen_relative_width_holds_apparent_size_across_depth_bands() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let frac = 0.02;
+        // Two motes of the same authored width at very different depths must
+        // subtend the same fraction of the view.
+        let near_world = frac * dust_view_height_at(10.0, fov);
+        let far_world = frac * dust_view_height_at(120.0, fov);
+        assert!(
+            far_world > near_world,
+            "a deeper mote needs more world width"
+        );
+        let apparent = |w: f32, d: f32| w / dust_view_height_at(d, fov);
+        assert!(
+            (apparent(near_world, 10.0) - apparent(far_world, 120.0)).abs() < 1e-6,
+            "apparent size must not depend on depth"
+        );
+    }
+
+    #[test]
+    fn builtin_widths_are_screen_fractions_not_world_units() {
+        let cfg = settings();
+        for layer in &cfg.layers {
+            assert!(
+                layer.width > 0.0 && layer.width < 0.5,
+                "width {} does not read as a screen fraction",
+                layer.width
+            );
+        }
+    }
+
+    // --- lifetime ----------------------------------------------------------
+
+    /// A mote must live long enough to actually transit the volume and pass the
+    /// camera. A fixed lifetime kills fast motes while they are still distant
+    /// specks, so the field never reads as streaming past you.
+    #[test]
+    fn lifetime_covers_transit_to_behind_the_camera() {
+        // 100 units out, closing at 50/s → ~2.1s to reach 5 units behind.
+        let life = dust_lifetime(100.0, 50.0, 10.0, 1.0);
+        assert!((life - 2.1).abs() < 1e-3, "got {life}");
+    }
+
+    #[test]
+    fn lifetime_shortens_as_speed_rises() {
+        let slow = dust_lifetime(100.0, 10.0, 100.0, 1.0);
+        let fast = dust_lifetime(100.0, 100.0, 100.0, 1.0);
+        assert!(fast < slow, "faster motes should transit sooner");
+    }
+
+    #[test]
+    fn lifetime_is_capped_so_slow_motes_do_not_hang() {
+        // Crawling: transit would be ~1000s. The cap is what stops motes
+        // hanging in space looking like snow.
+        let life = dust_lifetime(100.0, 0.1, 2.0, 1.0);
+        assert_eq!(life, 2.0);
+    }
+
+    #[test]
+    fn lifetime_at_zero_speed_falls_back_to_the_cap() {
+        assert_eq!(dust_lifetime(50.0, 0.0, 3.0, 1.0), 3.0);
+    }
+
+    #[test]
+    fn lifetime_never_returns_zero() {
+        assert!(dust_lifetime(0.0, 1e6, 5.0, 1.0) >= 0.05);
+    }
+
+    // --- config resolution -------------------------------------------------
+
+    #[test]
+    fn settings_without_world_config_use_builtin_layers() {
+        let cfg = settings();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.layers.len(), 3);
+        assert_eq!(cfg.speed_curve_exponent, DUST_SPEED_CURVE_EXPONENT);
+        // Warp is opt-in: absent [dust.warp] means no warp field.
+        assert!(!cfg.warp.enabled);
+    }
+
+    #[test]
+    fn builtin_layers_run_near_to_far() {
+        let cfg = settings();
+        let depths: Vec<f32> = cfg.layers.iter().map(|l| l.depth_band[0]).collect();
+        assert!(
+            depths.windows(2).all(|w| w[0] < w[1]),
+            "layers should be ordered near→far, got {depths:?}"
+        );
+        // Far motes must stay below the bloom threshold or the scene fogs.
+        let far = cfg.layers.last().expect("three layers");
+        let near = cfg.layers.first().expect("three layers");
+        assert!(far.brightness[1] < near.brightness[1]);
+        assert!(!far.additive, "far layer should alpha-blend, not add");
+        assert!(near.additive, "near layer should be additive");
+    }
+
+    #[test]
+    fn world_config_overrides_layers_positionally() {
+        use crate::world::config::{DustLayerConfig, DustPfxConfig};
+        let world = crate::world::config::WorldConfig {
+            dust: Some(DustPfxConfig {
+                layers: vec![DustLayerConfig {
+                    max_motes: Some(7),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cfg = DustPfxSettings::from_world(Some(&world));
+        assert_eq!(cfg.layers.len(), 1);
+        assert_eq!(cfg.layers[0].max_motes, 7);
+        // Unset fields fall back to the matching built-in layer.
+        assert_eq!(cfg.layers[0].texture, DUST_DEFAULT_LAYERS[0].texture);
+        assert_eq!(cfg.layers[0].width, DUST_DEFAULT_LAYERS[0].width);
+    }
+
+    #[test]
+    fn world_config_overrides_scalars() {
+        use crate::world::config::DustPfxConfig;
+        let world = crate::world::config::WorldConfig {
+            dust: Some(DustPfxConfig {
+                enabled: Some(false),
+                turbulence: Some(0.5),
+                low_speed_tint: Some([0.1, 0.2, 0.3]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cfg = DustPfxSettings::from_world(Some(&world));
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.turbulence, 0.5);
+        assert_eq!(cfg.low_speed_tint, [0.1, 0.2, 0.3]);
+        // Untouched fields keep their defaults.
+        assert_eq!(cfg.high_speed_tint, DUST_HIGH_SPEED_TINT);
+    }
+
+    #[test]
+    fn empty_dust_block_keeps_builtin_layers() {
+        let world = crate::world::config::WorldConfig {
+            dust: Some(Default::default()),
+            ..Default::default()
+        };
+        let cfg = DustPfxSettings::from_world(Some(&world));
+        assert_eq!(cfg.layers.len(), 3);
+    }
+
+    // --- quad geometry -----------------------------------------------------
+
+    /// `space_mote_streak_head.png` carries its bright head at the low-U end,
+    /// and the billboard aligns local +X with travel. The quad's UVs are
+    /// therefore mirrored so the head leads; if this flips, every near streak
+    /// trails head-first and the field reads as moving backwards.
+    #[test]
+    fn quad_uvs_put_low_u_at_positive_x_so_streak_heads_lead() {
+        let mesh = dust_quad_mesh();
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) => p.clone(),
+            _ => panic!("quad must have Float32x3 positions"),
+        };
+        let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x2(u)) => u.clone(),
+            _ => panic!("quad must have Float32x2 UVs"),
+        };
+        assert_eq!(positions.len(), 4);
+
+        let u_at_max_x = positions
+            .iter()
+            .zip(&uvs)
+            .filter(|(p, _)| p[0] > 0.0)
+            .map(|(_, uv)| uv[0])
+            .collect::<Vec<_>>();
+        let u_at_min_x = positions
+            .iter()
+            .zip(&uvs)
+            .filter(|(p, _)| p[0] < 0.0)
+            .map(|(_, uv)| uv[0])
+            .collect::<Vec<_>>();
+
+        assert!(
+            u_at_max_x.iter().all(|&u| u == 0.0),
+            "leading (+X) edge must sample u=0 where the streak head lives, got {u_at_max_x:?}"
+        );
+        assert!(
+            u_at_min_x.iter().all(|&u| u == 1.0),
+            "trailing (-X) edge must sample u=1 (the tail), got {u_at_min_x:?}"
+        );
+    }
 }
 
 #[cfg(test)]

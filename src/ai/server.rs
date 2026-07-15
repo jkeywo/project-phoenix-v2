@@ -335,7 +335,36 @@ fn aggregate_doctrine_blackboards(
             red_alert,
             hull_fraction,
         };
-        let scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
+        let mut scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
+        // Inject synthetic Retreat objective based on hull damage.
+        // Uses a default threshold of 0.3 (30% hull remaining).
+        let retreat_score = crate::ai::retreat_score::score_retreat(
+            hull_fraction,
+            crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD,
+        );
+        if retreat_score > 0.0 {
+            scored.push(crate::messages::ScoredObjective {
+                id: "retreat".to_string(),
+                score: retreat_score,
+                directive: crate::messages::AiDirective::Retreat {
+                    anchor: String::new(),
+                },
+                source: crate::messages::ObjectiveSource::Doctrine,
+                relevance: crate::objectives::directive_relevance(
+                    &crate::messages::AiDirective::Retreat {
+                        anchor: String::new(),
+                    },
+                ),
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "retreat".to_string(),
+                    text: "Retreat — hull critically damaged".to_string(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Doctrine,
+                },
+            });
+        }
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,

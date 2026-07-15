@@ -2717,6 +2717,8 @@ pub enum AiDirective {
     Reach { anchor: String },
     /// Hail the named target entity.
     Hail { target: String },
+    /// Retreat to the named anchor position.
+    Retreat { anchor: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.

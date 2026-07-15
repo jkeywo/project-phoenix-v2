@@ -385,6 +385,9 @@ fn parse_doctrine_directive(
         Some("Hail") => crate::messages::AiDirective::Hail {
             target: d.directive_hail_target.clone().unwrap_or_default(),
         },
+        Some("Retreat") => crate::messages::AiDirective::Retreat {
+            anchor: d.directive_anchor.clone().unwrap_or_default(),
+        },
         _ => crate::messages::AiDirective::None,
     }
 }

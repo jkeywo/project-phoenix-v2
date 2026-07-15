@@ -113,7 +113,9 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
                 SystemAffinity::Captain,
             ]
         }
-        AiDirective::Patrol { .. } | AiDirective::Reach { .. } => vec![SystemAffinity::Helm],
+        AiDirective::Patrol { .. } | AiDirective::Reach { .. } | AiDirective::Retreat { .. } => {
+            vec![SystemAffinity::Helm]
+        }
         AiDirective::Hail { .. } => vec![SystemAffinity::Captain],
     }
 }

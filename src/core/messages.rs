@@ -654,6 +654,12 @@ pub struct ShipClientConfig {
     /// compatibility with older server builds that don't send this field.
     #[serde(default)]
     pub station_systems: HashMap<String, Vec<String>>,
+    /// Minimum relative bearing change (radians) for Sensors to re-emit a
+    /// `ThreatBearing` coordination message to Shields. Sourced from
+    /// `[sensors_console] threat_bearing_epsilon_rad` in the ship TOML.
+    /// A change smaller than this is considered unchanged and won't re-trigger.
+    #[serde(default = "default_threat_bearing_epsilon_rad")]
+    pub threat_bearing_epsilon_rad: f32,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -686,6 +692,10 @@ fn default_repair_rate_hp_per_sec() -> f32 {
 
 fn default_impulse_charge_duration() -> f32 {
     3.0
+}
+
+fn default_threat_bearing_epsilon_rad() -> f32 {
+    0.175
 }
 
 fn default_phaser_beam_color() -> [f32; 4] {
@@ -724,6 +734,7 @@ impl Default for ShipClientConfig {
             power_rating: None,
             ship_css: None,
             station_systems: HashMap::new(),
+            threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
         }
     }
 }
@@ -1195,6 +1206,8 @@ pub enum CoordinationPayload {
         tier: DamageTier,
         deficit: f32,
     },
+    /// Sensors warns Shields of an incoming threat (hostile closing or torpedo).
+    ThreatBearing { bearing_rad: f32, label: String },
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a

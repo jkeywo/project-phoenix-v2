@@ -286,6 +286,7 @@ pub fn spawn_entity(
         // `CoordinationEnqueue.source_entity`.
         entity_commands.insert(crate::ship::shields::ShieldsCoordinationState::default());
         entity_commands.insert(crate::ship::sensors::SensorsFrequencyState::default());
+        entity_commands.insert(crate::ship::sensors::SensorsThreatState::default());
         // Power brownout advisory debounce state (issue #678): per-ship
         // so each ship tracks its own brownout notification cycle.
         entity_commands.insert(crate::ship::power::PowerBrownoutState::default());
@@ -294,6 +295,7 @@ pub fn spawn_entity(
         // AI folds into its steering once the request is consumed.
         entity_commands.insert(crate::weapons_plugin::WeaponsArcRequestState::default());
         entity_commands.insert(crate::ship_plugin::PendingArcBearingRequest::default());
+        entity_commands.insert(crate::ship::shields::PendingShieldsThreatBearing::default());
         entity_commands.insert(crate::ship_plugin::LastSystemTiers::default());
         entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());
         entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());

@@ -1523,6 +1523,12 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         } => {
             format!("Repair requested for {station_label} ({tier:?})")
         }
+        CoordinationPayload::ThreatBearing {
+            bearing_rad, label, ..
+        } => {
+            let bearing_deg = (bearing_rad.to_degrees() + 360.0) % 360.0;
+            format!("Sensors: threat bearing {bearing_deg:.0}° - {label}")
+        }
     }
 }
 
@@ -1537,6 +1543,7 @@ pub fn process_coordination_lag(
             Option<&mut crate::ai_plugin::ShipAiMemory>,
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
+            Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
             Has<LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -1546,6 +1553,7 @@ pub fn process_coordination_lag(
     mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
+    let shields_id = crate::system_registry::shields_system_id();
     let now = time.elapsed_secs();
     for (
         ship_config,
@@ -1555,6 +1563,7 @@ pub fn process_coordination_lag(
         mut ai_memory,
         mut alerted,
         mut repair_queue,
+        mut pending_shields_threat,
         is_local,
     ) in ship_components.iter_mut()
     {
@@ -1607,6 +1616,16 @@ pub fn process_coordination_lag(
                         if let CoordinationPayload::NavigateTo { x, z, .. } = &msg.payload {
                             if let Some(ai_mem) = ai_memory.as_deref_mut() {
                                 ai_mem.0.nav_goal = Some([*x, *z]);
+                            }
+                        }
+                    }
+                    // AI Shields consumes a Sensors threat bearing to rotate
+                    // the closest facing toward the incoming threat (issue #683).
+                    if target_policy.operate_ai && msg.target == shields_id {
+                        if let CoordinationPayload::ThreatBearing { bearing_rad, .. } = &msg.payload
+                        {
+                            if let Some(pending) = pending_shields_threat.as_deref_mut() {
+                                pending.0 = Some(*bearing_rad);
                             }
                         }
                     }

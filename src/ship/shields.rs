@@ -7,6 +7,13 @@ use crate::messages::{
 };
 use crate::ship_plugin::CoordinationEnqueue;
 
+/// Pending Sensors->Shields threat bearing, delivered via the channel-3
+/// coordination bus (issue #683). Set by `process_coordination_lag` when a
+/// `CoordinationPayload::ThreatBearing` is consumed by an AI-controlled
+/// Shields; read by `operate_shields_ai` to bias facing toward the threat.
+#[derive(Component, Clone, Debug, Default)]
+pub struct PendingShieldsThreatBearing(pub Option<f32>);
+
 // ── Components ─────────────────────────────────────────────────────────────────
 
 /// The ship's shield system.
@@ -556,18 +563,37 @@ fn operate_shields_ai(
             &mut ShipShields,
             &mut ShieldsDamageHistory,
             Option<&ShieldsAiConfigResource>,
+            &mut PendingShieldsThreatBearing,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let current_time = time.elapsed_secs();
 
-    for (control_sources, mut shields, mut damage_history, ai_config_comp) in ships.iter_mut() {
+    for (control_sources, mut shields, mut damage_history, ai_config_comp, mut pending_threat) in
+        ships.iter_mut()
+    {
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::shields_system_id());
         if !policy.operate_ai {
             continue;
+        }
+
+        // ── Threat-bearing override ─────────────────────────────────────────
+        // If Sensors has sent a threat bearing, override the normal damage-based
+        // focus to rotate/raise the closest facing toward the incoming threat.
+        if let Some(bearing_rad) = pending_threat.0.take() {
+            let bearing_deg = (bearing_rad.to_degrees() + 360.0) % 360.0;
+            let closest_idx = (0..shields.0.facings.len()).min_by(|&a, &b| {
+                let da = angular_distance_deg(shields.0.facings[a].center_deg, bearing_deg);
+                let db = angular_distance_deg(shields.0.facings[b].center_deg, bearing_deg);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            if let Some(idx) = closest_idx {
+                shields.0.set_focused_facing(Some(idx));
+            }
+            continue; // Threat bearing takes priority over damage analysis
         }
 
         let ai_cfg: &ShieldsAiConfigResource = ai_config_comp.unwrap_or(&*global_ai_config);
@@ -638,6 +664,12 @@ fn operate_shields_ai(
             shields.0.set_focused_facing(focus);
         }
     }
+}
+
+/// Angular distance (degrees) between two angles on a circle, always in [0, 180].
+fn angular_distance_deg(a: f32, b: f32) -> f32 {
+    let diff = (a - b).abs() % 360.0;
+    diff.min(360.0 - diff)
 }
 
 #[cfg(test)]

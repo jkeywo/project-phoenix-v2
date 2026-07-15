@@ -2058,6 +2058,7 @@ fn spawn_game_start_entities(
                 .insert(initial_active_ratings)
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .insert(crate::ship_plugin::PendingArcBearingRequest::default())
+                .insert(crate::ship::shields::PendingShieldsThreatBearing::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
                     x: pos.x,
@@ -2091,6 +2092,7 @@ fn spawn_game_start_entities(
                 // `entities/spawner.rs` for details.
                 .insert(crate::ship::shields::ShieldsCoordinationState::default())
                 .insert(crate::ship::sensors::SensorsFrequencyState::default())
+                .insert(crate::ship::sensors::SensorsThreatState::default())
                 .insert(crate::ship::power::PowerBrownoutState::default())
                 // Per-entity CollisionCooldown so player and NPC ships each
                 // have their own cooldown timer (PRD #597 PR-8).

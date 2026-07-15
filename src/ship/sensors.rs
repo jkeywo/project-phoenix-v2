@@ -28,6 +28,18 @@ pub struct SensorsFrequencyState {
     pub last_sent_frequency: Option<f32>,
 }
 
+/// Tracks the last threat warning emitted per ship to debounce against
+/// bus spam (issue #683). Sensors emits a `ThreatBearing` coordination
+/// message to Shields only when a *new* threat appears or an existing
+/// threat's bearing changes by more than the configured epsilon.
+#[derive(Component, Default, Clone)]
+pub struct SensorsThreatState {
+    pub last_threat_uuid: Option<String>,
+    pub last_bearing_rad: Option<f32>,
+    pub last_label: Option<String>,
+    pub last_distance: Option<f32>,
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
 pub struct ShipSensorsPlugin;
@@ -40,6 +52,7 @@ impl Plugin for ShipSensorsPlugin {
                 handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
                 operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
                 tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
                 publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
@@ -173,6 +186,163 @@ pub fn tick_sensors_frequency_hint(
             sender_origin,
             target: crate::system_registry::tactical_system_id(),
             payload: CoordinationPayload::FrequencyHint { frequency },
+            sender_label: "Sensors".to_string(),
+        });
+    }
+}
+
+/// Emit a channel-3 `ThreatBearing` coordination message to Shields whenever
+/// each ship's sensors detect an in-range closing hostile (or incoming torpedo).
+///
+/// Debounced: only fires on a *new* threat or a materially changed bearing
+/// (> configured `threat_bearing_epsilon_rad`, default ~10°). Iterates every ship
+/// (player + NPC) so AI sensors feed AI shields through the coordination bus.
+pub fn tick_sensors_threat_warning(
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    entity_positions: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entity_spawner::FactionComponent>,
+        ),
+        Without<crate::server_app::Ship>,
+    >,
+    ship_positions: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &crate::ship_state::ShipPhysics,
+            &crate::entity_spawner::FactionComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut ships: Query<
+        (
+            Entity,
+            &crate::entity_spawner::EntityUuid,
+            &crate::ship_state::ShipPhysics,
+            &crate::ship_plugin::ShipSystemControlSources,
+            &mut SensorsThreatState,
+            &crate::modifiers::ShipModifiers,
+            Option<&crate::entity_spawner::FactionComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut writer: MessageWriter<CoordinationEnqueue>,
+) {
+    let cfg = &ship_config.0;
+    let Some(faction_registry) = faction_registry else {
+        return; // No faction registry available (e.g. in tests without world setup)
+    };
+    let reg = &faction_registry.0;
+
+    // Build a list of all potential threat entities with their world positions
+    // and factions. Collected upfront to avoid ECS borrow conflicts with the
+    // mutable ship query below.
+    let mut candidates: Vec<(String, f32, f32, Option<uuid::Uuid>)> = Vec::new();
+    for (uuid, physics, faction) in &ship_positions {
+        candidates.push((uuid.0.clone(), physics.x, physics.z, Some(faction.0)));
+    }
+    for (uuid, tf, faction_opt) in &entity_positions {
+        if let Some(faction) = faction_opt {
+            candidates.push((
+                uuid.0.clone(),
+                tf.translation.x,
+                tf.translation.z,
+                Some(faction.0),
+            ));
+        }
+    }
+
+    for (entity, self_uuid, physics, control_sources, mut state, modifiers, self_faction) in
+        ships.iter_mut()
+    {
+        let radar_mult = modifiers.get(&ModifierSlot::SensorRadarRange);
+        let sensor_range = cfg.sensors_radar_range * radar_mult;
+        if sensor_range <= 0.0 {
+            continue;
+        }
+
+        let range_sq = sensor_range * sensor_range;
+        let sx = physics.x;
+        let sz = physics.z;
+        let yaw = physics.yaw;
+        let self_f_uuid = self_faction.map(|f| f.0);
+
+        // Find the closest enemy within sensor range.
+        let mut closest: Option<(String, f32, f32, f32)> = None; // uuid, dx, dz, dist_sq
+        for (other_uuid, ox, oz, other_faction) in &candidates {
+            if other_uuid == &self_uuid.0 {
+                continue;
+            }
+            let Some(other_f) = other_faction else {
+                continue;
+            };
+            if !crate::faction::is_enemy(self_f_uuid, Some(*other_f), reg) {
+                continue;
+            }
+            let dx = ox - sx;
+            let dz = oz - sz;
+            let dsq = dx * dx + dz * dz;
+            if dsq > range_sq {
+                continue;
+            }
+            if closest.as_ref().is_none_or(|(_, _, _, d)| dsq < *d) {
+                closest = Some((other_uuid.clone(), dx, dz, dsq));
+            }
+        }
+
+        // No threat in range — clear state.
+        let Some((threat_uuid, dx, dz, dist_sq)) = closest else {
+            if state.last_threat_uuid.is_some() {
+                state.last_threat_uuid = None;
+                state.last_bearing_rad = None;
+                state.last_label = None;
+                state.last_distance = None;
+            }
+            continue;
+        };
+
+        let distance = dist_sq.sqrt();
+
+        // Compute relative bearing (0 = dead ahead, positive = to starboard).
+        let absolute_bearing = dx.atan2(-dz);
+        let mut relative_bearing = absolute_bearing - yaw;
+        if relative_bearing > std::f32::consts::PI {
+            relative_bearing -= std::f32::consts::TAU;
+        } else if relative_bearing < -std::f32::consts::PI {
+            relative_bearing += std::f32::consts::TAU;
+        }
+
+        let is_new_threat = state.last_threat_uuid.as_deref() != Some(&threat_uuid);
+        let bearing_changed = state
+            .last_bearing_rad
+            .is_none_or(|last| (relative_bearing - last).abs() > cfg.threat_bearing_epsilon_rad);
+
+        if !is_new_threat && !bearing_changed {
+            continue;
+        }
+
+        let bearing_deg = (relative_bearing.to_degrees() + 360.0) % 360.0;
+        let label = format!("Hostile closing, range {distance:.0}m, bearing {bearing_deg:.0}°");
+
+        state.last_threat_uuid = Some(threat_uuid.clone());
+        state.last_bearing_rad = Some(relative_bearing);
+        state.last_label = Some(label.clone());
+        state.last_distance = Some(distance);
+
+        let sender_origin = control_sources
+            .0
+            .source_for(&crate::system_registry::sensors_system_id());
+
+        writer.write(CoordinationEnqueue {
+            source_entity: entity,
+            sender_origin,
+            target: crate::system_registry::shields_system_id(),
+            payload: CoordinationPayload::ThreatBearing {
+                bearing_rad: relative_bearing,
+                label,
+            },
             sender_label: "Sensors".to_string(),
         });
     }
@@ -571,6 +741,213 @@ mod tests {
         assert!(
             ai_policy.operate_ai,
             "AI Sensors must gate through operate_ai"
+        );
+    }
+
+    // ── tick_sensors_threat_warning tests ──────────────────────────────────────
+
+    /// Helper: initialise a faction registry with Federation (self) and Harrow
+    /// (enemy) factions, register the sensor range, and spawn the local ship.
+    fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
+        let mut app = test_app();
+
+        // Seed the faction registry so is_enemy works.
+        let fed_uuid = uuid::Uuid::new_v4();
+        let harrow_uuid = uuid::Uuid::new_v4();
+        let mut reg = crate::faction::FactionRegistry::new();
+        reg.insert(crate::faction::FactionConfig {
+            uuid: fed_uuid,
+            name: "Federation".into(),
+            enemies: vec![harrow_uuid],
+        });
+        reg.insert(crate::faction::FactionConfig {
+            uuid: harrow_uuid,
+            name: "Harrow".into(),
+            enemies: vec![fed_uuid],
+        });
+        app.insert_resource(crate::entities::config_cache::FactionRegistryResource(reg));
+
+        // Add ShipPhysics, EntityUuid, SensorsThreatState, ShipModifiers,
+        // and FactionComponent to the existing test ship entity.
+        let ship_uuid = uuid::Uuid::new_v4().to_string();
+        let mut ship_q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        let ship = ship_q.single_mut(app.world_mut()).unwrap();
+        app.world_mut().entity_mut(ship).insert((
+            crate::entity_spawner::EntityUuid(ship_uuid.clone()),
+            SensorsThreatState::default(),
+            crate::modifiers::ShipModifiers::new(),
+            crate::entity_spawner::FactionComponent(fed_uuid),
+            crate::ship_state::ShipPhysics::default(),
+        ));
+
+        (app, fed_uuid, harrow_uuid)
+    }
+
+    /// Spawn a hostile entity at the given position.
+    fn spawn_hostile(app: &mut App, uuid: &str, x: f32, z: f32, faction: uuid::Uuid) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            crate::entities::spawner::EntityName(format!("Hostile-{uuid}")),
+            Transform::from_xyz(x, 0.0, z),
+            crate::entity_spawner::FactionComponent(faction),
+        ));
+    }
+
+    #[test]
+    fn threat_warning_emitted_for_hostile_in_range() {
+        let (mut app, _fed, harrow) = test_app_with_factions();
+        spawn_hostile(&mut app, "h-1", 0.0, -200.0, harrow); // directly ahead, 200m
+
+        tick(&mut app);
+
+        let log = app.world().resource::<EnqueueLog>();
+        let threat = log
+            .0
+            .iter()
+            .find(|e| matches!(&e.payload, CoordinationPayload::ThreatBearing { .. }))
+            .expect("expected a ThreatBearing CoordinationEnqueue");
+
+        assert_eq!(
+            threat.target,
+            crate::system_registry::shields_system_id(),
+            "ThreatBearing should target the Shields system"
+        );
+        match &threat.payload {
+            CoordinationPayload::ThreatBearing { bearing_rad, label } => {
+                // Hostile at (0, -200) directly ahead → bearing ≈ 0 rad
+                assert!(
+                    bearing_rad.abs() < 0.1,
+                    "bearing should be near 0 for target ahead, got {bearing_rad}"
+                );
+                assert!(
+                    label.contains("Hostile closing"),
+                    "label should contain threat description, got {label}"
+                );
+            }
+            other => panic!("expected ThreatBearing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn threat_warning_debounced_for_same_threat_and_bearing() {
+        let (mut app, _fed, harrow) = test_app_with_factions();
+        spawn_hostile(&mut app, "h-1", 0.0, -200.0, harrow);
+
+        tick(&mut app); // first emission
+
+        let state = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&SensorsThreatState, With<crate::server_app::LocalShip>>();
+            q.single(app.world()).unwrap().last_threat_uuid.clone()
+        };
+        assert_eq!(
+            state.as_deref(),
+            Some("h-1"),
+            "state should track the threat uuid"
+        );
+
+        // Clear logged events
+        app.world_mut().resource_mut::<EnqueueLog>().0.clear();
+
+        tick(&mut app); // second tick, same hostile, same bearing
+
+        let log = app.world().resource::<EnqueueLog>();
+        let new_threats = log
+            .0
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::ThreatBearing { .. }))
+            .count();
+        assert_eq!(
+            new_threats, 0,
+            "should not re-emit ThreatBearing for the same threat and bearing"
+        );
+    }
+
+    #[test]
+    fn threat_warning_not_emitted_for_out_of_range_hostile() {
+        let (mut app, _fed, harrow) = test_app_with_factions();
+        // Default sensor range is 500; place hostile at 1000m
+        spawn_hostile(&mut app, "far-1", 0.0, -1000.0, harrow);
+
+        tick(&mut app);
+
+        let log = app.world().resource::<EnqueueLog>();
+        let threat = log
+            .0
+            .iter()
+            .find(|e| matches!(&e.payload, CoordinationPayload::ThreatBearing { .. }));
+        assert!(
+            threat.is_none(),
+            "should not emit ThreatBearing for out-of-range hostile"
+        );
+    }
+
+    #[test]
+    fn threat_warning_re_emitted_on_bearing_change() {
+        let (mut app, _fed, harrow) = test_app_with_factions();
+        spawn_hostile(&mut app, "h-1", 0.0, -200.0, harrow); // directly ahead
+
+        tick(&mut app); // first emission, bearing ≈ 0
+
+        // Clear logged events
+        app.world_mut().resource_mut::<EnqueueLog>().0.clear();
+
+        // Move hostile to starboard (~45°)
+        let mut hostile_q = app
+            .world_mut()
+            .query_filtered::<&mut Transform, With<crate::entity_spawner::EntityUuid>>();
+        for mut tf in hostile_q.iter_mut(app.world_mut()) {
+            tf.translation.x = 200.0;
+            tf.translation.z = -200.0;
+        }
+
+        tick(&mut app); // second emission — bearing changed enough
+
+        let log = app.world().resource::<EnqueueLog>();
+        let re_emitted = log
+            .0
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::ThreatBearing { .. }))
+            .count();
+        assert_eq!(
+            re_emitted, 1,
+            "should re-emit ThreatBearing when bearing changes materially"
+        );
+    }
+
+    #[test]
+    fn threat_warning_state_cleared_when_no_threat() {
+        let (mut app, _fed, harrow) = test_app_with_factions();
+        spawn_hostile(&mut app, "h-1", 0.0, -200.0, harrow);
+
+        tick(&mut app); // first emission — threat detected
+
+        // Despawn the hostile (exclude the LocalShip)
+        let mut hostile_q = app.world_mut().query_filtered::<Entity, (
+            With<crate::entity_spawner::EntityUuid>,
+            Without<crate::server_app::LocalShip>,
+        )>();
+        if let Some(hostile) = hostile_q.iter_mut(app.world_mut()).next() {
+            app.world_mut().entity_mut(hostile).despawn();
+        }
+
+        // Clear logged events
+        app.world_mut().resource_mut::<EnqueueLog>().0.clear();
+
+        tick(&mut app); // tick without threat
+
+        let state = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&SensorsThreatState, With<crate::server_app::LocalShip>>();
+            q.single(app.world()).unwrap().last_threat_uuid.clone()
+        };
+        assert_eq!(
+            state, None,
+            "state should be cleared when no threat remains"
         );
     }
 }

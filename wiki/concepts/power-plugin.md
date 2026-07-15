@@ -14,7 +14,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 
 After PR 6 of PRD #597 (2026-07-02), `ShipPowerSystem`, `PowerConfigResource`, `PowerAiConfigResource`, and `PowerMultiplierResource` all derive both `Resource` and `Component`. Every ship entity (player and NPC alike) carries a per-entity `ShipPowerSystem`; the player ship also carries per-entity power config components populated from the ship TOML.
 
-`operate_power_ai` and `tick_power_system` now iterate ALL ships (`Query<..., With<Ship>>`) rather than being LocalShip-scoped — NPCs tick their own power with the same code path as the player. Player-facing readers (`handle_power_messages`, `handle_power_inter_system`, `publish_power_blackboard`, `power_state_broadcaster`) remain LocalShip-scoped but prefer the per-entity component with a Resource fallback for tests.
+`tick_power_system` iterates ALL ships (`Query<..., With<Ship>>`) rather than being LocalShip-scoped — NPCs tick their own power with the same code path as the player. NPC/AI power reallocation now runs through `console_ai::server::ai_power_allocation` (decides `PowerReactorIntents` from the movement/red-alert rules) and `integrate_power_state` (applies those intents via `set_group_allocation`, dual-writing the legacy `ShipPowerSystem` Resource when the mutated entity is the `LocalShip`) — issue #693 replaced the old fused `operate_power_ai`. Player-facing readers (`handle_power_messages`, `handle_power_inter_system`, `publish_power_blackboard`, `power_state_broadcaster`) remain LocalShip-scoped but prefer the per-entity component with a Resource fallback for tests.
 
 ### Systems
 

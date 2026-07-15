@@ -273,9 +273,11 @@ pub fn spawn_entity(
         // its own `LastHelmInput` so systems that iterate `With<Ship>`
         // and read `Option<&LastHelmInput>` see a real value on NPCs
         // instead of the `unwrap_or_default()` fallback. Notably
-        // `operate_power_ai` reads it to pin `power.helm` to idle when
-        // throttle is zero. Inserted separately because Bevy's tuple
-        // Bundle max is 15 elements.
+        // `console_ai::server::ai_power_allocation` reads `thrust` to drive
+        // its hysteresis-based movement rule (`tick_power_movement_rule`),
+        // engaging/disengaging helm power by ±1 on sustained high/low
+        // thrust rather than pinning to an absolute level. Inserted
+        // separately because Bevy's tuple Bundle max is 15 elements.
         entity_commands.insert(crate::ship_plugin::LastHelmInput::default());
         // Per-ship coordination bus state (audit follow-up). Every ship
         // tracks its own shields down/restore notification cycle and its

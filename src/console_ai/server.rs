@@ -489,15 +489,36 @@ fn ai_power_allocation(
 /// immediately after `ai_power_allocation` in the same tick so the
 /// reallocation is visible to `tick_power_system` /
 /// `publish_power_blackboard` this frame.
+///
+/// **Dual-write.** Mirrors `handle_power_messages`'s `Has<LocalShip>` +
+/// Resource-sync pattern: when the mutated entity is the `LocalShip`, also
+/// snapshot the updated per-entity Component into the global `ShipPowerSystem`
+/// Resource (legacy Resource path for tests). This matters because a
+/// disconnected player's Power station can flip to Backfill AI (AGENTS.md
+/// rule 5), so `ai_power_allocation` / `integrate_power_state` can
+/// legitimately be the system driving the player's own ship's power grid.
 fn integrate_power_state(
     mut ships: Query<(
         &mut crate::ship::power::ShipPowerSystem,
         &mut crate::ship::power::PowerReactorIntents,
+        Has<crate::server_app::LocalShip>,
     )>,
+    power_res: Option<ResMut<crate::ship::power::ShipPowerSystem>>,
 ) {
-    for (mut power, mut intents) in ships.iter_mut() {
+    let mut power_res = power_res;
+    for (mut power, mut intents, is_local) in ships.iter_mut() {
+        if intents.0.is_empty() {
+            continue;
+        }
         for cmd in intents.0.drain(..) {
             let _ = power.0.set_group_allocation(&cmd.group, cmd.level);
+        }
+        // Dual-write: keep the Resource in sync with the LocalShip's
+        // Component (legacy Resource path for tests).
+        if is_local {
+            if let Some(pr) = power_res.as_deref_mut() {
+                pr.0 = power.0.clone();
+            }
         }
     }
 }
@@ -1034,6 +1055,54 @@ mod tests {
         assert_eq!(
             before, after,
             "human-operated power reactor must not be touched by ai_power_allocation"
+        );
+    }
+
+    #[test]
+    fn integrate_power_state_dual_writes_resource_for_local_ship() {
+        // Issue #693 review finding: when the AI path reallocates power for
+        // the LocalShip (e.g. a disconnected player's station backfilled to
+        // AI per AGENTS.md rule 5), `integrate_power_state` must dual-write
+        // the legacy global `ShipPowerSystem` Resource, mirroring
+        // `ship::power::handle_power_messages`'s dual-write for the human
+        // path — not just the per-entity Component.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::server_app::LocalShip);
+        app.world_mut()
+            .insert_resource(crate::ship::power::ShipPowerSystem(
+                crate::modifiers::power_system::PowerSystem::default(),
+            ));
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        // 4s exceeds the 3s default red_alert_engage_delay_secs in a single
+        // tick, so the weapons group should engage by +1.
+        power_tick_with_dt(&mut app, 4.0);
+
+        let component_level =
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        let resource_level = app
+            .world()
+            .resource::<crate::ship::power::ShipPowerSystem>()
+            .0
+            .level_for(&crate::messages::PowerGroupId(
+                crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+            ));
+        assert_eq!(
+            component_level, resource_level,
+            "global ShipPowerSystem Resource must be dual-written to match \
+             the LocalShip's per-entity Component after AI reallocation"
+        );
+        assert!(
+            resource_level > 1,
+            "expected the AI-driven weapons reallocation to be reflected in \
+             the dual-written Resource (resource_level={resource_level})"
         );
     }
 }

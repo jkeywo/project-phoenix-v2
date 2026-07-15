@@ -839,7 +839,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-509e38d93ea89f80.js" crossorigin="anonymous" integrity="sha384-TliQI1H/a1mMpEeKuq3pqYfgzWGn1Ly3z62KJ7yAmkCpOPtq0V+8pKLOZnlfs87f"><link rel="preload" href="./project-phoenix-509e38d93ea89f80_bg.wasm" crossorigin="anonymous" integrity="sha384-BkL8fDDFslovzZ7oAN/frNZzVaHz2deM8uqRlHJI/Is2XBbXfaurX3nJXWYstd2v" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-fbde24a4c3af45f9.js" crossorigin="anonymous" integrity="sha384-+j1xQiY3MydySND6309Pw/vPyrGIYV/0zdua5BSl2xAx/nAxynlmSEzoh8o5dAeg"><link rel="preload" href="./project-phoenix-fbde24a4c3af45f9_bg.wasm" crossorigin="anonymous" integrity="sha384-dPFrRiLs8RPDtgWtxR81gfohcIkbQ8Ak1o7QpGXPCbcevWZSyZybQ6Zx+FvdY8NQ" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -1080,8 +1080,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-509e38d93ea89f80.js';
-const wasm = await init({ module_or_path: './project-phoenix-509e38d93ea89f80_bg.wasm' });
+import init, * as bindings from './project-phoenix-fbde24a4c3af45f9.js';
+const wasm = await init({ module_or_path: './project-phoenix-fbde24a4c3af45f9_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2108,21 +2108,23 @@ function finishInit() {
       })
       .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
   } else {
-    // Multiple ships — show ship picker, defer server start until selection.
+    // Multiple ships — show ph-ship-picker component, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
     const worldList = document.getElementById('world-list');
-    // Replace world list label
     document.getElementById('world-list-label').textContent = 'Select a ship';
-    // Clear existing world buttons
     worldList.innerHTML = '';
-    for (const ship of shipResult.ships) {
-      const btn = document.createElement('button');
-      btn.className = 'world-btn';
-      btn.textContent = ship.label || ship.template_path;
-      btn.addEventListener('click', function() {
-        wasm_select_ship(ship.template_path);
+
+    // Dynamically import the ship-picker web component (registers custom element).
+    import('./gui/components/ph-ship-picker.js').then(() => {
+      const picker = document.createElement('ph-ship-picker');
+      worldList.appendChild(picker);
+      picker.state = { ships: shipResult.ships };
+
+      picker.addEventListener('ship-selected', (e) => {
+        const { template_path } = e.detail;
+        wasm_select_ship(template_path);
         panel.style.display = 'none';
-        fetch(ship.template_path)
+        fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
             try { wasm_validate_stations(toml); } catch (err) {
@@ -2131,12 +2133,11 @@ function finishInit() {
             }
             startServer();
           })
-          .catch(err => { showFatalError('Failed to load ' + ship.template_path + ': ' + String(err)); });
+          .catch(err => { showFatalError('Failed to load ' + template_path + ': ' + String(err)); });
       });
-      worldList.appendChild(btn);
-    }
-    // Show the panel again (it may have been hidden by world selection)
-    panel.style.display = '';
+
+      panel.style.display = '';
+    });
   }
 }
 

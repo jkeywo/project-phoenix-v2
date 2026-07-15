@@ -303,10 +303,13 @@ rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
 
 [power.ai]
-weapons_battery_floor = 0.5
-shields_battery_floor = 0.25
-helm_battery_floor = 0.75
-helm_throttle_threshold = 0.5
+movement_thrust_threshold = 0.7
+movement_engage_delay_secs = 3.0
+movement_battery_engage_min_pct = 50.0
+movement_battery_recharge_pct = 100.0
+red_alert_engage_delay_secs = 3.0
+red_alert_battery_engage_min_pct = 10.0
+red_alert_battery_recharge_pct = 100.0
 
 [captain_console]
 

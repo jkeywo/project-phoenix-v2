@@ -12,7 +12,7 @@
     .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
     .hero h1 { font-size: 26px; letter-spacing: 0.22em; color: var(--ink); margin: 0; }
     .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
-    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    .console-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
     ph-tactical-radar { width: 100%; aspect-ratio: 1 / 1; }
     @media (orientation: landscape) { ph-tactical-radar { height: 100%; width: auto; } }
     ph-phasers-controls, ph-torpedo-controls { flex-shrink: 0; }

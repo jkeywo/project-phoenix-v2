@@ -582,9 +582,10 @@ fn lod_ai_ships(
                 LodState::High => {
                     commands.entity(entity).insert(AiHighFidelity);
                     // AI intent/state components scoped to AiHighFidelity
-                    // (issue #692, extended by #693 for power) — bundled
-                    // alongside the marker so they stay present exactly
-                    // while the ship runs full-fidelity AI decision systems.
+                    // (issue #692, extended by #693 for power, #695 for
+                    // helm) — bundled alongside the marker so they stay
+                    // present exactly while the ship runs full-fidelity AI
+                    // decision systems.
                     commands
                         .entity(entity)
                         .insert(crate::ship::shields::ShieldArcIntents::default());
@@ -600,6 +601,13 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .insert(crate::weapons_plugin::TorpedoIntents::default());
+                    commands.entity(entity).insert((
+                        crate::ship::helm::ThrustInput::default(),
+                        crate::ship::helm::SteeringInput::default(),
+                        crate::ship::helm::LateralThrustInput::default(),
+                        crate::ship::helm::ImpulseCommand::default(),
+                        crate::ship::helm::BoostCommand::default(),
+                    ));
                     commands.entity(entity).insert(timer_comp);
                 }
                 LodState::Low => {
@@ -619,6 +627,13 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .remove::<crate::weapons_plugin::TorpedoIntents>();
+                    commands.entity(entity).remove::<(
+                        crate::ship::helm::ThrustInput,
+                        crate::ship::helm::SteeringInput,
+                        crate::ship::helm::LateralThrustInput,
+                        crate::ship::helm::ImpulseCommand,
+                        crate::ship::helm::BoostCommand,
+                    )>();
                     commands.entity(entity).insert(timer_comp);
                 }
             }
@@ -1247,6 +1262,11 @@ mod tests {
                 crate::ship::power::PowerReactorIntents::default(),
                 crate::ship::power::ShipPowerAiState::default(),
                 crate::weapons_plugin::TorpedoIntents::default(),
+                crate::ship::helm::ThrustInput::default(),
+                crate::ship::helm::SteeringInput::default(),
+                crate::ship::helm::LateralThrustInput::default(),
+                crate::ship::helm::ImpulseCommand::default(),
+                crate::ship::helm::BoostCommand::default(),
             ))
             .id()
     }

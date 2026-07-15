@@ -1820,6 +1820,16 @@ position = [0.5, -0.1, 0.25]
                 thrust_command(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::ship_plugin::LastHelmInput::default(),
+                // `integrate_helm_physics` (issue #695) is scoped to
+                // `AiHighFidelity` — add the marker + helm intent
+                // components so `process_helm_inputs` -> physics still
+                // moves this ship, matching pre-#695 behavior.
+                crate::ai_plugin::AiHighFidelity,
+                crate::ship::helm::ThrustInput::default(),
+                crate::ship::helm::SteeringInput::default(),
+                crate::ship::helm::LateralThrustInput::default(),
+                crate::ship::helm::ImpulseCommand::default(),
+                crate::ship::helm::BoostCommand::default(),
             ))
             .id();
 
@@ -1867,6 +1877,16 @@ position = [0.5, -0.1, 0.25]
                 thrust_command(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::ship_plugin::LastHelmInput::default(),
+                // `integrate_helm_physics` (issue #695) is scoped to
+                // `AiHighFidelity` — add the marker + helm intent
+                // components so `process_helm_inputs` -> physics still
+                // moves this ship, matching pre-#695 behavior.
+                crate::ai_plugin::AiHighFidelity,
+                crate::ship::helm::ThrustInput::default(),
+                crate::ship::helm::SteeringInput::default(),
+                crate::ship::helm::LateralThrustInput::default(),
+                crate::ship::helm::ImpulseCommand::default(),
+                crate::ship::helm::BoostCommand::default(),
             ))
             .id();
 

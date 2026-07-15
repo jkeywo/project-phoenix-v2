@@ -4,6 +4,7 @@ pub mod config;
 pub mod control_source;
 pub mod coordination;
 pub mod damage;
+pub mod helm;
 pub mod impulse;
 pub mod lateral_thrust;
 pub mod physics;

@@ -1,4 +1,3 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -19,6 +18,9 @@ use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
 use crate::ship::coordination::{CoordinationLagQueue, QueuedCoordination};
+use crate::ship::helm::{
+    BoostCommand, ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput,
+};
 use crate::ship::rating;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
@@ -216,80 +218,6 @@ pub const BANK_LERP_RATE: f32 = 5.0;
 
 pub struct ShipPlugin;
 
-/// Physics and drive config components bundled so `process_helm_inputs` stays
-/// under Bevy's 16-parameter system-function limit.
-///
-/// PR 4 (PRD #597): configs are now per-entity Components on each ship entity.
-/// Impulse and boost configs are component-only (issue #606); physics and
-/// bank configs still keep a Resource fallback for test environments that
-/// use `insert_resource` without inserting a LocalShip entity with components.
-#[derive(SystemParam)]
-struct HelmDriveParams<'w, 's> {
-    /// Per-entity drive configs on the LocalShip entity (PR 4 primary path).
-    config_q: Query<
-        'w,
-        's,
-        (
-            Option<&'static ShipPhysicsConfigResource>,
-            Option<&'static ImpulseConfigResource>,
-            Option<&'static BoostConfigResource>,
-            Option<&'static BankConfigResource>,
-        ),
-        With<LocalShip>,
-    >,
-    /// Resource fallbacks (legacy path; used by tests that insert_resource
-    /// without spawning a ship entity with the component). Only physics and
-    /// bank still support this path — impulse and boost are component-only.
-    physics_cfg_res: Option<Res<'w, ShipPhysicsConfigResource>>,
-    bank_cfg_res: Option<Res<'w, BankConfigResource>>,
-    /// Per-entity impulse state on the LocalShip (Component, not Resource).
-    impulse_q: Query<'w, 's, &'static ShipImpulse, With<LocalShip>>,
-    /// Per-entity boost state on the LocalShip (Component, not Resource).
-    boost_q: Query<'w, 's, &'static ShipBoost, With<LocalShip>>,
-}
-
-impl HelmDriveParams<'_, '_> {
-    /// Effective impulse config: per-entity component only.
-    fn impulse_cfg(&self) -> ImpulseConfigResource {
-        self.config_q
-            .single()
-            .ok()
-            .and_then(|(_, ic, _, _)| ic.cloned())
-            .unwrap_or_default()
-    }
-
-    /// Effective boost config: per-entity component only.
-    fn boost_cfg(&self) -> BoostConfigResource {
-        self.config_q
-            .single()
-            .ok()
-            .and_then(|(_, _, bc, _)| bc.cloned())
-            .unwrap_or_default()
-    }
-
-    /// Effective bank config: per-entity component takes priority over Resource.
-    fn bank_cfg(&self) -> BankConfigResource {
-        let entity = self
-            .config_q
-            .single()
-            .ok()
-            .and_then(|(_, _, _, bk)| bk.cloned());
-        entity
-            .or_else(|| self.bank_cfg_res.as_deref().cloned())
-            .unwrap_or_default()
-    }
-
-    /// Effective physics config: per-entity component takes priority over Resource.
-    fn physics_cfg(&self) -> Option<ShipPhysicsConfigResource> {
-        let entity = self
-            .config_q
-            .single()
-            .ok()
-            .and_then(|(pc, _, _, _)| pc.cloned());
-        entity.or_else(|| self.physics_cfg_res.as_deref().cloned())
-    }
-}
-
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(HelmInputTimer(Timer::from_seconds(
@@ -313,6 +241,22 @@ impl Plugin for ShipPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai)
                     .before(process_helm_inputs),
+                // Applies commanded impulse/boost phase transitions (issue
+                // #695). Must run before `process_helm_inputs` — whose
+                // stale-input edge-detection reads `ShipImpulse.phase` and
+                // needs to see this tick's transition, not last tick's —
+                // and before `tick_impulse`/`tick_boost` so a
+                // freshly-started charge/engagement begins progressing the
+                // same tick it was commanded, mirroring the old fused
+                // `process_helm_inputs`/`handle_impulse_messages` ordering.
+                apply_helm_commands
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(operate_helm_ai)
+                    .after(handle_impulse_messages)
+                    .after(handle_boost_messages)
+                    .before(process_helm_inputs)
+                    .before(tick_impulse)
+                    .before(tick_boost),
                 process_helm_inputs
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(operate_helm_ai)
@@ -326,12 +270,31 @@ impl Plugin for ShipPlugin {
                 detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 tick_boost.in_set(crate::sim_sets::SimSet::Physics),
+                handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
+                handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
+                // Shared physics-integration step (issue #695): reads the
+                // intent components written by `process_helm_inputs`
+                // (human/admission) and `operate_helm_ai` (AI decision),
+                // plus the post-transition `ShipImpulse`/`ShipBoost` state
+                // applied by `apply_helm_commands`, then performs the
+                // actual physics integration for whichever ship (LocalShip
+                // or promoted NPC) has fresh values this tick. Ordered
+                // after every writer of those intents and after
+                // `tick_impulse` so it reads this tick's freshly-ticked
+                // impulse phase, mirroring the old fused
+                // `process_helm_inputs` ordering.
+                integrate_helm_physics
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(operate_helm_ai)
+                    .after(process_helm_inputs)
+                    .after(apply_helm_commands)
+                    .after(tick_impulse)
+                    .after(tick_boost),
                 sync_ship_position
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(process_helm_inputs)
-                    .after(operate_helm_ai),
-                handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
-                handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
+                    .after(operate_helm_ai)
+                    .after(integrate_helm_physics),
                 handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
                 handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
                 handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
@@ -346,32 +309,35 @@ impl Plugin for ShipPlugin {
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
+/// Human-admission path (issue #695): turns `AdmittedCommands` into
+/// `LastHelmInput` (kept for broadcast/back-compat consumers) and the
+/// shared `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent
+/// components. Physics integration itself now lives in
+/// `integrate_helm_physics`, which reads those intent components for both
+/// the player ship and any AI-promoted NPC.
 fn process_helm_inputs(
     time: Res<Time>,
     mut timer: ResMut<HelmInputTimer>,
     ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<LocalShip>>,
-    mut physics_query: Query<&mut ShipPhysics, With<LocalShip>>,
     mut last_input_q: Query<&mut LastHelmInput, With<LocalShip>>,
-    modifiers_q: Query<&ShipModifiers, With<LocalShip>>,
-    drive: HelmDriveParams,
+    mut intent_q: Query<
+        (
+            Option<&mut ThrustInput>,
+            Option<&mut SteeringInput>,
+            Option<&mut LateralThrustInput>,
+        ),
+        With<LocalShip>,
+    >,
+    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
-    let default_modifiers;
-    let modifiers: &ShipModifiers = match modifiers_q.single() {
-        Ok(m) => m,
-        Err(_) => {
-            default_modifiers = ShipModifiers::new();
-            &default_modifiers
-        }
-    };
     let Some(mut last_input) = last_input_q.iter_mut().next() else {
         return;
     };
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
     // last cached helm input so a stale steering/thrust value can't
     // resurface the moment impulse cancels or the autopilot disengages.
-    let current_phase = drive
-        .impulse_q
+    let current_phase = impulse_q
         .iter()
         .next()
         .map(|i| i.0.phase)
@@ -387,31 +353,19 @@ fn process_helm_inputs(
     let Some((admitted, sources)) = ship_query.iter().next() else {
         return;
     };
-    let Some(mut physics) = physics_query.iter_mut().next() else {
-        return;
-    };
 
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
 
-    // When helm is under AI control (Backfill), `operate_helm_ai` has already
-    // integrated physics this frame.  Running `compute_physics` here a second
-    // time with a *different* dt (the 30 Hz timer duration) would double-move
-    // the player ship relative to NPC ships driven only by `operate_helm_ai`.
-    // Skip the physics integration; the AI-written LastHelmInput is still
-    // preserved so the SimState broadcast reflects the correct intent.
+    // When helm is under AI control (Backfill), `operate_helm_ai` is the
+    // authoritative writer of the intent components this tick. Skip
+    // admission entirely so a stale/human-admitted value can't clobber the
+    // AI's decision — mirrors the old physics-skip semantics, just for the
+    // admission decision now rather than the physics integration itself.
     if helm_control_policy(sources).operate_ai {
         return;
     }
-
-    // Read per-entity config components from the LocalShip entity.
-    // Falls back to Resources when the component is absent (test environments
-    // that don't insert a LocalShip entity with drive config components).
-    let impulse_cfg = drive.impulse_cfg();
-    let boost_cfg = drive.boost_cfg();
-    let bank_cfg = drive.bank_cfg();
-    let physics_cfg = drive.physics_cfg();
 
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
         if let SystemControlPayload::HelmInput { thrust, steering } = &cmd.payload {
@@ -425,114 +379,18 @@ fn process_helm_inputs(
             last_input.lateral = *lateral;
         }
     }
-    let dt = timer.0.duration().as_secs_f32();
-    let state = ShipPhysicsState {
-        x: physics.x,
-        z: physics.z,
-        yaw: physics.yaw,
-        forward_speed: physics.forward_speed,
-        lateral_speed: physics.lateral_speed,
-    };
-    let impulse_active = drive
-        .impulse_q
-        .iter()
-        .next()
-        .map(|i| i.0.is_active())
-        .unwrap_or(false);
-    let input = if impulse_active {
-        // Autopilot: full forward thrust, zero steering. Player input is ignored.
-        ShipPhysicsInput {
-            thrust: 1.0,
-            steering: 0.0,
-            lateral: 0.0,
+
+    if let Some((thrust_in, steering_in, lateral_in)) = intent_q.iter_mut().next() {
+        if let Some(mut t) = thrust_in {
+            t.0 = last_input.thrust;
         }
-    } else {
-        ShipPhysicsInput {
-            thrust: last_input.thrust,
-            steering: last_input.steering,
-            lateral: last_input.lateral,
+        if let Some(mut s) = steering_in {
+            s.0 = last_input.steering;
         }
-    };
-
-    // ── Engine-damage thrust scaling (issue #511) ─────────────────────────
-    // Count how many fine engine systems are online. Each offline engine
-    // removes 50% of the computed thrust. If both engines are offline, thrust
-    // is zeroed. Uses `offline_systems` set on `ShipSystemControlSources`
-    // (populated by `sync_console_damage_tiers` in `SimSet::Damage`).
-    let port_offline = sources
-        .0
-        .offline_systems
-        .contains(&crate::system_registry::helm_engine_port_system_id());
-    let stbd_offline = sources
-        .0
-        .offline_systems
-        .contains(&crate::system_registry::helm_engine_starboard_system_id());
-    // Fraction of engines online: 0 engines = 0.0, 1 engine = 0.5, 2 = 1.0.
-    // Only scale when at least one fine engine system is known (i.e. both IDs
-    // are registered in the control sources; if neither ID is present in
-    // offline_systems at all, it means no fine systems exist → no scaling).
-    let engine_thrust_scale: f32 = match (port_offline, stbd_offline) {
-        (true, true) => 0.0,
-        (true, false) | (false, true) => 0.5,
-        (false, false) => 1.0,
-    };
-    let scaled_input = ShipPhysicsInput {
-        thrust: input.thrust * engine_thrust_scale,
-        steering: input.steering,
-        lateral: input.lateral,
-    };
-
-    let mut config = match physics_cfg {
-        Some(ref cfg) => cfg.0,
-        None => ShipPhysicsConfig::new(),
-    };
-    config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
-    config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
-    config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
-    if impulse_active {
-        // Mirror `ship/impulse.rs::apply_to_physics`: a non-positive
-        // multiplier (e.g. an unset TOML field defaulting to 0) falls
-        // back to the const instead of nuking acceleration entirely.
-        let mult = if impulse_cfg.acceleration_multiplier > 0.0 {
-            impulse_cfg.acceleration_multiplier
-        } else {
-            crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
-        };
-        config.acceleration *= mult;
+        if let Some(mut l) = lateral_in {
+            l.0 = last_input.lateral;
+        }
     }
-    // Boost drive: while engaged, multiply max speed and acceleration. Only
-    // applies when the ship's TOML enabled the feature.
-    if boost_cfg.enabled
-        && drive
-            .boost_q
-            .iter()
-            .next()
-            .map(|b| b.0.is_active())
-            .unwrap_or(false)
-    {
-        config.max_speed *= boost_cfg.multiplier;
-        config.max_reverse_speed *= boost_cfg.multiplier;
-        config.acceleration *= boost_cfg.multiplier;
-        config.max_yaw_rate *= boost_cfg.steering_multiplier;
-    }
-    let result = compute_physics(state, scaled_input, dt, &config);
-
-    physics.x = result.x;
-    physics.z = result.z;
-    physics.yaw = result.yaw;
-    physics.forward_speed = result.forward_speed;
-    physics.lateral_speed = result.lateral_speed;
-
-    // Visual banking: lerp roll toward target based on steering (use the unscaled
-    // input.steering so roll reflects intent, not engine count).
-    let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
-    let target_roll = if impulse_active {
-        0.0
-    } else {
-        -input.steering * max_bank_rad
-    };
-    let lerp_factor = (bank_cfg.bank_lerp_rate * dt).min(1.0);
-    physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
 }
 
 fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy {
@@ -558,7 +416,6 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 /// helm path in `tick_ai_controllers`.
 #[allow(clippy::too_many_arguments)]
 fn operate_helm_ai(
-    time: Res<Time>,
     mut local_ship_input: Query<&mut LastHelmInput, With<LocalShip>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -577,7 +434,7 @@ fn operate_helm_ai(
         (
             Entity,
             &ShipSystemControlSources,
-            &mut ShipPhysics,
+            &ShipPhysics,
             &mut crate::ai_plugin::ShipAiMemory,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::entity_spawner::EntityUuid>,
@@ -586,15 +443,20 @@ fn operate_helm_ai(
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&crate::entities::spawner::BehaviourSection>,
             Has<crate::server_app::LocalShip>,
-            Option<&mut ShipImpulse>,
+            Option<&ShipImpulse>,
             Option<&ImpulseConfigResource>,
             Option<&mut PendingArcBearingRequest>,
-            Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+            (
+                Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+                &mut ThrustInput,
+                &mut SteeringInput,
+                &mut LateralThrustInput,
+                &mut ImpulseCommand,
+            ),
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
     let anchors = world_config
         .as_ref()
         .map(|wc| wc.anchors.clone())
@@ -641,7 +503,7 @@ fn operate_helm_ai(
     for (
         _entity,
         sources,
-        mut physics,
+        physics,
         mut ai_memory,
         blackboards,
         entity_uuid,
@@ -653,7 +515,7 @@ fn operate_helm_ai(
         impulse_comp,
         impulse_cfg,
         mut pending_bearing,
-        combat_config_opt,
+        (combat_config_opt, mut thrust_in, mut steering_in, mut lateral_in, mut impulse_cmd),
     ) in ships.iter_mut()
     {
         let policy = helm_control_policy(sources);
@@ -675,7 +537,13 @@ fn operate_helm_ai(
             .any(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm));
 
         if !has_helm_objective {
-            // No objectives → zero out intent (decelerate to stop).
+            // No objectives → zero out intent (decelerate to stop). Written
+            // for every AiHighFidelity ship (not just the player) so the
+            // shared `integrate_helm_physics` step decelerates it via the
+            // normal physics curve instead of coasting on a stale intent.
+            thrust_in.0 = 0.0;
+            steering_in.0 = 0.0;
+            lateral_in.0 = 0.0;
             if is_local {
                 if let Some(mut li) = local_ship_input.iter_mut().next() {
                     *li = LastHelmInput::default();
@@ -808,47 +676,16 @@ fn operate_helm_ai(
             physics.forward_speed,
         );
 
-        // ── Apply physics ────────────────────────────────────────────────────
-        let physics_config = helm_section
-            .map(|hc| {
-                let lt = hc.0.lateral_thrust.clone().unwrap_or_default();
-                ShipPhysicsConfig {
-                    max_speed: hc.0.max_speed,
-                    max_reverse_speed: hc.0.max_reverse_speed,
-                    acceleration: hc.0.acceleration,
-                    deceleration: hc.0.deceleration,
-                    max_yaw_rate: hc.0.max_yaw_rate,
-                    max_lateral_speed: lt.max_lateral_speed,
-                    lateral_acceleration: lt.lateral_acceleration,
-                }
-            })
-            .unwrap_or_else(ShipPhysicsConfig::new);
-
-        let result = compute_physics(
-            ShipPhysicsState {
-                x: physics.x,
-                z: physics.z,
-                yaw: physics.yaw,
-                forward_speed: physics.forward_speed,
-                lateral_speed: physics.lateral_speed,
-            },
-            ShipPhysicsInput {
-                thrust,
-                steering,
-                lateral,
-            },
-            dt,
-            &physics_config,
-        );
-
-        physics.x = result.x;
-        physics.z = result.z;
-        physics.yaw = result.yaw;
-        physics.forward_speed = result.forward_speed;
-        physics.lateral_speed = result.lateral_speed;
+        // ── Write intent components ────────────────────────────────────────────
+        // Physics integration itself now happens in the shared
+        // `integrate_helm_physics` system, which reads these intent
+        // components for both the player ship and any AI-promoted NPC.
+        thrust_in.0 = thrust;
+        steering_in.0 = steering;
+        lateral_in.0 = lateral;
 
         // ── AI Impulse decision ──────────────────────────────────────────────
-        if let (Some(mut impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
+        if let (Some(impulse), Some(cfg)) = (impulse_comp, impulse_cfg) {
             let target_pos =
                 resolve_helm_target_position(&scored, &world_view, &anchors, &ai_memory.0);
             if let Some(tp) = target_pos {
@@ -874,10 +711,10 @@ fn operate_helm_ai(
                     });
                     match decision {
                         crate::ai::ImpulseDecision::Engage => {
-                            impulse.0.start_charge();
+                            impulse_cmd.0 = crate::impulse::ImpulsePhase::Charging;
                         }
                         crate::ai::ImpulseDecision::Cancel => {
-                            impulse.0.cancel_charge();
+                            impulse_cmd.0 = crate::impulse::ImpulsePhase::Idle;
                         }
                         crate::ai::ImpulseDecision::NoChange => {}
                     }
@@ -885,8 +722,9 @@ fn operate_helm_ai(
             }
         }
 
-        // For the player ship: also write LastHelmInput so process_helm_inputs
-        // sees the AI-driven intent (though it will re-apply physics anyway).
+        // For the player ship: also write LastHelmInput so downstream
+        // consumers (broadcast, fine-engine bookkeeping) see the AI-driven
+        // intent.
         if is_local {
             if let Some(mut li) = local_ship_input.iter_mut().next() {
                 *li = LastHelmInput {
@@ -1012,7 +850,7 @@ fn operate_lateral_thrust_ai(
     mut timer: ResMut<AiLateralThrustTimer>,
     mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
-    ships: Query<(
+    mut ships: Query<(
         &ShipSystemControlSources,
         &crate::server_app::ShipSystemBlackboards,
         &ShipPhysics,
@@ -1020,6 +858,11 @@ fn operate_lateral_thrust_ai(
         Option<&crate::entities::spawner::EntityUuid>,
         Option<&crate::entities::spawner::FactionComponent>,
         Has<crate::server_app::LocalShip>,
+        // Only present under `AiHighFidelity` (issue #695). This system is
+        // not itself `AiHighFidelity`-scoped — it can match a demoted NPC
+        // that has lost the component — so the write below must guard on
+        // `Some`/skip gracefully rather than assume presence.
+        Option<&mut LateralThrustInput>,
     )>,
 ) {
     let Some(ref snapshot) = world_snapshot else {
@@ -1031,7 +874,9 @@ fn operate_lateral_thrust_ai(
 
     let snapshot_entities: Vec<crate::ai::AiWorldEntity> = snapshot.entities.clone();
 
-    for (sources, blackboards, physics, collider, entity_uuid, faction, is_local) in ships.iter() {
+    for (sources, blackboards, physics, collider, entity_uuid, faction, is_local, lateral_intent) in
+        ships.iter_mut()
+    {
         // Only run when lateral thrust is AI-controlled but the main helm is not
         // (if helm is also AI, operate_helm_ai already handles it).
         let lt_policy = sources
@@ -1095,6 +940,12 @@ fn operate_lateral_thrust_ai(
             if let Some(mut li) = local_ship_input.iter_mut().next() {
                 li.lateral = lateral;
             }
+        }
+        // Write the shared intent component too, for whichever ship this is
+        // (local or NPC), so `integrate_helm_physics` sees the AI-driven
+        // lateral value. Guarded: only present while `AiHighFidelity`.
+        if let Some(mut intent) = lateral_intent {
+            intent.0 = lateral;
         }
     }
 }
@@ -1199,9 +1050,22 @@ fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     }
 }
 
+/// Admission-only (issue #695): turns hull-damage auto-cancel and admitted
+/// `StartImpulseCharge`/`CancelImpulse` messages into an `ImpulseCommand`
+/// intent, rather than mutating `ShipImpulse` directly. The shared
+/// `integrate_helm_physics` system applies the actual `start_charge`/
+/// `cancel_charge` transition. Only writes the intent when something
+/// actually happened this tick (hull damage or an admitted command) —
+/// otherwise leaves the persisted intent alone, mirroring the old
+/// direct-mutation code which likewise only called `start_charge`/
+/// `cancel_charge` on those same triggers. Hull-damage cancellation is
+/// evaluated before the admitted-command loop, then the loop can still
+/// override it within the same tick — matching the old sequential
+/// direct-mutation order exactly.
 pub fn handle_impulse_messages(
     ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
-    mut impulse_q: Query<&mut ShipImpulse, With<LocalShip>>,
+    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
+    mut impulse_cmd_q: Query<&mut ImpulseCommand, With<LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
@@ -1211,9 +1075,11 @@ pub fn handle_impulse_messages(
     let Some(admitted) = ship_ac_query.iter().next() else {
         return;
     };
-    let Some(mut impulse) = impulse_q.iter_mut().next() else {
+    // Guard: only proceed when the LocalShip actually carries `ShipImpulse`
+    // (matches the old direct-mutation code's implicit guard).
+    if impulse_q.iter().next().is_none() {
         return;
-    };
+    }
     let hull_total = hull_q
         .single()
         .map(|h| (h.0.total_current(), h.0.total_max()))
@@ -1223,8 +1089,9 @@ pub fn handle_impulse_messages(
     }
 
     let current_hp = hull_total.0;
+    let mut desired: Option<crate::impulse::ImpulsePhase> = None;
     if current_hp < *last_hull_hp {
-        impulse.0.cancel_charge();
+        desired = Some(crate::impulse::ImpulsePhase::Idle);
     }
     *last_hull_hp = current_hp;
 
@@ -1233,12 +1100,18 @@ pub fn handle_impulse_messages(
             SystemControlPayload::StartImpulseCharge
                 if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
             {
-                impulse.0.start_charge();
+                desired = Some(crate::impulse::ImpulsePhase::Charging);
             }
             SystemControlPayload::CancelImpulse => {
-                impulse.0.cancel_charge();
+                desired = Some(crate::impulse::ImpulsePhase::Idle);
             }
             _ => {}
+        }
+    }
+
+    if let Some(phase) = desired {
+        if let Some(mut cmd_comp) = impulse_cmd_q.iter_mut().next() {
+            cmd_comp.0 = phase;
         }
     }
 }
@@ -1254,38 +1127,45 @@ fn tick_impulse(
     }
 }
 
-/// Toggle the boost drive in response to Helm boost controls. No-op when
-/// the feature is disabled.
+/// Admission-only (issue #695): turns admitted `ToggleBoost`/`SetBoost`
+/// messages into a `BoostCommand` intent (the desired active state),
+/// rather than mutating `ShipBoost` directly. The shared
+/// `integrate_helm_physics` system applies the actual `activate`/
+/// `deactivate` transition (which itself enforces the battery-empty guard,
+/// same as the old direct `toggle()`/`activate()` calls did). No-op when
+/// the feature is disabled for this ship, matching the old behavior.
 pub fn handle_boost_messages(
-    mut ship_query: Query<
-        (
-            &AdmittedCommands,
-            Option<&BoostConfigResource>,
-            &mut ShipBoost,
-        ),
+    ship_query: Query<
+        (&AdmittedCommands, Option<&BoostConfigResource>, &ShipBoost),
         With<LocalShip>,
     >,
+    mut boost_cmd_q: Query<&mut BoostCommand, With<LocalShip>>,
 ) {
-    let Some((admitted, entity_cfg, mut entity_boost)) = ship_query.iter_mut().next() else {
+    let Some((admitted, entity_cfg, entity_boost)) = ship_query.iter().next() else {
         return;
     };
     let enabled = entity_cfg.map(|c| c.enabled).unwrap_or(false);
     if !enabled {
         return;
     }
+    let mut desired_active = entity_boost.0.is_active();
+    let mut changed = false;
     for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::ToggleBoost => {
-                entity_boost.0.toggle();
+                desired_active = !desired_active;
+                changed = true;
             }
             SystemControlPayload::SetBoost { active } => {
-                if *active {
-                    entity_boost.0.activate();
-                } else {
-                    entity_boost.0.deactivate();
-                }
+                desired_active = *active;
+                changed = true;
             }
             _ => {}
+        }
+    }
+    if changed {
+        if let Some(mut cmd_comp) = boost_cmd_q.iter_mut().next() {
+            cmd_comp.0 = desired_active;
         }
     }
 }
@@ -1361,6 +1241,246 @@ fn is_inside_blocks_impulse(
         }
     }
     false
+}
+
+/// Applies commanded impulse/boost phase transitions (issue #695), split
+/// out from `integrate_helm_physics` so it can run *before*
+/// `process_helm_inputs` — whose stale-input edge-detection needs to
+/// observe this tick's freshly-transitioned `ShipImpulse.phase`, not last
+/// tick's (the old fused `process_helm_inputs` mutated `ShipImpulse` via
+/// `handle_impulse_messages` before its own edge-detect read it in the
+/// same tick; splitting admission from integration would otherwise delay
+/// that transition by one tick).
+///
+/// Uses change detection (`Ref::is_changed`) rather than unconditionally
+/// re-applying the persisted intent every tick: the intent components
+/// default to `Idle`/`false`, and blindly re-applying that default every
+/// tick would fight any *other* code path (including test harnesses) that
+/// sets `ShipImpulse`/`ShipBoost` directly without going through the
+/// intent-command pipeline. Only a tick where the intent was actually
+/// written (by `operate_helm_ai`'s AI decision, `handle_impulse_messages`,
+/// or `handle_boost_messages`) triggers a transition; `start_charge`/
+/// `cancel_charge` and `activate`/`deactivate` are themselves idempotent,
+/// so re-applying an intent that happens to already match current state is
+/// harmless.
+fn apply_helm_commands(
+    mut ships: Query<
+        (
+            Option<&mut ShipImpulse>,
+            Option<Ref<ImpulseCommand>>,
+            Option<&mut ShipBoost>,
+            Option<Ref<BoostCommand>>,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+) {
+    for (impulse, impulse_cmd, boost, boost_cmd) in ships.iter_mut() {
+        if let (Some(mut impulse), Some(cmd)) = (impulse, impulse_cmd) {
+            // Exclude the insertion tick (issue #695 follow-up): LOD
+            // promotion inserts a fresh default `ImpulseCommand`, which
+            // Bevy also reports as "changed" on that same tick. Without
+            // `!cmd.is_added()`, a promoted NPC's legitimate in-progress
+            // impulse would be silently force-reset to `Idle` purely as a
+            // side effect of gaining `AiHighFidelity`, not from any actual
+            // AI decision or player command. The default should persist
+            // untouched until something explicitly writes a new value on a
+            // later tick.
+            if cmd.is_changed() && !cmd.is_added() {
+                match cmd.0 {
+                    crate::impulse::ImpulsePhase::Charging => impulse.0.start_charge(),
+                    crate::impulse::ImpulsePhase::Idle => impulse.0.cancel_charge(),
+                    crate::impulse::ImpulsePhase::Active => {}
+                }
+            }
+        }
+        if let (Some(mut boost), Some(cmd)) = (boost, boost_cmd) {
+            // Same insertion-tick exclusion as above; currently latent for
+            // boost since no AI path admits `ShipBoost` for NPCs, but kept
+            // consistent for when that changes.
+            if cmd.is_changed() && !cmd.is_added() {
+                if cmd.0 {
+                    boost.0.activate();
+                } else {
+                    boost.0.deactivate();
+                }
+            }
+        }
+    }
+}
+
+/// Shared physics-integration step (issue #695). Reads the
+/// `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent components —
+/// written this tick by whichever of `process_helm_inputs` (human
+/// admission) or `operate_helm_ai` (AI decision) is authoritative for a
+/// given ship's helm, per the existing `ControlTickPolicy` mutual-exclusion
+/// gate — plus the post-transition `ShipImpulse`/`ShipBoost` state applied
+/// by `apply_helm_commands`, and performs the actual physics integration.
+/// Runs for both the player ship and any AI-promoted NPC (anything
+/// carrying `AiHighFidelity`, which is exactly the set of ships carrying
+/// these intent components).
+///
+/// Mirrors the physics tail that used to live in `process_helm_inputs`:
+/// engine-damage thrust scaling, impulse autopilot override + acceleration
+/// boost, boost-drive speed/steering multiplier, then `compute_physics`.
+/// Visual banking/roll is preserved as LocalShip-only, exactly as before —
+/// `operate_helm_ai` never applied roll to NPCs, and this system doesn't
+/// start doing so either.
+#[allow(clippy::too_many_arguments)]
+fn integrate_helm_physics(
+    time: Res<Time>,
+    physics_cfg_res: Option<Res<ShipPhysicsConfigResource>>,
+    bank_cfg_res: Option<Res<BankConfigResource>>,
+    mut ships: Query<
+        (
+            Has<LocalShip>,
+            &ShipSystemControlSources,
+            &mut ShipPhysics,
+            Option<&ShipModifiers>,
+            Option<&ShipPhysicsConfigResource>,
+            Option<&ImpulseConfigResource>,
+            Option<&BoostConfigResource>,
+            Option<&BankConfigResource>,
+            &ThrustInput,
+            &SteeringInput,
+            &LateralThrustInput,
+            (Option<&ShipImpulse>, Option<&ShipBoost>),
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+) {
+    let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
+
+    for (
+        is_local,
+        sources,
+        mut physics,
+        modifiers,
+        physics_cfg_comp,
+        impulse_cfg,
+        boost_cfg_comp,
+        bank_cfg_comp,
+        thrust_in,
+        steering_in,
+        lateral_in,
+        (impulse, boost),
+    ) in ships.iter_mut()
+    {
+        let default_modifiers;
+        let modifiers: &ShipModifiers = match modifiers {
+            Some(m) => m,
+            None => {
+                default_modifiers = ShipModifiers::new();
+                &default_modifiers
+            }
+        };
+
+        let state = ShipPhysicsState {
+            x: physics.x,
+            z: physics.z,
+            yaw: physics.yaw,
+            forward_speed: physics.forward_speed,
+            lateral_speed: physics.lateral_speed,
+        };
+
+        let impulse_active = impulse.map(|i| i.0.is_active()).unwrap_or(false);
+
+        let input = if impulse_active {
+            // Autopilot: full forward thrust, zero steering. Helm input is ignored.
+            ShipPhysicsInput {
+                thrust: 1.0,
+                steering: 0.0,
+                lateral: 0.0,
+            }
+        } else {
+            ShipPhysicsInput {
+                thrust: thrust_in.0,
+                steering: steering_in.0,
+                lateral: lateral_in.0,
+            }
+        };
+
+        // ── Engine-damage thrust scaling (issue #511) ──────────────────────
+        // Count how many fine engine systems are online. Each offline engine
+        // removes 50% of the computed thrust. If both engines are offline,
+        // thrust is zeroed.
+        let port_offline = sources
+            .0
+            .offline_systems
+            .contains(&crate::system_registry::helm_engine_port_system_id());
+        let stbd_offline = sources
+            .0
+            .offline_systems
+            .contains(&crate::system_registry::helm_engine_starboard_system_id());
+        let engine_thrust_scale: f32 = match (port_offline, stbd_offline) {
+            (true, true) => 0.0,
+            (true, false) | (false, true) => 0.5,
+            (false, false) => 1.0,
+        };
+        let scaled_input = ShipPhysicsInput {
+            thrust: input.thrust * engine_thrust_scale,
+            steering: input.steering,
+            lateral: input.lateral,
+        };
+
+        let mut config = physics_cfg_comp
+            .map(|c| c.0)
+            .or_else(|| physics_cfg_res.as_deref().map(|c| c.0))
+            .unwrap_or_else(ShipPhysicsConfig::new);
+        config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
+        config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
+        config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
+
+        if impulse_active {
+            // Mirror `ship/impulse.rs::apply_to_physics`: a non-positive
+            // multiplier (e.g. an unset TOML field defaulting to 0) falls
+            // back to the const instead of nuking acceleration entirely.
+            let impulse_cfg = impulse_cfg.cloned().unwrap_or_default();
+            let mult = if impulse_cfg.acceleration_multiplier > 0.0 {
+                impulse_cfg.acceleration_multiplier
+            } else {
+                crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
+            };
+            config.acceleration *= mult;
+        }
+
+        // Boost drive: while engaged, multiply max speed and acceleration.
+        // Only applies when the ship's TOML enabled the feature.
+        let boost_cfg = boost_cfg_comp.cloned().unwrap_or_default();
+        let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
+        if boost_cfg.enabled && boost_active {
+            config.max_speed *= boost_cfg.multiplier;
+            config.max_reverse_speed *= boost_cfg.multiplier;
+            config.acceleration *= boost_cfg.multiplier;
+            config.max_yaw_rate *= boost_cfg.steering_multiplier;
+        }
+
+        let result = compute_physics(state, scaled_input, dt, &config);
+
+        physics.x = result.x;
+        physics.z = result.z;
+        physics.yaw = result.yaw;
+        physics.forward_speed = result.forward_speed;
+        physics.lateral_speed = result.lateral_speed;
+
+        // Visual banking: LocalShip only, exactly as before — the old
+        // `operate_helm_ai` never applied roll to NPCs, and this shared
+        // step doesn't start doing so either. Uses the unscaled
+        // `input.steering` so roll reflects intent, not engine count.
+        if is_local {
+            let bank_cfg = bank_cfg_comp
+                .cloned()
+                .or_else(|| bank_cfg_res.as_deref().cloned())
+                .unwrap_or_default();
+            let max_bank_rad = bank_cfg.max_bank_deg.to_radians();
+            let target_roll = if impulse_active {
+                0.0
+            } else {
+                -input.steering * max_bank_rad
+            };
+            let lerp_factor = (bank_cfg.bank_lerp_rate * dt).min(1.0);
+            physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
+        }
+    }
 }
 
 // ── Station Rating Handler ──────────────────────────────────────────────────
@@ -1955,6 +2075,13 @@ mod tests {
             crate::ship::power::ShipPowerAiState::default(),
             crate::weapons_plugin::TorpedoIntents::default(),
         ));
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship::helm::ThrustInput::default(),
+            crate::ship::helm::SteeringInput::default(),
+            crate::ship::helm::LateralThrustInput::default(),
+            crate::ship::helm::ImpulseCommand::default(),
+            crate::ship::helm::BoostCommand::default(),
+        ));
         app
     }
 
@@ -2151,6 +2278,69 @@ mod tests {
             .get_mut::<ShipImpulse>()
             .unwrap()
             .0 = state;
+    }
+
+    // Regression test for issue #695 follow-up: LOD promotion re-inserting
+    // a fresh default `ImpulseCommand` must not silently cancel an
+    // in-progress impulse charge on the tick it's (re-)added. Bevy marks a
+    // freshly-inserted component as "changed" on its insertion tick, so
+    // without the `!cmd.is_added()` guard in `apply_helm_commands`, a
+    // ship's legitimate `Charging` state would get force-reset to `Idle`
+    // purely as a side effect of gaining `AiHighFidelity`/`ImpulseCommand`
+    // again, not from any explicit AI decision or player command.
+    #[test]
+    fn impulse_command_reinsertion_does_not_cancel_in_progress_charge() {
+        let mut app = test_app();
+        // Let the app settle past the initial-spawn insertion tick.
+        tick(&mut app);
+
+        // Simulate the ship having been mid-charge (e.g. promoted while a
+        // human/AI decision had already started charging impulse).
+        set_ship_impulse(
+            &mut app,
+            crate::impulse::ImpulseState {
+                phase: ImpulsePhase::Charging,
+                charge_progress: 0.4,
+            },
+        );
+
+        // Simulate LOD demotion: remove the intent component but leave
+        // `ShipImpulse` untouched, exactly as `lod_ai_ships`'s demote
+        // branch does.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).remove::<ImpulseCommand>();
+        tick(&mut app);
+
+        // The impulse charge must have persisted across demotion (no
+        // `ImpulseCommand` present means `apply_helm_commands` skips this
+        // ship entirely).
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Charging);
+
+        // Simulate LOD re-promotion: `lod_ai_ships` inserts a fresh
+        // default `ImpulseCommand` (phase = Idle) on the ship.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ImpulseCommand::default());
+        tick(&mut app);
+
+        // On the insertion tick, the default `Idle` value must NOT be
+        // force-applied: the in-progress charge should persist untouched
+        // because no explicit AI/human decision wrote a new value yet.
+        assert_eq!(
+            get_ship_impulse(&mut app).phase,
+            ImpulsePhase::Charging,
+            "re-inserting ImpulseCommand on LOD promotion must not cancel an in-progress impulse charge"
+        );
+
+        // A subsequent tick where something explicitly writes a changed
+        // value (not merely re-inserts) should still apply normally.
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<ImpulseCommand>()
+            .unwrap()
+            .0 = ImpulsePhase::Idle;
+        tick(&mut app);
+        assert_eq!(get_ship_impulse(&mut app).phase, ImpulsePhase::Idle);
     }
 
     #[test]
@@ -4228,6 +4418,22 @@ station = "helm"
         app.world_mut()
             .entity_mut(ship)
             .insert((ShipModifiers::new(), ShipBoost::default()));
+        // This ship carries no AiHighFidelity bundle by default (unlike
+        // `test_app()`), but `integrate_helm_physics` (issue #695) is
+        // scoped to `AiHighFidelity`, and these engine-thrust tests drive
+        // `ShipPhysics` purely through `LastHelmInput` + the human
+        // admission/physics pipeline. Add the marker + helm intent
+        // components so physics keeps integrating for this ship, matching
+        // pre-#695 behavior where `process_helm_inputs` computed physics
+        // for any `LocalShip` unconditionally.
+        app.world_mut().entity_mut(ship).insert((
+            crate::ai_plugin::AiHighFidelity,
+            crate::ship::helm::ThrustInput::default(),
+            crate::ship::helm::SteeringInput::default(),
+            crate::ship::helm::LateralThrustInput::default(),
+            crate::ship::helm::ImpulseCommand::default(),
+            crate::ship::helm::BoostCommand::default(),
+        ));
         app
     }
 
@@ -4643,6 +4849,13 @@ station = "helm"
             crate::ship::power::PowerReactorIntents::default(),
             crate::ship::power::ShipPowerAiState::default(),
             crate::weapons_plugin::TorpedoIntents::default(),
+        ));
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship::helm::ThrustInput::default(),
+            crate::ship::helm::SteeringInput::default(),
+            crate::ship::helm::LateralThrustInput::default(),
+            crate::ship::helm::ImpulseCommand::default(),
+            crate::ship::helm::BoostCommand::default(),
         ));
         app
     }

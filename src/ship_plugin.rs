@@ -2714,6 +2714,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             sensors_console: None,
             navigation_console: None,

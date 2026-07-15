@@ -1,4 +1,5 @@
 pub mod asset_preload;
+pub mod audio;
 pub mod bridge;
 pub mod pfx;
 pub mod radar;

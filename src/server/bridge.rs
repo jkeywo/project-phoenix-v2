@@ -17,8 +17,8 @@ use {
     crate::codec::{self, JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
-        AiChatterEvent, ConsoleStateChanged, HudStateChanged, LobbyStateChanged,
-        LOCAL_CONSOLE_TOKEN,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, ConsoleStateChanged, HudStateChanged,
+        LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
     },
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
@@ -197,6 +197,32 @@ thread_local! {
     /// [`viewscreen_border::apply_camera_shake`] each frame and read by
     /// [`flush_shake_state`] for the JS callback.
     static SHAKE_OFFSET: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
+
+    /// JS callback registered by the host page to receive the merged ship +
+    /// world audio config, once, on game start. Signature:
+    /// `callback(configJson: string)`.
+    static AUDIO_CONFIG_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the host page to receive one-shot positional
+    /// audio cues. Signature: `callback(cueJson: string)`.
+    static AUDIO_CUE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the host page to receive the forcefield SFX
+    /// level. Signature: `callback(level: number)`, `level` in 0.0–1.0.
+    static AUDIO_LEVEL_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// Latest forcefield SFX volume, written by
+    /// [`server::audio::drive_forcefield_level`] each frame and read by
+    /// [`flush_audio_level`].
+    static FORCEFIELD_LEVEL: RefCell<f32> = const { RefCell::new(0.0) };
+
+    /// Last value handed to `AUDIO_LEVEL_CB`. Unlike the shake offset (which
+    /// fires unconditionally so JS can reset its transform), a `.volume` write
+    /// that changes nothing is pure overhead at 60 Hz — so
+    /// [`flush_audio_level`] calls JS only when the level actually moves.
+    /// Starts at a sentinel no real level can equal, so the first flush always
+    /// fires.
+    static LAST_SENT_FORCEFIELD: RefCell<f32> = const { RefCell::new(-1.0) };
 
     /// Template path of the player ship selected by the host. Set by
     /// `wasm_select_ship()` before `wasm_init()`. When absent, defaults
@@ -422,6 +448,13 @@ pub fn wasm_init() {
             .add_plugins(ViewscreenBorderPlugin);
     }
 
+    // Audio is plain data + JS callbacks with no wgpu dependency, so unlike
+    // ViewscreenBorderPlugin it is safe to register in automation mode — and
+    // registering it in both branches means the smoke tests actually exercise
+    // it. The plugin registers its own bridge messages, which the PostUpdate
+    // flushes need in either branch.
+    app.add_plugins(crate::server::audio::ServerAudioPlugin);
+
     // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
     // Runtime toggling via F4 is handled by drain_debug_toggles.
     let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
@@ -455,6 +488,9 @@ pub fn wasm_init() {
             flush_lobby_state,
             flush_chatter,
             flush_shake_state,
+            flush_audio_config,
+            flush_audio_cue,
+            flush_audio_level,
         ),
     );
 
@@ -580,6 +616,45 @@ pub fn set_chatter_callback(callback: Function) {
 pub fn set_shake_offset(x: f32, y: f32) {
     SHAKE_OFFSET.with(|slot| {
         *slot.borrow_mut() = (x, y);
+    });
+}
+
+/// Called by [`crate::server::audio::drive_forcefield_level`] (WASM builds
+/// only) to store the current frame's forcefield SFX volume for JS.
+#[cfg(target_arch = "wasm32")]
+pub fn set_forcefield_level(level: f32) {
+    FORCEFIELD_LEVEL.with(|slot| {
+        *slot.borrow_mut() = level;
+    });
+}
+
+/// Called by JS once to register the audio-config callback.
+/// Bevy calls `callback(configJson: string)` once, when the local ship spawns.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_audio_config_callback(callback: Function) {
+    AUDIO_CONFIG_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the positional audio-cue callback.
+/// Bevy calls `callback(cueJson: string)` for each one-shot sound.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_audio_cue_callback(callback: Function) {
+    AUDIO_CUE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the forcefield-level callback.
+/// Bevy calls `callback(level: number)` whenever the level changes.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_audio_level_callback(callback: Function) {
+    AUDIO_LEVEL_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
     });
 }
 
@@ -1132,6 +1207,61 @@ fn flush_shake_state() {
                 &JsValue::from_f64(current.0 as f64),
                 &JsValue::from_f64(current.1 as f64),
             );
+        }
+    });
+}
+
+/// Reads `AudioConfigChanged` messages and forwards the config JSON to the
+/// registered audio-config callback via `cb.call1(NULL, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_audio_config(mut reader: MessageReader<AudioConfigChanged>) {
+    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
+    if payloads.is_empty() {
+        return;
+    }
+    AUDIO_CONFIG_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for json in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
+            }
+        }
+    });
+}
+
+/// Reads `AudioCueEvent` messages and forwards each cue's JSON to the
+/// registered audio-cue callback via `cb.call1(NULL, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_audio_cue(mut reader: MessageReader<AudioCueEvent>) {
+    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
+    if payloads.is_empty() {
+        return;
+    }
+    AUDIO_CUE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for json in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
+            }
+        }
+    });
+}
+
+/// Forwards the current forcefield SFX level to JS via `cb.call1(NULL, level)`.
+///
+/// Only fires when the level actually moved — an unchanged `.volume` write 60
+/// times a second buys nothing. The epsilon is well below audible resolution.
+#[cfg(target_arch = "wasm32")]
+fn flush_audio_level() {
+    let current = FORCEFIELD_LEVEL.with(|slot| *slot.borrow());
+    let last = LAST_SENT_FORCEFIELD.with(|slot| *slot.borrow());
+    if (current - last).abs() < 0.001 {
+        return;
+    }
+    LAST_SENT_FORCEFIELD.with(|slot| {
+        *slot.borrow_mut() = current;
+    });
+    AUDIO_LEVEL_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from_f64(current as f64));
         }
     });
 }

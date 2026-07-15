@@ -54,3 +54,20 @@ pub struct AiChatterEvent {
     pub to_label: String,
     pub text: String,
 }
+
+/// Emitted once by `server::audio::push_audio_config` when the local ship
+/// spawns, carrying the merged ship + world audio config. `json` is the output
+/// of `codec::encode_audio_config`. Read by `bridge::flush_audio_config`
+/// (wasm), which hands it to the JS callback that builds the audio graph.
+#[derive(Message, Clone, Debug)]
+pub struct AudioConfigChanged {
+    pub json: String,
+}
+
+/// Emitted by `server::audio::push_blaster_cues` for each one-shot positional
+/// sound. `json` is the output of `codec::encode_audio_cue` and carries
+/// listener-relative coordinates. Read by `bridge::flush_audio_cue` (wasm).
+#[derive(Message, Clone, Debug)]
+pub struct AudioCueEvent {
+    pub json: String,
+}

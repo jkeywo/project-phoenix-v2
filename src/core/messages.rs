@@ -1540,6 +1540,11 @@ pub struct ViewscreenHudState {
     /// Drives the engine hum volume on the host page.
     #[serde(default)]
     pub engine_thrust: f32,
+    /// True while the local ship has an active phaser beam. Drives the looping
+    /// phaser SFX on the host page. A bool rather than a level because this
+    /// struct is change-detected — see `recompute_hud_state`.
+    #[serde(default)]
+    pub phaser_firing: bool,
     /// Set when the game has ended. "Ship Destroyed" for hull death; the
     /// scenario `game_over` message otherwise. `None` while in progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]

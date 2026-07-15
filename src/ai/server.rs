@@ -1343,6 +1343,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             radar_appearance: None,
             mesh: None,

@@ -82,6 +82,15 @@ description = "Eight waves of Harrow attackers. Hold the line."
 color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
+# Red-alert audio. `siren` is a one-shot on the false→true edge; `music` loops
+# underneath for as long as the alert is active. Every other sound is
+# configured on the ship entity instead.
+[audio.red_alert]
+siren_file   = "assets/sounds/red_alert_siren.ogg"
+siren_volume = 0.7
+music_file   = "assets/sounds/last_stand_in_space_looped.ogg"
+music_volume = 0.35
+
 [dust]
 max_motes         = 240
 max_spawn_rate    = 40.0

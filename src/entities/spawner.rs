@@ -86,6 +86,16 @@ pub struct HelmConsoleSection(pub crate::entity_config::HelmConsoleConfig);
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
 
+/// Present when the EntityConfig has an `[audio]` section.
+///
+/// Read off the `LocalShip` by `server::audio::push_audio_config` to build the
+/// host page's audio graph. It has to be a component rather than a resource
+/// because the lobby ship picker chooses the hull at game start — see
+/// `spawn_game_start_entities`, which overrides the world's placeholder config
+/// with the selected ship.
+#[derive(Component, Clone, Debug)]
+pub struct ShipAudioSection(pub crate::audio_config::ShipAudioConfig);
+
 /// Present when the EntityConfig has a `[target]` section.
 /// Carries targetability tags, threat level, and description.
 #[derive(Component, Clone, Debug)]
@@ -485,6 +495,11 @@ pub fn spawn_entity(
         entity_commands.insert(EntityTarget(target.clone()));
     }
 
+    // Audio section — the local ship's copy drives the host page's sounds.
+    if let Some(audio) = &config.audio {
+        entity_commands.insert(ShipAudioSection(audio.clone()));
+    }
+
     // Faction â€” attach a FactionComponent so the AI can read faction from ECS.
     if let Some(faction_uuid) = config.faction {
         entity_commands.insert(FactionComponent(faction_uuid));
@@ -818,6 +833,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: Some(crate::entity_config::CommsConfig { range: 8000.0 }),
             asteroid_field: None,
             shape: None,
@@ -866,6 +882,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -911,6 +928,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -961,6 +979,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1013,6 +1032,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1074,6 +1094,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1144,6 +1165,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             shape: None,
             effects: None,
@@ -1197,6 +1219,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1289,6 +1312,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             faction: None,
@@ -1350,6 +1374,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             faction: None,
@@ -1404,6 +1429,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1485,6 +1511,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,
@@ -1603,6 +1630,7 @@ hull_integrity = 60.0
             shields_console: None,
             torpedoes: None,
             repair: None,
+            audio: None,
             comms: None,
             asteroid_field: None,
             shape: None,

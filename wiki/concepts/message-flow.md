@@ -3,7 +3,7 @@ title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot]
 sources: [src/server/bridge.rs, src/lobby/server.rs, src/server_app.rs, AGENTS.md]
-updated: 2026-07-05
+updated: 2026-07-15
 ---
 
 # Message Flow
@@ -137,6 +137,33 @@ host-only and available in normal builds for now.
 `wasm_init` calls `console_error_panic_hook::set_once()` before `App::new()`. Without this, any Rust panic anywhere in the Bevy app traps the wasm instance and every *subsequent* JS→WASM call surfaces as `RuntimeError: memory access out of bounds`, almost always pointing at `wasm_receive_message` (the next entry point fired by PeerJS). The hook routes the real panic message + Rust source location to `console.error` so the actual fault is visible.
 
 If a "memory access out of bounds" trace ever points at `wasm_receive_message` again, look earlier in the console for the *real* panic — and check that the hook is still installed in `src/server/bridge.rs::wasm_init`.
+
+## Channel-3 Coordination flow
+
+Channel-3 coordination messages (issue #494) let one system send a typed message to another system's human operator, or be consumed silently by AI:
+
+```
+detect_damage_tier_crossings (SimSet::Damage)
+  │  writes CoordinationEnqueue with target + payload
+  ▼
+handle_coordination_enqueue (SimSet::Input, next frame)
+  │  reads CoordinationEnqueue, enqueues to
+  │  CoordinationLagQueue with due_time = now + coordination_lag_secs
+  ▼
+process_coordination_lag (SimSet::Modifiers)
+  │  drains due messages, resolves live target control source
+  │  route_coordination(sender_origin, target_control):
+  │    AI→AI         → Consume (AI handles silently)
+  │    AI→Human      → Popup (CoordinationPopup to station holder)
+  │    Human→Human   → Suppress (they talk IRL)
+  │    Human→AI      → Popup (request routed to AI system)
+  ▼
+LobbyOutbox → OutboundMessage → routeOutbound → PeerJS
+```
+
+New in #684: `detect_damage_tier_crossings` emits a `CoordinationPayload::Alert { title, body }` targeting `captain_system_id()` when a system crosses into `DamageTier::Destroyed`. The `sender_origin` is the destroyed system's control source, so:
+- AI-controlled system destroyed → alert shown as popup to human captain.
+- Human-controlled system destroyed → alert suppressed (the player at that station can observe the destruction directly).
 
 ## Related
 

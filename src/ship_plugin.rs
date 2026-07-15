@@ -1826,6 +1826,17 @@ pub fn detect_damage_tier_crossings(
 
             if current_tier > prev_tier {
                 if current_tier == DamageTier::Destroyed {
+                    let sender_origin = sources.0.source_for(system_id);
+                    coord_writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin,
+                        target: crate::ship::system_registry::captain_system_id(),
+                        payload: CoordinationPayload::Alert {
+                            title: format!("System Destroyed: {}", system_id.0),
+                            body: format!("{} destroyed.", system_id.0),
+                        },
+                        sender_label: system_id.0.clone(),
+                    });
                     continue;
                 }
 
@@ -4705,6 +4716,233 @@ station = "helm"
         assert!(
             !cs.0.offline_systems.contains(&fore_sid),
             "shield-arc-fore must be removed from offline_systems after repair"
+        );
+    }
+
+    // ── Issue #684: Destroyed-tier alerts to Captain ─────────────────────────
+
+    #[derive(Resource, Default)]
+    struct CoordEnqueueBox(Vec<CoordinationEnqueue>);
+
+    fn collect_coord(
+        mut reader: MessageReader<CoordinationEnqueue>,
+        mut box_: ResMut<CoordEnqueueBox>,
+    ) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn drain_coord(app: &mut App) -> Vec<CoordinationEnqueue> {
+        let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
+        app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
+        msgs
+    }
+
+    fn coord_test_app() -> App {
+        let mut app = test_app();
+        app.init_resource::<CoordEnqueueBox>()
+            .add_systems(PostUpdate, collect_coord);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(LastSystemTiers::default());
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+        for mut cfg in q.iter_mut(app.world_mut()) {
+            cfg.0.coordination_lag_secs = 0.0;
+        }
+        app
+    }
+
+    fn set_captain_control_source(app: &mut App, source: ControlSource) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+        for mut cs in q.iter_mut(app.world_mut()) {
+            cs.0.set(crate::system_registry::captain_system_id(), source);
+        }
+    }
+
+    #[test]
+    fn destroyed_crossing_emits_alert_to_captain() {
+        let mut app = coord_test_app();
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid, 0.0);
+        tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        let alerts: Vec<_> = emitted
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+            .collect();
+        assert_eq!(alerts.len(), 1, "expected exactly one Alert");
+        assert_eq!(
+            alerts[0].target,
+            crate::ship::system_registry::captain_system_id(),
+            "Alert must target Captain system"
+        );
+        assert_eq!(alerts[0].sender_label, "tactical");
+        assert!(
+            matches!(&alerts[0].payload, CoordinationPayload::Alert { .. }),
+            "payload must be Alert"
+        );
+    }
+
+    #[test]
+    fn non_destroyed_crossing_does_not_emit_alert() {
+        let mut app = coord_test_app();
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid, 5.0);
+        tick(&mut app);
+        let emitted = drain_coord(&mut app);
+        let alerts: Vec<_> = emitted
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+            .collect();
+        assert_eq!(alerts.len(), 0, "no Alert for non-Destroyed crossing");
+        assert!(
+            emitted
+                .iter()
+                .any(|e| matches!(&e.payload, CoordinationPayload::RepairRequest { .. })),
+            "expected a RepairRequest for Disabled crossing"
+        );
+    }
+
+    #[test]
+    fn destroyed_alert_fires_once() {
+        let mut app = coord_test_app();
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid, 0.0);
+        tick(&mut app);
+        let emitted_t1 = drain_coord(&mut app);
+        assert_eq!(
+            emitted_t1
+                .iter()
+                .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+                .count(),
+            1,
+            "first tick must emit Alert"
+        );
+        tick(&mut app);
+        let emitted_t2 = drain_coord(&mut app);
+        assert_eq!(
+            emitted_t2
+                .iter()
+                .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+                .count(),
+            0,
+            "second tick must not re-emit Alert (fire-once)"
+        );
+    }
+
+    #[test]
+    fn destroyed_alert_refires_after_restore_and_re_destroy() {
+        let mut app = coord_test_app();
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid.clone(), 0.0);
+        tick(&mut app);
+        assert_eq!(
+            drain_coord(&mut app)
+                .iter()
+                .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+                .count(),
+            1,
+            "first destroy must emit Alert"
+        );
+        set_console_hp_direct(&mut app, tact_sid.clone(), 25.0);
+        tick(&mut app);
+        drain_coord(&mut app);
+        set_console_hp_direct(&mut app, tact_sid, 0.0);
+        tick(&mut app);
+        assert_eq!(
+            drain_coord(&mut app)
+                .iter()
+                .filter(|e| matches!(&e.payload, CoordinationPayload::Alert { .. }))
+                .count(),
+            1,
+            "re-destroy after restore must emit Alert again"
+        );
+    }
+
+    /// Routing test helper: creates a test app without `collect_coord` (to avoid
+    /// interfering with the coordination event readers) and sets lag to 0.
+    fn routing_test_app() -> App {
+        let mut app = test_app();
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(LastSystemTiers::default());
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+        for mut cfg in q.iter_mut(app.world_mut()) {
+            cfg.0.coordination_lag_secs = 0.0;
+        }
+        app
+    }
+
+    #[test]
+    fn destroyed_alert_consumed_by_ai_captain() {
+        let mut app = routing_test_app();
+        start_game_with_helm_and_science(&mut app);
+        set_captain_control_source(&mut app, ControlSource::Ai);
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid, 0.0);
+        tick(&mut app);
+        tick(&mut app);
+        let outbox = app.world().resource::<crate::lobby::LobbyOutbox>();
+        let popups: Vec<_> = outbox
+            .0
+            .iter()
+            .filter(|(_, msg)| {
+                matches!(
+                    msg,
+                    crate::messages::ServerMessage::CoordinationPopup { .. }
+                )
+            })
+            .collect();
+        assert!(
+            popups.is_empty(),
+            "AI Captain must not produce CoordinationPopup; got {} popup(s)",
+            popups.len()
+        );
+    }
+
+    #[test]
+    fn destroyed_alert_shows_popup_for_human_captain() {
+        let mut app = routing_test_app();
+        start_game_with_helm_and_science(&mut app);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(SystemId("tactical".into()), ControlSource::Ai);
+            }
+        }
+        let tact_sid = SystemId("tactical".into());
+        set_console_hp_direct(&mut app, tact_sid, 0.0);
+        // Tick 1: detect_damage_tier_crossings writes CoordinationEnqueue
+        //         into the message send buffer.
+        // Tick 2: buffer-swap → handle_coordination_enqueue reads and enqueues
+        //         to CoordinationQueue with due_time = now + 0.
+        //         process_coordination_lag reads due messages and dispatches
+        //         a CoordinationPopup to the LobbyOutbox.
+        // Tick 3: consumes the popup and/or allows the broadcast to flush.
+        tick(&mut app);
+        tick(&mut app);
+        tick(&mut app);
+        let outbox = app.world().resource::<crate::lobby::LobbyOutbox>();
+        let has_popup = outbox.0.iter().any(|(_, msg)| {
+            matches!(
+                msg,
+                crate::messages::ServerMessage::CoordinationPopup { .. }
+            )
+        });
+        assert!(
+            has_popup,
+            "Human Captain must receive a CoordinationPopup for destroyed system"
         );
     }
 }

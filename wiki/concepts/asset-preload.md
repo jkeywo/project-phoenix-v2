@@ -54,7 +54,7 @@ feature in `src/server_app.rs:239-257`.
    `auto_transition_from_loading` (`asset_preload.rs:671`) flips to
    `InProgress`.
 
-## The sidecar inbox contract
+## The sidecar cache contract
 
 Model-rig sidecars (`.model.toml` files alongside each `.glb`, e.g.
 `assets/models/dynasty_destroyer.model.toml`) are NOT loaded through the
@@ -65,43 +65,20 @@ into a `ModelRig` (`src/entities/model_rig.rs:1`). The JS fetch callback in
 process-wide thread-local map (`PENDING_SIDECAR_TOML` in
 `src/entities/config_cache.rs:104-115`).
 
-The inbox has **one consumer**: the renderer
-(`server_app::load_sidecar_toml` at `src/server_app.rs:1554-1568`). It uses
-`take_pending_sidecar_toml(path)` (`src/entities/config_cache.rs:407-420`),
-which `remove()`s the entry — destructive by design, so the same body cannot
-be consumed twice.
+The cache is persistent and supports multiple readers. The renderer uses
+`take_pending_sidecar_toml(path)` (`src/entities/config_cache.rs:335-337`),
+which returns a cloned body without removing the entry. This matters when many
+entities share one model sidecar: every entity must be able to read the same
+rig definition.
 
-Any other caller that needs to know whether the sidecar has arrived must use
-`is_pending_sidecar_delivered(path)` (`src/entities/config_cache.rs:422-431`),
-which is a non-destructive `contains_key()` check. The preload poller uses
-this at `src/server/asset_preload.rs:507-517`.
+Callers that only need delivery status use
+`is_pending_sidecar_delivered(path)` (`src/entities/config_cache.rs:345-347`).
+The preload poller uses this non-destructive check, while an empty cached body
+means the fetch completed without a sidecar and prevents repeated requests.
 
-### Why the contract matters — the prefetch race (2026-06-17 fix)
-
-Before this contract was made explicit, both the renderer's
-`load_sidecar_toml` and the preload poller called the same destructive
-`pop_pending_sidecar_toml`. Both raced for the same `HashMap` entry. The
-poller usually won (it runs every `Update`, the renderer only runs while
-walking `Without<RenderProcessed>` entities). The poller silently discarded
-the TOML body. The renderer's subsequent `take` returned `None`. The
-renderer then refired `request_sidecar_fetch`, which was deduped against
-`SIDECAR_FETCH_REQUESTED` (`config_cache.rs:441-451`) — the original fetch
-had already completed, so no re-fetch ever happened. The renderer waited
-forever, `continue`'d each frame at `server_app.rs:1707-1712`, and never
-spawned the `SceneRoot`. The entity still existed with its collider,
-transform, weapons, etc. — it just had no visible mesh.
-
-The race only affected entities whose sidecars happened to arrive on a
-frame where the poller ran before the renderer; entities lucky enough to
-have the renderer run first appeared correctly. Hence the partial,
-intermittent "some models present, some missing" symptom.
-
-The fix: split `pop_pending_sidecar_toml` into two functions —
-`take_pending_sidecar_toml` (destructive, renderer-only) and
-`is_pending_sidecar_delivered` (peek, anyone). The poller switched to the
-peek API. Backed by a Rust unit test
-(`src/entities/config_cache.rs:953-1015`) that simulates push → peek (×2)
-→ take and asserts the renderer still sees the body.
+Native regression coverage at `src/entities/config_cache.rs:805-864` verifies
+pre-delivery status, persistent multi-reader access, repeated delivery checks,
+and the empty-body contract.
 
 ## GLB readiness and `LoadState::Failed`
 

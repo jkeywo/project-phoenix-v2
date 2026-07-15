@@ -7054,6 +7054,52 @@ station = "tactical"
     }
 
     #[test]
+    fn npc_beam_tick_records_shooter_as_last_attacker() {
+        // Write-on-damage (#689): when a live beam hits a ship target that
+        // carries a `LastShipAttacker` component, `tick_beams` records the
+        // shooter's UUID as that target's last attacker. This write fires in
+        // Phase 2 before the `damage_to_apply <= 0` guard, but only when the
+        // target entity actually carries the component — so we insert it.
+        use crate::ai_plugin::AiTokenRegistry;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000003";
+        let target_uuid_str = "00000000-0000-0000-0000-000000000004";
+
+        let (npc_entity, target_entity) =
+            setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+        // The attacker-write branch only fires if the target carries
+        // `LastShipAttacker`; `setup_npc_shooter` does not add it.
+        app.world_mut()
+            .entity_mut(target_entity)
+            .insert(LastShipAttacker::default());
+
+        // Activate the beam directly on the per-entity ActiveBeam component.
+        {
+            let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
+            beam.target_uuid = Some(target_uuid_str.to_string());
+            beam.remaining_secs = 10.0;
+        }
+
+        // Tick enough for the beam to reach and hit the target.
+        for _ in 0..10 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world()
+                .get::<LastShipAttacker>(target_entity)
+                .unwrap()
+                .0,
+            Some(npc_uuid.to_string()),
+            "beam hit must record the shooter UUID as the target's last attacker"
+        );
+    }
+
+    #[test]
     fn npc_beam_tick_damages_npc_target_not_player() {
         // Regression test for PRD #597 PR-1: NPC-vs-NPC beam damage.
         // Before the fix, the old tick_npc_beams hull_query had

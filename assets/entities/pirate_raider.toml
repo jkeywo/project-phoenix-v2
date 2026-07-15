@@ -82,6 +82,10 @@ colour = [1.0, 0.2, 0.2]
 [comms]
 range = 400.0
 
+[ai_profile]
+aggression = 0.8
+sensor_range = 120.0
+
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#472/#574) Doctrine-based behaviour (FSM dissolved in issue #572).

@@ -18,8 +18,11 @@ pub fn anchors_from_world_config(
     world.anchors().clone()
 }
 
+use crate::ai::lod::{evaluate_lod, LodState};
 use crate::ai::AiMemory;
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
+use crate::server_app::{LocalShip, Ship};
+use crate::ship_state::ShipPhysics;
 
 /// Repeating 10 Hz timer that gates `build_world_snapshot` and
 /// `aggregate_doctrine_blackboards`.  Both systems only need to run at the
@@ -421,6 +424,18 @@ impl Plugin for AiPlugin {
         app.add_systems(
             Update,
             (
+                simulate_low_lod_ships
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(lod_ai_ships),
+                lod_ai_ships
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(build_world_snapshot)
+                    .before(crate::sim_sets::AiTickLabel),
+            ),
+        );
+        app.add_systems(
+            Update,
+            (
                 register_ai_tokens_on_spawn,
                 process_attacker_this_tick
                     .in_set(crate::sim_sets::SimSet::Physics)
@@ -498,6 +513,97 @@ fn unregister_on_despawn(
 ) {
     for entity in removed.read() {
         registry.unregister_by_bevy_entity(entity);
+    }
+}
+
+// ── LOD Management ──────────────────────────────────────────────────────────────
+
+/// Fractional hysteresis band applied on top of `AiProfile.sensor_range`
+/// to prevent rapid LOD oscillation near the range boundary.
+const LOD_HYSTERESIS: f32 = 0.2;
+
+/// Minimum time (seconds) that must elapse before a demotion is allowed.
+const LOD_DWELL_SECS: f64 = 2.0;
+
+/// Evaluate LOD for every NPC ship vs the player ship's position.
+/// Inserts `AiHighFidelity` when an NPC enters sensor range (promotion),
+/// removes it when the NPC leaves range after the hysteresis + dwell window
+/// has elapsed (demotion). `LocalShip` is never evaluated and is guaranteed
+/// to keep its `AiHighFidelity` marker.
+fn lod_ai_ships(
+    time: Res<Time>,
+    player: Query<&Transform, (With<LocalShip>, With<Ship>)>,
+    npcs: Query<
+        (
+            Entity,
+            &Transform,
+            &AiProfile,
+            Has<AiHighFidelity>,
+            Option<&LodTransitionTimer>,
+        ),
+        (With<Ship>, Without<LocalShip>),
+    >,
+    mut commands: Commands,
+) {
+    let Ok(player_transform) = player.single() else {
+        return;
+    };
+    let now_secs = time.elapsed_secs() as f64;
+    let px = player_transform.translation.x;
+    let pz = player_transform.translation.z;
+
+    for (entity, transform, profile, is_high, timer) in &npcs {
+        let dx = transform.translation.x - px;
+        let dz = transform.translation.z - pz;
+        let distance = (dx * dx + dz * dz).sqrt();
+
+        let current_state = if is_high {
+            LodState::High
+        } else {
+            LodState::Low
+        };
+        let last_change = timer.map(|t| t.last_state_change_secs).unwrap_or(0.0);
+
+        let new_state = evaluate_lod(
+            current_state,
+            distance,
+            profile.sensor_range,
+            now_secs,
+            last_change,
+            LOD_DWELL_SECS,
+            LOD_HYSTERESIS,
+        );
+
+        if new_state != current_state {
+            let timer_comp = LodTransitionTimer {
+                last_state_change_secs: now_secs,
+            };
+            match new_state {
+                LodState::High => {
+                    commands.entity(entity).insert(AiHighFidelity);
+                    commands.entity(entity).insert(timer_comp);
+                }
+                LodState::Low => {
+                    commands.entity(entity).remove::<AiHighFidelity>();
+                    commands.entity(entity).insert(timer_comp);
+                }
+            }
+        }
+    }
+}
+
+/// Cheap forward-movement simulation for ships running at low fidelity
+/// (those without the `AiHighFidelity` marker). Advances position based on
+/// current forward speed and heading without any AI decision-making,
+/// collision avoidance, or physics integration.
+fn simulate_low_lod_ships(
+    time: Res<Time>,
+    mut ships: Query<&mut ShipPhysics, (With<Ship>, Without<AiHighFidelity>)>,
+) {
+    let dt = time.delta_secs();
+    for mut physics in &mut ships {
+        physics.x += physics.forward_speed * physics.yaw.sin() * dt;
+        physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
     }
 }
 
@@ -1072,5 +1178,159 @@ mod tests {
         let mut app = build_test_app();
         app.add_systems(bevy::app::Update, read_faction_registry_system);
         app.update(); // Must not panic
+    }
+
+    // ── LOD system tests ─────────────────────────────────────────────────────
+
+    use crate::server_app::{LocalShip, Ship};
+    use crate::ship_state::ShipPhysics;
+
+    fn build_lod_test_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default()).add_systems(
+            Update,
+            (simulate_low_lod_ships.before(lod_ai_ships), lod_ai_ships),
+        );
+        app
+    }
+
+    fn tick_with_dt(app: &mut App, dt_secs: f32) {
+        let mut time = app.world_mut().resource_mut::<Time>();
+        time.advance_by(std::time::Duration::from_secs_f32(dt_secs));
+        app.update();
+    }
+
+    fn spawn_player(app: &mut App, x: f32, z: f32) -> Entity {
+        app.world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::from_xyz(x, 0.0, z),
+                ShipPhysics::default(),
+                AiHighFidelity,
+            ))
+            .id()
+    }
+
+    fn spawn_npc(app: &mut App, x: f32, z: f32, sensor_range: f32) -> Entity {
+        app.world_mut()
+            .spawn((
+                Ship,
+                Transform::from_xyz(x, 0.0, z),
+                ShipPhysics {
+                    x,
+                    z,
+                    forward_speed: 10.0,
+                    yaw: 0.0,
+                    ..Default::default()
+                },
+                AiProfile {
+                    aggression: 0.5,
+                    sensor_range,
+                },
+            ))
+            .id()
+    }
+
+    #[test]
+    fn local_ship_permanently_has_ai_high_fidelity() {
+        let mut app = build_lod_test_app();
+        let player = spawn_player(&mut app, 0.0, 0.0);
+        assert!(
+            app.world().get::<AiHighFidelity>(player).is_some(),
+            "LocalShip must start with AiHighFidelity"
+        );
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(player).is_some(),
+            "LocalShip must retain AiHighFidelity after update"
+        );
+    }
+
+    #[test]
+    fn npc_out_of_range_gets_cheap_movement() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 0.0, 0.0);
+        let npc = spawn_npc(&mut app, 500.0, 0.0, 100.0);
+
+        let initial = *app.world().get::<ShipPhysics>(npc).unwrap();
+        tick_with_dt(&mut app, 0.1);
+        let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+
+        // With yaw=0, forward_speed=10, dt=0.1:
+        //   x' = 500 + 10 * sin(0) * 0.1 = 500
+        //   z' = 0 - 10 * cos(0) * 0.1 = -1
+        assert!(
+            (physics.z - (initial.z - 1.0)).abs() < 0.001,
+            "NPC z should advance by forward_speed * dt: expected {}, got {}",
+            initial.z - 1.0,
+            physics.z,
+        );
+        assert!(
+            (physics.x - initial.x).abs() < 0.001,
+            "NPC x should not change when yaw=0: expected {}, got {}",
+            initial.x,
+            physics.x,
+        );
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "NPC out of range must not have AiHighFidelity"
+        );
+    }
+
+    #[test]
+    fn npc_in_range_promoted_to_high_fidelity() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 0.0, 0.0);
+        let npc = spawn_npc(&mut app, 50.0, 0.0, 100.0);
+
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_some(),
+            "NPC within sensor_range must be promoted to AiHighFidelity"
+        );
+    }
+
+    #[test]
+    fn dwell_timer_prevents_lod_thrashing() {
+        let mut app = build_lod_test_app();
+        spawn_player(&mut app, 0.0, 0.0);
+        let npc = spawn_npc(&mut app, 50.0, 0.0, 100.0);
+
+        // First update: promote to High (within range)
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_some(),
+            "NPC must start in High after first update"
+        );
+
+        // Move far outside range + hysteresis
+        app.world_mut()
+            .entity_mut(npc)
+            .insert(Transform::from_xyz(200.0, 0.0, 0.0));
+        app.world_mut().entity_mut(npc).insert(ShipPhysics {
+            x: 200.0,
+            z: 0.0,
+            forward_speed: 10.0,
+            yaw: 0.0,
+            ..Default::default()
+        });
+
+        // One more update: still within 2s dwell window (only 0.2s elapsed total)
+        tick_with_dt(&mut app, 0.1);
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_some(),
+            "NPC must stay High during dwell window"
+        );
+
+        // Advance well past 2-second dwell (35 * 0.1 = 3.5s more elapsed)
+        for _ in 0..35 {
+            tick_with_dt(&mut app, 0.1);
+        }
+
+        assert!(
+            app.world().get::<AiHighFidelity>(npc).is_none(),
+            "NPC must demote after dwell window elapses"
+        );
     }
 }

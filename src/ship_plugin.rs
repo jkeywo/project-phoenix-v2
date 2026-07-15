@@ -573,23 +573,26 @@ fn operate_helm_ai(
         Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::entities::spawner::ColliderSection>,
     )>,
-    mut ships: Query<(
-        Entity,
-        &ShipSystemControlSources,
-        &mut ShipPhysics,
-        &mut crate::ai_plugin::ShipAiMemory,
-        &crate::server_app::ShipSystemBlackboards,
-        Option<&crate::entity_spawner::EntityUuid>,
-        Option<&crate::entities::spawner::FactionComponent>,
-        Option<&crate::entities::spawner::ColliderSection>,
-        Option<&crate::entities::spawner::HelmConsoleSection>,
-        Option<&crate::entities::spawner::BehaviourSection>,
-        Has<crate::server_app::LocalShip>,
-        Option<&mut ShipImpulse>,
-        Option<&ImpulseConfigResource>,
-        Option<&mut PendingArcBearingRequest>,
-        Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-    )>,
+    mut ships: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &mut ShipPhysics,
+            &mut crate::ai_plugin::ShipAiMemory,
+            &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::entities::spawner::ColliderSection>,
+            Option<&crate::entities::spawner::HelmConsoleSection>,
+            Option<&crate::entities::spawner::BehaviourSection>,
+            Has<crate::server_app::LocalShip>,
+            Option<&mut ShipImpulse>,
+            Option<&ImpulseConfigResource>,
+            Option<&mut PendingArcBearingRequest>,
+            Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
 ) {
     let dt = time.delta_secs().min(HELM_AI_MAX_DT_SECS);
     let anchors = world_config
@@ -1942,9 +1945,11 @@ mod tests {
                 ShipImpulse(crate::impulse::ImpulseState::new()),
             ))
             .id();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert((ShipModifiers::new(), ShipBoost::default()));
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
+            crate::ai_plugin::AiHighFidelity,
+        ));
         app
     }
 
@@ -4616,10 +4621,10 @@ station = "helm"
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ai_plugin::ShipAiMemory::default(),
+                crate::ai_plugin::AiHighFidelity,
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     hull_config,
                 )),
-                crate::entity_spawner::EntityShipArcHull(arc_hull),
                 LastHelmInput::default(),
                 crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
             ))

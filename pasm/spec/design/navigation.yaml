@@ -76,10 +76,10 @@ entities:
 
   - mechanic: shared-waypoint-helm-autopilot
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Shared Waypoint Helm Autopilot
-      summary: When Helm is AI-controlled, it reads the shared waypoint as its destination whether a human Navigation operator or Navigation AI created it.
+      summary: When Helm is AI-controlled, it reads the shared waypoint as its destination whether a human Navigation operator or Navigation AI created it; the waypoint is followed once the NavigateTo clearance for its generation latches, and both writers issue that clearance identically.
     game_design:
       architecture_links: [helm-shared-waypoint-consumer]
       participating_roles: [navigation-operator, helm-ai-operator-role]
@@ -92,9 +92,9 @@ entities:
       status: accepted
       confidence: confirmed
       title: Navigation To Helm Navigate Request
-      summary: NavigateTo is a level-3 advisory coordination request, reserved for explicit coordination rather than the normal shared-waypoint control path.
+      summary: NavigateTo is the level-3 advisory clearance that releases the AI Helm to follow the current shared waypoint generation; it is issued identically whether a human Navigation operator or the Navigation AI set the waypoint.
     game_design:
       participating_roles: [navigation-operator, helm-operator, helm-ai-operator-role]
       information_exchanged: [shared-navigation-destination-information]
       actions_required: [set-navigation-destination]
-      intended_player_effect: Navigation can explicitly ask Helm to act without making the message a hidden autopilot command.
+      intended_player_effect: Navigation can explicitly ask Helm to act without making the message a hidden autopilot command; setting a waypoint clears the AI Helm to follow it regardless of who set it.

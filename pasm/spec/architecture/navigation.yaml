@@ -4,7 +4,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint Controller
-      summary: Owns each ship's free or entity-anchored navigation waypoint, accepting admitted set and clear commands.
+      summary: Owns each ship's free or entity-anchored navigation waypoint, accepting admitted set and clear commands and issuing the same Channel-3 NavigateTo clearance to the Helm station that the Navigation AI issues.
+      rationale:
+        - "A waypoint reaches the AI Helm identically no matter who set it (AGENTS.md rule 6): both writers — the admitted human SetNavigationWaypoint path and operate_navigation_ai — enqueue the clearance through one shared helper, so the message, the delivery lag, and the HelmWaypointClearance latch are the same. Previously only the AI path sent the clearance, so a human-set waypoint sat on the shared component unfollowed."
+        - The sender origin is derived from the navigation system's resolved control source, like every other post-admission enqueuer, not assumed from the wire path. Clearing needs no clearance message because a cleared waypoint leaves the Helm nothing to follow.
     architecture:
       kind: control-handler
       authority: authoritative
@@ -12,10 +15,12 @@ entities:
       reads: [system-control-source-state]
       writes: [navigation-waypoint-state]
       consumes: [system-control-command]
+      coordinates: [coordination-lag-router]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/console/navigation/mod.rs, src/core/messages.rs, gui/components/ph-navigation-map.js]
+      symbols: [enqueue_navigate_to_clearance]
       tests: [cargo test, npx vitest run]
 
   - state: navigation-waypoint-state
@@ -71,7 +76,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation AI Operator
-      summary: Selects a positive Helm-relevant objective within navigation range, writes the resulting free or anchored waypoint, and sends Helm a NavigateTo coordination message.
+      summary: Selects a positive Helm-relevant objective within navigation range, writes the resulting free or anchored waypoint, and sends Helm a NavigateTo coordination message through the same shared clearance helper the human waypoint path uses.
     architecture:
       kind: ai-operator
       authority: authoritative

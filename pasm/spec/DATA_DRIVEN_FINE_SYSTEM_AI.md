@@ -39,8 +39,9 @@ AI policy is authored inline on the `[[system]]` entry that owns the operated
 capability. Separate policy assets are not part of this design.
 
 Executable movement policy belongs only to actuator fine systems such as
-engines, steering, lateral thrust, vertical thrust, and boost. A coarse `helm`
-system does not own an AI policy. The shared Helm motion and hazard layer is a
+engines, steering, lateral thrust, vertical thrust, and boost. There is no
+coarse `helm` system to own an AI policy — issue #801 deleted it, and `helm`
+is a station id only. The shared Helm motion and hazard layer is a
 stateless compositor and safety service, not a combat behaviour controller.
 
 Every system that can receive `ControlSource::Ai` must declare one of:
@@ -344,8 +345,11 @@ damage gating.
 
 ## 9. Scheduling and evaluation
 
-AI uses an authoritative deterministic 10 Hz base tick aligned with Helm's
-control rhythm. Each fine-system policy declares an integer
+AI uses an authoritative deterministic fixed-rate base tick aligned with
+Helm's control rhythm. The shipped precedent is the shared AI-helm sim tick
+(issue #803): one TOML-authored rate — `[global] ai_helm_tick_hz`, default
+30 Hz — gates every per-axis AI helm system, decoupling AI decisions from the
+host frame rate. Each fine-system policy declares an integer
 `evaluate_every_ticks`; omitted values may use the schema's documented parsing
 default. Systems such as Sensors, Power, Repair, or Comms may therefore run less
 often without introducing frame-dependent timers.

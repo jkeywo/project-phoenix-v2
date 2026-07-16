@@ -89,7 +89,10 @@ entities:
       status: partially-implemented
       confidence: confirmed
       title: Per-System AI Operator Suite
-      summary: Applies AI control policy separately for Helm, Tactical, Captain, Power, Shields, Sensors, Comms, Repair, and Navigation systems.
+      summary: Applies AI control policy separately per declared system — per-axis Helm systems (thrust, steering, impulse, lateral thrust), per-bank Tactical systems, and the Captain, Power, Shields, Sensors, Comms, Repair, and Navigation systems.
+      rationale:
+        - "There is no coarse helm or tactical policy since #801: helm gates are per-axis and tactical gates are per-fine-system; the dead coarse AI fallbacks were deleted."
+        - "All four per-axis AI helm systems share one fixed-rate sim tick (#803, TOML-authored [global] ai_helm_tick_hz, default 30 Hz), decoupling AI helm decisions from the host frame rate."
     architecture:
       kind: ai-controller
       authority: authoritative

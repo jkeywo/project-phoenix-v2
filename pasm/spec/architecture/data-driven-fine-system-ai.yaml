@@ -108,10 +108,11 @@ entities:
       status: proposed
       confidence: confirmed
       title: AI Policy Tick Scheduler
-      summary: Runs policy evaluation on a deterministic 10 Hz base cadence with authored per-system integer tick multiples and next-tick visibility for outputs from other fine systems.
+      summary: Runs policy evaluation on a deterministic TOML-authored fixed-rate base cadence with authored per-system integer tick multiples and next-tick visibility for outputs from other fine systems.
       rationale:
         - A shared cadence aligns AI actuation with Helm's established control rhythm.
         - Integer evaluation multiples permit slower Sensors, Power, Repair, or Comms decisions without frame-dependent timers.
+        - "The shipped precedent is the shared AI-helm sim tick (#803): one AiHelmTickTimer at [global] ai_helm_tick_hz (default 30 Hz) gates all four per-axis AI helm systems, decoupling AI decisions from host frame rate for P2P lockstep (PRD #620)."
     architecture:
       kind: scheduler
       authority: authoritative

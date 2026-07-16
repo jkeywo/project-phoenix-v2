@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Input Cadence Controller
-      summary: Samples admitted human Helm input at 10 Hz while retaining the last authoritative intent between simulation updates.
+      summary: Samples admitted human Helm input at 30 Hz while retaining the last authoritative intent between simulation updates.
     architecture:
       kind: input-sampler
       authority: authoritative
@@ -115,10 +115,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Helm Control Router
-      summary: Authoritative host handler that admits helm, lateral-thrust, impulse, and boost commands into shared per-ship intent components; a separate shared integrator applies that intent to ship physics and drive state.
+      summary: Authoritative host handler that admits per-axis thrust, steering, lateral-thrust, impulse, and boost commands into shared per-ship intent components; a separate shared integrator applies that intent to ship physics and drive state.
       rationale:
         - Human helm commands are admitted at the host boundary and then applied to authoritative state on the LocalShip.
-        - Impulse and boost are separate host-owned drive states even though the UI targets the coarse helm system.
+        - "Issue #801 split the helm wire per axis: SetThrust targets the helm-thrust system and SetSteering targets helm-steering, replacing the combined HelmInput payload that targeted a coarse helm system. Admission is therefore per-axis, which fixes the #701 mismatch where a coarse-admitted human HelmInput fought a per-axis AI thrust write. The coarse helm and tactical systems were deleted; every wire target now names a declared system."
+        - "Impulse and boost are separate host-owned drive states with their own declared systems since #801: impulse commands target helm-impulse and boost commands target the new helm-boost system."
         - "Issue #695 split admission from physics integration: process_helm_inputs, handle_impulse_messages, and handle_boost_messages now only write ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_ship_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
     architecture:
       kind: subsystem
@@ -167,7 +168,8 @@ entities:
         - ImpulseCommand
         - BoostCommand
       messages:
-        - HelmInput
+        - SetThrust
+        - SetSteering
         - LateralThrustInput
         - StartImpulseCharge
         - CancelImpulse
@@ -356,6 +358,8 @@ entities:
       confidence: confirmed
       title: Helm Blackboard Publisher
       summary: Host publisher that derives helm, lateral-thrust, and engine status blackboards from authoritative motion and drive state.
+      rationale:
+        - "The Helm console blackboard is keyed by the helm station id (\"helm\"), not a system id: since #801 \"helm\" names a crew station only, while per-system blackboards such as helm-lateral-thrust keep system-id keys. The wire key strings are unchanged."
     architecture:
       kind: adapter
       authority: authoritative
@@ -551,7 +555,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Objective State
-      summary: Scored objective pool carrying helm-relevant Patrol, Reach, and Destroy directives for automated helm decisions.
+      summary: Scored objective pool carrying helm-relevant Patrol, Reach, Retreat, and Destroy directives for automated helm decisions.
     architecture:
       classification: replicated
       owner: helm-objective-aggregator
@@ -689,11 +693,13 @@ entities:
       status: implemented
       confidence: inferred
       title: Helm AI Operator
-      summary: Current authoritative AI helm executor that reads scored objectives and world snapshots, computes steering and avoidance internally, and writes the same ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand intent components the admitted human path writes, for the shared integrate_ship_physics/apply_helm_commands systems to apply.
+      summary: Per-axis AI helm decide systems (ai_helm_thrust, ai_helm_steering, ai_helm_impulse) that read scored objectives and world snapshots, compute steering and avoidance internally, and write the same ThrustInput/SteeringInput/ImpulseCommand intent components the admitted human path writes, for the shared integrate_ship_physics/apply_helm_commands systems to apply.
       rationale:
         - Helm AI does not synthesize human helm messages in the shipped code path.
         - This is a temporary implementation shape relative to the intended design, where fine helm systems should read a shared desired-motion surface and set the same typed actuator inputs a player can set, according to capability.
-        - "Issue #695 removed operate_helm_ai's direct writes to ShipPhysics/ShipImpulse; it now only decides and writes the shared intent components, mirroring the admitted human path's decide/apply split. This is a step toward, but not the same as, the intended shared desired-motion surface described below."
+        - "Issue #695 removed the direct writes to ShipPhysics/ShipImpulse; the AI now only decides and writes the shared intent components, mirroring the admitted human path's decide/apply split. This is a step toward, but not the same as, the intended shared desired-motion surface described below."
+        - "Issue #801 completed the per-axis split: each system gates on its own declared helm-thrust / helm-steering / helm-impulse system's operate_ai policy. The dead coarse helm fallbacks and helm_control_policy are deleted; a whole-helm judgement (e.g. arc-bearing) derives from the per-axis declarations via helm_axes_operate_ai, never from a coarse system."
+        - "Issue #803 decoupled the decision cadence from the host frame rate: all per-axis AI helm systems run only on the shared AI-helm sim tick (see ai-helm-tick-cadence), a determinism prerequisite for P2P lockstep (PRD #620)."
     architecture:
       kind: service
       authority: authoritative
@@ -716,7 +722,10 @@ entities:
         - src/ship_plugin.rs
         - src/ai/core.rs
       symbols:
-        - operate_helm_ai
+        - ai_helm_thrust
+        - ai_helm_steering
+        - ai_helm_impulse
+        - helm_axes_operate_ai
         - operate_helm
         - decide_impulse
         - steer_toward
@@ -732,6 +741,7 @@ entities:
       rationale:
         - This is distinct from full helm Backfill AI.
         - It fills the simplified-rating gap where only lateral thrust is automated for obstacle avoidance, but today still recomputes avoidance locally instead of consuming a shared ship-level hazard assessment.
+        - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
     architecture:
       kind: service
       authority: authoritative
@@ -749,8 +759,40 @@ entities:
         - src/ship_plugin.rs
         - src/ai/core.rs
       symbols:
-        - operate_lateral_thrust_ai
+        - ai_helm_lateral_thrust
         - operate_lateral_thrust
+      tests:
+        - cargo test
+
+  - component: ai-helm-tick-cadence
+    core:
+      status: implemented
+      confidence: confirmed
+      title: AI Helm Tick Cadence
+      summary: Shared fixed-rate sim tick (one AiHelmTickTimer plus an AiHelmTickReady latch) that gates all four per-axis AI helm systems — ai_helm_thrust, ai_helm_steering, ai_helm_impulse, and ai_helm_lateral_thrust — so AI helm decisions run at a TOML-authored rate instead of once per rendered frame.
+      rationale:
+        - "Issue #803: AI helm decisions were coupled to host frame rate — a 144 Hz host steered on ~4x fresher data than a 60 Hz one — a determinism blocker for P2P lockstep (PRD #620). One shared timer replaces per-frame execution and the private AiLateralThrustTimer."
+        - "The tick rate is data-driven: [global] ai_helm_tick_hz in the world TOML, serde default 30 Hz (the old lateral timer's period), reconciled from WorldConfig at runtime because the timer resource is built before the config exists."
+        - Existing ordering edges between the gated systems are preserved; the latch follows the AiSnapshotTimer idiom because run_if conditions must use read-only params.
+    architecture:
+      kind: scheduler
+      authority: authoritative
+      coordinates:
+        - helm-ai-operator
+        - helm-lateral-thrust-ai-operator
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship_plugin.rs
+        - src/world/config.rs
+        - assets/worlds/default.toml
+      symbols:
+        - AiHelmTickTimer
+        - AiHelmTickReady
+        - tick_ai_helm_timer
+        - ai_helm_tick_ready
       tests:
         - cargo test
 
@@ -876,7 +918,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Input Command
-      summary: Client-to-host thrust and steering request for the coarse helm system.
+      summary: Client-to-host per-axis thrust and steering requests; the combined joystick action fans out to SetThrust targeting the helm-thrust system and SetSteering targeting the helm-steering system.
+      rationale:
+        - "Issue #801 replaced the combined HelmInput payload (which targeted a coarse helm system) with two per-axis payloads, so admission gates each axis on its own declared system."
     architecture:
       authority: request
       producer:
@@ -895,7 +939,8 @@ entities:
         - src/core/codec.rs
         - gui/action-map.js
       messages:
-        - HelmInput
+        - SetThrust
+        - SetSteering
       tests:
         - tests/client/action-map.test.js
         - cargo test
@@ -934,7 +979,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Start Impulse Charge Command
-      summary: Client-to-host request to begin charging the impulse drive when the ship is not inside an impulse-blocking region.
+      summary: Client-to-host request, targeting the declared helm-impulse system, to begin charging the impulse drive when the ship is not inside an impulse-blocking region.
     architecture:
       authority: request
       producer:
@@ -963,7 +1008,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Cancel Impulse Command
-      summary: Client-to-host request to cancel a charging or active impulse drive.
+      summary: Client-to-host request, targeting the declared helm-impulse system, to cancel a charging or active impulse drive.
     architecture:
       authority: request
       producer:
@@ -992,7 +1037,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Toggle Boost Command
-      summary: Client-to-host request to toggle the boost drive on or off when boost is enabled for the ship.
+      summary: Client-to-host request, targeting the declared helm-boost system, to toggle the boost drive on or off when boost is enabled for the ship.
     architecture:
       authority: request
       producer:
@@ -1021,7 +1066,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Set Boost Command
-      summary: Client-to-host hold-style boost command that explicitly activates or deactivates the boost drive.
+      summary: Client-to-host hold-style boost command, targeting the declared helm-boost system, that explicitly activates or deactivates the boost drive.
     architecture:
       authority: request
       producer:

@@ -25,6 +25,8 @@ entities:
       confidence: confirmed
       title: Ship System Blackboard State
       summary: Authoritative current-tick per-ship published state for Helm, Weapons, Power, Shields, Captain, Repair, Comms, Sensors, Navigation, and Viewscreen systems.
+      rationale:
+        - "Since #801 the map holds two key namespaces: console-level blackboards (Helm, Weapons) are keyed by station id via helm_station_key / tactical_station_key, while per-system blackboards keep system-id keys. Both are carried as SystemId values and the client key strings are unchanged."
     architecture:
       classification: authoritative
       owner: system-blackboard-publisher
@@ -90,6 +92,7 @@ entities:
       summary: Per-ship delayed advisory channel for player and system coordination, with target control and availability resolved at delivery time.
       rationale:
         - Coordination latency should affect the message path consistently without freezing stale ownership decisions at send time.
+        - "Coordination targets live in the station-id namespace since #801: a channel-3 message is addressed to a crew station (e.g. helm_station_key / tactical_station_key), not to a declared system. The wire strings are unchanged."
     architecture:
       kind: coordination-service
       authority: authoritative

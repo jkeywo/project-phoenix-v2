@@ -39,6 +39,9 @@ entities:
       confidence: confirmed
       title: System Kind Registry
       summary: Code-backed registry that validates ship-authored system kinds and names the required AI controller for each kind.
+      rationale:
+        - "One id, one meaning (#801). Identifiers live in exactly one of three namespaces: system ids (declared [[system]] instances that get a ControlSource, gate admission, and can be damaged), station ids (crew stations that key console-level blackboards and channel-3 coordination routing), and wire targets (the target of a ControlSystem envelope, always a system id)."
+        - "The coarse helm and tactical systems were deleted by #801: \"helm\" and \"tactical\" are now station ids only, carried inside SystemId-typed maps via the helm_station_key / tactical_station_key helpers. No [[system]] block declares them, no ControlSource is registered for them, and no ControlSystem message may target them."
     architecture:
       kind: registry
       authority: authoritative
@@ -146,6 +149,7 @@ entities:
       summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command.
       rationale:
         - A client must not gain authority by naming another station's system or by bypassing a damaged, offline, or AI-controlled system.
+        - "Every wire target names a declared system since #801 — there is no coarse helm or tactical target — so admission is inherently per-axis for helm commands and per-bank for tactical commands."
     architecture:
       kind: command-validator
       authority: authoritative

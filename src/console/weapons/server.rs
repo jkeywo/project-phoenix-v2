@@ -482,7 +482,16 @@ impl Plugin for WeaponsPlugin {
             )
             .add_systems(
                 Update,
-                publish_weapons_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                // One system per blackboard type (issue #725). Each writes
+                // disjoint ShipSystemBlackboards keys, so there is no
+                // ordering dependency between them — bare tuple, no chain().
+                (
+                    publish_weapons_core_blackboard,
+                    publish_phaser_bank_blackboards,
+                    publish_torpedo_tube_blackboards,
+                    publish_torpedo_magazine_blackboard,
+                )
+                    .in_set(crate::sim_sets::SimSet::Publish),
             );
     }
 }
@@ -3591,7 +3600,7 @@ fn tick_torpedo_lifecycle(
 /// watching a backfilled console) see *why* the ship's lock is what it is, and
 /// it is what distinguishes AI intent from a human's lock on the wire.
 ///
-/// `publish_weapons_blackboard` rebuilds the entry from real ship state later
+/// `publish_weapons_core_blackboard` rebuilds the entry from real ship state later
 /// in the same tick, so a bare default entry never escapes to the wire.
 fn record_locked_target_decision(
     blackboards: &mut crate::server_app::ShipSystemBlackboards,
@@ -3609,7 +3618,7 @@ fn record_locked_target_decision(
 /// Drop any stale Tactical AI intent from a ship the selector is skipping.
 ///
 /// A no-op when the ship has no Weapons blackboard entry, rather than an
-/// insert of an empty one: `publish_weapons_blackboard` owns creating the entry
+/// insert of an empty one: `publish_weapons_core_blackboard` owns creating the entry
 /// with real ship state, and a ship the AI does not target for has no intent to
 /// report in the first place.
 fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSystemBlackboards) {
@@ -4379,10 +4388,135 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 }
 
 // ── Blackboard publish (issue #560) ─────────────────────────────────────────
+//
+// Split into one system per blackboard type (issue #725):
+// `publish_weapons_core_blackboard`, `publish_phaser_bank_blackboards`,
+// `publish_torpedo_tube_blackboards`, `publish_torpedo_magazine_blackboard`.
+// Each writes only its own `ShipSystemBlackboards` keys, so the four register
+// in `SimSet::Publish` with no ordering edges between them. Bank/tube state
+// that the core Weapons blackboard also carries is recomputed by the per-bank
+// / per-tube systems via the shared `build_bank_states` / `build_tube_states`
+// helpers — intentional duplication that keeps the systems order-free.
 
-/// Publish each ship's Weapons blackboard from current sim state.
+/// Build the per-bank [`PhaserBankState`] list from phaser config + live state.
+///
+/// Shared by `publish_weapons_core_blackboard` (for `WeaponsBlackboard::banks`)
+/// and `publish_phaser_bank_blackboards` (for the per-bank fine blackboards) so
+/// neither has to read the other's published map entry — recomputing keeps the
+/// two systems free of ordering constraints. Recomputation cost is trivial.
+#[allow(clippy::too_many_arguments)]
+fn build_bank_states(
+    combat_config: &PhaserCombatConfigResource,
+    cooldown: &PhaserCooldown,
+    beam_active: bool,
+    active_beam_bank: Option<&str>,
+    radar_range_mult: f32,
+    physics: ShipPhysics,
+    target_live_pos: Option<(f32, f32)>,
+) -> Vec<PhaserBankState> {
+    if combat_config.0.banks.is_empty() {
+        let effective_range =
+            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
+        let fire_ready = match target_live_pos {
+            None => false,
+            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                tx,
+                tz,
+                physics.x,
+                physics.z,
+                physics.yaw,
+                effective_range,
+            ),
+        };
+        let cd = cooldown.bank_remaining_secs("");
+        vec![PhaserBankState {
+            id: String::new(),
+            fire_ready,
+            on_cooldown: beam_active || cd > 0.0,
+            cooldown_remaining: cd,
+        }]
+    } else {
+        combat_config
+            .0
+            .banks
+            .iter()
+            .map(|b| {
+                let bank_ready = match target_live_pos {
+                    None => false,
+                    Some((tx, tz)) => {
+                        let bank_base_range = if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let effective_bank_range = bank_base_range * radar_range_mult;
+                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                            tx,
+                            tz,
+                            physics.x,
+                            physics.z,
+                            physics.yaw,
+                        );
+                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok
+                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                    }
+                };
+                let cd = cooldown.bank_remaining_secs(b.id.as_str());
+                let beam_on_this_bank = beam_active && active_beam_bank == Some(b.id.as_str());
+                PhaserBankState {
+                    id: b.id.clone(),
+                    fire_ready: bank_ready,
+                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    cooldown_remaining: cd,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Build the per-tube [`TorpedoTubeState`] list from the ship's torpedo system.
+///
+/// Shared by `publish_weapons_core_blackboard` (for `WeaponsBlackboard::tubes`)
+/// and `publish_torpedo_tube_blackboards` (for the per-tube fine blackboards)
+/// for the same order-freedom reason as [`build_bank_states`].
+fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeState> {
+    torpedo_sys
+        .0
+        .tubes
+        .iter()
+        .map(|t| {
+            let remaining = match &t.load_state {
+                crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                _ => 0.0,
+            };
+            TorpedoTubeState {
+                id: t.id.clone(),
+                loaded: t.is_loaded(),
+                reload_secs: remaining,
+                state: t.load_state.label().to_string(),
+                progress: t.load_state.progress(),
+                load_time: t.load_time,
+                volley_max: t.volley_max,
+                loaded_count: t.loaded_count,
+                target_count: t.target_count,
+                load_progress: t.load_progress(),
+            }
+        })
+        .collect()
+}
+
+/// Publish each ship's core Weapons blackboard from current sim state.
 /// Runs in `SimSet::Publish` (phase 1a). Dirty-tracking and broadcast are
 /// handled globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
+///
+/// Writes only the console-level Weapons entry (keyed by
+/// [`crate::system_registry::tactical_station_key`]); the per-bank /
+/// per-tube / magazine fine entries are owned by their own systems (issue
+/// #725), which recompute bank/tube state via the shared helpers rather than
+/// reading this system's output — no ordering between the four.
 ///
 /// Per-entity for every ship carrying `ShipSystemBlackboards` (issue #697),
 /// following the `ai::server::aggregate_doctrine_blackboards` precedent rather
@@ -4393,9 +4527,8 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 /// Two tiers of field, split by `Has<LocalShip>` in the loop:
 ///
 /// - **Ship state** — `target_uuid`, `locked_target`, `target_name`, `banks`,
-///   `tubes`, `torpedo_count`, `blasters`, and the per-bank / per-tube /
-///   magazine `is_online` flags. All derived from per-entity components that
-///   NPCs carry, so they are computed for every ship.
+///   `tubes`, `torpedo_count`, and `blasters`. All derived from per-entity
+///   components that NPCs carry, so they are computed for every ship.
 /// - **Client render data** — `blips`, `regions`, `phaser_arcs`,
 ///   `torpedo_arcs`, `phaser_mode`. Sourced from the player-only
 ///   `CurrentPhaserMode` / `ShipClientConfigResource` resources and meaningless
@@ -4408,7 +4541,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 /// is nothing to read a blackboard. None of this reaches the wire for NPCs:
 /// `broadcast_blackboard_updates` is `With<LocalShip>`-filtered, so NPC
 /// blackboards add zero bandwidth.
-fn publish_weapons_blackboard(
+fn publish_weapons_core_blackboard(
     mut ship_q: Query<
         (
             Option<&WeaponsTarget>,
@@ -4419,7 +4552,6 @@ fn publish_weapons_blackboard(
             Option<&BlasterSystemResource>,
             Option<&ShipPhysics>,
             Option<&crate::modifiers::ShipModifiers>,
-            Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
         ),
@@ -4444,7 +4576,6 @@ fn publish_weapons_blackboard(
         blaster_res,
         ship_physics,
         modifiers,
-        control_sources,
         mut entity_bbs,
         is_local,
     ) in ship_q.iter_mut()
@@ -4533,97 +4664,17 @@ fn publish_weapons_blackboard(
                 .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
         });
 
-        let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
-            let effective_range =
-                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
-            let fire_ready = match target_live_pos {
-                None => false,
-                Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
-                    tx,
-                    tz,
-                    physics.x,
-                    physics.z,
-                    physics.yaw,
-                    effective_range,
-                ),
-            };
-            let cd = cooldown.bank_remaining_secs("");
-            vec![PhaserBankState {
-                id: String::new(),
-                fire_ready,
-                on_cooldown: beam_active || cd > 0.0,
-                cooldown_remaining: cd,
-            }]
-        } else {
-            combat_config
-                .0
-                .banks
-                .iter()
-                .map(|b| {
-                    let bank_ready = match target_live_pos {
-                        None => false,
-                        Some((tx, tz)) => {
-                            let bank_base_range = if b.beam_range > 0.0 {
-                                b.beam_range
-                            } else {
-                                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                            };
-                            let effective_bank_range = bank_base_range * radar_range_mult;
-                            let (rx, ry) = crate::weapons::phaser::ship_local(
-                                tx,
-                                tz,
-                                physics.x,
-                                physics.z,
-                                physics.yaw,
-                            );
-                            let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                                <= effective_bank_range * effective_bank_range;
-                            range_ok
-                                && crate::weapons::phaser::in_arc(
-                                    rx,
-                                    ry,
-                                    b.facing_deg,
-                                    b.fire_arc_deg,
-                                )
-                        }
-                    };
-                    let cd = cooldown.bank_remaining_secs(b.id.as_str());
-                    let beam_on_this_bank =
-                        beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
-                    PhaserBankState {
-                        id: b.id.clone(),
-                        fire_ready: bank_ready,
-                        on_cooldown: beam_on_this_bank || cd > 0.0,
-                        cooldown_remaining: cd,
-                    }
-                })
-                .collect()
-        };
+        let banks: Vec<PhaserBankState> = build_bank_states(
+            combat_config,
+            cooldown,
+            beam_active,
+            active_beam_bank.as_deref(),
+            radar_range_mult,
+            physics,
+            target_live_pos,
+        );
 
-        let tubes: Vec<TorpedoTubeState> = torpedo_sys
-            .0
-            .tubes
-            .iter()
-            .map(|t| {
-                let remaining = match &t.load_state {
-                    crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                    | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
-                    _ => 0.0,
-                };
-                TorpedoTubeState {
-                    id: t.id.clone(),
-                    loaded: t.is_loaded(),
-                    reload_secs: remaining,
-                    state: t.load_state.label().to_string(),
-                    progress: t.load_state.progress(),
-                    load_time: t.load_time,
-                    volley_max: t.volley_max,
-                    loaded_count: t.loaded_count,
-                    target_count: t.target_count,
-                    load_progress: t.load_progress(),
-                }
-            })
-            .collect();
+        let tubes: Vec<TorpedoTubeState> = build_tube_states(torpedo_sys);
 
         // ── Client render data (LocalShip only) ──────────────────────────────
         // Everything below this point is drawn by the browser Tactical console
@@ -4752,24 +4803,110 @@ fn publish_weapons_blackboard(
         // system. Per-bank entries below keep their system-id keys.
         entity_bbs.0.insert(
             crate::system_registry::tactical_station_key(),
-            SystemBlackboard::Weapons(bb.clone()),
+            SystemBlackboard::Weapons(bb),
+        );
+    }
+}
+
+/// Publish each ship's per-bank `PhaserBank` blackboards (issue #512).
+/// Runs in `SimSet::Publish` with no ordering against the other publish
+/// systems — bank state is recomputed via [`build_bank_states`] rather than
+/// read back from the Weapons entry.
+///
+/// Emits one PhaserBank entry per bank in the ship config, keyed by
+/// the fine SystemId (e.g. "phaser-fore"). Consumers gate on their
+/// own bank without unpacking the whole weapons blackboard.
+///
+/// `is_online` is derived from `ShipSystemControlSources.offline_systems`
+/// (populated by `sync_console_damage_tiers` during `SimSet::Damage`).
+/// This matches the same surface all message handlers gate on, so
+/// damage-driven offline state is reflected everywhere consistently.
+/// Falls back to `true` when the ship has no ControlSources (test
+/// paths that don't spawn a Ship entity with the component). NPCs get
+/// this for free: `entities::spawner` gives every ship with a
+/// `[behaviour]` block its own `ShipSystemControlSources`.
+fn publish_phaser_bank_blackboards(
+    mut ship_q: Query<
+        (
+            Option<&WeaponsTarget>,
+            Option<&ActiveBeam>,
+            Option<&PhaserCooldown>,
+            Option<&PhaserCombatConfigResource>,
+            Option<&ShipPhysics>,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&ShipSystemControlSources>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+) {
+    for (
+        weapons_target,
+        beam,
+        cooldown,
+        combat_config,
+        ship_physics,
+        modifiers,
+        control_sources,
+        mut entity_bbs,
+    ) in ship_q.iter_mut()
+    {
+        let physics = ship_physics.copied().unwrap_or_default();
+        // Fallbacks mirror `publish_weapons_core_blackboard`: a ship (or test
+        // fixture) missing a component publishes exactly what it did before.
+        let default_beam;
+        let beam: &ActiveBeam = match beam {
+            Some(b) => b,
+            None => {
+                default_beam = ActiveBeam::default();
+                &default_beam
+            }
+        };
+        let default_cooldown;
+        let cooldown: &PhaserCooldown = match cooldown {
+            Some(c) => c,
+            None => {
+                default_cooldown = PhaserCooldown::default();
+                &default_cooldown
+            }
+        };
+        let combat_config_default;
+        let combat_config: &PhaserCombatConfigResource = match combat_config {
+            Some(c) => c,
+            None => {
+                combat_config_default = PhaserCombatConfigResource::default();
+                &combat_config_default
+            }
+        };
+        let default_modifiers;
+        let modifiers: &crate::modifiers::ShipModifiers = match modifiers {
+            Some(m) => m,
+            None => {
+                default_modifiers = crate::modifiers::ShipModifiers::new();
+                &default_modifiers
+            }
+        };
+
+        let target_uuid = weapons_target.and_then(|wt| wt.0.clone());
+        let target_live_pos: Option<(f32, f32)> = target_uuid
+            .as_deref()
+            .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+
+        let banks = build_bank_states(
+            combat_config,
+            cooldown,
+            beam.target_uuid.is_some(),
+            beam.bank.as_deref(),
+            radar_range_mult,
+            physics,
+            target_live_pos,
         );
 
-        // ── Per-bank blackboards (issue #512) ────────────────────────────
-        // Emit one PhaserBank entry per bank in the ship config, keyed by
-        // the fine SystemId (e.g. "phaser-fore"). Consumers gate on their
-        // own bank without unpacking the whole weapons blackboard.
-        //
-        // `is_online` is derived from `ShipSystemControlSources.offline_systems`
-        // (populated by `sync_console_damage_tiers` during `SimSet::Damage`).
-        // This matches the same surface all message handlers gate on, so
-        // damage-driven offline state is reflected everywhere consistently.
-        // Falls back to `true` when the ship has no ControlSources (test
-        // paths that don't spawn a Ship entity with the component). NPCs get
-        // this for free: `entities::spawner` gives every ship with a
-        // `[behaviour]` block its own `ShipSystemControlSources`.
         let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
-        for bank_state in &bb.banks {
+        for bank_state in &banks {
             let Some(bank_sysid) = crate::system_registry::phaser_bank_system_id(&bank_state.id)
             else {
                 continue;
@@ -4787,9 +4924,38 @@ fn publish_weapons_blackboard(
                 }),
             );
         }
+    }
+}
 
-        // ── Per-tube blackboards (issue #512) ────────────────────────────
-        for tube_state in &bb.tubes {
+/// Publish each ship's per-tube `TorpedoTube` blackboards (issue #512).
+/// Runs in `SimSet::Publish` with no ordering against the other publish
+/// systems — tube state is recomputed via [`build_tube_states`] rather than
+/// read back from the Weapons entry. `is_online` derivation matches
+/// [`publish_phaser_bank_blackboards`].
+fn publish_torpedo_tube_blackboards(
+    mut ship_q: Query<
+        (
+            Option<&TorpedoSystemResource>,
+            Option<&ShipSystemControlSources>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (torpedo_sys, control_sources, mut entity_bbs) in ship_q.iter_mut() {
+        let torpedo_sys_default;
+        let torpedo_sys: &TorpedoSystemResource = match torpedo_sys {
+            Some(t) => t,
+            None => {
+                torpedo_sys_default =
+                    TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default()));
+                &torpedo_sys_default
+            }
+        };
+
+        let tubes = build_tube_states(torpedo_sys);
+        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
+        for tube_state in &tubes {
             let Some(tube_sysid) = crate::system_registry::torpedo_tube_system_id(&tube_state.id)
             else {
                 continue;
@@ -4812,8 +4978,34 @@ fn publish_weapons_blackboard(
                 }),
             );
         }
+    }
+}
 
-        // ── Magazine blackboard (issue #512) ─────────────────────────────
+/// Publish each ship's `TorpedoMagazine` blackboard (issue #512).
+/// Runs in `SimSet::Publish` with no ordering against the other publish
+/// systems. `is_online` derivation matches [`publish_phaser_bank_blackboards`].
+fn publish_torpedo_magazine_blackboard(
+    mut ship_q: Query<
+        (
+            Option<&TorpedoSystemResource>,
+            Option<&ShipSystemControlSources>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (torpedo_sys, control_sources, mut entity_bbs) in ship_q.iter_mut() {
+        let torpedo_sys_default;
+        let torpedo_sys: &TorpedoSystemResource = match torpedo_sys {
+            Some(t) => t,
+            None => {
+                torpedo_sys_default =
+                    TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default()));
+                &torpedo_sys_default
+            }
+        };
+
+        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
         let magazine_sysid = crate::system_registry::torpedo_magazine_system_id();
         let magazine_online = offline_systems_opt
             .map(|set| !set.contains(&magazine_sysid))
@@ -9709,7 +9901,7 @@ station = "tactical"
             bb.locked_target.as_deref(),
             Some(target_uuid.as_str()),
             "ai_target_selection must publish its choice as locked_target, and that intent \
-             must survive publish_weapons_blackboard rebuilding the blackboard in SimSet::Publish"
+             must survive publish_weapons_core_blackboard rebuilding the blackboard in SimSet::Publish"
         );
         assert_eq!(
             get_weapons_target(&mut app).as_deref(),
@@ -9936,7 +10128,7 @@ station = "tactical"
 
     /// Stands in for `tick_beams` / `tick_torpedo_lifecycle`: both destroy the
     /// locked target and clear `WeaponsTarget` *after* `SimSet::Input`, which is
-    /// what leaves a dead `locked_target` for `publish_weapons_blackboard` to
+    /// what leaves a dead `locked_target` for `publish_weapons_core_blackboard` to
     /// carry forward.
     fn kill_target_after_input(
         mut commands: Commands,
@@ -11265,7 +11457,7 @@ ai_only = true
     // ── Finding 7 regression: end-to-end hull → offline_systems → PhaserBankBlackboard ──
     //
     // Ties together sync_console_damage_tiers (in ship_plugin) and
-    // publish_weapons_blackboard (in this module). A hull entry for
+    // publish_phaser_bank_blackboards (in this module). A hull entry for
     // Console::PhaserFore below the disabled threshold should end up as
     // `phaser-fore ∈ offline_systems` after one tick, and the emitted
     // blackboard should reflect `is_online: false`.
@@ -11316,7 +11508,7 @@ ai_only = true
         }
 
         // One update: sync_console_damage_tiers (Damage) writes offline_systems,
-        // publish_weapons_blackboard (Publish) reads it and emits the entry.
+        // publish_phaser_bank_blackboards (Publish) reads it and emits the entry.
         app.update();
 
         // Step 1 verify: offline_systems contains `phaser-fore`.

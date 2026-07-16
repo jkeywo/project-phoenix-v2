@@ -1570,7 +1570,7 @@ pub struct ViewscreenHudState {
 ///
 /// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = the effective
 /// tactical radar range (base `tactical_radar_range` × `RadarRange` modifier).
-/// Produced server-side by `publish_weapons_blackboard` from live ECS
+/// Produced server-side by `publish_weapons_core_blackboard` from live ECS
 /// transforms joined with the static world entity registry for tags/radius.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RadarBlip {
@@ -1939,7 +1939,7 @@ pub struct WeaponsBlackboard {
     /// Only `ai_target_selection` writes this field, and nothing on the server
     /// reads it back — it is reported, not consumed. Its job is to make the
     /// AI's reasoning observable and to tell an AI-driven lock apart from a
-    /// human's on the wire. `publish_weapons_blackboard`
+    /// human's on the wire. `publish_weapons_core_blackboard`
     /// carries the value forward when it rebuilds the blackboard (it runs in
     /// `SimSet::Publish`, after the AI wrote its intent in `SimSet::Input`),
     /// dropping it if the selected entity is no longer live — the beam and

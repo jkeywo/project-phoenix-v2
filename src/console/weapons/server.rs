@@ -2141,13 +2141,17 @@ fn handle_set_phaser_mode(
     }
 }
 
+/// Consume admitted `SetPhaserFrequency` envelopes targeting the
+/// `phaser-control` system and write the ship-wide emitter frequency
+/// (issue #804 — the legacy top-level `ClientMessage::SetPhaserFrequency`
+/// wire path was deleted; this admitted envelope path, mirroring
+/// [`handle_set_phaser_mode`], is the only one).
 fn handle_set_phaser_frequency(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
     ship_query: Query<
         (
-            &crate::ship_plugin::ShipConfigComponent,
+            &AdmittedCommands,
             &ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -2156,29 +2160,18 @@ fn handle_set_phaser_frequency(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
+    let Some((admitted, control_sources, ship_config)) = ship_query.iter().next() else {
         return;
     };
     // Ship-level gate (issue #512, option c): any bank human-operable.
-    let allowed = any_bank_accepts_human_input(control_sources, &ship_config.0);
-    // Deliberately not `tactical_authorized` — that also admits
-    // LOCAL_CONSOLE_TOKEN, which this handler has never granted.
-    let weapons_station = ship_config.0.weapons_station();
-    for ev in reader.read() {
-        let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
-            continue;
-        };
-        if !allowed {
-            continue;
-        }
-        let held_by = weapons_station
-            .as_ref()
-            .and_then(|station| sessions.0.holder_for_station(station));
-        if held_by != Some(ev.token.as_str()) {
-            continue;
-        }
-        if let Some(mut freq) = freq_q.iter_mut().next() {
-            freq.0 = frequency.clamp(0.0, 1.0);
+    if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
+        return;
+    }
+    for cmd in admitted.for_target(crate::system_registry::PHASER_CONTROL_SYSTEM_ID) {
+        if let SystemControlPayload::SetPhaserFrequency { frequency } = &cmd.payload {
+            if let Some(mut freq) = freq_q.iter_mut().next() {
+                freq.0 = frequency.clamp(0.0, 1.0);
+            }
         }
     }
 }
@@ -6831,15 +6824,20 @@ station = "tactical"
         tick(app);
     }
 
+    /// Build the admitted-envelope form of a frequency change (issue #804):
+    /// the only wire shape since the legacy top-level message was deleted.
+    fn set_phaser_frequency_msg(frequency: f32) -> ClientMessage {
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::phaser_control_system_id(),
+            payload: SystemControlPayload::SetPhaserFrequency { frequency },
+        }
+    }
+
     #[test]
     fn tactical_holder_can_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: 0.8 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(0.8));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6853,11 +6851,7 @@ station = "tactical"
         // Delegation removed in B4 — only Tactical holder may set phaser frequency.
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
-        );
+        push(&mut app, "sensors", set_phaser_frequency_msg(0.9));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6870,11 +6864,7 @@ station = "tactical"
     fn unrelated_console_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game(&mut app);
-        push(
-            &mut app,
-            "captain",
-            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
-        );
+        push(&mut app, "captain", set_phaser_frequency_msg(0.9));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6883,15 +6873,38 @@ station = "tactical"
         );
     }
 
+    /// When the phaser-control system operates AI, human `SetPhaserFrequency`
+    /// envelopes are refused at admission (mirrors the navigation console's
+    /// `control_system_rejected_when_ai_controlled`).
+    #[test]
+    fn set_phaser_frequency_rejected_when_phaser_control_ai() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::system_registry::phaser_control_system_id(),
+                    crate::ship::control_source::ControlSource::Ai,
+                );
+            }
+        }
+        push(&mut app, "weapons", set_phaser_frequency_msg(0.9));
+        tick(&mut app);
+        let freq = get_phaser_frequency(&mut app);
+        assert!(
+            (freq - 0.5).abs() < 1e-5,
+            "an AI-operated phaser-control must refuse human frequency input, got {freq}"
+        );
+    }
+
     #[test]
     fn set_phaser_frequency_clamps_value() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: 1.5 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(1.5));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6899,11 +6912,7 @@ station = "tactical"
             "frequency above 1.0 should clamp to 1.0, got {freq}"
         );
 
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: -0.5 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(-0.5));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(

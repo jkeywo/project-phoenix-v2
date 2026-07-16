@@ -17,7 +17,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `handle_set_target` | Processes `SetTarget` from the Tactical holder; locks target if in radar range |
 | `handle_fire_phaser` | Processes `FirePhaser`; starts a beam if target is in arc and phaser is ready |
 | `handle_set_phaser_mode` | Processes `SetPhaserMode { Auto \| Manual }` from Tactical holder |
-| `handle_set_phaser_frequency` | Processes `SetPhaserFrequency` from Tactical or Sensors (complexity-gated) |
+| `handle_set_phaser_frequency` | Consumes admitted `SetPhaserFrequency` envelopes on `phaser-control`, writes `ShipPhaserFrequency` (legacy top-level message deleted, #804) |
 | `handle_fire_torpedo` | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
 | `handle_load_tube` | Processes `LoadTube { tube }`; manually starts loading a tube |
 | `handle_unload_tube` | Processes `UnloadTube { tube }`; manually unloads or cancels loading |

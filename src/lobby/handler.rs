@@ -459,7 +459,6 @@ pub fn process_message(
         }
         // SetReady IS handled above (not a no-op in lobby).
         ClientMessage::FirePhaser { .. }
-        | ClientMessage::SetPhaserFrequency { .. }
         | ClientMessage::FireTorpedo { .. }
         | ClientMessage::ControlSystem { .. }
         | ClientMessage::SendCoordination { .. }

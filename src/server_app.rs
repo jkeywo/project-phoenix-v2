@@ -6889,18 +6889,25 @@ station = "pilot"
         );
     }
 
-    // -- SetPhaserFrequency delegation tests ----------------------------
+    // -- SetPhaserFrequency envelope tests (issue #804) -------------------
+    // The legacy top-level `ClientMessage::SetPhaserFrequency` was deleted;
+    // these exercise the admitted `ControlSystem` envelope path against the
+    // full server app (real ship config declaring `phaser-control`).
+
+    /// Build the admitted-envelope form of a frequency change (issue #804).
+    fn set_phaser_frequency_msg(frequency: f32) -> ClientMessage {
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::phaser_control_system_id(),
+            payload: crate::messages::SystemControlPayload::SetPhaserFrequency { frequency },
+        }
+    }
 
     /// Tactical holder may always set phaser frequency.
     #[test]
     fn tactical_holder_can_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: 0.8 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(0.8));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6914,11 +6921,7 @@ station = "pilot"
     fn sensors_holder_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
-        push(
-            &mut app,
-            "sensors",
-            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
-        );
+        push(&mut app, "sensors", set_phaser_frequency_msg(0.9));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6932,11 +6935,7 @@ station = "pilot"
     fn unrelated_console_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game(&mut app);
-        push(
-            &mut app,
-            "captain",
-            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
-        );
+        push(&mut app, "captain", set_phaser_frequency_msg(0.9));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6950,11 +6949,7 @@ station = "pilot"
     fn set_phaser_frequency_clamps_value() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: 1.5 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(1.5));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(
@@ -6962,11 +6957,7 @@ station = "pilot"
             "frequency above 1.0 should clamp to 1.0, got {freq}"
         );
 
-        push(
-            &mut app,
-            "weapons",
-            ClientMessage::SetPhaserFrequency { frequency: -0.5 },
-        );
+        push(&mut app, "weapons", set_phaser_frequency_msg(-0.5));
         tick(&mut app);
         let freq = get_phaser_frequency(&mut app);
         assert!(

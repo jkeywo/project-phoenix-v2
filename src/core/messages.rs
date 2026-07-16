@@ -975,8 +975,10 @@ pub enum RepairTarget {
 ///
 /// This is the primary control envelope of the station/system architecture
 /// (ADR-0002). A handful of weapons messages (`FirePhaser`, `FireTorpedo`,
-/// `LoadTube`, `UnloadTube`, `SetPhaserFrequency`) also survive as legacy
-/// top-level `ClientMessage` variants that runtime handlers still consume.
+/// `LoadTube`, `UnloadTube`) also survive as legacy top-level
+/// `ClientMessage` variants that runtime handlers still consume.
+/// (`SetPhaserFrequency`'s legacy top-level variant was deleted by #804 —
+/// the envelope form targeting `phaser-control` is the only wire path.)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
@@ -1122,10 +1124,6 @@ pub enum ClientMessage {
     /// Manually unload (or cancel loading of) the specified tube.
     UnloadTube {
         tube: TorpedoTube,
-    },
-    /// Set the phaser emitter frequency (0.0–1.0). Sent by the Tactical holder.
-    SetPhaserFrequency {
-        frequency: f32,
     },
     /// Primary station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed

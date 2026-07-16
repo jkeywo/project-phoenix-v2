@@ -346,10 +346,6 @@ mod tests {
                 },
             ),
             (
-                ClientMessageDiscriminants::SetPhaserFrequency,
-                ClientMessage::SetPhaserFrequency { frequency: 0.75 },
-            ),
-            (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
                     target: crate::system_registry::helm_thrust_system_id(),
@@ -1461,11 +1457,23 @@ mod tests {
             }
         );
 
-        // NOTE: a bare `{"type":"SetPhaserFrequency",...}` decodes as the
-        // legacy top-level `ClientMessage::SetPhaserFrequency` (full decode
-        // wins before short-form rewriting), so the short-form table entry
-        // only serves clients that can't send the top-level variant. The
-        // envelope form pins the phaser-control target explicitly:
+        // The legacy top-level `ClientMessage::SetPhaserFrequency` was deleted
+        // by #804, so a bare `{"type":"SetPhaserFrequency",...}` now falls
+        // through full decode and is wrapped by the short-form table as a
+        // `ControlSystem` envelope targeting phaser-control:
+        let msg = decode_bridge_client_message(
+            r#"{"type":"SetPhaserFrequency","data":{"frequency":0.6}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_control_system_id(),
+                payload: SystemControlPayload::SetPhaserFrequency { frequency: 0.6 },
+            }
+        );
+
+        // The envelope form pins the phaser-control target explicitly:
         let msg = decode_bridge_client_message(
             r#"{"type":"ControlSystem","data":{"target":"phaser-control","payload":{"type":"SetPhaserFrequency","data":{"frequency":0.4}}}}"#,
         )

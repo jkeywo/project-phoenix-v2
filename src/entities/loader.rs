@@ -48,6 +48,73 @@ pub fn assign_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
+// ── Template resolution ──────────────────────────────────────────────────────
+
+/// Resolve an entity-template path to a concrete `EntityConfig`, abstracting
+/// over *where* the template comes from: the filesystem on native
+/// (`FsTemplateLoader`), the preloaded config cache on WASM
+/// (`WasmTemplateLoader`).
+///
+/// Object-safe by design — `&self`, no generics on the method — so callers can
+/// hold a `&dyn TemplateLoader` and tests can inject a fake without touching
+/// the filesystem or the WASM thread-locals.
+///
+/// # Diagnostics are the caller's job
+///
+/// `load_template` returns `Option`, not `Result`: a missing template and a
+/// malformed one both collapse to `None`, and any `toml::de::Error` is
+/// intentionally dropped at this boundary. This module is deliberately free of
+/// Bevy (see the file header), so it must not log. The caller — which knows
+/// which entity, trigger, or spawn request asked for the template — is
+/// responsible for emitting the warning.
+pub trait TemplateLoader {
+    /// Load and parse the template at `path`, or `None` if it cannot be found
+    /// or parsed.
+    fn load_template(&self, path: &str) -> Option<EntityConfig>;
+}
+
+/// Native loader: reads the template TOML straight off the filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FsTemplateLoader;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TemplateLoader for FsTemplateLoader {
+    fn load_template(&self, path: &str) -> Option<EntityConfig> {
+        let toml_str = std::fs::read_to_string(path).ok()?;
+        EntityConfig::from_toml(&toml_str).ok()
+    }
+}
+
+/// WASM loader: serves templates out of the preloaded config cache, falling
+/// back to the filesystem on native.
+///
+/// Compiles on both targets so callers can name it unconditionally. On WASM
+/// the cache is the only source (there is no filesystem); on native the cache
+/// lookup always misses and the filesystem fallback does the work — which
+/// makes the fallback path testable under `cargo test`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WasmTemplateLoader;
+
+impl TemplateLoader for WasmTemplateLoader {
+    fn load_template(&self, path: &str) -> Option<EntityConfig> {
+        // Single-path lookup, not `get_config_cache()` — the latter clones the
+        // entire cache map on every call.
+        if let Some(config) = crate::config_cache::get_cached_entity_config(path) {
+            return Some(config);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            FsTemplateLoader.load_template(path)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +248,131 @@ overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
         let a = assign_uuid();
         let b = assign_uuid();
         assert_ne!(a, b);
+    }
+
+    // ── TemplateLoader ───────────────────────────────────────────────────────
+
+    /// Write a template TOML fixture to a unique temp path and return it.
+    fn write_template_fixture(body: &str) -> String {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static C: AtomicU32 = AtomicU32::new(0);
+        let tag = C.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("template_loader_fixture_{tag}.toml"));
+        std::fs::write(&p, body).expect("write template fixture");
+        p.to_string_lossy().into_owned()
+    }
+
+    // `r##"` (not `r#"`) — the `"#` in the colour literal would close a
+    // single-hash raw string early.
+    const VALID_TEMPLATE: &str = r##"
+tags = ["npc"]
+
+[appearance]
+colour = "#ff8800"
+size_min = 1.0
+size_max = 2.0
+"##;
+
+    #[test]
+    fn fs_template_loader_reads_and_parses_template_from_disk() {
+        let path = write_template_fixture(VALID_TEMPLATE);
+        let config = FsTemplateLoader
+            .load_template(&path)
+            .expect("valid template on disk must load");
+        assert_eq!(config.tags, vec!["npc"]);
+    }
+
+    #[test]
+    fn fs_template_loader_missing_path_returns_none() {
+        let path = std::env::temp_dir().join("template_loader_definitely_absent.toml");
+        assert!(
+            FsTemplateLoader
+                .load_template(&path.to_string_lossy())
+                .is_none(),
+            "a template that is not on disk must resolve to None"
+        );
+    }
+
+    #[test]
+    fn fs_template_loader_malformed_toml_returns_none() {
+        let path = write_template_fixture("this is not = = valid toml");
+        assert!(
+            FsTemplateLoader.load_template(&path).is_none(),
+            "a parse error must be swallowed into None, not panic"
+        );
+    }
+
+    /// On native the config cache is always empty, so `WasmTemplateLoader` must
+    /// fall through to the filesystem. This is the same fallback the WASM build
+    /// compiles out.
+    #[test]
+    fn wasm_template_loader_falls_back_to_filesystem_on_native() {
+        let path = write_template_fixture(VALID_TEMPLATE);
+        let config = WasmTemplateLoader
+            .load_template(&path)
+            .expect("native fallback must read the template from disk");
+        assert_eq!(config.tags, vec!["npc"]);
+    }
+
+    #[test]
+    fn wasm_template_loader_missing_everywhere_returns_none() {
+        let path = std::env::temp_dir().join("wasm_template_loader_definitely_absent.toml");
+        assert!(
+            WasmTemplateLoader
+                .load_template(&path.to_string_lossy())
+                .is_none(),
+            "not in cache and not on disk must resolve to None"
+        );
+    }
+
+    /// A hand-written fake proves the trait is object-safe and injectable —
+    /// the entire reason this is a trait rather than a cfg-split free fn.
+    /// #715's dispatch context will hold exactly this `&dyn TemplateLoader`.
+    struct FakeTemplateLoader {
+        templates: HashMap<String, String>,
+    }
+
+    impl TemplateLoader for FakeTemplateLoader {
+        fn load_template(&self, path: &str) -> Option<EntityConfig> {
+            EntityConfig::from_toml(self.templates.get(path)?).ok()
+        }
+    }
+
+    /// Stand-in for #715's applier: takes the loader as a trait object.
+    fn resolve_template_via(loader: &dyn TemplateLoader, path: &str) -> Option<EntityConfig> {
+        loader.load_template(path)
+    }
+
+    #[test]
+    fn dyn_template_loader_injection_resolves_via_fake() {
+        let mut templates = HashMap::new();
+        templates.insert(
+            "assets/entities/fake.toml".to_string(),
+            VALID_TEMPLATE.to_string(),
+        );
+        let fake = FakeTemplateLoader { templates };
+
+        let config = resolve_template_via(&fake, "assets/entities/fake.toml")
+            .expect("injected fake must serve its template");
+        assert_eq!(config.tags, vec!["npc"]);
+
+        assert!(
+            resolve_template_via(&fake, "assets/entities/unknown.toml").is_none(),
+            "injected fake must report unknown templates as None"
+        );
+    }
+
+    /// The real impls must also be usable as `&dyn TemplateLoader`, not just
+    /// the fake — otherwise injection buys nothing in production.
+    #[test]
+    fn real_loaders_are_usable_as_trait_objects() {
+        let path = write_template_fixture(VALID_TEMPLATE);
+        let loaders: Vec<&dyn TemplateLoader> = vec![&FsTemplateLoader, &WasmTemplateLoader];
+        for loader in loaders {
+            assert!(
+                resolve_template_via(loader, &path).is_some(),
+                "every real loader must resolve a valid on-disk template on native"
+            );
+        }
     }
 }

@@ -38,13 +38,18 @@
 //   caller decides.
 // * **Non-determinism is injected.** `SpawnEntity` takes its UUID from
 //   `DispatchContext::uuid_source` so tests can stub it.
-// * **Template loading is deferred** (issue #715). `ActionCmd::SpawnEntity`
-//   carries what the pure layer resolved — position, name, uuid, groups — and
-//   the applier loads the template.
+// * **Template loading is injected** (issue #715). `SpawnEntity` resolves its
+//   template through `DispatchContext::template_loader`, so this module never
+//   touches the filesystem or the WASM config cache itself — and the
+//   failed-spawn contingency gate lives *here*: a template that fails to
+//   resolve returns a warning-only result with no command and no name/group
+//   inserts, so the applier applies `DispatchResult`s unconditionally.
 
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::entity_config::EntityConfig;
+use crate::entity_loader::TemplateLoader;
 use crate::faction::FactionRegistry;
 use crate::flag_kind::FlagKind;
 use crate::messages::{AiDirective, GamePhase, ModifierSlot, ObjectiveSource};
@@ -134,6 +139,14 @@ pub struct DispatchContext<'a> {
     /// `Uuid::new_v4()` is non-deterministic and would make the returned
     /// `DispatchResult` unassertable.
     pub uuid_source: &'a dyn Fn() -> String,
+    /// Source of `SpawnEntity` templates. Injected (like `uuid_source`) so
+    /// this module never touches the filesystem or the WASM config cache: the
+    /// applier passes `entity_loader::WasmTemplateLoader` — config cache
+    /// first, filesystem fallback on native — and tests pass a hand-written
+    /// fake. Diagnostics are this module's job: `TemplateLoader` deliberately
+    /// collapses "missing" and "malformed" into `None`, and the `SpawnEntity`
+    /// arm turns that into a warning naming the entity and template path.
+    pub template_loader: &'a dyn TemplateLoader,
 }
 
 // ── Result ────────────────────────────────────────────────────────────────
@@ -235,21 +248,25 @@ pub enum ActionCmd {
         name: String,
         mutation: FlagMutation,
     },
-    /// Spawn an entity. `position` is resolved (anchor lookups already done);
-    /// `uuid` came from `DispatchContext::uuid_source`. The applier loads
-    /// `template_path` and, when `layer_path` is `Some`, records the spawned
-    /// entity on that layer so `UnloadWorld` despawns it.
+    /// Spawn an entity. `config` is the template already resolved via
+    /// `DispatchContext::template_loader`, with the trigger's `name` patched
+    /// in — the applier loads nothing. `position` is resolved (anchor lookups
+    /// already done); `uuid` came from `DispatchContext::uuid_source`. When
+    /// `layer_path` is `Some`, the applier records the spawned entity on that
+    /// layer so `UnloadWorld` despawns it.
     ///
-    /// If the template fails to resolve, nothing spawns and the result's
-    /// `name_to_uuid_inserts` / `entity_group_inserts` must be dropped too.
+    /// A template that fails to resolve never reaches here: the dispatch arm
+    /// returns a warning-only result instead — see `dispatch_spawn_entity`.
+    ///
+    /// `config` is boxed because `EntityConfig` dwarfs every other variant
+    /// (clippy: `large_enum_variant`) and commands travel in `Vec<ActionCmd>`.
     SpawnEntity {
-        template_path: String,
+        config: Box<EntityConfig>,
         name: String,
         uuid: String,
         position: [f32; 3],
         rotation: Option<[f32; 3]>,
         scale: Option<[f32; 3]>,
-        groups: Vec<String>,
         layer_path: Option<String>,
     },
     /// Destroy the entity with `uuid` and run the destruction cascade.
@@ -288,13 +305,14 @@ pub struct DispatchResult {
     pub new_events: Vec<WorldEvent>,
     /// `(entity_name, uuid)` pairs to register in the runtime's name map.
     ///
-    /// **Contingent when they come from `SpawnEntity`**: the applier MUST apply
-    /// them only if the accompanying `ActionCmd::SpawnEntity` actually spawned
-    /// (i.e. its template resolved). See that arm for why.
+    /// Unconditional, including from `SpawnEntity`: a spawn whose template
+    /// fails to resolve returns a warning-only result with no inserts (issue
+    /// #715 moved that contingency gate into `dispatch_spawn_entity`), so
+    /// whatever arrives here the applier applies as-is.
     pub name_to_uuid_inserts: Vec<(String, String)>,
     /// `(group, entity_name)` pairs to register for `OnAllDestroyed` tracking.
     ///
-    /// Same contingency as `name_to_uuid_inserts`.
+    /// Unconditional, like `name_to_uuid_inserts`.
     pub entity_group_inserts: Vec<(String, String)>,
     /// Messages the applier should log at warn level.
     pub warnings: Vec<String>,
@@ -370,83 +388,12 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
             return dispatch_world_flag_action(action, context);
         }
 
-        TriggerAction::SpawnEntity {
-            template_path,
-            name,
-            anchor,
-            position,
-            rotation,
-            scale,
-            groups,
-        } => {
-            // Resolve spawn position. `anchor` looks up in the origin layer's
-            // anchors (or the base world's anchors for a `None` origin).
-            // `position` is used directly.
-            let resolved_position: [f32; 3] = if let Some(pos) = position {
-                *pos
-            } else if let Some(anchor_name) = anchor {
-                let lookup = match &context.origin_layer {
-                    Some(layer_path) => context
-                        .layers
-                        .get(layer_path)
-                        .and_then(|l| l.anchors.get(anchor_name).copied()),
-                    None => context.base_anchors.get(anchor_name).copied(),
-                };
-                match lookup {
-                    Some(p) => p,
-                    None => {
-                        out.warnings.push(format!(
-                            "SpawnEntity '{name}' anchor '{anchor_name}' not found"
-                        ));
-                        return out;
-                    }
-                }
-            } else {
-                out.warnings.push(format!(
-                    "SpawnEntity '{name}' has neither anchor nor position"
-                ));
-                return out;
-            };
-
-            let uuid = (context.uuid_source)();
-
-            out.commands.push(ActionCmd::SpawnEntity {
-                template_path: template_path.clone(),
-                name: name.clone(),
-                uuid: uuid.clone(),
-                position: resolved_position,
-                rotation: *rotation,
-                scale: *scale,
-                groups: groups.clone(),
-                layer_path: context.origin_layer.clone(),
-            });
-
-            // Register name → uuid for subsequent triggers, and the entity in
-            // its groups for `OnAllDestroyed` tracking.
-            //
-            // Both are **contingent on the spawn succeeding**. Template loading
-            // is still the applier's job (issue #715 moves it in here behind a
-            // `TemplateLoader` trait), and these live in `DispatchResult` fields
-            // separate from `commands`, so nothing in the data says they depend
-            // on the `ActionCmd::SpawnEntity` above. The applier MUST apply them
-            // only if that command actually spawned — `server::handle_ai_events`
-            // resolves the template first and `continue`s on failure, so a
-            // failed spawn registers no name and no group membership.
-            //
-            // Registering them anyway leaves a phantom name → uuid entry. That
-            // mostly degrades to a "no ECS entity with UUID" warning, but
-            // `DestroyEntity` would still emit `WorldEvent::Destroyed` +
-            // `AiEntityDestroyed` for an entity that never spawned, firing
-            // `on_destroyed` triggers for a ghost.
-            //
-            // `ActionCmd::SpawnEntity` already carries `name`, `uuid` and
-            // `groups`, so the applier may instead derive both from the command
-            // at the point it knows the spawn succeeded.
-            out.name_to_uuid_inserts.push((name.clone(), uuid));
-
-            for g in groups {
-                out.entity_group_inserts.push((g.clone(), name.clone()));
-            }
+        // Entity spawning — position resolution, template loading via the
+        // injected `TemplateLoader`, uuid assignment, and the name/group
+        // registrations — is handled by `dispatch_spawn_entity` (issue #715).
+        // Same routing shape as the mission-state arm above.
+        TriggerAction::SpawnEntity { .. } => {
+            return dispatch_spawn_entity(action, context);
         }
 
         // Entity destruction — resolving the target's name to a UUID, then
@@ -931,6 +878,129 @@ fn dispatch_destroy_entity(action: &TriggerAction, context: &DispatchContext) ->
     out
 }
 
+/// Decide what a `SpawnEntity` `TriggerAction` should do.
+///
+/// Owns the single entity-spawn action. Split out of `dispatch_action`
+/// (issue #715), which routes exactly this variant here. Unlike the four
+/// earlier extractions this one also *moved* work into the pure layer:
+/// template loading, previously the applier's job, now goes through
+/// `DispatchContext::template_loader`.
+///
+/// Steps, in order (template before uuid — matching the pre-#710 inline
+/// semantics in `world::server`):
+///
+/// 1. Resolve the spawn position: an inline `position` wins; otherwise
+///    `anchor` is looked up in the origin layer's anchor table (base-world
+///    triggers look only in the base table, layer triggers only in their own
+///    layer's — no fallback between them); otherwise warn + no-op.
+/// 2. Load the template. `None` — missing or malformed; the trait collapses
+///    both — warns and returns with **no command and no inserts**. This is
+///    the contingency gate that used to live in the applier (`spawn_failed`):
+///    registering the name/groups anyway would leave a phantom name → uuid
+///    entry, and a later `DestroyEntity` would emit `WorldEvent::Destroyed`
+///    for an entity that never existed, firing `on_destroyed` triggers for a
+///    ghost.
+/// 3. Draw the uuid from `context.uuid_source` — only after a successful
+///    template load, so a failed spawn does not consume a uuid.
+/// 4. Patch the trigger's `name` into the config, emit the command, and
+///    register name → uuid plus group memberships (unconditional within this
+///    function because step 2 already gated the failure path).
+///
+/// Pure, like `dispatch_action`: reads `context`, mutates nothing, returns a
+/// `DispatchResult`. Called only for the variant above; any other variant is
+/// a routing bug in `dispatch_action` and trips the `unreachable!`.
+fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> DispatchResult {
+    let mut out = DispatchResult::default();
+
+    match action {
+        TriggerAction::SpawnEntity {
+            template_path,
+            name,
+            anchor,
+            position,
+            rotation,
+            scale,
+            groups,
+        } => {
+            // 1. Resolve spawn position. `anchor` looks up in the origin
+            // layer's anchors (or the base world's anchors for a `None`
+            // origin). `position` is used directly.
+            let resolved_position: [f32; 3] = if let Some(pos) = position {
+                *pos
+            } else if let Some(anchor_name) = anchor {
+                let lookup = match &context.origin_layer {
+                    Some(layer_path) => context
+                        .layers
+                        .get(layer_path)
+                        .and_then(|l| l.anchors.get(anchor_name).copied()),
+                    None => context.base_anchors.get(anchor_name).copied(),
+                };
+                match lookup {
+                    Some(p) => p,
+                    None => {
+                        out.warnings.push(format!(
+                            "SpawnEntity '{name}' anchor '{anchor_name}' not found"
+                        ));
+                        return out;
+                    }
+                }
+            } else {
+                out.warnings.push(format!(
+                    "SpawnEntity '{name}' has neither anchor nor position"
+                ));
+                return out;
+            };
+
+            // 2. Load the template — the contingency gate (see doc comment).
+            let Some(mut config) = context.template_loader.load_template(template_path) else {
+                out.warnings.push(format!(
+                    "SpawnEntity '{name}' template '{template_path}' not found"
+                ));
+                return out;
+            };
+
+            // 3. Only a spawn that will actually happen consumes a uuid.
+            let uuid = (context.uuid_source)();
+
+            // 4. Patch the entity name with the trigger's `name` field so the
+            // spawned ECS entity gets EntityName("wave_1") (not the template's
+            // display name like "Harrow Destroyer"). This mirrors what
+            // `spawn_world_entities` does for static `[[entity]]` entries and
+            // is required for `resolve_objective_target` to match Destroy
+            // directives by the scenario name.
+            if !name.is_empty() {
+                config.name = Some(name.clone());
+            }
+
+            out.commands.push(ActionCmd::SpawnEntity {
+                config: Box::new(config),
+                name: name.clone(),
+                uuid: uuid.clone(),
+                position: resolved_position,
+                rotation: *rotation,
+                scale: *scale,
+                layer_path: context.origin_layer.clone(),
+            });
+
+            // Register name → uuid for subsequent triggers, and the entity in
+            // its groups for `OnAllDestroyed` tracking. Unconditional here:
+            // step 2 already returned on the one failure mode that used to
+            // make these contingent.
+            out.name_to_uuid_inserts.push((name.clone(), uuid));
+
+            for g in groups {
+                out.entity_group_inserts.push((g.clone(), name.clone()));
+            }
+        }
+
+        other => {
+            unreachable!("dispatch_spawn_entity called with non-spawn action: {other:?}")
+        }
+    }
+
+    out
+}
+
 // ── Unit Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -945,6 +1015,43 @@ mod tests {
         STUB_UUID.to_string()
     }
 
+    /// Template path the `spawn()` helper names.
+    const DESTROYER_TEMPLATE: &str = "assets/entities/destroyer.toml";
+
+    /// Hand-written `TemplateLoader` fake serving `EntityConfig`s out of a
+    /// map. The dispatch tests need their own local fake (test modules don't
+    /// share the one in `entities::loader::tests`). The `Default` — an empty
+    /// map, i.e. every template missing — is what non-spawn tests carry.
+    #[derive(Default)]
+    struct FakeTemplateLoader {
+        templates: HashMap<String, EntityConfig>,
+    }
+
+    impl TemplateLoader for FakeTemplateLoader {
+        fn load_template(&self, path: &str) -> Option<EntityConfig> {
+            self.templates.get(path).cloned()
+        }
+    }
+
+    /// A minimal template config with a display name, so tests can observe
+    /// the trigger `name` overwriting it (or not, for an empty trigger name).
+    fn destroyer_template() -> EntityConfig {
+        EntityConfig {
+            name: Some("Harrow Destroyer".to_string()),
+            tags: vec!["npc".to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// `destroyer_template()` as `dispatch_spawn_entity` patches and boxes
+    /// it: the trigger's `name` wins over the template's display name.
+    fn patched_destroyer_template(name: &str) -> Box<EntityConfig> {
+        Box::new(EntityConfig {
+            name: Some(name.to_string()),
+            ..destroyer_template()
+        })
+    }
+
     /// Owned backing store for a `DispatchContext`. Tests mutate the public
     /// fields then call `ctx()` to borrow a context out of it.
     #[derive(Default)]
@@ -956,6 +1063,7 @@ mod tests {
         layers: HashMap<String, LayerView>,
         base_anchors: HashMap<String, [f32; 3]>,
         factions: Option<FactionRegistry>,
+        loader: FakeTemplateLoader,
     }
 
     impl Fixture {
@@ -973,11 +1081,21 @@ mod tests {
                 base_anchors: &self.base_anchors,
                 factions: self.factions.as_ref(),
                 uuid_source: &stub_uuid,
+                template_loader: &self.loader,
             }
         }
 
         fn with_entity(mut self, name: &str, uuid: &str) -> Self {
             self.name_to_uuid.insert(name.to_string(), uuid.to_string());
+            self
+        }
+
+        /// Pre-load the destroyer template that `spawn()` names, so the
+        /// spawn arm's template load succeeds.
+        fn with_destroyer(mut self) -> Self {
+            self.loader
+                .templates
+                .insert(DESTROYER_TEMPLATE.to_string(), destroyer_template());
             self
         }
     }
@@ -1022,7 +1140,7 @@ mod tests {
 
     fn spawn(anchor: Option<&str>, position: Option<[f32; 3]>, groups: Vec<&str>) -> TriggerAction {
         TriggerAction::SpawnEntity {
-            template_path: "assets/entities/destroyer.toml".to_string(),
+            template_path: DESTROYER_TEMPLATE.to_string(),
             name: "wave_1".to_string(),
             anchor: anchor.map(str::to_string),
             position,
@@ -1861,19 +1979,18 @@ mod tests {
 
     #[test]
     fn spawn_entity_with_explicit_position() {
-        let fx = Fixture::new();
+        let fx = Fixture::new().with_destroyer();
         let out = dispatch_action(&spawn(None, Some([1.0, 2.0, 3.0]), vec![]), &fx.ctx());
 
         assert_eq!(
             out.commands,
             vec![ActionCmd::SpawnEntity {
-                template_path: "assets/entities/destroyer.toml".to_string(),
+                config: patched_destroyer_template("wave_1"),
                 name: "wave_1".to_string(),
                 uuid: STUB_UUID.to_string(),
                 position: [1.0, 2.0, 3.0],
                 rotation: None,
                 scale: None,
-                groups: vec![],
                 layer_path: None,
             }]
         );
@@ -1887,7 +2004,7 @@ mod tests {
 
     #[test]
     fn spawn_entity_resolves_anchor_from_base_world() {
-        let mut fx = Fixture::new();
+        let mut fx = Fixture::new().with_destroyer();
         fx.base_anchors
             .insert("staging".to_string(), [10.0, 0.0, -5.0]);
         let out = dispatch_action(&spawn(Some("staging"), None, vec![]), &fx.ctx());
@@ -1900,7 +2017,7 @@ mod tests {
 
     #[test]
     fn spawn_entity_resolves_anchor_from_the_origin_layer() {
-        let mut fx = Fixture::new();
+        let mut fx = Fixture::new().with_destroyer();
         fx.origin_layer = Some("sub.toml".to_string());
         let mut sub = layer(None);
         sub.anchors.insert("staging".to_string(), [4.0, 5.0, 6.0]);
@@ -1914,13 +2031,12 @@ mod tests {
         assert_eq!(
             out.commands,
             vec![ActionCmd::SpawnEntity {
-                template_path: "assets/entities/destroyer.toml".to_string(),
+                config: patched_destroyer_template("wave_1"),
                 name: "wave_1".to_string(),
                 uuid: STUB_UUID.to_string(),
                 position: [4.0, 5.0, 6.0],
                 rotation: None,
                 scale: None,
-                groups: vec![],
                 layer_path: Some("sub.toml".to_string()),
             }]
         );
@@ -1928,7 +2044,7 @@ mod tests {
 
     #[test]
     fn spawn_entity_position_wins_over_anchor() {
-        let mut fx = Fixture::new();
+        let mut fx = Fixture::new().with_destroyer();
         fx.base_anchors
             .insert("staging".to_string(), [10.0, 0.0, -5.0]);
         let out = dispatch_action(
@@ -1968,9 +2084,31 @@ mod tests {
         );
     }
 
+    /// The contingency gate (issue #715): a spawn whose template fails to
+    /// resolve must produce NO command and NO name/group inserts — only a
+    /// warning. Before #715 this gate was the applier's `spawn_failed` local,
+    /// exercisable only through a full Bevy app.
+    #[test]
+    fn spawn_entity_template_not_found_warns_and_emits_nothing() {
+        // No `.with_destroyer()`: the loader has no templates at all.
+        let fx = Fixture::new();
+        let out = dispatch_action(&spawn(None, Some([0.0, 0.0, 0.0]), vec!["wave"]), &fx.ctx());
+
+        assert!(out.commands.is_empty());
+        assert!(out.name_to_uuid_inserts.is_empty());
+        assert!(out.entity_group_inserts.is_empty());
+        assert_eq!(
+            out.warnings,
+            vec![
+                "SpawnEntity 'wave_1' template 'assets/entities/destroyer.toml' not found"
+                    .to_string()
+            ]
+        );
+    }
+
     #[test]
     fn spawn_entity_registers_every_group() {
-        let fx = Fixture::new();
+        let fx = Fixture::new().with_destroyer();
         let out = dispatch_action(
             &spawn(None, Some([0.0, 0.0, 0.0]), vec!["wave", "hostiles"]),
             &fx.ctx(),
@@ -1987,9 +2125,9 @@ mod tests {
 
     #[test]
     fn spawn_entity_carries_rotation_and_scale_through() {
-        let fx = Fixture::new();
+        let fx = Fixture::new().with_destroyer();
         let action = TriggerAction::SpawnEntity {
-            template_path: "assets/entities/destroyer.toml".to_string(),
+            template_path: DESTROYER_TEMPLATE.to_string(),
             name: "wave_1".to_string(),
             anchor: None,
             position: Some([0.0, 0.0, 0.0]),
@@ -2011,7 +2149,7 @@ mod tests {
 
     #[test]
     fn spawn_entity_uuid_comes_from_the_injected_source() {
-        let fx = Fixture::new();
+        let fx = Fixture::new().with_destroyer();
         let counter = std::cell::Cell::new(0u32);
         let source = || {
             counter.set(counter.get() + 1);
@@ -3061,5 +3199,268 @@ mod tests {
             path: "worlds/sub.toml".to_string(),
         };
         let _ = dispatch_destroy_entity(&action, &fx.ctx());
+    }
+
+    // ── dispatch_spawn_entity (direct) ────────────────────────────────────
+    //
+    // The tests above drive the SpawnEntity arm through `dispatch_action`,
+    // proving the routing arm delegates. These call `dispatch_spawn_entity`
+    // directly, proving the extracted function is what produces the result
+    // and that the two entry points agree (issue #715). This is also where
+    // the behaviour that MOVED in #715 — template loading behind
+    // `DispatchContext::template_loader`, and the failed-spawn contingency
+    // gate — is pinned.
+
+    #[test]
+    fn spawn_template_loads_with_patched_name_and_inserts_directly() {
+        let fx = Fixture::new().with_destroyer();
+        let out = dispatch_spawn_entity(
+            &spawn(None, Some([1.0, 2.0, 3.0]), vec!["wave", "hostiles"]),
+            &fx.ctx(),
+        );
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::SpawnEntity {
+                    config: patched_destroyer_template("wave_1"),
+                    name: "wave_1".to_string(),
+                    uuid: STUB_UUID.to_string(),
+                    position: [1.0, 2.0, 3.0],
+                    rotation: None,
+                    scale: None,
+                    layer_path: None,
+                }],
+                name_to_uuid_inserts: vec![("wave_1".to_string(), STUB_UUID.to_string())],
+                entity_group_inserts: vec![
+                    ("wave".to_string(), "wave_1".to_string()),
+                    ("hostiles".to_string(), "wave_1".to_string()),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    /// The shipped test for the contingency gate (issue #715): a template
+    /// that fails to resolve produces a warning-only result — no command, no
+    /// name → uuid insert, no group insert. Before #715 this gate lived in
+    /// the applier (`spawn_failed`), where a #710 review flagged it had only
+    /// throwaway coverage.
+    #[test]
+    fn spawn_template_not_found_warns_and_emits_nothing_directly() {
+        // No `.with_destroyer()`: the loader has no templates at all.
+        let fx = Fixture::new();
+        let out =
+            dispatch_spawn_entity(&spawn(None, Some([1.0, 2.0, 3.0]), vec!["wave"]), &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec![
+                    "SpawnEntity 'wave_1' template 'assets/entities/destroyer.toml' not found"
+                        .to_string()
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    /// A failed spawn must not consume a uuid: the source is drawn only
+    /// after the template resolves (template before uuid — the pre-#710
+    /// inline ordering), so failures leave the uuid sequence untouched.
+    #[test]
+    fn spawn_failed_template_load_does_not_consume_a_uuid_directly() {
+        let fx = Fixture::new().with_destroyer();
+        let counter = std::cell::Cell::new(0u32);
+        let source = || {
+            counter.set(counter.get() + 1);
+            format!("uuid-{}", counter.get())
+        };
+        let ctx = DispatchContext {
+            uuid_source: &source,
+            ..fx.ctx()
+        };
+
+        // A template the loader does not know: warns, draws nothing.
+        let missing = TriggerAction::SpawnEntity {
+            template_path: "assets/entities/missing.toml".to_string(),
+            name: "wave_1".to_string(),
+            anchor: None,
+            position: Some([0.0, 0.0, 0.0]),
+            rotation: None,
+            scale: None,
+            groups: vec![],
+        };
+        let out = dispatch_spawn_entity(&missing, &ctx);
+        assert_eq!(out.warnings.len(), 1);
+        assert_eq!(counter.get(), 0, "a failed spawn must not consume a uuid");
+
+        // The next successful spawn draws the FIRST uuid, not the second.
+        let out = dispatch_spawn_entity(&spawn(None, Some([0.0, 0.0, 0.0]), vec![]), &ctx);
+        assert_eq!(
+            out.name_to_uuid_inserts,
+            vec![("wave_1".to_string(), "uuid-1".to_string())]
+        );
+    }
+
+    #[test]
+    fn spawn_anchor_resolves_from_the_origin_layer_directly() {
+        let mut fx = Fixture::new().with_destroyer();
+        fx.origin_layer = Some("sub.toml".to_string());
+        let mut sub = layer(None);
+        sub.anchors.insert("staging".to_string(), [4.0, 5.0, 6.0]);
+        fx.layers.insert("sub.toml".to_string(), sub);
+        // A same-named base anchor must NOT win for a layer-authored trigger.
+        fx.base_anchors
+            .insert("staging".to_string(), [99.0, 99.0, 99.0]);
+
+        let out = dispatch_spawn_entity(&spawn(Some("staging"), None, vec![]), &fx.ctx());
+
+        let ActionCmd::SpawnEntity {
+            position,
+            layer_path,
+            ..
+        } = &out.commands[0]
+        else {
+            panic!("expected SpawnEntity");
+        };
+        assert_eq!(position, &[4.0, 5.0, 6.0]);
+        // Origin-layer tracking: the command records the authoring layer so
+        // the applier attaches the spawn to it for cascade unload.
+        assert_eq!(layer_path, &Some("sub.toml".to_string()));
+    }
+
+    /// Layer-originated triggers look ONLY in their own layer's anchor
+    /// table: a same-named base-world anchor must not rescue a layer trigger
+    /// whose own layer lacks the anchor.
+    #[test]
+    fn spawn_origin_layer_anchor_missing_warns_despite_base_anchor_directly() {
+        let mut fx = Fixture::new().with_destroyer();
+        fx.origin_layer = Some("sub.toml".to_string());
+        fx.layers.insert("sub.toml".to_string(), layer(None)); // no anchors
+        fx.base_anchors
+            .insert("staging".to_string(), [99.0, 99.0, 99.0]);
+
+        let out = dispatch_spawn_entity(&spawn(Some("staging"), None, vec![]), &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["SpawnEntity 'wave_1' anchor 'staging' not found".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn spawn_anchor_resolves_from_the_base_world_directly() {
+        let mut fx = Fixture::new().with_destroyer();
+        fx.base_anchors
+            .insert("staging".to_string(), [10.0, 0.0, -5.0]);
+
+        let out = dispatch_spawn_entity(&spawn(Some("staging"), None, vec![]), &fx.ctx());
+
+        let ActionCmd::SpawnEntity {
+            position,
+            layer_path,
+            ..
+        } = &out.commands[0]
+        else {
+            panic!("expected SpawnEntity");
+        };
+        assert_eq!(position, &[10.0, 0.0, -5.0]);
+        // Base-world origin: no layer to attach the spawn to.
+        assert_eq!(layer_path, &None);
+    }
+
+    #[test]
+    fn spawn_rotation_and_scale_pass_through_directly() {
+        let fx = Fixture::new().with_destroyer();
+        let action = TriggerAction::SpawnEntity {
+            template_path: DESTROYER_TEMPLATE.to_string(),
+            name: "wave_1".to_string(),
+            anchor: None,
+            position: Some([0.0, 0.0, 0.0]),
+            rotation: Some([0.0, 1.57, 0.0]),
+            scale: Some([2.0, 2.0, 2.0]),
+            groups: vec![],
+        };
+        let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+        let ActionCmd::SpawnEntity {
+            rotation, scale, ..
+        } = &out.commands[0]
+        else {
+            panic!("expected SpawnEntity");
+        };
+        assert_eq!(rotation, &Some([0.0, 1.57, 0.0]));
+        assert_eq!(scale, &Some([2.0, 2.0, 2.0]));
+    }
+
+    #[test]
+    fn spawn_registers_every_group_directly() {
+        let fx = Fixture::new().with_destroyer();
+        let out = dispatch_spawn_entity(
+            &spawn(None, Some([0.0, 0.0, 0.0]), vec!["wave", "hostiles"]),
+            &fx.ctx(),
+        );
+
+        assert_eq!(
+            out.entity_group_inserts,
+            vec![
+                ("wave".to_string(), "wave_1".to_string()),
+                ("hostiles".to_string(), "wave_1".to_string()),
+            ]
+        );
+    }
+
+    /// An empty trigger `name` leaves the template's display name in place —
+    /// the patch is conditional on `!name.is_empty()`.
+    #[test]
+    fn spawn_empty_name_keeps_the_template_display_name_directly() {
+        let fx = Fixture::new().with_destroyer();
+        let action = TriggerAction::SpawnEntity {
+            template_path: DESTROYER_TEMPLATE.to_string(),
+            name: String::new(),
+            anchor: None,
+            position: Some([0.0, 0.0, 0.0]),
+            rotation: None,
+            scale: None,
+            groups: vec![],
+        };
+        let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+        let ActionCmd::SpawnEntity { config, .. } = &out.commands[0] else {
+            panic!("expected SpawnEntity");
+        };
+        assert_eq!(config.name, Some("Harrow Destroyer".to_string()));
+    }
+
+    #[test]
+    fn spawn_entity_matches_dispatch_action_routing() {
+        let mut fx = Fixture::new().with_destroyer();
+        fx.origin_layer = Some("sub.toml".to_string());
+        let mut sub = layer(None);
+        sub.anchors.insert("staging".to_string(), [4.0, 5.0, 6.0]);
+        fx.layers.insert("sub.toml".to_string(), sub);
+        let action = spawn(Some("staging"), None, vec!["wave"]);
+
+        // Both entry points must produce byte-identical results.
+        assert_eq!(
+            dispatch_action(&action, &fx.ctx()),
+            dispatch_spawn_entity(&action, &fx.ctx())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch_spawn_entity called with non-spawn action")]
+    fn spawn_entity_on_non_spawn_variant_panics() {
+        // The guard exists so a routing bug in `dispatch_action` fails loudly
+        // rather than silently returning an empty result.
+        let fx = Fixture::new();
+        let action = TriggerAction::UnloadWorld {
+            path: "worlds/sub.toml".to_string(),
+        };
+        let _ = dispatch_spawn_entity(&action, &fx.ctx());
     }
 }

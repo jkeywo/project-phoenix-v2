@@ -1248,6 +1248,11 @@ fn handle_ai_events(
     time: Option<Res<bevy::time::Time>>,
 ) {
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
+    // Template source for `SpawnEntity` dispatch (issue #715), built once per
+    // system run. `WasmTemplateLoader` unconditionally: it serves the
+    // preloaded config cache first and, on native, falls back to the
+    // filesystem — reproducing the old cfg-split inline block on both targets.
+    let template_loader = crate::entity_loader::WasmTemplateLoader;
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {
         world_events.push(WorldEvent::Attacked {
@@ -1536,6 +1541,7 @@ fn handle_ai_events(
                             .unwrap_or(&empty_anchors),
                         factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
                         uuid_source: &crate::entity_loader::assign_uuid,
+                        template_loader: &template_loader,
                     };
                     dispatch_action(action, &ctx)
                 };
@@ -1694,15 +1700,6 @@ fn apply_dispatch_result(
     }
 
     events_out.extend(new_events);
-
-    // `name_to_uuid_inserts` / `entity_group_inserts` are contingent on the
-    // accompanying `SpawnEntity` command actually spawning — template loading is
-    // still the applier's job (issue #715 moves it into the pure layer), so the
-    // pure layer cannot know whether the spawn resolved. Registering a name for
-    // an entity that never spawned would leave a phantom name -> uuid entry, and
-    // a later `DestroyEntity` would then emit `WorldEvent::Destroyed` for a
-    // ghost, firing `on_destroyed` triggers for an entity that never existed.
-    let mut spawn_failed = false;
 
     for cmd in action_cmds {
         match cmd {
@@ -1878,97 +1875,37 @@ fn apply_dispatch_result(
             }
 
             ActionCmd::SpawnEntity {
-                template_path,
-                name,
+                config,
+                name: _,
                 uuid,
                 position,
                 rotation,
                 scale,
-                groups: _,
                 layer_path,
             } => {
-                // Template loading stays here for now (issue #715 moves it into
-                // the pure layer behind a `TemplateLoader`). A failure here is
-                // what makes the name / group registrations contingent.
-                let config_cache = crate::config_cache::get_config_cache();
-                let template_inst = crate::world::config::WorldEntity {
-                    template_path: template_path.clone(),
-                    ..Default::default()
-                };
-                let entity_config = match crate::entity_loader::resolve_entity(
-                    &template_inst,
-                    &config_cache,
-                ) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        // Native fallback: try reading from disk.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            match std::fs::read_to_string(&template_path) {
-                                Ok(toml_str) => {
-                                    match crate::entity_config::EntityConfig::from_toml(&toml_str) {
-                                        Ok(c) => c,
-                                        Err(err) => {
-                                            bevy::log::warn!(
-                                                    "{log_ctx}: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
-                                                );
-                                            spawn_failed = true;
-                                            continue;
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    bevy::log::warn!(
-                                            "{log_ctx}: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
-                                        );
-                                    spawn_failed = true;
-                                    continue;
-                                }
-                            }
-                        }
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            bevy::log::warn!(
-                                    "{log_ctx}: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
-                                );
-                            spawn_failed = true;
-                            continue;
-                        }
-                    }
-                };
-
+                // The template arrives already resolved and name-patched: the
+                // pure layer loaded it via `DispatchContext::template_loader`
+                // and gated the failure path (issue #715), so a command here
+                // always spawns.
                 let pos_vec = Vec3::new(position[0], position[1], position[2]);
-                // Patch the entity name with the trigger's `name` field so the
-                // spawned ECS entity gets EntityName("wave_1") (not the
-                // template's display name like "Harrow Destroyer"). This mirrors
-                // what `spawn_world_entities` does for static `[[entity]]`
-                // entries and is required for `resolve_objective_target` to
-                // match Destroy directives by the scenario name.
-                let mut entity_config = entity_config;
-                if !name.is_empty() {
-                    entity_config.name = Some(name.clone());
-                }
-                let spawned = crate::entity_spawner::spawn_entity(
-                    commands,
-                    &entity_config,
-                    pos_vec,
-                    uuid,
-                    None,
-                );
+                let spawned =
+                    crate::entity_spawner::spawn_entity(commands, &config, pos_vec, uuid, None);
 
                 // Apply optional rotation (XYZ Euler radians) and scale
-                // (per-axis), mirroring `TransformConfig` semantics from the
-                // static `[[entity]]` schema. `spawn_entity` only set
-                // translation; overwrite the whole Transform when either is
-                // supplied.
+                // (per-axis) via the canonical `TransformConfig` conversions —
+                // the same parse-layer helpers the static `[[entity]]` schema
+                // uses. `spawn_entity` only set translation; overwrite the
+                // whole Transform when either is supplied.
                 if rotation.is_some() || scale.is_some() {
-                    let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
-                    let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
-                    let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
+                    let tc = crate::world::config::TransformConfig {
+                        rotation,
+                        scale,
+                        ..Default::default()
+                    };
                     commands.entity(spawned).insert(Transform {
                         translation: pos_vec,
-                        rotation: quat,
-                        scale: Vec3::new(sx, sy, sz),
+                        rotation: tc.quat(),
+                        scale: tc.scale_vec(),
                     });
                 }
 
@@ -2058,13 +1995,15 @@ fn apply_dispatch_result(
         }
     }
 
-    if !spawn_failed {
-        for (name, uuid) in name_to_uuid_inserts {
-            runtime.name_to_uuid.insert(name, uuid);
-        }
-        for (group, name) in entity_group_inserts {
-            runtime.entity_groups.entry(group).or_default().insert(name);
-        }
+    // Both maps arrive already gated: a `SpawnEntity` whose template failed
+    // to resolve returns a warning-only result with no inserts (issue #715
+    // moved that gate into `dispatch_spawn_entity`), so everything here
+    // applies unconditionally.
+    for (name, uuid) in name_to_uuid_inserts {
+        runtime.name_to_uuid.insert(name, uuid);
+    }
+    for (group, name) in entity_group_inserts {
+        runtime.entity_groups.entry(group).or_default().insert(name);
     }
 }
 
@@ -2121,6 +2060,9 @@ fn tick_delayed_actions(
         .collect();
 
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
+    // Same template source as `handle_ai_events` (issue #715): one
+    // `WasmTemplateLoader` per system run, both targets.
+    let template_loader = crate::entity_loader::WasmTemplateLoader;
 
     let mut ready: Vec<DelayedAction> = Vec::new();
     let mut still_pending: Vec<DelayedAction> = Vec::new();
@@ -2151,6 +2093,7 @@ fn tick_delayed_actions(
                     .unwrap_or(&empty_anchors),
                 factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
                 uuid_source: &crate::entity_loader::assign_uuid,
+                template_loader: &template_loader,
             };
             dispatch_action(&pda.action, &ctx)
         };

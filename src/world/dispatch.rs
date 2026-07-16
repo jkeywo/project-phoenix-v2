@@ -449,18 +449,12 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
             }
         }
 
-        TriggerAction::DestroyEntity { entity } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("DestroyEntity: unknown entity name '{entity}'"));
-                return out;
-            };
-            // The event lets chained `on_destroyed` triggers observe the kill;
-            // the command runs the despawn + destruction cascade.
-            out.new_events
-                .push(WorldEvent::Destroyed { uuid: uuid.clone() });
-            out.commands
-                .push(ActionCmd::DestroyEntity { uuid: uuid.clone() });
+        // Entity destruction — resolving the target's name to a UUID, then
+        // emitting the destroy command plus the `Destroyed` event — is
+        // handled by `dispatch_destroy_entity` (issue #714). Same routing
+        // shape as the mission-state arm above.
+        TriggerAction::DestroyEntity { .. } => {
+            return dispatch_destroy_entity(action, context);
         }
     }
 
@@ -894,6 +888,47 @@ fn dispatch_flag_mutation(
         mutation,
     });
     push_flag_transition(&mut out.new_events, &stripped, &target_layer, before, after);
+}
+
+/// Decide what a `DestroyEntity` `TriggerAction` should do.
+///
+/// Owns the single entity-destruction action. Split out of `dispatch_action`
+/// (issue #714), which routes exactly this variant here.
+///
+/// Resolves entity *name* → *UUID* via `context.name_to_uuid` (warn + no-op
+/// on an unknown name), then emits `ActionCmd::DestroyEntity` keyed by UUID
+/// and pushes `WorldEvent::Destroyed` into `new_events` so chained
+/// `on_destroyed` triggers observe the kill. The despawn + destruction
+/// cascade — and the `AiEntityDestroyed` queueing — stay in the applier; see
+/// "Purity boundaries" at the top of this file.
+///
+/// Pure, like `dispatch_action`: reads `context`, mutates nothing, returns a
+/// `DispatchResult`. Called only for the variant above; any other variant is
+/// a routing bug in `dispatch_action` and trips the `unreachable!`.
+fn dispatch_destroy_entity(action: &TriggerAction, context: &DispatchContext) -> DispatchResult {
+    let mut out = DispatchResult::default();
+
+    match action {
+        TriggerAction::DestroyEntity { entity } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("DestroyEntity: unknown entity name '{entity}'"));
+                return out;
+            };
+            // The event lets chained `on_destroyed` triggers observe the kill;
+            // the command runs the despawn + destruction cascade.
+            out.new_events
+                .push(WorldEvent::Destroyed { uuid: uuid.clone() });
+            out.commands
+                .push(ActionCmd::DestroyEntity { uuid: uuid.clone() });
+        }
+
+        other => {
+            unreachable!("dispatch_destroy_entity called with non-destroy action: {other:?}")
+        }
+    }
+
+    out
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────
@@ -2952,5 +2987,79 @@ mod tests {
             path: "worlds/sub.toml".to_string(),
         };
         let _ = dispatch_world_flag_action(&action, &fx.ctx());
+    }
+
+    // ── dispatch_destroy_entity (direct) ──────────────────────────────────
+    //
+    // The tests above drive the DestroyEntity arm through `dispatch_action`
+    // (`destroy_entity_emits_command_and_destroyed_event`,
+    // `destroy_entity_unknown_name_warns_and_emits_nothing`), proving the
+    // routing arm delegates. These call `dispatch_destroy_entity` directly,
+    // proving the extracted function is what produces the result and that
+    // the two entry points agree (issue #714).
+
+    #[test]
+    fn destroy_known_entity_emits_command_and_destroyed_event_directly() {
+        let fx = Fixture::new().with_entity("wave_1", "uuid-wave-1");
+        let action = TriggerAction::DestroyEntity {
+            entity: "wave_1".to_string(),
+        };
+        let out = dispatch_destroy_entity(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::DestroyEntity {
+                    uuid: "uuid-wave-1".to_string()
+                }],
+                new_events: vec![WorldEvent::Destroyed {
+                    uuid: "uuid-wave-1".to_string()
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn destroy_unknown_entity_warns_and_emits_nothing_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::DestroyEntity {
+            entity: "ghost".to_string(),
+        };
+        let out = dispatch_destroy_entity(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["DestroyEntity: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn destroy_entity_matches_dispatch_action_routing() {
+        let fx = Fixture::new().with_entity("wave_1", "uuid-wave-1");
+        let action = TriggerAction::DestroyEntity {
+            entity: "wave_1".to_string(),
+        };
+
+        // Both entry points must produce byte-identical results.
+        assert_eq!(
+            dispatch_action(&action, &fx.ctx()),
+            dispatch_destroy_entity(&action, &fx.ctx())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch_destroy_entity called with non-destroy action")]
+    fn destroy_entity_on_non_destroy_variant_panics() {
+        // The guard exists so a routing bug in `dispatch_action` fails loudly
+        // rather than silently returning an empty result.
+        let fx = Fixture::new();
+        let action = TriggerAction::UnloadWorld {
+            path: "worlds/sub.toml".to_string(),
+        };
+        let _ = dispatch_destroy_entity(&action, &fx.ctx());
     }
 }

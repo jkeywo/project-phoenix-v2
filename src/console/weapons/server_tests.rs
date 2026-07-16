@@ -136,6 +136,7 @@ fn test_app() -> App {
     ))
     .init_resource::<WorldResource>()
     .add_message::<AsteroidDestroyedVfx>()
+    .add_message::<ShipDestroyedVfx>()
     .add_message::<crate::ai_plugin::AiEntityDestroyed>()
     .init_resource::<CurrentPhaserMode>()
     .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
@@ -2497,6 +2498,154 @@ fn phaser_beam_emits_ai_entity_destroyed_on_npc_kill() {
     assert!(
         destroyed_events.0.iter().any(|e| e.entity_uuid == "npc-1"),
         "AiEntityDestroyed must be emitted with entity_uuid 'npc-1' so on_destroyed triggers fire"
+    );
+}
+
+/// `ShipDestroyedVfx` (issue #825) fires alongside `AiEntityDestroyed` on
+/// a phaser kill, at the target's position, falling back to
+/// `DEFAULT_SHIP_EXPLOSION_RADIUS` since `spawn_npc_entity` gives the
+/// target no `ColliderSection`.
+#[test]
+fn phaser_beam_emits_ship_destroyed_vfx_on_npc_kill() {
+    #[derive(Resource, Default)]
+    struct VfxBox(Vec<ShipDestroyedVfx>);
+
+    let mut app = test_app();
+    app.init_resource::<VfxBox>();
+    app.add_systems(
+        bevy::app::Update,
+        |mut r: bevy::ecs::prelude::MessageReader<ShipDestroyedVfx>,
+         mut b: bevy::ecs::prelude::ResMut<VfxBox>| {
+            for ev in r.read() {
+                b.0.push(*ev);
+            }
+        },
+    );
+
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    set_active_beam_damage_accumulator(&mut app, 30.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+    tick(&mut app);
+
+    let vfx = app.world().resource::<VfxBox>();
+    assert!(
+        vfx.0
+            .iter()
+            .any(|e| e.x == 0.0 && e.z == -20.0 && e.radius == DEFAULT_SHIP_EXPLOSION_RADIUS),
+        "ShipDestroyedVfx must fire at the target's position with the \
+         default radius (no ColliderSection on this fixture); got {:?}",
+        vfx.0
+    );
+}
+
+/// `ShipDestroyedVfx` (issue #825) must fire on a blaster kill too.
+/// Before this fix, `handle_blaster_hits` despawned non-local ship
+/// targets silently — no `EntityDespawned`, no `AiEntityDestroyed`, no
+/// VFX — unlike the phaser and torpedo damage paths. Pre-populates the
+/// bank's `in_flight` list directly (rather than simulating multi-tick
+/// projectile travel) so the hit registers on the very first tick.
+#[test]
+fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
+    use crate::entity_spawner::EntityUuid;
+
+    #[derive(Resource, Default)]
+    struct VfxBox(Vec<ShipDestroyedVfx>);
+
+    let mut app = test_app();
+    app.init_resource::<VfxBox>();
+    app.add_systems(
+        bevy::app::Update,
+        |mut r: bevy::ecs::prelude::MessageReader<ShipDestroyedVfx>,
+         mut b: bevy::ecs::prelude::ResMut<VfxBox>| {
+            for ev in r.read() {
+                b.0.push(*ev);
+            }
+        },
+    );
+
+    let target_uuid = "npc-blaster-target";
+
+    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
+        id: "fore".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 360.0,
+        volley_count: 1,
+        volley_interval_secs: 0.1,
+        cooldown_secs: 3.0,
+        charge_time_secs: 0.0,
+        projectile_speed: 40.0,
+        collision_radius: 5.0,
+        visual_scale: 1.0,
+        damage: 50,
+        shield_pierce: 0.0,
+        recoil_impulse: 0.0,
+        screenshake_magnitude: 0.0,
+        marker: None,
+        range: 35.0,
+    });
+    bank.in_flight.push(crate::blaster::BlasterProjectile {
+        id: "proj-1".into(),
+        x: 0.0,
+        z: -20.0,
+        heading: 0.0,
+        speed: 40.0,
+        lifespan_remaining: 5.0,
+        collision_radius: 5.0,
+        damage: 50,
+        shield_pierce: 0.0,
+        source_uuid: "shooter-uuid".into(),
+    });
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        EntityUuid("shooter-uuid".into()),
+        BlasterSystemResource(vec![bank]),
+        Transform::default(),
+    ));
+
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            30.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -20.0),
+    ));
+
+    app.update();
+    app.update(); // second tick allows the message-collector probe to drain it
+
+    let vfx = app.world().resource::<VfxBox>();
+    assert!(
+        vfx.0
+            .iter()
+            .any(|e| e.x == 0.0 && e.z == -20.0 && e.radius == DEFAULT_SHIP_EXPLOSION_RADIUS),
+        "ShipDestroyedVfx must fire on a blaster kill too; got {:?}",
+        vfx.0
     );
 }
 
@@ -6568,6 +6717,7 @@ fn los_test_app() -> App {
         .add_plugins(crate::server_app::AdmissionPlugin)
         .init_resource::<WorldResource>()
         .add_message::<AsteroidDestroyedVfx>()
+        .add_message::<ShipDestroyedVfx>()
         .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .init_resource::<CurrentPhaserMode>()
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(

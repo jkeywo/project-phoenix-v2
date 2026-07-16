@@ -7,7 +7,9 @@
 use bevy::prelude::*;
 
 use super::shared::{system_is_registered, tactical_authorized, TorpedoTargetSnapshot};
-use super::{AsteroidDestroyedVfx, WeaponsTarget};
+use super::{
+    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS,
+};
 use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
@@ -586,6 +588,7 @@ pub(crate) fn build_torpedo_target_snapshot(
 /// guidance/expiry via the [`TorpedoTargetSnapshot`] built earlier this
 /// tick, proximity detonation, shield routing, hull damage, despawn,
 /// broadcasts and VFX events.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_torpedo_lifecycle(
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
@@ -599,10 +602,12 @@ pub(crate) fn tick_torpedo_lifecycle(
         &mut EntitySystemHull,
         Option<&mut crate::ship::shields::ShipShields>,
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
+        Option<&crate::entity_spawner::ColliderSection>,
     )>,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
@@ -722,6 +727,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         let mut non_local_ship_destroyed = false;
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
+        let mut destroyed_ship_radius = DEFAULT_SHIP_EXPLOSION_RADIUS;
 
         for (
             entity,
@@ -730,6 +736,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             mut hull_comp,
             mut shield_comp,
             mut target_arc_hull,
+            collider_opt,
         ) in hull_query.iter_mut()
         {
             let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
@@ -780,6 +787,9 @@ pub(crate) fn tick_torpedo_lifecycle(
                     asteroid_destroyed = true;
                 } else {
                     non_local_ship_destroyed = true;
+                    destroyed_ship_radius = collider_opt
+                        .map(|c| c.0.radius)
+                        .unwrap_or(DEFAULT_SHIP_EXPLOSION_RADIUS);
                 }
                 // Use live position from whichever query matches (asteroid or ship).
                 if is_asteroid {
@@ -814,6 +824,11 @@ pub(crate) fn tick_torpedo_lifecycle(
             world.0.entities.retain(|a| a.uuid != target_uuid);
             destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
                 entity_uuid: target_uuid.clone(),
+            });
+            ship_vfx_events.write(ShipDestroyedVfx {
+                x: hit_x,
+                z: hit_z,
+                radius: destroyed_ship_radius,
             });
             outbox.0.push((
                 Target::All,

@@ -9,9 +9,11 @@ use bevy::prelude::*;
 use super::shared::{
     any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
 };
-use super::WeaponsTarget;
+use super::{
+    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS,
+};
 use crate::ai_plugin::AiTokenRegistry;
-use crate::lobby::{InboundMessage, Sessions, Target};
+use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{ClientMessage, GamePhase, ServerMessage, SystemControlPayload};
 use crate::model_rig::ModelMarkers;
 use crate::ship_plugin::ShipSystemControlSources;
@@ -554,6 +556,11 @@ pub(crate) fn handle_blaster_hits(
     mut commands: Commands,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
+    mut world: ResMut<WorldResource>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
+    collider_q: Query<&crate::entity_spawner::ColliderSection>,
 ) {
     // Build target list from live ECS transforms.
     let mut targets: Vec<(String, f32, f32, f32)> = Vec::new();
@@ -681,6 +688,49 @@ pub(crate) fn handle_blaster_hits(
                     }
                 } else if destroyed {
                     commands.entity(entity).try_despawn();
+                    // Historically silent for non-local targets — neither the
+                    // asteroid ripple nor a client despawn broadcast fired for
+                    // a blaster kill. Bring it in line with the phaser/torpedo
+                    // paths so every weapon type destroys entities the same
+                    // way.
+                    let is_asteroid = ast_uuid.is_some();
+                    let (hit_x, hit_z) = targets
+                        .iter()
+                        .find(|(u, ..)| u == &det.target_uuid)
+                        .map(|(_, x, z, _)| (*x, *z))
+                        .unwrap_or((0.0, 0.0));
+                    world.0.entities.retain(|a| a.uuid != det.target_uuid);
+                    if is_asteroid {
+                        vfx_events.write(AsteroidDestroyedVfx {
+                            x: hit_x,
+                            z: hit_z,
+                        });
+                        outbox.0.push((
+                            Target::All,
+                            ServerMessage::AsteroidDestroyed {
+                                uuid: det.target_uuid.clone(),
+                            },
+                        ));
+                    } else {
+                        destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                            entity_uuid: det.target_uuid.clone(),
+                        });
+                        let radius = collider_q
+                            .get(entity)
+                            .map(|c| c.0.radius)
+                            .unwrap_or(DEFAULT_SHIP_EXPLOSION_RADIUS);
+                        ship_vfx_events.write(ShipDestroyedVfx {
+                            x: hit_x,
+                            z: hit_z,
+                            radius,
+                        });
+                        outbox.0.push((
+                            Target::All,
+                            ServerMessage::EntityDespawned {
+                                uuid: det.target_uuid.clone(),
+                            },
+                        ));
+                    }
                 }
             }
             break; // UUID is unique.

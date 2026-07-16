@@ -16,22 +16,22 @@ Range-gated hailing for the Comms console. Entities opt in via a `[comms].range 
 range = 500.0
 ```
 
-Parsed by `CommsConfig { range: f32 }` in `src/entities/config.rs:542`. Optional field on `EntityConfig`.
+Parsed by `CommsConfig { range: f32 }` in `src/entities/config.rs:1523`. Optional field on `EntityConfig`.
 
 ### ECS
 
-- `CommsRange(pub f32)` Component — `src/comms/component.rs`. Inserted by `entities/spawner.rs` (`src/entities/spawner.rs:198`) when `config.comms.is_some()`.
+- `CommsRange(pub f32)` Component — `src/comms/component.rs`. Inserted by `entities/spawner.rs` (`src/entities/spawner.rs:631`) when `config.comms.is_some()`.
 - Pure helper: `comms::in_range(distance, a, b) -> bool` returns `distance <= a.min(b)` and is false for NaN inputs. `src/comms/range.rs`.
 
 ### Wire
 
-- `CommsContact.in_range: bool` — `src/core/messages.rs:262`.
-- `CommsMessage.sender_in_range: bool` — `src/core/messages.rs:255`.
+- `CommsContact.in_range: bool` — `src/core/messages.rs:493`.
+- `CommsMessage.sender_in_range: bool` — `src/core/messages.rs:467`.
 - Both fields use `#[serde(default = "default_true")]` for backward-compat with older JSON payloads.
 
 ## Server flow
 
-`update_comms_range_flags` (`src/world/server.rs:759`) runs every tick in `SimSet::Broadcast` immediately before `broadcast_comms_state`:
+`update_comms_range_flags` (`src/world/server.rs:1064`) runs every tick in `SimSet::Broadcast` immediately before `broadcast_comms_state`:
 
 1. Reads the player `Ship` Transform + its `CommsRange`.
 2. Walks `Query<(&EntityUuid, &Transform, &CommsRange)>`, computing per-entity `in_range`.
@@ -39,9 +39,9 @@ Parsed by `CommsConfig { range: f32 }` in `src/entities/config.rs:542`. Optional
 4. Prunes flags for despawned entities; prunes contacts whose entity lost (or never had) a `CommsRange` component (this is what excludes `[[comms]]`-template entries without a `[comms]` block).
 5. Sets `needs_broadcast = true` on any flip so `CommsState` re-broadcasts even when the inbox is clean.
 
-`broadcast_comms_state` (`src/world/server.rs:875`) then stamps `m.sender_in_range` per message from `range_flags`; missing UUIDs default to `false` when `range_active == true`.
+`broadcast_comms_state` (`src/world/server.rs:1164`) then stamps `m.sender_in_range` per message from `range_flags`; missing UUIDs default to `false` when `range_active == true`.
 
-New `CommsMessage` instances are stamped at injection time via `current_sender_in_range(&runtime, &sender_uuid)` (`src/world/server.rs:60`) — belt-and-braces so the field is correct from the moment the message lands, not only after the next broadcast.
+New `CommsMessage` instances are stamped at injection time via `current_sender_in_range(&runtime, &sender_uuid)` (`src/console/comms/server.rs:97`) — belt-and-braces so the field is correct from the moment the message lands, not only after the next broadcast.
 
 ### `range_active` semantics
 
@@ -51,14 +51,14 @@ While `range_active == false` (lobby phase, pure-handler tests), range gating is
 
 ## Server enforcement
 
-`handle_hail` and `handle_respond_to_message` (`src/world/server.rs:548`, `:648`) both reject the message when `range_active == true` and the target/sender's `range_flags` entry is missing or `false`. This means a stale or malicious client cannot bypass the gate.
+`handle_hail` and `handle_respond_to_message` (`src/console/comms/server.rs:113`, `:235` — relocated from `src/world/server.rs` in #608) both reject the message when `range_active == true` and the target/sender's `range_flags` entry is missing or `false`. This means a stale or malicious client cannot bypass the gate.
 
 ## Client UI
 
 `src/console/comms/client.rs` `refresh_all_comms_ui`:
 
 - **Contacts strip** — out-of-range contacts are **hidden** (not greyed). Empty state shows "All contacts out of range".
-- **Inbox rows** — sticky: every message stays. When `!sender_in_range`, the row appends an alert-red `[OUT OF RANGE]` tag (colour `Color::srgb(1.0, 0.2, 0.267)`, matching `COLOR_ALERT_RED` from `src/server/viewscreen_border.rs:119`).
+- **Inbox rows** — sticky: every message stays. When `!sender_in_range`, the row appends an alert-red `[OUT OF RANGE]` tag (colour `Color::srgb(1.0, 0.2, 0.267)`).
 - **Chat panel** — when viewing a message whose sender is out of range, response buttons are replaced with a disabled label. `detect_comms_clicks` also rejects clicks on those buttons.
 
 ## Values today
@@ -84,5 +84,6 @@ Default world has ship at `(150, 0, 0)`, Starbase at `(500, 0, 0)` → distance 
 - `src/core/messages.rs`, `src/core/codec.rs`
 - `src/entities/config.rs`, `src/entities/spawner.rs`
 - `src/world/server.rs`
+- `src/console/comms/server.rs` (handle_hail / handle_respond_to_message / current_sender_in_range)
 - `src/console/comms/client.rs`, `src/client_comms.rs`
 - `assets/entities/player_ship.toml`, `station_outpost.toml`, `pirate_raider.toml`

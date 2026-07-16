@@ -28,7 +28,7 @@ Both plugins expose a builder-style `register()` method and implement `bevy::Plu
 
 ## Key types
 
-### Audience (`src/core/broadcast/audience.rs:7`)
+### Audience (`src/core/broadcast/audience.rs:8`)
 
 ```rust
 pub enum Audience {
@@ -94,27 +94,27 @@ The broadcaster implements `bevy::Plugin` with `is_unique() -> false`, so you ca
 
 ## Complete catalogue of registered producers
 
-All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` write happens through a broadcaster-registered producer — either directly via the dispatch loop's `world.write_message(OutboundMessage { ... })` (`src/core/broadcast/sim.rs:183`, `src/core/broadcast/lobby.rs:174`) or inside a producer closure that is exclusively called by that dispatch.
+All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` write happens through a broadcaster-registered producer — either directly via the dispatch loop's `world.write_message(OutboundMessage { ... })` (`src/core/broadcast/sim.rs:189`, `src/core/broadcast/lobby.rs:188`) or inside a producer closure that is exclusively called by that dispatch.
 
 ### SimBroadcaster (game phase = `InProgress`)
 
 | Producer | Message(s) | Audience | Cadence | Registered in | Delivers as |
 |---|---|---|---|---|---|
-| `power_state_broadcaster` | `PowerState` | `Holding(StationId("power"))` | `Hz(10.0)` | `src/ship/power.rs:144` | Snapshot (via `sim_outbox_broadcaster`) |
-| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(StationId("tactical"))` | `Hz(10.0)` | `src/console/weapons/server.rs:2738` | Snapshot (via `sim_outbox_broadcaster`) |
-| `repair_state_broadcaster` | `RepairState` | `Holding(StationId("repair"))` | `Hz(10.0)` | `src/console/repair/server.rs:52` | Snapshot (via `sim_outbox_broadcaster`) |
-| `sim_state_broadcaster` | `SimState` + `SystemHullUpdate` | `All` | `Hz(10.0)` | `src/server_app.rs:362` | Snapshot |
-| `modifier_events_broadcaster` | `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `src/server_app.rs:603` | Reliable |
-| `sim_outbox_broadcaster` | Drain of `SimOutbox` (see below) | `All` (placeholder) | `OnEvent` | `src/server_app.rs:642` | Per-message via `delivery_class_for_msg()` |
+| `power_state_broadcaster` | `PowerState` | `Holding(StationId("power"))` | `Hz(10.0)` | `src/ship/power.rs:216` | Snapshot (via `sim_outbox_broadcaster`) |
+| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(StationId("tactical"))` | `Hz(10.0)` | `src/console/weapons/server.rs:4484` | Snapshot (via `sim_outbox_broadcaster`) |
+| `repair_state_broadcaster` | `RepairState` | `Holding(StationId("repair"))` | `Hz(10.0)` | `src/console/repair/server.rs:147` | Snapshot (via `sim_outbox_broadcaster`) |
+| `sim_state_broadcaster` | `SimState` + `SystemHullUpdate` | `All` | `Hz(10.0)` | `src/server_app.rs:381` | Snapshot |
+| `modifier_events_broadcaster` | `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `src/server_app.rs:622` | Reliable |
+| `sim_outbox_broadcaster` | Drain of `SimOutbox` (see below) | `All` (placeholder) | `OnEvent` | `src/server_app.rs:661` | Per-message via `delivery_class_for_msg()` |
 
-The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/server_app.rs:642`) is a special forwarding producer that drains `SimOutbox` — a `Vec<(Target, ServerMessage)>` resource written by simulation systems that need to emit arbitrary-target messages (entity spawn/despawn, torpedo events, shield status, world setup, comms state, objective summaries). It is the only producer that sets `delivery` per message via `delivery_class_for_msg()` (`src/server_app.rs:664`), which classifies high-frequency state pushes as `Snapshot` and everything else as `Reliable`. The producer writes each entry directly via `world.write_message(OutboundMessage { ... })` and returns an empty `Vec`. Messages currently routed through `SimOutbox`:
+The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/server_app.rs:661`) is a special forwarding producer that drains `SimOutbox` — a `Vec<(Target, ServerMessage)>` resource written by simulation systems that need to emit arbitrary-target messages (entity spawn/despawn, torpedo events, shield status, world setup, comms state, objective summaries). It is the only producer that sets `delivery` per message via `delivery_class_for_msg()` (`src/server_app.rs:683`), which classifies high-frequency state pushes as `Snapshot` and everything else as `Reliable`. The producer writes each entry directly via `world.write_message(OutboundMessage { ... })` and returns an empty `Vec`. Messages currently routed through `SimOutbox`:
 
 | Source system | Message(s) | Target | Location | Delivers as |
 |---|---|---|---|---|
-| `broadcast_shield_status` | `ShieldStatus` | `All` | `src/server_app.rs:1055` | Snapshot |
-| `broadcast_world_setup_on_start` | `WorldSetup` | `All` | `src/server_app.rs:1390` | Reliable |
-| `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/world/server.rs:1016` | Reliable |
-| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:1075` | Reliable |
+| `broadcast_shield_status` | `ShieldStatus` | `All` | `src/server_app.rs:1094` | Snapshot |
+| `broadcast_world_setup_on_start` | `WorldSetup` | `All` | `src/server_app.rs:1443` | Reliable |
+| `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/world/server.rs:1164` | Reliable |
+| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:1223` | Reliable |
 | Torpedo systems | `TorpedoLaunched` | `All` via `SimOutbox` | `src/console/weapons/server.rs` | Reliable |
 | `asteroid_spawn` / `update_asteroid_window` | `EntitySpawned` / `EntityDespawned` | `All` via `SimOutbox` | `asteroids/lifecycle.rs` | Reliable |
 | Phaser / damage systems | `PhaserFired`, `AsteroidDestroyed`, etc. | `All` via `SimOutbox` | `src/console/weapons/server.rs` | Reliable |
@@ -123,9 +123,9 @@ The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/server_app.rs:642`) is 
 
 | Producer | Message(s) | Audience | Cadence | Registered in |
 |---|---|---|---|---|
-| `lobby_outbox_broadcaster` | Drain of `LobbyOutbox` (see below) | `All` (placeholder) | `OnEvent` | `lobby/server.rs:179` |
+| `lobby_outbox_broadcaster` | Drain of `LobbyOutbox` (see below) | `All` (placeholder) | `OnEvent` | `lobby/server.rs:712` |
 
-The `LobbyOutbox` producer (`lobby_outbox_broadcaster`, `lobby/server.rs:179`) parallels the `SimOutbox` pattern. It drains `LobbyOutbox` — written by `lobby_handler::process_message()` and `handle_disconnect` systems. Messages routed through `LobbyOutbox`:
+The `LobbyOutbox` producer (`lobby_outbox_broadcaster`, `lobby/server.rs:712`) parallels the `SimOutbox` pattern. It drains `LobbyOutbox` — written by `lobby_handler::process_message()` and `handle_disconnect` systems. Messages routed through `LobbyOutbox`:
 
 | ServerMessage | Target | Notes |
 |---|---|---|
@@ -138,7 +138,7 @@ The `LobbyOutbox` producer (`lobby_outbox_broadcaster`, `lobby/server.rs:179`) p
 
 ## Contract: OutboundMessage is written ONLY through the broadcaster
 
-`OutboundMessage` (`src/lobby/server.rs:66`) is the Bevy `Message` that carries a `(Target, ServerMessage, DeliveryClass)` triple to the JS bridge:
+`OutboundMessage` (`src/lobby/server.rs:96`) is the Bevy `Message` that carries a `(Target, ServerMessage, DeliveryClass)` triple to the JS bridge:
 
 ```rust
 pub struct OutboundMessage {
@@ -155,7 +155,7 @@ The rule is:
 All outbound traffic flows through one of two paths:
 
 1. **Broadcaster dispatch loop** — `src/core/broadcast/sim.rs:189` and `src/core/broadcast/lobby.rs:188` write messages returned by registered producers. Each producer closure is called inside a pre-resolved audience context; the dispatch loop writes the `OutboundMessage` with `delivery: DeliveryClass::Reliable` (the producers themselves don't set delivery).
-2. **Forwarding producer closures** — `src/server_app.rs:642` (`sim_outbox_broadcaster`) calls `delivery_class_for_msg()` (`src/server_app.rs:664`) to set per-message delivery, and `src/lobby/server.rs:511` (`drain_lobby_outbox`) hardcodes `DeliveryClass::Reliable` for all lobby messages.
+2. **Forwarding producer closures** — `src/server_app.rs:661` (`sim_outbox_broadcaster`) calls `delivery_class_for_msg()` (`src/server_app.rs:683`) to set per-message delivery, and `src/lobby/server.rs:696` (`drain_lobby_outbox`) hardcodes `DeliveryClass::Reliable` for all lobby messages.
 
 This means a codebase grep for `write_message.*OutboundMessage` should only hit files under `src/core/broadcast/`, `src/server_app.rs`, and `src/lobby/server.rs`.
 
@@ -163,10 +163,10 @@ This means a codebase grep for `write_message.*OutboundMessage` should only hit 
 
 The following Bevy systems still write to `SimOutbox` (not `OutboundMessage` directly — the contract holds) but use the old hand-written pattern (own gating + timer + audience resolution). They are candidates for future migration to direct `SimBroadcaster` registrations:
 
-- `broadcast_shield_status` (`src/server_app.rs:1055`)
-- `broadcast_world_setup_on_start` (`src/server_app.rs:1390`)
-- `broadcast_comms_state` (`src/world/server.rs:1016`)
-- `broadcast_objective_summary` (`src/world/server.rs:1075`)
+- `broadcast_shield_status` (`src/server_app.rs:1094`)
+- `broadcast_world_setup_on_start` (`src/server_app.rs:1443`)
+- `broadcast_comms_state` (`src/world/server.rs:1164`)
+- `broadcast_objective_summary` (`src/world/server.rs:1223`)
 
 Each could be replaced by a `SimBroadcaster` registration that produces the same `ServerMessage` at the right cadence, eliminating the hand-written gating and timer.
 
@@ -204,5 +204,5 @@ A sixth cache, `LastWeaponsUpdate` (`src/console/weapons/server.rs`), stays defi
 ## Registration points
 
 - `src/bridge.rs` & `src/server/bridge.rs` — `LobbyBroadcaster` / `LobbyOutboxPlugin` registered alongside `LobbyPlugin`.
-- `src/server_app.rs:326-332` — registers all six `SimBroadcaster` producers (`add_simulation_plugins` function, `SimSet` scheduling).
-- `src/lobby/server.rs:507` — `LobbyOutboxPlugin::build` registers `drain_lobby_outbox` after `process_lobby`.
+- `src/server_app.rs:346`–`:351` — `add_simulation_plugins` registers `weapons_update_broadcaster`, `sim_state_broadcaster`, `modifier_events_broadcaster`, and `sim_outbox_broadcaster`; `power_state_broadcaster` and `repair_state_broadcaster` register inside their own plugins (`src/ship/power.rs:201`, `src/console/repair/server.rs:134`).
+- `src/lobby/server.rs:690` — `LobbyOutboxPlugin::build` registers `drain_lobby_outbox` after `process_lobby`.

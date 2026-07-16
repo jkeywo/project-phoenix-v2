@@ -2,8 +2,8 @@
 title: Objectives
 type: concept
 tags: [world, objectives, ai, captain, gui]
-sources: [src/objectives.rs, src/world/server.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
-updated: 2026-07-14
+sources: [src/objectives.rs, src/world/server.rs, src/world/dispatch.rs, src/console/comms/server.rs, src/console/captain/server.rs, src/ai/core.rs, assets/worlds/combat_test.toml]
+updated: 2026-07-16
 ---
 
 # Objectives

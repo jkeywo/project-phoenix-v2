@@ -3,7 +3,7 @@ title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot]
 sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, assets/worlds/default.toml]
-updated: 2026-07-14
+updated: 2026-07-16
 ---
 
 # World Data
@@ -21,7 +21,7 @@ seed = 42
 [global]
 seed = 42                                # optional global block; merged into WorldConfig
 
-[ambient_light]                          # src/world/config.rs:115
+[ambient_light]                          # src/world/config.rs:113
 color = [0.6, 0.55, 0.5]                 # sRGB; default Color::srgb(0.6, 0.55, 0.5)
 brightness = 300.0                       # default 300.0
 
@@ -29,7 +29,7 @@ brightness = 300.0                       # default 300.0
 name = "starbase"
 position = [0.0, 0.0, 0.0]               # normalised to [f32; 3]
 
-[[entity]]                               # src/world/config.rs:142
+[[entity]]                               # src/world/config.rs:276
 template = "assets/entities/station_axiom.toml"
 name = "axiom"                           # optional; overrides EntityConfig.name
 transform = { anchor = "starbase", offset = [10.0, 0.0, 0.0] }
@@ -51,9 +51,9 @@ Layered-world resolution is also proposed to grow beyond the current flag-only `
 
 World comms retain a sender reference for runtime resolution and carry separate sender display text. Every message still goes to the ship Comms system; world files do not define per-role message visibility.
 
-## TransformConfig (`src/world/config.rs:48`)
+## TransformConfig (`src/world/config.rs:46`)
 
-Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` and `resolve_entity_position_with` at `src/world/config.rs:752`):
+Single struct replaces the old flat `position` / `anchor` / `relative_to` / `offset` fields on `WorldEntity`. Resolution precedence (see `TransformConfig::resolve` at `src/world/config.rs:80` and `resolve_entity_position_with` at `src/world/config.rs:1734`):
 
 1. `relative_to = "<entity-name>" + offset` — resolved against a previously-spawned named entity
 2. `anchor = "<anchor-name>" + offset` — resolved against a `[[anchor]]`
@@ -64,14 +64,14 @@ Additional fields:
 - `rotation: [f32; 3]` — XYZ Euler radians, applied via `Quat::from_euler(EulerRot::XYZ, x, y, z)`. Default `[0, 0, 0]`.
 - `scale: [f32; 3]` — uniform-per-axis scale; default `[1, 1, 1]`. **Scale lives only on `TransformConfig`**; there is no `EntityConfig.scale` field.
 
-## AmbientLightConfig (`src/world/config.rs:115`)
+## AmbientLightConfig (`src/world/config.rs:113`)
 
-Optional top-level `[ambient_light]` block on the world TOML. Applied by the `spawn_world_ambient_light` system (`src/server/renderer.rs:209`, registered in `PostStartup` at `src/server/renderer.rs:91`) after `insert_world_config_resource` (`src/world/server.rs:152`) has placed the `WorldConfig` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`.
+Optional top-level `[ambient_light]` block on the world TOML. Applied by the `spawn_world_ambient_light` system (`src/server/renderer.rs:296`, registered in `PostStartup` at `src/server/renderer.rs:94`) after `insert_world_config_resource` (`src/world/server.rs:391`) has placed the `WorldConfig` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`.
 
 ## EntityConfig name + lights
 
-- `EntityConfig.name: Option<String>` (`src/entities/config.rs:640`) is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component (`src/entities/spawner.rs:22`).
-- `[[light]]` array-of-tables on `EntityConfig` (`src/entities/config.rs`) spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. Collected into the `Lights` component (`src/entities/spawner.rs:28`) and instantiated by `render_spawned_entities` (`src/server_app.rs:1147`).
+- `EntityConfig.name: Option<String>` (`src/entities/config.rs:1693`) is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component (`src/entities/spawner.rs:22`).
+- `[[light]]` array-of-tables on `EntityConfig` (`src/entities/config.rs`) spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. Collected into the `Lights` component (`src/entities/spawner.rs:28`) and instantiated by `render_spawned_entities` (`src/server_app.rs:2966`).
 - `[mesh].emissive: Option<f32>` on `EntityConfig` controls the StandardMaterial emissive multiplier (renderer default `0.4`; star templates use `2.0`).
 
 ## Lifecycle

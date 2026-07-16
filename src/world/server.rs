@@ -2272,14 +2272,6 @@ pub(crate) fn build_uuid_to_faction(
     map
 }
 
-/// Bundle of system params used by the two trigger-dispatch sites for
-/// the `add_faction_enemy` / `remove_faction_enemy` actions. Grouping
-/// these keeps both `tick_trigger_pipeline` and `handle_respond_to_message`
-/// under Bevy's per-system parameter cap (16).
-///
-/// `registry` is `Option<ResMut<_>>` so test apps that don't insert
-/// `FactionRegistryResource` (most of `world::server::tests`) still load
-/// the systems without a "resource does not exist" panic. Production
 /// Bundles the optional world-layer mutation resources used by
 /// `handle_respond_to_message` and `tick_trigger_pipeline` into a single
 /// `SystemParam` so both functions stay within Bevy's 16-parameter limit.
@@ -2318,6 +2310,14 @@ pub struct AiEventReaders<'w, 's> {
     pub waypoint_reached: MessageReader<'w, 's, crate::ai_plugin::AiWaypointReached>,
 }
 
+/// Bundle of system params used by the two trigger-dispatch sites for
+/// the `add_faction_enemy` / `remove_faction_enemy` actions. Grouping
+/// these keeps both `tick_trigger_pipeline` and `handle_respond_to_message`
+/// under Bevy's per-system parameter cap (16).
+///
+/// `registry` is `Option<ResMut<_>>` so test apps that don't insert
+/// `FactionRegistryResource` (most of `world::server::tests`) still load
+/// the systems without a "resource does not exist" panic. Production
 /// builds always insert the registry via `init_world_runtime`, so the
 /// `None` branch is a test-only safety net that logs and skips the
 /// action.
@@ -6524,6 +6524,549 @@ entity = "layer_npc"
         assert!(
             runtime.contacts.iter().all(|c| !c.in_range),
             "all contacts must be out of range after ship despawn"
+        );
+    }
+
+    // -- Issue #717: trigger-pipeline edge cases ------------------------------
+
+    /// (#717) An empty world — no triggers, no entities, no queued events —
+    /// must flow through the collect → inject → pipeline chain as a pure
+    /// no-op: nothing panics, no state appears, and (pinning the #716/#718
+    /// change-detection discipline) neither `WorldContentRuntime` nor
+    /// `WorldEventBuffer` is marked changed on an event-free tick.
+    #[test]
+    fn tick_trigger_pipeline_is_a_noop_on_an_empty_world() {
+        #[derive(Resource, Default)]
+        struct ChangeProbe {
+            runtime_changed: bool,
+            buffer_changed: bool,
+        }
+
+        fn probe(
+            runtime: Res<WorldContentRuntime>,
+            buffer: Res<WorldEventBuffer>,
+            mut out: ResMut<ChangeProbe>,
+        ) {
+            out.runtime_changed = runtime.is_changed();
+            out.buffer_changed = buffer.is_changed();
+        }
+
+        // Deliberately bare — no TimePlugin (so no `TimerElapsed` synthesis)
+        // and no Lobby/Ai plugin systems that might touch the probed
+        // resources. This is the "minimal test apps without TimePlugin" shape
+        // the pipeline's docs promise keeps working.
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>()
+            .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<WorldEventBuffer>()
+            .init_resource::<ChangeProbe>()
+            .add_message::<CommsChannel2Event>()
+            .add_message::<crate::ai_plugin::AiEntityAttacked>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai_plugin::AiWaypointReached>()
+            .add_systems(
+                Update,
+                (
+                    collect_world_events,
+                    inject_comms_templates,
+                    tick_trigger_pipeline,
+                    probe,
+                )
+                    .chain(),
+            );
+
+        // First tick: the probe sees everything "changed" because the
+        // resources were freshly inserted — it only proves nothing panics.
+        app.update();
+        // Second tick is the discriminating one: with no events and no
+        // triggers none of the three systems may mutably dereference the
+        // resources, so the probe must see them unchanged.
+        app.update();
+
+        let probe_out = app.world().resource::<ChangeProbe>();
+        assert!(
+            !probe_out.runtime_changed,
+            "an event-free tick must not mark WorldContentRuntime changed"
+        );
+        assert!(
+            !probe_out.buffer_changed,
+            "an event-free tick must not mark WorldEventBuffer changed"
+        );
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.trigger_states.is_empty(),
+            "no trigger state may appear"
+        );
+        assert!(
+            runtime.pending_world_events.is_empty(),
+            "no world events may be synthesised from nothing"
+        );
+        assert!(
+            app.world().resource::<WorldEventBuffer>().0.is_empty(),
+            "the buffer must stay empty"
+        );
+        assert!(
+            app.world()
+                .resource::<ObjectiveManagerRes>()
+                .0
+                .sorted_snapshots()
+                .is_empty(),
+            "no objectives may appear"
+        );
+    }
+
+    /// (#717) A trigger chain longer than `MAX_CHAIN_PASSES` must be cut off
+    /// at the cap (with a warning) instead of hanging the frame. Builds a
+    /// linear chain of `MAX_CHAIN_PASSES + 2` single-shot triggers: the seed
+    /// fires on the external `WorldLoaded` event and sets `chain_1`; link `i`
+    /// fires on `on_flag_set chain_i` and sets `chain_{i+1}`. Each pass of
+    /// the within-tick chaining loop advances the chain by exactly one link,
+    /// so the observable cut is: `chain_1..=chain_MAX` set (that much
+    /// dispatch work happened), `chain_{MAX+1}` never set (the cap broke the
+    /// loop before pass MAX+1), and the corresponding trigger never consumed.
+    #[test]
+    fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
+        let mut app = ai_trigger_test_app();
+        let chain_len = (MAX_CHAIN_PASSES + 2) as usize;
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            let mk = |condition, flag_to_set: String| TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition,
+                    actions: vec![TriggerAction::SetWorldFlag { name: flag_to_set }],
+                    when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+            };
+            let mut states = vec![mk(TriggerCondition::OnWorldLoaded, "chain_1".to_string())];
+            for i in 1..chain_len {
+                states.push(mk(
+                    TriggerCondition::OnFlagSet {
+                        name: format!("chain_{i}"),
+                    },
+                    format!("chain_{}", i + 1),
+                ));
+            }
+            runtime.trigger_states = states;
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        // A single update must terminate — the cap is what guarantees it.
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let max = MAX_CHAIN_PASSES as usize;
+        for i in 1..=max {
+            assert_eq!(
+                runtime.flags.counter(&format!("chain_{i}")),
+                1,
+                "pass {i} of the chaining loop must set chain_{i}"
+            );
+        }
+        assert_eq!(
+            runtime.flags.counter(&format!("chain_{}", max + 1)),
+            0,
+            "the MAX_CHAIN_PASSES cap must stop the chain before pass {}",
+            max + 1
+        );
+        assert!(
+            !runtime.trigger_states[max].fired,
+            "the link past the cap must never fire (its flag never got set)"
+        );
+    }
+
+    /// (#717) The per-trigger flag-store chain that `tick_trigger_pipeline`
+    /// builds for condition evaluation must fall back to the BASE store when
+    /// the trigger's `origin_layer` is missing from `WorldLayerMap`. The
+    /// `when` predicate here only passes if the chain's first entry is the
+    /// base store — an empty stand-in store would read `armed` as unset and
+    /// suppress the trigger. The layer map is deliberately non-empty so the
+    /// fallback is proven per-entry, not merely "map absent".
+    ///
+    /// The pure dispatch-layer twins of this behaviour (the `parent:` walk
+    /// inside `dispatch_world_flag_action`) are
+    /// `dispatch::tests::flag_layer_missing_mid_walk_is_silent_and_treated_as_base`
+    /// / `world_flag_layer_missing_mid_walk_is_silent_and_treated_as_base_directly`,
+    /// and the final-lookup-missing abort is
+    /// `flag_target_layer_missing_from_map_warns_and_emits_nothing`. This
+    /// test drives the Bevy-side chain builder those tests cannot reach.
+    #[test]
+    fn trigger_from_layer_missing_in_layer_map_reads_base_flags() {
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>();
+        {
+            let mut layer_map = app.world_mut().resource_mut::<WorldLayerMap>();
+            layer_map.0.insert(
+                "assets/worlds/unrelated.toml".to_string(),
+                WorldRuntime::default(),
+            );
+        }
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.flags.set_flag("armed"); // set in the BASE store only
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnWorldLoaded,
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "obj-ghost-layer".into(),
+                        text: "Fired despite the missing layer".into(),
+                        mandatory: false,
+                        targets: vec![],
+                        directive: crate::messages::AiDirective::None,
+                        utility: crate::objectives::UtilityConfig::default(),
+                        source: crate::messages::ObjectiveSource::default(),
+                    }],
+                    when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                },
+                fired: false,
+                // Not present in WorldLayerMap — e.g. state surviving an
+                // unload. The chain builder must treat it as the base world.
+                origin_layer: Some("assets/worlds/ghost.toml".to_string()),
+                seen_destroyed: HashSet::new(),
+            }];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-ghost-layer"),
+            "a missing origin layer must fall back to the base flag store, \
+             so the base-store `armed` flag must satisfy the when predicate"
+        );
+    }
+
+    /// (#717) One trigger whose action list carries every `TriggerAction`
+    /// variant (all 21) must dispatch them in LIST ORDER, each result applied
+    /// before the next action is dispatched. Order is observed through
+    /// order-sensitive pairs rather than instrumentation:
+    ///
+    /// * `AddObjective` → `CompleteObjective`/`FailObjective`: complete/fail
+    ///   only transition Active objectives, so the final statuses prove the
+    ///   adds ran first.
+    /// * `Apply*` → `Remove*` (float / int / flag modifiers): the removes
+    ///   only find what the applies wrote, so baseline end values prove
+    ///   apply-before-remove.
+    /// * `SetWorldFlag` → `ClearWorldFlag` on one flag: against the live
+    ///   store this emits `FlagSet` then `FlagCleared`; the chained
+    ///   `on_flag_cleared` trigger firing proves the order (a clear-first
+    ///   order would emit no `FlagCleared` transition at all).
+    /// * `SetWorldFlagValue(40)` → `IncrementWorldFlag(+2)`: final counter 42
+    ///   (the reverse order would end at 40).
+    /// * `AddFactionEnemy` → `RemoveFactionEnemy` of the same pair: final
+    ///   relationship is neutral (the reverse order would leave it hostile).
+    /// * `LoadWorld` → `UnloadWorld`: `PendingWorldLayerChanges` preserves
+    ///   push order positionally.
+    /// * `SpawnEntity` / `DestroyEntity` / `SetAiState` (warn no-op) and the
+    ///   trailing `GameOver` are asserted by their individual effects.
+    #[test]
+    fn single_trigger_dispatches_every_action_variant_in_list_order() {
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .init_resource::<crate::simulation::GameOverReason>();
+
+        // Target for the six per-entity modifier actions.
+        let target = app
+            .world_mut()
+            .spawn((
+                EntityUuid("allvar-target-uuid".to_string()),
+                crate::modifiers::ShipModifiers::new(),
+            ))
+            .id();
+        // Victim for DestroyEntity.
+        let victim = app
+            .world_mut()
+            .spawn((
+                EntityUuid("allvar-victim-uuid".to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("target_ship".into(), "allvar-target-uuid".into());
+            runtime
+                .name_to_uuid
+                .insert("victim".into(), "allvar-victim-uuid".into());
+            let all_variants = vec![
+                TriggerAction::AddObjective {
+                    id: "obj-alpha".into(),
+                    text: "Add then complete".into(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                },
+                TriggerAction::CompleteObjective {
+                    id: "obj-alpha".into(),
+                },
+                TriggerAction::AddObjective {
+                    id: "obj-beta".into(),
+                    text: "Add then fail".into(),
+                    mandatory: false,
+                    targets: vec![],
+                    directive: crate::messages::AiDirective::None,
+                    utility: crate::objectives::UtilityConfig::default(),
+                    source: crate::messages::ObjectiveSource::default(),
+                },
+                TriggerAction::FailObjective {
+                    id: "obj-beta".into(),
+                },
+                TriggerAction::SetAiState {
+                    entity: "target_ship".into(),
+                    state: "attack".into(),
+                    target: None,
+                },
+                TriggerAction::ApplyModifier {
+                    entity: "target_ship".into(),
+                    tag: "boost".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    bonus: 2.0,
+                },
+                TriggerAction::ApplyIntModifier {
+                    entity: "target_ship".into(),
+                    tag: "crew".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                    bonus: 3,
+                },
+                TriggerAction::ApplyFlag {
+                    entity: "target_ship".into(),
+                    tag: "jammer".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+                TriggerAction::RemoveModifier {
+                    entity: "target_ship".into(),
+                    tag: "boost".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                },
+                TriggerAction::RemoveIntModifier {
+                    entity: "target_ship".into(),
+                    tag: "crew".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                },
+                TriggerAction::RemoveFlag {
+                    entity: "target_ship".into(),
+                    tag: "jammer".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+                TriggerAction::SetWorldFlag {
+                    name: "ordered".into(),
+                },
+                TriggerAction::ClearWorldFlag {
+                    name: "ordered".into(),
+                },
+                TriggerAction::SetWorldFlagValue {
+                    name: "counter".into(),
+                    value: 40,
+                },
+                TriggerAction::IncrementWorldFlag {
+                    name: "counter".into(),
+                    by: 2,
+                },
+                TriggerAction::SpawnEntity {
+                    template_path: template_path.clone(),
+                    name: "allvar_spawned".into(),
+                    anchor: None,
+                    position: Some([5.0, 0.0, 5.0]),
+                    rotation: None,
+                    scale: None,
+                    groups: vec![],
+                },
+                TriggerAction::DestroyEntity {
+                    entity: "victim".into(),
+                },
+                TriggerAction::AddFactionEnemy {
+                    faction: "Harrow".into(),
+                    enemy: "Federation".into(),
+                },
+                TriggerAction::RemoveFactionEnemy {
+                    faction: "Harrow".into(),
+                    enemy: "Federation".into(),
+                },
+                TriggerAction::LoadWorld {
+                    path: "assets/worlds/allvar_load.toml".into(),
+                },
+                TriggerAction::UnloadWorld {
+                    path: "assets/worlds/allvar_unload.toml".into(),
+                },
+                TriggerAction::GameOver {
+                    message: Some("all variants dispatched".into()),
+                },
+            ];
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnWorldLoaded,
+                        actions: all_variants,
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                    },
+                    fired: false,
+                    origin_layer: None,
+                    seen_destroyed: HashSet::new(),
+                },
+                // Chained witness: fires only if the pipeline emitted
+                // FlagSet("ordered") followed by FlagCleared("ordered").
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnFlagCleared {
+                            name: "ordered".into(),
+                        },
+                        actions: vec![TriggerAction::AddObjective {
+                            id: "obj-chained-cleared".into(),
+                            text: "Observed set-then-clear".into(),
+                            mandatory: false,
+                            targets: vec![],
+                            directive: crate::messages::AiDirective::None,
+                            utility: crate::objectives::UtilityConfig::default(),
+                            source: crate::messages::ObjectiveSource::default(),
+                        }],
+                        when: None,
+                        action_predicates: vec![],
+                        action_delays: vec![],
+                    },
+                    fired: false,
+                    origin_layer: None,
+                    seen_destroyed: HashSet::new(),
+                },
+            ];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+        app.update();
+
+        // Objectives: add-before-complete / add-before-fail.
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        let snapshot_status = |id: &str| {
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| o.status.clone())
+        };
+        assert_eq!(
+            snapshot_status("obj-alpha"),
+            Some(ObjectiveStatus::Completed),
+            "AddObjective must dispatch before CompleteObjective"
+        );
+        assert_eq!(
+            snapshot_status("obj-beta"),
+            Some(ObjectiveStatus::Failed),
+            "AddObjective must dispatch before FailObjective"
+        );
+        assert_eq!(
+            snapshot_status("obj-chained-cleared"),
+            Some(ObjectiveStatus::Active),
+            "SetWorldFlag must dispatch before ClearWorldFlag (chained \
+             on_flag_cleared trigger must observe the transition)"
+        );
+
+        // Per-entity modifiers: apply-before-remove nets out to baselines.
+        let mods = app
+            .world()
+            .entity(target)
+            .get::<crate::modifiers::ShipModifiers>()
+            .expect("target must keep its ShipModifiers component");
+        assert!(
+            (mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            "RemoveModifier must undo the earlier ApplyModifier"
+        );
+        assert_eq!(
+            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            0,
+            "RemoveIntModifier must undo the earlier ApplyIntModifier"
+        );
+        assert!(
+            !mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "RemoveFlag must undo the earlier ApplyFlag"
+        );
+
+        // World flags: set-then-clear ends cleared; value-then-increment ends 42.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("ordered"), 0);
+        assert_eq!(
+            runtime.flags.counter("counter"),
+            42,
+            "SetWorldFlagValue(40) must dispatch before IncrementWorldFlag(+2)"
+        );
+
+        // SpawnEntity: registered and present in the ECS.
+        let spawned_uuid = runtime
+            .name_to_uuid
+            .get("allvar_spawned")
+            .cloned()
+            .expect("SpawnEntity must register name_to_uuid");
+        let mut q = app.world_mut().query::<&EntityUuid>();
+        assert!(
+            q.iter(app.world()).any(|eu| eu.0 == spawned_uuid),
+            "SpawnEntity must spawn the templated entity"
+        );
+
+        // DestroyEntity: the victim is gone.
+        assert!(
+            app.world().get_entity(victim).is_err(),
+            "DestroyEntity must despawn the victim"
+        );
+
+        // Factions: add-before-remove nets out to neutral.
+        let registry = &app
+            .world()
+            .resource::<crate::config_cache::FactionRegistryResource>()
+            .0;
+        assert!(
+            !crate::faction::is_enemy(
+                Some(harrow_faction_uuid()),
+                Some(fed_faction_uuid()),
+                registry
+            ),
+            "RemoveFactionEnemy must undo the earlier AddFactionEnemy"
+        );
+
+        // Layer changes: pushed in list order.
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert_eq!(pending.0.len(), 2, "exactly one Load and one Unload");
+        assert!(
+            matches!(&pending.0[0], WorldLayerChange::Load { path, .. } if path == "assets/worlds/allvar_load.toml"),
+            "LoadWorld must be queued before UnloadWorld, got {:?}",
+            pending.0
+        );
+        assert!(
+            matches!(&pending.0[1], WorldLayerChange::Unload(path) if path == "assets/worlds/allvar_unload.toml"),
+            "UnloadWorld must be queued after LoadWorld, got {:?}",
+            pending.0
+        );
+
+        // GameOver: reason recorded, phase transitioned (second update let
+        // the queued NextState take effect).
+        assert_eq!(
+            app.world()
+                .resource::<crate::simulation::GameOverReason>()
+                .0
+                .as_deref(),
+            Some("all variants dispatched"),
+            "GameOver must record its reason"
+        );
+        assert_eq!(
+            *app.world().resource::<State<GamePhase>>().get(),
+            GamePhase::GameOver,
+            "GameOver must queue the phase transition"
         );
     }
 

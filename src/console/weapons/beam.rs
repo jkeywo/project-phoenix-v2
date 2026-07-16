@@ -22,7 +22,7 @@ use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
     tactical_authorized, BeamContext, ShooterState,
 };
-use super::AsteroidDestroyedVfx;
+use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //
@@ -1109,6 +1109,7 @@ pub(crate) fn tick_beams_apply_damage(
         Option<&mut LastShipAttacker>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
+        Option<&crate::entity_spawner::ColliderSection>,
     )>,
     mut world: ResMut<WorldResource>,
     mut outbox: Option<ResMut<SimOutbox>>,
@@ -1116,6 +1117,7 @@ pub(crate) fn tick_beams_apply_damage(
     mut game_over_reason: Option<ResMut<GameOverReason>>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     mut beam_context: ResMut<BeamContext>,
 ) {
     for state in beam_context.0.iter_mut() {
@@ -1138,7 +1140,7 @@ pub(crate) fn tick_beams_apply_damage(
             let target_entity =
                 hull_q
                     .iter()
-                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _)| {
+                    .find_map(|(e, ast_uuid, ent_uuid, _, _, _, _, _, _, _, _, _)| {
                         let asteroid_match = ast_uuid.map(|u| u.0.as_str())
                             == Some(state.effective_target_uuid.as_str());
                         let entity_match = ent_uuid.map(|u| u.0.as_str())
@@ -1151,7 +1153,7 @@ pub(crate) fn tick_beams_apply_damage(
                     });
             if let Some((te, is_asteroid)) = target_entity {
                 if !is_asteroid {
-                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _, _)) =
+                    if let Ok((_, _, _, _, _, _, _, attacked_opt, last_attacker_opt, _, _, _)) =
                         hull_q.get_mut(te)
                     {
                         if let Some(mut atk) = attacked_opt {
@@ -1183,6 +1185,7 @@ pub(crate) fn tick_beams_apply_damage(
         let mut target_asteroid_destroyed = false;
         let mut target_ship_destroyed_non_local = false;
         let mut damage_applied = false;
+        let mut destroyed_ship_radius = DEFAULT_SHIP_EXPLOSION_RADIUS;
 
         for (
             target_entity,
@@ -1196,6 +1199,7 @@ pub(crate) fn tick_beams_apply_damage(
             _last_attacker_opt,
             target_is_local,
             mut target_arc_hull,
+            collider_opt,
         ) in hull_q.iter_mut()
         {
             let uuid_matches = ast_uuid.map(|u| u.0.as_str())
@@ -1324,6 +1328,9 @@ pub(crate) fn tick_beams_apply_damage(
                     // (never despawned — GameOver takes over).
                     commands.entity(target_entity).try_despawn();
                     target_ship_destroyed_non_local = true;
+                    destroyed_ship_radius = collider_opt
+                        .map(|c| c.0.radius)
+                        .unwrap_or(DEFAULT_SHIP_EXPLOSION_RADIUS);
                 }
             }
 
@@ -1359,6 +1366,11 @@ pub(crate) fn tick_beams_apply_damage(
             } else {
                 destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
                     entity_uuid: state.effective_target_uuid.clone(),
+                });
+                ship_vfx_events.write(ShipDestroyedVfx {
+                    x: state.effective_target_x,
+                    z: state.effective_target_z,
+                    radius: destroyed_ship_radius,
                 });
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((

@@ -72,6 +72,17 @@ pub struct AsteroidDestroyedVfx {
     pub z: f32,
 }
 
+/// Bevy message fired when a non-asteroid combat target is destroyed.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct ShipDestroyedVfx {
+    pub x: f32,
+    pub z: f32,
+    pub radius: f32,
+}
+
+/// Fallback explosion radius for targets without collider configuration.
+pub const DEFAULT_SHIP_EXPLOSION_RADIUS: f32 = 3.0;
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 /// Per-ship frequency match state for NPC auto-match frequency AI.
@@ -98,6 +109,7 @@ impl Plugin for WeaponsPlugin {
                 TorpedoConfig::default(),
             )))
             .add_message::<AsteroidDestroyedVfx>()
+            .add_message::<ShipDestroyedVfx>()
             .add_message::<CoordinationEnqueue>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)

@@ -8,7 +8,7 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::beam_render;
-use crate::console::weapons::BlasterSystemResource;
+use crate::console::weapons::{BlasterSystemResource, ShipDestroyedVfx};
 use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
 use crate::messages::GamePhase;
@@ -225,6 +225,12 @@ impl Plugin for PfxPlugin {
             .init_resource::<DustFieldState>()
             .init_resource::<PhaserPfxAssets>()
             .init_resource::<BlasterBoltPfxAssets>()
+            .init_resource::<ShipExplosionPfxAssets>()
+            // `spawn_ship_explosions` reads this message; registering it here
+            // too (redundantly with `WeaponsPlugin`) means test apps that add
+            // `PfxPlugin` without `WeaponsPlugin` still work — `add_message`
+            // is idempotent (backed by `init_resource::<Messages<T>>`).
+            .add_message::<ShipDestroyedVfx>()
             .add_plugins(MaterialPlugin::<DustMoteMaterial>::default())
             .add_plugins(MaterialPlugin::<EngineTrailMaterial>::default())
             .add_systems(Startup, load_engine_trail_textures)
@@ -234,6 +240,7 @@ impl Plugin for PfxPlugin {
                     sync_phaser_beams.run_if(in_state(GamePhase::InProgress)),
                     sync_torpedo_pfx.run_if(in_state(GamePhase::InProgress)),
                     sync_blaster_pfx.run_if(in_state(GamePhase::InProgress)),
+                    spawn_ship_explosions.run_if(in_state(GamePhase::InProgress)),
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
                     tick_engine_trail_materials,
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
@@ -1593,6 +1600,255 @@ fn spawn_blaster_impact_burst(
             },
         ));
     }
+}
+
+// ── Ship death explosion (issue #825) ───────────────────────────────────────
+//
+// One reusable explosion asset set, scaled per ship by `ShipDestroyedVfx::
+// radius` (the destroyed entity's `[collider]` TOML radius). Layers, per the
+// sci-fi explosion PFX guide: a bright primary flash, several irregular
+// "plasma core" puffs, a few larger/dimmer/longer-lived "vapour cloud"
+// puffs, an expanding shockwave ring, and a scatter of fading sparks —
+// deliberately skipping the guide's mesh-debris/secondary-detonation/
+// velocity-inheritance layers (no established convention for moving PFX
+// particles in this codebase yet; every existing burst here is a
+// static-position scale+fade, matching `spawn_blaster_impact_burst`).
+
+const EXPLOSION_FLASH_LIFETIME_SECS: f32 = 0.1;
+const EXPLOSION_FLASH_START_SCALE: f32 = 0.4;
+const EXPLOSION_FLASH_END_SCALE: f32 = 1.4;
+const EXPLOSION_FLASH_COLOR: [f32; 4] = [1.0, 0.98, 0.9, 1.0];
+const EXPLOSION_FLASH_EMISSIVE: f32 = 9.0;
+
+const EXPLOSION_CORE_PUFF_COUNT: usize = 6;
+const EXPLOSION_CORE_PUFF_LIFETIME_SECS: f32 = 0.6;
+const EXPLOSION_CORE_PUFF_START_SCALE: f32 = 0.5;
+const EXPLOSION_CORE_PUFF_END_SCALE: f32 = 0.9;
+const EXPLOSION_CORE_PUFF_SPREAD: f32 = 0.35;
+const EXPLOSION_CORE_COLOR: [f32; 4] = [1.0, 0.65, 0.25, 0.95];
+const EXPLOSION_CORE_EMISSIVE: f32 = 6.0;
+
+const EXPLOSION_CLOUD_PUFF_COUNT: usize = 4;
+const EXPLOSION_CLOUD_PUFF_LIFETIME_SECS: f32 = 2.0;
+const EXPLOSION_CLOUD_PUFF_START_SCALE: f32 = 0.6;
+const EXPLOSION_CLOUD_PUFF_END_SCALE: f32 = 1.8;
+const EXPLOSION_CLOUD_PUFF_SPREAD: f32 = 0.5;
+const EXPLOSION_CLOUD_COLOR: [f32; 4] = [0.9, 0.35, 0.12, 0.55];
+const EXPLOSION_CLOUD_EMISSIVE: f32 = 2.5;
+
+const EXPLOSION_RING_LIFETIME_SECS: f32 = 0.5;
+const EXPLOSION_RING_START_SCALE: f32 = 0.3;
+const EXPLOSION_RING_END_SCALE: f32 = 3.5;
+const EXPLOSION_RING_COLOR: [f32; 4] = [1.0, 0.7, 0.35, 0.5];
+const EXPLOSION_RING_EMISSIVE: f32 = 4.0;
+
+const EXPLOSION_SPARK_COUNT: usize = 10;
+const EXPLOSION_SPARK_LIFETIME_SECS: f32 = 0.5;
+const EXPLOSION_SPARK_SCALE: f32 = 0.4;
+const EXPLOSION_SPARK_SPREAD: f32 = 0.8;
+const EXPLOSION_SPARK_COLOR: [f32; 4] = [1.0, 0.55, 0.2, 1.0];
+const EXPLOSION_SPARK_EMISSIVE: f32 = 6.0;
+
+/// Texture handle for the one new explosion-specific asset — an irregular
+/// "plasma puff" blob reused (at different scale/colour/lifetime) for both
+/// the hot core and the cooler outer cloud layers. The flash, shockwave
+/// ring and sparks reuse `PhaserPfxAssets`' generic radial-glow/ring/streak
+/// textures, same as the blaster and phaser impact bursts.
+#[derive(Resource)]
+struct ShipExplosionPfxAssets {
+    puff: Handle<Image>,
+}
+
+impl FromWorld for ShipExplosionPfxAssets {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        Self {
+            puff: asset_server.load("pfx/explosion/explosion_puff.png"),
+        }
+    }
+}
+
+/// Spawns a death explosion for every `ShipDestroyedVfx` fired this tick
+/// (phaser/blaster/torpedo kills alike — see `console::weapons::server`).
+fn spawn_ship_explosions(
+    mut events: MessageReader<ShipDestroyedVfx>,
+    explosion_assets: Res<ShipExplosionPfxAssets>,
+    phaser_pfx_assets: Res<PhaserPfxAssets>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for ev in events.read() {
+        let pos = Vec3::new(ev.x, 0.1, ev.z);
+        let radius = ev.radius.max(0.5);
+        let billboard_mesh = meshes.add(unit_billboard_mesh());
+        let mut rng = rand::rng();
+
+        // Primary flash — the brightest, briefest moment.
+        let flash_mat = phaser_texture_material(
+            &mut materials,
+            phaser_pfx_assets.radial_glow.clone(),
+            EXPLOSION_FLASH_COLOR,
+            EXPLOSION_FLASH_EMISSIVE,
+        );
+        commands.spawn((
+            PfxEntity,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(flash_mat.clone()),
+            Transform::from_translation(pos)
+                .with_scale(Vec3::splat(EXPLOSION_FLASH_START_SCALE * radius)),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: EXPLOSION_FLASH_LIFETIME_SECS,
+            },
+            PfxBurst {
+                start_scale: EXPLOSION_FLASH_START_SCALE * radius,
+                end_scale: EXPLOSION_FLASH_END_SCALE * radius,
+            },
+            PfxFadingMaterial {
+                handle: flash_mat,
+                color: EXPLOSION_FLASH_COLOR,
+                emissive_strength: EXPLOSION_FLASH_EMISSIVE,
+            },
+        ));
+
+        // Hot plasma core — several irregular puffs, short-lived, bright.
+        for _ in 0..EXPLOSION_CORE_PUFF_COUNT {
+            let offset = random_horizontal_offset(&mut rng, EXPLOSION_CORE_PUFF_SPREAD * radius);
+            let mat = phaser_texture_material(
+                &mut materials,
+                explosion_assets.puff.clone(),
+                EXPLOSION_CORE_COLOR,
+                EXPLOSION_CORE_EMISSIVE,
+            );
+            commands.spawn((
+                PfxEntity,
+                Billboard,
+                Mesh3d(billboard_mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(pos + offset)
+                    .with_scale(Vec3::splat(EXPLOSION_CORE_PUFF_START_SCALE * radius)),
+                PfxLifetime {
+                    age: 0.0,
+                    lifetime: EXPLOSION_CORE_PUFF_LIFETIME_SECS,
+                },
+                PfxBurst {
+                    start_scale: EXPLOSION_CORE_PUFF_START_SCALE * radius,
+                    end_scale: EXPLOSION_CORE_PUFF_END_SCALE * radius,
+                },
+                PfxFadingMaterial {
+                    handle: mat,
+                    color: EXPLOSION_CORE_COLOR,
+                    emissive_strength: EXPLOSION_CORE_EMISSIVE,
+                },
+            ));
+        }
+
+        // Outer vapour cloud — fewer, larger, dimmer, longer-lived puffs.
+        for _ in 0..EXPLOSION_CLOUD_PUFF_COUNT {
+            let offset = random_horizontal_offset(&mut rng, EXPLOSION_CLOUD_PUFF_SPREAD * radius);
+            let mat = phaser_texture_material(
+                &mut materials,
+                explosion_assets.puff.clone(),
+                EXPLOSION_CLOUD_COLOR,
+                EXPLOSION_CLOUD_EMISSIVE,
+            );
+            commands.spawn((
+                PfxEntity,
+                Billboard,
+                Mesh3d(billboard_mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(pos + offset)
+                    .with_scale(Vec3::splat(EXPLOSION_CLOUD_PUFF_START_SCALE * radius)),
+                PfxLifetime {
+                    age: 0.0,
+                    lifetime: EXPLOSION_CLOUD_PUFF_LIFETIME_SECS,
+                },
+                PfxBurst {
+                    start_scale: EXPLOSION_CLOUD_PUFF_START_SCALE * radius,
+                    end_scale: EXPLOSION_CLOUD_PUFF_END_SCALE * radius,
+                },
+                PfxFadingMaterial {
+                    handle: mat,
+                    color: EXPLOSION_CLOUD_COLOR,
+                    emissive_strength: EXPLOSION_CLOUD_EMISSIVE,
+                },
+            ));
+        }
+
+        // Expanding shockwave ring.
+        let ring_mat = phaser_texture_material(
+            &mut materials,
+            phaser_pfx_assets.impact_ring.clone(),
+            EXPLOSION_RING_COLOR,
+            EXPLOSION_RING_EMISSIVE,
+        );
+        commands.spawn((
+            PfxEntity,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(ring_mat.clone()),
+            Transform::from_translation(pos)
+                .with_scale(Vec3::splat(EXPLOSION_RING_START_SCALE * radius)),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: EXPLOSION_RING_LIFETIME_SECS,
+            },
+            PfxBurst {
+                start_scale: EXPLOSION_RING_START_SCALE * radius,
+                end_scale: EXPLOSION_RING_END_SCALE * radius,
+            },
+            PfxFadingMaterial {
+                handle: ring_mat,
+                color: EXPLOSION_RING_COLOR,
+                emissive_strength: EXPLOSION_RING_EMISSIVE,
+            },
+        ));
+
+        // Sparks scattered omnidirectionally (not a directional impact, so
+        // no incoming-shot bias like `spawn_blaster_impact_burst`'s sparks).
+        for _ in 0..EXPLOSION_SPARK_COUNT {
+            let offset = random_horizontal_offset(&mut rng, EXPLOSION_SPARK_SPREAD * radius);
+            let mat = phaser_texture_material(
+                &mut materials,
+                phaser_pfx_assets.spark_streak.clone(),
+                EXPLOSION_SPARK_COLOR,
+                EXPLOSION_SPARK_EMISSIVE,
+            );
+            commands.spawn((
+                PfxEntity,
+                Billboard,
+                Mesh3d(billboard_mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(pos + offset)
+                    .with_scale(Vec3::splat(EXPLOSION_SPARK_SCALE * radius)),
+                PfxLifetime {
+                    age: 0.0,
+                    lifetime: EXPLOSION_SPARK_LIFETIME_SECS,
+                },
+                PfxFadingMaterial {
+                    handle: mat,
+                    color: EXPLOSION_SPARK_COLOR,
+                    emissive_strength: EXPLOSION_SPARK_EMISSIVE,
+                },
+            ));
+        }
+    }
+}
+
+/// A random offset within `spread` of the origin, mostly in the XZ plane
+/// with a small vertical component — same convention as the impact-spark
+/// offsets in `spawn_blaster_impact_burst` / `spawn_impact_burst`.
+fn random_horizontal_offset(rng: &mut impl Rng, spread: f32) -> Vec3 {
+    Vec3::new(
+        rng.random_range(-1.0_f32..1.0),
+        rng.random_range(-0.3_f32..0.3),
+        rng.random_range(-1.0_f32..1.0),
+    )
+    .normalize_or_zero()
+        * spread
+        * rng.random_range(0.2_f32..1.0)
 }
 
 /// Updates per-ship engine trail ribbons (mesh + material) each frame.

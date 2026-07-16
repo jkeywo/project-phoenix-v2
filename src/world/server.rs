@@ -1451,7 +1451,7 @@ fn tick_trigger_pipeline(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -1807,7 +1807,7 @@ pub(crate) fn apply_dispatch_result(
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -2162,7 +2162,7 @@ fn tick_delayed_actions(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,

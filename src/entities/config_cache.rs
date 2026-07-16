@@ -538,6 +538,14 @@ pub fn get_config_cache() -> ConfigCache {
     ConfigCache::new()
 }
 
+// Native twin of the WASM cache lookup. There is no preload cache on native —
+// templates are read from disk on demand — so the lookup always misses and the
+// caller is expected to fall back to the filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_cached_entity_config(_path: &str) -> Option<crate::entity_config::EntityConfig> {
+    None
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_world(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(true))

@@ -166,7 +166,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         texture: "pfx/space_mote_streak_head.png",
         max_motes: 24,
         spawn_rate: [0.0, 12.0],
-        opacity: [0.2, 1.0],
+        opacity: [0.1, 0.5],
         brightness: [0.8, 3.0],
         width: 0.03,
         length: [3.0, 20.0],
@@ -181,7 +181,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         texture: "pfx/space_mote_streak_soft.png",
         max_motes: 160,
         spawn_rate: [5.0, 160.0],
-        opacity: [0.1, 0.7],
+        opacity: [0.05, 0.35],
         brightness: [0.3, 1.8],
         width: 0.012,
         length: [1.0, 12.0],
@@ -198,7 +198,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         spawn_rate: [10.0, 250.0],
         // Kept below the bloom threshold so distant motes stay subtle and the
         // screen doesn't white out at speed (spec §8/§20).
-        opacity: [0.03, 0.25],
+        opacity: [0.015, 0.125],
         brightness: [0.15, 0.8],
         width: 0.004,
         length: [1.0, 5.0],
@@ -3510,19 +3510,24 @@ fn spawn_dust_motes(
                     layer.max_lifetime_secs,
                     rng.random_range(0.8..1.2),
                 );
+                let mote_width = layer.width
+                    * dust_view_height_at(depth, fov)
+                    * rng.random_range(0.7..1.3);
+                let mote_length_scale = rng.random_range(0.75..1.25);
+                let initial_length =
+                    mote_width * dust_ramp(layer.length, state.streak_s) * mote_length_scale;
                 commands.spawn((
                     PfxEntity,
                     DustMote {
                         kind: DustMoteKind::Layer(i),
-                        width: layer.width
-                            * dust_view_height_at(depth, fov)
-                            * rng.random_range(0.7..1.3),
-                        length_scale: rng.random_range(0.75..1.25),
+                        width: mote_width,
+                        length_scale: mote_length_scale,
                         turbulence: dust_turbulence(cfg.turbulence, &mut rng),
                     },
                     Mesh3d(state.quad.clone().expect("quad built above")),
                     MeshMaterial3d(material),
-                    Transform::from_translation(pos),
+                    Transform::from_translation(pos)
+                        .with_scale(Vec3::new(initial_length, mote_width, 1.0)),
                     PfxLifetime { age: 0.0, lifetime },
                 ));
             }
@@ -3551,19 +3556,25 @@ fn spawn_dust_motes(
                 0.35,
                 &mut rng,
             );
+            let mote_width = cfg.warp.width
+                * dust_view_height_at(depth, fov)
+                * rng.random_range(0.6..1.4);
+            let mote_length_scale = rng.random_range(0.6..1.4);
+            let initial_length = mote_width
+                * dust_ramp([1.0, cfg.warp.length_multiplier], state.warp_ramp)
+                * mote_length_scale;
             commands.spawn((
                 PfxEntity,
                 DustMote {
                     kind: DustMoteKind::Warp,
-                    width: cfg.warp.width
-                        * dust_view_height_at(depth, fov)
-                        * rng.random_range(0.6..1.4),
-                    length_scale: rng.random_range(0.6..1.4),
+                    width: mote_width,
+                    length_scale: mote_length_scale,
                     turbulence: Vec3::ZERO,
                 },
                 Mesh3d(state.quad.clone().expect("quad built above")),
                 MeshMaterial3d(warp_material.clone()),
-                Transform::from_translation(pos),
+                Transform::from_translation(pos)
+                    .with_scale(Vec3::new(initial_length, mote_width, 1.0)),
                 PfxLifetime {
                     age: 0.0,
                     lifetime: dust_lifetime(depth, mote_speed, 1.0, rng.random_range(0.8..1.2)),

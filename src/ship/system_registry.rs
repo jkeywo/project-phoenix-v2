@@ -116,6 +116,25 @@ pub const LATERAL_THRUST_KIND: &str = "lateral_thrust";
 pub const LATERAL_THRUST_SYSTEM_ID: &str = "helm-lateral-thrust";
 pub const LATERAL_THRUST_AI_CONTROLLER: &str = "lateral_thrust_ai";
 
+/// Wire `SystemId` for the Helm Thrust fine system (issue #701).
+///
+/// Owns the throttle axis: the `ThrustInput` intent component. Split out of
+/// the coarse `helm` kind so a station rating can automate the throttle while
+/// a human keeps the stick (and vice versa), and so the axis can be damaged
+/// and repaired independently.
+pub const HELM_THRUST_KIND: &str = "helm_thrust";
+pub const HELM_THRUST_SYSTEM_ID: &str = "helm-thrust";
+pub const HELM_THRUST_AI_CONTROLLER: &str = "helm_thrust_ai";
+
+/// Wire `SystemId` for the Helm Steering fine system (issue #701).
+///
+/// Owns the yaw axis: the `SteeringInput` intent component. Counterpart to
+/// [`HELM_THRUST_KIND`] — see that constant for the rationale behind the
+/// per-axis split.
+pub const HELM_STEERING_KIND: &str = "helm_steering";
+pub const HELM_STEERING_SYSTEM_ID: &str = "helm-steering";
+pub const HELM_STEERING_AI_CONTROLLER: &str = "helm_steering_ai";
+
 // ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
 //
 // The coarse `tactical` kind is DELETED from the runtime registry in favour of
@@ -356,6 +375,15 @@ impl SystemKindRegistry {
             LATERAL_THRUST_KIND,
             AiControllerRegistration::new(LATERAL_THRUST_AI_CONTROLLER)?,
         )?;
+        // Per-axis Helm systems (issue #701)
+        registry.register(
+            HELM_THRUST_KIND,
+            AiControllerRegistration::new(HELM_THRUST_AI_CONTROLLER)?,
+        )?;
+        registry.register(
+            HELM_STEERING_KIND,
+            AiControllerRegistration::new(HELM_STEERING_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Tactical systems (issue #512)
         registry.register(
             PHASER_BANK_KIND,
@@ -523,6 +551,16 @@ pub fn helm_impulse_system_id() -> SystemId {
 
 pub fn lateral_thrust_system_id() -> SystemId {
     SystemId(LATERAL_THRUST_SYSTEM_ID.to_string())
+}
+
+// ── Per-axis Helm system id helpers (issue #701) ──────────────────────────────
+
+pub fn helm_thrust_system_id() -> SystemId {
+    SystemId(HELM_THRUST_SYSTEM_ID.to_string())
+}
+
+pub fn helm_steering_system_id() -> SystemId {
+    SystemId(HELM_STEERING_SYSTEM_ID.to_string())
 }
 
 // ── Fine Tactical system id helpers (issue #512) ──────────────────────────────
@@ -983,6 +1021,39 @@ mod tests {
         );
     }
 
+    /// The per-axis Helm kinds (issue #701) must be registered like every
+    /// other fine kind, or a ship TOML naming them fails `ShipConfig` parse.
+    #[test]
+    fn per_axis_helm_kinds_are_registered() {
+        let registry = SystemKindRegistry::with_core_systems().unwrap();
+
+        assert!(
+            registry.contains(HELM_THRUST_KIND),
+            "helm_thrust not registered"
+        );
+        assert!(
+            registry.contains(HELM_STEERING_KIND),
+            "helm_steering not registered"
+        );
+
+        assert_eq!(
+            registry
+                .registration(HELM_THRUST_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            HELM_THRUST_AI_CONTROLLER
+        );
+        assert_eq!(
+            registry
+                .registration(HELM_STEERING_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            HELM_STEERING_AI_CONTROLLER
+        );
+    }
+
     #[test]
     fn fine_helm_system_ids_are_lowercase_kebab() {
         let ids = [
@@ -992,6 +1063,8 @@ mod tests {
             HELM_RADAR_SYSTEM_ID,
             HELM_IMPULSE_SYSTEM_ID,
             LATERAL_THRUST_SYSTEM_ID,
+            HELM_THRUST_SYSTEM_ID,
+            HELM_STEERING_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -1011,6 +1084,8 @@ mod tests {
         assert_eq!(HELM_RADAR_SYSTEM_ID, "helm-radar");
         assert_eq!(HELM_IMPULSE_SYSTEM_ID, "helm-impulse");
         assert_eq!(LATERAL_THRUST_SYSTEM_ID, "helm-lateral-thrust");
+        assert_eq!(HELM_THRUST_SYSTEM_ID, "helm-thrust");
+        assert_eq!(HELM_STEERING_SYSTEM_ID, "helm-steering");
     }
 
     #[test]
@@ -1024,6 +1099,8 @@ mod tests {
         assert_eq!(helm_radar_system_id().0, HELM_RADAR_SYSTEM_ID);
         assert_eq!(helm_impulse_system_id().0, HELM_IMPULSE_SYSTEM_ID);
         assert_eq!(lateral_thrust_system_id().0, LATERAL_THRUST_SYSTEM_ID);
+        assert_eq!(helm_thrust_system_id().0, HELM_THRUST_SYSTEM_ID);
+        assert_eq!(helm_steering_system_id().0, HELM_STEERING_SYSTEM_ID);
     }
 
     // ── Fine Tactical system tests (issue #512) ───────────────────────────────

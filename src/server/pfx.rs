@@ -20,9 +20,28 @@ use crate::simulation::{
 };
 use crate::weapons_plugin::PhaserCombatConfigResource;
 
-const BEAM_RADIUS: f32 = 0.02;
 const BEAM_Y_OFFSET: f32 = 0.0;
-const CONTACT_GLOW_RADIUS: f32 = 0.225;
+
+// Textured phaser beam layers (issue: phaser-pfx-replacement). Widths are
+// "radius" values fed into `segment_transform`, matching the old cylinder
+// convention (final half-width = radius, since the unit ribbon mesh spans
+// -1..1 in local X).
+const BEAM_GLOW_WIDTH: f32 = 0.28;
+const BEAM_CORE_WIDTH: f32 = 0.08;
+const CONTACT_GLOW_SIZE: f32 = 0.5;
+
+const MUZZLE_FLASH_LIFETIME_SECS: f32 = 0.12;
+const MUZZLE_FLASH_START_SIZE: f32 = 0.15;
+const MUZZLE_FLASH_END_SIZE: f32 = 0.5;
+
+const IMPACT_RING_LIFETIME_SECS: f32 = 0.35;
+const IMPACT_RING_START_SIZE: f32 = 0.15;
+const IMPACT_RING_END_SIZE: f32 = 0.9;
+
+const IMPACT_SPARK_LIFETIME_SECS: f32 = 0.25;
+const IMPACT_SPARK_SIZE: f32 = 0.35;
+const IMPACT_SPARK_COUNT: usize = 4;
+const IMPACT_SPARK_SPREAD: f32 = 0.6;
 
 const TORPEDO_RADIUS: f32 = 0.45;
 const TORPEDO_TRAIL_RADIUS: f32 = 0.18;
@@ -164,6 +183,7 @@ impl Plugin for PfxPlugin {
             .init_resource::<BlasterPfxState>()
             .init_resource::<EngineTrailState>()
             .init_resource::<DustFieldState>()
+            .init_resource::<PhaserPfxAssets>()
             .add_plugins(MaterialPlugin::<DustMoteMaterial>::default())
             .add_plugins(MaterialPlugin::<EngineTrailMaterial>::default())
             .add_systems(Startup, load_engine_trail_textures)
@@ -196,6 +216,16 @@ impl Plugin for PfxPlugin {
                     // between them, so PFX can read a stale pre-physics
                     // transform depending on scheduler tie-breaking.
                     .after(crate::sim_sets::SimSet::Physics),
+            )
+            // Runs after tick_bursts/sync_phaser_beams so its camera-facing
+            // rotation always wins for the frame (those systems write
+            // Transform too, on the same textured-billboard entities).
+            .add_systems(
+                Update,
+                billboard_face_camera
+                    .after(sync_phaser_beams)
+                    .after(tick_bursts)
+                    .run_if(in_state(GamePhase::InProgress)),
             )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_pfx);
     }
@@ -284,6 +314,53 @@ fn tick_engine_trail_materials(
     let elapsed = time.elapsed_secs();
     for (_, material) in materials.iter_mut() {
         material.time = elapsed;
+    }
+}
+
+/// Texture handles for the textured phaser beam/impact PFX layers, loaded
+/// once at plugin build time from `assets/pfx/` (sourced from
+/// `raw/pfx/phaser_pfx_assets/`).
+#[derive(Resource)]
+struct PhaserPfxAssets {
+    beam_glow: Handle<Image>,
+    beam_core: Handle<Image>,
+    radial_glow: Handle<Image>,
+    impact_ring: Handle<Image>,
+    spark_streak: Handle<Image>,
+}
+
+impl FromWorld for PhaserPfxAssets {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        Self {
+            beam_glow: asset_server.load("pfx/beam_glow.png"),
+            beam_core: asset_server.load("pfx/beam_core.png"),
+            radial_glow: asset_server.load("pfx/radial_glow.png"),
+            impact_ring: asset_server.load("pfx/impact_ring.png"),
+            spark_streak: asset_server.load("pfx/spark_streak.png"),
+        }
+    }
+}
+
+/// Marker for PFX entities that should always face the game camera —
+/// textured quads (beam contact glow, muzzle flash, impact ring, sparks)
+/// rendered as billboards rather than surfaces with fixed orientation.
+#[derive(Component)]
+struct Billboard;
+
+/// Rotates every `Billboard` entity to face the camera each frame.
+fn billboard_face_camera(
+    cam_q: Query<&Transform, (With<GameCamera>, Without<Billboard>)>,
+    mut q: Query<&mut Transform, With<Billboard>>,
+) {
+    let Ok(cam_t) = cam_q.single() else {
+        return;
+    };
+    let cam_pos = cam_t.translation;
+    for mut t in q.iter_mut() {
+        if (cam_pos - t.translation).length_squared() > 1e-6 {
+            t.look_at(cam_pos, Vec3::Y);
+        }
     }
 }
 
@@ -415,8 +492,11 @@ fn dust_quad_mesh() -> Mesh {
 }
 
 struct BeamEntities {
-    body: Entity,
-    glow: Entity,
+    glow_a: Entity,
+    glow_b: Entity,
+    core_a: Entity,
+    core_b: Entity,
+    contact: Entity,
 }
 
 #[derive(Resource, Default)]
@@ -524,6 +604,7 @@ fn sync_phaser_beams(
         (&Transform, Option<&ModelMarkers>, Option<&EntityUuid>),
         (With<LocalShip>, Without<BeamBody>, Without<BeamContactGlow>),
     >,
+    pfx_assets: Res<PhaserPfxAssets>,
     mut state: ResMut<BeamPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -614,6 +695,7 @@ fn sync_phaser_beams(
             origin,
             end,
             color,
+            &pfx_assets,
             &mut state,
             &mut commands,
             &mut meshes,
@@ -632,17 +714,22 @@ fn sync_phaser_beams(
     for key in dead {
         if let Some(entities) = state.active.remove(&key) {
             state.target_point_choices.remove(&key);
-            commands.entity(entities.body).try_despawn();
-            commands.entity(entities.glow).try_despawn();
+            commands.entity(entities.glow_a).try_despawn();
+            commands.entity(entities.glow_b).try_despawn();
+            commands.entity(entities.core_a).try_despawn();
+            commands.entity(entities.core_b).try_despawn();
+            commands.entity(entities.contact).try_despawn();
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_beam(
     key: String,
     start: Vec3,
     end: Vec3,
     color: [f32; 4],
+    pfx_assets: &PhaserPfxAssets,
     state: &mut BeamPfxState,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -650,47 +737,310 @@ fn upsert_beam(
     body_q: &mut Query<&mut Transform, (With<BeamBody>, Without<BeamContactGlow>)>,
     glow_q: &mut Query<&mut Transform, (With<BeamContactGlow>, Without<BeamBody>)>,
 ) {
+    let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+
     if let Some(existing) = state.active.get(&key) {
-        if let Ok(mut body_transform) = body_q.get_mut(existing.body) {
-            *body_transform = segment_transform(start, end, BEAM_RADIUS);
+        let glow_t = segment_transform(start, end, BEAM_GLOW_WIDTH);
+        let core_t = segment_transform(start, end, BEAM_CORE_WIDTH);
+        if let Ok(mut t) = body_q.get_mut(existing.glow_a) {
+            *t = glow_t;
         }
-        if let Ok(mut glow_transform) = glow_q.get_mut(existing.glow) {
-            *glow_transform =
-                Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_RADIUS));
+        if let Ok(mut t) = body_q.get_mut(existing.glow_b) {
+            *t = Transform {
+                rotation: glow_t.rotation * cross,
+                ..glow_t
+            };
+        }
+        if let Ok(mut t) = body_q.get_mut(existing.core_a) {
+            *t = core_t;
+        }
+        if let Ok(mut t) = body_q.get_mut(existing.core_b) {
+            *t = Transform {
+                rotation: core_t.rotation * cross,
+                ..core_t
+            };
+        }
+        if let Ok(mut t) = glow_q.get_mut(existing.contact) {
+            *t = Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_SIZE));
         }
         return;
     }
 
-    let body_mesh = meshes.add(Cylinder::new(1.0, 1.0));
-    let glow_mesh = meshes.add(Sphere { radius: 1.0 });
-    let body_mat = glow_material(materials, color, 6.0, AlphaMode::Blend);
-    let glow_mat = glow_material(
-        materials,
-        [color[0], color[1], color[2], color[3] * 0.65],
-        8.0,
-        AlphaMode::Add,
-    );
+    // First tick this beam exists: build the crossed-ribbon body (broad
+    // colour glow + narrow white-hot core, per-layer textured quads so the
+    // beam never disappears when viewed edge-on), a camera-facing contact
+    // glow at the endpoint, a brief muzzle flash at the origin, and an
+    // impact burst (ring + sparks) at the endpoint.
+    let ribbon_mesh = meshes.add(unit_ribbon_quad_mesh());
+    let billboard_mesh = meshes.add(unit_billboard_mesh());
 
-    let body = commands
+    let glow_color = [color[0], color[1], color[2], color[3] * 0.85];
+    let core_color = [
+        color[0] * 0.4 + 0.6,
+        color[1] * 0.4 + 0.6,
+        color[2] * 0.4 + 0.6,
+        color[3],
+    ];
+
+    let glow_mat =
+        phaser_texture_material(materials, pfx_assets.beam_glow.clone(), glow_color, 4.0);
+    let core_mat =
+        phaser_texture_material(materials, pfx_assets.beam_core.clone(), core_color, 7.0);
+    let contact_mat =
+        phaser_texture_material(materials, pfx_assets.radial_glow.clone(), core_color, 6.0);
+
+    let glow_t = segment_transform(start, end, BEAM_GLOW_WIDTH);
+    let core_t = segment_transform(start, end, BEAM_CORE_WIDTH);
+
+    let glow_a = commands
         .spawn((
             PfxEntity,
             BeamBody,
-            Mesh3d(body_mesh),
-            MeshMaterial3d(body_mat),
-            segment_transform(start, end, BEAM_RADIUS),
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(glow_mat.clone()),
+            glow_t,
         ))
         .id();
-    let glow = commands
+    let glow_b = commands
+        .spawn((
+            PfxEntity,
+            BeamBody,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(glow_mat),
+            Transform {
+                rotation: glow_t.rotation * cross,
+                ..glow_t
+            },
+        ))
+        .id();
+    let core_a = commands
+        .spawn((
+            PfxEntity,
+            BeamBody,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(core_mat.clone()),
+            core_t,
+        ))
+        .id();
+    let core_b = commands
+        .spawn((
+            PfxEntity,
+            BeamBody,
+            Mesh3d(ribbon_mesh),
+            MeshMaterial3d(core_mat),
+            Transform {
+                rotation: core_t.rotation * cross,
+                ..core_t
+            },
+        ))
+        .id();
+    let contact = commands
         .spawn((
             PfxEntity,
             BeamContactGlow,
-            Mesh3d(glow_mesh),
-            MeshMaterial3d(glow_mat),
-            Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_RADIUS)),
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(contact_mat),
+            Transform::from_translation(end).with_scale(Vec3::splat(CONTACT_GLOW_SIZE)),
         ))
         .id();
 
-    state.active.insert(key, BeamEntities { body, glow });
+    spawn_muzzle_flash(
+        start,
+        &billboard_mesh,
+        pfx_assets,
+        core_color,
+        commands,
+        materials,
+    );
+    spawn_impact_burst(end, &billboard_mesh, pfx_assets, color, commands, materials);
+
+    state.active.insert(
+        key,
+        BeamEntities {
+            glow_a,
+            glow_b,
+            core_a,
+            core_b,
+            contact,
+        },
+    );
+}
+
+/// Brief bright flash establishing the beam's origin point (per the "muzzle
+/// effect" design: restrained, brief, tightly concentrated).
+fn spawn_muzzle_flash(
+    pos: Vec3,
+    billboard_mesh: &Handle<Mesh>,
+    pfx_assets: &PhaserPfxAssets,
+    color: [f32; 4],
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let mat = phaser_texture_material(materials, pfx_assets.radial_glow.clone(), color, 8.0);
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(MUZZLE_FLASH_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: MUZZLE_FLASH_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: MUZZLE_FLASH_START_SIZE,
+            end_scale: MUZZLE_FLASH_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: mat,
+            color,
+            emissive_strength: 8.0,
+        },
+    ));
+}
+
+/// One-shot impact burst at the beam endpoint: an expanding ring plus a
+/// handful of outward sparks, layered on top of the persistent contact glow.
+fn spawn_impact_burst(
+    pos: Vec3,
+    billboard_mesh: &Handle<Mesh>,
+    pfx_assets: &PhaserPfxAssets,
+    color: [f32; 4],
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let ring_color = [color[0], color[1], color[2], color[3] * 0.9];
+    let ring_mat =
+        phaser_texture_material(materials, pfx_assets.impact_ring.clone(), ring_color, 5.0);
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(ring_mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(IMPACT_RING_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: IMPACT_RING_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: IMPACT_RING_START_SIZE,
+            end_scale: IMPACT_RING_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: ring_mat,
+            color: ring_color,
+            emissive_strength: 5.0,
+        },
+    ));
+
+    let mut rng = rand::rng();
+    for _ in 0..IMPACT_SPARK_COUNT {
+        let offset = Vec3::new(
+            rng.random_range(-1.0_f32..1.0),
+            rng.random_range(-0.3_f32..0.3),
+            rng.random_range(-1.0_f32..1.0),
+        )
+        .normalize_or_zero()
+            * IMPACT_SPARK_SPREAD;
+        let spark_color = [
+            color[0] * 0.5 + 0.5,
+            color[1] * 0.5 + 0.5,
+            color[2] * 0.5 + 0.5,
+            color[3],
+        ];
+        let spark_mat =
+            phaser_texture_material(materials, pfx_assets.spark_streak.clone(), spark_color, 6.0);
+        commands.spawn((
+            PfxEntity,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(spark_mat.clone()),
+            Transform::from_translation(pos + offset).with_scale(Vec3::splat(IMPACT_SPARK_SIZE)),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: IMPACT_SPARK_LIFETIME_SECS,
+            },
+            PfxFadingMaterial {
+                handle: spark_mat,
+                color: spark_color,
+                emissive_strength: 6.0,
+            },
+        ));
+    }
+}
+
+/// Unit quad (local X width -1..1, local Y length -0.5..0.5) reused via
+/// `segment_transform`'s (radius, length, radius) scale — matches the
+/// convention the old unit `Cylinder` primitive used. UV maps local Y
+/// (beam length) to U and local X (beam width) to V, since the source
+/// beam-profile textures run horizontally (length) with the bright falloff
+/// band across their vertical (width) axis.
+fn unit_ribbon_quad_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let positions: Vec<[f32; 3]> = vec![
+        [-1.0, -0.5, 0.0],
+        [1.0, -0.5, 0.0],
+        [1.0, 0.5, 0.0],
+        [-1.0, 0.5, 0.0],
+    ];
+    let normals: Vec<[f32; 3]> = vec![[0.0, 0.0, 1.0]; 4];
+    let uvs: Vec<[f32; 2]> = vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+    mesh
+}
+
+/// Unit quad (-0.5..0.5 both axes) for camera-facing billboards (muzzle
+/// flash, contact glow, impact ring, sparks).
+fn unit_billboard_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    let positions: Vec<[f32; 3]> = vec![
+        [-0.5, -0.5, 0.0],
+        [0.5, -0.5, 0.0],
+        [0.5, 0.5, 0.0],
+        [-0.5, 0.5, 0.0],
+    ];
+    let normals: Vec<[f32; 3]> = vec![[0.0, 0.0, 1.0]; 4];
+    let uvs: Vec<[f32; 2]> = vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+    mesh
+}
+
+/// Additive-blended, unlit, double-sided textured material for a phaser PFX
+/// layer (beam glow/core, muzzle flash, contact glow, impact ring, sparks).
+fn phaser_texture_material(
+    materials: &mut Assets<StandardMaterial>,
+    texture: Handle<Image>,
+    color: [f32; 4],
+    emissive_strength: f32,
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color: Color::srgba(color[0], color[1], color[2], color[3]),
+        base_color_texture: Some(texture),
+        emissive: LinearRgba::new(
+            color[0] * emissive_strength,
+            color[1] * emissive_strength,
+            color[2] * emissive_strength,
+            color[3],
+        ),
+        alpha_mode: AlphaMode::Add,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    })
 }
 
 /// Renders every ship's in-flight torpedoes each frame.
@@ -3210,6 +3560,7 @@ position = [0.5, -0.1, 0.25]
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(34),
         ))
@@ -3230,10 +3581,14 @@ position = [0.5, -0.1, 0.25]
     }
 
     fn beam_body_translation(app: &mut App) -> Vec3 {
+        // Multiple BeamBody entities exist now (crossed glow + core ribbon
+        // layers), but they all share the same start/end and therefore the
+        // same segment midpoint — any one of them is representative.
         let mut q = app
             .world_mut()
             .query_filtered::<&Transform, With<BeamBody>>();
-        q.single(app.world())
+        q.iter(app.world())
+            .next()
             .expect("BeamBody entity must exist")
             .translation
     }

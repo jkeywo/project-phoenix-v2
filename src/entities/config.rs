@@ -115,6 +115,14 @@ pub struct BehaviourConfig {
     /// resolves but Navigation has given a long-range steer target.
     #[serde(default = "default_nav_handoff_speed")]
     pub nav_handoff_speed: f32,
+    /// Hull fraction [0, 1] below which this entity starts scoring a synthetic
+    /// `Retreat` objective (issue #688/#701). At or above the threshold the
+    /// retreat score is 0; below it the score rises linearly to 1.0 at zero
+    /// hull. Defaults to [`crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD`]
+    /// when absent — set it per entity template to make a ship braver
+    /// (lower) or more cautious (higher).
+    #[serde(default = "default_retreat_hull_threshold")]
+    pub retreat_hull_threshold: f32,
 }
 
 /// Hand-written so `BehaviourConfig::default()` agrees with what serde
@@ -130,6 +138,7 @@ impl Default for BehaviourConfig {
             avoidance_buffer: default_avoidance_buffer(),
             avoidance_look_ahead_secs: default_avoidance_look_ahead_secs(),
             nav_handoff_speed: default_nav_handoff_speed(),
+            retreat_hull_threshold: default_retreat_hull_threshold(),
         }
     }
 }
@@ -148,6 +157,10 @@ fn default_nav_handoff_speed() -> f32 {
 
 fn default_avoidance_look_ahead_secs() -> f32 {
     crate::ai::AVOIDANCE_LOOK_AHEAD_SECS
+}
+
+fn default_retreat_hull_threshold() -> f32 {
+    crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.

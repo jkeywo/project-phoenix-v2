@@ -368,11 +368,15 @@ fn aggregate_doctrine_blackboards(
             hull_fraction,
         };
         let mut scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
-        // Inject synthetic Retreat objective based on hull damage.
-        // Uses a default threshold of 0.3 (30% hull remaining).
+        // Inject synthetic Retreat objective based on hull damage. The
+        // threshold is designer-tunable per entity template via
+        // `[behaviour] retreat_hull_threshold` (defaulting to
+        // `DEFAULT_RETREAT_THRESHOLD` while parsing when the field is
+        // absent), so a ship class can be made braver or more cautious
+        // without a recompile.
         let retreat_score = crate::ai::retreat_score::score_retreat(
             hull_fraction,
-            crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD,
+            behaviour.0.retreat_hull_threshold,
         );
         if retreat_score > 0.0 {
             scored.push(crate::messages::ScoredObjective {
@@ -400,6 +404,19 @@ fn aggregate_doctrine_blackboards(
                     targets: vec![],
                     source: crate::messages::ObjectiveSource::Doctrine,
                 },
+            });
+            // Restore the descending-score order that `score_doctrine_pool`
+            // established and that every consumer relies on: `operate_helm`
+            // and `resolve_helm_target_position` both take the FIRST
+            // Helm-relevant entry as the top-scored directive rather than
+            // scanning for the maximum. Pushing the synthetic Retreat onto the
+            // tail without re-sorting would park it behind every doctrine
+            // objective, so a Retreat could never be selected however low the
+            // hull fell.
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
         }
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
@@ -1456,6 +1473,125 @@ mod tests {
                 .iter()
                 .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm)),
             "at least one scored objective must carry SystemAffinity::Helm"
+        );
+    }
+
+    /// Publish a viewscreen pool for one entity and hand back its
+    /// `scored_objectives`.
+    fn scored_pool_for(
+        behaviour: crate::entity_config::BehaviourConfig,
+        hull_current: f32,
+        hull_max: f32,
+    ) -> Vec<crate::messages::ScoredObjective> {
+        use crate::damage::SystemHull;
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::messages::SystemId;
+        use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
+
+        let mut app = build_test_app();
+
+        let mut hull = SystemHull::from_config(&[(SystemId("captain".into()), hull_max)]);
+        hull.set_hp(&SystemId("captain".into()), hull_current);
+
+        app.world_mut().spawn((
+            BehaviourSection(behaviour),
+            EntitySystemHull(hull),
+            ShipSystemBlackboards::default(),
+        ));
+        app.update();
+
+        let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
+        let bb = q.iter(app.world()).next().expect("blackboards").clone();
+        match bb
+            .0
+            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+            .expect("viewscreen entry")
+        {
+            crate::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
+            _ => panic!("expected Viewscreen blackboard"),
+        }
+    }
+
+    /// The published pool must stay sorted descending by score even once the
+    /// synthetic hull-triggered Retreat has been injected.
+    ///
+    /// `operate_helm` and `resolve_helm_target_position` both take the FIRST
+    /// Helm-relevant entry as the top-scored directive rather than scanning for
+    /// the maximum, so a pool that is merely "mostly sorted" silently mis-selects.
+    #[test]
+    fn synthetic_retreat_keeps_the_pool_sorted_by_score() {
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+
+        let behaviour = BehaviourConfig {
+            // Retreat only ever scores in [0, 1], so a sub-1.0 doctrine entry is
+            // what makes the ordering observable at all.
+            doctrine: vec![DoctrineObjective {
+                id: "loiter".into(),
+                text: "Loiter".into(),
+                directive_kind: Some("Patrol".into()),
+                base_priority: 0.1,
+                directive_loop: true,
+                ..Default::default()
+            }],
+            retreat_hull_threshold: 0.5,
+            ..Default::default()
+        };
+
+        // Hull at 10% — well below the 0.5 threshold → retreat scores 0.8.
+        let scored = scored_pool_for(behaviour, 10.0, 100.0);
+
+        assert!(
+            scored.iter().any(|o| o.id == "retreat"),
+            "a badly damaged ship must have a synthetic Retreat injected"
+        );
+        for pair in scored.windows(2) {
+            assert!(
+                pair[0].score >= pair[1].score,
+                "pool must stay sorted descending: {:?} ({}) preceded {:?} ({})",
+                pair[0].id,
+                pair[0].score,
+                pair[1].id,
+                pair[1].score
+            );
+        }
+        assert_eq!(
+            scored[0].id, "retreat",
+            "the highest-scoring objective must lead the pool"
+        );
+    }
+
+    /// The retreat threshold is designer-tunable per entity template via
+    /// `[behaviour] retreat_hull_threshold` — two ships at identical hull must
+    /// disagree about retreating purely on their TOML.
+    #[test]
+    fn retreat_threshold_comes_from_behaviour_config() {
+        use crate::entity_config::BehaviourConfig;
+
+        let brave = scored_pool_for(
+            BehaviourConfig {
+                retreat_hull_threshold: 0.1,
+                ..Default::default()
+            },
+            40.0,
+            100.0,
+        );
+        let cautious = scored_pool_for(
+            BehaviourConfig {
+                retreat_hull_threshold: 0.9,
+                ..Default::default()
+            },
+            40.0,
+            100.0,
+        );
+
+        assert!(
+            !brave.iter().any(|o| o.id == "retreat"),
+            "hull 0.4 is above a 0.1 threshold — a brave ship must not retreat"
+        );
+        assert!(
+            cautious.iter().any(|o| o.id == "retreat"),
+            "hull 0.4 is below a 0.9 threshold — a cautious ship must retreat"
         );
     }
 

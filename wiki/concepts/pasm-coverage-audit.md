@@ -28,7 +28,7 @@ TypeScript, and HTML observations.
 `src/console_bridge.rs:20` defines `LOCAL_CONSOLE_TOKEN`. The WASM bridge
 decodes host-page actions and injects them as inbound messages under that token
 in `src/server/bridge.rs:1017`. Tactical explicitly accepts this token as an
-authorized local operator in `src/console/weapons/server.rs:451` and routes it
+authorized local operator in `src/console/weapons/mod.rs` and routes it
 to the local ship.
 
 PASM models remote peer transport, sessions, station ownership, and command
@@ -75,7 +75,7 @@ path scanner.
 `src/entities/tags.rs:13` defines typed entity tags and OR-based radar filter
 matching. `src/entities/target.rs:8` defines targetability tags, cosmetic
 threat level, and description. Tactical applies these filters and selection
-rules in `src/console/weapons/server.rs:4436` and `:4493`.
+rules in `src/console/weapons/mod.rs`.
 
 Radar/Sensors and Entity Configuration mention filters and appearance, but
 there is no explicit PASM contract for the entity tag vocabulary, targetability

@@ -12,7 +12,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/ship/system_registry.rs]
+      paths: [src/console/weapons/mod.rs, src/ship/system_registry.rs]
       tests: [cargo test]
 
   - component: torpedo-magazine-round-claim
@@ -29,7 +29,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/core/messages.rs]
+      paths: [src/console/weapons/mod.rs, src/core/messages.rs]
       symbols: [handle_torpedo_magazine_inter_system]
       tests: [cargo test]
 
@@ -50,7 +50,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/ai/core.rs]
+      paths: [src/console/weapons/mod.rs, src/ai/core.rs]
       symbols: [ai_target_selection]
       tests: [cargo test]
 
@@ -61,7 +61,7 @@ entities:
       title: Torpedo Auto-Fire AI
       summary: Decide/apply AI pair that selects loaded, in-arc torpedo tubes to fire at the ship's locked weapons target and applies the launch via the same primitive the human torpedo-fire path uses.
       rationale:
-        - "Issue #694 replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; issue #698 folded the former integrate_torpedo_intents into integrate_weapons_state (src/console/weapons/server.rs), the single adapter that drains both TorpedoIntents and PhaserIntents and applies them via TorpedoSystem::launch / ActiveBeam, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
+        - "Issue #694 replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; issue #698 folded the former integrate_torpedo_intents into integrate_weapons_state (src/console/weapons/mod.rs), the single adapter that drains both TorpedoIntents and PhaserIntents and applies them via TorpedoSystem::launch / ActiveBeam, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
         - Gated on AiHighFidelity plus a dedicated torpedo_magazine_system_id() operate_ai policy, distinct from the per-fine-system Tactical gate that governs target selection.
         - "Issue #698 promoted this from preliminary to full: the target_locked and target_shields inputs to the pure auto_fire_torpedo decision were hardcoded to true/0, and now read real state — target_locked from the locked WeaponsTarget resolving to a live entity, target_shields from the sum of the target's online ShipShields facings. Targets without ShipShields (asteroids, debris) read 0 and stay torpedo-eligible."
     architecture:
@@ -72,7 +72,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/server.rs]
+      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/mod.rs]
       symbols: [ai_torpedo_auto_fire, integrate_weapons_state, auto_fire_torpedo, TorpedoIntents]
       tests: [cargo test]
 
@@ -94,7 +94,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs]
+      paths: [src/console/weapons/mod.rs]
       symbols: [ai_phaser_auto_fire, integrate_weapons_state, PhaserIntents, PhaserCmd]
       tests: [cargo test]
   - component: tactical-weapons-controls
@@ -113,7 +113,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, gui/action-map.js]
+      paths: [src/console/weapons/mod.rs, gui/action-map.js]
       symbols: [handle_set_target, handle_fire_phaser, handle_fire_torpedo]
       tests: [cargo test, npx vitest run]
 
@@ -129,7 +129,7 @@ entities:
       writers: [tactical-weapons-controls]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs]
+      paths: [src/console/weapons/mod.rs]
       symbols: [WeaponsTarget]
       tests: [cargo test]
 
@@ -148,7 +148,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, src/entities/config.rs]
+      paths: [src/console/weapons/mod.rs, src/entities/config.rs]
       symbols: [handle_fire_phaser, tick_beams, PhaserBankConfig]
       tests: [cargo test]
 
@@ -164,7 +164,7 @@ entities:
       writers: [phaser-beam-system]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs]
+      paths: [src/console/weapons/mod.rs]
       symbols: [ActiveBeam, PhaserCooldown, CurrentPhaserMode]
       tests: [cargo test]
 
@@ -182,7 +182,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/blaster.rs, src/console/weapons/server.rs, src/entities/config.rs]
+      paths: [src/weapons/blaster.rs, src/console/weapons/mod.rs, src/entities/config.rs]
       symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig]
       tests: [cargo test]
 
@@ -217,7 +217,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/torpedo.rs, src/console/weapons/server.rs, src/entities/config.rs]
+      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/entities/config.rs]
       symbols: [TorpedoSystem, build_torpedo_target_snapshot, tick_torpedo_lifecycle, TorpedoesConfig]
       tests: [cargo test]
 
@@ -250,7 +250,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/server.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+      paths: [src/console/weapons/mod.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
       symbols: [weapons_update_broadcaster]
       tests: [cargo test, npx vitest run]
 

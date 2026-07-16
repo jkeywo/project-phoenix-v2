@@ -101,7 +101,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/entities/tags.rs, src/entities/target.rs, src/entities/config.rs, src/entities/spawner.rs, src/console/weapons/server.rs]
+      paths: [src/entities/tags.rs, src/entities/target.rs, src/entities/config.rs, src/entities/spawner.rs, src/console/weapons/mod.rs]
       symbols: [EntityTag, TargetSection, parse_tags, matches_any]
       tests: [cargo test]
 
@@ -117,7 +117,7 @@ entities:
       derived_from: [entity-template-state, radar-contact-projection-state]
     implementation:
       status: declared
-      paths: [src/entities/target.rs, src/console/weapons/server.rs, src/core/messages.rs]
+      paths: [src/entities/target.rs, src/console/weapons/mod.rs, src/core/messages.rs]
       tests: [cargo test]
 
   - component: authored-toml-observer
@@ -158,7 +158,7 @@ entities:
       title: Console AI Orchestrator Plugin
       summary: Registers the decide/apply system pairs that wire previously-orphaned pure helpers in console_ai::core into active Bevy systems for shields focus, power allocation, torpedo auto-fire, and delayed sensors frequency hinting.
       rationale:
-        - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/integrate_torpedo_intents, and ai_frequency_hint into ConsoleAiPlugin's Update schedule, so the plugin is no longer inactive and the prior removal-or-replace exception no longer applies. Issue #698 then moved the torpedo apply half out again: integrate_torpedo_intents was folded into console::weapons::server::integrate_weapons_state, which WeaponsPlugin registers because it also serves ships that never reach AiHighFidelity. ConsoleAiPlugin retains ai_torpedo_auto_fire (decide)."
+        - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/integrate_torpedo_intents, and ai_frequency_hint into ConsoleAiPlugin's Update schedule, so the plugin is no longer inactive and the prior removal-or-replace exception no longer applies. Issue #698 then moved the torpedo apply half out again: integrate_torpedo_intents was folded into console::weapons::integrate_weapons_state, which WeaponsPlugin registers because it also serves ships that never reach AiHighFidelity. ConsoleAiPlugin retains ai_torpedo_auto_fire (decide)."
         - Each decide system writes a per-ship intent component (ShieldArcIntents, PowerReactorIntents, TorpedoIntents) that its paired integrate/apply system consumes via the same mutation primitive the human admitted-command path uses.
     architecture:
       kind: service

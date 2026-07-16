@@ -86,7 +86,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/shield.rs, src/console/weapons/server.rs, src/regions/server.rs, src/server_app.rs]
+      paths: [src/weapons/shield.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/server_app.rs]
       symbols: [ShieldSystem]
       tests: [cargo test]
 

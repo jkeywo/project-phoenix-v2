@@ -18,11 +18,11 @@ use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 
-use super::server::AsteroidDestroyedVfx;
 use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
     tactical_authorized, BeamContext, ShooterState,
 };
+use super::AsteroidDestroyedVfx;
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //

@@ -6,8 +6,8 @@
 
 use bevy::prelude::*;
 
-use super::server::{AsteroidDestroyedVfx, WeaponsTarget};
 use super::shared::{system_is_registered, tactical_authorized, TorpedoTargetSnapshot};
+use super::{AsteroidDestroyedVfx, WeaponsTarget};
 use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};

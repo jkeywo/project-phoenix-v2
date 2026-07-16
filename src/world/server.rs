@@ -1789,7 +1789,6 @@ fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
 ///
 /// `log_ctx` prefixes the pure layer's `warnings` so each message still names
 /// the system it came from.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_dispatch_result(
     result: DispatchResult,
     log_ctx: &str,
@@ -2139,7 +2138,6 @@ pub(crate) fn apply_dispatch_result(
 ///
 /// Registered after `tick_trigger_pipeline` in `SimSet::Physics` so that it sees
 /// the same tick's `world_loaded_at_secs` anchor.
-#[allow(clippy::too_many_arguments)]
 fn tick_delayed_actions(
     mut runtime: ResMut<WorldContentRuntime>,
     time: Option<Res<bevy::time::Time>>,

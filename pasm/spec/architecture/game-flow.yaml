@@ -147,7 +147,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/console/weapons/server.rs, src/regions/server.rs, src/console/comms/server.rs]
+      paths: [src/server_app.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/console/comms/server.rs]
       symbols: [GameOverReason]
 
   - component: round-return-controller
@@ -226,7 +226,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/world/server.rs, src/console/weapons/server.rs, src/regions/server.rs]
+      paths: [src/server_app.rs, src/world/server.rs, src/console/weapons/mod.rs, src/regions/server.rs]
       tests: [cargo test]
 
   - component: terminal-round-outcome-router

@@ -219,12 +219,12 @@ post-#606):
 
 | Location | What it reads |
 |---|---|
-| `src/console/weapons/server.rs:337` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
+| `src/console/weapons/mod.rs` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
 | `src/ship_plugin.rs:309` — `process_helm_inputs` | `ModifierSlot::MaxSpeed` for acceleration/reverse-speed caps |
 | `src/server_app.rs:798` — `handle_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
-| `src/console/weapons/server.rs:570` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
+| `src/console/weapons/mod.rs` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
 | `src/console/repair/server.rs:176` — `tick_repair_teams` | `ModifierSlot::RepairRate` to scale repair speed |
-| `src/console/weapons/server.rs:992` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
+| `src/console/weapons/mod.rs` — `tick_beams` | `ModifierSlot::PhaserDamage` to scale beam DPS (per shooter) |
 | `src/regions/server.rs:342` — `handle_slow_zone_speed_clamp` | `ModifierSlot::MaxSpeed` to clamp ship speed on slow-zone entry |
 
 ## How `RegionEffect { uuid }` source identity prevents stale accumulation

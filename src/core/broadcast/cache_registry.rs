@@ -38,7 +38,7 @@
 //! transitively `crate::simulation`) so existing `ResMut<LastBroadcastX>`
 //! system parameters across the codebase are unaffected by the move.
 //!
-//! The sixth cache, `LastWeaponsUpdate` (`src/console/weapons/server.rs`),
+//! The sixth cache, `LastWeaponsUpdate` (`src/console/weapons/mod.rs`),
 //! stays defined in its natural home next to the weapons producer that reads
 //! and writes it every tick — moving the type would ripple through that
 //! file's producer closure for no behavioural benefit. This registry's
@@ -110,14 +110,14 @@ pub fn reset_all(
     shields: &mut LastBroadcastShields,
     positions: &mut LastBroadcastEntityPositions,
     health: &mut LastBroadcastEntityHealth,
-    weapons: &mut crate::console::weapons::server::LastWeaponsUpdate,
+    weapons: &mut crate::console::weapons::LastWeaponsUpdate,
     blackboards: &mut LastBroadcastBlackboards,
 ) {
     *hull = LastBroadcastHull::default();
     *shields = LastBroadcastShields::default();
     *positions = LastBroadcastEntityPositions::default();
     *health = LastBroadcastEntityHealth::default();
-    *weapons = crate::console::weapons::server::LastWeaponsUpdate::default();
+    *weapons = crate::console::weapons::LastWeaponsUpdate::default();
     *blackboards = LastBroadcastBlackboards::default();
 }
 
@@ -173,7 +173,7 @@ pub fn prune(
 /// the other three shared caches, so the next periodic broadcaster tick
 /// still diffs normally instead of being forced to re-send to everyone.
 pub fn resync_for_token(world: &mut World, token: &str) {
-    use crate::console::weapons::server::compute_current_weapons_update;
+    use crate::console::weapons::compute_current_weapons_update;
     use crate::entity_spawner::EntitySystemHull;
     use crate::lobby::Sessions;
     use crate::messages::StationId;
@@ -325,7 +325,7 @@ mod tests {
             .insert("uuid-1".into(), (bevy::math::Vec3::ZERO, 0.0));
         let mut health = LastBroadcastEntityHealth::default();
         health.0.insert("uuid-1".into(), (Some(1.0), Some(1.0)));
-        let mut weapons = crate::console::weapons::server::LastWeaponsUpdate {
+        let mut weapons = crate::console::weapons::LastWeaponsUpdate {
             target_uuid: Some("uuid-1".into()),
             ..Default::default()
         };
@@ -373,7 +373,7 @@ mod tests {
         );
         assert_eq!(
             weapons,
-            crate::console::weapons::server::LastWeaponsUpdate::default(),
+            crate::console::weapons::LastWeaponsUpdate::default(),
             "weapons cache must be default after reset_all"
         );
         assert!(
@@ -618,7 +618,7 @@ mod tests {
     /// the current holder of the Tactical station, so `resync_for_token`
     /// takes the "reconnecting client holds Tactical" branch.
     fn resync_test_app_with_tactical_holder(token: &str) -> App {
-        use crate::console::weapons::server::{
+        use crate::console::weapons::{
             CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource, WeaponsTarget,
         };
         use crate::lobby::Sessions;
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn resync_for_token_does_not_touch_last_weapons_update_cache() {
-        use crate::console::weapons::server::LastWeaponsUpdate;
+        use crate::console::weapons::LastWeaponsUpdate;
 
         let mut app = resync_test_app_with_tactical_holder("reconnector");
         app.init_resource::<LastWeaponsUpdate>();

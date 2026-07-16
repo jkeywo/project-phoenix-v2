@@ -4,7 +4,7 @@ title: WeaponsPlugin
 
 # WeaponsPlugin
 
-Extracted from `simulation.rs` as part of the simulation split series (issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)). The single `src/console/weapons/server.rs` file (which grew to ~12,000 lines including tests) was subsequently decomposed into per-domain files by the weapons decomposition series (issue [#685](https://github.com/jkeywo/project-phoenix-v2/issues/685); issues #721–#731). See [File layout](#file-layout) below.
+Extracted from `simulation.rs` as part of the simulation split series (issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)). The single `src/console/weapons/server.rs` file (which grew to ~12,000 lines including tests) was subsequently decomposed into per-domain files by the weapons decomposition series (issue [#685](https://github.com/jkeywo/project-phoenix-v2/issues/685); issues #721–#731). `server.rs` itself was folded into `mod.rs` at the end of that series so the final layout matches issue #731's expected structure exactly — see [File layout](#file-layout) below.
 
 ## Ownership
 
@@ -16,16 +16,15 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 
 | File | Owns |
 |---|---|
-| `mod.rs` | Declares the sibling modules and re-exports `server::*` at the crate boundary |
-| `server.rs` | `WeaponsPlugin` (all system + resource registration), the systems that are still genuinely shared between phaser and torpedo (`integrate_weapons_state`, `ai_target_selection`, `tick_weapons_arc_request`, `tick_npc_auto_match_frequency`), and re-export blocks that keep every sibling module's items reachable at their pre-split `crate::console::weapons::server::…` / `crate::weapons_plugin::…` paths |
-| `server_tests.rs` | All 119 `#[cfg(test)]` tests + test helpers for the weapons module, loaded into `server.rs` via `#[path = "server_tests.rs"] mod tests;` (kept as a child module rather than an external `tests/` integration file — see [Test placement](#test-placement)) |
+| `mod.rs` | Declares the sibling modules; hosts `WeaponsPlugin` (all system + resource registration), the systems that are still genuinely shared between phaser and torpedo (`integrate_weapons_state`, `ai_target_selection`, `tick_weapons_arc_request`, `tick_npc_auto_match_frequency`), the re-export blocks that keep every sibling module's items reachable at `crate::console::weapons::…` / `crate::weapons_plugin::…`, and the `#[cfg(test)] mod tests` declaration — matching issue #731's expected layout of "plugin assembly, re-exports" with no separate `server.rs` |
+| `server_tests.rs` | All 119 `#[cfg(test)]` tests + test helpers for the weapons module, loaded into `mod.rs` via `#[path = "server_tests.rs"] mod tests;` (kept as a child module rather than an external `tests/` integration file — see [Test placement](#test-placement)) |
 | `shared.rs` | Small pure helpers used by every weapons file (`live_entity_xz`, `tactical_authorized`, `system_is_registered`, bank/AI-operates predicates) plus the one-tick handoff resources `BeamContext`, `ShooterState`, `TorpedoTargetSnapshot` |
 | `beam.rs` | Phaser/beam domain: `ActiveBeam`, `PhaserCooldown`, `WeaponsTarget`, `LastShipAttacker`, `CurrentPhaserMode`, `PhaserCombatConfigResource`, beam events, `handle_fire_phaser`, `ai_phaser_auto_fire`, `handle_set_phaser_mode`/`_frequency`, `handle_set_target`, `drain_power_for_active_beam`, and the three-phase beam tick (see below) |
 | `torpedo.rs` | Torpedo domain: `TorpedoSystemResource`, `handle_fire_torpedo`, `handle_load_tube`, `handle_unload_tube`, `handle_set_torpedo_volley_target`, `handle_torpedo_magazine_inter_system`, and the two-phase torpedo tick (see below) |
 | `blaster.rs` | Blaster (NPC hitscan weapon) domain: `BlasterSystemResource`, `handle_fire_blaster`, `tick_blaster_auto_fire`, `tick_blaster_system`, `handle_blaster_hits` |
 | `blackboard.rs` | Publish-phase output: the four `publish_*_blackboard` systems, `compute_current_weapons_update`, `weapons_update_broadcaster`, `LastWeaponsUpdate`, and the radar-blip projection helpers |
 
-Every system stays registered from `WeaponsPlugin::build` in `server.rs`; the sibling files are pure implementation modules, not separate plugins. Cross-file items are `pub(crate)` (or `pub` where an item is also consumed outside the weapons module, e.g. `TorpedoSystemResource`) and re-exported from `server.rs` so both the plugin build function and the test module resolve them without needing to know which file they actually live in.
+Every system stays registered from `WeaponsPlugin::build` in `mod.rs`; the sibling files are pure implementation modules, not separate plugins. Cross-file items are `pub(crate)` (or `pub` where an item is also consumed outside the weapons module, e.g. `TorpedoSystemResource`) and re-exported from `mod.rs` so both the plugin build function and the test module resolve them without needing to know which file they actually live in.
 
 ### The three-phase beam tick
 
@@ -153,7 +152,7 @@ Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` porti
 
 ## Test placement
 
-All 119 weapons tests (plus their ~65 test-only helper functions, e.g. `test_app`, `los_test_app`, `lock_and_fire`, `weapons_blackboard_of`) live in `src/console/weapons/server_tests.rs`, loaded into `server.rs` as a child module:
+All 119 weapons tests (plus their ~65 test-only helper functions, e.g. `test_app`, `los_test_app`, `lock_and_fire`, `weapons_blackboard_of`) live in `src/console/weapons/server_tests.rs`, loaded into `mod.rs` as a child module:
 
 ```rust
 #[cfg(test)]
@@ -161,7 +160,7 @@ All 119 weapons tests (plus their ~65 test-only helper functions, e.g. `test_app
 mod tests;
 ```
 
-This is a deliberate deviation from a plain external `tests/weapons_test.rs` integration file. An external integration-test crate can only see `pub` items of the library, but the weapons tests exercise ~36 systems and types that are intentionally kept `pub(crate)`/private after the per-file split (issues #726–#729) — e.g. `run_system_once`-ing `integrate_weapons_state` directly, registering `ai_target_selection` as a bare system, calling `shared::system_is_registered` and `shared::any_bank_accepts_human_input` directly. Moving the tests externally would have forced promoting all of those to `pub`, reversing the encapsulation the split was for and violating this repo's "test through the public interface" convention (see `AGENTS.md`). The `#[path]` child-module form keeps the tests in the `console::weapons::server::tests` module path — `use super::*;` resolves exactly as it did when the tests were inline — while still shrinking `server.rs` itself down from ~8,300 lines to ~1,100.
+This is a deliberate deviation from a plain external `tests/weapons_test.rs` integration file. An external integration-test crate can only see `pub` items of the library, but the weapons tests exercise ~36 systems and types that are intentionally kept `pub(crate)`/private after the per-file split (issues #726–#729) — e.g. `run_system_once`-ing `integrate_weapons_state` directly, registering `ai_target_selection` as a bare system, calling `shared::system_is_registered` and `shared::any_bank_accepts_human_input` directly. Moving the tests externally would have forced promoting all of those to `pub`, reversing the encapsulation the split was for and violating this repo's "test through the public interface" convention (see `AGENTS.md`). The `#[path]` child-module form keeps the tests in the `console::weapons::tests` module path — `use super::*;` resolves exactly as it did when the tests were inline — while still shrinking `server.rs`'s original ~8,300 lines down to a ~1,100-line block that now lives directly in `mod.rs`.
 
 Representative tests:
 

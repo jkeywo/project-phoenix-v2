@@ -71,7 +71,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 | System | File | Status |
 |--------|------|--------|
 | `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship_plugin.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
-| `ai_target_selection` | `src/console/weapons/server.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
+| `ai_target_selection` | `src/console/weapons/mod.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
 | `ai_power_allocation` | `src/console_ai/server.rs` | ✅ (replaced the `operate_power_ai` stub) |
 | `ai_shield_focus` | `src/console_ai/server.rs` | ✅ (replaced `operate_shields_ai`; high-LOD only) |

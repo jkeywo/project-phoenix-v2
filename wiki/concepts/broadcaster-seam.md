@@ -101,7 +101,7 @@ All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` wri
 | Producer | Message(s) | Audience | Cadence | Registered in | Delivers as |
 |---|---|---|---|---|---|
 | `power_state_broadcaster` | `PowerState` | `Holding(StationId("power"))` | `Hz(10.0)` | `src/ship/power.rs:216` | Snapshot (via `sim_outbox_broadcaster`) |
-| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(StationId("tactical"))` | `Hz(10.0)` | `src/console/weapons/server.rs:4484` | Snapshot (via `sim_outbox_broadcaster`) |
+| `weapons_update_broadcaster` | `WeaponsUpdate` | `Holding(StationId("tactical"))` | `Hz(10.0)` | `src/console/weapons/mod.rs` | Snapshot (via `sim_outbox_broadcaster`) |
 | `repair_state_broadcaster` | `RepairState` | `Holding(StationId("repair"))` | `Hz(10.0)` | `src/console/repair/server.rs:147` | Snapshot (via `sim_outbox_broadcaster`) |
 | `sim_state_broadcaster` | `SimState` + `SystemHullUpdate` | `All` | `Hz(10.0)` | `src/server_app.rs:381` | Snapshot |
 | `modifier_events_broadcaster` | `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `src/server_app.rs:622` | Reliable |
@@ -115,9 +115,9 @@ The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/server_app.rs:661`) is 
 | `broadcast_world_setup_on_start` | `WorldSetup` | `All` | `src/server_app.rs:1443` | Reliable |
 | `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/world/server.rs:1164` | Reliable |
 | `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:1223` | Reliable |
-| Torpedo systems | `TorpedoLaunched` | `All` via `SimOutbox` | `src/console/weapons/server.rs` | Reliable |
+| Torpedo systems | `TorpedoLaunched` | `All` via `SimOutbox` | `src/console/weapons/mod.rs` | Reliable |
 | `asteroid_spawn` / `update_asteroid_window` | `EntitySpawned` / `EntityDespawned` | `All` via `SimOutbox` | `asteroids/lifecycle.rs` | Reliable |
-| Phaser / damage systems | `PhaserFired`, `AsteroidDestroyed`, etc. | `All` via `SimOutbox` | `src/console/weapons/server.rs` | Reliable |
+| Phaser / damage systems | `PhaserFired`, `AsteroidDestroyed`, etc. | `All` via `SimOutbox` | `src/console/weapons/mod.rs` | Reliable |
 
 ### LobbyBroadcaster (game phase = `Lobby`)
 
@@ -189,7 +189,7 @@ The five cache resources are defined in `cache_registry.rs` and re-exported from
 - `LastBroadcastShields` — per-facing `ShieldFacingStatus` Vec
 - `LastBroadcastBlackboards` — per-system `SystemBlackboard`
 
-A sixth cache, `LastWeaponsUpdate` (`src/console/weapons/server.rs`), stays defined in its natural home but is also covered by `reset_all` — so the registry's interface covers all six even though one struct lives elsewhere.
+A sixth cache, `LastWeaponsUpdate` (`src/console/weapons/mod.rs`), stays defined in its natural home but is also covered by `reset_all` — so the registry's interface covers all six even though one struct lives elsewhere.
 
 ## Cross-links to relevant PRDs
 

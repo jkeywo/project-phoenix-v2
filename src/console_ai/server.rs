@@ -15,19 +15,19 @@
 //!
 //! Issue #694 (preliminary) added `ai_torpedo_auto_fire` /
 //! `integrate_torpedo_intents`, replacing the old fused torpedo sub-block
-//! that used to live inside `console::weapons::server::operate_tactical_ai`
+//! that used to live inside `console::weapons::operate_tactical_ai`
 //! with the same decide/`TorpedoIntents`-write + mutate-only-adapter shape.
 //! `operate_tactical_ai` kept running for Tactical target selection only.
 //!
 //! Issue #698 completes that work: `ai_torpedo_auto_fire` is no longer
 //! preliminary (it reads real target-lock and target-shield state instead of
 //! hardcoding them), and `integrate_torpedo_intents` is gone — its body moved
-//! into `console::weapons::server::integrate_weapons_state`, the single
+//! into `console::weapons::integrate_weapons_state`, the single
 //! adapter that drains both `TorpedoIntents` and `PhaserIntents`.
 //!
 //! Issue #700 finished the decomposition: `operate_tactical_ai` is gone
 //! entirely, and target selection now lives wholly in
-//! `console::weapons::server::ai_target_selection`.
+//! `console::weapons::ai_target_selection`.
 
 use bevy::prelude::*;
 
@@ -79,7 +79,7 @@ impl Plugin for ConsoleAiPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(ai_power_allocation),
                 // Decide only. The apply half is
-                // `console::weapons::server::integrate_weapons_state`
+                // `console::weapons::integrate_weapons_state`
                 // (issue #698), which drains `TorpedoIntents` and
                 // `PhaserIntents` together and is registered by
                 // `WeaponsPlugin` — see its docs for why the weapons
@@ -549,10 +549,10 @@ fn integrate_power_state(
 ///
 /// Wires the previously-orphaned `console_ai::auto_fire_torpedo`: for ships
 /// whose Tactical target is already locked (`WeaponsTarget`, written by
-/// `console::weapons::server::ai_target_selection`), decides which loaded,
+/// `console::weapons::ai_target_selection`), decides which loaded,
 /// in-arc torpedo tubes to fire and writes the
 /// decision into `TorpedoIntents` for
-/// `console::weapons::server::integrate_weapons_state` to apply, rather than
+/// `console::weapons::integrate_weapons_state` to apply, rather than
 /// calling `TorpedoSystem::launch` directly.
 ///
 /// Replaces the old fused torpedo sub-block that used to run inline inside
@@ -594,7 +594,7 @@ fn integrate_power_state(
 ///   additionally gated on the holder's active rating having the
 ///   `torpedo_auto_fire` `ai_tuning` rule; when unclaimed, auto-fire is
 ///   unconditional. This exact distinction is what
-///   `console::weapons::server`'s `ai_stops_firing_when_rating_switches_to_std`
+///   `console::weapons`'s `ai_stops_firing_when_rating_switches_to_std`
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
@@ -748,7 +748,7 @@ pub(crate) fn ai_torpedo_auto_fire(
 }
 
 // `integrate_torpedo_intents` (issue #694) lived here until issue #698 folded
-// it into `console::weapons::server::integrate_weapons_state`, which drains
+// it into `console::weapons::integrate_weapons_state`, which drains
 // `TorpedoIntents` and `PhaserIntents` in one adapter. Nothing else may drain
 // `TorpedoIntents`: two systems both draining it would race for the launch.
 

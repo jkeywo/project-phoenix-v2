@@ -80,7 +80,7 @@ What each fidelity level runs:
 
 - **High**: the full per-axis AI decision systems, physics via `integrate_ship_physics`.
 - **Low**: `simulate_low_lod_ships` (`src/ai/server.rs`) dead-reckons `ShipPhysics.x/z/yaw` directly — a sanctioned out-of-band writer, filtered `Without<AiHighFidelity>` so it can never fight the integrator. A low-LOD ship with a Patrol/Reach objective still cheaply follows its route: it reads the same `ObjectiveCursors` the high-LOD path reads (one cursor surface since #702), so promotion/demotion resumes the route exactly where it left off.
-- Low-LOD NPCs **keep firing phasers**: `ai_phaser_auto_fire` (`src/console/weapons/server.rs`) is deliberately not filtered on `AiHighFidelity` — phaser fire is the main damage low-LOD NPCs contribute, and `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity` pins it. Torpedo auto-fire and shield-focus AI are high-LOD only (`ai_shield_focus` in `src/console_ai/server.rs` skips low-LOD ships, which retain whatever focus they had when demoted).
+- Low-LOD NPCs **keep firing phasers**: `ai_phaser_auto_fire` (`src/console/weapons/mod.rs`) is deliberately not filtered on `AiHighFidelity` — phaser fire is the main damage low-LOD NPCs contribute, and `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity` pins it. Torpedo auto-fire and shield-focus AI are high-LOD only (`ai_shield_focus` in `src/console_ai/server.rs` skips low-LOD ships, which retain whatever focus they had when demoted).
 
 ### Mesh (render) LOD
 

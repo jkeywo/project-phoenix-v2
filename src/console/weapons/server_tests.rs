@@ -1,4 +1,4 @@
-use super::super::shared::{any_bank_accepts_human_input, system_is_registered};
+use super::shared::{any_bank_accepts_human_input, system_is_registered};
 use super::*;
 use crate::ai_plugin::AiTokenRegistry;
 use crate::damage::SystemHull;

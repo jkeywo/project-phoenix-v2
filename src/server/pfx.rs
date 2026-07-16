@@ -8,7 +8,7 @@ use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::beam_render;
-use crate::console::weapons::server::BlasterSystemResource;
+use crate::console::weapons::BlasterSystemResource;
 use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
 use crate::messages::GamePhase;

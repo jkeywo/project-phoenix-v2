@@ -64,7 +64,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ship_plugin.rs, src/console/weapons/server.rs]
+      paths: [src/core/messages.rs, src/ship_plugin.rs, src/console/weapons/mod.rs]
       symbols: [InterSystemMsg]
       messages: [InterSystemPayload]
       tests: [cargo test]

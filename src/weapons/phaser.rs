@@ -492,7 +492,7 @@ mod tests {
     // ── Production fore/aft 270° geometry at non-zero yaw ─────────────────
     //
     // These tests use the same `ship_local` + `in_arc` helpers the runtime
-    // gate uses (see `console::weapons::server::handle_fire_phaser`). They
+    // gate uses (see `console::weapons::handle_fire_phaser`). They
     // exercise the *actual* player ship config: fore facing 0°, aft facing
     // 180°, each with a 270° arc — so the blind cone is the 90° wedge
     // directly opposite each bank's facing.

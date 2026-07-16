@@ -173,7 +173,7 @@ pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
 /// [`LastBroadcastBlackboards`] — now live in
 /// [`crate::core::broadcast::cache_registry`] (issue #613), which is the
 /// single module that knows about all six delta caches (the sixth,
-/// `LastWeaponsUpdate`, stays in `console::weapons::server`) and owns
+/// `LastWeaponsUpdate`, stays in `console::weapons`) and owns
 /// `reset_all` / `resync_for_token` / `prune`. Re-exported here so existing
 /// `crate::server_app::LastBroadcastX` / `crate::simulation::LastBroadcastX`
 /// references are unaffected by the move.

@@ -1246,7 +1246,7 @@ mod tests {
     // Power battery decreases in the same tick.
 
     fn inter_system_test_app() -> App {
-        use crate::console::weapons::server::{drain_power_for_active_beam, ActiveBeam};
+        use crate::console::weapons::{drain_power_for_active_beam, ActiveBeam};
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -1275,7 +1275,7 @@ mod tests {
 
     /// Helper: mutate the LocalShip's `ActiveBeam` component in tests.
     fn set_beam_target(app: &mut App, uuid: Option<String>) {
-        use crate::console::weapons::server::ActiveBeam;
+        use crate::console::weapons::ActiveBeam;
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[test]
     fn active_beam_drains_power_battery_via_inter_system_channel() {
-        use crate::console::weapons::server::PHASER_BATTERY_DRAIN_PER_SEC;
+        use crate::console::weapons::PHASER_BATTERY_DRAIN_PER_SEC;
         let mut app = inter_system_test_app();
 
         // Simulate an active phaser beam.
@@ -1352,7 +1352,7 @@ mod tests {
     /// `ShipSystemControlSources` so tests can seed `offline_systems`
     /// (mirrors what `sync_console_damage_tiers` would do on Disabled hull).
     fn inter_system_test_app_with_control_sources() -> App {
-        use crate::console::weapons::server::{drain_power_for_active_beam, ActiveBeam};
+        use crate::console::weapons::{drain_power_for_active_beam, ActiveBeam};
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -1376,7 +1376,7 @@ mod tests {
     }
 
     fn set_beam_target_on(app: &mut App, uuid: Option<String>) {
-        use crate::console::weapons::server::ActiveBeam;
+        use crate::console::weapons::ActiveBeam;
         let mut q = app
             .world_mut()
             .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();

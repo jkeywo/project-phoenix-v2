@@ -6,10 +6,10 @@
 
 use bevy::prelude::*;
 
-use super::server::WeaponsTarget;
 use super::shared::{
     any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
 };
+use super::WeaponsTarget;
 use crate::ai_plugin::AiTokenRegistry;
 use crate::lobby::{InboundMessage, Sessions, Target};
 use crate::messages::{ClientMessage, GamePhase, ServerMessage, SystemControlPayload};

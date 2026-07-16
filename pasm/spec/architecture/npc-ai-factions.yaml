@@ -101,7 +101,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship_plugin.rs, src/console/weapons/server.rs, src/console/captain/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs]
+      paths: [src/ship_plugin.rs, src/console/weapons/mod.rs, src/console/captain/server.rs, src/ship/power.rs, src/ship/shields.rs, src/ship/sensors.rs, src/console/comms/server.rs, src/console/repair/server.rs, src/console/navigation/mod.rs]
       tests: [cargo test]
 
   - component: ai-command-symmetry-migration

@@ -2,7 +2,7 @@
 title: Weapons Intent
 type: concept
 tags: [weapons, tactical, phaser, blaster, torpedo]
-sources: [src/console/weapons/server.rs, src/weapons/blaster.rs, src/weapons/torpedo.rs, src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+sources: [src/console/weapons/mod.rs, src/weapons/blaster.rs, src/weapons/torpedo.rs, src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
 updated: 2026-07-14
 ---
 

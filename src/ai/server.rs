@@ -1119,7 +1119,7 @@ mod tests {
     // once per new attacker. The writer's half — that `tick_beams` really does
     // compare rather than blind-write under a live beam — is pinned by
     // `sustained_beam_marks_last_attacker_changed_exactly_once` in
-    // `console::weapons::server`. Both halves are required; neither alone
+    // `console::weapons`. Both halves are required; neither alone
     // establishes the AC.
 
     /// Write `LastShipAttacker` the way `tick_beams` does — via `set_if_neq`,

@@ -62,7 +62,7 @@ Weapons cover parts of damage and destruction. Neither captures the complete
 game-state transition and entity-lifecycle contract.
 
 Sources: `src/lobby/server.rs`, `src/server_app.rs`,
-`src/console/weapons/server.rs`, `src/regions/server.rs`,
+`src/console/weapons/mod.rs`, `src/regions/server.rs`,
 `gui/lobby-state.js`.
 
 ## 5. Ship configuration, selection, and entity files — Captured
@@ -153,7 +153,7 @@ The slice now also records fine-system ownership, the torpedo magazine
 round-claim protocol, and Tactical AI's target/doctrine/arc-bearing behavior.
 The accepted family-aware arc-bearing design remains planned work.
 
-Sources: `src/console/weapons/server.rs`, `src/weapons/`,
+Sources: `src/console/weapons/mod.rs`, `src/weapons/`,
 `src/ship/system_registry.rs`.
 
 ## 12. Shields — Captured

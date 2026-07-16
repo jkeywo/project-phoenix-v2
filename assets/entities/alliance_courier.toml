@@ -293,6 +293,21 @@ id = "helm"
 kind = "helm"
 station = "pilot"
 
+# Per-axis helm systems (issue #701, declared in #800). Owned by "pilot" like
+# the coarse `helm` above, and — like it — absent from the pilot's `Std`
+# `automated_systems` list, because the pilot flies the ship by hand. An
+# unmanned pilot station gets `Backfill`, which automates every station-owned
+# system, so these two come up on AI exactly when the coarse helm does.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+station = "pilot"
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+station = "pilot"
+
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"

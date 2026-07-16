@@ -450,6 +450,23 @@ kind = "helm"
 station = "helm"
 power_group = "helm"
 
+# Per-axis helm systems (issue #701, declared in #800). Owned by the same
+# station and power group as the coarse `helm` above, and — like it — listed in
+# no rating's `automated_systems`. An unmanned Helm gets the `Backfill` rating,
+# which automates every station-owned system, so these two come up on AI exactly
+# when the coarse helm does; a manned Helm leaves all three on the human.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+station = "helm"
+power_group = "helm"
+
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"

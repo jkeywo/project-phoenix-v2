@@ -545,6 +545,23 @@ kind = "helm"
 station = "helm"
 power_group = "helm"
 
+# Per-axis helm systems (issues #701/#703, declared in #800 and #704). Owned by
+# the same station and power group as the coarse `helm` above, and — like it —
+# listed in no rating's `automated_systems`. An unmanned Helm gets the `Backfill`
+# rating, which automates every station-owned system, so these come up on AI
+# exactly when the coarse helm does; a manned Helm leaves them all on the human.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+station = "helm"
+power_group = "helm"
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+station = "helm"
+power_group = "helm"
+
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
@@ -578,6 +595,20 @@ power_group = "weapons"
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+# Declared in #704. The deleted `operate_helm_ai` monolith drove this hull's
+# lateral avoidance dodge on its behalf: an undeclared system resolves to
+# ControlSource::Human (`operate_ai = false`), so the monolith never stood down
+# from the lateral axis here. Declaring it hands the axis to
+# `ai_helm_lateral_thrust` on exactly the ticks the monolith drove it. Unlike the
+# cruiser and destroyer, this hull has no `Simplified` Helm rating, so — matching
+# the monolith, which only ran with the coarse helm on AI — lateral thrust is not
+# automated for a manned Helm.
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
 station = "helm"
 power_group = "helm"
 

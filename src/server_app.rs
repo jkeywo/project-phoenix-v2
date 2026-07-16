@@ -6775,7 +6775,7 @@ station = "pilot"
         );
     }
 
-    /// Issue #697 made `publish_weapons_blackboard` per-entity, so NPC ships now
+    /// Issue #697 made the weapons blackboard publish systems per-entity, so NPC ships now
     /// carry populated Weapons blackboards. `broadcast_blackboard_updates` reads
     /// only the `LocalShip`, and `LastBroadcastBlackboards` is a single global
     /// map keyed on `SystemId` alone — it structurally assumes one broadcast

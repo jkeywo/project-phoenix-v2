@@ -1285,6 +1285,60 @@ export function buildCourierConsoleState(state) {
 }
 
 /**
+ * Build a console payload from the fine systems owned by a station.
+ *
+ * Each entry in `systems` is keyed by its actual SystemId. A console therefore
+ * receives a view only when its station owns the corresponding fine system;
+ * the station's display role never selects data. This lets TOML move systems
+ * between stations without growing another per-hull composite builder.
+ *
+ * Multiple fine systems can share an aggregate view (for example all helm
+ * axes need the current flight state). The aggregate is deliberately copied
+ * only under the ids which own it, never under a station-role key.
+ *
+ * @param {string} stationId
+ * @param {object} state
+ */
+export function buildSystemStationConsoleState(stationId, state) {
+  const ids = state.stationSystems?.[stationId] || [];
+  const systems = {};
+  const controlSources = state.controlSources || {};
+  const add = (matches, build, adjust) => {
+    const view = JSON.parse(build(state));
+    const owned = ids.filter(matches);
+    if (owned.length === 0) return;
+    if (adjust) adjust(view, owned);
+    owned.forEach(id => { systems[id] = view; });
+  };
+  const allAi = idsToCheck => idsToCheck.length > 0
+    && idsToCheck.every(id => controlSources[id] === 'Ai');
+
+  add(id => ['captain', 'viewscreen', 'red-alert'].includes(id), buildCaptainConsoleState,
+    (view) => {
+      view.red_alert_auto = controlSources['red-alert'] === 'Ai';
+      view.viewscreen_auto = controlSources['viewscreen'] === 'Ai';
+    });
+  add(id => id.startsWith('helm-'), buildHelmConsoleState,
+    (view, owned) => { view.helm_auto = allAi(owned); view.lateral_auto = controlSources['helm-lateral-thrust'] === 'Ai'; });
+  add(id => id === 'tactical-radar' || id === 'phaser-control' || id.startsWith('phaser-')
+      || id.startsWith('torpedo-') || id.startsWith('blaster-'), buildWeaponsConsoleState,
+    (view, owned) => { view.tactical_auto = allAi(owned); });
+  add(id => id === 'sensors' || id === 'sensor-radar', buildSensorsConsoleState,
+    (view, owned) => { view.sensors_auto = allAi(owned); });
+  add(id => id === 'navigation', buildNavigationConsoleState);
+  add(id => id === 'comms', buildCommsConsoleState,
+    (view) => { view.comms_auto = controlSources['comms'] === 'Ai'; });
+  add(id => id === 'shields-system' || id.startsWith('shield-arc-'), buildShieldsConsoleState,
+    (view) => { view.shields_auto = controlSources['shields-system'] === 'Ai'; });
+  add(id => id === 'power-reactor' || id === 'power-battery', buildPowerConsoleState,
+    (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
+  add(id => id === 'repair', buildRepairConsoleState,
+    (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
+
+  return JSON.stringify({ station_id: stationId, system_ids: ids, systems });
+}
+
+/**
  * Destroyer Engineering console — combined Shields + Power + Repair view.
  *
  * Delegates to buildShieldsConsoleState, buildPowerConsoleState, and
@@ -1339,6 +1393,11 @@ if (typeof window !== 'undefined') {
     // Console enum names.
     switch (consoleName) {
       case 'tactical':
+        // A TOML station which owns helm fine systems is a system-composed
+        // console. Its iframe receives only the views for those owned systems.
+        if (state.stationSystems?.tactical?.some(id => id.startsWith('helm-'))) {
+          return buildSystemStationConsoleState('tactical', state);
+        }
         // Destroyer tactical = weapons + navigation + comms (determined by
         // ship_config.station_systems, not runtime blackboard presence).
         if (state.stationSystems?.tactical?.includes('navigation')) {
@@ -1346,6 +1405,11 @@ if (typeof window !== 'undefined') {
         }
         return buildWeaponsConsoleState(state);
       case 'captain':
+        // Likewise, a Captain station which owns repair is system-composed
+        // rather than a named-role special case (the two-player Courier).
+        if (state.stationSystems?.captain?.includes('repair')) {
+          return buildSystemStationConsoleState('captain', state);
+        }
         // Destroyer captain = captain + sensors.
         if (state.stationSystems?.captain?.includes('sensors')) {
           return buildDestroyerCaptainConsoleState(state);

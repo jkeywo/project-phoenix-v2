@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Courier Tactical</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }.frame { height: 100%; }
+    .panel-inner { height: 100%; box-sizing: border-box; padding: 18px 32px; display: flex; flex-direction: column; gap: 10px; }
+    h1 { margin: 0; color: var(--ink); font: 600 24px "Chakra Petch", sans-serif; letter-spacing: .2em; } h1 small { display:block; font: 11px "JetBrains Mono", monospace; color:var(--ink-faint); }
+    .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(14,17,23,.6); }
+    h2 { margin: 0; padding-bottom:5px; border-bottom:1px solid var(--edge); color:var(--ink-dim); font:600 11px "Chakra Petch",sans-serif; letter-spacing:.24em; text-transform:uppercase; }
+    ph-tactical-radar, ph-sensor-radar { width: 100%; aspect-ratio: 1 / 1; flex-shrink: 0; }
+    .sticks { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.buttons { display:flex; gap:8px; }.buttons > * { flex:1; }
+    footer { display:flex; align-items:center; gap:10px; color:var(--ink-faint); font:11px "JetBrains Mono",monospace; }.dot { width:7px;height:7px;border-radius:50%;background:var(--loaded); }.spacer{flex:1;}
+    @media (orientation: portrait) { .panel-inner { padding:10px; }.body { grid-template-columns:1fr; overflow:auto; } h1 { font-size:19px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Courier Tactical">
+    <div class="panel"></div><div class="panel-inner">
+      <h1>TACTICAL<small>HELM · WEAPONS · SENSORS</small></h1>
+      <div class="body">
+        <div class="col"><h2>Weapons</h2><ph-tactical-radar id="tactical-radar"></ph-tactical-radar><ph-blasters-controls id="blasters"></ph-blasters-controls><h2>Sensors</h2><ph-sensor-radar id="sensor-radar"></ph-sensor-radar><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
+        <div class="col"><h2>Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
+      </div>
+      <footer><span class="dot"></span><span>TACTICAL STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
+    </div>
+  </div>
+  <script type="module">
+    import '../components/ph-tactical-radar.js';
+    import '../components/ph-blasters-controls.js';
+    import '../components/ph-sensor-radar.js';
+    import '../components/ph-sensor-panel.js';
+    import '../components/ph-helm-joystick.js';
+    import '../components/ph-lateral-thrust-joystick.js';
+    import '../components/ph-impulse-btn.js';
+    import '../components/ph-boost-btn.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
+    initConsole({ name: 'tactical', render(s) {
+      const weapons = system(s, 'tactical-radar', 'blaster-fore');
+      const sensors = system(s, 'sensors', 'sensor-radar');
+      const helm = system(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
+      document.getElementById('tactical-radar').state = { blips: weapons.blips || [], x: weapons.ship_x || 0, z: weapons.ship_z || 0, speed: weapons.ship_speed || 0, ship_heading: weapons.ship_heading || 0, phaser_arcs: weapons.phaser_arcs || [], torpedo_arcs: weapons.torpedo_arcs || [], selected_target_uuid: weapons.target_uuid || null };
+      document.getElementById('blasters').state = { banks: weapons.blasters || [] };
+      document.getElementById('sensor-radar').state = sensors;
+      document.getElementById('sensor-panel').state = sensors;
+      document.getElementById('helm').state = { auto: !!helm.helm_auto };
+      document.getElementById('lateral').state = { auto: !!helm.lateral_auto };
+      document.getElementById('impulse').state = { state: helm.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (helm.impulse_charge_progress || 0) * 100, auto: !!helm.helm_auto };
+      document.getElementById('boost').state = { available: !!helm.boost_enabled, active: !!helm.boost_active, recharge_pct: helm.boost_battery != null ? helm.boost_battery * 100 : 100, auto: !!helm.helm_auto };
+      document.getElementById('damage').state = s.own_hull || null;
+    }});
+  </script>
+</body>
+</html>

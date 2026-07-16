@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Courier Captain</title>
+  <link rel="stylesheet" href="../console.css">
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; }
+    .frame { height: 100%; position: relative; }
+    .panel-inner { height: 100%; box-sizing: border-box; padding: 18px 32px; display: flex; flex-direction: column; gap: 10px; }
+    .hero, .footer { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .hero h1 { margin: 0 auto 0 0; font-size: 24px; letter-spacing: .2em; color: var(--ink); }
+    .hero h1 small { display: block; font: 11px "JetBrains Mono", monospace; letter-spacing: .2em; color: var(--ink-faint); }
+    button { background: rgba(14,17,23,.85); border: 1px solid var(--edge); color: var(--ink); font: 600 12px "Chakra Petch", sans-serif; letter-spacing: .16em; padding: 7px 11px; text-transform: uppercase; }
+    button.active { color: var(--cyan); border-color: var(--cyan); }
+    .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(14,17,23,.6); }
+    h2 { margin: 0; border-bottom: 1px solid var(--edge); padding-bottom: 5px; color: var(--ink-dim); font: 600 11px "Chakra Petch", sans-serif; letter-spacing: .24em; text-transform: uppercase; }
+    ph-objective-list, ph-shield-facings, ph-power-controls, ph-repair-teams { flex: 1; min-height: 0; }
+    .footer { color: var(--ink-faint); font: 11px "JetBrains Mono", monospace; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }.spacer { flex: 1; }
+    .overlay { display: none; position: absolute; inset: 0; z-index: 2; padding: 18px; box-sizing: border-box; background: rgba(5,8,24,.97); flex-direction: column; gap: 9px; }
+    .overlay.open { display: flex; }.overlay > :last-child { flex: 1; min-height: 0; }
+    @media (orientation: portrait) { .panel-inner { padding: 10px; }.body { grid-template-columns: 1fr; overflow: auto; }.hero h1 { font-size: 19px; } }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Courier Captain">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1>CAPTAIN<small>COURIER COMMAND</small></h1>
+        <button id="nav-toggle">Nav</button>
+        <button id="comms-toggle">Comms</button>
+      </div>
+      <div class="body">
+        <div class="col">
+          <h2>Command</h2>
+          <ph-camera-select id="camera"></ph-camera-select>
+          <ph-red-alert id="red-alert"></ph-red-alert>
+          <ph-objective-list id="objectives"></ph-objective-list>
+        </div>
+        <div class="col">
+          <h2>Shields & Power</h2>
+          <ph-shield-facings id="shields"></ph-shield-facings>
+          <ph-power-controls id="power"></ph-power-controls>
+          <ph-battery-bar id="battery"></ph-battery-bar>
+        </div>
+        <div class="col">
+          <h2>Repair</h2>
+          <ph-hull-integrity id="hull"></ph-hull-integrity>
+          <ph-repair-teams id="repair"></ph-repair-teams>
+        </div>
+      </div>
+      <footer class="footer"><span class="dot"></span><span>CAPTAIN STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
+    </div>
+    <section class="overlay" id="nav-overlay"><button id="nav-back">← Back</button><h2>Navigation</h2><ph-navigation-map id="nav"></ph-navigation-map></section>
+    <section class="overlay" id="comms-overlay"><button id="comms-back">← Back</button><h2>Comms</h2><ph-comms-contact-list id="contacts"></ph-comms-contact-list><ph-comms-current-message id="message"></ph-comms-current-message></section>
+  </div>
+  <script type="module">
+    import '../components/ph-camera-select.js';
+    import '../components/ph-red-alert.js';
+    import '../components/ph-objective-list.js';
+    import '../components/ph-shield-facings.js';
+    import '../components/ph-power-controls.js';
+    import '../components/ph-battery-bar.js';
+    import '../components/ph-hull-integrity.js';
+    import '../components/ph-repair-teams.js';
+    import '../components/ph-navigation-map.js';
+    import '../components/ph-comms-contact-list.js';
+    import '../components/ph-comms-current-message.js';
+    import '../components/ph-station-damage.js';
+    import { initConsole } from '../console-core.js';
+
+    function system(s, ...ids) {
+      for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id];
+      return {};
+    }
+    function close() {
+      document.querySelectorAll('.overlay').forEach(el => el.classList.remove('open'));
+      document.querySelectorAll('.hero button').forEach(el => el.classList.remove('active'));
+    }
+    function toggle(name) {
+      const overlay = document.getElementById(name + '-overlay');
+      const button = document.getElementById(name + '-toggle');
+      const open = overlay.classList.contains('open'); close();
+      if (!open) { overlay.classList.add('open'); button.classList.add('active'); }
+    }
+    initConsole({ name: 'captain', render(s) {
+      const command = system(s, 'captain', 'viewscreen', 'red-alert');
+      const shields = system(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');
+      const power = system(s, 'power-reactor', 'power-battery');
+      const repair = system(s, 'repair');
+      const nav = system(s, 'navigation');
+      const comms = system(s, 'comms');
+      // The Courier's compact bridge exposes only its Fore hull view and the
+      // authored Cinematic view, even if the model carries extra markers.
+      const courierViews = (command.camera_views || []).filter(view => view === 'camera_fore' || view === 'cinematic');
+      document.getElementById('camera').state = { views: courierViews, current_view: command.view_direction || '', auto: !!command.viewscreen_auto };
+      document.getElementById('red-alert').state = { active: !!command.red_alert, auto: !!command.red_alert_auto };
+      document.getElementById('objectives').state = { objectives: command.objectives || [], boosted_objective_id: command.boosted_objective_id ?? null };
+      document.getElementById('shields').state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
+      document.getElementById('power').state = { groups: power.consoles || [], auto: !!power.power_auto };
+      document.getElementById('battery').state = { level_pct: power.battery_max ? power.battery_charge / power.battery_max * 100 : 0, charging: !!power.battery_online && !power.locked, emergency_threshold_pct: 20 };
+      document.getElementById('hull').state = { total_pct: repair.overall_hull?.pct ?? 1 };
+      document.getElementById('repair').state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [] };
+      document.getElementById('nav').state = { blips: nav.blips || [], range: nav.radar_range || 800, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
+      document.getElementById('contacts').state = { contacts: comms.contacts || [] };
+      const messages = comms.messages || [];
+      document.getElementById('message').state = { thread: messages.find(m => !m.is_read) || messages.at(-1) || null };
+      document.getElementById('damage').state = s.own_hull || null;
+    }});
+    document.getElementById('nav-toggle').onclick = () => toggle('nav');
+    document.getElementById('comms-toggle').onclick = () => toggle('comms');
+    document.getElementById('nav-back').onclick = close;
+    document.getElementById('comms-back').onclick = close;
+  </script>
+</body>
+</html>

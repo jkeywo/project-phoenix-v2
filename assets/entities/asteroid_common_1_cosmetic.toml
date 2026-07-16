@@ -13,10 +13,20 @@ shape = "sphere"
 radius = 1
 colour = [0.5, 0.45, 0.38]
 
-# Distance-based LOD: full GLB up close, shared sphere far away.
+# Distance-based LOD: full GLB up close, decimated steps, shared sphere far away.
 [[mesh.lod]]
 max_distance = 50.0
 model = "assets/models/asteroid_common_1.glb"
+variant = "cosmetic"
+
+[[mesh.lod]]
+max_distance = 100.0
+model = "assets/models/asteroid_common_1_lod1.glb"
+variant = "cosmetic"
+
+[[mesh.lod]]
+max_distance = 150.0
+model = "assets/models/asteroid_common_1_lod2.glb"
 variant = "cosmetic"
 
 [[mesh.lod]]

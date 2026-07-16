@@ -113,6 +113,19 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
                 manifest.sidecars.push(sc);
             }
         }
+        // Also discover GLB models referenced by LOD levels
+        for lod in &mesh.lod {
+            if let Some(ref lod_model) = lod.model {
+                let rel = lod_model.strip_prefix("assets/").unwrap_or(lod_model);
+                if !manifest.glb_models.contains(&rel.to_string()) {
+                    manifest.glb_models.push(rel.to_string());
+                }
+                let sc = sidecar_path(lod_model, lod.variant.as_deref());
+                if !manifest.sidecars.contains(&sc) {
+                    manifest.sidecars.push(sc);
+                }
+            }
+        }
     }
     // Planet textures
     if let Some(ref planet) = config.planet {

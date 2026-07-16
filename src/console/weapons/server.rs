@@ -355,6 +355,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<NpcFrequencyMatchStates>()
             .init_resource::<BlasterSystemResource>()
             .init_resource::<BeamContext>()
+            .init_resource::<TorpedoTargetSnapshot>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
                 TorpedoConfig::default(),
             )))
@@ -460,11 +461,21 @@ impl Plugin for WeaponsPlugin {
                     drain_power_for_active_beam
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(integrate_weapons_state),
-                    tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
+                    // Torpedo tick split into two phases (issue #724),
+                    // connected by the one-tick `TorpedoTargetSnapshot`
+                    // resource: the builder writes it, the lifecycle reads
+                    // it. Instance-based `.chain()` rather than type-set
+                    // `.after(...)` for the same reason as the beam-tick
+                    // chain above: the weapons test harness registers a
+                    // second instance of each phase.
+                    (build_torpedo_target_snapshot, tick_torpedo_lifecycle)
+                        .chain()
+                        .in_set(crate::sim_sets::SimSet::Physics),
                     // Magazine consumer runs in Physics — reads channel-2 claims
                     // that handle_load_tube emitted in Input this tick, so the
                     // load starts same-tick (issue #512). Ordered after
-                    // tick_torpedo_system so its own state mutations are seen.
+                    // build_torpedo_target_snapshot / tick_torpedo_lifecycle
+                    // so its own state mutations are seen.
                     handle_torpedo_magazine_inter_system.in_set(crate::sim_sets::SimSet::Physics),
                     tick_blaster_system.in_set(crate::sim_sets::SimSet::Physics),
                 ),
@@ -483,7 +494,7 @@ impl Plugin for WeaponsPlugin {
 pub(crate) use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, any_blaster_bank_operates_ai,
     any_tactical_system_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
-    BeamContext, ShooterState,
+    BeamContext, ShooterState, TorpedoTargetSnapshot,
 };
 
 fn handle_set_target(
@@ -2906,7 +2917,7 @@ fn tick_blaster_system(
 /// damage. Emits `ServerMessage::BlasterHit`. Runs in `SimSet::Damage`.
 ///
 /// Hit detection uses live ECS Transform positions — the same approach as
-/// `tick_torpedo_system`.
+/// `build_torpedo_target_snapshot`.
 #[allow(clippy::too_many_arguments)]
 fn handle_blaster_hits(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
@@ -3186,23 +3197,12 @@ pub fn handle_torpedo_magazine_inter_system(
     }
 }
 
-fn tick_torpedo_system(
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
-    mut world: ResMut<WorldResource>,
-    time: Res<Time>,
-    mut outbox: ResMut<SimOutbox>,
-    mut hull_query: Query<(
-        Entity,
-        Option<&AsteroidUuid>,
-        Option<&crate::entity_spawner::EntityUuid>,
-        &mut EntitySystemHull,
-        Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::entity_spawner::EntityShipArcHull>,
-    )>,
-    mut commands: Commands,
-    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+/// Phase 1 of the torpedo tick (issue #724): build the one-tick
+/// [`TorpedoTargetSnapshot`] — target positions (live ECS with a
+/// `WorldResource` fallback) and the proximity detonation target list —
+/// which `tick_torpedo_lifecycle` reads later in the same tick.
+fn build_torpedo_target_snapshot(
+    world: Res<WorldResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     // Virtual entities (asteroid-field anchors, region trigger volumes) are
@@ -3220,10 +3220,9 @@ fn tick_torpedo_system(
             With<crate::entity_spawner::RegionShapeSection>,
         )>,
     >,
-    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    mut snapshot: ResMut<TorpedoTargetSnapshot>,
 ) {
-    let dt = time.delta_secs();
-    let mut weapons_target_opt = weapons_target_q.single_mut().ok();
+    snapshot.clear();
 
     // ── Build shared world snapshots up-front (used by every ship's tick) ───
 
@@ -3301,6 +3300,41 @@ fn tick_torpedo_system(
             .collect()
     };
 
+    snapshot.target_positions = target_positions;
+    snapshot.targets = targets;
+}
+
+/// Phase 2 of the torpedo tick (issue #724): per-ship torpedo tick —
+/// guidance/expiry via the [`TorpedoTargetSnapshot`] built earlier this
+/// tick, proximity detonation, shield routing, hull damage, despawn,
+/// broadcasts and VFX events.
+fn tick_torpedo_lifecycle(
+    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
+    mut world: ResMut<WorldResource>,
+    time: Res<Time>,
+    mut outbox: ResMut<SimOutbox>,
+    mut hull_query: Query<(
+        Entity,
+        Option<&AsteroidUuid>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        &mut EntitySystemHull,
+        Option<&mut crate::ship::shields::ShipShields>,
+        Option<&mut crate::entity_spawner::EntityShipArcHull>,
+    )>,
+    mut commands: Commands,
+    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    snapshot: Res<TorpedoTargetSnapshot>,
+) {
+    let dt = time.delta_secs();
+    let mut weapons_target_opt = weapons_target_q.single_mut().ok();
+    let target_positions = &snapshot.target_positions;
+    let targets = &snapshot.targets;
+
     // ── Phase 1: tick every ship's TorpedoSystem + collect detonation events ──
     //
     // Iterate all ships (`With<Ship>`) with a `TorpedoSystemResource`
@@ -3321,7 +3355,7 @@ fn tick_torpedo_system(
 
     for mut torpedo_sys in torpedo_sys_q.iter_mut() {
         any_ship_component = true;
-        let result = torpedo_sys.0.tick(dt, &target_positions, &mut || {
+        let result = torpedo_sys.0.tick(dt, target_positions, &mut || {
             uuid::Uuid::new_v4().to_string()
         });
         for expired_uuid in result.expired {
@@ -3342,7 +3376,7 @@ fn tick_torpedo_system(
                 },
             ));
         }
-        let hits = torpedo_sys.0.find_detonation_hits(&targets);
+        let hits = torpedo_sys.0.find_detonation_hits(targets);
         for (torpedo_uuid, target_uuid) in hits {
             let Some(det) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
@@ -3363,7 +3397,7 @@ fn tick_torpedo_system(
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` (no Ship entity carrying it) still work.
     if !any_ship_component {
-        let result = torpedo_sys_res.0.tick(dt, &target_positions, &mut || {
+        let result = torpedo_sys_res.0.tick(dt, target_positions, &mut || {
             uuid::Uuid::new_v4().to_string()
         });
         for expired_uuid in result.expired {
@@ -3384,7 +3418,7 @@ fn tick_torpedo_system(
                 },
             ));
         }
-        let hits = torpedo_sys_res.0.find_detonation_hits(&targets);
+        let hits = torpedo_sys_res.0.find_detonation_hits(targets);
         for (torpedo_uuid, target_uuid) in hits {
             let Some(det) = torpedo_sys_res.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
@@ -4467,7 +4501,7 @@ fn publish_weapons_blackboard(
         // wiped every tick and always read `None` on the wire.
         //
         // Re-check liveness rather than carrying blindly: the Input pair decided
-        // on this target, but `tick_beams` (`Damage`) and `tick_torpedo_system`
+        // on this target, but `tick_beams` (`Damage`) and `tick_torpedo_lifecycle`
         // (`Physics`) both clear `WeaponsTarget` after a kill, later in the same
         // tick. Carrying the dead value forward would publish `locked_target !=
         // target_uuid` for one tick, contradicting the field's own contract (see
@@ -5123,7 +5157,10 @@ station = "tactical"
                     tick_beams_tick_lifetimes,
                 )
                     .chain(),
-                tick_torpedo_system,
+                // The two torpedo-tick phases (issue #724) share the
+                // one-tick TorpedoTargetSnapshot resource, so they must
+                // run in order too.
+                (build_torpedo_target_snapshot, tick_torpedo_lifecycle).chain(),
             ),
         )
         .add_plugins(weapons_update_broadcaster())
@@ -6493,7 +6530,7 @@ station = "tactical"
             },
         );
         // First tick processes the FireTorpedo; second tick is where
-        // `tick_torpedo_system` evaluates detonations against the live
+        // `tick_torpedo_lifecycle` evaluates detonations against the live
         // target list (including the field anchor at the origin).
         tick(&mut app);
         tick(&mut app);
@@ -9897,7 +9934,7 @@ station = "tactical"
     #[derive(Resource)]
     struct KillTargetOnDamage(String);
 
-    /// Stands in for `tick_beams` / `tick_torpedo_system`: both destroy the
+    /// Stands in for `tick_beams` / `tick_torpedo_lifecycle`: both destroy the
     /// locked target and clear `WeaponsTarget` *after* `SimSet::Input`, which is
     /// what leaves a dead `locked_target` for `publish_weapons_blackboard` to
     /// carry forward.
@@ -11521,7 +11558,8 @@ ai_only = true
             ))
             // WeaponsPlugin already registers the three beam-tick phase
             // systems (tick_beams_prepare / tick_beams_apply_damage /
-            // tick_beams_tick_lifetimes) and tick_torpedo_system.
+            // tick_beams_tick_lifetimes) and the two torpedo-tick phases
+            // (build_torpedo_target_snapshot / tick_torpedo_lifecycle).
             // Do NOT register them again here.
             .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
             .add_systems(PostUpdate, collect);

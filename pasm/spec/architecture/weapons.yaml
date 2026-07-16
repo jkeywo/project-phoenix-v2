@@ -218,7 +218,7 @@ entities:
     implementation:
       status: declared
       paths: [src/weapons/torpedo.rs, src/console/weapons/server.rs, src/entities/config.rs]
-      symbols: [TorpedoSystem, tick_torpedo_system, TorpedoesConfig]
+      symbols: [TorpedoSystem, build_torpedo_target_snapshot, tick_torpedo_lifecycle, TorpedoesConfig]
       tests: [cargo test]
 
   - state: torpedo-state

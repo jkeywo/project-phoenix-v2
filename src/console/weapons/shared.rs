@@ -215,6 +215,33 @@ impl BeamContext {
     }
 }
 
+/// One-tick torpedo target snapshot shared across the torpedo-tick phases
+/// (issue #724).
+///
+/// Lifecycle: `build_torpedo_target_snapshot` calls
+/// [`TorpedoTargetSnapshot::clear`] at the start of each frame and
+/// repopulates both collections; `tick_torpedo_lifecycle` reads them later
+/// in the same tick. It carries no state across frames.
+#[derive(Resource, Default)]
+pub struct TorpedoTargetSnapshot {
+    /// UUID → (x, z) positions for torpedo guidance, from live ECS
+    /// transforms with a `WorldResource` snapshot fallback.
+    pub target_positions: std::collections::HashMap<String, (f32, f32)>,
+    /// Proximity detonation target list (uuid, x, z, radius). Virtual
+    /// entities (asteroid-field anchors, region trigger volumes) are
+    /// excluded.
+    pub targets: Vec<(String, f32, f32, f32)>,
+}
+
+impl TorpedoTargetSnapshot {
+    /// Empty the per-tick target collections. The builder calls this at
+    /// the start of every frame before repopulating.
+    pub fn clear(&mut self) {
+        self.target_positions.clear();
+        self.targets.clear();
+    }
+}
+
 /// True when `system_id` is registered on this ship's `ControlSourceResolver`
 /// (either in the `sources` map or in the damage-driven `offline_systems`
 /// set). Used to decide whether per-fine-instance gating applies to a
@@ -294,5 +321,25 @@ mod tests {
         assert_eq!(ctx.0.len(), 2);
         ctx.clear();
         assert!(ctx.0.is_empty());
+    }
+
+    #[test]
+    fn torpedo_target_snapshot_default_is_empty() {
+        let snap = TorpedoTargetSnapshot::default();
+        assert!(snap.target_positions.is_empty());
+        assert!(snap.targets.is_empty());
+    }
+
+    #[test]
+    fn torpedo_target_snapshot_clear_empties_after_push() {
+        let mut snap = TorpedoTargetSnapshot::default();
+        snap.target_positions
+            .insert("uuid-1".to_string(), (1.0, 2.0));
+        snap.targets.push(("uuid-1".to_string(), 1.0, 2.0, 3.0));
+        assert_eq!(snap.target_positions.len(), 1);
+        assert_eq!(snap.targets.len(), 1);
+        snap.clear();
+        assert!(snap.target_positions.is_empty());
+        assert!(snap.targets.is_empty());
     }
 }

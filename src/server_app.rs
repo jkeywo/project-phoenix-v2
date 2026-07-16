@@ -2372,7 +2372,7 @@ fn spawn_game_start_entities(
             // Inserted as per-entity component AND global resource (dual-write
             // migration). NPC ships with a [torpedoes] block also get their own
             // TorpedoSystemResource component via `entities::spawner::spawn_entity`
-            // (see #597 PR-3 and the audit follow-up); `tick_torpedo_system`
+            // (see #597 PR-3 and the audit follow-up); `tick_torpedo_lifecycle`
             // iterates `With<Ship>` so both paths advance the same way.
             if let Some(tc) = &config.torpedoes {
                 let runtime_config = tc.to_runtime();

@@ -446,41 +446,17 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
     let mut out = DispatchResult::default();
 
     match action {
-        TriggerAction::AddObjective {
-            id,
-            text,
-            mandatory,
-            targets,
-            directive,
-            utility,
-            source,
-        } => {
-            // Explicit targets win; otherwise fall back to the trigger
-            // condition's entity (legacy behaviour).
-            let resolved: Vec<String> = if targets.is_empty() {
-                context.entity_name.clone().into_iter().collect()
-            } else {
-                targets.clone()
-            };
-            out.commands.push(ActionCmd::AddObjective {
-                id: id.clone(),
-                text: text.clone(),
-                mandatory: *mandatory,
-                targets: resolved,
-                directive: directive.clone(),
-                utility: utility.clone(),
-                source: source.clone(),
-            });
-        }
-
-        TriggerAction::CompleteObjective { id } => {
-            out.commands
-                .push(ActionCmd::CompleteObjective { id: id.clone() });
-        }
-
-        TriggerAction::FailObjective { id } => {
-            out.commands
-                .push(ActionCmd::FailObjective { id: id.clone() });
+        // Mission-state actions — objectives, faction hostility, and the
+        // game-over transition — are handled by `dispatch_state_action`
+        // (issue #711). This table remains the single entry point over every
+        // variant; it just routes these six to their own function.
+        TriggerAction::AddObjective { .. }
+        | TriggerAction::CompleteObjective { .. }
+        | TriggerAction::FailObjective { .. }
+        | TriggerAction::GameOver { .. }
+        | TriggerAction::AddFactionEnemy { .. }
+        | TriggerAction::RemoveFactionEnemy { .. } => {
+            return dispatch_state_action(action, context);
         }
 
         TriggerAction::SetAiState {
@@ -582,16 +558,6 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 uuid: uuid.clone(),
                 tag: tag.clone(),
                 slot: slot.clone(),
-            });
-        }
-
-        TriggerAction::GameOver { message } => {
-            // `None` becomes `Some("")`, not `None` — preserved verbatim.
-            let reason = message.clone().unwrap_or_default();
-            // Reason first: `OnEnter(GamePhase::GameOver)` reads it.
-            out.commands.push(ActionCmd::SetGameOverReason { reason });
-            out.commands.push(ActionCmd::SetNextState {
-                phase: GamePhase::GameOver,
             });
         }
 
@@ -715,6 +681,72 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
             out.commands
                 .push(ActionCmd::DestroyEntity { uuid: uuid.clone() });
         }
+    }
+
+    out
+}
+
+/// Decide what one mission-state `TriggerAction` should do.
+///
+/// Owns the six actions that touch mission state — the three objective actions
+/// (`AddObjective`, `CompleteObjective`, `FailObjective`), the two faction-
+/// hostility actions (`AddFactionEnemy`, `RemoveFactionEnemy`), and the
+/// `GameOver` transition. Split out of `dispatch_action` (issue #711), which
+/// routes exactly these six variants here.
+///
+/// Pure, like `dispatch_action`: reads `context`, mutates nothing, returns a
+/// `DispatchResult`. Called only for the six variants above; any other variant
+/// is a routing bug in `dispatch_action` and trips the `unreachable!`.
+fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> DispatchResult {
+    let mut out = DispatchResult::default();
+
+    match action {
+        TriggerAction::AddObjective {
+            id,
+            text,
+            mandatory,
+            targets,
+            directive,
+            utility,
+            source,
+        } => {
+            // Explicit targets win; otherwise fall back to the trigger
+            // condition's entity (legacy behaviour).
+            let resolved: Vec<String> = if targets.is_empty() {
+                context.entity_name.clone().into_iter().collect()
+            } else {
+                targets.clone()
+            };
+            out.commands.push(ActionCmd::AddObjective {
+                id: id.clone(),
+                text: text.clone(),
+                mandatory: *mandatory,
+                targets: resolved,
+                directive: directive.clone(),
+                utility: utility.clone(),
+                source: source.clone(),
+            });
+        }
+
+        TriggerAction::CompleteObjective { id } => {
+            out.commands
+                .push(ActionCmd::CompleteObjective { id: id.clone() });
+        }
+
+        TriggerAction::FailObjective { id } => {
+            out.commands
+                .push(ActionCmd::FailObjective { id: id.clone() });
+        }
+
+        TriggerAction::GameOver { message } => {
+            // `None` becomes `Some("")`, not `None` — preserved verbatim.
+            let reason = message.clone().unwrap_or_default();
+            // Reason first: `OnEnter(GamePhase::GameOver)` reads it.
+            out.commands.push(ActionCmd::SetGameOverReason { reason });
+            out.commands.push(ActionCmd::SetNextState {
+                phase: GamePhase::GameOver,
+            });
+        }
 
         TriggerAction::AddFactionEnemy { faction, enemy } => {
             let Some(registry) = context.factions else {
@@ -763,6 +795,10 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 faction_uuid,
                 enemy_uuid,
             });
+        }
+
+        other => {
+            unreachable!("dispatch_state_action called with non-state action: {other:?}")
         }
     }
 
@@ -2078,5 +2114,186 @@ mod tests {
             out.warnings,
             vec!["RemoveFactionEnemy: unknown enemy faction name 'Nobody'".to_string()]
         );
+    }
+
+    // ── dispatch_state_action (direct) ────────────────────────────────────
+    //
+    // The tests above drive the six state arms through `dispatch_action`,
+    // proving the routing arm delegates. These call `dispatch_state_action`
+    // directly, proving the extracted function is what produces the result and
+    // that the two entry points agree (issue #711).
+
+    #[test]
+    fn state_add_objective_falls_back_to_trigger_entity_directly() {
+        let mut fx = Fixture::new();
+        fx.entity_name = Some("trigger_ship".to_string());
+        let out = dispatch_state_action(&add_objective(vec![]), &fx.ctx());
+
+        assert_eq!(
+            out.commands,
+            vec![ActionCmd::AddObjective {
+                id: "obj1".to_string(),
+                text: "Destroy the convoy".to_string(),
+                mandatory: true,
+                targets: vec!["trigger_ship".to_string()],
+                directive: AiDirective::default(),
+                utility: UtilityConfig::default(),
+                source: ObjectiveSource::default(),
+            }]
+        );
+        assert!(out.warnings.is_empty());
+        assert!(out.new_events.is_empty());
+    }
+
+    #[test]
+    fn state_add_objective_matches_dispatch_action_routing() {
+        let mut fx = Fixture::new();
+        fx.entity_name = Some("trigger_ship".to_string());
+        let action = add_objective(vec!["alpha", "beta"]);
+
+        // Both entry points must produce byte-identical results.
+        assert_eq!(
+            dispatch_action(&action, &fx.ctx()),
+            dispatch_state_action(&action, &fx.ctx())
+        );
+    }
+
+    #[test]
+    fn state_complete_objective_emits_command_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::CompleteObjective {
+            id: "obj1".to_string(),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out.commands,
+            vec![ActionCmd::CompleteObjective {
+                id: "obj1".to_string()
+            }]
+        );
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    fn state_fail_objective_emits_command_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::FailObjective {
+            id: "obj1".to_string(),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out.commands,
+            vec![ActionCmd::FailObjective {
+                id: "obj1".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn state_game_over_sets_reason_before_state_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::GameOver {
+            message: Some("The ship was lost".to_string()),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        // Ordering is load-bearing: OnEnter(GameOver) reads the reason first.
+        assert_eq!(
+            out.commands,
+            vec![
+                ActionCmd::SetGameOverReason {
+                    reason: "The ship was lost".to_string()
+                },
+                ActionCmd::SetNextState {
+                    phase: GamePhase::GameOver
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn state_game_over_without_message_yields_empty_reason_not_none_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::GameOver { message: None };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out.commands[0],
+            ActionCmd::SetGameOverReason {
+                reason: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn state_add_faction_enemy_emits_command_directly() {
+        let (registry, harrow, federation) = two_factions();
+        let mut fx = Fixture::new();
+        fx.factions = Some(registry);
+        let action = TriggerAction::AddFactionEnemy {
+            faction: "Harrow".to_string(),
+            enemy: "Federation".to_string(),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out.commands,
+            vec![ActionCmd::AddFactionEnemy {
+                faction_uuid: harrow,
+                enemy_uuid: federation,
+            }]
+        );
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    fn state_add_faction_enemy_without_registry_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::AddFactionEnemy {
+            faction: "Harrow".to_string(),
+            enemy: "Federation".to_string(),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert!(out.commands.is_empty());
+        assert_eq!(
+            out.warnings,
+            vec!["AddFactionEnemy skipped: FactionRegistryResource not present".to_string()]
+        );
+    }
+
+    #[test]
+    fn state_remove_faction_enemy_emits_command_directly() {
+        let (registry, harrow, federation) = two_factions();
+        let mut fx = Fixture::new();
+        fx.factions = Some(registry);
+        let action = TriggerAction::RemoveFactionEnemy {
+            faction: "Harrow".to_string(),
+            enemy: "Federation".to_string(),
+        };
+        let out = dispatch_state_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out.commands,
+            vec![ActionCmd::RemoveFactionEnemy {
+                faction_uuid: harrow,
+                enemy_uuid: federation,
+            }]
+        );
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch_state_action called with non-state action")]
+    fn state_action_on_non_state_variant_panics() {
+        // The guard exists so a routing bug in `dispatch_action` fails loudly
+        // rather than silently returning an empty result.
+        let fx = Fixture::new();
+        let action = TriggerAction::UnloadWorld {
+            path: "worlds/sub.toml".to_string(),
+        };
+        let _ = dispatch_state_action(&action, &fx.ctx());
     }
 }

@@ -418,7 +418,7 @@ impl Plugin for ShipPlugin {
                 sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
                 detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),
             )
-                .after(crate::lobby::process_lobby),
+                .after(crate::lobby::LobbySystemSet),
         );
 
         // Per-axis helm AI (issue #701). Registered separately from the tuple
@@ -457,7 +457,7 @@ impl Plugin for ShipPlugin {
             Update,
             (ai_helm_thrust, ai_helm_steering)
                 .in_set(crate::sim_sets::SimSet::Physics)
-                .after(crate::lobby::process_lobby)
+                .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
                 .after(process_helm_inputs)
                 .before(publish_joystick_to_engines)
@@ -485,7 +485,7 @@ impl Plugin for ShipPlugin {
             Update,
             ai_helm_impulse
                 .in_set(crate::sim_sets::SimSet::Physics)
-                .after(crate::lobby::process_lobby)
+                .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
                 .before(apply_helm_commands)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate

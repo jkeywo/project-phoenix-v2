@@ -40,7 +40,7 @@ entities:
       title: Tactical AI Weapon Operator
       summary: Uses scored Destroy objectives and fine-system availability to select and track targets, and issue arc-bearing coordination when a usable family lacks arc; firing decisions for individual weapon families live in separate decide/apply AI systems that read the resulting target.
       rationale:
-        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. operate_tactical_ai is now orchestration glue only: gate on the tactical operate_ai policy, then apply locked_target to WeaponsTarget."
+        - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. Issue #700 deleted operate_tactical_ai: with every other responsibility rehomed, the remaining glue was folded back into ai_target_selection, which now gates on the tactical operate_ai policy, publishes its choice to WeaponsBlackboard.locked_target as observable intent, and applies the same choice to WeaponsTarget in one system. Selection could not be separated from application by a sim set the way the other AI decide/apply pairs are — every WeaponsTarget reader runs in SimSet::Input — so keeping them in one system is what makes the AI's read-modify-write atomic against handle_set_target, the other Input writer of WeaponsTarget."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -51,7 +51,7 @@ entities:
     implementation:
       status: declared
       paths: [src/console/weapons/server.rs, src/ai/core.rs]
-      symbols: [ai_target_selection, operate_tactical_ai]
+      symbols: [ai_target_selection]
       tests: [cargo test]
 
   - component: torpedo-auto-fire-ai

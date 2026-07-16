@@ -43,6 +43,16 @@ const ENGINE_TRAIL_RADIUS: f32 = 1.5;
 const ENGINE_TRAIL_CRUMB_LIFETIME_SECS: f32 = 1.5;
 const ENGINE_TRAIL_MAX_CRUMBS: usize = 200;
 const ENGINE_TRAIL_MIN_CRUMB_DIST: f32 = 0.08;
+// Width tapers as a crumb ages, on top of the speed-based width set at spawn.
+const ENGINE_TRAIL_AGE_WIDTH_FALLOFF: f32 = 0.5;
+
+const ENGINE_TRAIL_SHADER: &str = "shaders/engine_trail.wgsl";
+const ENGINE_TRAIL_NOISE_TEXTURE: &str = "pfx/engine_trail/wispy_noise.png";
+const ENGINE_TRAIL_DISTORTION_TEXTURE: &str = "pfx/engine_trail/distortion_map.png";
+const ENGINE_TRAIL_GRADIENT_TEXTURE: &str = "pfx/engine_trail/soft_gradient.png";
+const ENGINE_TRAIL_DISSOLVE_TEXTURE: &str = "pfx/engine_trail/dissolve_mask.png";
+const ENGINE_TRAIL_SCROLL_SPEED: f32 = 1.4;
+const ENGINE_TRAIL_DISTORTION_STRENGTH: f32 = 0.06;
 
 // Dust mote defaults (overridden by the [dust] world config block).
 const DUST_SHADER: &str = "shaders/dust_mote.wgsl";
@@ -140,12 +150,23 @@ pub struct PfxPlugin;
 
 impl Plugin for PfxPlugin {
     fn build(&self, app: &mut App) {
+        // `MaterialPlugin` needs `Assets<Shader>`/`Assets<Image>` registered;
+        // normally supplied by `RenderPlugin`, but the headless server
+        // bootstrap (`server::bridge`) skips that, so register defensively
+        // here too (matches `StarRenderPlugin`'s dependency, guarded the
+        // same way in `bridge.rs`). Safe to call even if already registered.
+        app.init_asset::<bevy::shader::Shader>()
+            .init_asset_loader::<bevy::shader::ShaderLoader>()
+            .init_asset::<Image>();
+
         app.init_resource::<BeamPfxState>()
             .init_resource::<TorpedoPfxState>()
             .init_resource::<BlasterPfxState>()
             .init_resource::<EngineTrailState>()
             .init_resource::<DustFieldState>()
             .add_plugins(MaterialPlugin::<DustMoteMaterial>::default())
+            .add_plugins(MaterialPlugin::<EngineTrailMaterial>::default())
+            .add_systems(Startup, load_engine_trail_textures)
             .add_systems(
                 Update,
                 (
@@ -153,6 +174,7 @@ impl Plugin for PfxPlugin {
                     sync_torpedo_pfx.run_if(in_state(GamePhase::InProgress)),
                     sync_blaster_pfx.run_if(in_state(GamePhase::InProgress)),
                     spawn_engine_trails.run_if(in_state(GamePhase::InProgress)),
+                    tick_engine_trail_materials,
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),
                     tick_bursts.run_if(in_state(GamePhase::InProgress)),
                     // Ordered: state feeds both the emitter and the materials.
@@ -176,6 +198,92 @@ impl Plugin for PfxPlugin {
                     .after(crate::sim_sets::SimSet::Physics),
             )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_pfx);
+    }
+}
+
+/// Layered "ion trail" ribbon material: scrolling wispy-noise flow, UV
+/// distortion for wiggle, a soft cross-ribbon gradient profile, and a
+/// dissolve mask that breaks up the tail fade. See `engine_trail.wgsl`.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+struct EngineTrailMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    noise_texture: Handle<Image>,
+    #[texture(2)]
+    #[sampler(3)]
+    distortion_texture: Handle<Image>,
+    #[texture(4)]
+    #[sampler(5)]
+    gradient_texture: Handle<Image>,
+    #[texture(6)]
+    #[sampler(7)]
+    dissolve_texture: Handle<Image>,
+    #[uniform(8)]
+    color_r: f32,
+    #[uniform(8)]
+    color_g: f32,
+    #[uniform(8)]
+    color_b: f32,
+    #[uniform(8)]
+    color_a: f32,
+    #[uniform(8)]
+    time: f32,
+    #[uniform(8)]
+    scroll_speed: f32,
+    #[uniform(8)]
+    distortion_strength: f32,
+    #[uniform(8)]
+    _pad0: f32,
+}
+
+impl Material for EngineTrailMaterial {
+    fn fragment_shader() -> ShaderRef {
+        ENGINE_TRAIL_SHADER.into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Add
+    }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // The ribbon is a flat, camera-facing-ish strip; disable backface
+        // culling so it stays visible from either side.
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}
+
+/// Preloaded texture handles shared by every engine trail material instance.
+#[derive(Resource, Clone)]
+struct EngineTrailTextures {
+    noise: Handle<Image>,
+    distortion: Handle<Image>,
+    gradient: Handle<Image>,
+    dissolve: Handle<Image>,
+}
+
+fn load_engine_trail_textures(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(EngineTrailTextures {
+        noise: asset_server.load(ENGINE_TRAIL_NOISE_TEXTURE),
+        distortion: asset_server.load(ENGINE_TRAIL_DISTORTION_TEXTURE),
+        gradient: asset_server.load(ENGINE_TRAIL_GRADIENT_TEXTURE),
+        dissolve: asset_server.load(ENGINE_TRAIL_DISSOLVE_TEXTURE),
+    });
+}
+
+/// Advances the scroll-time uniform on every live engine trail material.
+fn tick_engine_trail_materials(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<EngineTrailMaterial>>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (_, material) in materials.iter_mut() {
+        material.time = elapsed;
     }
 }
 
@@ -781,6 +889,7 @@ fn sync_blaster_pfx(
 fn spawn_engine_trails(
     time: Res<Time>,
     mut state: ResMut<EngineTrailState>,
+    textures: Option<Res<EngineTrailTextures>>,
     ships_q: Query<
         (
             &Transform,
@@ -794,8 +903,15 @@ fn spawn_engine_trails(
     >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<EngineTrailMaterial>>,
 ) {
+    // `load_engine_trail_textures` (Startup) always runs before the first
+    // Update, but guard anyway so a plugin ordering change fails soft
+    // instead of panicking mid-frame.
+    let Some(textures) = textures else {
+        return;
+    };
+
     let dt = time.delta_secs();
 
     let mut live_key_bases: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -819,6 +935,7 @@ fn spawn_engine_trails(
             normalized,
             dt,
             &settings,
+            &textures,
             &mut state,
             &mut commands,
             &mut meshes,
@@ -855,10 +972,11 @@ fn update_engine_trail(
     normalized_speed: f32,
     dt: f32,
     settings: &EnginePfxSettings,
+    textures: &EngineTrailTextures,
     state: &mut EngineTrailState,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<EngineTrailMaterial>,
 ) {
     let emitters = engine_emitters(transform, markers, cfg);
     for (emitter_idx, (origin, direction)) in emitters.iter().enumerate() {
@@ -867,7 +985,7 @@ fn update_engine_trail(
         // Lazily create the ribbon entity and mesh for this emitter.
         if !state.emitters.contains_key(&key) {
             let mesh_handle = meshes.add(empty_ribbon_mesh());
-            let mat_handle = trail_ribbon_material(materials, settings.color);
+            let mat_handle = trail_ribbon_material(materials, textures, settings.color);
             let entity = commands
                 .spawn((
                     PfxEntity,
@@ -1015,17 +1133,23 @@ fn empty_ribbon_mesh() -> Mesh {
 }
 
 fn trail_ribbon_material(
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<EngineTrailMaterial>,
+    textures: &EngineTrailTextures,
     color: [f32; 4],
-) -> Handle<StandardMaterial> {
-    materials.add(StandardMaterial {
-        base_color: Color::srgba(color[0], color[1], color[2], color[3]),
-        emissive: LinearRgba::new(color[0] * 3.0, color[1] * 3.0, color[2] * 3.0, 1.0),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        double_sided: true,
-        cull_mode: None,
-        ..default()
+) -> Handle<EngineTrailMaterial> {
+    materials.add(EngineTrailMaterial {
+        noise_texture: textures.noise.clone(),
+        distortion_texture: textures.distortion.clone(),
+        gradient_texture: textures.gradient.clone(),
+        dissolve_texture: textures.dissolve.clone(),
+        color_r: color[0],
+        color_g: color[1],
+        color_b: color[2],
+        color_a: color[3],
+        time: 0.0,
+        scroll_speed: ENGINE_TRAIL_SCROLL_SPEED,
+        distortion_strength: ENGINE_TRAIL_DISTORTION_STRENGTH,
+        _pad0: 0.0,
     })
 }
 
@@ -1078,7 +1202,7 @@ fn build_ribbon_into_mesh(mesh: &mut Mesh, crumbs: &VecDeque<TrailCrumb>) {
         };
 
         let age_frac = (crumb.age / crumb.lifetime.max(0.001)).clamp(0.0, 1.0);
-        let hw = crumb.width * 0.5;
+        let hw = crumb.width * (1.0 - age_frac * ENGINE_TRAIL_AGE_WIDTH_FALLOFF) * 0.5;
         let base = Vec3::new(crumb.pos.x, crumb.pos.y + 0.05, crumb.pos.z);
 
         positions.push((base - perp * hw).to_array());
@@ -3081,6 +3205,7 @@ position = [0.5, -0.1, 0.25]
                 .chain(),
         )
         .add_plugins(crate::lobby::LobbyPlugin)
+        .add_plugins(bevy::app::TaskPoolPlugin::default())
         .add_plugins(bevy::time::TimePlugin)
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Mesh>()

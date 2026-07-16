@@ -24,7 +24,6 @@ fn default_coordination_lag_secs() -> f32 {
 /// [`ShipConfig::weapons_station`]. Every weapon system on a hull lives on one
 /// station by construction, so the first match wins.
 const WEAPONS_KINDS: &[&str] = &[
-    crate::system_registry::TACTICAL_KIND,
     crate::system_registry::PHASER_BANK_KIND,
     crate::system_registry::BLASTER_BANK_KIND,
     crate::system_registry::TORPEDO_TUBE_KIND,
@@ -187,7 +186,7 @@ impl ShipConfig {
     /// The station whose holder is authoritative for this ship's weapons.
     ///
     /// Ship-level Tactical operations (SetTarget / SetPhaserMode /
-    /// SetPhaserFrequency / ToggleAutoFire) and the `WeaponsUpdate` broadcast
+    /// SetPhaserFrequency) and the `WeaponsUpdate` broadcast
     /// need to know who owns the guns. That owner is not always a station
     /// literally named `"tactical"` — a single-station hull (the Courier) puts
     /// its blaster on `"pilot"` — so resolve it from the config instead of
@@ -203,7 +202,7 @@ impl ShipConfig {
             .or_else(|| {
                 // Legacy/test ships declare a `tactical` station but no fine
                 // weapon systems. Preserve the pre-lookup behaviour for them.
-                let tactical = StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into());
+                let tactical = StationId(crate::system_registry::TACTICAL_STATION_ID.into());
                 self.station(&tactical).map(|_| tactical)
             })
     }

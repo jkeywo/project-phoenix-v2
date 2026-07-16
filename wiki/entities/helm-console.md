@@ -14,7 +14,7 @@ The pilot's seat. The **only** console that can move the ship.
 
 - **Joystick:** up/down → thrust (0.0 to 1.0); left/right → steering (−1.0 to +1.0).
 - **Steering snaps to centre on release** so the ship stops turning when the operator lets go.
-- Sends `HelmInput { thrust, steering }` at **10 Hz** while controls are active.
+- Sends `SetThrust { value }` -> `helm-thrust` and `SetSteering { value }` -> `helm-steering` at **10 Hz** while controls are active (per-axis wire split, issue #801).
 - **Impulse button:** issues `StartImpulseCharge` when phase is `Idle`.
 - **Impulse overlay (Charging + Active):** the joystick is hidden and replaced with a charging progress bar, a `CANCEL IMPULSE` button, and a status readout (`x.x / y.y s` while charging, `ENGAGED` while active). See [Impulse drive](#impulse-drive).
 - **Boost button:** toggles the boost drive when `[helm_console.boost]` is present. While active, boost multiplies speed/acceleration by `multiplier` and yaw rate by `steering_multiplier`.
@@ -42,11 +42,11 @@ Boost is enabled by `[helm_console.boost]` in `assets/entities/player_ship.toml`
 
 Each simulation tick:
 1. Look up `helm_token()` from `SessionManager`.
-2. Drain `HelmInput` messages tagged with that token; keep the latest.
+2. Drain admitted `SetThrust`/`SetSteering` commands per axis; keep the latest of each.
 3. Pass `(state, input, dt, config)` into `compute_physics()` from `src/server/ship_physics.rs` — a pure Rust function, no Bevy.
 4. Apply the resulting velocity directly to the [Ship](./ship.md)'s Rapier rigid body.
 
-If no one is at Helm, no `HelmInput` is read and the ship coasts/decelerates.
+If no one is at Helm, no `SetThrust`/`SetSteering` is read and the ship coasts/decelerates.
 
 ## Helm radar
 

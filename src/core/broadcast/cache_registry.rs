@@ -262,7 +262,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
             .single(world)
             .ok()
             .and_then(|c| c.0.weapons_station())
-            .unwrap_or_else(|| StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into()));
+            .unwrap_or_else(|| StationId(crate::system_registry::TACTICAL_STATION_ID.into()));
         let holds_tactical = world
             .resource::<Sessions>()
             .0

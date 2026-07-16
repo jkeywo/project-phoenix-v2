@@ -119,16 +119,9 @@ base_priority  = 35.0
 target_speed   = 0.9
 maintain_range = 60.0
 
-
 # Ship systems (all AI-controlled - no human consoles)
-[[system]]
-id = "helm"
-kind = "helm"
-ai_only = true
-
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
-# has no stations, so — exactly like the coarse `helm` above — they are ownerless
-# and `ai_only`. The NPC spawn path sets every declared system to
+# has no stations, so they are ownerless and `ai_only`. The NPC spawn path sets every declared system to
 # ControlSource::Ai, so these come up on AI precisely when the coarse helm does.
 #
 # #800 declared thrust + steering. #704 adds impulse + lateral-thrust, which the
@@ -152,6 +145,15 @@ id = "helm-impulse"
 kind = "helm_impulse"
 ai_only = true
 
+# Boost drive axis (issue #801), declared for hull-uniformity with the player
+# ships: every helm axis is a declared system on every hull. No AI drives
+# boost, so on this stationless hull the declaration only gives the axis the
+# standard damage/repair surface.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
@@ -161,6 +163,14 @@ ai_only = true
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
+ai_only = true
+
+# Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
+# One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
+# admission gates on a real system instead of the deleted coarse `tactical`.
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
 ai_only = true
 
 [[system]]

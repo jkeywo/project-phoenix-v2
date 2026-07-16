@@ -143,9 +143,9 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
 
   // Lock the raider as the tactical target. Mirrors the real client
   // (gui/action-map.js `set_target`): SetTarget is a ControlSystem payload
-  // addressed to the tactical system, not a legacy top-level message.
+  // addressed to the tactical-radar system (issue #801), not a legacy top-level message.
   await tactical.send('ControlSystem', {
-    target: 'tactical',
+    target: 'tactical-radar',
     payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
   });
 
@@ -200,7 +200,7 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   // Lock target and wait for fire_ready on any bank. SetTarget routes
   // through the ControlSystem envelope (see gui/action-map.js `set_target`).
   await tactical.send('ControlSystem', {
-    target: 'tactical',
+    target: 'tactical-radar',
     payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
   });
   await tactical.page.bringToFront();
@@ -276,7 +276,7 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
   // Lock target. SetTarget routes through the ControlSystem envelope
   // (see gui/action-map.js `set_target`).
   await tactical.send('ControlSystem', {
-    target: 'tactical',
+    target: 'tactical-radar',
     payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
   });
   await tactical.page.bringToFront();

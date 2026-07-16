@@ -2,12 +2,24 @@
 title: Coarse-system migration
 type: concept
 tags: [stations, systems, migration, system-registry, prd-487, prd-517]
-updated: 2026-06-23
+updated: 2026-07-16
 ---
 
 # Coarse-system migration
 
 Status of the migration from per-console message dispatch to the unified coarse-system control path. All 9 consoles must register a system kind, accept `ControlSystem` dispatch, gate on `ControlSourceResolver::policy_for`, and emit channel-3 traffic via `CoordinationEnqueue`.
+
+## The three id namespaces (issue #801)
+
+One id, one meaning. Every identifier in the station/system architecture belongs to exactly one namespace:
+
+| Namespace | What it names | Examples |
+|-----------|---------------|----------|
+| **System id** | A declared `[[system]]` instance: gets a `ControlSource`, gates admission, can be damaged/repaired | `"helm-thrust"`, `"phaser-fore"`, `"sensors"` |
+| **Station id** | A crew station (console). Keys console-level blackboards and channel-3 coordination routing | `"helm"`, `"tactical"`, `"science"` |
+| **Wire target** | The `target` string of a `ClientMessage::ControlSystem` envelope — always a system id | `"helm-steering"`, `"tactical-radar"`, `"phaser-control"` |
+
+`"helm"` and `"tactical"` are station ids only: no `[[system]]` block declares them, no `ControlSource` is registered for them, and no `ControlSystem` message targets them. Console-level blackboards (Helm console, Weapons console) are keyed by the station id via `helm_station_key()` / `tactical_station_key()`; the client-visible key strings (`blackboards['helm']`, `blackboards['tactical']`) are unchanged. Per-system blackboards (`"phaser-bank-*"`, `"power-reactor"`, `"helm-lateral-thrust"`) keep system-id keys.
 
 ## SystemId naming convention
 
@@ -15,11 +27,11 @@ Pinned by issue #525. All `SystemId` wire strings follow one of three patterns:
 
 | Pattern | Rule | Examples |
 |---------|------|---------|
-| **Coarse system** | Lowercase kebab matching the system kind id | `"helm"`, `"tactical"`, `"red-alert"` |
+| **Coarse system** | Lowercase kebab matching the system kind id | `"sensors"`, `"captain"`, `"red-alert"` |
 | **Fine system** | Kind id + `-` + instance suffix | `"phaser-fore"`, `"torpedo-tube-fore-port"` |
 | **Ownerless capability** | Bare capability id (lowercase kebab) | `"red-alert"`, `"viewscreen"` |
 
-Multi-word ids always use hyphens (`-`), never underscores. The `*_SYSTEM_ID` constants in `src/ship/system_registry.rs` are the authoritative source; always use the helpers (`helm_system_id()`, `tactical_system_id()`, etc.) rather than inline string literals.
+Multi-word ids always use hyphens (`-`), never underscores. The `*_SYSTEM_ID` constants in `src/ship/system_registry.rs` are the authoritative source; always use the helpers (`sensors_system_id()`, `helm_thrust_system_id()`, etc.) rather than inline string literals.
 
 ### `red_alert` vs `red-alert` quirk
 
@@ -30,8 +42,8 @@ The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for lega
 | Console | Kind registered | `ControlSystem` dispatch | `policy_for` gating | Channel-3 via `CoordinationEnqueue` | Issue |
 |---------|----------------|--------------------------|---------------------|--------------------------------------|-------|
 | Captain | ✅ `captain` | ✅ | ✅ | n/a | #499 |
-| Helm | ✅ `helm` | ✅ | ✅ | ✅ | #497 |
-| Tactical | ✅ `tactical` | ✅ | ✅ | ✅ | #491 |
+| Helm | ❌ deleted by #801 — per-axis fine systems only (`helm_thrust`, `helm_steering`, `helm_impulse`, `helm_boost`, `lateral_thrust`, …); `"helm"` survives as a station id | ✅ (per axis) | ✅ (per axis) | ✅ (station-key target) | #497/#801 |
+| Tactical | ❌ deleted by #512/#801 — fine systems only (`phaser_bank`, `torpedo_tube`, `torpedo_magazine`, `tactical_radar`, `phaser_control`); `"tactical"` survives as a station id | ✅ (per system) | ✅ (per system) | ✅ (station-key target) | #491/#801 |
 | Power | ✅ `power` | ✅ | ✅ | n/a | #500 |
 | Sensors | ✅ `sensors` | ✅ | ✅ | ✅ | #498 |
 | Shields | ✅ `shields` | ✅ | ✅ | ✅ (#528) | #502/#528 |
@@ -47,12 +59,16 @@ Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is 
 | Issue | Coarse system | Shipped fine kinds |
 |-------|---------------|--------------------|
 | #511 | Helm | `helm_joystick`, `helm_engine` (port + starboard), `helm_radar`, `helm_impulse` |
+| #701/#800/#801 | Helm | `helm_thrust`, `helm_steering` (per-axis stick split), `helm_boost` (#801); the coarse `helm` `[[system]]` block is deleted from all 9 hull TOMLs |
 | #512 | Tactical | `phaser_bank` (fore + aft), `torpedo_tube` (fore-port + fore-starboard + aft), `torpedo_magazine` |
+| #801 | Tactical | `phaser_control` (ship-wide phaser mode + frequency); `SetTarget` re-targeted to `tactical-radar`; the coarse `tactical` id ceases to exist as a system |
 | #513 | Power | `power_reactor`, `power_battery` |
 | #514 | Shields | `shield_arc` (variable count, per `[[shield_arc]]` TOML block; player ship = 4 arcs fore/port/aft/starboard; NPCs = 1 omni arc) |
 | #515 | Comms / Captain / Viewscreen | closed as substantially done — Captain / Red-Alert / Viewscreen shipped via PRD #487; Comms deliberately left coarse (single narrow console; splitting into inbox/transmitter/scanner deferred pending a damage-driven rationale) |
 
-Under #512, the coarse `tactical` `[[system]]` block was **deleted** from all 5 ship TOMLs (player_ship + 4 NPC ships). `TACTICAL_SYSTEM_ID = "tactical"` is retained as a coordination surface for ship-level operations (SetTarget / SetPhaserMode / SetPhaserFrequency); their authorisation gate is "any phaser bank accepts human input" (option c in the issue), so no coarse block is needed. Fine kinds registered but not present on a given ship default to a fallback coarse-tactical gate — this preserves NPC behaviour where a ship declares bank ids that don't match the player-ship convention (`"port"`/`"starboard"` versus `"fore"`/`"aft"`).
+Under #512, the coarse `tactical` `[[system]]` block was **deleted** from all ship TOMLs. Under #801 the id itself stopped being a system: `SetTarget` targets `tactical-radar`, and `SetPhaserMode` / `SetPhaserFrequency` target the new `phaser-control` system (declared on every hull with phaser banks). `"tactical"` survives only as `TACTICAL_STATION_ID` — the station-id key for the Weapons console blackboard and coordination routing. The dead coarse-tactical fallbacks in `any_bank_operates_ai` / `any_blaster_bank_operates_ai` / `any_tactical_system_operates_ai` were deleted; unregistered fine ids resolve to the default-source policy.
+
+Under #801 the coarse `helm` `[[system]]` block was likewise **deleted** from all 9 hull TOMLs. The combined `HelmInput { thrust, steering }` payload was split into `SetThrust { value }` → `helm-thrust` and `SetSteering { value }` → `helm-steering`, so a human's stick input is admitted per axis — fixing the #701 mismatch where the human's combined input was admitted on the coarse policy while the AI gated per axis. Impulse commands target `helm-impulse`; boost commands target the new `helm-boost` system. `"helm"` survives only as `HELM_STATION_ID` (Helm console blackboard key, coordination routing, and the helm station itself).
 
 Tube-to-magazine communication uses [`InterSystemPayload::ClaimTorpedoRound { tube }`](../../src/core/messages.rs) on channel 2, mirroring the `DrainWeaponsBattery` pattern from #559. The magazine consumer refuses claims when its hull entry — declared as `[[hull.system_hull]] system_id = "torpedo-magazine"` in TOML (pre-#619 this block was spelled `[[hull.console_hull]] console = "TorpedoMagazine"`) — is at Disabled/Destroyed tier.
 
@@ -64,7 +80,7 @@ Under #514, the coarse `shields` `[[system]]` block was **deleted** from `player
 
 ## Key files
 
-- `src/ship/system_registry.rs` — All `*_SYSTEM_ID`, `*_KIND`, `*_AI_CONTROLLER` constants and `*_system_id()` helpers.
+- `src/ship/system_registry.rs` — All `*_SYSTEM_ID`, `*_KIND`, `*_AI_CONTROLLER` constants, `*_system_id()` helpers, and the station-key helpers (`helm_station_key()`, `tactical_station_key()`).
 - `src/ship/control_source.rs` — `ControlSourceResolver` and `policy_for`.
 - `src/ship/coordination.rs` — `process_coordination_lag` delivers channel-3 messages to `PendingArcBearingRequest` (`coordination.rs:1495`)
 - `src/ship_plugin.rs` — `PendingArcBearingRequest` component set when AI Helm consumes `ArcBearingRequest` (`ship_plugin.rs:69`); `operate_helm_ai` reads pending bearing and biases steering via `steer_toward`

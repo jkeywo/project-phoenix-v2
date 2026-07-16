@@ -73,7 +73,7 @@ pub fn decode_ui_action(s: &str) -> Result<crate::messages::UiAction, serde_json
 ///
 /// The preferred wire shape is a full `ClientMessage`. Some smoke-test and
 /// legacy browser paths still send short-form system payloads such as
-/// `{"type":"HelmInput","data":{"thrust":0.5,"steering":0.0}}`; this helper
+/// `{"type":"SetThrust","data":{"value":0.5}}`; this helper
 /// wraps those as `ClientMessage::ControlSystem` while keeping raw JSON handling
 /// inside the codec module.
 pub fn decode_bridge_client_message(s: &str) -> Result<ClientMessage, serde_json::Error> {
@@ -118,13 +118,21 @@ fn system_payload_type_name(type_name: &str) -> &str {
 
 fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
     match type_name {
-        "HelmInput" | "StartImpulseCharge" | "CancelImpulse" | "ToggleBoost" | "SetBoost" => {
-            Some(crate::system_registry::HELM_SYSTEM_ID)
+        // Per-axis helm systems (issue #801): each payload resolves to the
+        // declared system that owns it, never to a coarse `helm` id.
+        "SetThrust" => Some(crate::system_registry::HELM_THRUST_SYSTEM_ID),
+        "SetSteering" => Some(crate::system_registry::HELM_STEERING_SYSTEM_ID),
+        "StartImpulseCharge" | "CancelImpulse" => {
+            Some(crate::system_registry::HELM_IMPULSE_SYSTEM_ID)
         }
+        "ToggleBoost" | "SetBoost" => Some(crate::system_registry::HELM_BOOST_SYSTEM_ID),
         "ToggleRedAlert" => Some(crate::system_registry::RED_ALERT_SYSTEM_ID),
         "SetView" => Some(crate::system_registry::VIEWSCREEN_SYSTEM_ID),
-        "SetTarget" | "SetPhaserMode" | "SetPhaserFrequency" => {
-            Some(crate::system_registry::TACTICAL_SYSTEM_ID)
+        // Ship-wide tactical operations (issue #801): target lock lives on the
+        // tactical radar; phaser mode/frequency on the phaser-control system.
+        "SetTarget" => Some(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID),
+        "SetPhaserMode" | "SetPhaserFrequency" => {
+            Some(crate::system_registry::PHASER_CONTROL_SYSTEM_ID)
         }
         "Hail" | "SelectCommsMessage" | "RespondToMessage" | "ClearComms" | "ShowOnScreen" => {
             Some(crate::system_registry::COMMS_SYSTEM_ID)
@@ -344,11 +352,15 @@ mod tests {
             (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
-                    target: crate::system_registry::helm_system_id(),
-                    payload: SystemControlPayload::HelmInput {
-                        thrust: 0.75,
-                        steering: -0.5,
-                    },
+                    target: crate::system_registry::helm_thrust_system_id(),
+                    payload: SystemControlPayload::SetThrust { value: 0.75 },
+                },
+            ),
+            (
+                ClientMessageDiscriminants::ControlSystem,
+                ClientMessage::ControlSystem {
+                    target: crate::system_registry::helm_steering_system_id(),
+                    payload: SystemControlPayload::SetSteering { value: -0.25 },
                 },
             ),
             (
@@ -360,7 +372,9 @@ mod tests {
             (
                 ClientMessageDiscriminants::SendCoordination,
                 ClientMessage::SendCoordination {
-                    target: crate::system_registry::tactical_system_id(),
+                    // Coordination targets are station-id keys (issue #801) —
+                    // console-level routing, not system admission.
+                    target: crate::system_registry::tactical_station_key(),
                     payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
                 },
             ),
@@ -756,7 +770,7 @@ mod tests {
             (
                 ServerMessageDiscriminants::CoordinationPopup,
                 ServerMessage::CoordinationPopup {
-                    target: crate::system_registry::helm_system_id(),
+                    target: crate::system_registry::helm_station_key(),
                     payload: CoordinationPayload::Alert {
                         title: "Shield down".into(),
                         body: "Fore shield offline".into(),
@@ -936,7 +950,7 @@ mod tests {
     #[test]
     fn target_designation_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::tactical_system_id(),
+            target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::TargetDesignation {
                 uuid: "asteroid-42".into(),
                 label: "Asteroid".into(),
@@ -946,7 +960,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::tactical_system_id(),
+            target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::TargetDesignation {
                 uuid: "asteroid-42".into(),
                 label: "Asteroid".into(),
@@ -963,7 +977,7 @@ mod tests {
     #[test]
     fn arc_bearing_request_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
@@ -973,7 +987,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
@@ -989,7 +1003,7 @@ mod tests {
     #[test]
     fn power_brownout_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::tactical_system_id(),
+            target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::PowerBrownout {
                 group: "weapons".into(),
                 label: "WEAPONS".into(),
@@ -1000,7 +1014,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::tactical_system_id(),
+            target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::PowerBrownout {
                 group: "weapons".into(),
                 label: "WEAPONS".into(),
@@ -1027,7 +1041,7 @@ mod tests {
     fn navigate_to_coordination_payload_round_trips() {
         let generation = u64::MAX - 1;
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
                 label: "Hostile base".into(),
@@ -1037,7 +1051,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
                 label: "Hostile base".into(),
@@ -1370,20 +1384,29 @@ mod tests {
     }
 
     #[test]
-    fn decode_bridge_client_message_wraps_short_form_helm_input() {
-        let msg = decode_bridge_client_message(
-            r#"{"type":"HelmInput","data":{"thrust":0.5,"steering":-0.25}}"#,
-        )
-        .unwrap();
+    fn decode_bridge_client_message_wraps_short_form_set_thrust() {
+        let msg =
+            decode_bridge_client_message(r#"{"type":"SetThrust","data":{"value":0.5}}"#).unwrap();
 
         assert_eq!(
             msg,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.5,
-                    steering: -0.25,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.5 },
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_set_steering() {
+        let msg = decode_bridge_client_message(r#"{"type":"SetSteering","data":{"value":-0.25}}"#)
+            .unwrap();
+
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: -0.25 },
             }
         );
     }
@@ -1395,8 +1418,63 @@ mod tests {
         assert_eq!(
             msg,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_boost_payloads() {
+        let msg = decode_bridge_client_message(r#"{"type":"ToggleBoost"}"#).unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_boost_system_id(),
+                payload: SystemControlPayload::ToggleBoost,
+            }
+        );
+
+        let msg =
+            decode_bridge_client_message(r#"{"type":"SetBoost","data":{"active":true}}"#).unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_boost_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            }
+        );
+    }
+
+    #[test]
+    fn decode_bridge_client_message_wraps_short_form_phaser_control() {
+        let msg =
+            decode_bridge_client_message(r#"{"type":"SetPhaserMode","data":{"mode":"Auto"}}"#)
+                .unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_control_system_id(),
+                payload: SystemControlPayload::SetPhaserMode {
+                    mode: crate::messages::PhaserMode::Auto,
+                },
+            }
+        );
+
+        // NOTE: a bare `{"type":"SetPhaserFrequency",...}` decodes as the
+        // legacy top-level `ClientMessage::SetPhaserFrequency` (full decode
+        // wins before short-form rewriting), so the short-form table entry
+        // only serves clients that can't send the top-level variant. The
+        // envelope form pins the phaser-control target explicitly:
+        let msg = decode_bridge_client_message(
+            r#"{"type":"ControlSystem","data":{"target":"phaser-control","payload":{"type":"SetPhaserFrequency","data":{"frequency":0.4}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_control_system_id(),
+                payload: SystemControlPayload::SetPhaserFrequency { frequency: 0.4 },
             }
         );
     }
@@ -1447,7 +1525,7 @@ mod tests {
         assert_eq!(
             msg,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "raider-1".into(),
                 },

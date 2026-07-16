@@ -505,8 +505,8 @@ pub fn tick_power_system(
 /// Map a power group id string to the target `SystemId` for coordination.
 fn system_id_for_power_group(group: &str) -> Option<SystemId> {
     match group {
-        WEAPONS_POWER_GROUP => Some(crate::system_registry::tactical_system_id()),
-        HELM_POWER_GROUP => Some(crate::system_registry::helm_system_id()),
+        WEAPONS_POWER_GROUP => Some(crate::system_registry::tactical_station_key()),
+        HELM_POWER_GROUP => Some(crate::system_registry::helm_station_key()),
         SENSORS_POWER_GROUP => Some(crate::system_registry::sensors_system_id()),
         _ => None,
     }

@@ -142,7 +142,7 @@ impl ViewscreenArbiter {
 pub fn source_system_for_view_mode(mode: &ViewMode) -> SystemId {
     match mode {
         ViewMode::Camera(_) => crate::system_registry::captain_system_id(),
-        ViewMode::Radar => crate::system_registry::helm_system_id(),
+        ViewMode::Radar => crate::system_registry::helm_radar_system_id(),
         ViewMode::ScienceRadar | ViewMode::SensorsRadar => {
             crate::system_registry::sensors_system_id()
         }
@@ -194,13 +194,13 @@ mod tests {
         });
 
         let first = arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(first.mode, ViewMode::Radar);
 
         let second = arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(second.mode, ViewMode::Camera(CameraView::new("camera_aft")));
@@ -210,7 +210,7 @@ mod tests {
     fn higher_priority_comms_overrides_helm_radar() {
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
 
@@ -232,7 +232,7 @@ mod tests {
         });
 
         let resolved = arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
 
@@ -253,14 +253,14 @@ mod tests {
 
         // Overlay on top of cinematic.
         let overlay = arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(overlay.mode, ViewMode::Radar);
 
         // Dismiss overlay → back to Cinematic.
         let dismiss = arbiter.request_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_system_id(),
+            requester: crate::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(dismiss.mode, ViewMode::Cinematic);

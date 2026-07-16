@@ -167,7 +167,7 @@ describe('set_target', () => {
     ACTION_MAP.set_target({ action: 'set_target', uuid: 'abc' }, send, mutate);
     expect(mutate).toHaveBeenCalledWith({ weaponsTarget: 'abc' });
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'tactical',
+      target: 'tactical-radar',
       payload: { type: 'SetTarget', data: { uuid: 'abc' } },
     });
   });
@@ -186,7 +186,7 @@ describe('set_phaser_mode', () => {
     const send = mkSend();
     ACTION_MAP.set_phaser_mode({ action: 'set_phaser_mode', mode: 'Manual' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'tactical',
+      target: 'phaser-control',
       payload: { type: 'SetPhaserMode', data: { mode: 'Manual' } },
     });
   });
@@ -237,21 +237,47 @@ describe('toggle_red_alert', () => {
 });
 
 describe('helm_input', () => {
-  it('calls send ControlSystem HelmInput with thrust and steering', () => {
+  // Issue #801: one joystick action fans out to the two per-axis payloads,
+  // so admission gates each axis on its own declared system.
+  it('sends SetThrust to helm-thrust and SetSteering to helm-steering', () => {
     const send = mkSend();
     ACTION_MAP.helm_input({ action: 'helm_input', thrust: 0.5, steering: -0.3 }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
-      payload: { type: 'HelmInput', data: { thrust: 0.5, steering: -0.3 } },
+      target: 'helm-thrust',
+      payload: { type: 'SetThrust', data: { value: 0.5 } },
     });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: -0.3 } },
+    });
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('defaults thrust and steering to 0', () => {
     const send = mkSend();
     ACTION_MAP.helm_input({ action: 'helm_input' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
-      payload: { type: 'HelmInput', data: { thrust: 0, steering: 0 } },
+      target: 'helm-thrust',
+      payload: { type: 'SetThrust', data: { value: 0 } },
+    });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: 0 } },
+    });
+  });
+});
+
+describe('set_helm', () => {
+  it('maps joystick yaw onto the steering axis', () => {
+    const send = mkSend();
+    ACTION_MAP.set_helm({ action: 'set_helm', thrust: 0.8, yaw: 0.2 }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-thrust',
+      payload: { type: 'SetThrust', data: { value: 0.8 } },
+    });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: 0.2 } },
     });
   });
 });
@@ -261,7 +287,7 @@ describe('start_impulse_charge', () => {
     const send = mkSend();
     ACTION_MAP.start_impulse_charge({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'helm-impulse',
       payload: { type: 'StartImpulseCharge' },
     });
   });
@@ -272,7 +298,7 @@ describe('toggle_boost', () => {
     const send = mkSend();
     ACTION_MAP.toggle_boost({ action: 'toggle_boost' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'helm-boost',
       payload: { type: 'ToggleBoost' },
     });
   });
@@ -283,7 +309,7 @@ describe('set_boost', () => {
     const send = mkSend();
     ACTION_MAP.set_boost({ active: true }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'helm-boost',
       payload: { type: 'SetBoost', data: { active: true } },
     });
   });
@@ -291,7 +317,7 @@ describe('set_boost', () => {
     const send = mkSend();
     ACTION_MAP.set_boost({ active: false }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'helm-boost',
       payload: { type: 'SetBoost', data: { active: false } },
     });
   });
@@ -302,7 +328,7 @@ describe('cancel_impulse', () => {
     const send = mkSend();
     ACTION_MAP.cancel_impulse({}, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'helm',
+      target: 'helm-impulse',
       payload: { type: 'CancelImpulse' },
     });
   });

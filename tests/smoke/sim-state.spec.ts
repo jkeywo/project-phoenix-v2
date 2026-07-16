@@ -1,4 +1,4 @@
-// Issues #58 + #59 — Smoke tests: SimState broadcast and HelmInput physics.
+// Issues #58 + #59 — Smoke tests: SimState broadcast and helm-thrust physics.
 
 import fs from 'fs';
 import path from 'path';
@@ -123,7 +123,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   await helm.close();
 });
 
-test('HelmInput changes ship position in subsequent blackboard updates', async ({ context }) => {
+test('SetThrust changes ship position in subsequent blackboard updates', async ({ context }) => {
   const { captain, helm, serverPage } = await startGame(context);
 
   // Record initial position from first HelmBlackboard
@@ -159,8 +159,8 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
   await expect.poll(
     async () => {
       await helm.send('ControlSystem', {
-        target: 'helm',
-        payload: { type: 'HelmInput', data: { thrust: 1.0, steering: 0.0 } },
+        target: 'helm-thrust',
+        payload: { type: 'SetThrust', data: { value: 1.0 } },
       });
       await serverPage.bringToFront();
       return movedBlackboardCount();
@@ -173,8 +173,8 @@ test('HelmInput changes ship position in subsequent blackboard updates', async (
 
   // Stop thrust so this test leaves the shared server page in a quiet state.
   await helm.send('ControlSystem', {
-    target: 'helm',
-    payload: { type: 'HelmInput', data: { thrust: 0.0, steering: 0.0 } },
+    target: 'helm-thrust',
+    payload: { type: 'SetThrust', data: { value: 0.0 } },
   });
 
   // Confirm at least one moved BlackboardUpdate exists.

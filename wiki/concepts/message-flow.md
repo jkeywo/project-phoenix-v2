@@ -90,7 +90,7 @@ JS detects a peer drop and calls `wasm_player_disconnected(token)`. The bridge f
 | Channel | Rate | Delivery |
 |---|---|---|
 | Discrete events (`PlayerJoined`, `StationAssigned`, `GameStarted`, …) | Immediate (per inbound message) | Reliable |
-| `HelmInput` / commands from clients | 10 Hz while controls are active | Reliable |
+| `SetThrust` / `SetSteering` / commands from clients | 10 Hz while controls are active | Reliable |
 | `SimState` broadcast | 10 Hz | Snapshot |
 | Per-console state (`PowerState`, `WeaponsUpdate`, `RepairState`, `ShieldStatus`) | 10 Hz | Snapshot |
 | `BlackboardUpdate` / `SystemHullUpdate` | 10 Hz | Snapshot |

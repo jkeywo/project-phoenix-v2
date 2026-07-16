@@ -394,7 +394,7 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::system_registry::helm_system_id(),
+                        target: crate::system_registry::helm_station_key(),
                         payload,
                         sender_label: "Shields".to_string(),
                     });
@@ -415,7 +415,7 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::system_registry::helm_system_id(),
+                        target: crate::system_registry::helm_station_key(),
                         payload,
                         sender_label: "Shields".to_string(),
                     });
@@ -1027,7 +1027,7 @@ mod tests {
         assert!(
             down_msgs
                 .iter()
-                .all(|m| m.target == crate::system_registry::helm_system_id()),
+                .all(|m| m.target == crate::system_registry::helm_station_key()),
             "ShieldFacingDown should target the helm system"
         );
     }
@@ -1209,7 +1209,7 @@ mod tests {
         assert!(
             down_msgs
                 .iter()
-                .all(|m| m.target == crate::system_registry::helm_system_id()),
+                .all(|m| m.target == crate::system_registry::helm_station_key()),
             "ShieldFacingDown should target the helm system"
         );
     }

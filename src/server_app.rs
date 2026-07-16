@@ -1327,8 +1327,8 @@ fn admit_system_commands(
 ///      (handles fine-grained systems and modern coarse systems).
 ///   3. Station-name fallback: if the target string matches a known station
 ///      id, treat it as the owning station (backward compatibility with
-///      deprecated coarse systems like `"tactical"`, `"power"` whose
-///      `[[system]]` entry was removed during fine-grained refactoring).
+///      deprecated coarse systems like `"power"` whose `[[system]]` entry
+///      was removed during fine-grained refactoring).
 ///   4. `None` — truly unknown system id, caller will deny.
 fn station_for_system(
     config: &crate::ship::config::ShipConfig,
@@ -1341,17 +1341,6 @@ fn station_for_system(
     // Step 2: direct system lookup.
     if let Some(system) = config.system(target) {
         return system.station.clone();
-    }
-    // Step 2.5: the `tactical` coordination surface has no `[[system]]` block
-    // (deleted by #512) but is still addressed by SetTarget / SetPhaserMode /
-    // ToggleAutoFire. Resolve it to whoever actually owns the weapons suite —
-    // "tactical" for the crewed hulls, "pilot" for the single-station Courier.
-    // Without this, step 3's station-name fallback only works for hulls whose
-    // weapons station happens to be named "tactical".
-    if target.0 == crate::system_registry::TACTICAL_SYSTEM_ID {
-        if let Some(station) = config.weapons_station() {
-            return Some(station);
-        }
     }
     // Step 3: station-name fallback — does the target match a known station?
     let candidate = StationId(target.0.clone());
@@ -3342,12 +3331,14 @@ mod tests {
 
     // ── station_for_system ───────────────────────────────────────────────
 
-    /// The `tactical` coordination surface has no `[[system]]` block, so
-    /// resolving it relies on step 2.5's `weapons_station()` lookup. Without
-    /// it, a hull whose weapons station isn't literally named "tactical" gets
-    /// `None` and every SetTarget is denied.
+    /// Issue #801 deleted `station_for_system`'s "tactical" special case
+    /// (step 2.5): `"tactical"` is a station id, not a system, and no
+    /// `ControlSystem` message targets it. Ship-level tactical operations
+    /// target real declared systems (`tactical-radar`, `phaser-control`),
+    /// which resolve through the ordinary system→station lookup — including
+    /// on a hull whose weapons station isn't literally named "tactical".
     #[test]
-    fn station_for_system_resolves_tactical_surface_to_the_weapons_owner() {
+    fn station_for_system_resolves_tactical_systems_via_their_declared_station() {
         let crewed = crate::ship::config::ShipConfig::from_toml(
             r#"
 [[station]]
@@ -3360,14 +3351,26 @@ rank = "Ltn."
 id = "phaser-fore"
 kind = "phaser_bank"
 station = "tactical"
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 "#,
-            &["phaser_bank"],
+            &["phaser_bank", "tactical_radar"],
         )
         .unwrap();
         assert_eq!(
+            station_for_system(&crewed, &SystemId("tactical-radar".into())),
+            Some(StationId("tactical".into())),
+            "crewed hulls resolve tactical-radar to their tactical station"
+        );
+        // The station-name fallback still resolves the bare station string
+        // (legacy coarse-system compatibility), but only because a station
+        // by that name exists — there is no weapons-owner special case.
+        assert_eq!(
             station_for_system(&crewed, &SystemId("tactical".into())),
             Some(StationId("tactical".into())),
-            "crewed hulls must keep resolving to their tactical station"
         );
 
         let courier = crate::ship::config::ShipConfig::from_toml(
@@ -3382,14 +3385,25 @@ rank = "Ltn."
 id = "blaster-fore"
 kind = "blaster_bank"
 station = "pilot"
+
+[[system]]
+id = "pilot-radar"
+kind = "tactical_radar"
+station = "pilot"
 "#,
-            &["blaster_bank"],
+            &["blaster_bank", "tactical_radar"],
         )
         .unwrap();
         assert_eq!(
-            station_for_system(&courier, &SystemId("tactical".into())),
+            station_for_system(&courier, &SystemId("pilot-radar".into())),
             Some(StationId("pilot".into())),
-            "the Courier's guns live on pilot, so the tactical surface must resolve there"
+            "the Courier's radar lives on pilot, so SetTarget resolves there"
+        );
+        assert_eq!(
+            station_for_system(&courier, &SystemId("tactical".into())),
+            None,
+            "no tactical station and no tactical system: the deleted step-2.5 \
+             weapons-owner special case must not resurrect this lookup"
         );
     }
 
@@ -4528,7 +4542,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -4561,7 +4575,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -4590,7 +4604,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "no-such-asteroid".into(),
                 },
@@ -4623,7 +4637,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -4661,7 +4675,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -4697,7 +4711,7 @@ station = "pilot"
             app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -4808,7 +4822,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5054,7 +5068,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
             },
         );
@@ -5086,7 +5100,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
             },
         );
@@ -5300,7 +5314,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Manual,
                 },
@@ -5324,7 +5338,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Auto,
                 },
@@ -5336,7 +5350,7 @@ station = "pilot"
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Manual,
                 },
@@ -5546,7 +5560,7 @@ station = "pilot"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5610,7 +5624,7 @@ station = "pilot"
             &mut app_fast,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5650,7 +5664,7 @@ station = "pilot"
             &mut app_base,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },

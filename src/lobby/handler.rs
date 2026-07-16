@@ -1720,11 +1720,8 @@ max_level = 4
     fn control_system_in_lobby_produces_no_output() {
         let mut sessions = sessions_with("t1", "Alice");
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
-            payload: crate::messages::SystemControlPayload::HelmInput {
-                thrust: 0.5,
-                steering: 0.0,
-            },
+            target: crate::system_registry::helm_thrust_system_id(),
+            payload: crate::messages::SystemControlPayload::SetThrust { value: 0.5 },
         };
         let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         assert!(result.outbound.is_empty());

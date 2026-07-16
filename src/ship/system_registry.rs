@@ -1,12 +1,32 @@
 //! System-kind registry and stable `SystemId` helpers.
 //!
+//! ## The three id namespaces (issue #801)
+//!
+//! One id, one meaning. Every identifier in the station/system architecture
+//! belongs to exactly one of three namespaces:
+//!
+//! | Namespace | What it names | Type | Examples |
+//! |-----------|---------------|------|----------|
+//! | **System id** | A declared `[[system]]` instance: gets a `ControlSource`, gates admission, can be damaged/repaired | `SystemId` | `"helm-thrust"`, `"phaser-fore"`, `"sensors"` |
+//! | **Station id** | A crew station (console). Keys console-level blackboards and channel-3 coordination routing | `StationId` (carried as `SystemId` in blackboard maps and coordination envelopes — see below) | `"helm"`, `"tactical"`, `"science"` |
+//! | **Wire target** | The `target` string of a `ClientMessage::ControlSystem` envelope. Always a system id | JSON string | `"helm-steering"`, `"tactical-radar"`, `"phaser-control"` |
+//!
+//! The coarse `helm` and `tactical` *systems* were deleted by #801: `"helm"`
+//! and `"tactical"` are now station ids only. Console-level blackboards (the
+//! Helm console blackboard, the Weapons console blackboard) are keyed by the
+//! station id; per-system blackboards (`"phaser-bank-*"`, `"power-reactor"`,
+//! `"helm-lateral-thrust"`) keep system-id keys. The blackboard map and the
+//! `BlackboardUpdate` wire message are typed `SystemId`, so station-id keys
+//! are carried inside `SystemId` values — use the `*_station_key()` helpers
+//! below, never `helm_thrust_system_id()`-style helpers, for those entries.
+//!
 //! ## SystemId naming convention (pinned by issue #525)
 //!
 //! Every `SystemId` string follows one of three patterns:
 //!
 //! | Pattern | Rule | Examples |
 //! |---------|------|---------|
-//! | **Coarse system** | Lowercase kebab matching the system kind id | `"helm"`, `"tactical"`, `"red-alert"` |
+//! | **Coarse system** | Lowercase kebab matching the system kind id | `"sensors"`, `"captain"`, `"red-alert"` |
 //! | **Fine system** | Kind id + `-` + instance suffix | `"phaser-fore"`, `"torpedo-tube-fore-port"` |
 //! | **Ownerless capability** | Bare capability id (lowercase kebab) | `"red-alert"`, `"viewscreen"` |
 //!
@@ -41,17 +61,28 @@ pub const VIEWSCREEN_SYSTEM_ID: &str = "viewscreen";
 pub const VIEWSCREEN_KIND: &str = "viewscreen";
 pub const VIEWSCREEN_AI_CONTROLLER: &str = "viewscreen_ai";
 
+// ── Station ids (console namespace, issue #801) ──────────────────────────────
+//
+// These are NOT system ids. `"helm"` and `"tactical"` name crew stations
+// (consoles). They key console-level blackboard entries and channel-3
+// coordination routing, both of which are typed `SystemId` on the wire and in
+// the per-ship blackboard map — so the station-id string is carried inside a
+// `SystemId` value via the `*_station_key()` helpers. No `[[system]]` block
+// declares these ids, no `ControlSource` is registered for them, and no
+// `ControlSystem` wire message may target them.
+
+/// Station id for the Helm console. Keys the Helm console blackboard and
+/// helm-directed coordination messages.
+pub const HELM_STATION_ID: &str = "helm";
+
+/// Station id for the Tactical (weapons) console on the crewed hulls. Keys the
+/// Weapons console blackboard and tactical-directed coordination messages.
+/// Note the *station* owning a hull's weapons is resolved from the ship config
+/// (`ShipConfig::weapons_station`) — a single-station hull may own its guns on
+/// `"pilot"` — but the blackboard/coordination key is always this string.
+pub const TACTICAL_STATION_ID: &str = "tactical";
+
 // ── Station-owned coarse systems ─────────────────────────────────────────────
-
-/// Wire `SystemId` for the Helm coarse system.
-pub const HELM_SYSTEM_ID: &str = "helm";
-pub const HELM_KIND: &str = "helm";
-pub const HELM_AI_CONTROLLER: &str = "helm_ai";
-
-/// Wire `SystemId` for the Tactical coarse system.
-pub const TACTICAL_SYSTEM_ID: &str = "tactical";
-pub const TACTICAL_KIND: &str = "tactical";
-pub const TACTICAL_AI_CONTROLLER: &str = "tactical_ai";
 
 /// Wire `SystemId` for the Power coarse system.
 pub const POWER_SYSTEM_ID: &str = "power";
@@ -135,15 +166,23 @@ pub const HELM_STEERING_KIND: &str = "helm_steering";
 pub const HELM_STEERING_SYSTEM_ID: &str = "helm-steering";
 pub const HELM_STEERING_AI_CONTROLLER: &str = "helm_steering_ai";
 
+/// Wire `SystemId` for the Helm Boost fine system (issue #801).
+///
+/// Owns the boost drive commands (`ToggleBoost` / `SetBoost`). Split out of
+/// the deleted coarse `helm` system so boost admission gates on its own
+/// declared system, like every other helm axis.
+pub const HELM_BOOST_KIND: &str = "helm_boost";
+pub const HELM_BOOST_SYSTEM_ID: &str = "helm-boost";
+pub const HELM_BOOST_AI_CONTROLLER: &str = "helm_boost_ai";
+
 // ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
 //
-// The coarse `tactical` kind is DELETED from the runtime registry in favour of
-// three fine kinds. `TACTICAL_SYSTEM_ID = "tactical"` is retained purely as a
-// coordination surface — ship-level operations (SetTarget / SetPhaserMode /
-// SetPhaserFrequency / ToggleAutoFire) still address this string but their
-// authorisation gate is now "any bank policy accepts human input" (option (c)
-// in the issue), so the coarse system no longer needs its own `[[system]]`
-// block.
+// The coarse `tactical` kind is gone entirely (#512 removed the `[[system]]`
+// block; #801 removed the id from the system namespace). `"tactical"` survives
+// only as [`TACTICAL_STATION_ID`] — the station-id key for the Weapons console
+// blackboard and coordination routing. Ship-level operations moved to real
+// declared systems: `SetTarget` targets `tactical-radar`; `SetPhaserMode` /
+// `SetPhaserFrequency` target `phaser-control`.
 
 /// Wire `SystemId` for the Phaser Bank fine systems.
 ///
@@ -168,6 +207,18 @@ pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
 /// A blaster bank fires straight-flying projectiles in data-driven volleys.
 pub const BLASTER_BANK_KIND: &str = "blaster_bank";
 pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
+
+/// Wire `SystemId` for the Phaser Control fine system (issue #801).
+///
+/// A single declared system owning the ship-wide phaser settings: the firing
+/// mode (`CurrentPhaserMode`) and the emitter frequency
+/// (`ShipPhaserFrequency`). These are ship-wide values, NOT per-bank — the
+/// data model is unchanged; this system exists so `SetPhaserMode` /
+/// `SetPhaserFrequency` admission gates on a real declared system instead of
+/// the deleted coarse `tactical` id.
+pub const PHASER_CONTROL_KIND: &str = "phaser_control";
+pub const PHASER_CONTROL_SYSTEM_ID: &str = "phaser-control";
+pub const PHASER_CONTROL_AI_CONTROLLER: &str = "phaser_control_ai";
 
 /// Wire `SystemId` for the Tactical Radar fine system.
 ///
@@ -315,14 +366,6 @@ impl SystemKindRegistry {
     pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::with_red_alert()?;
         registry.register(
-            HELM_KIND,
-            AiControllerRegistration::new(HELM_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            TACTICAL_KIND,
-            AiControllerRegistration::new(TACTICAL_AI_CONTROLLER)?,
-        )?;
-        registry.register(
             POWER_KIND,
             AiControllerRegistration::new(POWER_AI_CONTROLLER)?,
         )?;
@@ -384,6 +427,11 @@ impl SystemKindRegistry {
             HELM_STEERING_KIND,
             AiControllerRegistration::new(HELM_STEERING_AI_CONTROLLER)?,
         )?;
+        // Helm boost fine system (issue #801)
+        registry.register(
+            HELM_BOOST_KIND,
+            AiControllerRegistration::new(HELM_BOOST_AI_CONTROLLER)?,
+        )?;
         // Fine-grained Tactical systems (issue #512)
         registry.register(
             PHASER_BANK_KIND,
@@ -401,6 +449,11 @@ impl SystemKindRegistry {
         registry.register(
             BLASTER_BANK_KIND,
             AiControllerRegistration::new(BLASTER_BANK_AI_CONTROLLER)?,
+        )?;
+        // Phaser control fine system (issue #801)
+        registry.register(
+            PHASER_CONTROL_KIND,
+            AiControllerRegistration::new(PHASER_CONTROL_AI_CONTROLLER)?,
         )?;
         // Tactical / sensor radar fine systems
         registry.register(
@@ -476,12 +529,23 @@ pub fn red_alert_system_id() -> SystemId {
     SystemId(RED_ALERT_SYSTEM_ID.to_string())
 }
 
-pub fn helm_system_id() -> SystemId {
-    SystemId(HELM_SYSTEM_ID.to_string())
+// ── Station-key helpers (console namespace, issue #801) ──────────────────────
+//
+// These return the station-id string wrapped in a `SystemId` because the
+// blackboard map (`ShipSystemBlackboards`), the `BlackboardUpdate` wire
+// message and the coordination envelope are all typed `SystemId`. They are
+// NOT system ids: nothing registers a `ControlSource` for them and no
+// `ControlSystem` message may target them.
+
+/// Station-id key for the Helm console blackboard / helm-directed coordination.
+pub fn helm_station_key() -> SystemId {
+    SystemId(HELM_STATION_ID.to_string())
 }
 
-pub fn tactical_system_id() -> SystemId {
-    SystemId(TACTICAL_SYSTEM_ID.to_string())
+/// Station-id key for the Weapons console blackboard / tactical-directed
+/// coordination.
+pub fn tactical_station_key() -> SystemId {
+    SystemId(TACTICAL_STATION_ID.to_string())
 }
 
 // NOTE: There is no `power_system_id()` helper. The coarse `POWER_SYSTEM_ID`
@@ -563,6 +627,10 @@ pub fn helm_steering_system_id() -> SystemId {
     SystemId(HELM_STEERING_SYSTEM_ID.to_string())
 }
 
+pub fn helm_boost_system_id() -> SystemId {
+    SystemId(HELM_BOOST_SYSTEM_ID.to_string())
+}
+
 // ── Fine Tactical system id helpers (issue #512) ──────────────────────────────
 
 pub fn phaser_fore_system_id() -> SystemId {
@@ -587,6 +655,10 @@ pub fn torpedo_tube_aft_system_id() -> SystemId {
 
 pub fn torpedo_magazine_system_id() -> SystemId {
     SystemId(TORPEDO_MAGAZINE_SYSTEM_ID.to_string())
+}
+
+pub fn phaser_control_system_id() -> SystemId {
+    SystemId(PHASER_CONTROL_SYSTEM_ID.to_string())
 }
 
 // ── Fine Power system id helpers (issue #513) ─────────────────────────────────
@@ -667,8 +739,6 @@ mod tests {
     fn coarse_system_ids_are_lowercase_kebab() {
         let ids = [
             RED_ALERT_SYSTEM_ID,
-            HELM_SYSTEM_ID,
-            TACTICAL_SYSTEM_ID,
             POWER_SYSTEM_ID,
             SENSORS_SYSTEM_ID,
             NAVIGATION_SYSTEM_ID,
@@ -695,8 +765,6 @@ mod tests {
     #[test]
     fn coarse_system_id_values_are_stable() {
         assert_eq!(RED_ALERT_SYSTEM_ID, "red-alert");
-        assert_eq!(HELM_SYSTEM_ID, "helm");
-        assert_eq!(TACTICAL_SYSTEM_ID, "tactical");
         assert_eq!(POWER_SYSTEM_ID, "power");
         assert_eq!(SENSORS_SYSTEM_ID, "sensors");
         assert_eq!(NAVIGATION_SYSTEM_ID, "navigation");
@@ -710,9 +778,7 @@ mod tests {
     #[test]
     fn system_id_helpers_return_expected_values() {
         assert_eq!(red_alert_system_id().0, RED_ALERT_SYSTEM_ID);
-        assert_eq!(helm_system_id().0, HELM_SYSTEM_ID);
-        assert_eq!(tactical_system_id().0, TACTICAL_SYSTEM_ID);
-        // No `power_system_id()` helper — see note above the tactical helper.
+        // No `power_system_id()` helper — see note above the station-key helpers.
         // The coarse constant is still pinned by `coarse_system_id_values_are_stable`.
         assert_eq!(sensors_system_id().0, SENSORS_SYSTEM_ID);
         assert_eq!(navigation_system_id().0, NAVIGATION_SYSTEM_ID);
@@ -787,34 +853,32 @@ mod tests {
         );
     }
 
+    /// The coarse `helm` / `tactical` kinds were deleted by #801: `"helm"`
+    /// and `"tactical"` are station ids only. A ship TOML declaring either
+    /// as a `[[system]]` kind must fail validation.
     #[test]
-    fn core_registry_has_helm_ai_controller() {
+    fn coarse_helm_and_tactical_kinds_are_not_registered() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
-        assert!(registry.contains(HELM_KIND));
-        assert_eq!(
-            registry
-                .registration(HELM_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_AI_CONTROLLER
+        assert!(
+            !registry.contains("helm"),
+            "coarse `helm` must not be a registered system kind"
+        );
+        assert!(
+            !registry.contains("tactical"),
+            "coarse `tactical` must not be a registered system kind"
         );
     }
 
+    /// Station-id keys are stable wire/blackboard strings — the client reads
+    /// `blackboards['helm']` / `blackboards['tactical']`, so these must never
+    /// drift.
     #[test]
-    fn core_registry_has_tactical_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(TACTICAL_KIND));
-        assert_eq!(
-            registry
-                .registration(TACTICAL_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            TACTICAL_AI_CONTROLLER
-        );
+    fn station_key_values_are_stable() {
+        assert_eq!(HELM_STATION_ID, "helm");
+        assert_eq!(TACTICAL_STATION_ID, "tactical");
+        assert_eq!(helm_station_key().0, HELM_STATION_ID);
+        assert_eq!(tactical_station_key().0, TACTICAL_STATION_ID);
     }
 
     #[test]
@@ -1035,6 +1099,10 @@ mod tests {
             registry.contains(HELM_STEERING_KIND),
             "helm_steering not registered"
         );
+        assert!(
+            registry.contains(HELM_BOOST_KIND),
+            "helm_boost not registered"
+        );
 
         assert_eq!(
             registry
@@ -1052,6 +1120,14 @@ mod tests {
                 .name(),
             HELM_STEERING_AI_CONTROLLER
         );
+        assert_eq!(
+            registry
+                .registration(HELM_BOOST_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            HELM_BOOST_AI_CONTROLLER
+        );
     }
 
     #[test]
@@ -1065,6 +1141,7 @@ mod tests {
             LATERAL_THRUST_SYSTEM_ID,
             HELM_THRUST_SYSTEM_ID,
             HELM_STEERING_SYSTEM_ID,
+            HELM_BOOST_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -1086,6 +1163,7 @@ mod tests {
         assert_eq!(LATERAL_THRUST_SYSTEM_ID, "helm-lateral-thrust");
         assert_eq!(HELM_THRUST_SYSTEM_ID, "helm-thrust");
         assert_eq!(HELM_STEERING_SYSTEM_ID, "helm-steering");
+        assert_eq!(HELM_BOOST_SYSTEM_ID, "helm-boost");
     }
 
     #[test]
@@ -1101,6 +1179,7 @@ mod tests {
         assert_eq!(lateral_thrust_system_id().0, LATERAL_THRUST_SYSTEM_ID);
         assert_eq!(helm_thrust_system_id().0, HELM_THRUST_SYSTEM_ID);
         assert_eq!(helm_steering_system_id().0, HELM_STEERING_SYSTEM_ID);
+        assert_eq!(helm_boost_system_id().0, HELM_BOOST_SYSTEM_ID);
     }
 
     // ── Fine Tactical system tests (issue #512) ───────────────────────────────
@@ -1120,6 +1199,10 @@ mod tests {
         assert!(
             registry.contains(TORPEDO_MAGAZINE_KIND),
             "torpedo_magazine not registered"
+        );
+        assert!(
+            registry.contains(PHASER_CONTROL_KIND),
+            "phaser_control not registered"
         );
 
         assert_eq!(
@@ -1146,6 +1229,14 @@ mod tests {
                 .name(),
             TORPEDO_MAGAZINE_AI_CONTROLLER
         );
+        assert_eq!(
+            registry
+                .registration(PHASER_CONTROL_KIND)
+                .unwrap()
+                .ai_controller
+                .name(),
+            PHASER_CONTROL_AI_CONTROLLER
+        );
     }
 
     #[test]
@@ -1157,6 +1248,7 @@ mod tests {
             TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID,
             TORPEDO_TUBE_AFT_SYSTEM_ID,
             TORPEDO_MAGAZINE_SYSTEM_ID,
+            PHASER_CONTROL_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -1179,6 +1271,7 @@ mod tests {
         );
         assert_eq!(TORPEDO_TUBE_AFT_SYSTEM_ID, "torpedo-tube-aft");
         assert_eq!(TORPEDO_MAGAZINE_SYSTEM_ID, "torpedo-magazine");
+        assert_eq!(PHASER_CONTROL_SYSTEM_ID, "phaser-control");
     }
 
     #[test]
@@ -1195,6 +1288,7 @@ mod tests {
         );
         assert_eq!(torpedo_tube_aft_system_id().0, TORPEDO_TUBE_AFT_SYSTEM_ID);
         assert_eq!(torpedo_magazine_system_id().0, TORPEDO_MAGAZINE_SYSTEM_ID);
+        assert_eq!(phaser_control_system_id().0, PHASER_CONTROL_SYSTEM_ID);
     }
 
     #[test]

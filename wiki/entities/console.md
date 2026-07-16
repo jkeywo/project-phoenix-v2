@@ -62,8 +62,9 @@ capability is being addressed" address. Both are just lowercase-kebab strings.
 1. **One player per station.** Server enforces in `SessionManager`.
 2. **Captain authority is checked server-side.** `ToggleRedAlert` and
    `SetViewMode` are no-ops unless the sender holds `"captain"`.
-3. **Helm is the only station that can move the ship.** `HelmInput` from any
-   other token is silently dropped (also gated by `SystemId::helm`).
+3. **Helm is the only station that can move the ship.** `SetThrust`/`SetSteering` from any
+   other token is silently dropped (also gated per axis by the `helm-thrust` /
+   `helm-steering` system ids).
 4. **Tactical authorization is checked server-side.** `FirePhaser` requires a
    locked target plus `is_fire_ready()` (range + arc) on the addressed phaser
    bank SystemId; `FireTorpedo` requires a loaded tube SystemId and a target.

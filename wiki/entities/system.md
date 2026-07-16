@@ -25,25 +25,25 @@ and Power (#513–#515) are not yet decomposed.
 
 ## SystemId
 
-A `SystemId` is a stable, lowercase-kebab string — e.g. `"helm"`,
+A `SystemId` is a stable, lowercase-kebab string — e.g. `"helm-thrust"`,
 `"red-alert"`, `"viewscreen"`. It is the `target` field in every
 `ControlSystem` client message:
 
 ```json
 { "type": "ControlSystem",
-  "data": { "target": "helm",
-             "payload": { "type": "HelmInput", "data": { "thrust": 1.0, "steering": 0.0 } } } }
+  "data": { "target": "helm-thrust",
+             "payload": { "type": "SetThrust", "data": { "value": 1.0 } } } }
 ```
 
 Constant helpers live in `src/ship/system_registry.rs`
-(`helm_system_id()`, `tactical_system_id()`, etc.).
+(`helm_thrust_system_id()`, `tactical_radar_system_id()`, etc.). Note `"helm"` and `"tactical"` are STATION ids, not system ids (issue #801): they key console-level blackboards and coordination via `helm_station_key()` / `tactical_station_key()`, and are never `ControlSystem` targets.
 
 ## TOML schema (`[[system]]`)
 
 ```toml
 [[system]]
-id = "helm"           # SystemId
-kind = "helm"         # SystemKind — determines which handler owns this system
+id = "helm-thrust"    # SystemId
+kind = "helm_thrust"  # SystemKind — determines which handler owns this system
 station = "helm"      # owning StationId
 power_group = "helm"  # power allocation bucket
 

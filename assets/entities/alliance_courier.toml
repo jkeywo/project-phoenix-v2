@@ -288,13 +288,8 @@ id = "sensors"
 kind = "sensors"
 station = "pilot"
 
-[[system]]
-id = "helm"
-kind = "helm"
-station = "pilot"
-
-# Per-axis helm systems (issue #701, declared in #800). Owned by "pilot" like
-# the coarse `helm` above, and — like it — absent from the pilot's `Std`
+# Per-axis helm systems (issue #701, declared in #800). Owned by "pilot" and
+# absent from the pilot's `Std`
 # `automated_systems` list, because the pilot flies the ship by hand. An
 # unmanned pilot station gets `Backfill`, which automates every station-owned
 # system, so these two come up on AI exactly when the coarse helm does.
@@ -326,6 +321,15 @@ station = "pilot"
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "pilot"
+
+# Boost drive commands (issue #801). Split out of the deleted coarse `helm`
+# system so ToggleBoost/SetBoost admission gates on its own declared system,
+# like every other helm axis. Listed in no rating's `automated_systems` —
+# Backfill automates it with the rest of the station.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
 station = "pilot"
 
 [[system]]

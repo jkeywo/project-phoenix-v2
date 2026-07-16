@@ -526,7 +526,7 @@ fn handle_set_target(
             &default_modifiers
         }
     };
-    for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
         let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
             continue;
         };
@@ -585,18 +585,16 @@ fn tactical_authorized(
         || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
 
-/// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency,
-/// ToggleAutoFire) are gated on "any phaser bank accepts human input"
+/// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency)
+/// are gated on "any phaser bank accepts human input"
 /// (issue #512, option c). This preserves the "fire when only one bank is
-/// alive" semantic without giving the coarse `tactical` system its own
-/// `[[system]]` block.
+/// alive" semantic.
 ///
-/// Returns `true` when:
-/// - Any bank in the ship's `phaser_banks` config has an operable fine
-///   system (`accept_human_input == true`), OR
-/// - The ship config has no `phaser_banks` declared at all (legacy /
-///   test-ship path) — in that case we fall back to the coarse tactical
-///   policy so existing tests keep passing.
+/// Returns `true` when any bank in the ship's `phaser_banks` config has an
+/// operable fine system (`accept_human_input == true`), or when the config
+/// declares no `phaser_bank` fine systems at all — nothing to gate on, and
+/// the per-target admission gate has already authorised the command (the
+/// dead coarse `tactical` fallback was deleted by #801).
 fn any_bank_accepts_human_input(
     control_sources: &ShipSystemControlSources,
     ship_config: &crate::ship::config::ShipConfig,
@@ -609,11 +607,10 @@ fn any_bank_accepts_human_input(
         .map(|s| s.id.clone())
         .collect();
     if bank_system_ids.is_empty() {
-        // Legacy fallback: no fine banks declared → gate on coarse tactical.
-        return control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id())
-            .accept_human_input;
+        // No fine banks declared: nothing to gate on — admission on the
+        // target system has already authorised the command. (The dead
+        // coarse `tactical` fallback was deleted by #801.)
+        return true;
     }
     bank_system_ids
         .iter()
@@ -625,34 +622,25 @@ fn any_bank_accepts_human_input(
 ///
 /// Used as the ship-level early-skip gate in `ai_phaser_auto_fire` after
 /// issue #512 deleted the coarse `[[system]] id = "tactical"` block. Before
-/// the fix, the auto-fire loop gated on `policy_for(&tactical_system_id())
-/// .operate_ai` — that always returned the default `Human` policy for any
-/// ship whose config no longer declared the coarse system, so NPCs with
-/// fine phaser banks silently stopped auto-firing.
+/// the fix, the auto-fire loop gated on the coarse tactical policy — that
+/// always returned the default `Human` policy for any ship whose config no
+/// longer declared the coarse system, so NPCs with fine phaser banks
+/// silently stopped auto-firing.
 ///
-/// Fallback: when the ship config declares NO `phaser_bank` fine systems
-/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
-/// policy so existing tests that seed only the coarse SystemId continue
-/// to pass.
+/// No coarse fallback: a config with no `phaser_bank` fine systems has no
+/// bank that could be AI-operated, so this returns `false`. (The coarse
+/// `tactical` fallback that used to sit here was provably dead — the id was
+/// declared in zero TOMLs and registered in no resolver — and was deleted
+/// by #801.)
 fn any_bank_operates_ai(
     control_sources: &ShipSystemControlSources,
     ship_config: &crate::ship::config::ShipConfig,
 ) -> bool {
-    let bank_system_ids: Vec<SystemId> = ship_config
+    ship_config
         .systems
         .iter()
         .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
-        .map(|s| s.id.clone())
-        .collect();
-    if bank_system_ids.is_empty() {
-        return control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id())
-            .operate_ai;
-    }
-    bank_system_ids
-        .iter()
-        .any(|id| control_sources.0.policy_for(id).operate_ai)
+        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
 /// True when ANY blaster bank on the ship has an operable fine system whose
@@ -660,29 +648,18 @@ fn any_bank_operates_ai(
 ///
 /// Used as the ship-level early-skip gate in `tick_blaster_auto_fire`.
 ///
-/// Fallback: when the ship config declares NO `blaster_bank` fine systems
-/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
-/// policy so existing tests that seed only the coarse SystemId continue
-/// to pass.
+/// No coarse fallback: a config with no `blaster_bank` fine systems has no
+/// bank that could be AI-operated, so this returns `false` (dead coarse
+/// `tactical` fallback deleted by #801, as in [`any_bank_operates_ai`]).
 fn any_blaster_bank_operates_ai(
     control_sources: &ShipSystemControlSources,
     ship_config: &crate::ship::config::ShipConfig,
 ) -> bool {
-    let bank_system_ids: Vec<SystemId> = ship_config
+    ship_config
         .systems
         .iter()
         .filter(|s| s.kind == crate::system_registry::BLASTER_BANK_KIND)
-        .map(|s| s.id.clone())
-        .collect();
-    if bank_system_ids.is_empty() {
-        return control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id())
-            .operate_ai;
-    }
-    bank_system_ids
-        .iter()
-        .any(|id| control_sources.0.policy_for(id).operate_ai)
+        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
 /// True when ANY tactical fine system (phaser bank, torpedo tube, or the
@@ -695,10 +672,9 @@ fn any_blaster_bank_operates_ai(
 /// surface (weapons_target sync + torpedo auto-fire both need to run when
 /// any tactical fine system is AI-driven).
 ///
-/// Fallback: when the ship config declares NO tactical fine systems at all
-/// (legacy / test ship path), returns the coarse `tactical.operate_ai`
-/// policy so existing tests that seed only the coarse SystemId continue
-/// to pass.
+/// No coarse fallback: a config with no tactical fine systems has nothing
+/// that could be AI-operated, so this returns `false` (dead coarse
+/// `tactical` fallback deleted by #801, as in [`any_bank_operates_ai`]).
 fn any_tactical_system_operates_ai(
     control_sources: &ShipSystemControlSources,
     ship_config: &crate::ship::config::ShipConfig,
@@ -708,28 +684,19 @@ fn any_tactical_system_operates_ai(
         crate::system_registry::TORPEDO_TUBE_KIND,
         crate::system_registry::TORPEDO_MAGAZINE_KIND,
     ];
-    let tactical_fine_ids: Vec<SystemId> = ship_config
+    ship_config
         .systems
         .iter()
         .filter(|s| tactical_fine_kinds.contains(&s.kind.as_str()))
-        .map(|s| s.id.clone())
-        .collect();
-    if tactical_fine_ids.is_empty() {
-        return control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_system_id())
-            .operate_ai;
-    }
-    tactical_fine_ids
-        .iter()
-        .any(|id| control_sources.0.policy_for(id).operate_ai)
+        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
 /// True when `system_id` is registered on this ship's `ControlSourceResolver`
 /// (either in the `sources` map or in the damage-driven `offline_systems`
 /// set). Used to decide whether per-fine-instance gating applies to a
-/// message, or whether we should fall back to the coarse tactical policy for
-/// NPC ships that haven't opted into the fine-system decomposition.
+/// message, or whether the default-source policy applies (ships that haven't
+/// opted into the fine-system decomposition; issue #801 removed the coarse
+/// `tactical` fallback that used to sit behind this check).
 fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &SystemId) -> bool {
     control_sources.0.entries().any(|(id, _)| id == system_id)
         || control_sources.0.offline_systems.contains(system_id)
@@ -828,20 +795,20 @@ fn handle_fire_phaser(
         // Authorize the shooter per its own ControlSource. Human tokens
         // require `accept_human_input`; `ai:` tokens require `operate_ai`.
         // Per-bank gate (issue #512): resolve the SystemId for this bank's
-        // fine system and gate on its own policy. Falls back to the coarse
-        // tactical policy when the bank id doesn't resolve to a known fine
-        // system OR when the ship hasn't registered a fine system for this
-        // bank (NPC path — NPC ships declare fine `phaser_bank` systems in
-        // their TOML but use different bank ids like "port"/"starboard" that
-        // don't match the `fore`/`aft` fine SystemId constants). The
-        // fallback preserves the coarse-tactical AI semantic for NPCs.
+        // fine system and gate on its own policy. An unresolved or
+        // unregistered bank id gets the default-source policy (issue #801 —
+        // no coarse fallback; production ships register a fine system for
+        // every declared bank).
         let bank_system_id = crate::system_registry::phaser_bank_system_id(bank)
             .filter(|id| system_is_registered(control_sources, id));
         let policy = match &bank_system_id {
             Some(id) => control_sources.0.policy_for(id),
-            None => control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id()),
+            // Unregistered fine system: the default-source policy — exactly
+            // what `policy_for` returns for any unknown id. No coarse
+            // `tactical` fallback (issue #801).
+            None => crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            ),
         };
         let is_ai_token = ev.token.starts_with("ai:");
         let authorized = if is_ai_token {
@@ -1059,12 +1026,15 @@ pub(crate) fn ai_phaser_auto_fire(
         // path) fall back to the coarse `tactical.operate_ai` policy.
         let bank_ai_available = match ship_config_opt {
             Some(cfg) => any_bank_operates_ai(control_sources, &cfg.0),
-            None => {
-                control_sources
-                    .0
-                    .policy_for(&crate::system_registry::tactical_system_id())
-                    .operate_ai
-            }
+            // No ship config (test-only spawns): derive the gate from the
+            // same per-bank fine ids the fire loop below uses. No coarse
+            // `tactical` fallback (issue #801).
+            None => combat_config_opt.is_some_and(|cc| {
+                cc.0.banks.iter().any(|b| {
+                    crate::system_registry::phaser_bank_system_id(&b.id)
+                        .is_some_and(|id| control_sources.0.policy_for(&id).operate_ai)
+                })
+            }),
         };
         let auto_fire = bank_ai_available || (is_local && phaser_mode.0 == PhaserMode::Auto);
         if !auto_fire {
@@ -1445,7 +1415,7 @@ fn tick_weapons_arc_request(
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
             sender_origin,
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: target_uuid,
                 label,
@@ -2164,7 +2134,7 @@ fn handle_set_phaser_mode(
     if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
         return;
     }
-    for cmd in admitted.for_target(crate::system_registry::TACTICAL_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::system_registry::PHASER_CONTROL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
             phaser_mode.0 = *mode;
         }
@@ -2234,16 +2204,17 @@ fn handle_load_tube(
             continue;
         };
         // Per-tube gate (issue #512): the tube's own fine-system policy
-        // decides whether human input can trigger a load. Fall back to
-        // coarse tactical gating when the tube id doesn't resolve OR
-        // when the ship hasn't registered a fine system for this tube.
+        // decides whether human input can trigger a load. An unresolved or
+        // unregistered tube id gets the default-source policy (issue #801 —
+        // no coarse fallback).
         let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
             .filter(|id| system_is_registered(control_sources, id));
         let tube_policy = match &tube_system_id {
             Some(id) => control_sources.0.policy_for(id),
-            None => control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id()),
+            // Unregistered fine system → default-source policy (issue #801).
+            None => crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            ),
         };
         if !tube_policy.accept_human_input {
             continue;
@@ -2291,15 +2262,16 @@ fn handle_unload_tube(
             continue;
         };
         // Per-tube gate (issue #512): the tube's own fine-system policy
-        // decides whether human input can trigger an unload. Falls back to
-        // coarse tactical when the ship hasn't registered a fine tube system.
+        // decides whether human input can trigger an unload. An unregistered
+        // tube id gets the default-source policy (issue #801).
         let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
             .filter(|id| system_is_registered(control_sources, id));
         let tube_policy = match &tube_system_id {
             Some(id) => control_sources.0.policy_for(id),
-            None => control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id()),
+            // Unregistered fine system → default-source policy (issue #801).
+            None => crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            ),
         };
         if !tube_policy.accept_human_input {
             continue;
@@ -2351,14 +2323,16 @@ fn handle_set_torpedo_volley_target(
             Some(id) if !id.is_empty() => id,
             _ => continue,
         };
-        // Gate on the tube's own fine-system policy (falls back to tactical).
+        // Gate on the tube's own fine-system policy (default-source policy
+        // for unregistered ids — issue #801).
         let is_registered = system_is_registered(control_sources, target);
         let tube_policy = if is_registered {
             control_sources.0.policy_for(target)
         } else {
-            control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id())
+            // Unregistered fine system → default-source policy (issue #801).
+            crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            )
         };
         if !tube_policy.accept_human_input {
             continue;
@@ -2463,16 +2437,16 @@ fn handle_fire_torpedo(
         // Authorize per the shooter's own ControlSource: human tokens need
         // `accept_human_input`; `ai:` tokens need `operate_ai`.
         // Per-tube gate (issue #512): resolve the fine SystemId for this tube
-        // and gate on its own policy. Falls back to the coarse tactical policy
-        // when the tube id doesn't resolve to a fine system OR when the ship
-        // hasn't registered a fine system for this tube (NPC path).
+        // and gate on its own policy. An unresolved or unregistered tube id
+        // gets the default-source policy (issue #801 — no coarse fallback).
         let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
             .filter(|id| system_is_registered(control_sources, id));
         let policy = match &tube_system_id {
             Some(id) => control_sources.0.policy_for(id),
-            None => control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id()),
+            // Unregistered fine system → default-source policy (issue #801).
+            None => crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            ),
         };
         let is_ai_token = ev.token.starts_with("ai:");
         let authorized = if is_ai_token {
@@ -2644,9 +2618,12 @@ fn handle_fire_blaster(
             .filter(|id| system_is_registered(control_sources, id));
         let policy = match &bank_system_id {
             Some(id) => control_sources.0.policy_for(id),
-            None => control_sources
-                .0
-                .policy_for(&crate::system_registry::tactical_system_id()),
+            // Unregistered fine system: the default-source policy — exactly
+            // what `policy_for` returns for any unknown id. No coarse
+            // `tactical` fallback (issue #801).
+            None => crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            ),
         };
         let is_ai_token = ev.token.starts_with("ai:");
         let authorized = if is_ai_token {
@@ -2752,12 +2729,13 @@ fn tick_blaster_auto_fire(
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
             Some(cfg) => any_blaster_bank_operates_ai(control_sources, &cfg.0),
-            None => {
-                control_sources
-                    .0
-                    .policy_for(&crate::system_registry::tactical_system_id())
-                    .operate_ai
-            }
+            // No ship config (test-only spawns): derive the gate from the
+            // same per-bank fine ids the fire loop uses. No coarse
+            // `tactical` fallback (issue #801).
+            None => blaster_res.0.iter().any(|bank| {
+                crate::system_registry::blaster_bank_system_id(&bank.config.id)
+                    .is_some_and(|id| control_sources.0.policy_for(&id).operate_ai)
+            }),
         };
         if !ai_controlled {
             #[cfg(target_arch = "wasm32")]
@@ -3722,7 +3700,7 @@ fn record_locked_target_decision(
 ) {
     let entry = blackboards
         .0
-        .entry(crate::system_registry::tactical_system_id())
+        .entry(crate::system_registry::tactical_station_key())
         .or_insert_with(|| SystemBlackboard::Weapons(WeaponsBlackboard::default()));
     if let SystemBlackboard::Weapons(weapons) = entry {
         weapons.locked_target = value;
@@ -3738,7 +3716,7 @@ fn record_locked_target_decision(
 fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSystemBlackboards) {
     if let Some(SystemBlackboard::Weapons(weapons)) = blackboards
         .0
-        .get_mut(&crate::system_registry::tactical_system_id())
+        .get_mut(&crate::system_registry::tactical_station_key())
     {
         weapons.locked_target = None;
     }
@@ -4558,8 +4536,6 @@ fn publish_weapons_blackboard(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    use crate::system_registry::TACTICAL_SYSTEM_ID;
-
     for (
         weapons_target,
         beam,
@@ -4636,7 +4612,7 @@ fn publish_weapons_blackboard(
         // target — but it can be read, and #698 / #700 will read it.
         let locked_target = entity_bbs
             .0
-            .get(&SystemId(TACTICAL_SYSTEM_ID.to_string()))
+            .get(&crate::system_registry::tactical_station_key())
             .and_then(|bb| match bb {
                 SystemBlackboard::Weapons(weapons) => weapons.locked_target.clone(),
                 _ => None,
@@ -4871,8 +4847,12 @@ fn publish_weapons_blackboard(
             regions,
         };
 
+        // Console-level blackboard: keyed by the Tactical STATION id (issue
+        // #801). The wire string is unchanged — the client still reads
+        // `blackboards['tactical']` — but the key names the console, not a
+        // system. Per-bank entries below keep their system-id keys.
         entity_bbs.0.insert(
-            SystemId(TACTICAL_SYSTEM_ID.to_string()),
+            crate::system_registry::tactical_station_key(),
             SystemBlackboard::Weapons(bb.clone()),
         );
 
@@ -5146,6 +5126,16 @@ kind = "phaser_bank"
 station = "tactical"
 
 [[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
+
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
+station = "tactical"
+
+[[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
 station = "tactical"
@@ -5168,7 +5158,13 @@ station = "tactical"
         crate::ship_plugin::ShipConfigComponent(
             crate::ship::config::parse_and_validate(
                 TOML,
-                &["phaser_bank", "torpedo_tube", "torpedo_magazine"],
+                &[
+                    "phaser_bank",
+                    "torpedo_tube",
+                    "torpedo_magazine",
+                    "tactical_radar",
+                    "phaser_control",
+                ],
             )
             .expect("test ship config must be valid"),
         )
@@ -5593,7 +5589,7 @@ station = "tactical"
             app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5622,7 +5618,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5653,7 +5649,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5682,7 +5678,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "no-such-asteroid".into(),
                 },
@@ -5713,7 +5709,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5748,7 +5744,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -5861,7 +5857,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -6089,7 +6085,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
             },
         );
@@ -6116,7 +6112,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
             },
         );
@@ -6148,7 +6144,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Manual,
                 },
@@ -6171,7 +6167,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Auto,
                 },
@@ -6183,7 +6179,7 @@ station = "tactical"
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
                     mode: crate::messages::PhaserMode::Manual,
                 },
@@ -6255,10 +6251,16 @@ station = "tactical"
         let torpedo_config = TorpedoConfig::default();
         let npc_torpedo_sys = crate::torpedo::TorpedoSystem::new(torpedo_config);
         let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
-        npc_ai_sources.set(
-            crate::system_registry::tactical_system_id(),
-            crate::ship::control_source::ControlSource::Ai,
-        );
+        // #801: seed the fine tube + magazine systems (there is no coarse
+        // tactical system to seed).
+        for sysid in [
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::system_registry::torpedo_tube_aft_system_id(),
+            crate::system_registry::torpedo_magazine_system_id(),
+        ] {
+            npc_ai_sources.set(sysid, crate::ship::control_source::ControlSource::Ai);
+        }
         let npc_entity = app
             .world_mut()
             .spawn((
@@ -6652,7 +6654,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -6703,7 +6705,7 @@ station = "tactical"
             &mut app_fast,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -6741,7 +6743,7 @@ station = "tactical"
             &mut app_base,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -6957,7 +6959,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7004,7 +7006,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7102,7 +7104,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7159,7 +7161,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7240,7 +7242,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7492,7 +7494,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "npc-1".into(),
                 },
@@ -7546,10 +7548,15 @@ station = "tactical"
         // whether a human or `ai_target_selection` set it, so an AI shooter
         // seeds it exactly as a human one would.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
-        sources.set(
-            crate::system_registry::tactical_system_id(),
-            crate::ship::control_source::ControlSource::Ai,
-        );
+        // #801: seed the fine systems for the banks these tests fire
+        // ("port"/"starboard" per the test_app combat config) — there is no
+        // coarse tactical system to seed.
+        for bank in ["port", "starboard"] {
+            sources.set(
+                crate::system_registry::phaser_bank_system_id(bank).unwrap(),
+                crate::ship::control_source::ControlSource::Ai,
+            );
+        }
 
         let npc_entity = app
             .world_mut()
@@ -8169,8 +8176,9 @@ station = "tactical"
         // plus the components the unified `handle_fire_phaser` requires:
         // `Ship`, `ShipSystemControlSources` (Tactical = Ai), `WeaponsTarget`.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the phaser bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::phaser_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let npc_entity = app
@@ -8361,8 +8369,9 @@ station = "tactical"
 
         // NPC facing -Z (yaw=0 forward = -Z) with Tactical set to Ai.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the phaser bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::phaser_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let npc_entity = app
@@ -8436,8 +8445,9 @@ station = "tactical"
         use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the phaser bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::phaser_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let npc = app
@@ -8668,7 +8678,7 @@ station = "tactical"
             .find(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. }))
             .expect("expected an ArcBearingRequest CoordinationEnqueue event");
         assert_eq!(request.source_entity, ship_entity);
-        assert_eq!(request.target, crate::system_registry::helm_system_id());
+        assert_eq!(request.target, crate::system_registry::helm_station_key());
         match &request.payload {
             CoordinationPayload::ArcBearingRequest { uuid, .. } => {
                 assert_eq!(uuid, target_uuid);
@@ -8809,8 +8819,9 @@ station = "tactical"
         // NPC facing -Z with a narrow port-only bank (facing_deg=-90, arc=60°).
         // Target directly ahead is out of arc.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the phaser bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::phaser_bank_system_id("port").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let combat = crate::entity_config::PhaserCombatConfig {
@@ -8878,14 +8889,13 @@ station = "tactical"
     }
 
     fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
-        use crate::messages::{SystemBlackboard, SystemId};
+        use crate::messages::SystemBlackboard;
         use crate::server_app::ShipSystemBlackboards;
-        use crate::system_registry::TACTICAL_SYSTEM_ID;
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         match q.single(app.world()) {
-            Ok(bbs) => match bbs.0.get(&SystemId(TACTICAL_SYSTEM_ID.to_string())) {
+            Ok(bbs) => match bbs.0.get(&crate::system_registry::tactical_station_key()) {
                 Some(SystemBlackboard::Weapons(bb)) => bb.blips.clone(),
                 _ => Vec::new(),
             },
@@ -8949,14 +8959,13 @@ station = "tactical"
 
     // ── Tactical AI tests ──────────────────────────────────────────────────
 
-    /// Set the ControlSource for the coarse tactical system AND every
-    /// tactical fine system on the LocalShip.
+    /// Set the ControlSource for every tactical fine system on the LocalShip.
     ///
-    /// Post-#512 the coarse `tactical` no longer has a `[[system]]` block,
-    /// so gating in production reads per-fine-system policies. This helper
-    /// updates every tactical surface so tests that intended "Tactical is
-    /// AI-controlled" behave the same way through both the fine-system
-    /// path and the legacy coarse-tactical fallback path.
+    /// Post-#512 gating reads per-fine-system policies; post-#801 the coarse
+    /// `tactical` id is not a system at all, so this helper seeds only the
+    /// fine ids (mirrors what happens when a station rating flips to
+    /// Backfill, which triggers AI control of every fine system owned by
+    /// the station).
     fn set_tactical_control_source(
         app: &mut App,
         source: crate::ship::control_source::ControlSource,
@@ -8965,11 +8974,6 @@ station = "tactical"
         let mut q = world
             .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         for mut cs in q.iter_mut(world) {
-            // Coarse (fallback for ships without fine systems).
-            cs.0.set(crate::system_registry::tactical_system_id(), source);
-            // Fine tactical systems (production path — mirrors what happens
-            // when a station rating flips to Backfill, which triggers AI
-            // control of every fine system owned by the station).
             for sysid in [
                 crate::system_registry::phaser_fore_system_id(),
                 crate::system_registry::phaser_aft_system_id(),
@@ -9698,7 +9702,7 @@ station = "tactical"
             .entity(entity)
             .get::<crate::server_app::ShipSystemBlackboards>()
             .and_then(
-                |bbs| match bbs.0.get(&crate::system_registry::tactical_system_id()) {
+                |bbs| match bbs.0.get(&crate::system_registry::tactical_station_key()) {
                     Some(SystemBlackboard::Weapons(bb)) => Some(bb.clone()),
                     _ => None,
                 },
@@ -9906,7 +9910,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -9989,7 +9993,7 @@ station = "tactical"
                 .get::<crate::server_app::ShipSystemBlackboards>()
                 .unwrap()
                 .0
-                .contains_key(&crate::system_registry::tactical_system_id()),
+                .contains_key(&crate::system_registry::tactical_station_key()),
             "a skipped ship has no AI intent to report, so the selector must not \
              insert a bare Weapons blackboard entry for it"
         );
@@ -10731,10 +10735,10 @@ station = "tactical"
             .map(|ts| ts.0.torpedoes_remaining)
             .unwrap();
 
-        // End-to-end: LoadTube tries to emit a claim — but the tube gate uses
-        // the coarse tactical policy (test ship doesn't declare fine tube
-        // systems either), which passes, then the claim goes to the magazine
-        // consumer which refuses because the magazine is offline.
+        // End-to-end: LoadTube tries to emit a claim — the tube gate passes
+        // (fine tube systems default to the Human source), then the claim
+        // goes to the magazine consumer which refuses because the magazine
+        // is offline.
         push(
             &mut app,
             "weapons",
@@ -10866,9 +10870,7 @@ station = "tactical"
         // ("phaser-fore", "phaser-aft"). `any_bank_accepts_human_input`
         // iterates them and returns true if ANY bank accepts human input.
         // So to refuse SetTarget, EVERY fine bank must be offline.
-        // Mark both fine banks offline; the coarse tactical is only used as
-        // a fallback when the ship declares no fine banks (which the test
-        // config now does).
+        // Mark both fine banks offline.
         mark_system_offline(&mut app, crate::system_registry::phaser_fore_system_id());
         mark_system_offline(&mut app, crate::system_registry::phaser_aft_system_id());
 
@@ -10876,7 +10878,7 @@ station = "tactical"
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -10996,7 +10998,7 @@ station = "tactical"
     // dead code: after #512 deleted `[[system]] id = "tactical" kind = "tactical"`
     // from every ship TOML, the coarse tactical SystemId is not registered
     // in any ship's ControlSourceResolver. Every code path that gated on
-    // `policy_for(&tactical_system_id()).operate_ai` would therefore see the
+    // a coarse-tactical policy lookup would therefore see the
     // default `Human` policy (`operate_ai = false`) and never run.
     //
     // These tests DO NOT touch the coarse `tactical` SystemId — they set
@@ -11024,7 +11026,7 @@ station = "tactical"
         // NPC TOMLs do. Its policy is Ai. The coarse `tactical` SystemId
         // is INTENTIONALLY untouched — the test would fail before finding 1
         // was fixed because the early-skip in `tick_phaser_auto_fire` would
-        // read `policy_for(&tactical_system_id()).operate_ai == false` and
+        // read the coarse tactical policy's `operate_ai == false` and
         // `continue`.
         const NPC_TOML: &str = r#"
 [[system]]
@@ -11127,11 +11129,12 @@ ai_only = true
                     crate::ship::control_source::ControlSource::Ai,
                 );
                 // Confirm coarse tactical is NOT set — this is what makes
-                // the test cover the finding.
+                // the test cover the finding. (#801: "tactical" is a station
+                // id, not a system, so nothing should ever register it.)
                 assert!(
                     !cs.0
                         .entries()
-                        .any(|(id, _)| { id == &crate::system_registry::tactical_system_id() }),
+                        .any(|(id, _)| { id.0 == crate::system_registry::TACTICAL_STATION_ID }),
                     "test invariant: coarse tactical must NOT be registered"
                 );
             }
@@ -11967,8 +11970,9 @@ ai_only = true
         let target_uuid = "bb000000-0000-0000-0000-000000000011";
 
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the blaster bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::blaster_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         // NPC at (10, 10) — away from LocalShip at origin — facing -Z (target at 10, -10).
@@ -12064,8 +12068,9 @@ ai_only = true
         let target_uuid = "bb000000-0000-0000-0000-000000000021";
 
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the blaster bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::blaster_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let npc_entity = app
@@ -12136,8 +12141,9 @@ ai_only = true
 
         // NPC with Tactical set to Ai.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        // #801: seed the blaster bank's fine system (no coarse tactical).
         sources.set(
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::blaster_bank_system_id("fore").unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();

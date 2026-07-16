@@ -46,7 +46,10 @@ Every variant gets a test like:
 ```rust
 #[test]
 fn helm_input_round_trips() {
-    let original = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
+    let original = ClientMessage::ControlSystem {
+    target: helm_thrust_system_id(),
+    payload: SystemControlPayload::SetThrust { value: 0.75 },
+};
     let bytes = JsonCodec::encode(&original).unwrap();
     let decoded: ClientMessage = JsonCodec::decode(&bytes).unwrap();
     assert_eq!(original, decoded);

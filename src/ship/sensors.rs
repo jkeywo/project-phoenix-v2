@@ -138,7 +138,7 @@ pub fn handle_sensors_messages(
             writer.write(CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_station_key(),
                 payload: CoordinationPayload::TargetDesignation {
                     uuid: uuid.clone(),
                     label,
@@ -228,7 +228,7 @@ pub fn tick_sensors_frequency_hint(
         writer.write(CoordinationEnqueue {
             source_entity: entity,
             sender_origin,
-            target: crate::system_registry::tactical_system_id(),
+            target: crate::system_registry::tactical_station_key(),
             payload: CoordinationPayload::FrequencyHint { frequency },
             sender_label: "Sensors".to_string(),
         });
@@ -640,7 +640,7 @@ mod tests {
 
         assert_eq!(
             enqueued.target,
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::tactical_station_key(),
             "TargetDesignation should be enqueued for the Tactical system"
         );
         match &enqueued.payload {

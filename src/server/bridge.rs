@@ -1119,11 +1119,12 @@ fn drain_ui_actions(mut writer: MessageWriter<InboundMessage>) {
     for json in pending {
         match codec::decode_ui_action(&json) {
             Ok(action) => {
-                let msg = messages::ui_action_to_client_message(&action);
-                writer.write(InboundMessage {
-                    token: LOCAL_CONSOLE_TOKEN.to_string(),
-                    msg,
-                });
+                for msg in messages::ui_action_to_client_messages(&action) {
+                    writer.write(InboundMessage {
+                        token: LOCAL_CONSOLE_TOKEN.to_string(),
+                        msg,
+                    });
+                }
             }
             Err(_) => {
                 let snippet: String = json.chars().take(80).collect();

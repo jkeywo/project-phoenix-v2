@@ -980,9 +980,13 @@ pub enum RepairTarget {
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
     ToggleRedAlert,
-    HelmInput {
-        thrust: f32,
-        steering: f32,
+    /// Set the throttle axis. Targets `helm-thrust` (issue #801).
+    SetThrust {
+        value: f32,
+    },
+    /// Set the yaw axis. Targets `helm-steering` (issue #801).
+    SetSteering {
+        value: f32,
     },
     StartImpulseCharge,
     CancelImpulse,
@@ -2390,10 +2394,35 @@ pub enum UiAction {
     ConfirmScenario,
 }
 
-/// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
-/// handlers already process. Pure — covered by a native unit test.
-pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
+/// Maps a decoded [`UiAction`] to the [`ClientMessage`]s the server handlers
+/// already process. Pure — covered by a native unit test.
+///
+/// Returns a `Vec` because a single UI action can fan out to more than one
+/// wire message: `HelmInput` carries both axes of the helm joystick, which
+/// since #801 are two per-axis payloads (`SetThrust` → `helm-thrust`,
+/// `SetSteering` → `helm-steering`). Every other action maps to exactly one
+/// message.
+pub fn ui_action_to_client_messages(a: &UiAction) -> Vec<ClientMessage> {
+    if let UiAction::HelmInput { thrust, steering } = a {
+        return vec![
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: *thrust },
+            },
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: *steering },
+            },
+        ];
+    }
+    vec![ui_action_to_single_client_message(a)]
+}
+
+fn ui_action_to_single_client_message(a: &UiAction) -> ClientMessage {
     match a {
+        UiAction::HelmInput { .. } => {
+            unreachable!("HelmInput is handled by ui_action_to_client_messages")
+        }
         UiAction::FireTorpedo { tube, target_uuid } => ClientMessage::FireTorpedo {
             tube: tube.clone(),
             target_uuid: target_uuid.clone(),
@@ -2411,27 +2440,20 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
                 mode: ViewMode::Camera(CameraView::new(direction.clone())),
             },
         },
-        UiAction::HelmInput { thrust, steering } => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
-            payload: SystemControlPayload::HelmInput {
-                thrust: *thrust,
-                steering: *steering,
-            },
-        },
         UiAction::StartImpulseCharge => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_impulse_system_id(),
             payload: SystemControlPayload::StartImpulseCharge,
         },
         UiAction::CancelImpulse => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_impulse_system_id(),
             payload: SystemControlPayload::CancelImpulse,
         },
         UiAction::ToggleBoost => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_boost_system_id(),
             payload: SystemControlPayload::ToggleBoost,
         },
         UiAction::SetBoost { active } => ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_boost_system_id(),
             payload: SystemControlPayload::SetBoost { active: *active },
         },
         UiAction::SetRadarView => ClientMessage::ControlSystem {
@@ -2503,6 +2525,17 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
 mod ui_action_tests {
     use super::*;
 
+    /// Most actions map to exactly one wire message; unwrap it.
+    fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
+        let mut msgs = ui_action_to_client_messages(a);
+        assert_eq!(
+            msgs.len(),
+            1,
+            "expected a single-message action, got {msgs:?}"
+        );
+        msgs.pop().unwrap()
+    }
+
     #[test]
     fn fire_torpedo_maps_to_client_message() {
         let action = UiAction::FireTorpedo {
@@ -2573,21 +2606,27 @@ mod ui_action_tests {
         );
     }
 
+    /// The combined joystick action fans out to the two per-axis payloads
+    /// (issue #801): admission gates each axis on its own declared system,
+    /// which is what fixes the #701 coarse-vs-per-axis mismatch.
     #[test]
-    fn helm_input_maps_to_client_message() {
+    fn helm_input_maps_to_per_axis_client_messages() {
         let action = UiAction::HelmInput {
             thrust: 0.75,
             steering: -0.5,
         };
         assert_eq!(
-            ui_action_to_client_message(&action),
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.75,
-                    steering: -0.5
-                }
-            }
+            ui_action_to_client_messages(&action),
+            vec![
+                ClientMessage::ControlSystem {
+                    target: crate::system_registry::helm_thrust_system_id(),
+                    payload: SystemControlPayload::SetThrust { value: 0.75 },
+                },
+                ClientMessage::ControlSystem {
+                    target: crate::system_registry::helm_steering_system_id(),
+                    payload: SystemControlPayload::SetSteering { value: -0.5 },
+                },
+            ]
         );
     }
 
@@ -2596,7 +2635,7 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::StartImpulseCharge),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             }
         );
@@ -2607,7 +2646,7 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::CancelImpulse),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             }
         );
@@ -2618,7 +2657,7 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::ToggleBoost),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             }
         );
@@ -2629,14 +2668,14 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetBoost { active: true }),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: true },
             }
         );
         assert_eq!(
             ui_action_to_client_message(&UiAction::SetBoost { active: false }),
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: false },
             }
         );

@@ -539,12 +539,6 @@ kind = "viewscreen"
 station = "captain"
 power_group = "ops"
 
-[[system]]
-id = "helm"
-kind = "helm"
-station = "helm"
-power_group = "helm"
-
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704). Owned by
 # the same station and power group as the coarse `helm` above, and — like it —
 # listed in no rating's `automated_systems`. An unmanned Helm gets the `Backfill`
@@ -592,9 +586,28 @@ kind = "tactical_radar"
 station = "tactical"
 power_group = "weapons"
 
+# Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
+# One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
+# admission gates on a real system instead of the deleted coarse `tactical`.
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
+station = "tactical"
+power_group = "weapons"
+
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
+station = "helm"
+power_group = "helm"
+
+# Boost drive commands (issue #801). Split out of the deleted coarse `helm`
+# system so ToggleBoost/SetBoost admission gates on its own declared system,
+# like every other helm axis. Listed in no rating's `automated_systems` —
+# Backfill automates it with the rest of the station.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
 station = "helm"
 power_group = "helm"
 

@@ -67,18 +67,19 @@ fn view_request_from_admitted(
         }
     }
     match &cmd.payload {
+        // `SetView` arrives either on the viewscreen target or (legacy helm
+        // console path) on the `"helm"` station-id target — the coarse helm
+        // system is gone (#801), but the wire string is unchanged and resolves
+        // through the station-name admission fallback. Either way the
+        // requesting system is derived from the view mode itself.
         SystemControlPayload::SetView { mode }
-            if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID =>
+            if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID
+                || cmd.target.0 == crate::system_registry::HELM_STATION_ID =>
         {
             Some((
                 crate::ship::viewscreen::source_system_for_view_mode(mode),
                 resolve(mode),
             ))
-        }
-        SystemControlPayload::SetView { mode }
-            if cmd.target.0 == crate::system_registry::HELM_SYSTEM_ID =>
-        {
-            Some((crate::system_registry::helm_system_id(), resolve(mode)))
         }
         _ => None,
     }
@@ -638,7 +639,7 @@ mod tests {
         // check the token would pass is_command_authorized.
         set_control_source(
             &mut app,
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::tactical_radar_system_id(),
             ControlSource::Ai,
         );
         start_game(&mut app);
@@ -655,7 +656,7 @@ mod tests {
             &mut app,
             &npc_token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "enemy-ship".into(),
                 },
@@ -990,7 +991,11 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                // Legacy helm-console path: the wire target is the `"helm"`
+                // station-id string (issue #801 — no coarse helm system).
+                target: crate::messages::SystemId(
+                    crate::system_registry::HELM_STATION_ID.to_string(),
+                ),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1038,9 +1043,11 @@ mod tests {
     #[test]
     fn ai_controlled_helm_can_drive_viewscreen_without_human_seat() {
         let mut app = test_app();
+        // Radar view authority derives from the helm-radar fine system
+        // (issue #801) — the coarse helm system no longer exists.
         set_control_source(
             &mut app,
-            crate::system_registry::helm_system_id(),
+            crate::system_registry::helm_radar_system_id(),
             ControlSource::Ai,
         );
 

@@ -652,7 +652,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         // than assumed to be named "tactical". NPCs have no weapons owner, so
         // the fallback keeps them on the unclaimed (fire unconditionally) path.
         let tactical_station = ship_config.0.weapons_station().unwrap_or_else(|| {
-            crate::messages::StationId(crate::system_registry::TACTICAL_SYSTEM_ID.into())
+            crate::messages::StationId(crate::system_registry::TACTICAL_STATION_ID.into())
         });
 
         // Claimed/unclaimed distinction, preserved verbatim from the old
@@ -837,7 +837,7 @@ fn ai_frequency_hint(
             writer.write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::system_registry::tactical_system_id(),
+                target: crate::system_registry::tactical_station_key(),
                 payload: crate::messages::CoordinationPayload::FrequencyHint { frequency },
                 sender_label: "Sensors".to_string(),
             });
@@ -1144,7 +1144,7 @@ mod tests {
         }
         assert_eq!(
             hint.target,
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::tactical_station_key(),
             "frequency hint should target Tactical"
         );
     }

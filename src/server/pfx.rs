@@ -3590,11 +3590,8 @@ position = [0.5, -0.1, 0.25]
     // for free, with no privacy workarounds needed.
     fn thrust_command() -> crate::messages::AdmittedCommands {
         crate::messages::AdmittedCommands(vec![crate::messages::AdmittedCommand {
-            target: crate::system_registry::helm_system_id(),
-            payload: crate::messages::SystemControlPayload::HelmInput {
-                thrust: 1.0,
-                steering: 0.0,
-            },
+            target: crate::system_registry::helm_thrust_system_id(),
+            payload: crate::messages::SystemControlPayload::SetThrust { value: 1.0 },
             response_token: None,
         }])
     }

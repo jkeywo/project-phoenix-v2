@@ -451,7 +451,7 @@ pub fn operate_navigation_ai(
         coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
             source_entity: entity,
             sender_origin: crate::ship::control_source::ControlSource::Ai,
-            target: crate::system_registry::helm_system_id(),
+            target: crate::system_registry::helm_station_key(),
             payload: crate::messages::CoordinationPayload::NavigateTo {
                 generation: waypoint.generation(),
                 label: top_obj.snapshot.text.clone(),

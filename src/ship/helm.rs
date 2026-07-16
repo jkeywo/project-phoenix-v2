@@ -23,12 +23,12 @@ use bevy::prelude::*;
 use crate::ship::impulse::ImpulsePhase;
 
 /// Desired forward/reverse thrust, in the same `[-1.0, 1.0]` range as
-/// `SystemControlPayload::HelmInput::thrust`.
+/// `SystemControlPayload::SetThrust::value`.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct ThrustInput(pub f32);
 
 /// Desired yaw steering input, in the same `[-1.0, 1.0]` range as
-/// `SystemControlPayload::HelmInput::steering`.
+/// `SystemControlPayload::SetSteering::value`.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct SteeringInput(pub f32);
 

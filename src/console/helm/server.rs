@@ -9,8 +9,8 @@ use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship_plugin::BoostConfigResource;
 use crate::ship_state::ShipPhysics;
 use crate::system_registry::{
-    helm_engine_port_system_id, helm_engine_starboard_system_id, lateral_thrust_system_id,
-    HELM_SYSTEM_ID,
+    helm_engine_port_system_id, helm_engine_starboard_system_id, helm_station_key,
+    lateral_thrust_system_id,
 };
 
 pub struct HelmPlugin;
@@ -107,10 +107,10 @@ fn publish_helm_blackboard(
     ];
 
     if let Some(mut bbs) = ship_q.iter_mut().next() {
-        bbs.0.insert(
-            SystemId(HELM_SYSTEM_ID.to_string()),
-            SystemBlackboard::Helm(bb),
-        );
+        // Console-level blackboard: keyed by the Helm STATION id (issue #801).
+        // The wire string is unchanged — the client still reads
+        // `blackboards['helm']` — but the key names the console, not a system.
+        bbs.0.insert(helm_station_key(), SystemBlackboard::Helm(bb));
 
         // Publish per-engine entries.
         for (system_id, engine_sid) in engine_entries {
@@ -202,7 +202,7 @@ mod tests {
 
     /// Helper: read the helm blackboard from the LocalShip entity's ShipSystemBlackboards component.
     fn get_helm_blackboard(app: &mut App) -> crate::messages::HelmBlackboard {
-        let key = SystemId(HELM_SYSTEM_ID.to_string());
+        let key = helm_station_key();
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
@@ -225,7 +225,7 @@ mod tests {
         let mut app = base_app();
         app.update();
 
-        let key = SystemId(HELM_SYSTEM_ID.to_string());
+        let key = helm_station_key();
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();

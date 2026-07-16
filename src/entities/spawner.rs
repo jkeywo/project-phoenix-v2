@@ -1767,13 +1767,13 @@ directive_kind = "Destroy"
 base_priority = 1.0
 
 [[system]]
-id = "helm"
-kind = "helm"
+id = "helm-thrust"
+kind = "helm_thrust"
 ai_only = true
 
 [[system]]
-id = "tactical"
-kind = "tactical"
+id = "tactical-radar"
+kind = "tactical_radar"
 ai_only = true
 "#;
         let config = EntityConfig::from_toml(toml).expect("toml must parse");
@@ -1782,7 +1782,11 @@ ai_only = true
             "EntityConfig.ship_config must be populated from [[system]] blocks"
         );
         let sc = config.ship_config.as_ref().unwrap();
-        assert_eq!(sc.systems.len(), 2, "expected two systems (helm, tactical)");
+        assert_eq!(
+            sc.systems.len(),
+            2,
+            "expected two systems (helm-thrust, tactical-radar)"
+        );
         assert_eq!(sc.stations.len(), 0, "NPCs have no stations");
 
         let mut app = App::new();
@@ -1807,10 +1811,13 @@ ai_only = true
             "spawned NPC entity carries its two declared systems"
         );
         let system_ids: Vec<&str> = comp.0.systems.iter().map(|s| s.id.0.as_str()).collect();
-        assert!(system_ids.contains(&"helm"), "helm system must be present");
         assert!(
-            system_ids.contains(&"tactical"),
-            "tactical system must be present"
+            system_ids.contains(&"helm-thrust"),
+            "helm-thrust system must be present"
+        );
+        assert!(
+            system_ids.contains(&"tactical-radar"),
+            "tactical-radar system must be present"
         );
     }
 }

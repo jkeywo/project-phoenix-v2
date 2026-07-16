@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::console_bridge::AiChatterEvent;
-use crate::control_source::{ControlSourceResolver, ControlTickPolicy};
+use crate::control_source::ControlSourceResolver;
 use crate::damage::DamageTier;
 use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::{InboundMessage, Sessions};
@@ -366,11 +366,12 @@ impl Plugin for ShipPlugin {
         // `LateralThrustInput` payload, so making its fine system AI-operated
         // sets `accept_human_input = false` and no lateral command is ever
         // admitted — nothing for `process_helm_inputs` to clobber it with.
-        // Thrust and steering instead share the coarse `helm` `HelmInput`
-        // payload, which stays admissible while a human holds the coarse helm
-        // (exactly the case these systems run in). Running last makes the
-        // per-axis AI the authoritative writer of the axis it owns,
-        // deterministically rather than by set-order luck.
+        // Thrust and steering are the same shape since #801 (`SetThrust` →
+        // `helm-thrust`, `SetSteering` → `helm-steering`, admitted per axis),
+        // and `process_helm_inputs` additionally skips writing an AI-held
+        // axis's intent. Running last still makes the per-axis AI the
+        // authoritative writer of the axis it owns, deterministically rather
+        // than by set-order luck.
         //
         // These two are deliberately *unordered* against each other since #702
         // made `operate_helm` pure. `ai_helm_thrust.before(ai_helm_steering)`
@@ -517,19 +518,36 @@ fn process_helm_inputs(
         return;
     }
 
-    // When helm is under AI control (Backfill), the helm AI is the
-    // authoritative writer of the intent components this tick. Skip
-    // admission entirely so a stale/human-admitted value can't clobber the
-    // AI's decision — mirrors the old physics-skip semantics, just for the
-    // admission decision now rather than the physics integration itself.
-    if helm_control_policy(sources).operate_ai {
-        return;
+    // Per-axis admission (issue #801). Each axis is applied only when its own
+    // declared system is NOT AI-operated: admission already refuses human
+    // commands for an AI-held axis (`accept_human_input == false`), and the
+    // per-axis AI (`ai_helm_thrust` / `ai_helm_steering`) is the authoritative
+    // writer of that axis's intent this tick. Skipping per axis — instead of
+    // the old ship-wide coarse-`helm` gate — is what fixes the #701 mismatch:
+    // with `helm-thrust = Ai` and `helm-steering = Human`, the human's
+    // steering is admitted and applied while the thrust axis stays with the AI.
+    let thrust_ai = sources
+        .0
+        .policy_for(&crate::system_registry::helm_thrust_system_id())
+        .operate_ai;
+    let steering_ai = sources
+        .0
+        .policy_for(&crate::system_registry::helm_steering_system_id())
+        .operate_ai;
+
+    if !thrust_ai {
+        for cmd in admitted.for_target(crate::system_registry::HELM_THRUST_SYSTEM_ID) {
+            if let SystemControlPayload::SetThrust { value } = &cmd.payload {
+                last_input.thrust = *value;
+            }
+        }
     }
 
-    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
-        if let SystemControlPayload::HelmInput { thrust, steering } = &cmd.payload {
-            last_input.thrust = *thrust;
-            last_input.steering = *steering;
+    if !steering_ai {
+        for cmd in admitted.for_target(crate::system_registry::HELM_STEERING_SYSTEM_ID) {
+            if let SystemControlPayload::SetSteering { value } = &cmd.payload {
+                last_input.steering = *value;
+            }
         }
     }
 
@@ -541,10 +559,14 @@ fn process_helm_inputs(
 
     if let Some((thrust_in, steering_in, lateral_in)) = intent_q.iter_mut().next() {
         if let Some(mut t) = thrust_in {
-            t.0 = last_input.thrust;
+            if !thrust_ai {
+                t.0 = last_input.thrust;
+            }
         }
         if let Some(mut s) = steering_in {
-            s.0 = last_input.steering;
+            if !steering_ai {
+                s.0 = last_input.steering;
+            }
         }
         if let Some(mut l) = lateral_in {
             l.0 = last_input.lateral;
@@ -552,10 +574,19 @@ fn process_helm_inputs(
     }
 }
 
-fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy {
+/// True when the AI helm is flying this ship: both stick axes
+/// (`helm-thrust` AND `helm-steering`) are AI-operated. The coarse `helm`
+/// system this used to gate on was deleted by #801; per Rule 6 the answer
+/// derives from the per-axis declarations, never a coarse fallback.
+fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
     sources
         .0
-        .policy_for(&crate::system_registry::helm_system_id())
+        .policy_for(&crate::system_registry::helm_thrust_system_id())
+        .operate_ai
+        && sources
+            .0
+            .policy_for(&crate::system_registry::helm_steering_system_id())
+            .operate_ai
 }
 
 // ── Shared helm-AI decision inputs (issue #701) ───────────────────────────────
@@ -685,7 +716,10 @@ fn helm_ai_radar_range(
     ship_client_config: Option<&crate::lobby::server::ShipClientConfigResource>,
     is_local: bool,
 ) -> f32 {
-    let from_blackboard = match blackboards.0.get(&crate::system_registry::helm_system_id()) {
+    let from_blackboard = match blackboards
+        .0
+        .get(&crate::system_registry::helm_station_key())
+    {
         Some(crate::messages::SystemBlackboard::Helm(bb)) if bb.radar_range > 0.0 => {
             Some(bb.radar_range)
         }
@@ -997,7 +1031,7 @@ fn detect_reached_objective_completion(
         .unwrap_or_default();
 
     for (sources, physics, blackboards, behaviour_section) in ships.iter() {
-        if !helm_control_policy(sources).operate_ai {
+        if !helm_axes_operate_ai(sources) {
             continue;
         }
 
@@ -1952,7 +1986,7 @@ pub fn handle_impulse_messages(
     }
     *last_hull_hp = current_hp;
 
-    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::system_registry::HELM_IMPULSE_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::StartImpulseCharge
                 if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
@@ -2007,7 +2041,7 @@ pub fn handle_boost_messages(
     }
     let mut desired_active = entity_boost.0.is_active();
     let mut changed = false;
-    for cmd in admitted.for_target(crate::system_registry::HELM_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::system_registry::HELM_BOOST_SYSTEM_ID) {
         match &cmd.payload {
             SystemControlPayload::ToggleBoost => {
                 desired_active = !desired_active;
@@ -2050,12 +2084,13 @@ fn tick_boost(
         return;
     }
     let last_input = last_input_q.single().copied().unwrap_or_default();
-    let policy = helm_control_policy(control_sources);
     let has_helm = sessions
         .0
-        .holder_for_station(&crate::messages::StationId("helm".into()))
+        .holder_for_station(&crate::messages::StationId(
+            crate::system_registry::HELM_STATION_ID.into(),
+        ))
         .is_some()
-        || policy.operate_ai;
+        || helm_axes_operate_ai(control_sources);
     let impulse_active = impulse_q
         .iter()
         .next()
@@ -2591,11 +2626,41 @@ pub fn process_coordination_lag(
     {
         let due = queue.0.due_messages(now);
         for msg in due {
-            let target_policy = control_sources.0.policy_for(&msg.target);
+            // Coordination targets are console-level station-id keys (issue
+            // #801), so a helm-directed message cannot gate on a `helm`
+            // system that no longer exists. The Helm console's effective
+            // control source derives from its stick axes: AI when both
+            // `helm-thrust` and `helm-steering` are AI-operated (the shape
+            // Backfill and NPC spawn produce), otherwise the steering axis —
+            // the axis helm-directed coordination (arc bearings, navigation
+            // clearances) actually drives — is the representative. Every
+            // other target resolves through `policy_for` as before; station
+            // keys with no registered system (e.g. `"tactical"`) get the
+            // default Human policy, unchanged from when the coarse tactical
+            // id was undeclared.
+            let helm_key = crate::system_registry::helm_station_key();
+            let (target_policy, target_control) = if msg.target == helm_key {
+                if helm_axes_operate_ai(control_sources) {
+                    (
+                        crate::ship::control_source::control_tick_policy(ControlSource::Ai),
+                        ControlSource::Ai,
+                    )
+                } else {
+                    let rep = crate::system_registry::helm_steering_system_id();
+                    (
+                        control_sources.0.policy_for(&rep),
+                        control_sources.0.source_for(&rep),
+                    )
+                }
+            } else {
+                (
+                    control_sources.0.policy_for(&msg.target),
+                    control_sources.0.source_for(&msg.target),
+                )
+            };
             let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
                 coordination::DeliverAction::Consume
             } else {
-                let target_control = control_sources.0.source_for(&msg.target);
                 coordination::route_coordination(msg.sender_origin, target_control)
             };
 
@@ -2624,9 +2689,7 @@ pub fn process_coordination_lag(
                     }
                     // AI Helm folds a consumed arc-bearing request into its
                     // steering (issue #677) rather than only chattering about it.
-                    if target_policy.operate_ai
-                        && msg.target == crate::system_registry::helm_system_id()
-                    {
+                    if target_policy.operate_ai && msg.target == helm_key {
                         if let CoordinationPayload::ArcBearingRequest { uuid, .. } = &msg.payload {
                             if let Some(pending) = pending_bearing.as_deref_mut() {
                                 pending.0 = uuid::Uuid::parse_str(uuid).ok();
@@ -2916,7 +2979,7 @@ pub fn detect_damage_tier_crossings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
+    use crate::control_source::{ControlSource, ControlTickPolicy};
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
@@ -3182,10 +3245,10 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
         for mut cs in q.iter_mut(app.world_mut()) {
-            cs.0.set(crate::system_registry::helm_system_id(), source);
             cs.0.set(crate::system_registry::helm_thrust_system_id(), source);
             cs.0.set(crate::system_registry::helm_steering_system_id(), source);
             cs.0.set(crate::system_registry::helm_impulse_system_id(), source);
+            cs.0.set(crate::system_registry::helm_boost_system_id(), source);
             cs.0.set(crate::system_registry::lateral_thrust_system_id(), source);
         }
     }
@@ -3323,11 +3386,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 1.0,
-                    steering: 0.25,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 0.25 },
             },
         );
         tick_twice(&mut app);
@@ -3371,11 +3439,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: -1.0,
-                    steering: 1.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: -1.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
         tick_twice(&mut app);
@@ -3383,6 +3456,53 @@ mod tests {
         // Human input must be ignored when policy is AI; no AiControllerComponent
         // on the player ship yet, so LastHelmInput stays at default.
         assert_eq!(get_last_helm_input(&mut app), LastHelmInput::default());
+    }
+
+    /// The #701 mismatch, fixed by #801: with `helm-thrust = Ai` and
+    /// `helm-steering = Human`, the human's combined joystick input used to be
+    /// admitted or refused on the COARSE helm policy, so the whole input got
+    /// in and the AI's thrust write had to win by ordering. Per-axis wire
+    /// targets make admission itself per-axis: the human's `SetSteering` is
+    /// admitted, the human's `SetThrust` is refused at the gate.
+    #[test]
+    fn per_axis_admission_fixes_the_coarse_vs_per_axis_mismatch() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+        // AI holds the throttle; the human keeps the stick.
+        set_fine_control_source(
+            &mut app,
+            crate::system_registry::helm_thrust_system_id(),
+            ControlSource::Ai,
+        );
+
+        // The human joystick fans out into the two per-axis messages.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 0.25 },
+            },
+        );
+        tick_twice(&mut app);
+
+        let last = get_last_helm_input(&mut app);
+        assert_eq!(
+            last.steering, 0.25,
+            "the human-held steering axis must admit the human's SetSteering"
+        );
+        assert_eq!(
+            last.thrust, 0.0,
+            "the AI-held thrust axis must refuse the human's SetThrust at admission"
+        );
     }
 
     #[test]
@@ -3407,7 +3527,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3470,7 +3590,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3494,7 +3614,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3512,7 +3632,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3530,7 +3650,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3539,7 +3659,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );
@@ -3557,7 +3677,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3566,7 +3686,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );
@@ -3652,7 +3772,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3677,7 +3797,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -3728,11 +3848,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.0,
-                    steering: 1.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
         tick(&mut app);
@@ -3776,11 +3901,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 1.0,
-                    steering: 0.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
         tick(&mut app);
@@ -3862,11 +3992,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 1.0,
-                    steering: 0.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
         tick(&mut app);
@@ -3879,11 +4014,16 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 1.0,
-                    steering: 0.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        push(
+            &mut base,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
         tick(&mut base);
@@ -3911,11 +4051,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.0,
-                    steering: 1.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
         tick(&mut app);
@@ -3927,11 +4072,16 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.0,
-                    steering: 1.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.0 },
+            },
+        );
+        push(
+            &mut base,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
         tick(&mut base);
@@ -4012,7 +4162,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -4023,7 +4173,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -4044,7 +4194,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -4065,7 +4215,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: true },
             },
         );
@@ -4076,7 +4226,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: false },
             },
         );
@@ -4095,7 +4245,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -4125,11 +4275,16 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
-                payload: SystemControlPayload::HelmInput {
-                    thrust: 0.0,
-                    steering: 1.0,
-                },
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.0 },
+            },
+        );
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_steering_system_id(),
+                payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
         tick(&mut app);
@@ -4139,7 +4294,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -4166,7 +4321,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_system_id(),
+                target: crate::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );
@@ -4477,7 +4632,9 @@ station = "helm"
         set_helm_control_source(app, ControlSource::Human);
         set_fine_control_source(
             app,
-            crate::system_registry::helm_system_id(),
+            // #801: "helm" is a station id, not a system. Seeding it here is
+            // the point of the test — it must drive nothing.
+            crate::messages::SystemId(crate::system_registry::HELM_STATION_ID.to_string()),
             ControlSource::Ai,
         );
     }
@@ -4690,14 +4847,16 @@ station = "helm"
         for (hull, toml_str) in hulls {
             let resolver = resolver_from_shipped_hull(toml_str);
 
-            // Sanity: every one of these hulls is a helm-bearing ship, so the
-            // coarse system must be there. A hull that failed this would make
-            // the per-axis assertions below meaningless rather than wrong.
+            // Sanity (#801): the coarse `helm` system is deleted from every
+            // shipped hull — a TOML that still declared it would fail parse
+            // (the kind is unregistered), but pin the resolver view too.
             assert!(
-                resolver
-                    .policy_for(&crate::system_registry::helm_system_id())
+                !resolver
+                    .policy_for(&crate::messages::SystemId(
+                        crate::system_registry::HELM_STATION_ID.to_string()
+                    ))
                     .operate_ai,
-                "{hull} must declare the coarse `helm` system"
+                "{hull} must NOT declare a coarse `helm` system (#801)"
             );
 
             for (axis_name, axis_id) in &axes {
@@ -4759,15 +4918,8 @@ station = "helm"
             "the shipped hull must declare helm-steering, or ai_helm_steering is dormant \
              in shipped content"
         );
-        // Precondition for the proof below: with both axes AI, the monolith
-        // stands down from both, so it cannot be the writer.
-        assert!(
-            resolver
-                .policy_for(&crate::system_registry::helm_system_id())
-                .operate_ai,
-            "sanity: the shipped hull also declares the coarse helm, so this is the \
-             all-three-AI case the monolith used to own outright"
-        );
+        // #801: the shipped hull no longer declares a coarse helm at all —
+        // the per-axis declarations above are the whole story.
 
         let mut app = test_app();
         let anchor = "station-alpha";
@@ -5445,13 +5597,7 @@ station = "helm"
             "the shipped hull must declare helm-impulse, or ai_helm_impulse is dormant \
              in shipped content"
         );
-        assert!(
-            resolver
-                .policy_for(&crate::system_registry::helm_system_id())
-                .operate_ai,
-            "sanity: the shipped hull also declares the coarse helm, so this is the \
-             case the monolith used to own outright"
-        );
+        // #801: the shipped hull no longer declares a coarse helm at all.
 
         let anchor = "station-alpha";
         let mut app = impulse_ai_app(reach_scored_objective(anchor, 10.0));
@@ -5641,12 +5787,7 @@ station = "helm"
             "the shipped hull must declare helm-lateral-thrust, or ai_helm_lateral_thrust \
              is dormant in shipped content"
         );
-        assert!(
-            resolver
-                .policy_for(&crate::system_registry::helm_system_id())
-                .operate_ai,
-            "sanity: the shipped hull also declares the coarse helm"
-        );
+        // #801: the shipped hull no longer declares a coarse helm at all.
 
         let mut app = lateral_dodge_app();
         install_control_sources(&mut app, &resolver);
@@ -5708,7 +5849,9 @@ station = "helm"
     fn helm_ai_writers_are_mutually_exclusive() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
-        let coarse = crate::system_registry::helm_system_id();
+        // #801: "helm" is not a system; seeding it (the C dimension) must
+        // have no influence on any writer — which is what this test proves.
+        let coarse = crate::messages::SystemId(crate::system_registry::HELM_STATION_ID.to_string());
         let thrust = crate::system_registry::helm_thrust_system_id();
         let steering = crate::system_registry::helm_steering_system_id();
         let lateral = crate::system_registry::lateral_thrust_system_id();
@@ -7127,51 +7270,67 @@ station = "helm"
 
     // ── E5 smoke tests (#553) ─────────────────────────────────────────────────
 
-    // (a) Pirate raider — verifies that an NPC ship with full Ai control has
-    // `operate_ai = true` for helm, which is the gate that makes `operate_helm_ai`
-    // apply Transform physics for that ship instead of the player ship path.
+    // (a) Pirate raider — verifies that an NPC ship with both stick axes on
+    // Ai control satisfies `helm_axes_operate_ai`, the gate every per-ship
+    // "is the AI flying this" consumer reads since #801.
     #[test]
     fn pirate_raider_ai_helm_policy_routes_through_npc_path() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
         let mut resolver = ControlSourceResolver::new();
         for system_id in [
-            crate::system_registry::helm_system_id(),
-            crate::system_registry::tactical_system_id(),
+            crate::system_registry::helm_thrust_system_id(),
+            crate::system_registry::helm_steering_system_id(),
         ] {
             resolver.set(system_id, ControlSource::Ai);
         }
         let sources = ShipSystemControlSources(resolver);
-        let policy = helm_control_policy(&sources);
         assert!(
-            policy.operate_ai,
-            "NPC raider helm must route through operate_helm_ai"
+            helm_axes_operate_ai(&sources),
+            "NPC raider helm axes must route through the AI helm path"
         );
         assert!(
-            !policy.accept_human_input,
+            !sources
+                .0
+                .policy_for(&crate::system_registry::helm_thrust_system_id())
+                .accept_human_input,
             "NPC raider must not accept human helm input"
         );
     }
 
-    // (b) All-Backfill player ship — verifies that when the player ship has all
-    // systems on Ai control but no AiControllerComponent (no behaviour tree),
-    // `helm_control_policy` still returns `operate_ai = true` so the player-ship
-    // path in `operate_helm_ai` writes zero thrust/steering (safe deceleration).
+    // (b) All-Backfill player ship — verifies that when the player ship has
+    // both stick axes on Ai control but no AiControllerComponent (no
+    // behaviour tree), `helm_axes_operate_ai` still returns true. A single
+    // AI axis is NOT enough — the predicate answers "is the AI flying this
+    // ship", which needs both.
     #[test]
     fn all_backfill_helm_policy_gates_operate_ai() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
         let mut resolver = ControlSourceResolver::new();
-        resolver.set(crate::system_registry::helm_system_id(), ControlSource::Ai);
-        let sources = ShipSystemControlSources(resolver);
-        let policy = helm_control_policy(&sources);
-        assert!(
-            policy.operate_ai,
-            "Backfill player helm must satisfy the operate_ai gate"
+        resolver.set(
+            crate::system_registry::helm_thrust_system_id(),
+            ControlSource::Ai,
         );
+        let sources = ShipSystemControlSources(resolver);
         assert!(
-            !policy.accept_human_input,
-            "Backfill player helm must not accept human input"
+            !helm_axes_operate_ai(&sources),
+            "one AI axis alone must not satisfy the whole-helm AI predicate"
+        );
+
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(
+            crate::system_registry::helm_thrust_system_id(),
+            ControlSource::Ai,
+        );
+        resolver.set(
+            crate::system_registry::helm_steering_system_id(),
+            ControlSource::Ai,
+        );
+        let sources = ShipSystemControlSources(resolver);
+        assert!(
+            helm_axes_operate_ai(&sources),
+            "Backfill player helm (both axes AI) must satisfy the AI-helm gate"
         );
     }
 
@@ -7415,7 +7574,10 @@ station = "helm"
         let mut sources = ShipSystemControlSources::default();
         sources
             .0
-            .set(crate::system_registry::helm_system_id(), source);
+            .set(crate::system_registry::helm_thrust_system_id(), source);
+        sources
+            .0
+            .set(crate::system_registry::helm_steering_system_id(), source);
         let entity = app
             .world_mut()
             .spawn((
@@ -7549,8 +7711,8 @@ station = "helm"
 
         // Precondition: the two ships genuinely differ in control source,
         // otherwise this test is vacuous.
-        let policy_of = |app: &App, e: Entity| {
-            helm_control_policy(
+        let ai_of = |app: &App, e: Entity| {
+            helm_axes_operate_ai(
                 app.world()
                     .entity(e)
                     .get::<ShipSystemControlSources>()
@@ -7558,7 +7720,7 @@ station = "helm"
             )
         };
         assert!(
-            policy_of(&app, ai).operate_ai && !policy_of(&app, human).operate_ai,
+            ai_of(&app, ai) && !ai_of(&app, human),
             "test must compare an AI-controlled helm against a human-controlled one"
         );
 

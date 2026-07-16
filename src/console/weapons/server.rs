@@ -354,6 +354,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<WeaponsUpdateFirstTick>()
             .init_resource::<NpcFrequencyMatchStates>()
             .init_resource::<BlasterSystemResource>()
+            .init_resource::<BeamContext>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
                 TorpedoConfig::default(),
             )))
@@ -421,7 +422,23 @@ impl Plugin for WeaponsPlugin {
             .add_systems(
                 Update,
                 (
-                    tick_beams.in_set(crate::sim_sets::SimSet::Damage),
+                    // Beam tick split into three phases (issue #723), connected
+                    // by the one-tick `BeamContext` resource: prepare writes it,
+                    // apply-damage reads/mutates it, tick-lifetimes reads it.
+                    // Explicit `.chain()` edges keep the three deterministic
+                    // within `SimSet::Damage`. Instance-based `.chain()` rather
+                    // than type-set `.after(...)` edges (the
+                    // `drain_power_for_active_beam` style below) because the
+                    // weapons test harness registers a second instance of each
+                    // phase, which would make a `SystemTypeSet` ordering
+                    // ambiguous and panic at schedule build.
+                    (
+                        tick_beams_prepare,
+                        tick_beams_apply_damage,
+                        tick_beams_tick_lifetimes,
+                    )
+                        .chain()
+                        .in_set(crate::sim_sets::SimSet::Damage),
                     handle_blaster_hits.in_set(crate::sim_sets::SimSet::Damage),
                     // Weapons AI APPLY half (issue #698): drains both
                     // `PhaserIntents` (written in `Input`) and `TorpedoIntents`
@@ -466,6 +483,7 @@ impl Plugin for WeaponsPlugin {
 pub(crate) use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, any_blaster_bank_operates_ai,
     any_tactical_system_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
+    BeamContext, ShooterState,
 };
 
 fn handle_set_target(
@@ -1265,35 +1283,33 @@ fn tick_weapons_arc_request(
     }
 }
 
-/// Unified per-tick beam ticker for every ship (player + NPC).
+/// Phase 1 of the beam tick (issue #723): snapshot shooter state and tick
+/// per-bank cooldowns.
 ///
-/// Iterates `Query<..., With<Ship>>` — one loop handles player-fired beams
+/// Unified per-tick beam handling for every ship (player + NPC). Iterates
+/// `Query<..., With<Ship>>` — one loop handles player-fired beams
 /// (LocalShip source) and NPC-fired beams (AI-controlled Ship source). Reads
 /// per-bank config from each shooter's own `PhaserCombatConfigResource`
 /// component (defaulting when absent) and applies the shooter's own
 /// `ShipModifiers` to damage and range.
 ///
-/// Damage routing rules:
-/// - Asteroid target → emits `AsteroidDestroyed` + `AsteroidDestroyedVfx`.
-/// - Non-asteroid, non-LocalShip target (NPC or station) → emits
-///   `EntityDespawned` + `AiEntityDestroyed` on kill.
-/// - LocalShip target → emits `DamageTaken` per hit and `ShipDestroyed` +
-///   `GameOver` on kill. Never despawns the LocalShip entity.
+/// Collects an owned [`ShooterState`] snapshot per live beam — everything the
+/// later phases ([`tick_beams_apply_damage`], [`tick_beams_tick_lifetimes`])
+/// need to apply damage without holding a mutable borrow on the ship query —
+/// into the one-tick [`BeamContext`] resource, cleared at the start of every
+/// run so nothing goes stale across frames. In the same pass it ticks
+/// cooldowns, pre-computes the per-tick damage integer and accumulator delta,
+/// resolves the live target position, checks arc/range, and runs the LOS
+/// raycast (Rapier) with friendly-fire classification to pick the effective
+/// target. Shooters whose beam ends here (target vanished / out of arc) have
+/// their cooldown started and `BeamEndedEvent` fired immediately and never
+/// enter `BeamContext`.
 ///
-/// Attacker tracking: every non-asteroid target has `ShipAttackedThisTick`
-/// set true and `LastShipAttacker` set to the shooter's UUID — the latter
-/// **compared before writing**, because its change detection is the rising edge
-/// that fires `AiEntityAttacked` and the `on_entity_attacked` triggers behind it
-/// (issue #702). See the note on [`LastShipAttacker`].
-///
-/// Weapons-target clearing: when the player kills its locked target, its
-/// `WeaponsTarget.0` is set to `None`. NPC locks are re-evaluated by
-/// `ai_target_selection`, whose staleness guard clears a dead target.
-///
-/// Merges the former `tick_active_beam` (player-only) and `tick_npc_beams`
-/// (NPC-only) systems — final divergence closed under PRD #597.
+/// The three phases together merge the former `tick_active_beam`
+/// (player-only) and `tick_npc_beams` (NPC-only) systems — final divergence
+/// closed under PRD #597.
 #[allow(clippy::too_many_arguments)]
-fn tick_beams(
+fn tick_beams_prepare(
     time: Res<Time>,
     mut commands: Commands,
     // Every ship with weapons: player + NPC. All ships now carry ActiveBeam,
@@ -1326,33 +1342,6 @@ fn tick_beams(
         ),
         With<crate::server_app::Ship>,
     >,
-    // Any potentially targetable entity that can take damage: asteroids and
-    // any ship with hull. Uses Option<&AsteroidUuid> + Option<&EntityUuid> so
-    // we can match either UUID type; no Ship marker filter — non-ship targets
-    // (stations, damageable regions) may not have Ship but do have EntityUuid.
-    //
-    // `Transform` is `Option` because test fixtures sometimes spawn hull-only
-    // entities without a Transform; production entities always have one and
-    // are still matched by UUID.
-    mut hull_q: Query<(
-        Entity,
-        Option<&AsteroidUuid>,
-        Option<&crate::entity_spawner::EntityUuid>,
-        Option<&Transform>,
-        Option<&ShipPhysics>,
-        &mut EntitySystemHull,
-        Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::server_app::ShipAttackedThisTick>,
-        Option<&mut LastShipAttacker>,
-        bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        Option<&mut crate::entity_spawner::EntityShipArcHull>,
-    )>,
-    mut world: ResMut<WorldResource>,
-    mut outbox: Option<ResMut<SimOutbox>>,
-    mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<GameOverReason>>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
-    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     // LOS raycast parameters (optional so tests without RapierPhysicsPlugin still pass).
@@ -1365,44 +1354,15 @@ fn tick_beams(
         Option<&AsteroidUuid>,
         Option<&FactionComponent>,
     )>,
+    mut beam_context: ResMut<BeamContext>,
 ) {
     use crate::entity_config::PhaserCombatConfig;
 
     let dt = time.delta_secs();
 
-    // ── Phase 1: snapshot shooter state and tick per-bank cooldowns ─────────
-    //
-    // Collect owned copies of everything we need to apply damage without
-    // holding a mutable borrow on ship_q. In the same pass we tick cooldowns
-    // and pre-compute the per-tick damage integer, accumulator delta, and
-    // whether the beam should end (target out of range/arc/vanished).
-
-    struct ShooterState {
-        shooter_entity: Entity,
-        shooter_uuid: String,
-        shooter_x: f32,
-        shooter_z: f32,
-        target_uuid: String,
-        active_bank: String,
-        cooldown_secs: f32,
-        damage_to_apply: i32,
-        shield_pierce: f32,
-        end_beam_early: bool,
-        is_local_shooter: bool,
-        shooter_phaser_freq: f32,
-        /// UUID of the entity that will actually receive damage this tick.
-        /// Equals `target_uuid` when LOS is clear; set to the blocker's UUID
-        /// when a blocking entity intercepts the beam.
-        effective_target_uuid: String,
-        /// Position of the effective target (for VFX positioning on destruction).
-        effective_target_x: f32,
-        effective_target_z: f32,
-        /// True when a friendly ship is blocking — beam is absorbed with no
-        /// damage applied to anyone this tick.
-        zero_damage: bool,
-    }
-
-    let mut shooters: Vec<ShooterState> = Vec::new();
+    // One-tick resource: clear before repopulating so nothing from the
+    // previous frame survives.
+    beam_context.clear();
 
     for (
         shooter_entity,
@@ -1630,7 +1590,7 @@ fn tick_beams(
                 (target_uuid.clone(), tx, tz, false)
             };
 
-        shooters.push(ShooterState {
+        beam_context.0.push(ShooterState {
             shooter_entity,
             shooter_uuid: shooter_uuid_opt.map(|u| u.0.clone()).unwrap_or_default(),
             shooter_x: shooter_physics.x,
@@ -1649,14 +1609,61 @@ fn tick_beams(
             shooter_phaser_freq: shooter_phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
         });
     }
+}
 
-    // ── Phase 2: apply damage to targets ─────────────────────────────────────
+/// Phase 2 of the beam tick (issue #723): apply damage to targets.
+///
+/// For each shooter snapshot in [`BeamContext`] (written by
+/// [`tick_beams_prepare`] earlier this tick), find its target in `hull_q`,
+/// route damage through shields, apply hull damage, and record whether the
+/// target was destroyed — `end_beam_early`, read by
+/// [`tick_beams_tick_lifetimes`] to end the beam and clear `WeaponsTarget`.
+///
+/// Damage routing rules:
+/// - Asteroid target → emits `AsteroidDestroyed` + `AsteroidDestroyedVfx`.
+/// - Non-asteroid, non-LocalShip target (NPC or station) → emits
+///   `EntityDespawned` + `AiEntityDestroyed` on kill.
+/// - LocalShip target → emits `DamageTaken` per hit and `ShipDestroyed` +
+///   `GameOver` on kill. Never despawns the LocalShip entity.
+///
+/// Attacker tracking: every non-asteroid target has `ShipAttackedThisTick`
+/// set true and `LastShipAttacker` set to the shooter's UUID — the latter
+/// **compared before writing**, because its change detection is the rising edge
+/// that fires `AiEntityAttacked` and the `on_entity_attacked` triggers behind it
+/// (issue #702). See the note on [`LastShipAttacker`].
+#[allow(clippy::too_many_arguments)]
+fn tick_beams_apply_damage(
+    mut commands: Commands,
+    // Any potentially targetable entity that can take damage: asteroids and
+    // any ship with hull. Uses Option<&AsteroidUuid> + Option<&EntityUuid> so
+    // we can match either UUID type; no Ship marker filter — non-ship targets
+    // (stations, damageable regions) may not have Ship but do have EntityUuid.
     //
-    // For each shooter, find its target in hull_q, route damage through
-    // shields, apply hull damage, and record whether the target was destroyed
-    // (so we can end the beam and clear WeaponsTarget in phase 3).
-
-    for state in shooters.iter_mut() {
+    // `Transform` is `Option` because test fixtures sometimes spawn hull-only
+    // entities without a Transform; production entities always have one and
+    // are still matched by UUID.
+    mut hull_q: Query<(
+        Entity,
+        Option<&AsteroidUuid>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&Transform>,
+        Option<&ShipPhysics>,
+        &mut EntitySystemHull,
+        Option<&mut crate::ship::shields::ShipShields>,
+        Option<&mut crate::server_app::ShipAttackedThisTick>,
+        Option<&mut LastShipAttacker>,
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        Option<&mut crate::entity_spawner::EntityShipArcHull>,
+    )>,
+    mut world: ResMut<WorldResource>,
+    mut outbox: Option<ResMut<SimOutbox>>,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<GameOverReason>>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut beam_context: ResMut<BeamContext>,
+) {
+    for state in beam_context.0.iter_mut() {
         // When a friendly ship blocks the beam this tick, skip all damage and
         // attacker tracking — nobody takes damage.
         if state.zero_damage {
@@ -1910,14 +1917,39 @@ fn tick_beams(
             state.end_beam_early = true;
         }
     }
+}
 
-    // ── Phase 3: end beams that hit a destroyed target; tick remaining_secs ─
-    //
-    // Re-borrow ship_q mutably to update per-shooter beam state (target
-    // cleared, cooldown started, WeaponsTarget cleared for LocalShip).
+/// Phase 3 of the beam tick (issue #723): end beams that hit a destroyed
+/// target and tick `remaining_secs` on the rest.
+///
+/// Reads the shooter snapshots from [`BeamContext`] (`end_beam_early` set by
+/// [`tick_beams_apply_damage`]) and borrows the ship query mutably to update
+/// per-shooter beam state (target cleared, cooldown started, `WeaponsTarget`
+/// cleared for LocalShip).
+///
+/// Weapons-target clearing: when the player kills its locked target, its
+/// `WeaponsTarget.0` is set to `None`. NPC locks are re-evaluated by
+/// `ai_target_selection`, whose staleness guard clears a dead target.
+fn tick_beams_tick_lifetimes(
+    time: Res<Time>,
+    mut commands: Commands,
+    // Narrowed shooter query: phase 3 only mutates the shooter's beam,
+    // cooldown, and (LocalShip only) weapons-target lock. Every production
+    // ship carries WeaponsTarget (`Option` only for minimal test spawns).
+    mut ship_q: Query<
+        (
+            &mut ActiveBeam,
+            &mut PhaserCooldown,
+            Option<&mut WeaponsTarget>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    beam_context: Res<BeamContext>,
+) {
+    let dt = time.delta_secs();
 
-    for state in shooters {
-        let Ok((_, _, _, mut beam, mut cooldown, _, _, mut weapons_target_opt, _, _, _)) =
+    for state in beam_context.0.iter() {
+        let Ok((mut beam, mut cooldown, mut weapons_target_opt)) =
             ship_q.get_mut(state.shooter_entity)
         else {
             continue;
@@ -5079,7 +5111,21 @@ station = "tactical"
                 ],
             },
         ))
-        .add_systems(Update, (tick_beams, tick_torpedo_system))
+        .add_systems(
+            Update,
+            (
+                // The three beam-tick phases (issue #723) share the one-tick
+                // BeamContext resource, so they must run in order — a bare
+                // tuple is unordered in Bevy, hence the .chain().
+                (
+                    tick_beams_prepare,
+                    tick_beams_apply_damage,
+                    tick_beams_tick_lifetimes,
+                )
+                    .chain(),
+                tick_torpedo_system,
+            ),
+        )
         .add_plugins(weapons_update_broadcaster())
         // PR-7 (issue #597) — `tick_shields` (formerly `tick_npc_shield_regen`)
         // now lives on `ShipShieldsPlugin`. Include it so tests that spawn NPCs
@@ -11405,11 +11451,12 @@ ai_only = true
     // ── LOS blocking tests (Rapier) ──────────────────────────────────────────
     //
     // These tests spin up a Rapier world (like the collision tests in
-    // server_app.rs) and verify that `tick_beams` routes damage correctly when
-    // a blocking entity is between the shooter and the original target.
+    // server_app.rs) and verify that the beam-tick phases route damage
+    // correctly when a blocking entity is between the shooter and the
+    // original target.
 
-    /// Build a minimal app with Rapier physics + WeaponsPlugin so `tick_beams`
-    /// runs the LOS raycast.
+    /// Build a minimal app with Rapier physics + WeaponsPlugin so
+    /// `tick_beams_prepare` runs the LOS raycast.
     fn los_test_app() -> App {
         use bevy_rapier3d::prelude::RapierPhysicsPlugin;
         let mut app = App::new();
@@ -11472,7 +11519,9 @@ ai_only = true
                     }],
                 },
             ))
-            // WeaponsPlugin already registers tick_beams and tick_torpedo_system.
+            // WeaponsPlugin already registers the three beam-tick phase
+            // systems (tick_beams_prepare / tick_beams_apply_damage /
+            // tick_beams_tick_lifetimes) and tick_torpedo_system.
             // Do NOT register them again here.
             .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
             .add_systems(PostUpdate, collect);

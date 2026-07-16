@@ -199,11 +199,11 @@ pub struct ShooterState {
 
 /// One-tick beam context shared across the beam-tick phases (issue #722).
 ///
-/// Lifecycle: phase 1 (snapshot + cooldown tick) calls [`BeamContext::clear`]
-/// at the start of each frame and repopulates the vec; phases 2 and 3
-/// (damage application, beam end/VFX) read it later in the same tick. It
-/// carries no state across frames. Not yet wired into any schedule —
-/// issue #723 wires the phases.
+/// Lifecycle: phase 1 (`tick_beams_prepare`, snapshot + cooldown tick) calls
+/// [`BeamContext::clear`] at the start of each frame and repopulates the vec;
+/// phase 2 (`tick_beams_apply_damage`) mutates it (instagib multiplier,
+/// `end_beam_early`) and phase 3 (`tick_beams_tick_lifetimes`) reads it later
+/// in the same tick. It carries no state across frames.
 #[derive(Resource, Default)]
 pub struct BeamContext(pub Vec<ShooterState>);
 

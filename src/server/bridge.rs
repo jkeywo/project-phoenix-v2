@@ -293,8 +293,15 @@ pub fn wasm_get_instagib() -> bool {
 
 // ── Public WASM API ────────────────────────────────────────────────────────
 
-/// Called by JS with the raw alliance_cruiser.toml content to validate the
-/// `[[station]]` schema before starting the server.
+/// Called by JS with the raw ship entity TOML content to validate the
+/// `[[station]]`/`[[system]]` schema before starting the server.
+///
+/// Parses through `EntityConfig::from_toml` (not the raw `ShipConfig`
+/// parser) so that `[[shield_arc]]` blocks are synthesised into their
+/// matching `[[system]]` entries before validation. Ships whose ratings
+/// reference a synthesised arc system (e.g. the Courier's single "Std"
+/// rating automating `shield-arc-fore`/`shield-arc-aft`) would otherwise
+/// fail validation here even though the real in-game config is valid.
 ///
 /// On success, stores the parsed `ShipStations` internally and returns
 /// `Ok(JsValue::UNDEFINED)`. On failure, returns `Err(JsValue)` with a
@@ -303,26 +310,19 @@ pub fn wasm_get_instagib() -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
-    use crate::ship::system_registry::SystemKindRegistry;
-    let registry = SystemKindRegistry::with_core_systems()
-        .map_err(|e| JsValue::from_str(&format!("System registry init failed: {}", e)))?;
-    let kinds: Vec<&str> = registry.kinds().collect();
-    match crate::ship::config::parse_and_validate(toml_str, &kinds) {
-        Ok(ship_config) => {
-            let stations = crate::stations_config::stations_from_ship_config(&ship_config);
-            SHIP_STATIONS.with(|slot| {
-                *slot.borrow_mut() = Some(stations);
-            });
-            SHIP_CONFIG.with(|slot| {
-                *slot.borrow_mut() = Some(ship_config);
-            });
-            Ok(JsValue::UNDEFINED)
-        }
-        Err(e) => Err(JsValue::from_str(&format!(
-            "Station config validation failed: {}",
-            e
-        ))),
-    }
+    let entity_config = crate::entities::config::EntityConfig::from_toml(toml_str)
+        .map_err(|e| JsValue::from_str(&format!("Station config validation failed: {}", e)))?;
+    let ship_config = entity_config.ship_config.ok_or_else(|| {
+        JsValue::from_str("Station config validation failed: ship has no [[station]] blocks")
+    })?;
+    let stations = crate::stations_config::stations_from_ship_config(&ship_config);
+    SHIP_STATIONS.with(|slot| {
+        *slot.borrow_mut() = Some(stations);
+    });
+    SHIP_CONFIG.with(|slot| {
+        *slot.borrow_mut() = Some(ship_config);
+    });
+    Ok(JsValue::UNDEFINED)
 }
 
 /// Called by JS on page load. Builds and runs the Bevy app.

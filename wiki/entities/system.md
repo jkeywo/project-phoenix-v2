@@ -130,7 +130,11 @@ accepts human input".)
 
 Current fine kinds registered in `SystemKindRegistry::with_core_systems`:
 `helm_joystick`, `helm_engine`, `helm_radar`, `helm_impulse` (from #511);
-`phaser_bank`, `torpedo_tube`, `torpedo_magazine` (from #512).
+`lateral_thrust`; `helm_thrust`, `helm_steering` (the per-axis split from
+#701 — `helm_thrust` owns `ThrustInput`, `helm_steering` owns
+`SteeringInput`); `phaser_bank`, `torpedo_tube`, `torpedo_magazine` (from
+#512); `blaster_bank` (#631); `tactical_radar`, `sensor_radar`;
+`power_reactor`, `power_battery` (#513); `shield_arc` (#514).
 
 ## Related
 

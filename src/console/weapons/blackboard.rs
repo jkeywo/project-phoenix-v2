@@ -9,8 +9,8 @@ use super::torpedo::TorpedoSystemResource;
 use crate::lobby::WorldResource;
 use crate::messages::{
     BlasterBankState, ModifierSlot, PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip,
-    RadarRegion, ServerMessage, SystemBlackboard, TorpedoTubeClientConfig,
-    TorpedoTubeState, WeaponsBlackboard,
+    RadarRegion, ServerMessage, SystemBlackboard, TorpedoTubeClientConfig, TorpedoTubeState,
+    WeaponsBlackboard,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;

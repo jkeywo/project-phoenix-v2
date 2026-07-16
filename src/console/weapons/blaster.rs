@@ -687,4 +687,3 @@ pub(crate) fn handle_blaster_hits(
         }
     }
 }
-

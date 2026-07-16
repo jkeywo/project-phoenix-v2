@@ -1166,7 +1166,9 @@ fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
     let out = tick(&mut app);
 
     assert!(
-        out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
+        out.iter().any(
+            |m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")
+        ),
         "expected TorpedoLaunched broadcast after Tactical fires torpedo"
     );
 }
@@ -1289,7 +1291,9 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
     let out = tick(&mut app);
 
     assert!(
-        out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
+        out.iter().any(
+            |m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")
+        ),
         "NPC should broadcast TorpedoLaunched after ai:<uuid> FireTorpedo message"
     );
 
@@ -1329,7 +1333,9 @@ fn local_console_token_can_fire_torpedo() {
     let out = tick(&mut app);
 
     assert!(
-        out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
+        out.iter().any(
+            |m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")
+        ),
         "local console token should be authorized to fire torpedoes end-to-end (issue #422)"
     );
 }
@@ -1722,7 +1728,10 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         .entities
         .iter()
         .any(|a| a.uuid == "target-uuid");
-    assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
+    assert!(
+        still_exists_base,
+        "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)"
+    );
 }
 
 // ── SetPhaserFrequency delegation tests ────────────────────────────────
@@ -2422,8 +2431,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // Shield HP must decrease (torpedo damage_shields absorbed by shield).
     // (If damage_shields == 0 in the TOML config the test is still valid:
     // it just shows hull dropped instead, but we accept either change.)
-    let total_damage_taken =
-        (shields_before - shields_after) + ((hull_before - hull_after) as i32);
+    let total_damage_taken = (shields_before - shields_after) + ((hull_before - hull_after) as i32);
     assert!(
         total_damage_taken > 0,
         "torpedo hit must cause total damage: shields_before={shields_before}, shields_after={shields_after}, \
@@ -2895,8 +2903,7 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
         .0
         .iter()
         .find(|(_, msg)| matches!(msg, crate::messages::ServerMessage::BeamStarted { .. }));
-    let Some((_, crate::messages::ServerMessage::BeamStarted { source_uuid, .. })) =
-        beam_started
+    let Some((_, crate::messages::ServerMessage::BeamStarted { source_uuid, .. })) = beam_started
     else {
         panic!("expected BeamStarted message in outbox");
     };
@@ -3936,13 +3943,10 @@ fn asteroid_beyond_tactical_range_not_in_blips() {
 /// fine ids (mirrors what happens when a station rating flips to
 /// Backfill, which triggers AI control of every fine system owned by
 /// the station).
-fn set_tactical_control_source(
-    app: &mut App,
-    source: crate::ship::control_source::ControlSource,
-) {
+fn set_tactical_control_source(app: &mut App, source: crate::ship::control_source::ControlSource) {
     let world = app.world_mut();
-    let mut q = world
-        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         for sysid in [
             crate::system_registry::phaser_fore_system_id(),
@@ -4382,8 +4386,7 @@ fn the_lock_is_rescanned_when_the_current_target_dies() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let engaged =
-        spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
     spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
@@ -4425,8 +4428,7 @@ fn the_lock_is_rescanned_when_the_current_target_dies_with_no_radar_horizon() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let engaged =
-        spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+    let engaged = spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
     spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
@@ -4462,8 +4464,7 @@ fn the_lock_is_rescanned_when_the_current_target_leaves_radar_range() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let fleeing =
-        spawn_factioned_target(&mut app, &fleeing_uuid, 0.0, -60.0, federation_faction());
+    let fleeing = spawn_factioned_target(&mut app, &fleeing_uuid, 0.0, -60.0, federation_faction());
     spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
     insert_untargeted_destroy_objective(&mut app, 35.0);
     set_local_last_attacker(&mut app, None);
@@ -4820,8 +4821,8 @@ fn human_tactical_leaves_locked_target_empty_and_keeps_the_human_lock() {
 fn set_mixed_tactical_control_sources(app: &mut App) {
     use crate::ship::control_source::ControlSource;
     let world = app.world_mut();
-    let mut q = world
-        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         for sysid in [
             crate::system_registry::phaser_fore_system_id(),
@@ -5352,9 +5353,10 @@ fn spawn_shielded_target(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
     app.world_mut()
         .spawn((
             crate::entity_spawner::EntityUuid(uuid.into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                (crate::messages::SystemId("captain".into()), 50.0),
-            ])),
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                crate::messages::SystemId("captain".into()),
+                50.0,
+            )])),
             crate::ship::shields::ShipShields(shields, 0.5),
             Transform::from_xyz(x, 0.0, z),
         ))
@@ -5448,8 +5450,8 @@ fn ai_torpedo_auto_fire_stops_firing_when_rating_switches_to_std() {
 /// the gate.
 fn mark_system_offline(app: &mut App, system_id: SystemId) {
     let world = app.world_mut();
-    let mut q = world
-        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         cs.0.offline_systems.insert(system_id.clone());
     }
@@ -5464,8 +5466,8 @@ fn register_fine_system(
     source: crate::ship::control_source::ControlSource,
 ) {
     let world = app.world_mut();
-    let mut q = world
-        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         cs.0.set(system_id.clone(), source);
     }
@@ -5874,7 +5876,8 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
     {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
+            );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
                 id: "fore".into(),
@@ -6255,7 +6258,8 @@ fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
     {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
+            );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
                 id: "dorsal".into(),
@@ -6321,7 +6325,8 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
     {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
+            );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
             cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
                 id: "fore".into(),
@@ -6767,8 +6772,7 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
 
     let mut app = los_test_app();
 
-    let shooter_faction =
-        uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+    let shooter_faction = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
     let enemy_faction = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
 
     // Make shooter hostile to blocker.

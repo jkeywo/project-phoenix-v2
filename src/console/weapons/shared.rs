@@ -248,7 +248,10 @@ impl TorpedoTargetSnapshot {
 /// message, or whether the default-source policy applies (ships that haven't
 /// opted into the fine-system decomposition; issue #801 removed the coarse
 /// `tactical` fallback that used to sit behind this check).
-pub(crate) fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &SystemId) -> bool {
+pub(crate) fn system_is_registered(
+    control_sources: &ShipSystemControlSources,
+    system_id: &SystemId,
+) -> bool {
     control_sources.0.entries().any(|(id, _)| id == system_id)
         || control_sources.0.offline_systems.contains(system_id)
 }

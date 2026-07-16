@@ -9,9 +9,7 @@ use bevy::prelude::*;
 use super::shared::{
     any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
 };
-use super::{
-    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS,
-};
+use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS};
 use crate::ai_plugin::AiTokenRegistry;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{ClientMessage, GamePhase, ServerMessage, SystemControlPayload};
@@ -701,10 +699,7 @@ pub(crate) fn handle_blaster_hits(
                         .unwrap_or((0.0, 0.0));
                     world.0.entities.retain(|a| a.uuid != det.target_uuid);
                     if is_asteroid {
-                        vfx_events.write(AsteroidDestroyedVfx {
-                            x: hit_x,
-                            z: hit_z,
-                        });
+                        vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
                         outbox.0.push((
                             Target::All,
                             ServerMessage::AsteroidDestroyed {

@@ -320,7 +320,10 @@ mod tests {
                 ("assets/planets/earth/albedo.webp".to_string(), true),
                 ("assets/planets/earth/normal.webp".to_string(), false),
                 ("assets/planets/earth/roughness.webp".to_string(), false),
-                ("assets/planets/earth/emissive_colour.webp".to_string(), true),
+                (
+                    "assets/planets/earth/emissive_colour.webp".to_string(),
+                    true
+                ),
                 ("assets/planets/earth/cloud_albedo.webp".to_string(), true),
                 ("assets/planets/earth/cloud_opacity.webp".to_string(), false),
             ]

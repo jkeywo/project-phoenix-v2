@@ -1487,8 +1487,7 @@ fn spawn_torpedo_impact_burst(
         Billboard,
         Mesh3d(billboard_mesh.clone()),
         MeshMaterial3d(flash_mat.clone()),
-        Transform::from_translation(pos)
-            .with_scale(Vec3::splat(TORPEDO_IMPACT_FLASH_START_SIZE)),
+        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_FLASH_START_SIZE)),
         PfxLifetime {
             age: 0.0,
             lifetime: TORPEDO_IMPACT_FLASH_LIFETIME_SECS,
@@ -1516,8 +1515,7 @@ fn spawn_torpedo_impact_burst(
         Billboard,
         Mesh3d(billboard_mesh.clone()),
         MeshMaterial3d(plasma_mat.clone()),
-        Transform::from_translation(pos)
-            .with_scale(Vec3::splat(TORPEDO_IMPACT_PLASMA_START_SCALE)),
+        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_PLASMA_START_SCALE)),
         PfxLifetime {
             age: 0.0,
             lifetime: TORPEDO_IMPACT_PLASMA_LIFETIME_SECS,
@@ -1681,7 +1679,16 @@ fn sync_blaster_pfx(
 
     for (uuid, x, z, heading, _) in &all_in_flight {
         let pos = Vec3::new(*x, 0.1, *z);
-        update_blaster_bolt(uuid, pos, *heading, &mut state, &mut commands, &mut meshes, &mut materials, &mut body_q);
+        update_blaster_bolt(
+            uuid,
+            pos,
+            *heading,
+            &mut state,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut body_q,
+        );
     }
 }
 

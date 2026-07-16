@@ -68,6 +68,20 @@ id = "helm"
 kind = "helm"
 ai_only = true
 
+# Per-axis helm systems (issue #701, declared in #800). This hull has no
+# stations, so — exactly like the coarse `helm` above — they are ownerless and
+# `ai_only`. The NPC spawn path sets every declared system to ControlSource::Ai,
+# so these come up on AI precisely when the coarse helm does.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
 # NPCs have no `[power_groups.*]` block so `power_group` is omitted.
 [[system]]

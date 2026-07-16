@@ -4,26 +4,76 @@ title: WeaponsPlugin
 
 # WeaponsPlugin
 
-Extracted from `simulation.rs` as part of the simulation split series (issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)).
+Extracted from `simulation.rs` as part of the simulation split series (issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)). The single `src/console/weapons/server.rs` file (which grew to ~12,000 lines including tests) was subsequently decomposed into per-domain files by the weapons decomposition series (issue [#685](https://github.com/jkeywo/project-phoenix-v2/issues/685); issues #721–#731). See [File layout](#file-layout) below.
 
 ## Ownership
 
 `WeaponsPlugin` owns all phaser, torpedo, and beam-render state and message handling for the Tactical console.
 
-### Systems
+## File layout
 
-| System | Responsibility |
+`src/console/weapons/` is a module tree, not a single file:
+
+| File | Owns |
 |---|---|
-| `handle_set_target` | Processes `SetTarget` from the Tactical holder; locks target if in radar range |
-| `handle_fire_phaser` | Processes `FirePhaser`; starts a beam if target is in arc and phaser is ready |
-| `handle_set_phaser_mode` | Processes `SetPhaserMode { Auto \| Manual }` from Tactical holder |
-| `handle_set_phaser_frequency` | Consumes admitted `SetPhaserFrequency` envelopes on `phaser-control`, writes `ShipPhaserFrequency` (legacy top-level message deleted, #804) |
-| `handle_fire_torpedo` | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
-| `handle_load_tube` | Processes `LoadTube { tube }`; manually starts loading a tube |
-| `handle_unload_tube` | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
-| `tick_beams` | Advances every active phaser beam (player + NPC): damage accumulation, sever-on-range, natural end, cooldown start |
-| `tick_torpedo_system` | Advances all in-flight torpedoes; fires `TorpedoDestroyed` for expired ones |
-| `tick_weapons_arc_request` | Emits `ArcBearingRequest` channel-3 coordination to Helm when weapons target is in range but outside all firing arcs |
+| `mod.rs` | Declares the sibling modules and re-exports `server::*` at the crate boundary |
+| `server.rs` | `WeaponsPlugin` (all system + resource registration), the systems that are still genuinely shared between phaser and torpedo (`integrate_weapons_state`, `ai_target_selection`, `tick_weapons_arc_request`, `tick_npc_auto_match_frequency`), and re-export blocks that keep every sibling module's items reachable at their pre-split `crate::console::weapons::server::…` / `crate::weapons_plugin::…` paths |
+| `server_tests.rs` | All 119 `#[cfg(test)]` tests + test helpers for the weapons module, loaded into `server.rs` via `#[path = "server_tests.rs"] mod tests;` (kept as a child module rather than an external `tests/` integration file — see [Test placement](#test-placement)) |
+| `shared.rs` | Small pure helpers used by every weapons file (`live_entity_xz`, `tactical_authorized`, `system_is_registered`, bank/AI-operates predicates) plus the one-tick handoff resources `BeamContext`, `ShooterState`, `TorpedoTargetSnapshot` |
+| `beam.rs` | Phaser/beam domain: `ActiveBeam`, `PhaserCooldown`, `WeaponsTarget`, `LastShipAttacker`, `CurrentPhaserMode`, `PhaserCombatConfigResource`, beam events, `handle_fire_phaser`, `ai_phaser_auto_fire`, `handle_set_phaser_mode`/`_frequency`, `handle_set_target`, `drain_power_for_active_beam`, and the three-phase beam tick (see below) |
+| `torpedo.rs` | Torpedo domain: `TorpedoSystemResource`, `handle_fire_torpedo`, `handle_load_tube`, `handle_unload_tube`, `handle_set_torpedo_volley_target`, `handle_torpedo_magazine_inter_system`, and the two-phase torpedo tick (see below) |
+| `blaster.rs` | Blaster (NPC hitscan weapon) domain: `BlasterSystemResource`, `handle_fire_blaster`, `tick_blaster_auto_fire`, `tick_blaster_system`, `handle_blaster_hits` |
+| `blackboard.rs` | Publish-phase output: the four `publish_*_blackboard` systems, `compute_current_weapons_update`, `weapons_update_broadcaster`, `LastWeaponsUpdate`, and the radar-blip projection helpers |
+
+Every system stays registered from `WeaponsPlugin::build` in `server.rs`; the sibling files are pure implementation modules, not separate plugins. Cross-file items are `pub(crate)` (or `pub` where an item is also consumed outside the weapons module, e.g. `TorpedoSystemResource`) and re-exported from `server.rs` so both the plugin build function and the test module resolve them without needing to know which file they actually live in.
+
+### The three-phase beam tick
+
+`tick_beams` used to be a single ~660-line system. It is now three systems chained in `SimSet::Damage`, connected by the one-tick `BeamContext(Vec<ShooterState>)` resource (`shared.rs`):
+
+1. **`tick_beams_prepare`** — snapshots shooter state: live position lookup, arc/range check, damage accumulator, LOS raycast (Rapier), friendly-fire classification. Clears and repopulates `BeamContext`.
+2. **`tick_beams_apply_damage`** — shield routing, hull damage, asteroid/NPC despawn, instagib/god-mode, VFX, broadcasts (`DamageTaken`, `ShipDestroyed`, `AsteroidDestroyed`, `EntityDespawned`), attacker tracking (`LastShipAttacker` via `set_if_neq`).
+3. **`tick_beams_tick_lifetimes`** — ends beams on destroyed targets, ticks `remaining_secs`, fires `BeamEndedEvent`, clears `WeaponsTarget`.
+
+Registered as an instance-based `.chain()` rather than type-set `.after(...)` edges, because the test harness registers a second instance of each phase — `SystemTypeSet` ordering would be ambiguous (and panic at schedule build) across two instances of the same system type.
+
+### The two-phase torpedo tick
+
+`tick_torpedo_system` was similarly split into two systems in `SimSet::Physics`, connected by the one-tick `TorpedoTargetSnapshot` resource (`shared.rs`):
+
+1. **`build_torpedo_target_snapshot`** — builds the UUID→(x,z) position map (live ECS + `WorldResource` fallback) and the detonation target list `(uuid, x, z, radius)`, excluding virtual entities (asteroid-field anchors, region triggers — see [Virtual entities](#virtual-entities-are-excluded-from-torpedo-detonation)).
+2. **`tick_torpedo_lifecycle`** — per-ship torpedo tick: proximity detection, shield routing, hull damage, despawn, broadcasts, VFX. Same `.chain()` rationale as the beam split.
+
+### Per-blackboard publish
+
+`publish_weapons_blackboard` was split into four systems in `SimSet::Publish`, one per blackboard entry the ship writes (`publish_weapons_core_blackboard`, `publish_phaser_bank_blackboards`, `publish_torpedo_tube_blackboards`, `publish_torpedo_magazine_blackboard`). `ShipSystemBlackboards` is a per-ship `HashMap<SystemId, SystemBlackboard>` component, not a struct with named fields — each system writes a disjoint set of map keys, so all four register as a bare (unordered) tuple. Because none of them may depend on another having run first, the bank/tube list each entry needs is *recomputed* per system via shared pure helpers (`build_bank_states`, `build_tube_states` in `blackboard.rs`) rather than read back out of another system's freshly-written map entry.
+
+### Systems (by SimSet)
+
+| System | SimSet | Responsibility |
+|---|---|---|
+| `handle_set_target` | Input | Processes `SetTarget` from the Tactical holder; locks target if in radar range |
+| `handle_fire_phaser` | Input | Processes `FirePhaser`; starts a beam if target is in arc and phaser is ready |
+| `ai_phaser_auto_fire` | Input | AI equivalent of `handle_fire_phaser`; writes `PhaserIntents` |
+| `handle_set_phaser_mode` | Input | Processes `SetPhaserMode { Auto \| Manual }` from Tactical holder |
+| `handle_set_phaser_frequency` | Input | Consumes admitted `SetPhaserFrequency` envelopes on `phaser-control`, writes `ShipPhaserFrequency` (legacy top-level message deleted, #804) |
+| `handle_fire_torpedo` | Input | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
+| `handle_load_tube` | Input | Processes `LoadTube { tube }`; manually starts loading a tube |
+| `handle_unload_tube` | Input | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
+| `handle_set_torpedo_volley_target` | Input | Processes `SetTorpedoVolleyTarget` for a specific tube |
+| `handle_fire_blaster` | Input | Processes `FireBlaster` for NPC hitscan weapons |
+| `tick_blaster_auto_fire` | Input | AI auto-fire decision for blaster-equipped NPCs |
+| `integrate_weapons_state` | Physics | Drains `PhaserIntents`/`TorpedoIntents` into `ActiveBeam`/torpedo launches (shared phaser+torpedo adapter; deliberately not split further) |
+| `drain_power_for_active_beam` | Physics | Drains ship power while a beam is active |
+| `build_torpedo_target_snapshot` → `tick_torpedo_lifecycle` | Physics (chained) | See [two-phase torpedo tick](#the-two-phase-torpedo-tick) |
+| `tick_blaster_system` | Physics | Advances in-flight blaster shots |
+| `handle_torpedo_magazine_inter_system` | Physics | Cross-system torpedo magazine claim routing |
+| `tick_beams_prepare` → `tick_beams_apply_damage` → `tick_beams_tick_lifetimes` | Damage (chained) | See [three-phase beam tick](#the-three-phase-beam-tick) |
+| `handle_blaster_hits` | Damage | Applies blaster hit damage |
+| `publish_weapons_core_blackboard`, `publish_phaser_bank_blackboards`, `publish_torpedo_tube_blackboards`, `publish_torpedo_magazine_blackboard` | Publish (unordered) | See [Per-blackboard publish](#per-blackboard-publish) |
+| `tick_weapons_arc_request` | — | Emits `ArcBearingRequest` channel-3 coordination to Helm when weapons target is in range but outside all firing arcs |
+| `ai_target_selection` | Input | Chooses/clears the AI-selected target and its `locked_target` carry-forward |
+| `tick_npc_auto_match_frequency` | — | NPC phaser-frequency auto-match AI |
 
 ### Resources
 
@@ -64,7 +114,7 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 
 Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
 
-The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is defined in `src/console/weapons/server.rs:3838` and registered by `add_simulation_plugins()` in `src/server_app.rs:329`.
+The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `WeaponsUpdate` at 10 Hz to the Tactical holder) is defined in `src/console/weapons/blackboard.rs` and registered by `add_simulation_plugins()` in `src/server_app.rs`.
 
 ## Broadcaster
 
@@ -87,13 +137,13 @@ max_hp        = 60.0
 regen_per_sec = 1.0
 ```
 
-Damage routing — three paths in `src/console/weapons/server.rs` route NPC-bound damage through the shield:
+Damage routing — three paths route NPC-bound damage through the shield:
 
 | Path | System | Pierce source |
 |---|---|---|
-| Player phaser → NPC | `tick_beams` | Active bank's `shield_pierce` (Option<f32>) |
-| Player torpedo → NPC | `tick_torpedo_system` | `TorpedoDetonation.shield_pierce` (snapshot at launch) |
-| NPC phaser → NPC/station | `tick_beams` | Active bank's `shield_pierce` (per-entity `PhaserCombatConfigResource`) |
+| Player phaser → NPC | `tick_beams_apply_damage` (`beam.rs`) | Active bank's `shield_pierce` (Option<f32>) |
+| Player torpedo → NPC | `tick_torpedo_lifecycle` (`torpedo.rs`) | `TorpedoDetonation.shield_pierce` (snapshot at launch) |
+| NPC phaser → NPC/station | `tick_beams_apply_damage` (`beam.rs`) | Active bank's `shield_pierce` (per-entity `PhaserCombatConfigResource`) |
 
 Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion lands on hull directly, `absorbed` hits the shield, and any overflow leaks back to hull. Damage with no shield component falls through to the legacy hull-direct path unchanged (zero regression for asteroids and shieldless stations).
 
@@ -101,17 +151,27 @@ Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` porti
 
 **Wire format** — `EntitySnapshot.shield_fraction: Option<f32>` and `EntityStateSnapshot.shield_fraction: Option<f32>` carry the live shield ratio (`Some(current/max)` for shielded entities, broken shields read as `Some(0.0)`, shieldless entities omit the field). Used by the Sensors panel target-info row (#473).
 
-## Tests
+## Test placement
 
-Tests live in `src/weapons_plugin.rs` under `#[cfg(test)] mod tests`.
+All 119 weapons tests (plus their ~65 test-only helper functions, e.g. `test_app`, `los_test_app`, `lock_and_fire`, `weapons_blackboard_of`) live in `src/console/weapons/server_tests.rs`, loaded into `server.rs` as a child module:
+
+```rust
+#[cfg(test)]
+#[path = "server_tests.rs"]
+mod tests;
+```
+
+This is a deliberate deviation from a plain external `tests/weapons_test.rs` integration file. An external integration-test crate can only see `pub` items of the library, but the weapons tests exercise ~36 systems and types that are intentionally kept `pub(crate)`/private after the per-file split (issues #726–#729) — e.g. `run_system_once`-ing `integrate_weapons_state` directly, registering `ai_target_selection` as a bare system, calling `shared::system_is_registered` and `shared::any_bank_accepts_human_input` directly. Moving the tests externally would have forced promoting all of those to `pub`, reversing the encapsulation the split was for and violating this repo's "test through the public interface" convention (see `AGENTS.md`). The `#[path]` child-module form keeps the tests in the `console::weapons::server::tests` module path — `use super::*;` resolves exactly as it did when the tests were inline — while still shrinking `server.rs` itself down from ~8,300 lines to ~1,100.
+
+Representative tests:
 
 | Test | Behaviour verified |
 |---|---|
 | `fire_phaser_on_valid_target_broadcasts_beam_started` | Beam starts when target is in range and arc |
-| `fire_phaser_rejected_when_target_behind_ship` | Beam rejected if target not in forward arc |
-| `fire_phaser_rejected_during_cooldown` | Beam rejected while cooldown is active |
-| `weapons_update_fire_ready_true_when_target_in_range_and_arc` | `WeaponsUpdate.fire_ready` true for valid target |
-| `weapons_update_fire_ready_false_when_target_out_of_phaser_range` | `WeaponsUpdate.fire_ready` false for out-of-range target |
+| `beam_severs_when_target_leaves_phaser_range` | Beam ends early when the target moves out of range mid-tick |
+| `torpedo_does_not_detonate_on_asteroid_field_anchor_entity` | Virtual-entity exclusion holds for torpedo proximity detonation |
+| `publish_writes_phaser_fore_blackboard_when_bank_configured` | Per-bank blackboard publish system writes the expected entry |
+| `los_enemy_blocker_redirects_damage_away_from_target` | Rapier line-of-sight raycast redirects beam damage to a blocker |
 | `phaser_damage_modifier_doubles_kill_rate` | `PhaserDamage` modifier at +1 doubles effective DPS |
 
 Integration tests (test-app exercises `WeaponsPlugin` as a complete plugin) are in `src/server_app.rs::tests`.
@@ -170,7 +230,7 @@ inserted as `PhaserCombatConfigResource` during
 seeds the resource with `PhaserCombatConfig::default()` so test apps
 that never load a ship TOML still get a working phaser system.
 
-`handle_fire_phaser`, `tick_beams`, and the
+`handle_fire_phaser`, `tick_beams_prepare`/`tick_beams_apply_damage`, and the
 `weapons_update_broadcaster` all read this resource instead of the
 legacy module-private `_LEGACY_BEAM_DURATION_SECS` /
 `_LEGACY_BEAM_COOLDOWN_SECS` constants. The public
@@ -189,7 +249,7 @@ Drift guards in `src/entities/config.rs`:
 
 End-to-end "TOML flows to live state" tests:
 - `phaser_combat_config_resource_reflects_player_ship_toml_weapons_console`
-  (`src/console/weapons/server.rs`)
+  (`src/console/weapons/server_tests.rs`)
 - `shield_system_reflects_player_ship_toml_shields_console_base_block`
   (`src/weapons/shield.rs`)
 
@@ -234,7 +294,7 @@ image-heavy treatment.
 
 ## Virtual entities are excluded from torpedo detonation
 
-`tick_torpedo_system` (`src/console/weapons/server.rs:3010`) builds the
+`build_torpedo_target_snapshot` (`src/console/weapons/torpedo.rs`) builds the
 proximity-detonation target list from both live ECS entities and the
 `WorldResource` snapshot. Every entry carries an `(uuid, x, z, radius)`
 that `find_detonation_hits` (`src/weapons/torpedo.rs:771`) tests against
@@ -256,7 +316,7 @@ with no physical body that the player should pass through:
   snapshot radius comes from the region shape (`Sphere.radius`,
   `Box.max_he`, or `Torus.outer_radius`) at `src/server_app.rs:1691`.
 
-`tick_torpedo_system` excludes both via a `virtual_entity_q` query
+`build_torpedo_target_snapshot` excludes both via a `virtual_entity_q` query
 (`Or<(With<AsteroidFieldSection>, With<RegionShapeSection>)>`) plus a
 shape-based filter for snapshot-only entries (anything with
 `EntitySnapshot.shape.is_some()` is treated as virtual). The exclusion
@@ -266,13 +326,26 @@ to real targets via `SetTarget` authorisation).
 
 Regression test:
 `torpedo_does_not_detonate_on_asteroid_field_anchor_entity`
-(`src/console/weapons/server.rs`).
+(`src/console/weapons/server_tests.rs`).
+
+## How to add a new weapon type
+
+Follow the blaster as the template (`blaster.rs` is the newest, smallest weapon domain and doesn't carry the historical baggage of beam/torpedo). Broadly:
+
+1. **Pick a home file.** A new weapon type gets its own `src/console/weapons/<name>.rs`, declared in `mod.rs`. Don't add it to `server.rs` — that file is reserved for `WeaponsPlugin` registration and the systems genuinely shared across weapon types (`integrate_weapons_state`, `ai_target_selection`, arc-request coordination).
+2. **Define the per-ship state** as a `#[derive(Resource, Component, Clone, Default)]` struct (mirrors `BlasterSystemResource`/`TorpedoSystemResource`) so it can live as both a per-entity component (NPC ships) and, where convenient, a `Res`/`ResMut` fallback for the local ship.
+3. **Split Input/Physics/Damage from the start** if the weapon has an in-flight or channel-open phase (a torpedo/beam-shaped weapon), following the phase-resource pattern in `shared.rs`: a one-tick `Resource` wrapping a `Vec<YourShotState>`, cleared and repopulated by the first ("prepare"/"snapshot") system in `SimSet::Physics` or `SimSet::Damage`, read by later phases, and chained (`.chain()`) rather than ordered by `SystemTypeSet` — the test harness commonly registers a second instance of the plugin, and type-set ordering panics across duplicate instances. If the weapon is pure hitscan (like the blaster), a single system per phase (fire-intent handler → tick → hit-apply) is enough — no snapshot resource needed.
+4. **Add a publish system**, not a shared blackboard builder — the publish phase intentionally has one system per blackboard entry (`SimSet::Publish`, unordered, disjoint `ShipSystemBlackboards` map keys) so weapon types never depend on each other's publish order. Add your new `SystemBlackboard` variant to `crate::messages` and a `publish_<weapon>_blackboard` system in `blackboard.rs` (or your weapon's own file, re-exported the same way blaster/beam/torpedo systems are).
+5. **Register everything from `WeaponsPlugin::build`** in `server.rs`, in the correct `SimSet`, with `.in_set(...)` and (only where genuinely required) explicit `.chain()`/`.before()`/`.after()` edges — do not add ordering "just in case."
+6. **Source all tunable numbers from TOML** on the ship's `EntityConfig` (a new `[<weapon>_console]` or similar block), following the `[weapons_console]` / `[torpedoes]` precedent above: `serde(default)` fields, a `to_runtime()` conversion, a drift-guard test in `src/entities/config.rs` comparing the player-ship TOML against the runtime defaults, and `WeaponsPlugin::build` seeding a default resource so test apps that never load a TOML still work.
+7. **Add tests to `server_tests.rs`**, not a new file — it's the single home for all weapons-module tests (see [Test placement](#test-placement)) so `test_app()`/`combined_test_app()`/helpers stay shared.
 
 ## Sources
 
-- `src/weapons_plugin.rs`
+- `src/console/weapons/` (`server.rs`, `server_tests.rs`, `shared.rs`, `beam.rs`, `torpedo.rs`, `blaster.rs`, `blackboard.rs`)
 - `src/server_app.rs` (integration tests)
 - Issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)
+- Issue [#685](https://github.com/jkeywo/project-phoenix-v2/issues/685) (weapons decomposition series, #721–#731)
 - [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 

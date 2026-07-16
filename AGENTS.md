@@ -128,7 +128,7 @@ docs/           — Draft design notes (numbered).
 7. **Helm runs on fixed ticks, not frames.** Simulation reads helm inputs at 30Hz (`HelmInputTimer`); AI helm decisions run on the shared sim tick (`[global] ai_helm_tick_hz` in the world TOML, default 30Hz) — never once per rendered frame.
 8. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`. Destroyed asteroids respawn fresh when the player leaves the cell and returns.
 9. **WebGL2 rendering; PeerJS cloud broker** (not self-hosted, deferred post-PoC).
-10. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/{damage,physics,rating,control_source,coordination}`, `modifiers/repair_teams`, and friends have no Bevy imports — fully unit-testable on native.
+10. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/{damage,physics,rating,control_source,coordination}`, `modifiers/repair_teams`, `world/{content,flags,dispatch}`, and friends have no Bevy imports — fully unit-testable on native.
 11. **No hardcoded gameplay values.** All gameplay data (stats, icons, colours, sizes, behaviours) comes from TOML config, loaded into entities/components and sent over the network where the client needs it. The only acceptable hardcoded values are: (a) defaults applied while parsing a TOML file (`unwrap_or(...)`-style fallbacks), and (b) client-side placeholders shown while waiting for authoritative data from the server. If a value could plausibly be tuned by a designer, it belongs in TOML — never inline it "for now", and never add a hardcoded branch that can override what the config says.
 
 ---

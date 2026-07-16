@@ -113,6 +113,7 @@ pub struct BehaviourConfig {
     /// Speed fraction [0, 1] for the Channel-3 Navigation→Helm handoff
     /// fallthrough (nav_goal), used when no local Helm-relevant objective
     /// resolves but Navigation has given a long-range steer target.
+    /// Defaults to [`crate::ai::NAV_HANDOFF_SPEED`] when absent.
     #[serde(default = "default_nav_handoff_speed")]
     pub nav_handoff_speed: f32,
     /// Hull fraction [0, 1] below which this entity starts scoring a synthetic
@@ -152,7 +153,7 @@ fn default_avoidance_buffer() -> f32 {
 }
 
 fn default_nav_handoff_speed() -> f32 {
-    0.6
+    crate::ai::NAV_HANDOFF_SPEED
 }
 
 fn default_avoidance_look_ahead_secs() -> f32 {

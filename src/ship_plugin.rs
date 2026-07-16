@@ -617,9 +617,13 @@ fn helm_ai_world_view(
 /// behaviour tuning, returning `(thrust, steering)`.
 ///
 /// Both per-axis systems call this and keep only their own axis (see the
-/// module note on `ai_helm_thrust`). Every tunable it passes down —
-/// arrival radius, nav-handoff speed — comes from the entity's
-/// `[behaviour]` TOML section, never a literal.
+/// module note on `ai_helm_thrust`). Every tunable it passes down — arrival
+/// radius, avoidance buffer, avoidance look-ahead, nav-handoff speed — comes
+/// from the entity's `[behaviour]` TOML section. The `crate::ai::*` constants
+/// below appear only as `unwrap_or` fallbacks for an entity that has no
+/// `[behaviour]` section at all; every one of them is the same value the
+/// matching serde `default =` fn supplies, so an entity that omits the field
+/// and an entity that omits the whole section behave identically.
 fn helm_ai_decision(
     memory: &mut crate::ai::AiMemory,
     world_view: &crate::ai::WorldView,
@@ -644,15 +648,19 @@ fn helm_ai_decision(
         behaviour_section
             .map(|b| b.0.waypoint_arrival_radius)
             .unwrap_or(crate::ai::WAYPOINT_ARRIVAL_RADIUS),
-        crate::ai::AVOIDANCE_BUFFER,
-        crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+        behaviour_section
+            .map(|b| b.0.avoidance_buffer)
+            .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
+        behaviour_section
+            .map(|b| b.0.avoidance_look_ahead_secs)
+            .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
         forward_speed,
         faction_registry
             .map(|r| &r.0)
             .unwrap_or(&crate::faction::FactionRegistry::default()),
         behaviour_section
             .map(|b| b.0.nav_handoff_speed)
-            .unwrap_or(0.6),
+            .unwrap_or(crate::ai::NAV_HANDOFF_SPEED),
     )
 }
 
@@ -853,11 +861,19 @@ fn operate_helm_ai(
         );
 
         // ── Compute lateral thrust for obstacle avoidance (AI only) ──────────
+        // Same TOML-authored avoidance tuning `helm_ai_decision` passes to
+        // `operate_helm`: the dodge and the yaw must agree about how much
+        // clearance this hull wants, or the ship sidesteps an obstacle its
+        // steering has already decided is not a threat.
         let lateral = crate::ai::operate_lateral_thrust(
             &world_view,
             &scored,
-            crate::ai::AVOIDANCE_BUFFER,
-            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            behaviour_section
+                .map(|b| b.0.avoidance_buffer)
+                .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
+            behaviour_section
+                .map(|b| b.0.avoidance_look_ahead_secs)
+                .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
             physics.forward_speed,
         );
 
@@ -1411,6 +1427,10 @@ fn operate_lateral_thrust_ai(
         // that has lost the component — so the write below must guard on
         // `Some`/skip gracefully rather than assume presence.
         Option<&mut LateralThrustInput>,
+        // Optional, so it does not filter the iteration set: a ship without a
+        // `[behaviour]` section still runs AI lateral thrust, on the
+        // `crate::ai::*` fallbacks that match the serde defaults.
+        Option<&crate::entities::spawner::BehaviourSection>,
     )>,
 ) {
     let Some(ref snapshot) = world_snapshot else {
@@ -1422,8 +1442,17 @@ fn operate_lateral_thrust_ai(
 
     let snapshot_entities: Vec<crate::ai::AiWorldEntity> = snapshot.entities.clone();
 
-    for (sources, blackboards, physics, collider, entity_uuid, faction, is_local, lateral_intent) in
-        ships.iter_mut()
+    for (
+        sources,
+        blackboards,
+        physics,
+        collider,
+        entity_uuid,
+        faction,
+        is_local,
+        lateral_intent,
+        behaviour_section,
+    ) in ships.iter_mut()
     {
         // Only run when lateral thrust is AI-controlled but the main helm is not
         // (if helm is also AI, operate_helm_ai already handles it).
@@ -1474,11 +1503,18 @@ fn operate_lateral_thrust_ai(
             ..Default::default()
         };
 
+        // TOML-authored avoidance tuning, same as `operate_helm_ai` and
+        // `helm_ai_decision` use: how much clearance this hull wants is a
+        // property of the hull, not of which system happens to be automated.
         let lateral = crate::ai::operate_lateral_thrust(
             &world_view,
             &scored,
-            crate::ai::AVOIDANCE_BUFFER,
-            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            behaviour_section
+                .map(|b| b.0.avoidance_buffer)
+                .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
+            behaviour_section
+                .map(|b| b.0.avoidance_look_ahead_secs)
+                .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
             physics.forward_speed,
         );
 
@@ -2810,9 +2846,9 @@ mod tests {
             .expect("expected Ship entity with ShipPhysics")
     }
 
-    // Test helper for directly seeding ship physics state; no current test
-    // calls it, retained for symmetry with `get_ship_physics` above.
-    #[allow(dead_code)]
+    // Test helper for directly seeding ship physics state — the avoidance
+    // tests use it to give the ship a forward speed, which the projection and
+    // the `AVOIDANCE_MIN_SPEED` gate both depend on.
     fn set_ship_physics(app: &mut App, physics: ShipPhysics) {
         let mut q = app
             .world_mut()
@@ -5177,6 +5213,405 @@ station = "helm"
             1,
             "a TOML-widened arrival radius must move the high-LOD helm on to wp1, \
              the same call the cursor evaluator makes"
+        );
+    }
+
+    // ── TOML-authored avoidance tuning (AGENTS.md rule 11) ────────────────
+    //
+    // `[behaviour] avoidance_buffer` / `avoidance_look_ahead_secs` are
+    // declared with serde defaults, so a designer can author them per entity
+    // template. Three sites feed them to the pure AI: `helm_ai_decision`
+    // (steering/thrust), `operate_helm_ai` (lateral dodge) and the standalone
+    // `operate_lateral_thrust_ai`. Each test below pins one of the tuning
+    // fields by choosing a geometry that the constant and the authored value
+    // disagree about, so reverting a site to `crate::ai::AVOIDANCE_*` turns
+    // the assertion red.
+
+    /// Seeds a `WorldSnapshot` holding a single stationary obstacle, so the
+    /// avoidance maths has exactly one threat to reason about and the
+    /// assertions below can attribute any lateral dodge to it alone.
+    fn snapshot_with_obstacle(app: &mut App, position: [f32; 3], radius: f32) {
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::new_v4(),
+                name: Some("rock".into()),
+                position,
+                faction: None,
+                shields: None,
+                hull_fraction: None,
+                // `None` yaw keeps the obstacle un-projected, so
+                // `avoidance_look_ahead_secs` only moves *our* projected
+                // position — one variable, not two.
+                yaw: None,
+                radius,
+                forward_speed: 0.0,
+            }],
+        });
+    }
+
+    fn set_behaviour_section(app: &mut App, behaviour: crate::entity_config::BehaviourConfig) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entities::spawner::BehaviourSection(behaviour));
+    }
+
+    fn lateral_intent(app: &mut App) -> f32 {
+        app.world_mut()
+            .query::<&LateralThrustInput>()
+            .single(app.world())
+            .expect("ship must carry LateralThrustInput")
+            .0
+    }
+
+    /// `operate_lateral_thrust_ai` runs when lateral thrust is AI-operated but
+    /// the helm proper is human — the "Simplified" partial-automation rating.
+    fn lateral_thrust_ai_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Human);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::system_registry::lateral_thrust_system_id(),
+                    ControlSource::Ai,
+                );
+            }
+        }
+        set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
+        if let Some(behaviour) = behaviour {
+            set_behaviour_section(&mut app, behaviour);
+        }
+        app
+    }
+
+    /// A wider TOML `avoidance_buffer` must widen the dodge radius of the
+    /// standalone lateral-thrust AI. The obstacle sits 40 units off the bow:
+    /// outside the default 5-unit buffer (radius 0+1+5 = 6), inside an
+    /// authored 60 (radius 0+1+60 = 61).
+    #[test]
+    fn lateral_thrust_ai_honours_toml_authored_avoidance_buffer() {
+        // Stationary ship, so `avoidance_look_ahead_secs` scales a zero
+        // velocity and cannot influence the result — isolating the buffer.
+        let obstacle = [4.0, 0.0, -40.0];
+
+        let mut default_app = lateral_thrust_ai_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        // Two ticks: Bevy's first `update()` reports a zero delta, which does
+        // not advance the 30 Hz `AiLateralThrustTimer` gate.
+        tick_twice(&mut default_app);
+        assert_eq!(
+            lateral_intent(&mut default_app),
+            0.0,
+            "with the default 5-unit buffer a 40-unit-distant obstacle is not a threat"
+        );
+
+        let mut authored_app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick_twice(&mut authored_app);
+        assert!(
+            lateral_intent(&mut authored_app).abs() > 0.0,
+            "a TOML-authored 60-unit avoidance_buffer must bring the same obstacle \
+             inside the dodge radius; got no lateral thrust, so the system is still \
+             reading crate::ai::AVOIDANCE_BUFFER"
+        );
+    }
+
+    /// A longer TOML `avoidance_look_ahead_secs` must project the ship further
+    /// forward before testing for a threat. At 10 u/s the default 3 s horizon
+    /// stops 70 units short of the obstacle (well outside the 6-unit dodge
+    /// radius); an authored 10 s lands the projection right on top of it.
+    #[test]
+    fn lateral_thrust_ai_honours_toml_authored_avoidance_look_ahead() {
+        // Forward at yaw 0 is -Z, so the obstacle sits 100 units down -Z with
+        // a 2-unit lateral offset to give the dodge a defined sign.
+        let obstacle = [2.0, 0.0, -100.0];
+
+        fn moving_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+            let mut app = lateral_thrust_ai_app(behaviour);
+            let mut physics = get_ship_physics(&mut app);
+            physics.forward_speed = 10.0;
+            physics.yaw = 0.0;
+            set_ship_physics(&mut app, physics);
+            app
+        }
+
+        let mut default_app = moving_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        // See the buffer test: the first `update()` has a zero delta.
+        tick_twice(&mut default_app);
+        assert_eq!(
+            lateral_intent(&mut default_app),
+            0.0,
+            "the default 3 s horizon projects only 30 units ahead — the obstacle at \
+             100 is not yet a threat"
+        );
+
+        let mut authored_app = moving_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_look_ahead_secs: 10.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick_twice(&mut authored_app);
+        assert!(
+            lateral_intent(&mut authored_app).abs() > 0.0,
+            "a TOML-authored 10 s look-ahead projects 100 units ahead, onto the \
+             obstacle; got no lateral thrust, so the system is still reading \
+             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS"
+        );
+    }
+
+    /// Drives the `helm_ai_decision` → `operate_helm` → `avoidance_steering`
+    /// path: a Reach anchor dead ahead down -Z, so the base steer sits in the
+    /// deadband at zero and any nonzero `SteeringInput` is avoidance and
+    /// nothing else. `avoidance_steering` ignores ships slower than
+    /// `AVOIDANCE_MIN_SPEED`, hence the explicit forward speed.
+    fn helm_ai_steering_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        app.insert_resource(world_config_with_anchor("far-ahead", [0.0, 0.0, -900.0]));
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective("far-ahead", 8.0)]);
+        if let Some(behaviour) = behaviour {
+            set_behaviour_section(&mut app, behaviour);
+        }
+        let mut physics = get_ship_physics(&mut app);
+        physics.forward_speed = 10.0;
+        physics.yaw = 0.0;
+        set_ship_physics(&mut app, physics);
+        app
+    }
+
+    fn steering_intent(app: &mut App) -> f32 {
+        app.world_mut()
+            .query::<&SteeringInput>()
+            .single(app.world())
+            .expect("ship must carry SteeringInput")
+            .0
+    }
+
+    /// `helm_ai_decision` feeds `avoidance_buffer` to `operate_helm`, where it
+    /// widens the radius `avoidance_steering` treats as a threat.
+    #[test]
+    fn helm_ai_decision_honours_toml_authored_avoidance_buffer() {
+        // Projected 30 units ahead (10 u/s × the default 3 s), the obstacle is
+        // ~10.8 units away: outside the default 6-unit dodge radius
+        // (0 + 1 + 5), inside an authored 61 (0 + 1 + 60).
+        let obstacle = [4.0, 0.0, -40.0];
+
+        let mut default_app = helm_ai_steering_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        tick(&mut default_app);
+        assert_eq!(
+            steering_intent(&mut default_app),
+            0.0,
+            "with the default 5-unit buffer the obstacle is no threat and the anchor \
+             is dead ahead, so steering stays in the deadband"
+        );
+
+        let mut authored_app = helm_ai_steering_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick(&mut authored_app);
+        assert!(
+            steering_intent(&mut authored_app).abs() > 0.0,
+            "a TOML-authored 60-unit avoidance_buffer must make the helm steer around \
+             the obstacle; got no steering, so helm_ai_decision is still passing \
+             crate::ai::AVOIDANCE_BUFFER"
+        );
+    }
+
+    /// `helm_ai_decision` feeds `avoidance_look_ahead_secs` to `operate_helm`,
+    /// where it sets how far forward `avoidance_steering` projects the ship
+    /// before testing for a threat.
+    #[test]
+    fn helm_ai_decision_honours_toml_authored_avoidance_look_ahead() {
+        // At 10 u/s the default 3 s horizon projects 30 units ahead, leaving
+        // the obstacle ~70 units off; a 10 s horizon projects 100 units, right
+        // onto it.
+        let obstacle = [2.0, 0.0, -100.0];
+
+        let mut default_app = helm_ai_steering_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        tick(&mut default_app);
+        assert_eq!(
+            steering_intent(&mut default_app),
+            0.0,
+            "the default 3 s horizon does not reach the obstacle at 100 units"
+        );
+
+        let mut authored_app = helm_ai_steering_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_look_ahead_secs: 10.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick(&mut authored_app);
+        assert!(
+            steering_intent(&mut authored_app).abs() > 0.0,
+            "a TOML-authored 10 s look-ahead must bring the obstacle into the helm's \
+             projected path; got no steering, so helm_ai_decision is still passing \
+             crate::ai::AVOIDANCE_LOOK_AHEAD_SECS"
+        );
+    }
+
+    /// Drives the full-AI helm's own dodge: `operate_helm_ai` calls
+    /// `operate_lateral_thrust` directly. Forward speed is not optional
+    /// scaffolding — `operate_lateral_thrust` projects the ship by
+    /// `forward_speed * avoidance_look_ahead_secs`, so a stationary ship
+    /// collapses that projection onto its own position and makes the look-ahead
+    /// term unobservable no matter what value is passed.
+    fn helm_ai_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let mut cfg = crate::world::config::WorldConfig::default();
+        // Waypoint far down -Z keeps the helm driving straight ahead, so
+        // the lateral axis reflects avoidance alone.
+        cfg.anchors.insert("wp0".into(), [0.0, 0.0, -900.0]);
+        app.insert_resource(cfg);
+        set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
+        if let Some(behaviour) = behaviour {
+            set_behaviour_section(&mut app, behaviour);
+        }
+        let mut physics = get_ship_physics(&mut app);
+        physics.forward_speed = 10.0;
+        physics.yaw = 0.0;
+        set_ship_physics(&mut app, physics);
+        app
+    }
+
+    /// The same two tunables reach the pure AI a second way: `operate_helm_ai`
+    /// calls `operate_lateral_thrust` directly for the full-AI helm. The dodge
+    /// and the steering must agree about clearance, so this site must read the
+    /// same TOML the steering does.
+    #[test]
+    fn operate_helm_ai_honours_toml_authored_avoidance_buffer() {
+        // Projected 30 units ahead (10 u/s × the default 3 s), the obstacle is
+        // ~10.8 units away: outside the default 6-unit dodge radius
+        // (0 + 1 + 5), inside an authored 61 (0 + 1 + 60).
+        let obstacle = [4.0, 0.0, -40.0];
+
+        let mut default_app = helm_ai_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        tick(&mut default_app);
+        assert_eq!(
+            lateral_intent(&mut default_app),
+            0.0,
+            "with the default 5-unit buffer the obstacle sits ~10.8 units off the \
+             projected path and is not a threat"
+        );
+
+        let mut authored_app = helm_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick(&mut authored_app);
+        assert!(
+            lateral_intent(&mut authored_app).abs() > 0.0,
+            "operate_helm_ai must pass the TOML-authored avoidance_buffer to \
+             operate_lateral_thrust, not crate::ai::AVOIDANCE_BUFFER"
+        );
+    }
+
+    /// The sixth wired argument: `operate_helm_ai` must pass the TOML-authored
+    /// `avoidance_look_ahead_secs` to `operate_lateral_thrust`, which uses it to
+    /// project the ship forward before testing for a threat. Mirrors
+    /// `lateral_thrust_ai_honours_toml_authored_avoidance_look_ahead`, but for
+    /// the full-AI helm path rather than the standalone lateral-thrust system.
+    #[test]
+    fn operate_helm_ai_honours_toml_authored_avoidance_look_ahead() {
+        // Forward at yaw 0 is -Z. At 10 u/s the default 3 s horizon projects
+        // only 30 units ahead, leaving the obstacle ~70 units off; an authored
+        // 10 s projects 100 units, landing 2 units from it — inside the default
+        // 6-unit dodge radius (0 + 1 + 5), so the buffer is held constant and
+        // the look-ahead is the only variable.
+        let obstacle = [2.0, 0.0, -100.0];
+
+        let mut default_app = helm_ai_app(None);
+        snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
+        tick(&mut default_app);
+        assert_eq!(
+            lateral_intent(&mut default_app),
+            0.0,
+            "the default 3 s horizon projects only 30 units ahead — the obstacle at \
+             100 is not yet a threat"
+        );
+
+        let mut authored_app = helm_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_look_ahead_secs: 10.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
+        tick(&mut authored_app);
+        assert!(
+            lateral_intent(&mut authored_app).abs() > 0.0,
+            "operate_helm_ai must pass the TOML-authored avoidance_look_ahead_secs to \
+             operate_lateral_thrust, not crate::ai::AVOIDANCE_LOOK_AHEAD_SECS"
+        );
+    }
+
+    /// `nav_handoff_speed` is the throttle the helm adopts for a Channel-3
+    /// Navigation→Helm handoff. It is authored in `[behaviour]`, and the
+    /// `crate::ai::NAV_HANDOFF_SPEED` fallback exists only for an entity with
+    /// no `[behaviour]` section at all.
+    #[test]
+    fn helm_ai_honours_toml_authored_nav_handoff_speed() {
+        fn nav_goal_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+            let mut app = test_app();
+            set_helm_control_source(&mut app, ControlSource::Ai);
+            // A Helm-relevant objective must exist (an empty pool makes
+            // `operate_helm_ai` zero the intent and skip the decision
+            // entirely), but it must not *resolve* — a Reach whose anchor is
+            // absent from the WorldConfig yields `None`, so `operate_helm`
+            // falls through to the nav_goal handoff, the only path that reads
+            // `nav_handoff_speed`.
+            set_ship_blackboard_objectives(
+                &mut app,
+                vec![reach_scored_objective("anchor-not-in-world-config", 8.0)],
+            );
+            if let Some(behaviour) = behaviour {
+                set_behaviour_section(&mut app, behaviour);
+            }
+            let ship = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(ship)
+                .get_mut::<crate::ai_plugin::ShipAiMemory>()
+                .expect("ship must carry ShipAiMemory")
+                .0
+                .nav_goal = Some([0.0, -900.0]);
+            tick(&mut app);
+            app
+        }
+
+        fn thrust(app: &mut App) -> f32 {
+            app.world_mut()
+                .query::<&ThrustInput>()
+                .single(app.world())
+                .expect("ship must carry ThrustInput")
+                .0
+        }
+
+        assert!(
+            (thrust(&mut nav_goal_app(None)) - crate::ai::NAV_HANDOFF_SPEED).abs() < 1e-6,
+            "a ship with no [behaviour] section must fall back to NAV_HANDOFF_SPEED"
+        );
+        assert!(
+            (thrust(&mut nav_goal_app(Some(
+                crate::entity_config::BehaviourConfig {
+                    nav_handoff_speed: 0.25,
+                    ..Default::default()
+                }
+            ))) - 0.25)
+                .abs()
+                < 1e-6,
+            "a TOML-authored nav_handoff_speed must be the throttle the helm adopts, \
+             not crate::ai::NAV_HANDOFF_SPEED"
         );
     }
 

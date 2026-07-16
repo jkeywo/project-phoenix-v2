@@ -22,6 +22,12 @@ pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
 pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
 pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
+/// Speed fraction [0, 1] used for the Channel-3 Navigation→Helm handoff
+/// (nav_goal) fallthrough when the entity has no `[behaviour]` section to
+/// author one. Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::nav_handoff_speed`], whose serde
+/// default reads this constant so the two cannot drift apart.
+pub const NAV_HANDOFF_SPEED: f32 = 0.6;
 const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.

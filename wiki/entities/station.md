@@ -3,7 +3,7 @@ title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai]
 sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship_plugin.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-07-03
+updated: 2026-07-16
 ---
 
 # Station
@@ -11,9 +11,10 @@ updated: 2026-07-03
 A fixed bridge seat a player can claim in the lobby. Stations replaced the
 old per-player-count console bundles in B1–B3 (issue #518).
 
-The ship carries a fixed roster of **9 stations**: captain, helm, tactical,
-repair, sensors, shields, navigation, power, comms. Each maps 1-to-1 to a
-[Console](./console.md) panel and owns one or more [Systems](./system.md).
+Each hull carries an authored roster of stations. A station owns one or more
+[Systems](./system.md); a console is chosen by the station's authored
+`console` URL and can lay out any combination of its owned fine systems. For
+example, the Courier has Captain and Tactical stations.
 
 ## Wire shape (`StationDef`)
 
@@ -29,9 +30,9 @@ Sent to clients inside `Welcome.ship_stations.stations`:
 }
 ```
 
-Defined in `src/lobby/stations_config.rs:StationDef`. The `consoles` field
-was deleted in issue #619 — clients derive the console panel from the
-`station_id` string directly via `gui/console-registry.js`.
+Defined in `src/lobby/stations_config.rs:StationDef`. Its optional `console`
+URL is passed from TOML to the client, while `gui/console-registry.js`
+supplies stable DOM ids for known station ids.
 
 ## TOML schema (`[[station]]`)
 
@@ -55,8 +56,7 @@ automated_systems = []      # system IDs automated at this rating
 key = { ... }
 ```
 
-The `console = "..."` field that appeared here pre-#619 was deleted with the
-Console enum; the station id itself is now the canonical routing key.
+The optional `console = "..."` field selects the station's iframe page.
 
 Parsed into `StationConfig` by `src/ship/config.rs`, validated and loaded into
 `ShipConfigResource` at startup by `load_ship_config_from_disk()`.

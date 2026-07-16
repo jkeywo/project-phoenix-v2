@@ -1,21 +1,8 @@
-# Alliance Courier — the single-player hull.
+# Alliance Courier — a compact two-player hull.
 #
-# Every other playable ship assumes a crew of 4-6. This one has a single
-# station, "pilot", that owns everything the player touches: flying, the one
-# blaster, the one radar, comms, nav and objectives. Red alert, shields and the
-# repair team run themselves.
-#
-# Two things here are deliberate and easy to break:
-#
-#  1. Everything the player must NOT touch is automated through the "Std"
-#     rating's `automated_systems`, NOT through `ai_only`. `ai_only` is inert on
-#     the player spawn path — ship::rating::ai_only_systems() has no production
-#     caller, so an ownerless ai_only system on a player hull would sit at
-#     ControlSource::Human forever with no AI and no panel. Every system below
-#     therefore declares `station = "pilot"`.
-#
-#  2. There is no [power] block and no [power_groups], so no [[system]] may
-#     declare a `power_group` (ShipConfigError::UnknownPowerGroup).
+# Captain owns command, Comms, Navigation, Power, Repair and Shields. Tactical
+# owns weapons, helm and Sensors. Every capability remains a fine System; the
+# client derives the data for each station from those TOML assignments.
 
 name = "Alliance Courier"
 class = "courier"
@@ -39,9 +26,8 @@ length = 1.5
 
 # ── Per-system hull ──────────────────────────────────────────────────────────
 # One entry per damageable system, plus "core" — the ownerless bucket that
-# RepairTarget::Core dispatches to. No power-reactor/power-battery: this hull
-# has no power system. Shield-arc hull comes from [[shield_arc]].hull_max_hp,
-# not from here.
+# RepairTarget::Core dispatches to. Shield-arc hull comes from
+# [[shield_arc]].hull_max_hp, not from here.
 
 [[hull.system_hull]]
 system_id = "core"
@@ -76,8 +62,8 @@ disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
 [[hull.system_hull]]
-system_id = "pilot-radar"
-display_name = "Radar"
+system_id = "tactical-radar"
+display_name = "Tactical Radar"
 max_hp = 12
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -91,10 +77,33 @@ damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
 debuff_magnitude = 0.20
 
+[[hull.system_hull]]
+system_id = "sensor-radar"
+display_name = "Sensor Radar"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "power-reactor"
+display_name = "Reactor"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "power-battery"
+display_name = "Battery"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
 # ── Repair ───────────────────────────────────────────────────────────────────
-# One team for the whole ship, and slower than the crewed hulls (the destroyer
-# runs 2 teams at 0.5 hp/sec with a 5s walk). Nobody is flying this thing AND
-# running damage control, so the AI does it.
+# One team for the whole ship. The Captain dispatches it to either station;
+# repair then works through that station's damaged systems in the normal order.
 
 [repair]
 repair_team_count = 1
@@ -106,11 +115,8 @@ repair_rate_hp_per_sec = 0.25
 [weapons_console]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
-# The one radar. Its `shows` list is the union of what helm, sensors and
-# tactical each show on the crewed hulls, at the sensors radar's range — the
-# pilot has one scope and it has to cover all three jobs. Blips are computed
-# server-side from these two fields, so authoring the union here IS the
-# feature; there is no client-side merge.
+# Tactical's combat scope. Sensors receives its separate long-range scope
+# below, so each station sees data for its own fine Systems.
 [weapons_console.radar]
 range = 250
 shows = [ "player", "ship", "station", "asteroid", "asteroid_field", "planet", "star", "missile", "torpedo", "region" ]
@@ -135,8 +141,7 @@ shield_pierce = 0.1
 range = 35
 
 # ── Sensors ──────────────────────────────────────────────────────────────────
-# Gives the sensor panel its range and set_sensors_target a home. The pilot has
-# no separate sensors scope — tapping the one radar fills this panel.
+# Gives Tactical's sensor panel its range and set_sensors_target home.
 
 [sensors_console]
 
@@ -147,7 +152,7 @@ selects = [ "ship", "station", "planet" ]
 
 # ── Helm ─────────────────────────────────────────────────────────────────────
 # Quicker and twitchier than the destroyer, and much less able to take a hit.
-# No [helm_console.radar]: the pilot console renders the weapons radar.
+# No [helm_console.radar]: Tactical renders its combat radar separately.
 
 [helm_console]
 max_speed = 20
@@ -195,8 +200,8 @@ colour = [ 0, 1, 0.2 ]
 size = 4
 icon = "playerShip"
 
-# Required for the pilot console's Cinematic button: the synthetic "cinematic"
-# view only resolves when this block exists.
+# The Courier deliberately offers only its Fore hull camera and this Cinematic
+# camera on the shared viewscreen.
 [cinematic_camera]
 position = [0, 6, 12]
 default_pitch_deg = 12
@@ -206,9 +211,7 @@ hysteresis_secs = 3
 yaw_follow_deg_per_sec = 45
 
 # ── Shields ──────────────────────────────────────────────────────────────────
-# Two arcs, fore and aft. AI-run via the Std rating — the pilot has no shield
-# panel. The `shields-system` [[system]] below must exist, or arc synthesis
-# gives these arcs station = None and they fall off the pilot's station.
+# Two arcs, fore and aft. Captain controls them through shields-system.
 
 [shields_console]
 focus_bonus_max_hp = 0
@@ -238,37 +241,79 @@ center_deg = 180
 width_deg = 180
 hull_max_hp = 4
 
-# ── Station ──────────────────────────────────────────────────────────────────
+# ── Power ────────────────────────────────────────────────────────────────────
+# Small-hull values are authored here rather than inferred from ship class.
+[power]
+capacity = 35
+rates = [ 3, 2, 1, 0, -1, -3 ]
+emergency_threshold = 10
+
+[power.ai]
+movement_thrust_threshold = 0.7
+movement_engage_delay_secs = 3.0
+movement_battery_engage_min_pct = 50.0
+movement_battery_recharge_pct = 100.0
+red_alert_engage_delay_secs = 3.0
+red_alert_battery_engage_min_pct = 10.0
+red_alert_battery_recharge_pct = 100.0
+
+[power_groups.ops]
+label = "Operations"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.helm]
+label = "Propulsion"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "Weapons"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.sensors]
+label = "Sensors"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── Stations ─────────────────────────────────────────────────────────────────
 
 [[station]]
-id = "pilot"
-name = "Pilot"
-description = "Fly the ship, run the gun, and talk to everyone."
-rank = "Ltn."
-short_code = "PLT"
-console = "gui/courier/pilot.html"
+id = "captain"
+name = "Captain"
+description = "Command the ship, coordinate the mission and manage its support systems."
+rank = "Cmdr."
+short_code = "CPT"
+console = "gui/courier/captain.html"
 
-# One rating only. The client renders the complexity toggle solely when a
-# station has more than one, so a single rating keeps the solo lobby clean.
-# Everything listed here is permanently AI-run: the pilot has no panel for any
-# of it. This list — not `ai_only` — is what actually drives the AI.
 [[station.rating]]
 name = "Std"
-automated_systems = [
-  "red-alert",
-  "repair",
-  "shields-system",
-  "shield-arc-fore",
-  "shield-arc-aft",
-]
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Fly the Courier, track contacts and operate its blaster."
+rank = "Ltn."
+short_code = "TAC"
+console = "gui/courier/tactical.html"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
 
 # ── Systems ──────────────────────────────────────────────────────────────────
-# All owned by "pilot"; none declare a power_group (no [power_groups] exist).
 
 [[system]]
 id = "captain"
 kind = "captain"
-station = "pilot"
+station = "captain"
+power_group = "ops"
 
 # The wire target of set_view is `viewscreen`, but authorisation resolves
 # through source_system_for_view_mode to `captain` for both Camera and
@@ -276,54 +321,67 @@ station = "pilot"
 [[system]]
 id = "viewscreen"
 kind = "viewscreen"
-station = "pilot"
+station = "captain"
+power_group = "ops"
 
 [[system]]
 id = "red-alert"
 kind = "red_alert"
-station = "pilot"
+station = "captain"
+power_group = "ops"
 
 [[system]]
 id = "sensors"
 kind = "sensors"
-station = "pilot"
+station = "tactical"
+power_group = "sensors"
+
+[[system]]
+id = "sensor-radar"
+kind = "sensor_radar"
+station = "tactical"
+power_group = "sensors"
 
 # Per-axis helm systems (issue #701; thrust/steering declared in #800,
 # impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
 # This hull declares five axes: helm-thrust, helm-steering, helm-impulse,
-# helm-boost and helm-lateral-thrust, all owned by "pilot" and absent from the
-# pilot's `Std` `automated_systems` list, because the pilot flies the ship by
-# hand. An unmanned pilot station gets `Backfill`, which automates every
-# station-owned system, so all five axes come up on AI together.
+# helm-boost and helm-lateral-thrust, all owned by Tactical. An unmanned
+# Tactical station gets Backfill, which automates every owned System.
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-joystick"
 kind = "helm_joystick"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-engine-port"
 kind = "helm_engine"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-engine-starboard"
 kind = "helm_engine"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 # Boost drive commands (issue #801). Split out of the deleted coarse `helm`
 # system so ToggleBoost/SetBoost admission gates on its own declared system,
@@ -332,46 +390,65 @@ station = "pilot"
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-station = "pilot"
+station = "tactical"
+power_group = "helm"
 
-# The one radar. Kind is tactical_radar, which is also one of the kinds
-# ShipConfig::weapons_station() keys on to resolve the pilot as the weapons
-# owner.
+# tactical_radar is one of the kinds ShipConfig::weapons_station() uses to
+# resolve Tactical as the weapons owner.
 [[system]]
-id = "pilot-radar"
+id = "tactical-radar"
 kind = "tactical_radar"
-station = "pilot"
+station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
-station = "pilot"
+station = "tactical"
+power_group = "weapons"
 
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "pilot"
+station = "captain"
+power_group = "ops"
 
 [[system]]
 id = "comms"
 kind = "comms"
-station = "pilot"
+station = "captain"
+power_group = "ops"
 
 [[system]]
 id = "shields-system"
 kind = "shields"
-station = "pilot"
+station = "captain"
 marker = "ship"
+power_group = "ops"
 
 [[system]]
 id = "repair"
 kind = "repair"
-station = "pilot"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+station = "captain"
+power_group = "ops"
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+station = "captain"
+power_group = "ops"
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 # Every sound this ship makes. Playback is server-side only (the host page's

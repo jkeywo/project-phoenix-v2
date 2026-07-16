@@ -3,7 +3,7 @@ title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, state, vitest]
 sources: [client.html, gui/console-registry.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
-updated: 2026-07-03
+updated: 2026-07-16
 ---
 
 ## Summary
@@ -32,7 +32,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) |
 | `comms-state.js` | Comms inbox/contact view-model |
-| `console-state.js` | Pure `build*(state)` view-model builders, one per console iframe |
+| `console-state.js` | Pure view-model builders. System-composed consoles use the station's TOML-authored fine `SystemId`s and receive views keyed by those ids. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
 | `iframe-bridge.js` | `push()` / `wireLoad()` state-push into console iframes (ADR-0001 §2) |
 | `content-switcher.js` + `tab-bar.js` | Console tab bar + section visibility |

@@ -22,6 +22,7 @@ import {
   buildScienceConsoleState,
   buildEngineeringConsoleState,
   buildCourierConsoleState,
+  buildSystemStationConsoleState,
   buildCruiserCommsConsoleState,
   buildDestroyerCaptainConsoleState,
   buildDestroyerTacticalConsoleState,
@@ -1896,6 +1897,23 @@ describe('buildCourierConsoleState', () => {
     expect(s.captain).toHaveProperty('objectives');
   });
 
+});
+
+describe('buildSystemStationConsoleState', () => {
+  it('returns only views attached to the station-owned fine systems', () => {
+    const state = {
+      stationSystems: { captain: ['red-alert', 'repair'] },
+      blackboards: {
+        captain: { red_alert: true },
+        repair: { teams: [], system_hull: [] },
+      },
+    };
+    const s = parse(buildSystemStationConsoleState('captain', state));
+    expect(s.system_ids).toEqual(['red-alert', 'repair']);
+    expect(s.systems['red-alert'].red_alert).toBe(true);
+    expect(s.systems).toHaveProperty('repair');
+    expect(s.systems).not.toHaveProperty('sensors');
+  });
 });
 // The 'pilot' dispatch and own_hull routing need window.buildConsoleState,
 // which only exists under jsdom — see tests/client/console-state-resolver.test.js.

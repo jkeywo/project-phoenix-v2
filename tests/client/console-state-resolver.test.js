@@ -63,3 +63,32 @@ describe('buildConsoleStateInner pilot routing', () => {
     expect(s.own_hull.entries.map((e) => e.system_id)).toEqual(['blaster-fore']);
   });
 });
+
+describe('fine-System station routing', () => {
+  it('builds the Courier Captain payload from its owned fine systems', () => {
+    const state = {
+      stationSystems: {
+        captain: ['captain', 'viewscreen', 'red-alert', 'navigation', 'comms', 'shields-system', 'power-reactor', 'power-battery', 'repair'],
+      },
+    };
+    const s = JSON.parse(window.buildConsoleStateInner('captain', state));
+    expect(s.system_ids).toEqual(state.stationSystems.captain);
+    expect(s.systems).toHaveProperty('red-alert');
+    expect(s.systems).toHaveProperty('navigation');
+    expect(s.systems).toHaveProperty('repair');
+    expect(s.systems).not.toHaveProperty('helm-thrust');
+  });
+
+  it('builds the Courier Tactical payload from its owned fine systems', () => {
+    const state = {
+      stationSystems: {
+        tactical: ['helm-thrust', 'helm-steering', 'tactical-radar', 'blaster-fore', 'sensors', 'sensor-radar'],
+      },
+    };
+    const s = JSON.parse(window.buildConsoleStateInner('tactical', state));
+    expect(s.systems).toHaveProperty('helm-thrust');
+    expect(s.systems).toHaveProperty('tactical-radar');
+    expect(s.systems).toHaveProperty('sensor-radar');
+    expect(s.systems).not.toHaveProperty('repair');
+  });
+});

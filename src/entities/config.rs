@@ -431,6 +431,112 @@ impl Default for StarConfig {
     }
 }
 
+fn default_planet_radius() -> f32 {
+    20.0
+}
+
+fn default_planet_emissive_strength() -> f32 {
+    1.0
+}
+
+fn default_planet_emissive_night_only() -> bool {
+    true
+}
+
+fn default_planet_cloud_scale() -> f32 {
+    1.03
+}
+
+fn default_planet_atmosphere_strength() -> f32 {
+    1.0
+}
+
+/// Textured planet visual definition (`[planet]` section).
+///
+/// Renders as a UV sphere with a custom shader sampling equirectangular
+/// texture maps: day/night lighting relative to the star, optional
+/// nightside-gated emissive (city lights / nightglow), an optional
+/// alpha-blended cloud/smog/ash shell on a slightly larger sphere, and an
+/// optional fresnel atmosphere rim glow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetConfig {
+    #[serde(default = "default_planet_radius")]
+    pub radius: f32,
+    #[serde(default = "default_star_longitude_segments")]
+    pub longitude_segments: u32,
+    #[serde(default = "default_star_latitude_segments")]
+    pub latitude_segments: u32,
+    /// Core surface texture set (`[planet.surface]`). Required.
+    pub surface: PlanetSurfaceConfig,
+    /// Optional cloud/smog/ash shell (`[planet.clouds]`).
+    #[serde(default)]
+    pub clouds: Option<PlanetCloudsConfig>,
+    /// Optional atmosphere rim glow (`[planet.atmosphere]`).
+    #[serde(default)]
+    pub atmosphere: Option<PlanetAtmosphereConfig>,
+}
+
+/// Core surface texture maps for a `[planet]`. Paths are TOML-style
+/// (`assets/...`-prefixed) like `MeshConfig.model`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetSurfaceConfig {
+    /// Base colour map (sRGB). Required.
+    pub albedo: String,
+    /// Tangent-space normal map (linear).
+    #[serde(default)]
+    pub normal: Option<String>,
+    /// Grayscale roughness map (linear).
+    #[serde(default)]
+    pub roughness: Option<String>,
+    /// Emissive colour map (sRGB): city lights, nightglow, lava glow.
+    #[serde(default)]
+    pub emissive_colour: Option<String>,
+    /// Grayscale emissive mask (linear). When absent the emissive colour map
+    /// is used unmasked (maps that are black where unlit need no mask).
+    #[serde(default)]
+    pub emissive_mask: Option<String>,
+    /// Gate emission to the night side (city lights). `false` for emission
+    /// that is visible on the day side too (lava).
+    #[serde(default = "default_planet_emissive_night_only")]
+    pub emissive_night_only: bool,
+    #[serde(default = "default_planet_emissive_strength")]
+    pub emissive_strength: f32,
+}
+
+/// Cloud/smog/ash shell rendered on a second, slightly larger sphere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetCloudsConfig {
+    /// Cloud colour map (sRGB). Required.
+    pub albedo: String,
+    /// Grayscale opacity map (linear). When absent the albedo luminance is
+    /// used as opacity.
+    #[serde(default)]
+    pub opacity: Option<String>,
+    /// Cloud normal map — accepted for authoring completeness but unused by
+    /// the core shader.
+    #[serde(default)]
+    pub normal: Option<String>,
+    /// Shell radius as a multiple of the planet radius.
+    #[serde(default = "default_planet_cloud_scale")]
+    pub scale: f32,
+    /// Longitudinal drift in UV wraps per second. 0 = static.
+    #[serde(default)]
+    pub drift_speed: f32,
+}
+
+/// Fresnel rim atmosphere glow parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanetAtmosphereConfig {
+    /// RGB colour `[r, g, b]` in linear 0-1 range.
+    pub colour: [f32; 3],
+    #[serde(default = "default_planet_atmosphere_strength")]
+    pub strength: f32,
+}
+
 /// Kind of a `[[light]]` entry: a point light or a directional light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1751,6 +1857,10 @@ pub struct EntityConfig {
     /// Procedural animated star/sun visual.
     #[serde(default)]
     pub star: Option<StarConfig>,
+    /// Textured planet visual. Takes precedence over `[mesh]` when both are
+    /// present (`[mesh]` stays as a fallback for headless/editor contexts).
+    #[serde(default)]
+    pub planet: Option<PlanetConfig>,
     /// Ship class identifier (e.g. "battleship", "cruiser"). Sourced from
     /// top-level TOML `class` field.
     #[serde(default)]
@@ -3098,6 +3208,52 @@ surfase_colour = [1.0, 0.7, 0.1]
             .expect("planet_earth.toml must have [collider]");
         assert_eq!(collider.shape, ColliderShape::Ball);
         assert!((collider.radius - 20.0).abs() < 1e-6);
+
+        // Textured-planet section: earth has clouds, atmosphere, and
+        // night-gated city-light emission without a separate mask.
+        let planet = config
+            .planet
+            .as_ref()
+            .expect("planet_earth.toml must have [planet]");
+        assert!((planet.radius - 20.0).abs() < 1e-6);
+        assert!(planet.surface.normal.is_some());
+        assert!(planet.surface.emissive_colour.is_some());
+        assert!(planet.surface.emissive_mask.is_none());
+        assert!(planet.surface.emissive_night_only);
+        assert!(planet.clouds.is_some());
+        assert!(planet.atmosphere.is_some());
+    }
+
+    #[test]
+    fn planet_lava_template_parses_with_dayside_emission() {
+        let toml_str = include_str!("../../assets/entities/planet_lava.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("planet_lava.toml must parse");
+        let planet = config
+            .planet
+            .as_ref()
+            .expect("planet_lava.toml must have [planet]");
+        // Lava glows on the day side too — the night gate must be off.
+        assert!(!planet.surface.emissive_night_only);
+        assert!(planet.surface.emissive_mask.is_some());
+        let clouds = planet.clouds.as_ref().expect("ash shell expected");
+        assert!((clouds.scale - 1.03).abs() < 1e-6);
+        assert!(
+            (clouds.drift_speed - 0.0).abs() < 1e-6,
+            "no motion by default"
+        );
+    }
+
+    #[test]
+    fn moon_luna_template_parses_surface_only() {
+        let toml_str = include_str!("../../assets/entities/moon_luna.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("moon_luna.toml must parse");
+        let planet = config
+            .planet
+            .as_ref()
+            .expect("moon_luna.toml must have [planet]");
+        assert!(planet.surface.emissive_colour.is_none());
+        assert!(planet.clouds.is_none());
+        assert!(planet.atmosphere.is_none());
     }
 
     #[test]

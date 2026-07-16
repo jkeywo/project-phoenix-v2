@@ -14,6 +14,8 @@
 #     asteroids to reach the starbase)
 #   - Spawn anchors beyond the outer belt (r > 1000), biased toward
 #     the +X hemisphere.
+#   - Gas giant + ice moon beyond the outer belt on the -X side (r ~1237),
+#     clear of the spawn anchors.
 #
 # Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
 # spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
@@ -148,12 +150,27 @@ starbase_patrol_west  = [320.0, 0.0, 100.0]   # starbase + [-180, 0,    0]
 template_path = "assets/entities/star_sun.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 
-# Planet in the inter-field gap.
+# Planet in the inter-field gap. The id/name stay "earth" so any existing
+# trigger/comms references keep resolving.
 [[entity]]
-template_path = "assets/entities/planet_earth.toml"
+template_path = "assets/entities/planet_ecumenopolis.toml"
 id = "earth"
 name = "earth"
 transform = { position = [550.0, 0.0, 0.0] }
+
+# Gas giant beyond the outer belt (r ~1237 > 1000), on the -X side away from
+# the +X-biased enemy spawn anchors. Its ice moon is placed relative to it.
+[[entity]]
+template_path = "assets/entities/planet_gas_giant.toml"
+id = "gas-giant"
+name = "gas-giant"
+transform = { position = [-1200.0, 0.0, 300.0] }
+
+[[entity]]
+template_path = "assets/entities/moon_ice.toml"
+id = "ice-moon"
+name = "ice-moon"
+transform = { relative_to = "gas-giant", offset = [125.0, 0.0, 40.0] }
 
 # Inner asteroid belt around the star, r=200..300. Forms cover near the
 # centre of the playspace; the player can hide in or peek out of it.

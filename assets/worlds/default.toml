@@ -69,6 +69,21 @@ id = "earth"
 name = "earth"
 transform = { position = [400.0, 0.0, 400.0] }
 
+# Earth's moon, placed relative to the planet (static — no orbital motion).
+[[entity]]
+template_path = "assets/entities/moon_luna.toml"
+id = "luna"
+name = "luna"
+transform = { relative_to = "earth", offset = [60.0, 0.0, 30.0] }
+
+# Lava planet in a further-out position (r ~922; the asteroid field spans
+# r=300..350 and earth sits at r ~566).
+[[entity]]
+template_path = "assets/entities/planet_lava.toml"
+id = "lava-planet"
+name = "lava-planet"
+transform = { position = [-700.0, 0.0, -600.0] }
+
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
 transform = { position = [0.0, 0.0, 0.0] }

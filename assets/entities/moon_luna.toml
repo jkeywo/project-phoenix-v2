@@ -1,0 +1,32 @@
+name = "Luna"
+tags = ["moon"]
+
+[target]
+tags = ["moon"]
+threat_level = "none"
+description = "A cratered rocky moon"
+
+[collider]
+shape = "Ball"
+radius = 6.0
+length = 0.0
+
+[radar_appearance]
+colour = [0.7, 0.7, 0.7]
+size = 6.0
+icon = "planet"
+
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
+[mesh]
+shape = "sphere"
+radius = 6.0
+colour = [0.6, 0.6, 0.6]
+
+[planet]
+radius = 6.0
+
+[planet.surface]
+albedo = "assets/planets/moon/albedo.webp"
+normal = "assets/planets/moon/normal.webp"
+roughness = "assets/planets/moon/roughness.webp"

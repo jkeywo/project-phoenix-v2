@@ -25,7 +25,7 @@ server = []
 debug = ["bevy/debug"]
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["webgl2"] }
+bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
 glam = "0.30"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

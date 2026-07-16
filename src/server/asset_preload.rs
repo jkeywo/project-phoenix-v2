@@ -36,6 +36,10 @@ pub struct AssetManifest {
     pub pfx_textures: Vec<String>,
     /// Full sidecar paths (e.g. `"assets/models/dynasty_destroyer.model.toml"`).
     pub sidecars: Vec<String>,
+    /// Planet texture paths (TOML-style, `assets/`-prefixed) with their sRGB
+    /// flag. Loaded via `entity_planet::load_planet_image` so the loader
+    /// settings match the renderer's (Bevy keeps the first load's settings).
+    pub planet_textures: Vec<(String, bool)>,
     /// Sub-world TOML paths discovered (for tracking purposes; not loaded here).
     pub sub_worlds: Vec<String>,
 }
@@ -107,6 +111,14 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
             let sc = sidecar_path(model_path, mesh.variant.as_deref());
             if !manifest.sidecars.contains(&sc) {
                 manifest.sidecars.push(sc);
+            }
+        }
+    }
+    // Planet textures
+    if let Some(ref planet) = config.planet {
+        for entry in crate::entity_planet::planet_texture_paths(planet) {
+            if !manifest.planet_textures.contains(&entry) {
+                manifest.planet_textures.push(entry);
             }
         }
     }
@@ -427,6 +439,13 @@ pub fn begin_asset_preload(
         let handle: Handle<Image> = asset_server.load(icon_path);
         icon_handles.push((icon_path.clone(), handle));
     }
+    // Planet textures ride the icon path too (plain `Handle<Image>`), but must
+    // go through the shared loader so the sRGB/sampler settings match the
+    // renderer's (Bevy keeps the settings of the first load of a path).
+    for (path, srgb) in &manifest.planet_textures {
+        let handle = crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+        icon_handles.push((path.clone(), handle));
+    }
 
     // Request sidecar fetches (WASM) — on native these are read synchronously later
     #[cfg(target_arch = "wasm32")]
@@ -468,10 +487,18 @@ pub fn begin_asset_preload(
                     let handle: Handle<Image> = asset_server.load(icon_path);
                     icon_handles.push((icon_path.clone(), handle));
                 }
+                for (path, srgb) in &manifest_mut.planet_textures {
+                    let handle =
+                        crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+                    icon_handles.push((path.clone(), handle));
+                }
                 manifest.glb_models.extend(manifest_mut.glb_models);
                 manifest.radar_icons.extend(manifest_mut.radar_icons);
                 manifest.pfx_textures.extend(manifest_mut.pfx_textures);
                 manifest.sidecars.extend(manifest_mut.sidecars);
+                manifest
+                    .planet_textures
+                    .extend(manifest_mut.planet_textures);
                 seen_worlds.insert(world_path.clone());
             }
         }
@@ -568,6 +595,7 @@ pub fn poll_asset_preload(
     {
         let mut new_glbs: Vec<String> = Vec::new();
         let mut new_icons: Vec<String> = Vec::new();
+        let mut new_planet_textures: Vec<(String, bool)> = Vec::new();
         let mut new_sidecars: Vec<String> = Vec::new();
         let mut new_sub_worlds: Vec<String> = Vec::new();
         let mut still_pending_worlds: Vec<String> = Vec::new();
@@ -593,6 +621,7 @@ pub fn poll_asset_preload(
                         // Dust textures ride the icon path — both are Images.
                         new_icons.extend(manifest.radar_icons);
                         new_icons.extend(manifest.pfx_textures);
+                        new_planet_textures.extend(manifest.planet_textures);
                         new_sidecars.extend(manifest.sidecars);
                         new_sub_worlds.extend(more_worlds);
                         preload.seen_worlds.insert(world_path.clone());
@@ -618,6 +647,10 @@ pub fn poll_asset_preload(
         for icon_path in &new_icons {
             let handle: Handle<Image> = asset_server.load(icon_path);
             preload.icon_handles.push((icon_path.clone(), handle));
+        }
+        for (path, srgb) in &new_planet_textures {
+            let handle = crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+            preload.icon_handles.push((path.clone(), handle));
         }
         for sc_path in &new_sidecars {
             // Guard: only push sidecars that haven't been registered yet. The same
@@ -938,6 +971,50 @@ mod tests {
             .sidecars
             .iter()
             .any(|s| s.contains("alliance_cruiser.model.toml")));
+    }
+
+    /// A `[planet]` section contributes every declared texture path with the
+    /// correct sRGB flag, so the preload gate covers planet textures and they
+    /// load with the same settings the renderer uses.
+    #[test]
+    fn discover_entity_config_with_planet_adds_textures() {
+        let config = EntityConfig {
+            planet: Some(PlanetConfig {
+                radius: 20.0,
+                longitude_segments: 64,
+                latitude_segments: 32,
+                surface: PlanetSurfaceConfig {
+                    albedo: "assets/planets/earth/albedo.webp".into(),
+                    normal: Some("assets/planets/earth/normal.webp".into()),
+                    roughness: None,
+                    emissive_colour: Some("assets/planets/earth/emissive_colour.webp".into()),
+                    emissive_mask: None,
+                    emissive_night_only: true,
+                    emissive_strength: 1.0,
+                },
+                clouds: Some(PlanetCloudsConfig {
+                    albedo: "assets/planets/earth/cloud_albedo.webp".into(),
+                    opacity: Some("assets/planets/earth/cloud_opacity.webp".into()),
+                    normal: None,
+                    scale: 1.03,
+                    drift_speed: 0.0,
+                }),
+                atmosphere: None,
+            }),
+            ..Default::default()
+        };
+        let mut manifest = AssetManifest::default();
+        discover_entity_config_assets(&config, &mut manifest);
+        assert_eq!(
+            manifest.planet_textures,
+            vec![
+                ("assets/planets/earth/albedo.webp".to_string(), true),
+                ("assets/planets/earth/normal.webp".to_string(), false),
+                ("assets/planets/earth/emissive_colour.webp".to_string(), true),
+                ("assets/planets/earth/cloud_albedo.webp".to_string(), true),
+                ("assets/planets/earth/cloud_opacity.webp".to_string(), false),
+            ]
+        );
     }
 
     #[test]

@@ -248,6 +248,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_plugins(crate::entity_star::StarRenderPlugin)
+    .add_plugins(crate::entity_planet::PlanetRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
     .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
@@ -2981,6 +2982,8 @@ fn render_spawned_entities(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut star_surface_materials: ResMut<Assets<crate::entity_star::StarSurfaceMaterial>>,
     mut star_halo_materials: ResMut<Assets<crate::entity_star::StarHaloMaterial>>,
+    mut planet_surface_materials: ResMut<Assets<crate::entity_planet::PlanetSurfaceMaterial>>,
+    mut planet_cloud_materials: ResMut<Assets<crate::entity_planet::PlanetCloudMaterial>>,
     mut proc_cache: ResMut<ProceduralMeshCache>,
     scenes: Res<Assets<bevy::scene::Scene>>,
     entities: Query<
@@ -2989,6 +2992,7 @@ fn render_spawned_entities(
             &Transform,
             Option<&crate::entity_spawner::MeshSection>,
             Option<&crate::entity_spawner::StarSection>,
+            Option<&crate::entity_spawner::PlanetSection>,
             Option<&crate::entity_spawner::Lights>,
             Option<&PendingSceneHandle>,
             Option<&crate::simulation::LocalShip>,
@@ -2996,7 +3000,8 @@ fn render_spawned_entities(
         Without<RenderProcessed>,
     >,
 ) {
-    for (entity, transform, mesh_sec, star_sec, lights_opt, pending, local_ship) in entities.iter()
+    for (entity, transform, mesh_sec, star_sec, planet_sec, lights_opt, pending, local_ship) in
+        entities.iter()
     {
         let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
 
@@ -3025,6 +3030,44 @@ fn render_spawned_entities(
                     },
                 ));
             });
+        } else if let Some(planet_sec) = planet_sec {
+            // Textured planet: UV sphere with the custom planet shader, plus
+            // an optional alpha-blended cloud shell child. Checked before the
+            // `[mesh]` branch — planet templates keep a procedural `[mesh]`
+            // fallback for headless/editor contexts that must not win here.
+            let cfg = &planet_sec.0;
+            let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+                cfg.radius,
+                cfg.longitude_segments,
+                cfg.latitude_segments,
+            ));
+            let surface_mat = planet_surface_materials.add(
+                crate::entity_planet::surface_material_from_config(cfg, &asset_server),
+            );
+            let mut ec = commands.entity(entity);
+            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
+            if let Some(cloud_mat) =
+                crate::entity_planet::cloud_material_from_config(cfg, &asset_server)
+            {
+                let shell_scale = cfg
+                    .clouds
+                    .as_ref()
+                    .map(|c| c.scale.max(1.001))
+                    .unwrap_or(1.03);
+                let cloud_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+                    cfg.radius * shell_scale,
+                    cfg.longitude_segments,
+                    cfg.latitude_segments,
+                ));
+                let cloud_mat = planet_cloud_materials.add(cloud_mat);
+                ec.with_children(|parent| {
+                    parent.spawn((
+                        Mesh3d(cloud_mesh),
+                        MeshMaterial3d(cloud_mat),
+                        Transform::default(),
+                    ));
+                });
+            }
         } else if let Some(mesh_sec) = mesh_sec {
             let cfg = &mesh_sec.0;
 

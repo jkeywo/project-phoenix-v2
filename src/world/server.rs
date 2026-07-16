@@ -7344,6 +7344,7 @@ condition = "on_world_loaded"
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -7638,6 +7639,7 @@ condition = "on_world_loaded"
         let npc_config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,

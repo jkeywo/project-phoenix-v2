@@ -49,6 +49,10 @@ pub struct MeshSection(pub crate::entity_config::MeshConfig);
 #[derive(Component, Clone, Debug)]
 pub struct StarSection(pub StarConfig);
 
+/// Present when the EntityConfig has a [planet] section.
+#[derive(Component, Clone, Debug)]
+pub struct PlanetSection(pub crate::entity_config::PlanetConfig);
+
 /// Present when the EntityConfig had a [shape] section (region entity).
 #[derive(Component, Clone, Debug)]
 pub struct RegionShapeSection(pub RegionShape);
@@ -189,6 +193,11 @@ pub fn spawn_entity(
     // Star section
     if let Some(star) = &config.star {
         entity_commands.insert(StarSection(star.clone()));
+    }
+
+    // Planet section
+    if let Some(planet) = &config.planet {
+        entity_commands.insert(PlanetSection(planet.clone()));
     }
 
     // Top-level name scalar
@@ -845,6 +854,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            planet: None,
             cinematic_camera: None,
             ai_profile: None,
         };
@@ -894,6 +904,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            planet: None,
             cinematic_camera: None,
             ai_profile: None,
         };
@@ -940,6 +951,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            planet: None,
             cinematic_camera: None,
             ai_profile: None,
         };
@@ -991,6 +1003,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            planet: None,
             cinematic_camera: None,
             ai_profile: None,
         };
@@ -1008,6 +1021,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1106,6 +1120,7 @@ mod tests {
             target: None,
             mesh: None,
             star: None,
+            planet: None,
             ship_config: None,
             shield_arcs: Vec::new(),
             cinematic_camera: None,
@@ -1129,6 +1144,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1195,6 +1211,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1286,6 +1303,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1352,6 +1370,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1408,6 +1427,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1488,6 +1508,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1607,6 +1628,7 @@ hull_integrity = 60.0
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,

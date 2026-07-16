@@ -1477,10 +1477,10 @@ mod tests {
     }
 
     /// `RemoveFactionEnemy` re-validates every AI controller's target after a
-    /// successful removal (issue #710 gave the delayed path this too; the
-    /// audit for issue #722 found comms independently replicated it
-    /// correctly already). This test proves unifying comms onto the shared
-    /// `dispatch_action` table doesn't silently drop that behaviour: a comms
+    /// successful removal (issue #710 gave the delayed path this too; an
+    /// audit found comms independently replicated it correctly already).
+    /// This test proves unifying comms onto the shared `dispatch_action`
+    /// table doesn't silently drop that behaviour: a comms
     /// response that tears down a hostility must clear an in-progress AI
     /// engagement on the now-friendly target, exactly like
     /// `tick_trigger_pipeline`'s
@@ -1488,10 +1488,11 @@ mod tests {
     /// proves for the trigger path.
     #[test]
     fn comms_response_remove_faction_enemy_revalidates_ai_targets() {
-        use crate::ai_plugin::{AiPlugin, ShipAiMemory};
+        use crate::ai_plugin::AiPlugin;
         use crate::entities::spawner::FactionComponent;
         use crate::entity_config::BehaviourConfig;
         use crate::entity_spawner::BehaviourSection;
+        use crate::weapons_plugin::WeaponsTarget;
 
         // Bundled TOML faction UUIDs (see `world::server::tests::{fed,harrow}_faction_uuid`).
         let federation_uuid =
@@ -1551,7 +1552,9 @@ mod tests {
             FactionComponent(federation_uuid),
         ));
 
-        // Harrow-factioned NPC with an AI behaviour.
+        // Harrow-factioned NPC with an AI behaviour and its authoritative
+        // Tactical lock (post-#702, WeaponsTarget — not a ShipAiMemory
+        // mirror — is what revalidate_ai_targets_after_faction_change clears).
         let npc_uuid_str = "22222222-2222-2222-2222-222222222222";
         let npc_entity = app
             .world_mut()
@@ -1560,19 +1563,20 @@ mod tests {
                 EntityUuid(npc_uuid_str.to_string()),
                 BehaviourSection(BehaviourConfig::default()),
                 FactionComponent(harrow_uuid),
+                WeaponsTarget::default(),
             ))
             .id();
 
-        // Let `AiPlugin` attach `AiControllerComponent` + `ShipAiMemory`.
+        // Let `AiPlugin` attach the `AiControllerComponent` marker.
         app.update();
 
-        // Seed the engagement: NPC's ShipAiMemory.target = player.
+        // Seed the engagement: NPC's WeaponsTarget locks the player.
         {
-            let mut mem = app
+            let mut lock = app
                 .world_mut()
-                .get_mut::<ShipAiMemory>(npc_entity)
-                .expect("ShipAiMemory must be attached");
-            mem.0.target = Some(uuid::Uuid::parse_str(player_uuid_str).unwrap());
+                .get_mut::<WeaponsTarget>(npc_entity)
+                .expect("WeaponsTarget must be attached");
+            lock.0 = Some(player_uuid_str.to_string());
         }
 
         // Install the comms template: one response carries all three
@@ -1661,12 +1665,12 @@ mod tests {
         );
         let _ = tick(&mut app);
 
-        // The NPC's ShipAiMemory.target must be cleared: Harrow no longer
+        // The NPC's WeaponsTarget lock must be cleared: Harrow no longer
         // considers Federation hostile after the response's third action.
-        let mem = app.world().get::<ShipAiMemory>(npc_entity).unwrap();
+        let lock = app.world().get::<WeaponsTarget>(npc_entity).unwrap();
         assert_eq!(
-            mem.0.target, None,
-            "comms RemoveFactionEnemy must clear memory.target when the target is no longer hostile"
+            lock.0, None,
+            "comms RemoveFactionEnemy must clear WeaponsTarget when the target is no longer hostile"
         );
     }
 

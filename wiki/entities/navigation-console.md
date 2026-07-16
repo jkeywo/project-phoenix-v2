@@ -37,7 +37,7 @@ An anchored waypoint follows the source entity's live transform. If the source d
 
 Navigation commands enter through the same `ControlSystem` command path as other fine-system controls and are admitted for the Navigation system. The Navigation blackboard publishes the waypoint for all consumers. Helm and other consoles can display it, and AI Helm should treat it as the normal shared desired destination whether a human or Navigation AI wrote it.
 
-`NavigateTo` remains a level-3 advisory coordination request for an explicit ask to Helm; it is not the ordinary route by which Navigation AI moves the ship.
+`NavigateTo` is the level-3 clearance that releases the AI Helm to follow the waypoint: it carries the waypoint's `generation` (not a position), serves the ship's `coordination_lag_secs` in the coordination queue, and latches into `HelmWaypointClearance` on delivery. It is issued from one origin-agnostic place — `issue_navigate_to_clearance` in `src/console/navigation/mod.rs` — once per new waypoint generation, and re-issued when the helm axes flip Human→AI while the current generation is unlatched (so a waypoint set under a human helm is still flown after a disconnect/Backfill flip). Neither waypoint writer sends its own clearance.
 
 ## Wire surface
 

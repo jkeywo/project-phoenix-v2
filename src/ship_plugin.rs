@@ -615,7 +615,7 @@ fn process_helm_inputs(
 /// (`helm-thrust` AND `helm-steering`) are AI-operated. The coarse `helm`
 /// system this used to gate on was deleted by #801; per Rule 6 the answer
 /// derives from the per-axis declarations, never a coarse fallback.
-fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
+pub(crate) fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
     sources
         .0
         .policy_for(&crate::system_registry::helm_thrust_system_id())
@@ -6894,6 +6894,161 @@ station = "helm"
             get_thrust_input(&mut app) > 0.0,
             "once cleared, the AI Helm must fly the human-set waypoint — \
              rule-6 symmetry with the AI-set path"
+        );
+    }
+
+    /// Waypoint clearance survives a helm control flip: a waypoint set while
+    /// the helm is HUMAN-manned delivers as suppressed/popup (no latch); when
+    /// the helm later flips to AI (disconnect → Backfill), the shared issuer
+    /// re-issues the `NavigateTo` on the Human→AI edge, the order serves the
+    /// normal Channel-3 lag, latches, and the AI helm flies the existing
+    /// waypoint — no human re-set required, and no instant latch.
+    #[test]
+    fn waypoint_set_while_helm_human_is_flown_once_helm_flips_to_ai() {
+        let mut app = test_app();
+        app.add_plugins(crate::navigation_plugin::NavigationPlugin)
+            .init_resource::<crate::lobby::server::ShipClientConfigResource>();
+
+        // A human captain + navigation officer, game started. The helm axes
+        // stay on their default Human control for now.
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::Identify {
+                token: "navigation".into(),
+                name: "Decker".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::SelectStation {
+                station: "Navigation".into(),
+            },
+        );
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SetReady { ready: true });
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::SetReady { ready: true },
+        );
+        tick(&mut app);
+
+        // A Helm-relevant objective that cannot resolve, so once the helm is
+        // AI the only thing left to fly is the Navigation waypoint.
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![reach_scored_objective("anchor-not-in-world-config", 8.0)],
+        );
+
+        // The human sets the waypoint over the wire while the helm is human.
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: crate::messages::SystemControlPayload::SetNavigationWaypoint {
+                    x: 0.0,
+                    z: -900.0,
+                    source_uuid: None,
+                },
+            },
+        );
+        tick(&mut app);
+
+        let ship = find_ship_entity(&mut app);
+        let generation = app
+            .world()
+            .entity(ship)
+            .get::<crate::navigation_plugin::NavigationWaypoint>()
+            .expect("ship must carry NavigationWaypoint")
+            .generation();
+
+        // Serve well past the delivery lag with the helm still human: the
+        // order routes to the human helm (suppress — human sender, human
+        // target) and must NOT latch a clearance.
+        let lag_secs = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipConfigComponent, With<Ship>>();
+            q.single(app.world())
+                .expect("ship config")
+                .0
+                .coordination_lag_secs
+        };
+        let ticks = (lag_secs / 0.2).ceil() as u32 + 4;
+        for _ in 0..ticks {
+            tick(&mut app);
+        }
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<HelmWaypointClearance>()
+                .expect("ship must carry HelmWaypointClearance")
+                .0,
+            None,
+            "an order delivered to a human helm must not latch a clearance"
+        );
+        assert_eq!(
+            get_thrust_input(&mut app),
+            0.0,
+            "no AI helm, no flight — nothing should be driving the thrust axis"
+        );
+
+        // The helm flips to AI (the disconnect → Backfill shape).
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // The clearance must not latch instantly — the re-issued order still
+        // serves the authored Channel-3 delivery lag.
+        tick(&mut app);
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<HelmWaypointClearance>()
+                .expect("ship must carry HelmWaypointClearance")
+                .0,
+            None,
+            "the re-issued NavigateTo must serve the delivery lag, not latch instantly"
+        );
+
+        // Serve the lag (authored per hull), plus slack for the tick that
+        // enqueues and the tick that delivers.
+        for _ in 0..ticks {
+            tick(&mut app);
+        }
+        assert_eq!(
+            app.world()
+                .entity(ship)
+                .get::<HelmWaypointClearance>()
+                .expect("ship must carry HelmWaypointClearance")
+                .0,
+            Some(generation),
+            "after the helm flips to AI, the re-issued NavigateTo must latch \
+             the existing waypoint's generation once the lag is served"
+        );
+        assert!(
+            get_thrust_input(&mut app) > 0.0,
+            "the AI helm must fly the waypoint that was set while the helm \
+             was human — clearance survives the control flip"
         );
     }
 

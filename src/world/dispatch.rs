@@ -471,94 +471,17 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
             ));
         }
 
-        TriggerAction::ApplyModifier {
-            entity,
-            tag,
-            slot,
-            bonus,
-        } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("ApplyModifier: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::ApplyModifier {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                slot: slot.clone(),
-                bonus: *bonus,
-            });
-        }
-
-        TriggerAction::RemoveModifier { entity, tag, slot } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("RemoveModifier: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::RemoveModifier {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                slot: slot.clone(),
-            });
-        }
-
-        TriggerAction::ApplyFlag { entity, tag, kind } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("ApplyFlag: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::ApplyFlag {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                kind: kind.clone(),
-            });
-        }
-
-        TriggerAction::RemoveFlag { entity, tag, kind } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("RemoveFlag: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::RemoveFlag {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                kind: kind.clone(),
-            });
-        }
-
-        TriggerAction::ApplyIntModifier {
-            entity,
-            tag,
-            slot,
-            bonus,
-        } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("ApplyIntModifier: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::ApplyIntModifier {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                slot: slot.clone(),
-                bonus: *bonus,
-            });
-        }
-
-        TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-            let Some(uuid) = context.name_to_uuid.get(entity) else {
-                out.warnings
-                    .push(format!("RemoveIntModifier: unknown entity name '{entity}'"));
-                return out;
-            };
-            out.commands.push(ActionCmd::RemoveIntModifier {
-                uuid: uuid.clone(),
-                tag: tag.clone(),
-                slot: slot.clone(),
-            });
+        // Entity modifier/flag actions — float modifiers, bool flags, and
+        // integer modifiers on a named entity — are handled by
+        // `dispatch_entity_modifier_action` (issue #712). Same routing shape
+        // as the mission-state arm above.
+        TriggerAction::ApplyModifier { .. }
+        | TriggerAction::RemoveModifier { .. }
+        | TriggerAction::ApplyFlag { .. }
+        | TriggerAction::RemoveFlag { .. }
+        | TriggerAction::ApplyIntModifier { .. }
+        | TriggerAction::RemoveIntModifier { .. } => {
+            return dispatch_entity_modifier_action(action, context);
         }
 
         TriggerAction::LoadWorld { path } => {
@@ -799,6 +722,130 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
 
         other => {
             unreachable!("dispatch_state_action called with non-state action: {other:?}")
+        }
+    }
+
+    out
+}
+
+/// Decide what one entity-modifier `TriggerAction` should do.
+///
+/// Owns the six actions that stamp a modifier or flag onto a named entity —
+/// the float-modifier pair (`ApplyModifier`, `RemoveModifier`), the bool-flag
+/// pair (`ApplyFlag`, `RemoveFlag`), and the integer-modifier pair
+/// (`ApplyIntModifier`, `RemoveIntModifier`). Split out of `dispatch_action`
+/// (issue #712), which routes exactly these six variants here.
+///
+/// All six share one shape: resolve entity *name* → *UUID* via
+/// `context.name_to_uuid` (warn + no-op on an unknown name), then emit the
+/// matching `ActionCmd` keyed by UUID. The UUID → `Entity` → `ShipModifiers`
+/// step stays in the applier — see "Purity boundaries" at the top of this
+/// file.
+///
+/// Pure, like `dispatch_action`: reads `context`, mutates nothing, returns a
+/// `DispatchResult`. Called only for the six variants above; any other variant
+/// is a routing bug in `dispatch_action` and trips the `unreachable!`.
+fn dispatch_entity_modifier_action(
+    action: &TriggerAction,
+    context: &DispatchContext,
+) -> DispatchResult {
+    let mut out = DispatchResult::default();
+
+    match action {
+        TriggerAction::ApplyModifier {
+            entity,
+            tag,
+            slot,
+            bonus,
+        } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("ApplyModifier: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::ApplyModifier {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                slot: slot.clone(),
+                bonus: *bonus,
+            });
+        }
+
+        TriggerAction::RemoveModifier { entity, tag, slot } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("RemoveModifier: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::RemoveModifier {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                slot: slot.clone(),
+            });
+        }
+
+        TriggerAction::ApplyFlag { entity, tag, kind } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("ApplyFlag: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::ApplyFlag {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                kind: kind.clone(),
+            });
+        }
+
+        TriggerAction::RemoveFlag { entity, tag, kind } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("RemoveFlag: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::RemoveFlag {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                kind: kind.clone(),
+            });
+        }
+
+        TriggerAction::ApplyIntModifier {
+            entity,
+            tag,
+            slot,
+            bonus,
+        } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("ApplyIntModifier: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::ApplyIntModifier {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                slot: slot.clone(),
+                bonus: *bonus,
+            });
+        }
+
+        TriggerAction::RemoveIntModifier { entity, tag, slot } => {
+            let Some(uuid) = context.name_to_uuid.get(entity) else {
+                out.warnings
+                    .push(format!("RemoveIntModifier: unknown entity name '{entity}'"));
+                return out;
+            };
+            out.commands.push(ActionCmd::RemoveIntModifier {
+                uuid: uuid.clone(),
+                tag: tag.clone(),
+                slot: slot.clone(),
+            });
+        }
+
+        other => {
+            unreachable!(
+                "dispatch_entity_modifier_action called with non-modifier action: {other:?}"
+            )
         }
     }
 
@@ -2295,5 +2342,300 @@ mod tests {
             path: "worlds/sub.toml".to_string(),
         };
         let _ = dispatch_state_action(&action, &fx.ctx());
+    }
+
+    // ── dispatch_entity_modifier_action (direct) ──────────────────────────
+    //
+    // The tests above drive the six modifier/flag arms through
+    // `dispatch_action`, proving the routing arm delegates. These call
+    // `dispatch_entity_modifier_action` directly, proving the extracted
+    // function is what produces the result and that the two entry points
+    // agree (issue #712).
+
+    #[test]
+    fn modifier_apply_modifier_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::ApplyModifier {
+            entity: "raider".to_string(),
+            tag: "buff".to_string(),
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 2.5,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::ApplyModifier {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "buff".to_string(),
+                    slot: ModifierSlot::MaxSpeed,
+                    bonus: 2.5,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_modifier_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::ApplyModifier {
+            entity: "ghost".to_string(),
+            tag: "buff".to_string(),
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 2.5,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["ApplyModifier: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_modifier_matches_dispatch_action_routing() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::ApplyModifier {
+            entity: "raider".to_string(),
+            tag: "buff".to_string(),
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 2.5,
+        };
+
+        // Both entry points must produce byte-identical results.
+        assert_eq!(
+            dispatch_action(&action, &fx.ctx()),
+            dispatch_entity_modifier_action(&action, &fx.ctx())
+        );
+    }
+
+    #[test]
+    fn modifier_remove_modifier_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::RemoveModifier {
+            entity: "raider".to_string(),
+            tag: "buff".to_string(),
+            slot: ModifierSlot::MaxSpeed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::RemoveModifier {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "buff".to_string(),
+                    slot: ModifierSlot::MaxSpeed,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_remove_modifier_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::RemoveModifier {
+            entity: "ghost".to_string(),
+            tag: "buff".to_string(),
+            slot: ModifierSlot::MaxSpeed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["RemoveModifier: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_flag_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::ApplyFlag {
+            entity: "raider".to_string(),
+            tag: "cloak".to_string(),
+            kind: FlagKind::CommsJammed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::ApplyFlag {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "cloak".to_string(),
+                    kind: FlagKind::CommsJammed,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_flag_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::ApplyFlag {
+            entity: "ghost".to_string(),
+            tag: "cloak".to_string(),
+            kind: FlagKind::CommsJammed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["ApplyFlag: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_remove_flag_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::RemoveFlag {
+            entity: "raider".to_string(),
+            tag: "cloak".to_string(),
+            kind: FlagKind::CommsJammed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::RemoveFlag {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "cloak".to_string(),
+                    kind: FlagKind::CommsJammed,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_remove_flag_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::RemoveFlag {
+            entity: "ghost".to_string(),
+            tag: "cloak".to_string(),
+            kind: FlagKind::CommsJammed,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["RemoveFlag: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_int_modifier_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::ApplyIntModifier {
+            entity: "raider".to_string(),
+            tag: "crew".to_string(),
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 3,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::ApplyIntModifier {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "crew".to_string(),
+                    slot: IntModifierSlot::RepairTeams,
+                    bonus: 3,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_apply_int_modifier_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::ApplyIntModifier {
+            entity: "ghost".to_string(),
+            tag: "crew".to_string(),
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 3,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["ApplyIntModifier: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_remove_int_modifier_resolves_name_to_uuid_directly() {
+        let fx = Fixture::new().with_entity("raider", "uuid-raider");
+        let action = TriggerAction::RemoveIntModifier {
+            entity: "raider".to_string(),
+            tag: "crew".to_string(),
+            slot: IntModifierSlot::RepairTeams,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::RemoveIntModifier {
+                    uuid: "uuid-raider".to_string(),
+                    tag: "crew".to_string(),
+                    slot: IntModifierSlot::RepairTeams,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn modifier_remove_int_modifier_unknown_entity_warns_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::RemoveIntModifier {
+            entity: "ghost".to_string(),
+            tag: "crew".to_string(),
+            slot: IntModifierSlot::RepairTeams,
+        };
+        let out = dispatch_entity_modifier_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec!["RemoveIntModifier: unknown entity name 'ghost'".to_string()],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch_entity_modifier_action called with non-modifier action")]
+    fn entity_modifier_action_on_non_modifier_variant_panics() {
+        // The guard exists so a routing bug in `dispatch_action` fails loudly
+        // rather than silently returning an empty result.
+        let fx = Fixture::new();
+        let action = TriggerAction::UnloadWorld {
+            path: "worlds/sub.toml".to_string(),
+        };
+        let _ = dispatch_entity_modifier_action(&action, &fx.ctx());
     }
 }

@@ -415,7 +415,8 @@ struct RawActionEntry {
     #[serde(default)]
     enemy: Option<String>,
     // ── add_objective extended fields (issue #571) ─────────────────────────
-    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Hail"`, or omit for `None`.
+    /// Directive kind: `"Patrol"`, `"Destroy"`, `"Reach"`, `"Retreat"`,
+    /// `"Hail"`, or omit for `None`.
     #[serde(default)]
     directive_kind: Option<String>,
     /// Anchor names for a `Patrol` directive.
@@ -424,7 +425,7 @@ struct RawActionEntry {
     /// Whether a `Patrol` directive loops back to the first anchor.
     #[serde(default)]
     directive_loop: Option<bool>,
-    /// Anchor name for a `Reach` directive.
+    /// Anchor name for a `Reach` or `Retreat` directive.
     #[serde(default)]
     directive_anchor: Option<String>,
     /// Base utility score for the objective (default 0.0).
@@ -884,6 +885,11 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 "Directive 'Reach' requires a 'directive_anchor' field".to_string()
             })?,
         }),
+        Some("Retreat") => Ok(AiDirective::Retreat {
+            anchor: raw.directive_anchor.clone().ok_or_else(|| {
+                "Directive 'Retreat' requires a 'directive_anchor' field".to_string()
+            })?,
+        }),
         Some("Hail") => Ok(AiDirective::Hail {
             target: raw
                 .target
@@ -891,7 +897,7 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
         }),
         Some(other) => Err(format!(
-            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Hail",
+            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail",
             other
         )),
     }
@@ -2653,6 +2659,55 @@ condition = "on_world_loaded"
             TriggerAction::AddObjective { targets, .. } => assert!(targets.is_empty()),
             other => panic!("expected AddObjective, got {other:?}"),
         }
+    }
+
+    /// `Retreat` is ordinary authored doctrine since #702 (hull TOMLs accept
+    /// `directive_kind = "Retreat"`), so a mission objective must be able to
+    /// author it too — same shape as `Reach`: a required `directive_anchor`.
+    #[test]
+    fn parse_world_reads_add_objective_retreat_directive() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type             = "add_objective"
+  id               = "obj-retreat"
+  text             = "Fall back to the haven."
+  directive_kind   = "Retreat"
+  directive_anchor = "pirate_haven"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddObjective { directive, .. } => {
+                assert_eq!(
+                    *directive,
+                    crate::messages::AiDirective::Retreat {
+                        anchor: "pirate_haven".into(),
+                    }
+                );
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_retreat_directive_requires_directive_anchor() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-retreat"
+  text           = "Fall back."
+  directive_kind = "Retreat"
+"#;
+        let err = parse_world(toml).expect_err("Retreat without an anchor must be rejected");
+        assert!(
+            err.contains("Retreat") && err.contains("directive_anchor"),
+            "error must name the directive and the missing field, got: {err}"
+        );
     }
 
     #[test]

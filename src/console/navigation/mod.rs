@@ -182,25 +182,78 @@ impl NavigationWaypoint {
 
 fn handle_navigation_waypoint(
     mut ship_query: Query<
-        (&AdmittedCommands, &mut NavigationWaypoint),
+        (
+            Entity,
+            &AdmittedCommands,
+            &mut NavigationWaypoint,
+            &crate::ship_plugin::ShipSystemControlSources,
+        ),
         With<crate::server_app::Ship>,
     >,
+    mut coordination_writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
 ) {
-    for (admitted, mut waypoint) in ship_query.iter_mut() {
+    for (entity, admitted, mut waypoint, control_sources) in ship_query.iter_mut() {
         for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
             match &cmd.payload {
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
                     waypoint.set(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+                    // A waypoint reaches the AI Helm identically no matter who
+                    // set it (AGENTS.md rule 6): the human path issues the same
+                    // Channel-3 clearance — same message, same delivery lag,
+                    // same latch — that `operate_navigation_ai` issues. Without
+                    // this, a human-set waypoint sat on the shared component
+                    // forever unfollowed, because `cleared_nav_waypoint` only
+                    // releases a generation the clearance has latched.
+                    // The origin is derived from the navigation system's
+                    // resolved control source, like every other post-admission
+                    // enqueuer — not assumed from the wire path.
+                    enqueue_navigate_to_clearance(
+                        &mut coordination_writer,
+                        entity,
+                        control_sources
+                            .0
+                            .source_for(&crate::system_registry::navigation_system_id()),
+                        waypoint.generation(),
+                        format!("waypoint ({x:.0}, {z:.0})"),
+                    );
                 }
                 SystemControlPayload::ClearNavigationWaypoint => {
+                    // Clearing needs no clearance message: the waypoint has no
+                    // snapshot, so the Helm has nothing to follow either way —
+                    // the same shape as the AI path's `waypoint.clear()`.
                     waypoint.clear();
                 }
                 _ => {}
             }
         }
     }
+}
+
+/// Enqueue the Channel-3 `NavigateTo` order clearing the AI Helm to follow the
+/// ship's current waypoint generation (issue #702).
+///
+/// Both writers of [`NavigationWaypoint`] — `operate_navigation_ai` and the
+/// human `handle_navigation_waypoint` path — go through here, so a waypoint
+/// reaches the AI Helm through the same message, the same delivery lag, and the
+/// same `HelmWaypointClearance` latch regardless of who set it (AGENTS.md
+/// rule 6). The message carries the waypoint's `generation`, not its position:
+/// the waypoint itself is the goal.
+fn enqueue_navigate_to_clearance(
+    writer: &mut MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
+    ship: Entity,
+    sender_origin: crate::ship::control_source::ControlSource,
+    generation: u64,
+    label: String,
+) {
+    writer.write(crate::ship_plugin::CoordinationEnqueue {
+        source_entity: ship,
+        sender_origin,
+        target: crate::system_registry::helm_station_key(),
+        payload: crate::messages::CoordinationPayload::NavigateTo { generation, label },
+        sender_label: "Navigation".into(),
+    });
 }
 
 /// Build the appropriate `WaypointMode` from raw coordinates and an optional
@@ -448,16 +501,13 @@ pub fn operate_navigation_ai(
         // every tick does not re-bump the generation and re-incur the lag on a
         // Helm already following it.
         waypoint.set(mode);
-        coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
-            source_entity: entity,
-            sender_origin: crate::ship::control_source::ControlSource::Ai,
-            target: crate::system_registry::helm_station_key(),
-            payload: crate::messages::CoordinationPayload::NavigateTo {
-                generation: waypoint.generation(),
-                label: top_obj.snapshot.text.clone(),
-            },
-            sender_label: "Navigation".into(),
-        });
+        enqueue_navigate_to_clearance(
+            &mut coordination_writer,
+            entity,
+            crate::ship::control_source::ControlSource::Ai,
+            waypoint.generation(),
+            top_obj.snapshot.text.clone(),
+        );
     }
 }
 
@@ -1287,6 +1337,68 @@ mod tests {
             );
             assert_eq!(label, "Reach base");
         }
+    }
+
+    /// Rule-6 symmetry: a *human*-set waypoint issues the same Channel-3
+    /// `NavigateTo` clearance — carrying the waypoint's generation — that the
+    /// AI path issues (mirrors
+    /// `operate_navigation_ai_reach_sets_free_waypoint_and_emits_navigate_to`).
+    /// Without it, an AI Helm silently never follows a human-set waypoint:
+    /// `cleared_nav_waypoint` only releases a generation the clearance has
+    /// latched, and only this message ever latches one.
+    #[test]
+    fn human_set_waypoint_emits_navigate_to_with_current_generation() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        app.init_resource::<NavCoordCapture>()
+            .add_systems(PostUpdate, capture_nav_coord);
+
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::ControlSystem {
+                target: crate::messages::SystemId("navigation".into()),
+                payload: SystemControlPayload::SetNavigationWaypoint {
+                    x: 120.0,
+                    z: -45.0,
+                    source_uuid: None,
+                },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Free { x: 120.0, z: -45.0 })
+        );
+
+        let coords = drain_nav_coord(&mut app);
+        let nav_to = coords
+            .iter()
+            .find(|c| {
+                matches!(
+                    &c.payload,
+                    crate::messages::CoordinationPayload::NavigateTo { .. }
+                )
+            })
+            .expect(
+                "a human-set waypoint must enqueue the same NavigateTo clearance the AI path does",
+            );
+        assert_eq!(nav_to.target, crate::system_registry::helm_station_key());
+        assert_eq!(
+            nav_to.sender_origin,
+            crate::ship::control_source::ControlSource::Human
+        );
+        let crate::messages::CoordinationPayload::NavigateTo { generation, .. } = &nav_to.payload
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            *generation,
+            nav_waypoint_generation(&mut app),
+            "NavigateTo must carry the current waypoint's generation, or the \
+             AI Helm's clearance can never match and it will never fly it"
+        );
     }
 
     #[test]

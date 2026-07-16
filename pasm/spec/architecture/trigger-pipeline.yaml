@@ -1,0 +1,214 @@
+# Trigger pipeline (issues #707-#719): how authored world events become
+# dispatched trigger actions on the host, each tick.
+#
+# Event flow (one host tick, systems chained in this order):
+#   external world events (AI combat / waypoint bridge messages, queued
+#   world-load / region / delayed-action events)
+#     -> world-event-collector            (collect_world_events)
+#     -> world-event-buffer-state         (WorldEventBuffer, per-tick)
+#     -> world-comms-template-injector    (inject_comms_templates)
+#     -> world-trigger-chaining-loop      (tick_trigger_pipeline:
+#          evaluate conditions -> dispatch_action table -> ActionCmds
+#          -> apply_dispatch_result, looped for same-tick chaining)
+#   world-delayed-action-scheduler        (tick_delayed_actions) runs after
+#   the loop and feeds the NEXT tick's buffer.
+#
+# Per-caller routing of dispatch-produced events: the chaining loop feeds
+# them to the next pass of the SAME tick; only the delayed-action scheduler
+# queues them for the NEXT tick. (The comms-response dispatch site also
+# pushes onto pending_world_events, but it runs in SimSet::Input, before
+# Physics, so the pipeline fires those events later the SAME tick.)
+#
+# This slice complements world-files.yaml, which owns the evaluator
+# (world-trigger-evaluator) and the action catalogue
+# (world-trigger-action-dispatcher); the entities here describe the pipeline
+# that drives them and the contracts that keep it extendable.
+entities:
+  - component: world-event-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Event Collector
+      summary: Collects each tick's externally-sourced world events into the per-tick event buffer from three sources, in order - bridged AI combat and waypoint messages, events queued by world loads, region observers, and the previous tick's delayed actions, and one synthesised timer event once a world is loaded.
+      goals:
+        - every consumer of world events reads one buffer filled by one producer
+        - stale events cannot leak between ticks because the buffer is rebuilt every run
+      rationale:
+        - a single collection point keeps the trigger pipeline's inputs inspectable and keeps event-free ticks from marking runtime state changed
+      references:
+        - world-trigger-chaining-loop
+    architecture:
+      kind: event-bridge
+      authority: authoritative
+      owns: [world-event-buffer-state]
+      produces: [world-event-buffer-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+      symbols: [collect_world_events, AiEventReaders]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: world_event_buffer_holds_only_current_tick_events
+        summary: The buffer holds exactly the current tick's events; stale events do not leak.
+      - kind: test
+        reference: tick_trigger_pipeline_is_a_noop_on_an_empty_world
+        summary: An event-free tick leaves the runtime and the buffer unmarked by change detection.
+
+  - state: world-event-buffer-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Event Buffer
+      summary: This tick's externally-sourced world events, valid for exactly one tick. Only external events enter it - the chaining loop's internally-produced flag and destruction events stay local to the loop, which is what restricts comms templates to firing from external events only.
+    architecture:
+      classification: authoritative
+      owner: world-event-collector
+      writers: [world-event-collector]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+      symbols: [WorldEventBuffer]
+      tests: [cargo test]
+
+  - component: world-comms-template-injector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Comms Template Injector
+      summary: Auto-fires comms templates that match this tick's external events and injects the resulting messages onto the immediate comms channel. Ordered after event collection and before trigger dispatch, so it reads the same entity name bindings the trigger pipeline's tick-level snapshot sees.
+      rationale:
+        - running before dispatch means no spawn action has mutated the name map yet this tick, keeping template sender resolution deterministic
+    architecture:
+      kind: event-router
+      authority: authoritative
+      reads: [world-event-buffer-state, world-configuration-state, world-name-binding-state]
+      coordinates: [world-comms-runtime]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+      symbols: [inject_comms_templates]
+      tests: [cargo test]
+
+  - component: world-trigger-chaining-loop
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Trigger Chaining Loop
+      summary: Within one host tick, alternates trigger evaluation and action dispatch until a pass produces no new events, so chained triggers (a flag mutation firing a flag-watching trigger) resolve with zero frame latency. Bounded by a fixed pass cap of sixteen that breaks pathological trigger cycles with a warning instead of hanging the frame.
+      goals:
+        - chained scenario logic resolves in the same frame that caused it
+        - a mis-authored trigger cycle degrades to a logged cutoff, never a hang
+      rationale:
+        - "determinism contract: each pass is two-phase - every trigger condition is evaluated against the live flag stores before any fired action dispatches, so all triggers in a pass see the same values and their mutations become visible only to the next pass"
+        - "live-store freshness: action dispatch re-projects the live flag stores per action, never a pre-pass snapshot, so duplicate mutations preview correct before/after transitions and each boolean flip emits exactly one event"
+        - "the dispatch name map is rebuilt at the top of every pass, so an action can resolve an entity name that a spawn registered in an earlier pass of the same tick"
+        - "event routing is per-caller: this loop feeds produced events into its own next pass (same tick); the delayed-action scheduler queues them for the next tick; the comms-response site pushes onto pending_world_events from SimSet::Input, which the pipeline drains later the same tick"
+    architecture:
+      kind: evaluation-loop
+      authority: authoritative
+      reads: [world-event-buffer-state, world-flag-state, world-layer-runtime-state, world-name-binding-state]
+      coordinates: [world-trigger-evaluator, world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/world/content.rs]
+      symbols: [tick_trigger_pipeline, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: trigger_chain_exceeding_max_passes_stops_at_the_cap
+        summary: A chain longer than the cap performs exactly the capped number of passes, then breaks.
+      - kind: test
+        reference: set_flag_action_fires_on_flag_set_trigger_within_same_tick
+        summary: Chained triggers fire in the same Bevy frame as the mutation that caused them.
+      - kind: test
+        reference: flag_stores_handed_to_dispatch_are_live_within_a_pass
+        summary: Dispatch previews transitions against live stores, never a per-pass snapshot.
+      - kind: test
+        reference: single_trigger_dispatches_every_action_variant_in_list_order
+        summary: One trigger carrying every action variant dispatches them in authored list order.
+      - kind: test
+        reference: trigger_from_layer_missing_in_layer_map_reads_base_flags
+        summary: A trigger whose origin layer is missing from the layer map evaluates against the base flag store.
+
+  - component: trigger-dispatch-purity-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Trigger Dispatch Purity Contract
+      summary: The action-dispatch table is a pure, Bevy-free decision layer. It reads a read-only context and returns commands keyed by entity UUID strings, warnings as plain data, and destination-agnostic events; one impure applier turns those into ECS mutations for both world-trigger callers (immediate and delayed).
+      goals:
+        - every dispatch arm, including every failure path, is testable as a plain function call over plain data
+        - one dispatch table serves both world-trigger dispatch sites (immediate and delayed), so those two paths cannot drift apart; the comms-response site (handle_respond_to_message) remains an intentionally parallel inline dispatch, kept symmetric by exhaustive matching plus the comms parity test suite
+      rationale:
+        - "purity boundaries: entity targets are UUID strings (never ECS entity handles), logging is returned as warning strings, flag mutation is previewed rather than performed, and produced events are returned unrouted for the caller to place"
+        - "per-group layout: one exhaustive match routes each variant to its group function - mission state (dispatch_state_action), per-entity modifiers (dispatch_entity_modifier_action), world flags (dispatch_world_flag_action), destruction (dispatch_destroy_entity), spawning (dispatch_spawn_entity). The routing match and the applier are wildcard-free (compile-time exhaustive); each group function ends in an unreachable! guard, so routing a new variant into a group without adding its inner arm is a runtime panic caught by the group's should_panic test, not a compile error"
+        - "non-determinism is injected: the spawn UUID source and the entity template loader are seams on the context, so tests stub them and the module never touches the filesystem or the config cache"
+    architecture:
+      kind: purity-contract
+      authority: authoritative
+      coordinates: [world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/dispatch.rs, src/world/server.rs, src/entities/loader.rs]
+      symbols: [dispatch_action, dispatch_state_action, dispatch_entity_modifier_action, dispatch_world_flag_action, dispatch_destroy_entity, dispatch_spawn_entity, DispatchContext, DispatchResult, ActionCmd, TemplateLoader]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: spawn_failed_template_load_does_not_consume_a_uuid_directly
+        summary: Failure paths are gated inside the pure layer, so the applier applies results unconditionally.
+
+  - component: trigger-action-extension-contract
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Trigger Action Extension Contract
+      summary: The authored procedure for adding a new trigger action variant. Exhaustive matches in the dispatch table's routing match, the applier, the comms-response inline dispatch, and the parity enumeration mean the compiler walks the author to every site that must change; the one runtime-only gap is the group functions' unreachable! guards (covered by should_panic tests).
+      goals:
+        - declare the new variant on the TriggerAction enum and parse it from world TOML (src/world/config.rs)
+        - add a dispatch arm in the pure table (src/world/dispatch.rs), routed into the matching per-group function or a new group function for a new action family
+        - when the action needs a new ECS effect, add an ActionCmd variant and an applier arm (apply_dispatch_result in src/world/server.rs); actions that resolve to existing commands need no applier change
+        - add the variant's arm to the comms-response inline dispatch (handle_respond_to_message in src/console/comms/server.rs, an intentionally parallel match — the compiler forces this because that match is also exhaustive) and extend its parity enumeration tests so comms responses stay symmetric with world triggers
+        - add pure unit tests beside the dispatch table and pipeline tests beside the Bevy systems
+      rationale:
+        - keeping every match exhaustive turns "did I wire the new variant everywhere" into a compile error rather than a runtime gap
+      references:
+        - trigger-dispatch-purity-contract
+    architecture:
+      kind: authoring-contract
+      authority: authoritative
+      coordinates: [world-trigger-action-dispatcher]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/world/dispatch.rs, src/world/server.rs]
+      symbols: [TriggerAction, ActionCmd]
+      tests: [cargo test]
+
+  - component: world-delayed-action-scheduler
+    core:
+      status: implemented
+      confidence: confirmed
+      title: World Delayed Action Scheduler
+      summary: Holds trigger actions whose authored per-action delay has not yet elapsed and dispatches due ones through the same pure dispatch table as immediate actions. Its produced events queue for the next tick's buffer, because it runs after the chaining loop has already drained this tick's.
+      rationale:
+        - sharing the dispatch table with the immediate path means delayed actions gain every dispatch behaviour (including AI target revalidation) instead of drifting on a duplicated table
+    architecture:
+      kind: scheduler
+      authority: authoritative
+      reads: [world-flag-state, world-layer-runtime-state]
+      coordinates: [world-trigger-action-dispatcher, world-event-collector]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs]
+      symbols: [tick_delayed_actions, DelayedAction]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: delayed_action_dispatches_and_queues_event_for_next_tick
+        summary: A delayed action's produced events queue for the next tick, not the current pass.

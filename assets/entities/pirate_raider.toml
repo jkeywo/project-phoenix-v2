@@ -89,9 +89,16 @@ sensor_range = 120.0
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#472/#574) Doctrine-based behaviour (FSM dissolved in issue #572).
-# Two standing objectives scored each tick: Destroy outscores Patrol so the
-# ship immediately pursues any hostile it can find; when no hostile is visible
-# operate_helm falls back to the Patrol directive.
+# Three standing objectives scored each tick, in priority order:
+#
+#   Retreat (100) — only scores at all below 30% hull; when it does, it beats
+#                   everything and the raider runs for its haven.
+#   Destroy  (35) — pursue any hostile Tactical has locked.
+#   Patrol   (20) — the default when no hostile is visible.
+#
+# `zero_gates` is a veto: `retreat-when-hurt` scores 0 — i.e. is not in the
+# running at all — until hull drops below the threshold, so its high
+# `base_priority` costs nothing while the ship is healthy.
 
 [behaviour]
 
@@ -112,24 +119,42 @@ base_priority  = 35.0
 target_speed   = 0.9
 maintain_range = 25.0
 
+# Break off and run for the haven once badly hurt (issue #702).
+#
+# This replaces a synthetic Retreat the engine used to inject whenever hull fell
+# below a hardcoded-ish `[behaviour] retreat_hull_threshold`. That mechanism was
+# inert: it scored 0..1 against doctrine priorities in the tens, so it could
+# never win, and its anchor was always empty so it fell back to a "home
+# position" production never seeded — i.e. world origin. Authoring it here fixes
+# both (a real priority on the right scale, a real anchor) and makes the
+# threshold, the destination and the urgency all designer-tunable per hull.
+#
+# `pirate_haven` is declared by the worlds that fly this template's patrol route
+# (patrol.toml, default.toml). In a world that declares no such anchor the
+# directive simply resolves to nowhere and the raider fights on — the same
+# behaviour it had before this objective existed.
+[[behaviour.doctrine]]
+id               = "retreat-when-hurt"
+text             = "Hull critical — break off and run for the haven"
+directive_kind   = "Retreat"
+directive_anchor = "pirate_haven"
+base_priority    = 100.0
+zero_gates       = [{ condition = "hull_below", threshold = 0.3 }]
+target_speed     = 1.0
 
 # Ship systems (all AI-controlled - no human consoles)
-[[system]]
-id = "helm"
-kind = "helm"
-ai_only = true
-
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
-# has no stations, so — exactly like the coarse `helm` above — they are ownerless
-# and `ai_only`. The NPC spawn path sets every declared system to
+# has no stations, so they are ownerless and `ai_only`. The NPC spawn path sets every declared system to
 # ControlSource::Ai, so these come up on AI precisely when the coarse helm does.
 #
 # #800 declared thrust + steering. #704 adds impulse + lateral-thrust, which the
 # deleted `operate_helm_ai` monolith used to drive on this hull's behalf: an
 # undeclared system resolves to ControlSource::Human (`operate_ai = false`), so
 # the monolith never stood down from those two axes here. Declaring them hands
-# both to `ai_helm_impulse` / `ai_helm_lateral_thrust` on exactly the ticks the
-# monolith drove them, which is what makes the delete behaviour-preserving.
+# both to `ai_helm_impulse` / `ai_helm_lateral_thrust`, which was what made the
+# delete behaviour-preserving. (Since #803 both systems decide on the shared
+# AI-helm sim tick — `[global] ai_helm_tick_hz`, default 30 Hz — rather than
+# once per rendered frame as the monolith did.)
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
@@ -145,6 +170,15 @@ id = "helm-impulse"
 kind = "helm_impulse"
 ai_only = true
 
+# Boost drive axis (issue #801), declared for hull-uniformity with the player
+# ships: every helm axis is a declared system on every hull. No AI drives
+# boost, so on this stationless hull the declaration only gives the axis the
+# standard damage/repair surface.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
@@ -154,6 +188,14 @@ ai_only = true
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
+ai_only = true
+
+# Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
+# One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
+# admission gates on a real system instead of the deleted coarse `tactical`.
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
 ai_only = true
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.

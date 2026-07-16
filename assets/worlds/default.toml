@@ -16,6 +16,11 @@
 seed = 42
 title = "Starbase Alpha"
 description = "Defend the Federation outpost against an incoming raider patrol."
+# Fixed rate (Hz) of the shared AI-helm sim tick: every per-axis AI helm
+# system (thrust, steering, lateral thrust, impulse) decides at this cadence,
+# independent of the host's frame rate (issue #803). Omitting the key
+# defaults to 30.
+ai_helm_tick_hz = 30.0
 
 [ambient_light]
 color      = [0.6, 0.55, 0.5]
@@ -47,6 +52,10 @@ starbase_alpha = [1000.0, 0.0, 0.0]
 patrol_alpha   = [600.0, 0.0, -600.0]
 patrol_beta    = [500.0, 0.0, -300.0]
 patrol_gamma   = [200.0, 0.0, -600.0]
+# Where a mauled raider runs to. Referenced by the `retreat-when-hurt` doctrine
+# in assets/entities/pirate_raider.toml; set away from the patrol route and the
+# starbase so a retreat visibly breaks off rather than circling the fight.
+pirate_haven   = [-800.0, 0.0, -1200.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 

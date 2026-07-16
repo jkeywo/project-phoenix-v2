@@ -88,22 +88,27 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Lock the weapon / sensor target to a specific entity UUID. */
+  /** Lock the weapon / sensor target to a specific entity UUID.
+   *  Wire target is 'tactical-radar' (issue #801): target lock lives on the
+   *  tactical radar fine system; the coarse 'tactical' id is a station id,
+   *  not a wire target. */
   set_target: (a, send, mutate) => {
     if (a.uuid) {
       mutate({ weaponsTarget: a.uuid });
       send('ControlSystem', {
-        target: 'tactical',
+        target: 'tactical-radar',
         payload: { type: 'SetTarget', data: { uuid: a.uuid } },
       });
     }
   },
 
-  /** Switch phaser firing mode (Auto / Manual / etc.). */
+  /** Switch phaser firing mode (Auto / Manual / etc.).
+   *  Wire target is 'phaser-control' (issue #801): the ship-wide phaser
+   *  settings system. */
   set_phaser_mode: (a, send) => {
     if (a.mode)
       send('ControlSystem', {
-        target: 'tactical',
+        target: 'phaser-control',
         payload: { type: 'SetPhaserMode', data: { mode: a.mode } },
       });
   },
@@ -140,56 +145,67 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Send helm thrust / steering inputs. */
+  /** Send helm thrust / steering inputs.
+   *
+   *  One joystick action fans out to the two per-axis wire messages (issue
+   *  #801): SetThrust -> 'helm-thrust' and SetSteering -> 'helm-steering'.
+   *  Admission gates each axis on its own declared system, so a ship with an
+   *  AI-held throttle and a human-held stick admits exactly the axis the
+   *  human owns. Component emitters (ph-helm-joystick) are unchanged.
+   */
   helm_input: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
-      payload: {
-        type: 'HelmInput',
-        data: { thrust: a.thrust || 0, steering: a.steering || 0 },
-      },
+      target: 'helm-thrust',
+      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
+    });
+    send('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: a.steering || 0 } },
     });
   },
 
-  /** Set helm via analog joystick (ph-helm-joystick component). */
+  /** Set helm via analog joystick (ph-helm-joystick component).
+   *  Same per-axis fan-out as helm_input (issue #801); the joystick's yaw
+   *  maps to the steering axis. */
   set_helm: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
-      payload: {
-        type: 'HelmInput',
-        data: { thrust: a.thrust || 0, steering: a.yaw || 0 },
-      },
+      target: 'helm-thrust',
+      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
+    });
+    send('ControlSystem', {
+      target: 'helm-steering',
+      payload: { type: 'SetSteering', data: { value: a.yaw || 0 } },
     });
   },
 
-  /** Begin charging the impulse drive. */
+  /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */
   start_impulse_charge: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
+      target: 'helm-impulse',
       payload: { type: 'StartImpulseCharge' },
     });
   },
 
-  /** Cancel an active impulse charge. */
+  /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
   cancel_impulse: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
+      target: 'helm-impulse',
       payload: { type: 'CancelImpulse' },
     });
   },
 
-  /** Toggle the boost drive on/off. */
+  /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
   toggle_boost: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
+      target: 'helm-boost',
       payload: { type: 'ToggleBoost' },
     });
   },
 
-  /** Explicitly set boost on or off (hold-to-boost). */
+  /** Explicitly set boost on or off (hold-to-boost). Targets 'helm-boost'. */
   set_boost: (a, send) => {
     send('ControlSystem', {
-      target: 'helm',
+      target: 'helm-boost',
       payload: {
         type: 'SetBoost',
         data: { active: !!a.active },
@@ -341,11 +357,12 @@ export const ACTION_MAP = Object.freeze({
     if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
   },
 
-  /** Set the phaser frequency to an explicit value (0.0–1.0). */
+  /** Set the phaser frequency to an explicit value (0.0–1.0).
+   *  Wire target is 'phaser-control' (issue #801). */
   set_phaser_frequency: (a, send) => {
     if (typeof a.frequency === 'number') {
       send('ControlSystem', {
-        target: 'tactical',
+        target: 'phaser-control',
         payload: { type: 'SetPhaserFrequency', data: { frequency: a.frequency } },
       });
     }

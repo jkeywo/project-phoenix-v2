@@ -849,10 +849,19 @@
     // setup messages that are not the result of a deliberate button press).
     const NO_CLICK = new Set(['HelmInput', 'LateralThrustInput', 'Identify', 'SetName']);
 
+    const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
+
     function playClick() {
       const el = document.getElementById('ui-click');
       if (!el) return;
       el.currentTime = 0;
+      // preservesPitch defaults to true in modern browsers, which normalizes
+      // pitch back out of playbackRate changes — disable it so the rate
+      // jitter below actually varies the pitch.
+      el.preservesPitch = false;
+      el.webkitPreservesPitch = false;
+      el.mozPreservesPitch = false;
+      el.playbackRate = 1 + (Math.random() * 2 - 1) * CLICK_PITCH_VARIANCE;
       el.play().catch(() => {});
     }
 

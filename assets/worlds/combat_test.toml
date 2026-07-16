@@ -143,6 +143,24 @@ starbase_patrol_east  = [680.0, 0.0, 100.0]   # starbase + [+180, 0,    0]
 starbase_patrol_south = [500.0, 0.0, 280.0]   # starbase + [  0, 0, +180]
 starbase_patrol_west  = [320.0, 0.0, 100.0]   # starbase + [-180, 0,    0]
 
+# Patrol anchors for enemy ship [[behaviour.doctrine]] routes. These must match
+# the `directive_anchors` referenced in the entity TOMLs so that low-LOD ships
+# have a resolvable Patrol route to follow inbound toward the starbase area.
+# (The high-LOD Destroy directive takes over once the player is within each
+# ship's sensor range.)
+#
+# Pirate raider (destroyer) patrol circuit: approach from north, east, south.
+patrol_alpha       = [850.0, 0.0, -400.0]   # north-east approach
+patrol_beta        = [900.0, 0.0, 100.0]    # due east
+patrol_gamma       = [850.0, 0.0, 600.0]    # south-east approach
+# Harrow cruiser patrol circuit: two waypoints between the outer belt and
+# starbase.
+ironveil_patrol_a  = [750.0, 0.0, -100.0]   # ring-outer to mid
+ironveil_patrol_b  = [600.0, 0.0, 200.0]    # mid to starbase vicinity
+# Harrow battleship patrol circuit: two waypoints on the east approach.
+warhawk_patrol_a   = [1100.0, 0.0, -50.0]   # far east
+warhawk_patrol_b   = [700.0, 0.0, 50.0]     # mid east
+
 # ── Static map entities ───────────────────────────────────────────────────────
 
 # Star at world origin. Inner asteroid field rings the star at r=200..300.

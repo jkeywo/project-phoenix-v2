@@ -852,6 +852,7 @@ fn simulate_low_lod_ships(
             &mut ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&ObjectiveCursors>,
+            Option<&crate::entities::spawner::HelmConsoleSection>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -862,7 +863,17 @@ fn simulate_low_lod_ships(
         .map(|wc| wc.anchors.clone())
         .unwrap_or_default();
 
-    for (mut physics, blackboards, cursors) in &mut ships {
+    // Default speed fraction when the low-LOD path has a valid route but the
+    // helm config is absent (unusual — all shipped hulls carry one).
+    const LOW_LOD_SPEED_FRACTION: f32 = 0.4;
+    // Simple ramp rate so forward_speed doesn't snap from 0 to max in one tick.
+    const LOW_LOD_ACCEL_PER_SEC: f32 = 10.0;
+
+    for (mut physics, blackboards, cursors, helm_section) in &mut ships {
+        let max_speed = helm_section
+            .map(|h| h.0.max_speed)
+            .filter(|&s| s > 0.0)
+            .unwrap_or(20.0);
         let route = blackboards.and_then(active_waypoint_route);
 
         // Steer along the route only when we have a Patrol/Reach objective AND
@@ -892,6 +903,15 @@ fn simulate_low_lod_ships(
                 let dz = target_pos[2] - physics.z;
                 if dx * dx + dz * dz > f32::EPSILON {
                     physics.yaw = dx.atan2(-dz);
+                }
+                // Accelerate toward the target speed so a ship that spawned
+                // far from the player (and never had `integrate_ship_physics`
+                // running for it) actually moves. Without this a low-LOD ship
+                // stays stuck at forward_speed = 0 forever.
+                let target_speed = max_speed * LOW_LOD_SPEED_FRACTION;
+                if physics.forward_speed < target_speed {
+                    physics.forward_speed =
+                        (physics.forward_speed + LOW_LOD_ACCEL_PER_SEC * dt).min(target_speed);
                 }
                 physics.x += physics.forward_speed * physics.yaw.sin() * dt;
                 physics.z -= physics.forward_speed * physics.yaw.cos() * dt;

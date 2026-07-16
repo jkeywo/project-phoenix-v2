@@ -41,8 +41,18 @@ impl Plugin for NavigationPlugin {
 ///
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own waypoint.
+///
+/// # The Helm's goal, not a copy of it (issue #702)
+///
+/// This is the one navigation goal on the ship. The AI Helm reads it directly
+/// rather than keeping a private `AiMemory.nav_goal` copy laundered through a
+/// coordination message — one position, no split brain. Humans
+/// (`SetNavigationWaypoint`) and `operate_navigation_ai` write it symmetrically.
 #[derive(Component, Default, Clone, Debug, PartialEq)]
-pub struct NavigationWaypoint(pub Option<WaypointMode>);
+pub struct NavigationWaypoint {
+    mode: Option<WaypointMode>,
+    generation: u64,
+}
 
 /// Storage variant of the navigation waypoint.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,11 +70,97 @@ pub enum WaypointMode {
     },
 }
 
+/// Whether two modes name the *same* waypoint — the identity the `generation`
+/// counts, as distinct from structural equality.
+///
+/// A `Free` waypoint is its position. An `Anchored` waypoint is its parent
+/// entity: `last_x`/`last_z` are a cache of that entity's transform, refreshed
+/// every tick by [`refresh_anchored_waypoint`], so comparing them would make a
+/// waypoint anchored to a *moving* ship count as brand new on every tick it
+/// moved — re-incurring the Channel-3 lag forever and never letting the Helm
+/// follow it.
+fn same_waypoint(a: &WaypointMode, b: &WaypointMode) -> bool {
+    match (a, b) {
+        (WaypointMode::Free { x: ax, z: az }, WaypointMode::Free { x: bx, z: bz }) => {
+            ax == bx && az == bz
+        }
+        (
+            WaypointMode::Anchored {
+                source_uuid: a_uuid,
+                ..
+            },
+            WaypointMode::Anchored {
+                source_uuid: b_uuid,
+                ..
+            },
+        ) => a_uuid == b_uuid,
+        _ => false,
+    }
+}
+
 impl NavigationWaypoint {
+    /// A waypoint already set to `mode` (generation 1). Test/spawn convenience.
+    pub fn new(mode: WaypointMode) -> Self {
+        let mut waypoint = Self::default();
+        waypoint.set(mode);
+        waypoint
+    }
+
+    /// The current waypoint, or `None` when none is set.
+    pub fn mode(&self) -> Option<&WaypointMode> {
+        self.mode.as_ref()
+    }
+
+    /// Monotonic id of the *current* waypoint (issue #702).
+    ///
+    /// Bumped by [`set`](Self::set) and [`clear`](Self::clear) whenever they
+    /// actually change which waypoint is named. This is what carries the
+    /// Channel-3 Navigation→Helm lag now that `AiMemory.nav_goal` is gone:
+    /// `CoordinationPayload::NavigateTo` carries a generation rather than a
+    /// position, `process_coordination_lag` latches it into
+    /// `HelmWaypointClearance` when the message comes due, and the AI Helm
+    /// follows the waypoint only while `clearance == generation`. Every *new*
+    /// waypoint therefore re-incurs the lag — which a bare "has been cleared"
+    /// bool would not: that would delay only the first.
+    ///
+    /// A `u64` counter rather than a timestamp because PRD #620 (P2P lockstep)
+    /// needs this to be deterministic across peers.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Set the waypoint, bumping [`generation`](Self::generation) if this names
+    /// a different waypoint than the current one.
+    ///
+    /// Re-setting the same waypoint is a no-op: it neither bumps the generation
+    /// (which would re-incur the Channel-3 lag on a Helm already following it)
+    /// nor marks the component changed. `operate_navigation_ai` re-sets its
+    /// waypoint every tick, so this idempotence is load-bearing rather than an
+    /// optimisation.
+    pub fn set(&mut self, mode: WaypointMode) {
+        match &mut self.mode {
+            // Same waypoint: refresh the anchor cache in place, no bump.
+            Some(current) if same_waypoint(current, &mode) => *current = mode,
+            _ => {
+                self.mode = Some(mode);
+                self.generation = self.generation.wrapping_add(1);
+            }
+        }
+    }
+
+    /// Clear the waypoint, bumping [`generation`](Self::generation) if one was
+    /// set. Clearing an already-clear waypoint is a no-op — see [`set`](Self::set).
+    pub fn clear(&mut self) {
+        if self.mode.is_some() {
+            self.mode = None;
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
     /// Returns the broadcast-shaped snapshot for the current waypoint, or
     /// `None` if no waypoint is set.
     pub fn snapshot(&self) -> Option<WaypointSnapshot> {
-        match &self.0 {
+        match &self.mode {
             None => None,
             Some(WaypointMode::Free { x, z }) => Some(WaypointSnapshot {
                 x: *x,
@@ -96,10 +192,10 @@ fn handle_navigation_waypoint(
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
-                    waypoint.0 = Some(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+                    waypoint.set(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
                 }
                 SystemControlPayload::ClearNavigationWaypoint => {
-                    waypoint.0 = None;
+                    waypoint.clear();
                 }
                 _ => {}
             }
@@ -134,7 +230,7 @@ fn refresh_anchored_waypoint(
             source_uuid,
             last_x,
             last_z,
-        }) = waypoint.0.as_mut()
+        }) = waypoint.mode.as_mut()
         else {
             continue;
         };
@@ -142,6 +238,11 @@ fn refresh_anchored_waypoint(
         let mut found = false;
         for (uuid, transform) in entity_q.iter() {
             if uuid.0 == *source_uuid {
+                // Tracking the anchor is not a *new* waypoint: it is the same
+                // waypoint, whose parent moved. Mutated in place without
+                // bumping the generation, or a waypoint anchored to a moving
+                // ship would re-incur the Channel-3 lag every tick and the AI
+                // Helm would never follow it (issue #702).
                 *last_x = transform.translation.x;
                 *last_z = transform.translation.z;
                 found = true;
@@ -150,8 +251,9 @@ fn refresh_anchored_waypoint(
         }
 
         if !found {
-            // Parent entity has despawned (or never existed). Auto-clear.
-            waypoint.0 = None;
+            // Parent entity has despawned (or never existed). Auto-clear —
+            // a real change of waypoint, so this one does bump the generation.
+            waypoint.clear();
         }
     }
 }
@@ -193,6 +295,11 @@ fn publish_navigation_blackboard(
 /// world location using a nav-range-filtered entity view, sets the ship's
 /// `NavigationWaypoint` (AI write path), and emits a `NavigateTo` coordination
 /// message to Helm.
+///
+/// `NavigateTo` carries the waypoint's `generation`, not its position (issue
+/// #702): the waypoint itself is the goal, and the message only tells the Helm
+/// *which* waypoint it is now cleared to follow. See
+/// [`NavigationWaypoint::generation`].
 pub fn operate_navigation_ai(
     mut ships: Query<(
         Entity,
@@ -201,6 +308,7 @@ pub fn operate_navigation_ai(
         &mut NavigationWaypoint,
         &crate::ship_state::ShipPhysics,
         Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::ai_plugin::ObjectiveCursors>,
     )>,
     entities: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
@@ -226,7 +334,7 @@ pub fn operate_navigation_ai(
         .map(|c| c.0.nav_chart_range)
         .unwrap_or(0.0);
 
-    for (entity, sources, blackboards, mut waypoint, ship_physics, _self_uuid_opt) in
+    for (entity, sources, blackboards, mut waypoint, ship_physics, _self_uuid_opt, cursors) in
         ships.iter_mut()
     {
         let policy = sources
@@ -256,7 +364,7 @@ pub fn operate_navigation_ai(
             });
 
         let Some(top_obj) = top else {
-            waypoint.0 = None;
+            waypoint.clear();
             continue;
         };
 
@@ -275,99 +383,92 @@ pub fn operate_navigation_ai(
             all_entities.clone()
         };
 
-        match &top_obj.directive {
-            crate::messages::AiDirective::Destroy { target } => {
-                if target.is_empty() {
-                    waypoint.0 = None;
-                    continue;
-                }
-                let found = nav_filtered.iter().find(|(uuid, _)| uuid == target);
-
-                if let Some((_, pos)) = found {
-                    let x = pos[0];
-                    let z = pos[2];
-                    waypoint.0 = Some(WaypointMode::Anchored {
-                        source_uuid: target.clone(),
-                        last_x: x,
-                        last_z: z,
-                    });
-                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
-                        source_entity: entity,
-                        sender_origin: crate::ship::control_source::ControlSource::Ai,
-                        target: crate::system_registry::helm_system_id(),
-                        payload: crate::messages::CoordinationPayload::NavigateTo {
-                            x,
-                            z,
-                            label: top_obj.snapshot.text.clone(),
-                        },
-                        sender_label: "Navigation".into(),
-                    });
-                } else {
-                    waypoint.0 = None;
-                }
-            }
-            crate::messages::AiDirective::Reach { anchor } => {
-                if anchor.is_empty() {
-                    waypoint.0 = None;
-                    continue;
-                }
-                let pos = world_config
+        // Resolve the directive to the waypoint Navigation wants the Helm to
+        // travel to, or `None` when it names nowhere reachable.
+        let resolved: Option<WaypointMode> = match &top_obj.directive {
+            crate::messages::AiDirective::Destroy { target } => (!target.is_empty())
+                .then(|| nav_filtered.iter().find(|(uuid, _)| uuid == target))
+                .flatten()
+                .map(|(_, pos)| WaypointMode::Anchored {
+                    source_uuid: target.clone(),
+                    last_x: pos[0],
+                    last_z: pos[2],
+                }),
+            crate::messages::AiDirective::Reach { anchor } => (!anchor.is_empty())
+                .then(|| anchor_pos(&world_config, anchor))
+                .flatten()
+                .map(|pos| WaypointMode::Free {
+                    x: pos[0],
+                    z: pos[2],
+                }),
+            crate::messages::AiDirective::Retreat { anchor } => (!anchor.is_empty())
+                .then(|| anchor_pos(&world_config, anchor))
+                .flatten()
+                .map(|pos| WaypointMode::Free {
+                    x: pos[0],
+                    z: pos[2],
+                }),
+            crate::messages::AiDirective::Patrol { anchors, loop_path } => {
+                // Resolve from the objective's *active cursor target*, not
+                // `anchors[0]` (issue #702). This system was cursor-blind: it
+                // parked the waypoint on the first anchor of the route and left
+                // it there for the whole patrol, so Navigation kept telling the
+                // Helm to fly to a waypoint the ship had already rounded laps
+                // ago. The cursor is the objective's own record of where it is
+                // on its route — the same one `helm_patrol` steers from and
+                // `advance_objective_cursors` advances — so reading it is what
+                // makes Navigation and Helm agree about which waypoint is
+                // current.
+                let index = cursors
+                    .and_then(|c| {
+                        c.0.iter()
+                            .find(|cursor| cursor.objective_id == top_obj.id)
+                            .map(|cursor| cursor.index())
+                    })
+                    .unwrap_or(0);
+                let world_anchors = world_config
                     .as_ref()
-                    .and_then(|wc| wc.anchors.get(anchor.as_str()).copied());
+                    .map(|wc| wc.anchors.clone())
+                    .unwrap_or_default();
+                crate::ai::patrol_cursor::cursor_target(index, anchors, *loop_path, &world_anchors)
+                    .map(|pos| WaypointMode::Free {
+                        x: pos[0],
+                        z: pos[2],
+                    })
+            }
+            _ => None,
+        };
 
-                if let Some(pos) = pos {
-                    let x = pos[0];
-                    let z = pos[2];
-                    waypoint.0 = Some(WaypointMode::Free { x, z });
-                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
-                        source_entity: entity,
-                        sender_origin: crate::ship::control_source::ControlSource::Ai,
-                        target: crate::system_registry::helm_system_id(),
-                        payload: crate::messages::CoordinationPayload::NavigateTo {
-                            x,
-                            z,
-                            label: top_obj.snapshot.text.clone(),
-                        },
-                        sender_label: "Navigation".into(),
-                    });
-                } else {
-                    waypoint.0 = None;
-                }
-            }
-            crate::messages::AiDirective::Patrol { anchors, .. } => {
-                if anchors.is_empty() {
-                    waypoint.0 = None;
-                    continue;
-                }
-                let anchor_name = &anchors[0];
-                let pos = world_config
-                    .as_ref()
-                    .and_then(|wc| wc.anchors.get(anchor_name.as_str()).copied());
+        let Some(mode) = resolved else {
+            waypoint.clear();
+            continue;
+        };
 
-                if let Some(pos) = pos {
-                    let x = pos[0];
-                    let z = pos[2];
-                    waypoint.0 = Some(WaypointMode::Free { x, z });
-                    coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
-                        source_entity: entity,
-                        sender_origin: crate::ship::control_source::ControlSource::Ai,
-                        target: crate::system_registry::helm_system_id(),
-                        payload: crate::messages::CoordinationPayload::NavigateTo {
-                            x,
-                            z,
-                            label: top_obj.snapshot.text.clone(),
-                        },
-                        sender_label: "Navigation".into(),
-                    });
-                } else {
-                    waypoint.0 = None;
-                }
-            }
-            _ => {
-                waypoint.0 = None;
-            }
-        }
+        // `set` is idempotent for an unchanged waypoint, so re-running this
+        // every tick does not re-bump the generation and re-incur the lag on a
+        // Helm already following it.
+        waypoint.set(mode);
+        coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
+            source_entity: entity,
+            sender_origin: crate::ship::control_source::ControlSource::Ai,
+            target: crate::system_registry::helm_system_id(),
+            payload: crate::messages::CoordinationPayload::NavigateTo {
+                generation: waypoint.generation(),
+                label: top_obj.snapshot.text.clone(),
+            },
+            sender_label: "Navigation".into(),
+        });
     }
+}
+
+/// World position of a named anchor, if the world config declares one.
+fn anchor_pos(
+    world_config: &Option<Res<crate::world::config::WorldConfig>>,
+    anchor: &str,
+) -> Option<[f32; 3]> {
+    world_config
+        .as_ref()
+        .and_then(|wc| wc.anchors.get(anchor).copied())
 }
 
 #[cfg(test)]
@@ -457,7 +558,17 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&NavigationWaypoint, With<crate::server_app::LocalShip>>();
-        q.single(app.world()).ok().and_then(|w| w.0.clone())
+        q.single(app.world()).ok().and_then(|w| w.mode().cloned())
+    }
+
+    /// The LocalShip waypoint's current generation (issue #702).
+    fn nav_waypoint_generation(app: &mut App) -> u64 {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&NavigationWaypoint, With<crate::server_app::LocalShip>>();
+        q.single(app.world())
+            .expect("LocalShip must carry a NavigationWaypoint")
+            .generation()
     }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
@@ -1162,11 +1273,18 @@ mod tests {
             )
         });
         assert!(nav_to.is_some(), "expected NavigateTo coordination event");
-        if let Some(crate::messages::CoordinationPayload::NavigateTo { x, z, label }) =
+        if let Some(crate::messages::CoordinationPayload::NavigateTo { generation, label }) =
             nav_to.map(|c| &c.payload)
         {
-            assert!((*x - 300.0).abs() < 0.01);
-            assert!((*z - (-100.0)).abs() < 0.01);
+            // The message names *which* waypoint the Helm is cleared for; the
+            // position lives on the waypoint itself (asserted above). Post-#702
+            // no coordinates travel on the wire at all — that duplication was
+            // the `nav_goal` split brain.
+            assert_eq!(
+                *generation,
+                nav_waypoint_generation(&mut app),
+                "NavigateTo must carry the current waypoint's generation, or the                  Helm's clearance can never match and it will never fly it"
+            );
             assert_eq!(label, "Reach base");
         }
     }
@@ -1209,6 +1327,91 @@ mod tests {
         assert_eq!(wp, Some(WaypointMode::Free { x: 200.0, z: 50.0 }));
     }
 
+    /// Navigation resolves a Patrol from the objective's **active cursor
+    /// target**, not `anchors[0]` (issue #702).
+    ///
+    /// This system was cursor-blind: it parked the waypoint on the first anchor
+    /// of the route and left it there for the whole patrol, so once the ship had
+    /// rounded its first waypoint Navigation was still telling the Helm to fly
+    /// to a leg it had finished laps ago. The cursor is the objective's own
+    /// record of where it is on its route — the same one `helm_patrol` steers
+    /// from and `advance_objective_cursors` advances — so reading it is what
+    /// makes the two consoles agree.
+    ///
+    /// The route below needs two distinct anchors to tell the two behaviours
+    /// apart: with a one-anchor route (as
+    /// `operate_navigation_ai_patrol_sets_free_waypoint` uses) index 0 and the
+    /// cursor always agree, and a cursor-blind implementation passes.
+    #[test]
+    fn operate_navigation_ai_patrol_follows_the_objective_cursor() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors.insert("leg_a".into(), [100.0, 0.0, 0.0]);
+        wc.anchors.insert("leg_b".into(), [900.0, 0.0, -400.0]);
+        app.world_mut().insert_resource(wc);
+
+        inject_viewscreen_objective(
+            &mut app,
+            vec![crate::messages::ScoredObjective {
+                id: "patrol-test".into(),
+                score: 60.0,
+                directive: crate::messages::AiDirective::Patrol {
+                    anchors: vec!["leg_a".into(), "leg_b".into()],
+                    loop_path: true,
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "patrol-test".into(),
+                    text: "Patrol area".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+        );
+
+        // The ship has already rounded leg_a; its cursor names leg_b.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip");
+        let mut cursor = crate::ai::patrol_cursor::PatrolCursor::new("patrol-test");
+        crate::ai::patrol_cursor::advance_cursor(
+            &mut cursor,
+            &["leg_a".to_string(), "leg_b".to_string()],
+            true,
+            [100.0, 0.0, 0.0], // sitting on leg_a
+            &app.world()
+                .resource::<crate::world::config::WorldConfig>()
+                .anchors
+                .clone(),
+            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
+        );
+        assert_eq!(cursor.index(), 1, "precondition: cursor must name leg_b");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ai_plugin::ObjectiveCursors(vec![cursor]));
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Free {
+                x: 900.0,
+                z: -400.0
+            }),
+            "Navigation must place the waypoint on the cursor's current leg (leg_b), \
+             not on the route's first anchor (leg_a) — a cursor-blind Navigation \
+             keeps ordering the Helm back to a leg it has already flown"
+        );
+    }
+
     #[test]
     fn operate_navigation_ai_no_objective_clears_waypoint() {
         let mut app = test_app();
@@ -1221,7 +1424,7 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut NavigationWaypoint, With<crate::server_app::LocalShip>>();
             if let Ok(mut wp) = q.single_mut(app.world_mut()) {
-                wp.0 = Some(WaypointMode::Free { x: 500.0, z: 500.0 });
+                wp.set(WaypointMode::Free { x: 500.0, z: 500.0 });
             }
         }
         assert!(

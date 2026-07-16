@@ -2146,7 +2146,16 @@ fn spawn_game_start_entities(
                     yaw: initial_yaw,
                     ..Default::default()
                 })
-                .insert(crate::ai_plugin::ShipAiMemory::default())
+                // Channel-3 Navigation→Helm clearance latch (issue #702).
+                .insert(crate::ship_plugin::HelmWaypointClearance::default())
+                // Per-objective route cursors. The player ship was missing
+                // these — `entities/spawner.rs` inserted them for NPCs and this
+                // path did not — which silently disabled AI patrol on the
+                // player ship whenever an unmanned Helm backfilled to AI: with
+                // no cursor component, `helm_patrol` had no route position to
+                // steer from and `advance_objective_cursors` had nothing to
+                // advance (issue #702).
+                .insert(crate::ai_plugin::ObjectiveCursors::default())
                 .insert(crate::weapons_plugin::WeaponsTarget::default())
                 .insert(crate::weapons_plugin::ActiveBeam::default())
                 .insert(crate::weapons_plugin::PhaserCooldown::default())

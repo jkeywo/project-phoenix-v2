@@ -1197,8 +1197,19 @@ pub enum CoordinationPayload {
         /// Current allocated level (what the system is actually getting).
         allocated_level: u8,
     },
-    /// Navigation gives Helm a long-range steer-to position (issue #681).
-    NavigateTo { x: f32, z: f32, label: String },
+    /// Navigation clears Helm to follow the ship's current `NavigationWaypoint`
+    /// (issues #681, #702).
+    ///
+    /// Carries the waypoint's `generation`, not a position. The waypoint is the
+    /// goal and lives on the ship as one per-entity component that both
+    /// consoles read; duplicating its coordinates onto the wire is what created
+    /// the `AiMemory.nav_goal` split brain this replaced. All this message does
+    /// is say *which* waypoint the Helm is now cleared to fly to, which — once
+    /// it has survived the Channel-3 delivery lag — is the whole of the lag's
+    /// job. See [`NavigationWaypoint::generation`].
+    ///
+    /// [`NavigationWaypoint::generation`]: crate::navigation_plugin::NavigationWaypoint::generation
+    NavigateTo { generation: u64, label: String },
     /// A system has crossed to a worse damage tier and needs repair (issue #682).
     RepairRequest {
         station_id: String,

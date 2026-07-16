@@ -242,7 +242,7 @@ pub(crate) fn handle_respond_to_message(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<crate::ai_plugin::AiControllerComponent>,

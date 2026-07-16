@@ -1013,15 +1013,23 @@ mod tests {
     }
 
     /// `CoordinationPayload::NavigateTo` round-trip, embedded in both
-    /// directions of the channel-3 bus (issue #681 — Navigation tells Helm
-    /// to steer toward a long-range objective).
+    /// directions of the channel-3 bus (issue #681 — Navigation clears Helm to
+    /// follow the ship's waypoint).
+    ///
+    /// Post-#702 the payload carries the waypoint's `generation` rather than
+    /// its `{x, z}`: the waypoint itself is the shared goal, and this message
+    /// only names which one the Helm is cleared for. The generation is a `u64`
+    /// (not a timestamp) for PRD #620 lockstep determinism, so a value beyond
+    /// f64's exact-integer range is used here to pin that it survives the JSON
+    /// codec without precision loss — the failure mode a naive `f32`/`f64`
+    /// generation would have.
     #[test]
     fn navigate_to_coordination_payload_round_trips() {
+        let generation = u64::MAX - 1;
         let send_msg = ClientMessage::SendCoordination {
             target: crate::system_registry::helm_system_id(),
             payload: CoordinationPayload::NavigateTo {
-                x: 1200.0,
-                z: -800.0,
+                generation,
                 label: "Hostile base".into(),
             },
         };
@@ -1031,8 +1039,7 @@ mod tests {
         let popup_msg = ServerMessage::CoordinationPopup {
             target: crate::system_registry::helm_system_id(),
             payload: CoordinationPayload::NavigateTo {
-                x: 1200.0,
-                z: -800.0,
+                generation,
                 label: "Hostile base".into(),
             },
             sender_label: "Navigation".into(),

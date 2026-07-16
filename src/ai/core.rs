@@ -1,8 +1,10 @@
 /// Pure AI module — no Bevy imports.
 ///
 /// Contains navigation utilities (`steer_toward`, `avoidance_steering`),
-/// per-system operate functions (`operate_helm`, `operate_weapons`),
-/// the `AiMemory` private-reasoning state, and the `CaptainAi` helper.
+/// per-system operate functions (`operate_helm`, `operate_lateral_thrust`),
+/// and the `CaptainAi` helper. The operate functions are pure: issue #702
+/// deleted the `AiMemory` private-reasoning state they used to mutate, so all
+/// per-ship AI state now lives in ECS components.
 ///
 /// The old FSM (`AiState`/`TransitionConfig`/`Blackboard`/`tick()`) was
 /// dissolved in issue #572; motor behaviour now lives in the operate functions
@@ -23,8 +25,8 @@ pub const AVOIDANCE_BUFFER: f32 = 5.0;
 /// Look-ahead horizon (seconds) for predictive collision avoidance.
 pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
 /// Speed fraction [0, 1] used for the Channel-3 Navigation→Helm handoff
-/// (nav_goal) fallthrough when the entity has no `[behaviour]` section to
-/// author one. Parse-time default only — see
+/// (`NavigationWaypoint`) fallthrough when the entity has no `[behaviour]`
+/// section to author one. Parse-time default only — see
 /// [`crate::entity_config::BehaviourConfig::nav_handoff_speed`], whose serde
 /// default reads this constant so the two cannot drift apart.
 pub const NAV_HANDOFF_SPEED: f32 = 0.6;
@@ -114,32 +116,6 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
     } else {
         ImpulseDecision::NoChange
     }
-}
-
-// ── AiMemory ──────────────────────────────────────────────────────────────────
-
-/// Private per-entity reasoning state that persists across ticks.
-///
-/// Replaces the old 5-slot `Blackboard`; contains only state that cannot be
-/// derived from the published blackboards or world registry (chosen target,
-/// last attacker, home position, waypoint cursor). Combat timers live on the
-/// viewscreen blackboard (issue #572).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct AiMemory {
-    /// UUID of the entity currently selected as the attack/pursuit target.
-    pub target: Option<Uuid>,
-    /// UUID of the last entity to damage this AI entity.
-    pub last_attacker: Option<Uuid>,
-    /// World-space spawn position — used as the fallback retreat anchor.
-    pub home_position: [f32; 3],
-    /// Current index into the active patrol waypoint list.
-    pub waypoint_index: usize,
-    /// Channel-3 Navigation-to-Helm handoff steer target (issue #681).
-    /// Set when Navigation AI sends `NavigateTo`; consumed by `operate_helm`
-    /// as a fallthrough when no local Helm-relevant objective resolves.
-    /// Cleared on arrival (`WAYPOINT_ARRIVAL_RADIUS`) or when a local
-    /// objective (Destroy / Patrol / Reach) resolves to a non-None result.
-    pub nav_goal: Option<[f32; 2]>,
 }
 
 // ── WorldView ─────────────────────────────────────────────────────────────────
@@ -403,20 +379,48 @@ fn parse_doctrine_directive(
 /// Per-system operate function for the Helm.
 ///
 /// Reads the scored objective pool, selects the top-scoring directive the Helm
-/// can serve (Patrol, Destroy, Reach), and returns `(thrust, steering)`.
+/// can serve (Destroy, Patrol, Reach, Retreat), and returns `(thrust, steering)`.
 ///
-/// Mutates `memory` to track the current waypoint index and selected target.
+/// # Pure (issue #702)
+///
+/// A pure function of its arguments: it owns no state and mutates nothing.
+/// Every goal it serves is read from a surface some other console owns —
+/// Tactical's `weapons_target`, Navigation's `nav_waypoint`, the objective's
+/// own `cursors`. **Objectives own goals; the Helm only derives controls from
+/// them.**
+///
+/// That is what dissolved the #701 "first per-axis system to run owns the
+/// commit" rule. The rule existed solely because this function mutated a shared
+/// `AiMemory`, which made calling it twice in a tick (once per axis) unsafe —
+/// two commits double-advanced the patrol waypoint, zero commits froze it.
+/// Purity removes the hazard rather than guarding it: `ai_helm_thrust` and
+/// `ai_helm_steering` can both call this, in any order, any number of times,
+/// and each keeps its own axis from an identical answer.
+///
+/// Arguments that are *not* pure inputs must not be added back. In particular
+/// this function does not take a `FactionRegistry`: it has nobody to be hostile
+/// to, because it no longer acquires targets (see `helm_destroy`).
+///
+/// - `cursors` — this ship's `ObjectiveCursors`, read-only. `cursor_target()`
+///   resolves the active waypoint; `advance_objective_cursors`
+///   (`SimSet::Modifiers`) is the sole writer.
+/// - `weapons_target` — the ship's `WeaponsTarget`, i.e. whoever Tactical
+///   (human or AI) has locked.
+/// - `nav_waypoint` — Navigation's waypoint, `Some` only once the caller has
+///   confirmed the Channel-3 clearance matches its generation.
+#[allow(clippy::too_many_arguments)]
 pub fn operate_helm(
-    memory: &mut AiMemory,
     world_view: &WorldView,
     scored_pool: &[crate::messages::ScoredObjective],
     doctrine: &[crate::entity_config::DoctrineObjective],
     anchors: &std::collections::HashMap<String, [f32; 3]>,
+    cursors: &[crate::ai::patrol_cursor::PatrolCursor],
+    weapons_target: Option<Uuid>,
+    nav_waypoint: Option<[f32; 2]>,
     waypoint_arrival_radius: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
     forward_speed: f32,
-    faction_registry: &crate::faction::FactionRegistry,
     nav_handoff_speed: f32,
 ) -> (f32, f32) {
     use crate::messages::{AiDirective, SystemAffinity};
@@ -437,18 +441,19 @@ pub fn operate_helm(
     {
         let cfg = doctrine.iter().find(|d| d.id == objective.id);
         let result = match &objective.directive {
-            AiDirective::Destroy { target } => {
+            AiDirective::Destroy { .. } => {
                 let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.8);
                 let maintain_range = cfg.map(|d| d.maintain_range).unwrap_or(25.0);
+                // The directive's own `target` is deliberately ignored here: it
+                // is Tactical's input, not the Helm's. `ai_target_selection`
+                // resolves it (tier 1) and publishes the result as
+                // `WeaponsTarget`, which is what we pursue — see `helm_destroy`.
                 helm_destroy(
-                    memory,
                     world_view,
-                    anchors,
                     avoidance_buffer,
                     avoidance_look_ahead_secs,
                     forward_speed,
-                    faction_registry,
-                    Some(target.as_str()),
+                    weapons_target,
                     target_speed,
                     maintain_range,
                 )
@@ -458,11 +463,20 @@ pub fn operate_helm(
                 loop_path,
             } => {
                 let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.5);
+                // The cursor for *this* objective. A ship with no cursor entry
+                // yet (the evaluator inserts it at the end of the tick) steers
+                // toward the first waypoint in the meantime — the same
+                // treatment `simulate_low_lod_ships` gives the gap.
+                let index = cursors
+                    .iter()
+                    .find(|c| c.objective_id == objective.id)
+                    .map(|c| c.index())
+                    .unwrap_or(0);
                 helm_patrol(
-                    memory,
                     world_view,
                     waypoints,
                     *loop_path,
+                    index,
                     waypoint_arrival_radius,
                     avoidance_buffer,
                     avoidance_look_ahead_secs,
@@ -475,7 +489,6 @@ pub fn operate_helm(
                 let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
                 anchors.get(anchor.as_str()).and_then(|&pos| {
                     helm_navigate_to(
-                        memory,
                         world_view,
                         pos,
                         waypoint_arrival_radius,
@@ -488,45 +501,54 @@ pub fn operate_helm(
             }
             AiDirective::Retreat { anchor } => {
                 let target_speed = cfg.map(|d| d.target_speed).unwrap_or(0.6);
-                // Resolve the retreat anchor by name, falling back to the ship's
-                // home/spawn position when the anchor is empty or unknown. The
-                // synthetic hull-triggered Retreat carries an empty anchor
-                // (see `aggregate_doctrine_blackboards`), so this fallback is
-                // what makes it steer back toward spawn. Retreat therefore
-                // always resolves, so it returns `Some(..)` rather than falling
-                // through to lower-priority directives.
-                let pos = anchors
-                    .get(anchor.as_str())
-                    .copied()
-                    .unwrap_or(memory.home_position);
-                helm_navigate_to(
-                    memory,
-                    world_view,
-                    pos,
-                    waypoint_arrival_radius,
-                    avoidance_buffer,
-                    avoidance_look_ahead_secs,
-                    forward_speed,
-                    target_speed,
-                )
+                // Retreat resolves its anchor by name and nothing else. An
+                // empty or unknown anchor returns `None` and falls through to
+                // the next directive, exactly as `Reach` does — a Retreat that
+                // names nowhere is a Retreat to nowhere.
+                //
+                // This arm used to fall back to `AiMemory.home_position` for the
+                // benefit of a *synthetic* hull-triggered Retreat that
+                // `aggregate_doctrine_blackboards` injected with an empty
+                // anchor. #702 deleted that injector: it was broken three ways
+                // (home_position was never seeded in production, so every
+                // shipped ship "retreated" to world origin; its 0..1 score could
+                // never outrank doctrine's tens; the anchor was empty only
+                // because the anchors map was out of scope). Retreat is now
+                // ordinary authored doctrine — `directive_kind = "Retreat"` with
+                // a real `directive_anchor`, a real `base_priority`, and a
+                // `hull_below` zero-gate — which a designer can tune per hull in
+                // TOML and which scores on the right scale.
+                anchors.get(anchor.as_str()).and_then(|&pos| {
+                    helm_navigate_to(
+                        world_view,
+                        pos,
+                        waypoint_arrival_radius,
+                        avoidance_buffer,
+                        avoidance_look_ahead_secs,
+                        forward_speed,
+                        target_speed,
+                    )
+                })
             }
             _ => None,
         };
         if let Some(result) = result {
-            // Local objective resolved — clear the nav_goal handoff so the
-            // ship doesn't blend two conflicting targets (issue #681).
-            memory.nav_goal = None;
             return result;
         }
     }
 
-    // Fall through to Channel-3 Navigation handoff (issue #681).
-    // When no Helm-relevant objective resolved and Navigation has given us a
-    // long-range steer target, navigate toward it. This lets a Navigation AI
-    // guide a short-range Helm toward an objective the Helm cannot yet see.
-    if let Some([nx, nz]) = memory.nav_goal {
+    // Fall through to the Channel-3 Navigation handoff (issues #681, #702).
+    // When no Helm-relevant objective resolved and Navigation has set a
+    // waypoint, travel to it. This lets a Navigation AI guide a short-range
+    // Helm toward an objective the Helm cannot yet see.
+    //
+    // `nav_waypoint` is `Some` only when the caller has confirmed this ship's
+    // `HelmWaypointClearance` matches the waypoint's `generation` — that is
+    // where the Channel-3 lag lives now. There is nothing to clear on arrival
+    // or staleness: the waypoint belongs to Navigation, and a Helm that
+    // resolved a local objective simply never consults it.
+    if let Some([nx, nz]) = nav_waypoint {
         if let Some(result) = helm_navigate_to(
-            memory,
             world_view,
             [nx, 0.0, nz],
             waypoint_arrival_radius,
@@ -535,39 +557,46 @@ pub fn operate_helm(
             forward_speed,
             nav_handoff_speed,
         ) {
-            if result == (0.0, 0.0) {
-                memory.nav_goal = None; // arrived
-            }
             return result;
         }
-        memory.nav_goal = None; // stale / invalid target
     }
 
     (0.0, 0.0)
 }
 
-/// Helm execute: pursue/attack using `memory.target` (or discover a new hostile).
+/// Helm execute: pursue the target Tactical has selected.
+///
+/// # The Helm does not acquire (issue #702)
+///
+/// `weapons_target` is the ship's `WeaponsTarget` — the one authoritative lock,
+/// written by whoever operates Tactical: a human via `SetTarget`, or
+/// `ai_target_selection`. The Helm reads that selection and closes on it; it
+/// never picks a target of its own.
+///
+/// This deleted a real bug rather than merely moving code. The Helm used to
+/// acquire independently (`resolve_destroy_target`: explicit → current →
+/// last_attacker → nearest hostile) against its *own* radar horizon, while
+/// `ai_target_selection` ran the identical four tiers against Tactical's — 187.5
+/// vs 75 on alliance hulls. Two selectors over two horizons could disagree, so a
+/// ship would close on A while shooting B. One selector, one surface, no
+/// divergence.
+///
+/// Returns `None` when the target is not in `world_view.entities`, i.e. Tactical
+/// has locked something this ship's *helm* radar cannot see — the caller then
+/// falls through to a lower-priority directive rather than flying blind at a
+/// bearing it cannot confirm.
 fn helm_destroy(
-    memory: &mut AiMemory,
     world_view: &WorldView,
-    _anchors: &std::collections::HashMap<String, [f32; 3]>,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
     forward_speed: f32,
-    faction_registry: &crate::faction::FactionRegistry,
-    directive_target: Option<&str>,
+    weapons_target: Option<Uuid>,
     target_speed: f32,
     maintain_range: f32,
 ) -> Option<(f32, f32)> {
-    // Validate / refresh target.
-    let target_uuid =
-        resolve_destroy_target(memory, world_view, faction_registry, directive_target)?;
-    memory.target = Some(target_uuid);
+    let target_uuid = weapons_target?;
 
-    let Some(target_entity) = world_view.entities.iter().find(|e| e.uuid == target_uuid) else {
-        memory.target = None;
-        return None;
-    };
+    let target_entity = world_view.entities.iter().find(|e| e.uuid == target_uuid)?;
 
     let pos = world_view.entity_pos;
     let target_pos = target_entity.position;
@@ -636,33 +665,6 @@ fn helm_destroy(
     Some((thrust, steering))
 }
 
-/// Resolve which target to attack: existing (if still visible) > last_attacker > nearest hostile.
-fn resolve_destroy_target(
-    memory: &AiMemory,
-    world_view: &WorldView,
-    faction_registry: &crate::faction::FactionRegistry,
-    directive_target: Option<&str>,
-) -> Option<Uuid> {
-    if let Some(target) = directive_target.filter(|t| !t.is_empty()) {
-        return resolve_objective_target(target, world_view);
-    }
-
-    // Prefer current target if still in world view.
-    if let Some(t) = memory.target {
-        if world_view.entities.iter().any(|e| e.uuid == t) {
-            return Some(t);
-        }
-    }
-    // Fall back to last attacker if visible.
-    if let Some(la) = memory.last_attacker {
-        if world_view.entities.iter().any(|e| e.uuid == la) {
-            return Some(la);
-        }
-    }
-    // Scan for nearest hostile.
-    find_nearest_hostile(world_view, faction_registry)
-}
-
 /// Resolve an authored objective target against the AI world view.
 ///
 /// The target may be the entity UUID string itself or the scenario/display name
@@ -680,14 +682,19 @@ pub fn resolve_objective_target(target: &str, world_view: &WorldView) -> Option<
 
 /// Find the nearest entity that is hostile to this AI's faction.
 ///
-/// The single definition of "who is the enemy, and which one is closest",
-/// shared by the helm path (`resolve_destroy_target`) and the weapons path
-/// (`ai_target_selection`'s nearest-hostile tier, issue #703). Both must agree
-/// — a helm that closes on one ship while weapons locks another is a bug — so
-/// neither may grow a second hostile scan.
+/// The single definition of "who is the enemy, and which one is closest". Its
+/// one caller is the weapons path — `ai_target_selection`'s nearest-hostile
+/// tier (issue #703).
+///
+/// The helm path was the second caller until #702 deleted its acquisition
+/// outright: the Helm now reads the `WeaponsTarget` that `ai_target_selection`
+/// writes instead of running its own tiers over its own radar horizon. That
+/// closed the divergence this function's "both must agree" note used to warn
+/// about — there is now one selector rather than two obliged to agree. Nothing
+/// on the helm path may grow a hostile scan back; that is the bug, not the fix.
 ///
 /// Distance is measured in the XZ plane (see [`dist_sq`]), matching the
-/// range checks both callers gate on.
+/// range checks the caller gates on.
 pub fn find_nearest_hostile(
     world_view: &WorldView,
     faction_registry: &crate::faction::FactionRegistry,
@@ -716,12 +723,28 @@ fn dist_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
     dx * dx + dz * dz
 }
 
-/// Helm execute: patrol waypoints in order, advancing when each is reached.
+/// Helm execute: steer toward the waypoint this objective's cursor names.
+///
+/// # Read-only (issue #702)
+///
+/// `index` comes from the ship's `ObjectiveCursors` entry for this objective and
+/// is never written here. `advance_objective_cursors` (`SimSet::Modifiers`) is
+/// the sole writer of every cursor, for every ship, at every LOD — which is what
+/// makes it impossible to advance a cursor twice in one tick. This function used
+/// to keep its own `AiMemory.waypoint_index`, a *second* high-LOD cursor that
+/// duplicated the low-LOD `ObjectiveCursors` one; the two are now one surface.
+///
+/// Advancement consequently lands one tick later than it did. That is benign:
+/// the arrival tick already returns zero steering (below), so the tick before
+/// the cursor moves is a tick the ship flies straight — exactly what it did
+/// when this function advanced the index itself and returned the same
+/// `(target_speed, 0.0)`.
+#[allow(clippy::too_many_arguments)]
 fn helm_patrol(
-    memory: &mut AiMemory,
     world_view: &WorldView,
     waypoints: &[String],
     loop_path: bool,
+    index: usize,
     waypoint_arrival_radius: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
@@ -729,36 +752,31 @@ fn helm_patrol(
     target_speed: f32,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
 ) -> Option<(f32, f32)> {
+    // No route at all — not a Patrol this Helm can serve. Fall through.
     if waypoints.is_empty() {
         return None;
     }
 
-    // Clamp index.
-    if memory.waypoint_index >= waypoints.len() {
-        if loop_path {
-            memory.waypoint_index = 0;
-        } else {
-            return Some((0.0, 0.0));
-        }
+    // Terminal stop: a non-looping route walked past its final waypoint. This
+    // is resolved idleness — hold station rather than falling through to a
+    // lower-priority directive.
+    if index >= waypoints.len() && !loop_path {
+        return Some((0.0, 0.0));
     }
 
-    let waypoint_name = &waypoints[memory.waypoint_index];
-    let &wp_pos = anchors.get(waypoint_name.as_str())?;
+    // `cursor_target` owns index resolution (wraparound for looping routes) and
+    // anchor lookup. `None` here means the current waypoint's anchor is unknown
+    // — fall through; the cursor evaluator skips past it this same tick.
+    let wp_pos = crate::ai::patrol_cursor::cursor_target(index, waypoints, loop_path, anchors)?;
 
     let pos = world_view.entity_pos;
     let dx = wp_pos[0] - pos[0];
     let dz = wp_pos[2] - pos[2];
     let dist = (dx * dx + dz * dz).sqrt();
 
-    // Arrived — advance waypoint.
+    // Arrived. Fly straight through; the cursor advances in `Modifiers` later
+    // this tick, and the next tick steers toward the new waypoint.
     if dist < waypoint_arrival_radius {
-        if memory.waypoint_index + 1 < waypoints.len() {
-            memory.waypoint_index += 1;
-        } else if loop_path {
-            memory.waypoint_index = 0;
-        } else {
-            return Some((0.0, 0.0));
-        }
         return Some((target_speed, 0.0));
     }
 
@@ -784,9 +802,9 @@ fn helm_patrol(
     Some((target_speed, steering))
 }
 
-/// Helm execute: navigate to a fixed position (for Reach directives).
+/// Helm execute: navigate to a fixed position (Reach / Retreat / the Channel-3
+/// Navigation handoff).
 fn helm_navigate_to(
-    _memory: &mut AiMemory,
     world_view: &WorldView,
     target_pos: [f32; 3],
     arrival_radius: f32,
@@ -834,52 +852,6 @@ fn helm_navigate_to(
         target_speed
     };
     Some((thrust, steering))
-}
-
-// ── operate_weapons ───────────────────────────────────────────────────────────
-
-/// Per-system operate function for Weapons.
-///
-/// Returns `(target_uuid, should_fire)` — the caller emits `SetTarget` and
-/// `FirePhaser` InboundMessages with the AI token as needed.
-///
-/// Selects the top-scoring Destroy directive (score > 0, Weapons relevance)
-/// and targets whoever `memory.target` points to (or falls back to
-/// `memory.last_attacker` when no current target is set).
-pub fn operate_weapons(
-    memory: &AiMemory,
-    world_view: &WorldView,
-    scored_pool: &[crate::messages::ScoredObjective],
-    faction_registry: &crate::faction::FactionRegistry,
-) -> (Option<Uuid>, bool) {
-    use crate::messages::SystemAffinity;
-
-    // Find top Destroy directive with Weapons relevance and positive score.
-    let top_destroy = scored_pool
-        .iter()
-        .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Weapons));
-    let Some(top_destroy) = top_destroy else {
-        return (None, false);
-    };
-    let directive_target = match &top_destroy.directive {
-        crate::messages::AiDirective::Destroy { target } => Some(target.as_str()),
-        _ => return (None, false),
-    };
-
-    // Resolve target: explicit directive target, or current target →
-    // last attacker → nearest hostile for standing "destroy hostiles" doctrine.
-    let target = resolve_destroy_target(memory, world_view, faction_registry, directive_target);
-
-    let Some(t) = target else {
-        return (None, false);
-    };
-
-    // Only fire when phaser is ready.
-    if !world_view.entity_phaser_ready {
-        return (Some(t), false);
-    }
-
-    (Some(t), true)
 }
 
 // ── CaptainAi ────────────────────────────────────────────────────────────────
@@ -1007,6 +979,11 @@ pub fn operate_lateral_thrust(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No `ObjectiveCursors` entries — the right input for every test that is
+    /// not about patrol routes. `helm_patrol` treats a missing cursor as index
+    /// 0, so this is "the ship is at the start of any route it has".
+    const NO_CURSORS: &[crate::ai::patrol_cursor::PatrolCursor] = &[];
 
     // ── steer_toward ──────────────────────────────────────────────────────
 
@@ -1186,32 +1163,6 @@ mod tests {
         );
     }
 
-    // ── AiMemory ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn ai_memory_default_has_no_target() {
-        let m = AiMemory::default();
-        assert!(m.target.is_none());
-    }
-
-    #[test]
-    fn ai_memory_default_has_no_last_attacker() {
-        let m = AiMemory::default();
-        assert!(m.last_attacker.is_none());
-    }
-
-    #[test]
-    fn ai_memory_default_home_is_origin() {
-        let m = AiMemory::default();
-        assert_eq!(m.home_position, [0.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn ai_memory_default_waypoint_index_is_zero() {
-        let m = AiMemory::default();
-        assert_eq!(m.waypoint_index, 0);
-    }
-
     // ── operate_helm patrol ───────────────────────────────────────────────
 
     fn patrol_pool() -> Vec<crate::messages::ScoredObjective> {
@@ -1248,103 +1199,13 @@ mod tests {
         }]
     }
 
-    fn empty_registry() -> crate::faction::FactionRegistry {
-        crate::faction::FactionRegistry::new()
-    }
-
-    fn anchors_with_alpha() -> std::collections::HashMap<String, [f32; 3]> {
-        let mut m = std::collections::HashMap::new();
-        m.insert("alpha".into(), [100.0, 0.0, 0.0]);
-        m
-    }
-
-    fn world_at_origin() -> WorldView {
-        WorldView {
-            entity_pos: [0.0, 0.0, 0.0],
-            entity_yaw: 0.0,
-            self_radius: 2.0,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn operate_helm_patrol_generates_nonzero_steering_toward_waypoint() {
-        let mut memory = AiMemory::default();
-        let world = world_at_origin();
-        let pool = patrol_pool();
-        let doctrine = patrol_doctrine();
-        let anchors = anchors_with_alpha();
-
-        let (thrust, _steering) = operate_helm(
-            &mut memory,
-            &world,
-            &pool,
-            &doctrine,
-            &anchors,
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-        assert!(thrust > 0.0, "should thrust toward waypoint");
-    }
-
-    #[test]
-    fn operate_helm_empty_pool_returns_zero() {
-        let mut memory = AiMemory::default();
-        let world = world_at_origin();
-        let (thrust, steering) = operate_helm(
-            &mut memory,
-            &world,
-            &[],
-            &[],
-            &std::collections::HashMap::new(),
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-        assert_eq!(thrust, 0.0);
-        assert_eq!(steering, 0.0);
-    }
-
-    #[test]
-    fn operate_helm_zeroed_pool_returns_zero() {
-        let mut memory = AiMemory::default();
-        let world = world_at_origin();
-        let mut pool = patrol_pool();
-        pool[0].score = 0.0; // zero-gated
-        let doctrine = patrol_doctrine();
-        let anchors = anchors_with_alpha();
-
-        let (thrust, steering) = operate_helm(
-            &mut memory,
-            &world,
-            &pool,
-            &doctrine,
-            &anchors,
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-        assert_eq!(thrust, 0.0, "zero-gated pool must produce no thrust");
-        assert_eq!(steering, 0.0);
-    }
-
-    #[test]
-    fn operate_helm_advances_waypoint_on_arrival() {
-        let mut memory = AiMemory::default();
-        let mut anchors = std::collections::HashMap::new();
-        anchors.insert("wp0".into(), [0.0, 0.0, 0.0]); // at origin = already arrived
-        anchors.insert("wp1".into(), [100.0, 0.0, 0.0]);
-
+    /// A two-waypoint, non-looping Patrol over `wp0` then `wp1`, with matching
+    /// doctrine (`target_speed` 0.5). The caller supplies the anchor positions,
+    /// so the same route can be posed as "arrived", "en route" or "terminal".
+    fn two_waypoint_patrol() -> (
+        Vec<crate::messages::ScoredObjective>,
+        Vec<crate::entity_config::DoctrineObjective>,
+    ) {
         let pool = vec![crate::messages::ScoredObjective {
             id: "patrol".into(),
             score: 20.0,
@@ -1372,24 +1233,245 @@ mod tests {
             target_speed: 0.5,
             ..Default::default()
         }];
+        (pool, doctrine)
+    }
 
+    /// A single Reach objective naming `anchor`, scored `score`.
+    fn reach_pool(anchor: &str, score: f32) -> Vec<crate::messages::ScoredObjective> {
+        vec![crate::messages::ScoredObjective {
+            id: "reach".into(),
+            score,
+            directive: crate::messages::AiDirective::Reach {
+                anchor: anchor.into(),
+            },
+            source: crate::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::messages::SystemAffinity::Helm],
+            snapshot: crate::messages::ObjectiveSnapshot {
+                id: "reach".into(),
+                text: "".into(),
+                mandatory: false,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
+                source: crate::messages::ObjectiveSource::Doctrine,
+            },
+        }]
+    }
+
+    fn anchors_with_alpha() -> std::collections::HashMap<String, [f32; 3]> {
+        let mut m = std::collections::HashMap::new();
+        m.insert("alpha".into(), [100.0, 0.0, 0.0]);
+        m
+    }
+
+    fn world_at_origin() -> WorldView {
+        WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn operate_helm_patrol_generates_nonzero_steering_toward_waypoint() {
         let world = world_at_origin();
-        operate_helm(
-            &mut memory,
+        let pool = patrol_pool();
+        let doctrine = patrol_doctrine();
+        let anchors = anchors_with_alpha();
+
+        let (thrust, _steering) = operate_helm(
             &world,
             &pool,
             &doctrine,
             &anchors,
+            NO_CURSORS,
+            None,
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
+            0.6,
+        );
+        assert!(thrust > 0.0, "should thrust toward waypoint");
+    }
+
+    #[test]
+    fn operate_helm_empty_pool_returns_zero() {
+        let world = world_at_origin();
+        let (thrust, steering) = operate_helm(
+            &world,
+            &[],
+            &[],
+            &std::collections::HashMap::new(),
+            NO_CURSORS,
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert_eq!(thrust, 0.0);
+        assert_eq!(steering, 0.0);
+    }
+
+    #[test]
+    fn operate_helm_zeroed_pool_returns_zero() {
+        let world = world_at_origin();
+        let mut pool = patrol_pool();
+        pool[0].score = 0.0; // zero-gated
+        let doctrine = patrol_doctrine();
+        let anchors = anchors_with_alpha();
+
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            NO_CURSORS,
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert_eq!(thrust, 0.0, "zero-gated pool must produce no thrust");
+        assert_eq!(steering, 0.0);
+    }
+
+    /// `helm_patrol` steers toward the waypoint the *cursor* names, not
+    /// blindly toward the route's first anchor (issue #702).
+    ///
+    /// This is the core of the `waypoint_index` migration. `operate_helm` used
+    /// to own a private `AiMemory.waypoint_index` and advance it itself, giving
+    /// the high-LOD helm a second cursor that could disagree with the
+    /// `ObjectiveCursors` the low-LOD path and the scenario triggers used.
+    /// There is now one cursor and the helm reads it.
+    #[test]
+    fn operate_helm_patrol_steers_to_the_cursors_waypoint() {
+        let mut anchors = std::collections::HashMap::new();
+        // wp0 is dead ahead (negative Z at yaw 0); wp1 is to starboard.
+        anchors.insert("wp0".into(), [0.0, 0.0, -100.0]);
+        anchors.insert("wp1".into(), [100.0, 0.0, 0.0]);
+        let (pool, doctrine) = two_waypoint_patrol();
+        let world = world_at_origin();
+
+        // A cursor sitting on index 1 must produce a turn to starboard.
+        let mut cursor = crate::ai::patrol_cursor::PatrolCursor::new("patrol");
+        crate::ai::patrol_cursor::advance_cursor(
+            &mut cursor,
+            &["wp0".to_string(), "wp1".to_string()],
+            false,
+            [0.0, 0.0, -100.0], // sitting on wp0 → the cursor advances to wp1
+            &anchors,
+            WAYPOINT_ARRIVAL_RADIUS,
+        );
+        assert_eq!(cursor.index(), 1, "precondition: cursor must be on wp1");
+
+        let (_thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            std::slice::from_ref(&cursor),
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert!(
+            steering > 0.0,
+            "the helm must steer toward the cursor's waypoint (wp1, to starboard),              not the route's first anchor (wp0, dead ahead, which would steer ~0);              got steering={steering}"
+        );
+    }
+
+    /// On the arrival tick the helm flies straight through rather than
+    /// advancing anything itself — `advance_objective_cursors`
+    /// (`SimSet::Modifiers`) owns advancement, and lands it later the same
+    /// tick. This is why moving the cursor out of `operate_helm` is benign:
+    /// the tick the cursor moves was already a zero-steering tick.
+    #[test]
+    fn operate_helm_patrol_flies_straight_through_on_arrival() {
+        let mut anchors = std::collections::HashMap::new();
+        anchors.insert("wp0".into(), [0.0, 0.0, 0.0]); // at origin = arrived
+        anchors.insert("wp1".into(), [100.0, 0.0, 0.0]);
+        let (pool, doctrine) = two_waypoint_patrol();
+        let world = world_at_origin();
+
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            NO_CURSORS,
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
             0.6,
         );
         assert_eq!(
-            memory.waypoint_index, 1,
-            "should advance past arrived waypoint"
+            (thrust, steering),
+            (0.5, 0.0),
+            "arrival tick must hold course at the doctrine's target_speed"
+        );
+    }
+
+    /// A non-looping route walked past its final waypoint is resolved
+    /// idleness — hold station rather than falling through to a lower-priority
+    /// directive.
+    #[test]
+    fn operate_helm_patrol_terminal_stop_holds_station() {
+        let mut anchors = std::collections::HashMap::new();
+        anchors.insert("wp0".into(), [0.0, 0.0, -100.0]);
+        anchors.insert("wp1".into(), [100.0, 0.0, 0.0]);
+        let (mut pool, doctrine) = two_waypoint_patrol();
+        // Add a resolvable lower-priority Reach; a terminal Patrol must not
+        // fall through to it.
+        pool.extend(reach_pool("wp1", 1.0));
+        let world = world_at_origin();
+
+        let mut cursor = crate::ai::patrol_cursor::PatrolCursor::new("patrol");
+        // Walk the cursor off the end of the non-looping route.
+        for pos in [[0.0, 0.0, -100.0], [100.0, 0.0, 0.0]] {
+            crate::ai::patrol_cursor::advance_cursor(
+                &mut cursor,
+                &["wp0".to_string(), "wp1".to_string()],
+                false,
+                pos,
+                &anchors,
+                WAYPOINT_ARRIVAL_RADIUS,
+            );
+        }
+        assert!(cursor.index() >= 2, "precondition: cursor must be terminal");
+
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &doctrine,
+            &anchors,
+            std::slice::from_ref(&cursor),
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert_eq!(
+            (thrust, steering),
+            (0.0, 0.0),
+            "a finished non-looping patrol holds station; it must not fall              through to the lower-priority Reach"
         );
     }
 
@@ -1452,22 +1534,22 @@ mod tests {
         // (Patrol) rather than leaving the ship idle.  Matches the
         // combat_test.toml scenario where wave objectives are added on the same
         // tick as the entities spawn, before the WorldSnapshot is rebuilt.
-        let mut memory = AiMemory::default();
         let world = world_at_origin(); // entities list is empty → wave_1 not found
         let anchors = anchors_with_alpha();
         let pool = destroy_then_patrol_pool(&anchors);
 
         let (thrust, _steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &[],
             &anchors,
+            NO_CURSORS,
+            None,
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(
@@ -1476,20 +1558,121 @@ mod tests {
         );
     }
 
+    /// The Helm pursues the ship's `WeaponsTarget` and does not fall through to
+    /// Patrol (issue #702).
+    ///
+    /// This is the `target` migration in one test. `operate_helm` used to
+    /// resolve the Destroy directive's authored name itself, via a private
+    /// four-tier `resolve_destroy_target` (explicit → current → last_attacker →
+    /// nearest) over its own radar horizon — the same four tiers
+    /// `ai_target_selection` runs over Tactical's. Two selectors, two horizons,
+    /// so a ship could close on one ship while shooting another. Now Tactical
+    /// selects and the Helm reads the selection.
+    ///
+    /// Geometry: the Destroy target sits dead ahead and the Patrol anchor to
+    /// starboard, so "which directive won" is legible from the steering alone —
+    /// ~0 means Destroy, positive means it fell through to Patrol.
     #[test]
-    fn operate_helm_uses_destroy_when_target_exists_not_patrol() {
-        // Regression guard: when the Destroy target IS in the world snapshot,
-        // the ship must pursue that target and NOT fall through to Patrol.
-        let target_uuid = Uuid::new_v4();
-        let mut memory = AiMemory::default();
-        let mut anchors = anchors_with_alpha();
-        // Place the patrol anchor directly ahead so patrol would also produce
-        // positive thrust — this confirms Destroy wins by checking the memory
-        // target, not just thrust direction.
-        anchors.insert("alpha".into(), [100.0, 0.0, 0.0]);
+    fn operate_helm_destroy_pursues_the_weapons_target() {
+        let (world, pool, anchors, target_uuid) = destroy_vs_patrol_scene();
 
-        // Target is far away in a different direction (to the side) so the
-        // Destroy path steers differently from the patrol path.
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            Some(target_uuid),
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+
+        assert!(thrust > 0.0, "should close on the target");
+        assert!(
+            steering.abs() < PATROL_DEADBAND_RAD,
+            "the helm must pursue the WeaponsTarget (dead ahead → ~0 steering),              not fall through to Patrol (to starboard → positive steering);              got steering={steering}"
+        );
+    }
+
+    /// The converse, and the reason the Helm may not acquire on its own: with
+    /// Tactical holding no lock, a Destroy directive resolves to nobody and
+    /// falls through — *even though* a perfectly good hostile is sitting in the
+    /// Helm's world view. A Helm that scanned for its own target would pursue
+    /// it and diverge from what Tactical is shooting.
+    #[test]
+    fn operate_helm_destroy_without_a_weapons_target_falls_through() {
+        let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
+
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            None, // Tactical has locked nothing
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+
+        assert!(
+            thrust > 0.0,
+            "should fall through to Patrol and keep flying"
+        );
+        assert!(
+            steering > 0.0,
+            "with no Tactical lock the Destroy directive resolves to nobody and              must fall through to Patrol (to starboard → positive steering); a              ~0 steering means the helm acquired the visible hostile itself,              which is the divergence #702 removed; got steering={steering}"
+        );
+    }
+
+    /// A Tactical lock the Helm's own radar cannot see is not pursuable: the
+    /// directive falls through rather than flying at a bearing it cannot
+    /// confirm. (`world_view.entities` is already radar-filtered by the caller.)
+    #[test]
+    fn operate_helm_destroy_ignores_a_target_outside_its_world_view() {
+        let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
+
+        let (_thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            Some(Uuid::new_v4()), // locked, but not in the world view
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert!(
+            steering > 0.0,
+            "an invisible target must fall through to Patrol, not steer at a              bearing the helm cannot confirm; got steering={steering}"
+        );
+    }
+
+    /// A scene where Destroy and Patrol are told apart by steering alone:
+    /// the Destroy target is dead ahead (yaw 0 → forward is -Z), the Patrol
+    /// anchor `alpha` is to starboard. Destroy outscores Patrol.
+    ///
+    /// Returns `(world, pool, anchors, target_uuid)`.
+    #[allow(clippy::type_complexity)]
+    fn destroy_vs_patrol_scene() -> (
+        WorldView,
+        Vec<crate::messages::ScoredObjective>,
+        std::collections::HashMap<String, [f32; 3]>,
+        Uuid,
+    ) {
+        let target_uuid = Uuid::new_v4();
+        let anchors = anchors_with_alpha(); // alpha = [100, 0, 0], to starboard
         let world = WorldView {
             entity_pos: [0.0, 0.0, 0.0],
             entity_yaw: 0.0,
@@ -1497,74 +1680,34 @@ mod tests {
             entities: vec![crate::ai::AiWorldEntity {
                 uuid: target_uuid,
                 name: Some("wave_1".into()),
-                position: [0.0, 0.0, -200.0], // behind the ship
+                position: [0.0, 0.0, -200.0], // dead ahead
                 ..Default::default()
             }],
             ..Default::default()
         };
-
-        let pool = vec![
-            crate::messages::ScoredObjective {
+        let mut pool = vec![crate::messages::ScoredObjective {
+            id: "destroy-wave-1".into(),
+            score: 90.0,
+            directive: crate::messages::AiDirective::Destroy {
+                target: "wave_1".into(),
+            },
+            source: crate::messages::ObjectiveSource::Mission,
+            relevance: vec![
+                crate::messages::SystemAffinity::Helm,
+                crate::messages::SystemAffinity::Weapons,
+                crate::messages::SystemAffinity::Captain,
+            ],
+            snapshot: crate::messages::ObjectiveSnapshot {
                 id: "destroy-wave-1".into(),
-                score: 90.0,
-                directive: crate::messages::AiDirective::Destroy {
-                    target: "wave_1".into(),
-                },
+                text: "Destroy".into(),
+                mandatory: true,
+                status: crate::messages::ObjectiveStatus::Active,
+                targets: vec![],
                 source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![
-                    crate::messages::SystemAffinity::Helm,
-                    crate::messages::SystemAffinity::Weapons,
-                    crate::messages::SystemAffinity::Captain,
-                ],
-                snapshot: crate::messages::ObjectiveSnapshot {
-                    id: "destroy-wave-1".into(),
-                    text: "Destroy wave 1".into(),
-                    mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec!["wave_1".into()],
-                    source: crate::messages::ObjectiveSource::Mission,
-                },
             },
-            crate::messages::ScoredObjective {
-                id: "patrol-base".into(),
-                score: 30.0,
-                directive: crate::messages::AiDirective::Patrol {
-                    anchors: vec!["alpha".into()],
-                    loop_path: true,
-                },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
-                    id: "patrol-base".into(),
-                    text: "Patrol".into(),
-                    mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
-                },
-            },
-        ];
-
-        operate_helm(
-            &mut memory,
-            &world,
-            &pool,
-            &[],
-            &anchors,
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-
-        // The Destroy path sets memory.target to the resolved UUID.
-        assert_eq!(
-            memory.target,
-            Some(target_uuid),
-            "memory.target must be set by Destroy path, not left None by Patrol"
-        );
+        }];
+        pool.extend(patrol_pool()); // score 20 — below Destroy
+        (world, pool, anchors, target_uuid)
     }
 
     // ── operate_helm Retreat ──────────────────────────────────────────────
@@ -1597,23 +1740,23 @@ mod tests {
         // [100, 0, 0] — to the right of a ship at origin facing yaw 0
         // (forward = (0, -1)), so steering must be positive (see
         // steer_toward_positive_for_target_to_right).
-        let mut memory = AiMemory::default();
         let world = world_at_origin();
         let mut anchors = std::collections::HashMap::new();
         anchors.insert("rally".to_string(), [100.0, 0.0, 0.0]);
         let pool = retreat_pool("rally", 50.0);
 
         let (thrust, steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &[],
             &anchors,
+            NO_CURSORS,
+            None,
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(thrust > 0.0, "Retreat should thrust toward the anchor");
@@ -1623,41 +1766,78 @@ mod tests {
         );
     }
 
+    /// The other side of `operate_helm_retreat_steers_toward_valid_anchor`: a
+    /// Retreat naming an anchor the world does not declare resolves to nowhere
+    /// and falls through to the next directive, exactly as `Reach` does.
+    ///
+    /// This test used to assert the opposite — that an empty anchor fell back to
+    /// `AiMemory.home_position` — because a *synthetic* hull-triggered Retreat
+    /// injected by `aggregate_doctrine_blackboards` always carried an empty
+    /// anchor and needed somewhere to go. #702 deleted that injector and the
+    /// `home_position` it leaned on. The old fallback was never the safety net
+    /// it looked like: `home_position` was never seeded in production, so it was
+    /// world origin, and "retreat" meant "fly to [0,0,0]" for every shipped
+    /// ship. Falling through to Patrol is both the honest answer and the useful
+    /// one. Retreat is now authored doctrine with a real anchor.
     #[test]
-    fn operate_helm_retreat_falls_back_to_home_position_when_anchor_empty() {
-        // Regression: the synthetic hull-triggered Retreat carries an empty
-        // anchor (see aggregate_doctrine_blackboards). With no matching anchor
-        // in the map, operate_helm must fall back to memory.home_position and
-        // still steer toward it (never falling through to idle). home_position
-        // is at [100, 0, 0] — to the right → positive steering.
-        let mut memory = AiMemory {
-            home_position: [100.0, 0.0, 0.0],
-            ..Default::default()
-        };
+    fn operate_helm_retreat_with_unknown_anchor_falls_through() {
         let world = world_at_origin();
-        let anchors = std::collections::HashMap::new(); // empty → no match
-        let pool = retreat_pool("", 50.0);
+        // "alpha" is known and Patrol wants it; the Retreat anchor is not.
+        let anchors = anchors_with_alpha();
+        let mut pool = retreat_pool("nowhere-in-particular", 50.0);
+        pool.extend(patrol_pool());
+        let doctrine = patrol_doctrine();
 
         let (thrust, steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
-            &[],
+            &doctrine,
             &anchors,
+            NO_CURSORS,
+            None,
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
+
+        // Patrol's "alpha" is at [100, 0, 0] — to the right of a ship at origin
+        // at yaw 0, so a positive steering means we are flying the *Patrol*, not
+        // idling and not retreating to a phantom origin.
         assert!(
-            thrust > 0.0,
-            "Retreat with empty anchor should thrust toward home_position"
+            thrust > 0.0 && steering > 0.0,
+            "an unresolvable Retreat must fall through to the next directive              (here Patrol toward `alpha`), not resolve to a fabricated position;              got thrust={thrust}, steering={steering}"
         );
-        assert!(
-            steering > 0.0,
-            "home_position to the right must give positive steering"
+    }
+
+    /// And with nothing to fall through *to*, an unresolvable Retreat is idle —
+    /// not a flight to world origin.
+    #[test]
+    fn operate_helm_lone_unresolvable_retreat_is_idle() {
+        let world = world_at_origin();
+        let anchors = std::collections::HashMap::new();
+        let pool = retreat_pool("", 50.0);
+
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            None,
+            None,
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert_eq!(
+            (thrust, steering),
+            (0.0, 0.0),
+            "a Retreat that names nowhere is a Retreat to nowhere"
         );
     }
 
@@ -1723,19 +1903,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut memory = AiMemory::default();
         let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
         let (thrust, _) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &doctrine,
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            Some(target_uuid), // Tactical's lock — what the helm pursues (#702)
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(
@@ -1764,19 +1944,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut memory = AiMemory::default();
         let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
         let (thrust, _) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &doctrine,
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            Some(target_uuid), // Tactical's lock — what the helm pursues (#702)
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         // At dist=25, t = (25-20)/(30-20) = 0.5 → expected thrust = 0.4
@@ -1805,19 +1985,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut memory = AiMemory::default();
         let (pool, doctrine) = destroy_pool_for("enemy", 0.8, maintain_range);
         let (thrust, _) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &doctrine,
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            Some(target_uuid), // Tactical's lock — what the helm pursues (#702)
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert_eq!(thrust, 0.0, "inside stop_dist: thrust must be 0");
@@ -1843,20 +2023,20 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut memory = AiMemory::default();
         let (pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
 
         let (thrust, steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &doctrine,
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            Some(target_uuid), // Tactical's lock — what the helm pursues (#702)
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
 
@@ -1882,7 +2062,6 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut memory = AiMemory::default();
         let (mut pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
         pool.push(crate::messages::ScoredObjective {
             id: "patrol-base".into(),
@@ -1905,16 +2084,17 @@ mod tests {
         let anchors = anchors_with_alpha();
 
         let (thrust, steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &doctrine,
             &anchors,
+            NO_CURSORS,
+            Some(target_uuid), // Tactical's lock - what the helm pursues (#702)
+            None,
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
 
@@ -1923,184 +2103,6 @@ mod tests {
             steering, 0.0,
             "resolved Destroy should hold station instead of falling through to Patrol"
         );
-    }
-
-    // ── operate_weapons ───────────────────────────────────────────────────
-
-    fn destroy_pool_with_score(score: f32) -> Vec<crate::messages::ScoredObjective> {
-        destroy_pool_with_target(score, "")
-    }
-
-    fn destroy_pool_with_target(score: f32, target: &str) -> Vec<crate::messages::ScoredObjective> {
-        vec![crate::messages::ScoredObjective {
-            id: "destroy".into(),
-            score,
-            directive: crate::messages::AiDirective::Destroy {
-                target: target.into(),
-            },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![
-                crate::messages::SystemAffinity::Helm,
-                crate::messages::SystemAffinity::Weapons,
-                crate::messages::SystemAffinity::Captain,
-            ],
-            snapshot: crate::messages::ObjectiveSnapshot {
-                id: "destroy".into(),
-                text: "".into(),
-                mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
-                targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
-            },
-        }]
-    }
-
-    #[test]
-    fn operate_weapons_returns_target_and_fire_when_ready_and_target_visible() {
-        let target_id = Uuid::new_v4();
-        let memory = AiMemory {
-            target: Some(target_id),
-            ..Default::default()
-        };
-        let world = WorldView {
-            entity_phaser_ready: true,
-            entities: vec![AiWorldEntity {
-                uuid: target_id,
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_score(35.0);
-        let (t, fire) = operate_weapons(&memory, &world, &pool, &empty_registry());
-        assert_eq!(t, Some(target_id));
-        assert!(fire);
-    }
-
-    #[test]
-    fn operate_weapons_no_fire_when_phaser_not_ready() {
-        let target_id = Uuid::new_v4();
-        let memory = AiMemory {
-            target: Some(target_id),
-            ..Default::default()
-        };
-        let world = WorldView {
-            entity_phaser_ready: false,
-            entities: vec![AiWorldEntity {
-                uuid: target_id,
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_score(35.0);
-        let (t, fire) = operate_weapons(&memory, &world, &pool, &empty_registry());
-        assert_eq!(t, Some(target_id), "should still select target");
-        assert!(!fire, "must not fire when phaser not ready");
-    }
-
-    #[test]
-    fn operate_weapons_zero_gated_destroy_returns_no_fire() {
-        let target_id = Uuid::new_v4();
-        let memory = AiMemory {
-            target: Some(target_id),
-            ..Default::default()
-        };
-        let world = WorldView {
-            entity_phaser_ready: true,
-            entities: vec![AiWorldEntity {
-                uuid: target_id,
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_score(0.0); // zero-gated
-        let (_t, fire) = operate_weapons(&memory, &world, &pool, &empty_registry());
-        assert!(!fire, "zero-gated destroy must not fire");
-    }
-
-    #[test]
-    fn operate_weapons_falls_back_to_last_attacker_when_no_target() {
-        let attacker_id = Uuid::new_v4();
-        let memory = AiMemory {
-            target: None,
-            last_attacker: Some(attacker_id),
-            ..Default::default()
-        };
-        let world = WorldView {
-            entity_phaser_ready: true,
-            entities: vec![AiWorldEntity {
-                uuid: attacker_id,
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_score(35.0);
-        let (t, fire) = operate_weapons(&memory, &world, &pool, &empty_registry());
-        assert_eq!(t, Some(attacker_id));
-        assert!(fire);
-    }
-
-    #[test]
-    fn operate_weapons_prefers_named_destroy_target_over_nearest_hostile() {
-        let named_id = Uuid::new_v4();
-        let nearer_hostile = Uuid::new_v4();
-        let hostile_faction = Uuid::new_v4();
-        let self_faction = Uuid::new_v4();
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.add_enemy(self_faction, hostile_faction);
-        let memory = AiMemory::default();
-        let world = WorldView {
-            entity_phaser_ready: true,
-            self_faction: Some(self_faction),
-            entities: vec![
-                AiWorldEntity {
-                    uuid: nearer_hostile,
-                    faction: Some(hostile_faction),
-                    position: [1.0, 0.0, 0.0],
-                    ..Default::default()
-                },
-                AiWorldEntity {
-                    uuid: named_id,
-                    name: Some("wave_1".into()),
-                    faction: Some(hostile_faction),
-                    position: [100.0, 0.0, 0.0],
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_target(35.0, "wave_1");
-
-        let (target, fire) = operate_weapons(&memory, &world, &pool, &registry);
-
-        assert_eq!(target, Some(named_id));
-        assert!(fire);
-    }
-
-    #[test]
-    fn operate_weapons_ignores_missing_named_destroy_target() {
-        let hostile_id = Uuid::new_v4();
-        let hostile_faction = Uuid::new_v4();
-        let self_faction = Uuid::new_v4();
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.add_enemy(self_faction, hostile_faction);
-        let memory = AiMemory::default();
-        let world = WorldView {
-            entity_phaser_ready: true,
-            self_faction: Some(self_faction),
-            entities: vec![AiWorldEntity {
-                uuid: hostile_id,
-                name: Some("other_wave".into()),
-                faction: Some(hostile_faction),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let pool = destroy_pool_with_target(35.0, "wave_1");
-
-        let (target, fire) = operate_weapons(&memory, &world, &pool, &registry);
-
-        assert_eq!(target, None);
-        assert!(!fire);
     }
 
     // ── CaptainAi ─────────────────────────────────────────────────────────
@@ -2410,247 +2412,220 @@ mod tests {
         assert_eq!(decide_impulse(&input), ImpulseDecision::NoChange);
     }
 
-    // ── nav_goal (issue #681) ──────────────────────────────────────────────
+    // ── Navigation waypoint handoff (issues #681, #702) ────────────────────
+    //
+    // `nav_waypoint` is the position of the ship's `NavigationWaypoint`,
+    // supplied by the caller only once the Channel-3 clearance matches its
+    // generation. It replaced `AiMemory.nav_goal`, a private copy of the same
+    // position laundered through the coordination message.
+    //
+    // These tests lost their "…and clears nav_goal" halves, because there is no
+    // longer anything to clear: the waypoint belongs to Navigation, and a Helm
+    // that resolves a local objective simply never consults it. The
+    // clearing-on-arrival and clearing-on-resolve rules existed only to stop the
+    // private copy drifting out of sync with the real waypoint.
 
-    /// When no Helm-relevant objective resolves, nav_goal fallthrough should
-    /// steer toward the stored nav_goal position.
+    /// With no Helm-relevant objective, the Helm travels to the cleared
+    /// Navigation waypoint.
     #[test]
-    fn operate_helm_falls_through_to_nav_goal_when_no_objective() {
-        let mut memory = AiMemory {
-            nav_goal: Some([100.0, 0.0]),
-            ..Default::default()
-        };
+    fn operate_helm_falls_through_to_nav_waypoint_when_no_objective() {
         let world = world_at_origin(); // entities list empty, anchors empty
         let pool: Vec<crate::messages::ScoredObjective> = vec![];
-        let doctrine = vec![];
 
         let (thrust, _steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
-            &doctrine,
+            &[],
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            None,
+            Some([100.0, 0.0]),
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(
             thrust > 0.0,
-            "nav_goal fallthrough must produce positive thrust"
+            "the nav-waypoint fallthrough must produce positive thrust"
         );
     }
 
-    /// When nav_goal target is reached (within WAYPOINT_ARRIVAL_RADIUS),
-    /// operate_helm should return zero thrust and clear nav_goal.
+    /// An *uncleared* waypoint is not followed. The caller passes `None` until
+    /// `HelmWaypointClearance` matches the waypoint's generation, so this is
+    /// where the Channel-3 lag is visible from `operate_helm`'s side: the Helm
+    /// has been given a waypoint but not yet the order to fly it.
     #[test]
-    fn operate_helm_clears_nav_goal_on_arrival() {
-        let mut memory = AiMemory {
-            nav_goal: Some([0.0, -1.0]), // just one unit away (within arrival radius)
-            ..Default::default()
-        };
-        // Ship at origin, target at [0, 0, -1] => dist = 1 < 20 => arrived
+    fn operate_helm_ignores_an_uncleared_nav_waypoint() {
         let world = world_at_origin();
-        let pool = vec![];
-        let doctrine = vec![];
+        let pool: Vec<crate::messages::ScoredObjective> = vec![];
 
-        let (thrust, _steering) = operate_helm(
-            &mut memory,
+        let (thrust, steering) = operate_helm(
             &world,
             &pool,
-            &doctrine,
+            &[],
             &std::collections::HashMap::new(),
+            NO_CURSORS,
+            None,
+            None, // clearance has not caught up with the waypoint's generation
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
-        assert_eq!(thrust, 0.0, "arrived at nav_goal must produce zero thrust");
-        assert!(
-            memory.nav_goal.is_none(),
-            "nav_goal must be cleared on arrival"
+        assert_eq!(
+            (thrust, steering),
+            (0.0, 0.0),
+            "an uncleared waypoint must not be followed - that lag is the whole \
+             job of the Channel-3 handoff"
         );
     }
 
-    /// When a local objective resolves (Patrol with valid anchor), nav_goal
-    /// must be cleared so the ship doesn't blend two conflicting targets.
+    /// Arriving at the waypoint stops the ship. It does *not* clear the
+    /// waypoint: the waypoint is Navigation's, and the Helm holds station on it
+    /// rather than reaching into another console's state.
     #[test]
-    fn operate_helm_clears_nav_goal_when_local_objective_resolves() {
-        let mut memory = AiMemory {
-            nav_goal: Some([-999.0, -999.0]), // far away (not nav_goal land)
-            ..Default::default()
-        };
+    fn operate_helm_holds_station_on_reaching_the_nav_waypoint() {
+        // Ship at origin, waypoint at [0, -1] => dist = 1 < 20 => arrived.
         let world = world_at_origin();
-        let pool = patrol_pool(); // Patrol toward "alpha"
-        let doctrine = patrol_doctrine();
-        let anchors = anchors_with_alpha(); // alpha at [100, 0, 0]
+        let pool = vec![];
 
-        let (thrust, _) = operate_helm(
-            &mut memory,
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &std::collections::HashMap::new(),
+            NO_CURSORS,
+            None,
+            Some([0.0, -1.0]),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert_eq!(
+            (thrust, steering),
+            (0.0, 0.0),
+            "arrived at the nav waypoint must produce zero thrust"
+        );
+    }
+
+    /// A resolvable local objective outranks the nav waypoint - the ship must
+    /// fly the objective, not blend the two bearings.
+    #[test]
+    fn operate_helm_prefers_a_local_objective_over_the_nav_waypoint() {
+        let world = world_at_origin();
+        let pool = patrol_pool(); // Patrol toward "alpha" at [100, 0, 0] (starboard)
+        let doctrine = patrol_doctrine();
+        let anchors = anchors_with_alpha();
+
+        let (thrust, steering) = operate_helm(
             &world,
             &pool,
             &doctrine,
             &anchors,
+            NO_CURSORS,
+            None,
+            Some([0.0, -999.0]), // cleared, and nowhere near `alpha`
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(
-            thrust > 0.0,
-            "patrol must produce thrust even when nav_goal is set"
-        );
-        assert!(
-            memory.nav_goal.is_none(),
-            "nav_goal must be cleared when a local objective resolves"
+            thrust > 0.0 && steering > 0.0,
+            "Patrol resolves, so the helm must fly it (toward `alpha`, to \
+             starboard = positive steering) and ignore the nav waypoint; \
+             got thrust={thrust}, steering={steering}"
         );
     }
 
-    /// End-to-end: when no local Helm objective resolves and Navigation has
-    /// set a nav_goal, operate_helm navigates toward it. Once a visible hostile
-    /// appears with a matching Destroy objective, the helm transitions to
-    /// destroy behaviour (AC #5).
+    /// The fallthrough is per-tick and stateless: an objective that *cannot*
+    /// resolve yields to the nav waypoint. This is the case the handoff exists
+    /// for - a Navigation AI steering a short-range Helm toward an objective the
+    /// Helm cannot see yet.
     #[test]
-    fn operate_helm_transitions_from_nav_goal_to_destroy() {
-        let target_uuid = Uuid::new_v4();
-        let mut memory = AiMemory {
-            nav_goal: Some([200.0, 0.0]),
-            ..Default::default()
-        };
-
-        // Phase 1: empty pool, only nav_goal → navigate toward nav_goal
-        let world_empty = world_at_origin();
-        let empty_pool: Vec<crate::messages::ScoredObjective> = vec![];
-
-        let (thrust1, _) = operate_helm(
-            &mut memory,
-            &world_empty,
-            &empty_pool,
-            &[],
-            &std::collections::HashMap::new(),
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-        assert!(
-            thrust1 > 0.0,
-            "nav_goal fallthrough must produce thrust toward steer target"
-        );
-        assert!(
-            memory.nav_goal.is_some(),
-            "nav_goal must persist when target not yet reached"
-        );
-
-        // Phase 2: hostile entity appears in range with a Destroy objective
-        // → helm switches to destroy, clearing nav_goal.
-        let world_with_hostile = WorldView {
-            entity_pos: [0.0, 0.0, 0.0],
-            entity_yaw: 0.0,
-            self_radius: 2.0,
-            entities: vec![AiWorldEntity {
-                uuid: target_uuid,
-                name: Some("enemy-hostile".into()),
-                position: [100.0, 0.0, 0.0],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        let destroy_pool: Vec<crate::messages::ScoredObjective> =
-            vec![crate::messages::ScoredObjective {
-                id: "destroy-hostile".into(),
-                score: 90.0,
-                directive: crate::messages::AiDirective::Destroy {
-                    target: "enemy-hostile".into(),
-                },
-                source: crate::messages::ObjectiveSource::Doctrine,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
-                    id: "destroy-hostile".into(),
-                    text: "Destroy hostile".into(),
-                    mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec!["enemy-hostile".into()],
-                    source: crate::messages::ObjectiveSource::Doctrine,
-                },
-            }];
-        let destroy_doctrine = vec![crate::entity_config::DoctrineObjective {
-            id: "destroy-hostile".into(),
-            text: "Destroy hostile".into(),
-            directive_kind: Some("Destroy".into()),
-            base_priority: 90.0,
-            target_speed: 0.9,
-            maintain_range: 25.0,
-            ..Default::default()
-        }];
-
-        let (thrust2, _) = operate_helm(
-            &mut memory,
-            &world_with_hostile,
-            &destroy_pool,
-            &destroy_doctrine,
-            &std::collections::HashMap::new(),
-            WAYPOINT_ARRIVAL_RADIUS,
-            AVOIDANCE_BUFFER,
-            AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &empty_registry(),
-            0.6,
-        );
-
-        assert!(
-            thrust2 > 0.0,
-            "resolved Destroy must produce thrust toward hostile"
-        );
-        assert!(
-            memory.nav_goal.is_none(),
-            "nav_goal must be cleared when local Destroy objective resolves"
-        );
-        assert_eq!(
-            memory.target,
-            Some(target_uuid),
-            "memory.target must be set to the hostile entity"
-        );
-    }
-
-    /// When a local objective exists but fails to resolve (e.g. Destroy with
-    /// target not in world view), operate_helm should fall through to nav_goal.
-    #[test]
-    fn operate_helm_falls_through_unresolvable_destroy_to_nav_goal() {
-        let mut memory = AiMemory {
-            nav_goal: Some([100.0, 0.0]),
-            ..Default::default()
-        };
+    fn operate_helm_falls_through_unresolvable_objectives_to_the_nav_waypoint() {
         let world = world_at_origin(); // no entities -> Destroy unresolvable
+                                       // Destroy (90, unresolvable) then Patrol (30); with empty anchors the
+                                       // Patrol cannot resolve either, so both fall through.
         let pool = destroy_then_patrol_pool(&std::collections::HashMap::new());
-        // destroy_then_patrol_pool has Destroy (score 90, unresolvable), Patrol (score 30, resolvable)
-        // but we pass empty anchors, so Patrol also unresolvable => fall through to nav_goal
 
         let (thrust, _steering) = operate_helm(
-            &mut memory,
             &world,
             &pool,
             &[],
-            &std::collections::HashMap::new(), // no anchors -> Patrol also unresolvable
+            &std::collections::HashMap::new(),
+            NO_CURSORS,
+            None,
+            Some([100.0, 0.0]),
             WAYPOINT_ARRIVAL_RADIUS,
             AVOIDANCE_BUFFER,
             AVOIDANCE_LOOK_AHEAD_SECS,
             0.0,
-            &empty_registry(),
             0.6,
         );
         assert!(
             thrust > 0.0,
-            "must fall through to nav_goal when no objective resolves"
+            "must fall through to the nav waypoint when no objective resolves"
+        );
+    }
+
+    /// End-to-end: the Helm flies the nav waypoint while it has nothing better
+    /// to do, then switches to Destroy the moment Tactical locks a target the
+    /// Helm can see.
+    #[test]
+    fn operate_helm_transitions_from_nav_waypoint_to_destroy() {
+        let (world, pool, _anchors, target_uuid) = destroy_vs_patrol_scene();
+        let no_anchors = std::collections::HashMap::new();
+
+        // Phase 1: no objective resolves (no anchors for the Patrol, no lock for
+        // the Destroy) -> fly the waypoint, which sits to starboard.
+        let (thrust1, steering1) = operate_helm(
+            &world,
+            &[],
+            &[],
+            &no_anchors,
+            NO_CURSORS,
+            None,
+            Some([200.0, 0.0]),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert!(
+            thrust1 > 0.0 && steering1 > 0.0,
+            "phase 1: must fly toward the nav waypoint (to starboard)"
+        );
+
+        // Phase 2: Tactical locks the hostile, which is dead ahead -> Destroy
+        // resolves and outranks the waypoint.
+        let (thrust2, steering2) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &no_anchors,
+            NO_CURSORS,
+            Some(target_uuid),
+            Some([200.0, 0.0]),
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+        assert!(thrust2 > 0.0, "phase 2: must close on the hostile");
+        assert!(
+            steering2.abs() < PATROL_DEADBAND_RAD,
+            "phase 2: a resolved Destroy must win over the nav waypoint - the \
+             target is dead ahead (~0 steering), the waypoint to starboard; \
+             got steering={steering2}"
         );
     }
 }

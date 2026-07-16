@@ -15,6 +15,10 @@ description = "Hunt down a pirate raider on patrol through the sector."
 patrol_alpha = [600.0, 0.0, -600.0]
 patrol_beta  = [-600.0, 0.0, -400.0]
 patrol_gamma = [0.0, 0.0, -1000.0]
+# Where a mauled raider runs to. Referenced by the `retreat-when-hurt` doctrine
+# in assets/entities/pirate_raider.toml; set well outside the patrol triangle so
+# a retreat visibly breaks off the engagement rather than circling it.
+pirate_haven = [-1200.0, 0.0, -1400.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 

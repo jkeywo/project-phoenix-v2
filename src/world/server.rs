@@ -1221,7 +1221,7 @@ fn handle_ai_events(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -2781,25 +2781,33 @@ pub struct FactionDispatchParams<'w, 's> {
     >,
 }
 
-/// After a faction relationship is mutated, walk every AI controller and
-/// clear `blackboard.target` if the controller's `target` faction is no
-/// longer hostile to the controller's own faction.
+/// After a faction relationship is mutated, walk every AI controller and clear
+/// its `WeaponsTarget` if the locked target's faction is no longer hostile to
+/// the controller's own faction.
 ///
-/// Required because `enemy_in_range` only seeds `blackboard.target` Ã¢â‚¬â€
-/// once set, the controller's current state (`Pursuing`, `Attacking`,
-/// `Fleeing`) keeps engaging the target via the blackboard UUID without
-/// re-checking the faction relationship. A scenario that demotes a
-/// faction from hostile to neutral via `remove_faction_enemy` would
-/// otherwise leave existing engagements stuck on a now-friendly target.
+/// Required because `ai_target_selection`'s retention tier deliberately keeps an
+/// established lock rather than re-deciding from scratch every tick — that
+/// stickiness is what stops helm and weapons drifting onto different ships.
+/// Retention only asks "is it alive and in radar range", never "is it still an
+/// enemy", so a scenario that demotes a faction from hostile to neutral via
+/// `remove_faction_enemy` would otherwise leave a ship engaging a now-friendly
+/// target forever. Clearing the lock here drops it back to the tiers below,
+/// which do consult the registry.
 ///
-/// Controllers with no target, no faction, or a target that has no
-/// faction (factionless entities like the starbase or an asteroid) are
-/// left untouched.
+/// Post-#702 this clears `WeaponsTarget` — the ship's one authoritative lock —
+/// rather than the private `ShipAiMemory.target` mirror it used to clear. That
+/// mirror had already stopped being the firing path's input, so demoting a
+/// faction stopped the ship *pursuing* its old enemy while it carried on
+/// *shooting* it. One surface, one clear, both behaviours.
+///
+/// Controllers with no target, no faction, an unparseable target UUID, or a
+/// target that has no faction (factionless entities like the starbase or an
+/// asteroid) are left untouched.
 pub(crate) fn revalidate_ai_targets_after_faction_change(
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut crate::weapons_plugin::WeaponsTarget>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -2807,17 +2815,21 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
     registry: &crate::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
 ) {
-    for (_uid, ai_mem_opt, self_faction_comp) in ai_query.iter_mut() {
-        let Some(mut ai_mem) = ai_mem_opt else {
+    for (_uid, weapons_target_opt, self_faction_comp) in ai_query.iter_mut() {
+        let Some(mut weapons_target) = weapons_target_opt else {
             continue;
         };
-        let Some(target_uuid) = ai_mem.0.target else {
+        let Some(target_uuid) = weapons_target
+            .0
+            .as_deref()
+            .and_then(|t| uuid::Uuid::parse_str(t).ok())
+        else {
             continue;
         };
         let self_faction = self_faction_comp.map(|fc| fc.0);
         let target_faction = uuid_to_faction.get(&target_uuid).copied();
         if !crate::faction::is_enemy(self_faction, target_faction, registry) {
-            ai_mem.0.target = None;
+            weapons_target.0 = None;
         }
     }
 }
@@ -5113,19 +5125,24 @@ pub(crate) mod tests {
                 EntityUuid(npc_uuid_str.to_string()),
                 BehaviourSection(BehaviourConfig::default()),
                 crate::entities::spawner::FactionComponent(harrow_faction_uuid()),
+                // The ship's authoritative Tactical lock. Post-#702 this is the
+                // surface `revalidate_ai_targets_after_faction_change` clears;
+                // it used to clear the private `ShipAiMemory.target` mirror,
+                // which by then was no longer what the firing path read.
+                crate::weapons_plugin::WeaponsTarget::default(),
             ))
             .id();
 
-        // First update: attach the AiControllerComponent marker + ShipAiMemory.
+        // First update: attach the AiControllerComponent marker.
         app.update();
 
-        // Manually seed the engagement: NPC's ShipAiMemory.target = player.
+        // Manually seed the engagement: the NPC has locked the player.
         {
-            let mut mem = app
+            let mut lock = app
                 .world_mut()
-                .get_mut::<crate::ai_plugin::ShipAiMemory>(npc_entity)
-                .expect("ShipAiMemory must be attached");
-            mem.0.target = Some(player_uuid);
+                .get_mut::<crate::weapons_plugin::WeaponsTarget>(npc_entity)
+                .expect("WeaponsTarget must be attached");
+            lock.0 = Some(player_uuid.to_string());
         }
 
         // Bring both sides into mutual hostility, then fire
@@ -5182,15 +5199,17 @@ pub(crate) mod tests {
 
         app.update();
 
-        // The NPC's ShipAiMemory.target must be cleared because Harrow
-        // no longer considers Federation hostile.
-        let mem = app
+        // The NPC's lock must be cleared because Harrow no longer considers
+        // Federation hostile. `ai_target_selection`'s retention tier would
+        // otherwise hold the lock forever: it re-checks that the target is alive
+        // and in radar range, never that it is still an enemy.
+        let lock = app
             .world()
-            .get::<crate::ai_plugin::ShipAiMemory>(npc_entity)
+            .get::<crate::weapons_plugin::WeaponsTarget>(npc_entity)
             .unwrap();
         assert_eq!(
-            mem.0.target, None,
-            "remove_faction_enemy must clear memory.target when target is no longer hostile"
+            lock.0, None,
+            "remove_faction_enemy must clear WeaponsTarget when the target is no longer hostile"
         );
     }
 

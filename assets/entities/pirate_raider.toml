@@ -89,9 +89,16 @@ sensor_range = 120.0
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
 # (#472/#574) Doctrine-based behaviour (FSM dissolved in issue #572).
-# Two standing objectives scored each tick: Destroy outscores Patrol so the
-# ship immediately pursues any hostile it can find; when no hostile is visible
-# operate_helm falls back to the Patrol directive.
+# Three standing objectives scored each tick, in priority order:
+#
+#   Retreat (100) — only scores at all below 30% hull; when it does, it beats
+#                   everything and the raider runs for its haven.
+#   Destroy  (35) — pursue any hostile Tactical has locked.
+#   Patrol   (20) — the default when no hostile is visible.
+#
+# `zero_gates` is a veto: `retreat-when-hurt` scores 0 — i.e. is not in the
+# running at all — until hull drops below the threshold, so its high
+# `base_priority` costs nothing while the ship is healthy.
 
 [behaviour]
 
@@ -111,6 +118,29 @@ directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9
 maintain_range = 25.0
+
+# Break off and run for the haven once badly hurt (issue #702).
+#
+# This replaces a synthetic Retreat the engine used to inject whenever hull fell
+# below a hardcoded-ish `[behaviour] retreat_hull_threshold`. That mechanism was
+# inert: it scored 0..1 against doctrine priorities in the tens, so it could
+# never win, and its anchor was always empty so it fell back to a "home
+# position" production never seeded — i.e. world origin. Authoring it here fixes
+# both (a real priority on the right scale, a real anchor) and makes the
+# threshold, the destination and the urgency all designer-tunable per hull.
+#
+# `pirate_haven` is declared by the worlds that fly this template's patrol route
+# (patrol.toml, default.toml). In a world that declares no such anchor the
+# directive simply resolves to nowhere and the raider fights on — the same
+# behaviour it had before this objective existed.
+[[behaviour.doctrine]]
+id               = "retreat-when-hurt"
+text             = "Hull critical — break off and run for the haven"
+directive_kind   = "Retreat"
+directive_anchor = "pirate_haven"
+base_priority    = 100.0
+zero_gates       = [{ condition = "hull_below", threshold = 0.3 }]
+target_speed     = 1.0
 
 
 # Ship systems (all AI-controlled - no human consoles)

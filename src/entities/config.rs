@@ -30,10 +30,12 @@ pub struct DoctrineObjective {
     /// Whether the patrol loops back to the first anchor after the last.
     #[serde(default)]
     pub directive_loop: bool,
-    /// Named target for `Destroy` directives. Runtime-resolved via `AiMemory.target`.
+    /// Named target for `Destroy` directives. Resolved by `ai_target_selection`
+    /// (tier 1) onto the ship's `WeaponsTarget`, which is what the Helm and the
+    /// firing systems then read.
     #[serde(default)]
     pub directive_target: Option<String>,
-    /// Named anchor for `Reach` directives.
+    /// Named anchor for `Reach` and `Retreat` directives.
     #[serde(default)]
     pub directive_anchor: Option<String>,
     /// Named target for `Hail` directives.
@@ -111,19 +113,25 @@ pub struct BehaviourConfig {
     #[serde(default = "default_avoidance_look_ahead_secs")]
     pub avoidance_look_ahead_secs: f32,
     /// Speed fraction [0, 1] for the Channel-3 Navigation→Helm handoff
-    /// fallthrough (nav_goal), used when no local Helm-relevant objective
-    /// resolves but Navigation has given a long-range steer target.
+    /// fallthrough, used when no local Helm-relevant objective resolves but
+    /// Navigation has set a waypoint the Helm is cleared to follow.
     /// Defaults to [`crate::ai::NAV_HANDOFF_SPEED`] when absent.
     #[serde(default = "default_nav_handoff_speed")]
     pub nav_handoff_speed: f32,
-    /// Hull fraction [0, 1] below which this entity starts scoring a synthetic
-    /// `Retreat` objective (issue #688/#701). At or above the threshold the
-    /// retreat score is 0; below it the score rises linearly to 1.0 at zero
-    /// hull. Defaults to [`crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD`]
-    /// when absent — set it per entity template to make a ship braver
-    /// (lower) or more cautious (higher).
-    #[serde(default = "default_retreat_hull_threshold")]
-    pub retreat_hull_threshold: f32,
+    // `retreat_hull_threshold` lived here until issue #702. It fed a synthetic
+    // hull-triggered Retreat that could never win (0..1 score against doctrine's
+    // tens) and always steered to world origin (its anchor was empty and the
+    // `home_position` it fell back on was never seeded in production). Retreat
+    // is now authored as ordinary doctrine, which is strictly more expressive —
+    // a real anchor, a real priority, and any `zero_gates` combination rather
+    // than one hardwired hull ramp:
+    //
+    //     [[behaviour.doctrine]]
+    //     id               = "retreat-when-hurt"
+    //     directive_kind   = "Retreat"
+    //     directive_anchor = "pirate_haven"
+    //     base_priority    = 100.0
+    //     zero_gates       = [{ condition = "hull_below", threshold = 0.3 }]
 }
 
 /// Hand-written so `BehaviourConfig::default()` agrees with what serde
@@ -139,7 +147,6 @@ impl Default for BehaviourConfig {
             avoidance_buffer: default_avoidance_buffer(),
             avoidance_look_ahead_secs: default_avoidance_look_ahead_secs(),
             nav_handoff_speed: default_nav_handoff_speed(),
-            retreat_hull_threshold: default_retreat_hull_threshold(),
         }
     }
 }
@@ -158,10 +165,6 @@ fn default_nav_handoff_speed() -> f32 {
 
 fn default_avoidance_look_ahead_secs() -> f32 {
     crate::ai::AVOIDANCE_LOOK_AHEAD_SECS
-}
-
-fn default_retreat_hull_threshold() -> f32 {
-    crate::ai::retreat_score::DEFAULT_RETREAT_THRESHOLD
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.
@@ -3786,7 +3789,7 @@ hull_max_hp = 6
     fn pirate_raider_doctrine_destroy_has_correct_directive_kind() {
         // (#572) FSM transitions dissolved — engagement logic now lives in the
         // utility scorer. Verify the destroy-hostiles objective carries the
-        // Destroy directive kind so operate_weapons picks it up.
+        // Destroy directive kind so `ai_target_selection` picks it up.
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");

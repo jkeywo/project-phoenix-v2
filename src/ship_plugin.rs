@@ -83,6 +83,30 @@ pub struct CoordinationQueue(pub CoordinationLagQueue);
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingArcBearingRequest(pub Option<uuid::Uuid>);
 
+/// Which generation of this ship's [`NavigationWaypoint`] the AI Helm is
+/// cleared to follow (issue #702).
+///
+/// The Channel-3 Navigation→Helm lag, reduced to one integer. `Navigation` sets
+/// the waypoint and enqueues `CoordinationPayload::NavigateTo` carrying its
+/// `generation`; the message spends the delivery lag in the queue; when
+/// `process_coordination_lag` finally consumes it, it latches the generation
+/// here. The AI Helm travels to the waypoint only while
+/// `clearance == waypoint.generation()`.
+///
+/// Because the waypoint bumps its generation whenever it names somewhere new,
+/// *every* new waypoint re-incurs the lag. There is only ever one waypoint and
+/// no copy of the previous one, so during the lag the Helm does not keep flying
+/// the old bearing: [`cleared_nav_waypoint`] yields `None` and the Helm falls
+/// through to its own local objectives, or idles if it has none. A bare `bool`
+/// ("Navigation has spoken") would only delay the first order and then wave
+/// every subsequent waypoint through instantly.
+///
+/// `None` = never cleared for anything.
+///
+/// [`NavigationWaypoint`]: crate::navigation_plugin::NavigationWaypoint
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct HelmWaypointClearance(pub Option<u64>);
+
 /// Tracks the last-seen `DamageTier` per system per ship for detecting
 /// crossings to worse tiers (issue #682). Initialised during ship spawn;
 /// each tick of the tier-crossing detector updates entries for every system.
@@ -336,8 +360,6 @@ impl Plugin for ShipPlugin {
         // These two gate on their own axis alone (#800) and are the only writers
         // of the axis each owns, so ordering no longer arbitrates write
         // exclusion at all — since #704 there is no second writer to exclude.
-        // What the order still fixes is who commits `AiMemory`: the last system
-        // to run owns it, so `ai_helm_thrust` must precede `ai_helm_steering`.
         //
         // Ordered AFTER `process_helm_inputs`, unlike
         // `ai_helm_lateral_thrust`. Lateral thrust has its own
@@ -350,9 +372,12 @@ impl Plugin for ShipPlugin {
         // per-axis AI the authoritative writer of the axis it owns,
         // deterministically rather than by set-order luck.
         //
-        // `ai_helm_thrust` runs before `ai_helm_steering` so that the commit
-        // rule in the module note below ("the last helm-AI system that actually
-        // runs owns the `AiMemory` commit") has a well-defined "last".
+        // These two are deliberately *unordered* against each other since #702
+        // made `operate_helm` pure. `ai_helm_thrust.before(ai_helm_steering)`
+        // existed only to give the #701 `AiMemory` commit rule a well-defined
+        // "last system to run"; with no shared memory to commit, each system
+        // writes only the axis it owns and neither reads the other's output, so
+        // there is nothing left for an edge between them to arbitrate.
         //
         // Both systems also write `LastHelmInput.{thrust,steering}` for the
         // player ship, one field each. Every reader of that *pair* in
@@ -375,7 +400,7 @@ impl Plugin for ShipPlugin {
         // pair; it needs no edge against these systems.)
         app.add_systems(
             Update,
-            (ai_helm_thrust.before(ai_helm_steering), ai_helm_steering)
+            (ai_helm_thrust, ai_helm_steering)
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::process_lobby)
                 .after(crate::sim_sets::AiTickLabel)
@@ -394,33 +419,39 @@ impl Plugin for ShipPlugin {
         // it already runs before `process_helm_inputs`, so this system cannot
         // join `ai_helm_thrust`/`ai_helm_steering` in running last.
         //
-        // `.before(ai_helm_thrust)` is the subtle one, and it is load-bearing.
-        // This system needs *post*-decision `AiMemory` (the impulse target is
-        // resolved after `operate_helm` has advanced the patrol waypoint), but
-        // it commits nothing, so it replays the decision on a scratch clone.
-        // A scratch clone is only equivalent to what the committer reads if the
-        // memory it clones is *pre*-commit — so this system must run before the
-        // tick's committer. Running after one would replay the decision on
-        // already-advanced memory and aim the impulse at the *next* waypoint.
+        // `.before(ai_helm_thrust)` USED to sit here, and #702 removed it.
         //
-        // Until #704 this edge was spelled `.before(operate_helm_ai)`, the
-        // monolith being the earliest possible committer. With the monolith
-        // deleted the earliest possible committer is `ai_helm_thrust` (which
-        // commits when helm-steering is not AI) and the latest is
-        // `ai_helm_steering`; `ai_helm_thrust.before(ai_helm_steering)` makes
-        // the one edge below sufficient for both. It is stated explicitly rather
-        // than left to the transitive `apply_helm_commands` →
-        // `process_helm_inputs` → `ai_helm_thrust` chain, because the
-        // requirement is about the commit, not about command application, and
-        // must not silently evaporate if that chain is ever re-cut.
-        // `ai_helm_impulse_reads_pre_commit_memory` pins it.
+        // Its reason was never about `ai_helm_thrust` as such: this system
+        // needed *pre-commit* `AiMemory`, because it replayed the helm decision
+        // on a scratch clone to reach the post-decision `waypoint_index` that
+        // `resolve_helm_target_position` then read. A scratch clone is only
+        // equivalent to what the committer sees if the memory it clones has not
+        // been committed yet — so it had to run before the tick's first possible
+        // committer, whichever system that was (`operate_helm_ai` until #704,
+        // then `ai_helm_thrust`).
+        //
+        // #702 deleted `AiMemory`. There is no commit, no clone, and no replay:
+        // the cursor is a read-only surface that `advance_objective_cursors`
+        // owns in `SimSet::Modifiers`, so it cannot move underneath this system
+        // within `Physics` at all, and every helm-AI system in the set reads the
+        // identical value regardless of order. The edge had nothing left to
+        // enforce.
+        //
+        // What remains is one real requirement — `.before(apply_helm_commands)`,
+        // which is what consumes `ImpulseCommand` into a `ShipImpulse` phase
+        // transition — plus `.after(AiTickLabel)` for the scored objectives this
+        // system reads. Note the surviving edge *transitively* keeps this system
+        // before `ai_helm_thrust` anyway (`apply_helm_commands` runs before
+        // `process_helm_inputs`, which `ai_helm_thrust` runs after), so removing
+        // the explicit edge changes no actual schedule — it removes a constraint
+        // whose stated justification no longer exists, rather than one holding
+        // something up.
         app.add_systems(
             Update,
             ai_helm_impulse
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::process_lobby)
                 .after(crate::sim_sets::AiTickLabel)
-                .before(ai_helm_thrust)
                 .before(apply_helm_commands),
         );
 
@@ -534,6 +565,36 @@ fn helm_control_policy(sources: &ShipSystemControlSources) -> ControlTickPolicy 
 // the entity's scored objectives, and a `WorldView`. These helpers are the
 // single implementation of each, so the per-axis systems cannot silently
 // drift from the monolith they replace in #704.
+
+/// The console-owned surfaces the AI Helm derives its goals from (issue #702).
+///
+/// Every one of these is a shared, authoritative surface that a human operator
+/// could equally drive — that symmetry is the point. The Helm reads them; it
+/// owns none of them, and keeps no private copy of any of them:
+///
+/// | Surface | Owner | Answers |
+/// |---|---|---|
+/// | [`WeaponsTarget`] | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
+/// | [`NavigationWaypoint`] + [`HelmWaypointClearance`] | Navigation (+ the Channel-3 lag) | where to travel |
+/// | [`ObjectiveCursors`] | `advance_objective_cursors` | where on the route |
+///
+/// All `Option` because minimal test spawns omit them; a missing surface means
+/// "no goal from that console", never a fabricated default.
+///
+/// Bundled as one `QueryData` because all three per-axis helm systems need the
+/// identical set, and because their per-system queries are close to Bevy's
+/// tuple cap.
+///
+/// [`WeaponsTarget`]: crate::weapons_plugin::WeaponsTarget
+/// [`NavigationWaypoint`]: crate::navigation_plugin::NavigationWaypoint
+/// [`ObjectiveCursors`]: crate::ai_plugin::ObjectiveCursors
+#[derive(bevy::ecs::query::QueryData)]
+pub struct HelmAiSurfaces {
+    weapons_target: Option<&'static crate::weapons_plugin::WeaponsTarget>,
+    waypoint: Option<&'static crate::navigation_plugin::NavigationWaypoint>,
+    clearance: Option<&'static HelmWaypointClearance>,
+    cursors: Option<&'static crate::ai_plugin::ObjectiveCursors>,
+}
 
 /// The read-only entity query the helm AI falls back to when `WorldSnapshot`
 /// is absent (tests that don't register `AiPlugin`).
@@ -680,6 +741,51 @@ fn helm_ai_world_view(
     }
 }
 
+/// The Navigation waypoint this ship's AI Helm is currently *cleared* to follow
+/// (issue #702), or `None` if there is none or the clearance has not caught up.
+///
+/// This is the whole of the Channel-3 Navigation-to-Helm lag on the read side.
+/// `operate_navigation_ai` sets `NavigationWaypoint` and enqueues a `NavigateTo`
+/// carrying its `generation`; that message serves the delivery lag in the queue;
+/// `process_coordination_lag` then latches the generation into
+/// `HelmWaypointClearance`. Until the latch matches, the Helm has been given the
+/// waypoint but not yet the order, so this returns `None` — every *new* waypoint
+/// re-incurs the lag, not merely the first.
+///
+/// `None` during the lag does not mean "carry on as before": the waypoint is
+/// overwritten in place and the old position is not kept anywhere, so the Helm
+/// cannot resume the previous bearing. It falls back to its own local
+/// objectives, or idles if it has none, until the clearance catches up.
+///
+/// A ship missing either component (bare test spawns) is never cleared, which is
+/// the same safe default: it falls back to its own local objectives.
+fn cleared_nav_waypoint(
+    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+    clearance: Option<&HelmWaypointClearance>,
+) -> Option<[f32; 2]> {
+    let waypoint = waypoint?;
+    let cleared_generation = clearance?.0?;
+    if cleared_generation != waypoint.generation() {
+        return None;
+    }
+    let snapshot = waypoint.snapshot()?;
+    Some([snapshot.x, snapshot.z])
+}
+
+/// This ship's Tactical lock as a UUID, for the Helm to pursue (issue #702).
+///
+/// `WeaponsTarget` is a `String` because it may name an asteroid as well as an
+/// entity; the Helm only pursues things with a canonical UUID, and an
+/// unparseable id names nobody.
+fn helm_weapons_target(
+    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
+) -> Option<uuid::Uuid> {
+    weapons_target?
+        .0
+        .as_deref()
+        .and_then(|t| uuid::Uuid::parse_str(t).ok())
+}
+
 /// Call the pure `crate::ai::operate_helm` with this ship's TOML-authored
 /// behaviour tuning, returning `(thrust, steering)`.
 ///
@@ -691,23 +797,32 @@ fn helm_ai_world_view(
 /// `[behaviour]` section at all; every one of them is the same value the
 /// matching serde `default =` fn supplies, so an entity that omits the field
 /// and an entity that omits the whole section behave identically.
+///
+/// Takes everything by shared reference: `operate_helm` has been pure since
+/// #702, so calling this twice in a tick (once per axis) is safe by
+/// construction rather than by scheduling.
+#[allow(clippy::too_many_arguments)]
 fn helm_ai_decision(
-    memory: &mut crate::ai::AiMemory,
     world_view: &crate::ai::WorldView,
     scored: &[crate::messages::ScoredObjective],
     behaviour_section: Option<&crate::entities::spawner::BehaviourSection>,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
+    cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
+    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
+    nav_waypoint: Option<[f32; 2]>,
     forward_speed: f32,
-    faction_registry: Option<&crate::entities::config_cache::FactionRegistryResource>,
 ) -> (f32, f32) {
+    const NO_CURSORS: &[crate::ai::patrol_cursor::PatrolCursor] = &[];
     crate::ai::operate_helm(
-        memory,
         world_view,
         scored,
         behaviour_section
             .map(|b| b.0.doctrine.as_slice())
             .unwrap_or(&[]),
         anchors,
+        cursors.map(|c| c.0.as_slice()).unwrap_or(NO_CURSORS),
+        helm_weapons_target(weapons_target),
+        nav_waypoint,
         // Authored per entity template in TOML (`[behaviour]
         // waypoint_arrival_radius`), same as the cursor evaluator reads —
         // the helm's turn-at-waypoint decision must not disagree with the
@@ -722,9 +837,6 @@ fn helm_ai_decision(
             .map(|b| b.0.avoidance_look_ahead_secs)
             .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
         forward_speed,
-        faction_registry
-            .map(|r| &r.0)
-            .unwrap_or(&crate::faction::FactionRegistry::default()),
         behaviour_section
             .map(|b| b.0.nav_handoff_speed)
             .unwrap_or(crate::ai::NAV_HANDOFF_SPEED),
@@ -798,30 +910,37 @@ fn apply_arc_bearing_request(
 /// consistent with the `top_obj` filter at that call site — see
 /// `ai_helm_impulse_leaves_the_drive_alone_without_a_helm_objective`, which pins
 /// the two agreeing.
+///
+/// Reads exactly the surfaces `operate_helm` reads (issue #702) — the ship's
+/// `WeaponsTarget` for `Destroy`, the objective's cursor for `Patrol`, the named
+/// anchor for `Reach`/`Retreat`. Two answers to "where is the Helm going?" must
+/// not diverge, or the ship charges its impulse drive at a point it is not
+/// steering toward.
 fn resolve_helm_target_position(
     scored: &[crate::messages::ScoredObjective],
     world_view: &crate::ai::WorldView,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
-    memory: &crate::ai::AiMemory,
+    cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
+    weapons_target: Option<uuid::Uuid>,
 ) -> Option<[f32; 3]> {
     use crate::messages::{AiDirective, SystemAffinity};
     let top = scored
         .iter()
         .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))?;
     match &top.directive {
-        AiDirective::Reach { anchor } => anchors.get(anchor.as_str()).copied(),
-        AiDirective::Retreat { anchor } => Some(
-            // Resolve the retreat anchor by name, falling back to the ship's
-            // home/spawn position when the anchor is empty or unknown (the
-            // synthetic hull-triggered Retreat carries an empty anchor). Mirrors
-            // the Retreat arm in `operate_helm`.
-            anchors
-                .get(anchor.as_str())
-                .copied()
-                .unwrap_or(memory.home_position),
-        ),
-        AiDirective::Destroy { target } => {
-            let uuid = uuid::Uuid::parse_str(target).ok()?;
+        // `Reach` and `Retreat` are the same shape: fly to a named anchor.
+        // An unknown or empty anchor resolves to nowhere, exactly as the
+        // matching arms of `operate_helm` do.
+        AiDirective::Reach { anchor } | AiDirective::Retreat { anchor } => {
+            anchors.get(anchor.as_str()).copied()
+        }
+        // The directive's own `target` is Tactical's input, not the Helm's.
+        // `helm_destroy` pursues the `WeaponsTarget` that `ai_target_selection`
+        // resolved from it, so this must read the same lock or the impulse
+        // could aim at the authored target while the helm closes on whoever
+        // Tactical actually locked.
+        AiDirective::Destroy { .. } => {
+            let uuid = weapons_target?;
             world_view
                 .entities
                 .iter()
@@ -829,13 +948,17 @@ fn resolve_helm_target_position(
                 .map(|e| e.position)
         }
         AiDirective::Patrol {
-            anchors: waypoints, ..
+            anchors: waypoints,
+            loop_path,
         } => {
-            let idx = memory.waypoint_index;
-            waypoints
-                .get(idx)
-                .and_then(|wp| anchors.get(wp.as_str()))
-                .copied()
+            let index = cursors
+                .and_then(|c| {
+                    c.0.iter()
+                        .find(|cursor| cursor.objective_id == top.id)
+                        .map(|cursor| cursor.index())
+                })
+                .unwrap_or(0);
+            crate::ai::patrol_cursor::cursor_target(index, waypoints, *loop_path, anchors)
         }
         _ => None,
     }
@@ -954,8 +1077,9 @@ fn detect_reached_objective_completion(
 // something other than its own declaration.
 // `helm_ai_writers_are_mutually_exclusive` pins the whole outcome invariant
 // under C over every (C, T, S, L, I) combination;
-// `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` and
-// `coarse_helm_alone_commits_no_memory` pin it end-to-end through a ticking app;
+// `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` pins it
+// end-to-end through a ticking app (it had a `coarse_helm_alone_commits_no_memory`
+// twin until #702 deleted `AiMemory` and left it nothing to observe);
 // `shipped_hull_helm_is_driven_by_the_per_axis_declarations_alone` pins it on a
 // real hull's control sources.
 //
@@ -976,60 +1100,46 @@ fn detect_reached_objective_completion(
 // all — `operate_lateral_thrust` is a separate pure function — so it only
 // duplicates the `WorldView`.)
 //
-// **AiMemory ownership**: `operate_helm` mutates `AiMemory` (patrol waypoint
-// advance, Destroy target selection, nav_goal clearing). Committing that twice
-// in one tick would double-advance the patrol waypoint on arrival; committing
-// it zero times freezes the waypoint. (`ShipAiMemory.target` is no longer the
-// weapons AI's bridge: `ai_torpedo_auto_fire` reads `WeaponsTarget` alone
-// post-#698, and post-#703 `ai_target_selection` acquires the nearest hostile
-// itself, leaving `ai_phaser_auto_fire`'s memory fallback vestigial.)
-// So the rule is:
+// **No shared mutable state** (issue #702). `operate_helm` is a pure function:
+// it reads the ship's surfaces (`WeaponsTarget`, `NavigationWaypoint` +
+// `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
+// `(thrust, steering)`. Both systems can call it, in either order, and each
+// keeps only its own axis.
 //
-//     **The last helm-AI system that actually runs owns the commit.**
+// This is where the #701 "the last helm-AI system that actually runs owns the
+// `AiMemory` commit" rule used to be. That rule existed *solely* because
+// `operate_helm` mutated a shared `AiMemory` — advancing the patrol waypoint,
+// selecting the Destroy target, clearing `nav_goal` — which made calling it once
+// per axis unsafe: two commits double-advanced the waypoint on arrival, zero
+// commits froze it forever. The whole apparatus (a `steering_is_ai` probe, a
+// scratch clone in `ai_helm_thrust`, a four-row exactly-once table, five tests
+// that could only observe the rule through `AiMemory` mutations) existed to
+// arbitrate a hazard.
 //
-// The registered order is `ai_helm_thrust` → `ai_helm_steering` (it was
-// `operate_helm_ai` → `ai_helm_thrust` → `ai_helm_steering` until #704 removed
-// the first term), so concretely: `ai_helm_steering` always commits when it
-// runs; `ai_helm_thrust` commits only when helm-steering is *not* AI-operated.
-// Whoever does not commit works on a scratch clone and discards it. That keys
-// off policies both already read, so it needs no shared cache.
+// #702 removed the hazard instead of guarding it. Each goal moved to the console
+// that owns it — Tactical selects the target, Navigation sets the waypoint, the
+// objective's cursor tracks the route — so `operate_helm` has nothing left to
+// mutate. Purity means "how many times did it run?" is not a question anyone has
+// to answer.
 //
-// The other two systems are outside this rule and stay outside it.
-// `ai_helm_lateral_thrust` never reads or writes `AiMemory`. `ai_helm_impulse`
-// reads it but commits in *no* combination — it always scratches — so it can
-// neither double-advance the waypoint nor be relied on to advance it. The cost
-// of never committing is that it must see pre-commit memory, which is what its
-// `.before(ai_helm_thrust)` registration buys; see the comment there. So (T, S)
-// alone decide the commit, and L and I do not enter into it.
+// What survives from #701 is the **`LastHelmInput` ordering**, which is about a
+// different hazard and remains load-bearing. Both systems write `LastHelmInput`
+// for the player ship, one field each (`.thrust` / `.steering`), and since #704
+// they are the only writers of those fields. Any reader of that *pair* in
+// `SimSet::Physics` must therefore be ordered after BOTH, or it can observe a
+// torn pair — this tick's AI throttle beside last tick's stale human steering.
+// The pair readers are `publish_joystick_to_engines`, `operate_helm_engine_ai`
+// and `tick_boost`; `helm_ai_last_input_pair_is_not_torn` pins the result.
 //
-// Exactly-once over every (thrust T, steering S) combination, each system's body
-// running iff its own axis is AI. Deleting the monolith halved this table: the
-// four C=1 rows collapsed onto their C=0 counterparts, because C now decides
-// nothing. The one row that changed meaning rather than merging is T=0, S=0,
-// which used to commit once via the monolith when C=1 and now commits zero times
-// — the ship simply is not being flown by anyone.
+// (`ai_helm_lateral_thrust` also writes `LastHelmInput`, but only the disjoint
+// `.lateral` field, and it is already `.before(process_helm_inputs)` — hence
+// already before these two. `ai_power_allocation` reads `.thrust` alone, so it
+// cannot see a torn pair and needs no edge.)
 //
-//   T=0, S=0 → nothing runs; nothing to commit.                             0
-//   T=1, S=0 → thrust runs, sees `!S` → commits.                            1
-//   T=0, S=1 → steering runs → commits.                                     1
-//   T=1, S=1 → thrust scratches; steering commits.                          1
-//
-// The shipped-hull case is the last row: every hull declares both axes, and an
-// unmanned station backfills them to AI.
-//
-// Because every system that runs reads memory *before* any commit lands, and
-// `helm_ai_decision` is pure given (memory, world_view, scored, tuning), both
-// reach the identical decision — so the axes never disagree, and the per-axis
-// result is bit-identical to what the monolith alone produced before #800. The
-// "no Helm-relevant objective" early-`continue` short-circuits before
-// `operate_helm` is called at all, on every path — zero commits everywhere, not
-// an asymmetry.
-// `ai_helm_thrust_commits_memory_when_steering_is_human` and
-// `per_axis_gates_are_independent` pin the mixed cases;
-// `helm_ai_memory_commits_exactly_once` and
-// `shipped_hull_helm_ai_memory_commits_exactly_once` pin that the both-AI and
-// shipped-hull cases do not double-advance; `coarse_helm_alone_commits_no_memory`
-// pins the T=0/S=0 row that #704 moved from one commit to none.
+// Because `operate_helm` is a pure function of (world_view, scored, surfaces,
+// tuning), both systems reach an identical decision from identical inputs — so
+// the axes never disagree, and the per-axis result stays bit-identical to what
+// the monolith produced before #800.
 
 /// Per-axis helm AI: throttle. Writes `ThrustInput` for ships whose
 /// helm-thrust system is AI-operated, whatever the coarse helm is doing — since
@@ -1042,9 +1152,9 @@ fn detect_reached_objective_completion(
 /// (Every per-axis helm system is scoped this way since #703 brought
 /// `ai_helm_lateral_thrust` into line.)
 ///
-/// Commits `AiMemory` when helm-steering is *not* AI-operated, i.e. when
-/// `ai_helm_steering` will not run for this ship this tick and this system is
-/// the first (and only) per-axis system that does — see the module note.
+/// Mutates nothing but its own axis: `operate_helm` is pure since #702, so
+/// there is no `AiMemory` commit to own and no ordering against
+/// `ai_helm_steering` to arbitrate — see the module note.
 ///
 /// Takes `&ShipPhysics` read-only and never advances physics itself;
 /// `integrate_ship_physics` is the sole helm-path writer (issues #695, #699).
@@ -1054,14 +1164,12 @@ fn ai_helm_thrust(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: HelmAiFallbackQuery,
     mut ships: Query<
         (
             &ShipSystemControlSources,
             &ShipPhysics,
-            &mut crate::ai_plugin::ShipAiMemory,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::entities::spawner::FactionComponent>,
@@ -1069,6 +1177,7 @@ fn ai_helm_thrust(
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&crate::entities::spawner::BehaviourSection>,
             Has<crate::server_app::LocalShip>,
+            HelmAiSurfaces,
             &mut ThrustInput,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
@@ -1087,7 +1196,6 @@ fn ai_helm_thrust(
     for (
         sources,
         physics,
-        mut ai_memory,
         blackboards,
         entity_uuid,
         faction,
@@ -1095,6 +1203,7 @@ fn ai_helm_thrust(
         helm_section,
         behaviour_section,
         is_local,
+        surfaces,
         mut thrust_in,
     ) in ships.iter_mut()
     {
@@ -1133,34 +1242,17 @@ fn ai_helm_thrust(
             &snapshot_entities,
         );
 
-        // AiMemory commit rule — see the module note. `ai_helm_steering` runs
-        // after us and commits whenever it runs, so we must not: we'd
-        // double-advance the patrol waypoint. But when helm-steering is *not*
-        // AI-operated it never runs, and we are the last helm-AI system to run
-        // on this ship this tick — so we commit, otherwise `waypoint_index` and
-        // `target` would freeze forever in the thrust-AI/steering-human config.
-        // Until #704 `operate_helm_ai` ran before us and yielded the commit to
-        // us whenever we ran at all; with it deleted we are the tick's first
-        // possible committer, and the rule is unchanged.
-        let steering_is_ai = sources
-            .0
-            .policy_for(&crate::system_registry::helm_steering_system_id())
-            .operate_ai;
-        let mut memory_scratch;
-        let memory: &mut crate::ai::AiMemory = if steering_is_ai {
-            memory_scratch = ai_memory.0.clone();
-            &mut memory_scratch
-        } else {
-            &mut ai_memory.0
-        };
+        // No commit rule, and no scratch clone to dodge one: `operate_helm` is
+        // pure, so we simply ask it and keep our axis (issue #702).
         let (thrust, _steering) = helm_ai_decision(
-            memory,
             &world_view,
             &scored,
             behaviour_section,
             &anchors,
+            surfaces.cursors,
+            surfaces.weapons_target,
+            cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
             physics.forward_speed,
-            faction_registry.as_deref(),
         );
 
         thrust_in.0 = thrust;
@@ -1168,7 +1260,9 @@ fn ai_helm_thrust(
         // Mirror to LastHelmInput for the player ship so broadcast /
         // fine-engine bookkeeping consumers see the AI's throttle. Since #704
         // this system is the sole writer of the `.thrust` field on the AI path
-        // (`operate_helm_ai` mirrored it field-wise for the coarse path).
+        // (`operate_helm_ai` mirrored it field-wise for the coarse path). The
+        // ordering that stops a reader seeing this beside a stale `.steering`
+        // survives #702 — see the module note.
         if is_local {
             if let Some(mut li) = local_ship_input.iter_mut().next() {
                 li.thrust = thrust;
@@ -1185,34 +1279,33 @@ fn ai_helm_thrust(
 /// Steers toward the selected waypoint/target chosen by the pure
 /// `crate::ai::operate_helm`, which resolves the top-scored Helm-relevant
 /// directive. That includes the **Retreat consumer** (issue #688): when
-/// `AiDirective::Retreat` is the top-scored directive — as it is once
-/// `aggregate_doctrine_blackboards` injects the synthetic hull-triggered
-/// Retreat below the entity's TOML `[behaviour] retreat_hull_threshold` —
-/// `operate_helm`'s Retreat arm resolves the anchor by name, falling back to
-/// the ship's home position when the anchor is empty (which the synthetic one
-/// always is), and steers toward it. `ai_helm_steering_retreats_toward_anchor`
-/// and `ai_helm_steering_retreat_falls_back_to_home_position` pin that
-/// behaviour through this system.
+/// `AiDirective::Retreat` is the top-scored directive, `operate_helm`'s Retreat
+/// arm resolves its named anchor and steers toward it.
+/// `ai_helm_steering_retreats_toward_anchor` pins that behaviour through this
+/// system, and `ai_helm_steering_retreat_with_unknown_anchor_falls_through`
+/// pins the other side of it.
 ///
-/// Commits `AiMemory` whenever it runs. Since it is `.after(ai_helm_thrust)`,
-/// and `ai_helm_thrust` yields the commit to it precisely when helm-steering is
-/// AI-operated, exactly one of the two commits per tick — see the module note
-/// above. Takes `&ShipPhysics` read-only; `integrate_ship_physics` is the
-/// sole helm-path physics writer (issues #695, #699).
+/// Retreat reached this system via a *synthetic* objective injected by
+/// `aggregate_doctrine_blackboards` below a `[behaviour] retreat_hull_threshold`
+/// until #702; it is now ordinary authored doctrine, and the empty-anchor /
+/// `home_position` fallback that the synthetic one depended on is gone.
+///
+/// Mutates nothing but its own axis — `operate_helm` is pure since #702, so
+/// there is no `AiMemory` commit and no ordering against `ai_helm_thrust` (see
+/// the module note). Takes `&ShipPhysics` read-only; `integrate_ship_physics`
+/// is the sole helm-path physics writer (issues #695, #699).
 #[allow(clippy::too_many_arguments)]
 fn ai_helm_steering(
     mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: HelmAiFallbackQuery,
     mut ships: Query<
         (
             &ShipSystemControlSources,
             &ShipPhysics,
-            &mut crate::ai_plugin::ShipAiMemory,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::entities::spawner::FactionComponent>,
@@ -1222,6 +1315,7 @@ fn ai_helm_steering(
             Has<crate::server_app::LocalShip>,
             Option<&mut PendingArcBearingRequest>,
             Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+            HelmAiSurfaces,
             &mut SteeringInput,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
@@ -1240,7 +1334,6 @@ fn ai_helm_steering(
     for (
         sources,
         physics,
-        mut ai_memory,
         blackboards,
         entity_uuid,
         faction,
@@ -1250,6 +1343,7 @@ fn ai_helm_steering(
         is_local,
         mut pending_bearing,
         combat_config_opt,
+        surfaces,
         mut steering_in,
     ) in ships.iter_mut()
     {
@@ -1286,20 +1380,16 @@ fn ai_helm_steering(
             &snapshot_entities,
         );
 
-        // Commits AiMemory: waypoint advance / target selection happen here.
-        // We are the last helm-AI system to run, and `ai_helm_thrust` defers the
-        // commit whenever helm-steering is AI — which it plainly is here — so
-        // this is the tick's one and only commit. (`operate_helm_ai` was the
-        // third deferrer until #704 deleted it.)
-        // See the module note.
+        // Pure call, no commit — see the module note (issue #702).
         let (_thrust, mut steering) = helm_ai_decision(
-            &mut ai_memory.0,
             &world_view,
             &scored,
             behaviour_section,
             &anchors,
+            surfaces.cursors,
+            surfaces.weapons_target,
+            cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
             physics.forward_speed,
-            faction_registry.as_deref(),
         );
 
         // ── Weapons->Helm arc-bearing request (issue #677) ────────────────────
@@ -1331,19 +1421,10 @@ fn ai_helm_steering(
 /// carrying that marker (`lod_ai_ships` inserts/removes it with the intent
 /// bundle), so the query can take `&mut ImpulseCommand` directly.
 ///
-/// **Reads `AiMemory`; never commits it.** The decision needs the *post*-
-/// decision memory — `operate_helm` picks the Destroy target and advances the
-/// patrol waypoint, and `resolve_helm_target_position` then reads
-/// `memory.waypoint_index` — so this system replays `helm_ai_decision` on a
-/// scratch clone and throws it away, exactly as the monolith does for the ship
-/// whose axes it does not own. That keeps it out of the "last helm-AI system to
-/// run owns the commit" ordering in the module note entirely: it commits in no
-/// combination, so it can neither double-advance the waypoint nor freeze it.
-/// The price is that it must observe *pre*-commit memory like every other
-/// helm-AI system, which is why it is registered `.before(ai_helm_thrust)` (it
-/// was `.before(operate_helm_ai)` until #704 removed the earlier committer) —
-/// running after a committer would replay the decision on already-advanced
-/// memory and resolve the *next* waypoint as the impulse target.
+/// **Reads the shared helm surfaces; mutates none of them.** It resolves where
+/// the Helm is going via `resolve_helm_target_position`, over the same
+/// `WeaponsTarget` / `ObjectiveCursors` the steering decision uses, so the drive
+/// charges toward the point the ship is actually steering at.
 ///
 /// Writes only on an `Engage`/`Cancel` decision, never on `NoChange`:
 /// `apply_helm_commands` transitions on `ImpulseCommand` change detection, so
@@ -1354,15 +1435,12 @@ fn ai_helm_impulse(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: HelmAiFallbackQuery,
     mut ships: Query<
         (
             &ShipSystemControlSources,
             &ShipPhysics,
-            // Read-only: this system never commits — see the doc above.
-            &crate::ai_plugin::ShipAiMemory,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::entities::spawner::FactionComponent>,
@@ -1372,6 +1450,7 @@ fn ai_helm_impulse(
             Has<crate::server_app::LocalShip>,
             Option<&ShipImpulse>,
             Option<&ImpulseConfigResource>,
+            HelmAiSurfaces,
             &mut ImpulseCommand,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
@@ -1390,7 +1469,6 @@ fn ai_helm_impulse(
     for (
         sources,
         physics,
-        ai_memory,
         blackboards,
         entity_uuid,
         faction,
@@ -1400,6 +1478,7 @@ fn ai_helm_impulse(
         is_local,
         impulse_comp,
         impulse_cfg,
+        surfaces,
         mut impulse_cmd,
     ) in ships.iter_mut()
     {
@@ -1454,22 +1533,19 @@ fn ai_helm_impulse(
             &snapshot_entities,
         );
 
-        // Scratch memory: replay the decision to reach the same post-decision
-        // state the monolith reads, then discard it. See the doc above.
-        let mut memory_scratch = ai_memory.0.clone();
-        let _ = helm_ai_decision(
-            &mut memory_scratch,
-            &world_view,
+        // Resolve where the Helm is going, from the same surfaces `operate_helm`
+        // reads. There is no `helm_ai_decision` replay here any more: it existed
+        // only to advance a scratch `AiMemory` so that this lookup would see the
+        // post-advance `waypoint_index`. The cursor is read-only and lives
+        // outside the decision now, so the replay computed an answer nobody
+        // used (issue #702).
+        let Some(target_pos) = resolve_helm_target_position(
             &scored,
-            behaviour_section,
+            &world_view,
             &anchors,
-            physics.forward_speed,
-            faction_registry.as_deref(),
-        );
-
-        let Some(target_pos) =
-            resolve_helm_target_position(&scored, &world_view, &anchors, &memory_scratch)
-        else {
+            surfaces.cursors,
+            helm_weapons_target(surfaces.weapons_target),
+        ) else {
             continue;
         };
 
@@ -2458,6 +2534,8 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
             format!("{label} brownout (level {allocated_level})")
         }
         CoordinationPayload::NavigateTo { label, .. } => {
+            // The generation is an internal handle, not something a bridge
+            // officer would say out loud; the label is the human-facing part.
             format!("Navigation: steer toward {label}")
         }
         CoordinationPayload::RepairRequest {
@@ -2484,7 +2562,7 @@ pub fn process_coordination_lag(
             &ShipSystemControlSources,
             &mut CoordinationQueue,
             Option<&mut PendingArcBearingRequest>,
-            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&mut HelmWaypointClearance>,
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
@@ -2504,7 +2582,7 @@ pub fn process_coordination_lag(
         control_sources,
         mut queue,
         mut pending_bearing,
-        mut ai_memory,
+        mut waypoint_clearance,
         mut alerted,
         mut repair_queue,
         mut pending_shields_threat,
@@ -2554,12 +2632,15 @@ pub fn process_coordination_lag(
                                 pending.0 = uuid::Uuid::parse_str(uuid).ok();
                             }
                         }
-                        // Channel-3 Navigation-to-Helm handoff (issue #681):
-                        // stash the long-range steer target for AI Helm's
-                        // fallthrough in operate_helm.
-                        if let CoordinationPayload::NavigateTo { x, z, .. } = &msg.payload {
-                            if let Some(ai_mem) = ai_memory.as_deref_mut() {
-                                ai_mem.0.nav_goal = Some([*x, *z]);
+                        // Channel-3 Navigation-to-Helm handoff (issues #681,
+                        // #702): the order has now served its delivery lag, so
+                        // clear the AI Helm to follow this generation of the
+                        // ship's `NavigationWaypoint`. No position is copied —
+                        // the waypoint is the goal, and `operate_helm` reads it
+                        // straight off the ship.
+                        if let CoordinationPayload::NavigateTo { generation, .. } = &msg.payload {
+                            if let Some(clearance) = waypoint_clearance.as_deref_mut() {
+                                clearance.0 = Some(*generation);
                             }
                         }
                     }
@@ -2877,7 +2958,6 @@ mod tests {
                 CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     hull_config,
                 )),
@@ -2902,8 +2982,54 @@ mod tests {
             crate::ship::helm::LateralThrustInput::default(),
             crate::ship::helm::ImpulseCommand::default(),
             crate::ship::helm::BoostCommand::default(),
+            // The console-owned surfaces the AI helm derives its goals from
+            // (issue #702). Production spawns all four on every ship; see
+            // `HelmAiSurfaces`.
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
+            HelmWaypointClearance::default(),
+            crate::ai_plugin::ObjectiveCursors::default(),
         ));
         app
+    }
+
+    /// Lock this ship's Tactical surface onto `uuid` (issue #702).
+    ///
+    /// The helm pursues `WeaponsTarget`; it no longer resolves a `Destroy`
+    /// directive's authored name itself. In production `ai_target_selection`
+    /// does that resolution (tier 1) and publishes the result here, so a test
+    /// that poses a Destroy objective and expects pursuit must supply the lock
+    /// that system would have written.
+    fn set_ship_weapons_target(app: &mut App, uuid: &str) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut target = entity
+            .get_mut::<crate::weapons_plugin::WeaponsTarget>()
+            .expect("ship must carry WeaponsTarget");
+        target.0 = Some(uuid.to_string());
+    }
+
+    /// Give this ship a Navigation waypoint *and* the Channel-3 clearance to
+    /// fly it, as `operate_navigation_ai` → `process_coordination_lag` would
+    /// once the order came due (issue #702). Returns the waypoint's generation.
+    use crate::navigation_plugin::WaypointMode;
+
+    fn set_cleared_nav_waypoint(app: &mut App, x: f32, z: f32) -> u64 {
+        let ship = find_ship_entity(app);
+        let generation = {
+            let mut entity = app.world_mut().entity_mut(ship);
+            let mut waypoint = entity
+                .get_mut::<crate::navigation_plugin::NavigationWaypoint>()
+                .expect("ship must carry NavigationWaypoint");
+            waypoint.set(WaypointMode::Free { x, z });
+            waypoint.generation()
+        };
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut clearance = entity
+            .get_mut::<HelmWaypointClearance>()
+            .expect("ship must carry HelmWaypointClearance");
+        clearance.0 = Some(generation);
+        generation
     }
 
     fn apply_hull_damage(app: &mut App, amount: f32) {
@@ -4454,34 +4580,6 @@ station = "helm"
         app
     }
 
-    fn set_ship_home_position(app: &mut App, pos: [f32; 3]) {
-        let ship = find_ship_entity(app);
-        let mut entity = app.world_mut().entity_mut(ship);
-        let mut mem = entity
-            .get_mut::<crate::ai_plugin::ShipAiMemory>()
-            .expect("expected ShipAiMemory");
-        mem.0.home_position = pos;
-    }
-
-    fn set_ship_nav_goal(app: &mut App, goal: Option<[f32; 2]>) {
-        let ship = find_ship_entity(app);
-        let mut entity = app.world_mut().entity_mut(ship);
-        let mut mem = entity
-            .get_mut::<crate::ai_plugin::ShipAiMemory>()
-            .expect("expected ShipAiMemory");
-        mem.0.nav_goal = goal;
-    }
-
-    fn get_ship_nav_goal(app: &mut App) -> Option<[f32; 2]> {
-        let ship = find_ship_entity(app);
-        app.world()
-            .entity(ship)
-            .get::<crate::ai_plugin::ShipAiMemory>()
-            .expect("expected ShipAiMemory")
-            .0
-            .nav_goal
-    }
-
     /// Build a `ControlSourceResolver` from a shipped hull's TOML the way the
     /// game does when nobody is driving: parse the file, then set every
     /// *declared* system to `ControlSource::Ai`. That is literally what the NPC
@@ -4752,30 +4850,6 @@ station = "helm"
         );
     }
 
-    /// AC3/AC4 on the shipped-hull shape. All three helm systems run for this
-    /// ship, so `operate_helm_ai` must yield the `AiMemory` commit to
-    /// `ai_helm_steering` (the last to run). If it commits as well, the patrol
-    /// waypoint advances twice in one tick and the ship skips a leg — the
-    /// double-commit the old coarse gate used to make impossible.
-    #[test]
-    fn shipped_hull_helm_ai_memory_commits_exactly_once() {
-        let mut app = test_app();
-        stacked_patrol_world(&mut app);
-        let resolver =
-            resolver_from_shipped_hull(include_str!("../assets/entities/pirate_raider.toml"));
-        install_control_sources(&mut app, &resolver);
-
-        tick(&mut app);
-
-        assert_eq!(
-            get_waypoint_index(&mut app),
-            1,
-            "on a shipped hull all three helm-AI systems run; exactly one must commit \
-             AiMemory (2 = operate_helm_ai double-committed against ai_helm_steering, \
-             0 = nobody committed)"
-        );
-    }
-
     /// AC3 on the shipped-hull shape: the Weapons->Helm arc-bearing bias (#677)
     /// must survive the move to the per-axis path. Before #800 the bias reached
     /// shipped hulls via `operate_helm_ai`; now `ai_helm_steering` owns steering
@@ -4926,11 +5000,6 @@ station = "helm"
             crate::system_registry::helm_thrust_system_id(),
             ControlSource::Ai,
         );
-        // A stale channel-3 Navigation handoff. `operate_helm` clears this the
-        // moment a local Helm objective resolves (which `Reach` does), so it is
-        // a direct probe for "did the AiMemory mutation get committed?".
-        set_ship_nav_goal(&mut app, Some([-500.0, -500.0]));
-
         tick(&mut app);
 
         assert!(
@@ -4942,149 +5011,11 @@ station = "helm"
             0.0,
             "steering axis is still human → must be untouched"
         );
-        // Independent axes must not mean a half-dead AI: the one system that
-        // does run still has to commit AiMemory, or waypoint advance and target
-        // selection freeze while the throttle happily keeps writing. See
-        // `ai_helm_thrust_commits_memory_when_steering_is_human` for the
-        // waypoint half of the same rule.
-        assert_eq!(
-            get_ship_nav_goal(&mut app),
-            None,
-            "the sole running per-axis system must commit AiMemory, not discard \
-             it into a scratch clone; a surviving nav_goal means frozen memory"
-        );
-    }
-
-    /// Read this ship's committed patrol waypoint index out of `ShipAiMemory`.
-    fn get_waypoint_index(app: &mut App) -> usize {
-        let ship = find_ship_entity(app);
-        app.world()
-            .entity(ship)
-            .get::<crate::ai_plugin::ShipAiMemory>()
-            .expect("expected ShipAiMemory")
-            .0
-            .waypoint_index
-    }
-
-    /// A patrol whose every waypoint sits on top of the ship, so `helm_patrol`
-    /// takes its "arrived → advance" branch on each call it is given. That
-    /// makes `waypoint_index` a direct counter of `AiMemory` commits: 0 means
-    /// nothing committed, 1 means exactly one commit, 2 means it committed
-    /// twice. Three waypoints (not two) so a double-advance reads as `2` rather
-    /// than wrapping back around to `0` and aliasing with the frozen case.
-    fn stacked_patrol_world(app: &mut App) {
-        let mut cfg = crate::world::config::WorldConfig::default();
-        for wp in ["wp-a", "wp-b", "wp-c"] {
-            cfg.anchors.insert(wp.into(), [0.0, 0.0, 0.0]);
-        }
-        app.insert_resource(cfg);
-        set_ship_blackboard_objectives(
-            app,
-            vec![patrol_scored_objective(vec!["wp-a", "wp-b", "wp-c"], 20.0)],
-        );
-    }
-
-    /// Regression (issue #701 review, finding 2): in the thrust-AI /
-    /// steering-human config `ai_helm_steering` never runs, so if it were still
-    /// the *sole* committer of `AiMemory` nothing would commit — `waypoint_index`
-    /// would freeze at 0 forever and the throttle would target waypoint 0 for
-    /// the rest of the mission. `ai_helm_thrust` must therefore commit when it
-    /// is the only per-axis system running.
-    #[test]
-    fn ai_helm_thrust_commits_memory_when_steering_is_human() {
-        let mut app = test_app();
-        stacked_patrol_world(&mut app);
-        set_helm_control_source(&mut app, ControlSource::Human);
-        set_fine_control_source(
-            &mut app,
-            crate::system_registry::helm_thrust_system_id(),
-            ControlSource::Ai,
-        );
-
-        tick(&mut app);
-
-        assert_eq!(
-            get_waypoint_index(&mut app),
-            1,
-            "ai_helm_thrust is the only per-axis system running, so it must \
-             commit AiMemory exactly once; 0 = frozen memory (nothing committed)"
-        );
-    }
-
-    /// The mirror of the above: steering-AI / thrust-human commits too. Pins
-    /// that the two mixed configs behave the same way, rather than one
-    /// advancing and one freezing.
-    #[test]
-    fn ai_helm_steering_commits_memory_when_thrust_is_human() {
-        let mut app = test_app();
-        stacked_patrol_world(&mut app);
-        set_helm_control_source(&mut app, ControlSource::Human);
-        set_fine_control_source(
-            &mut app,
-            crate::system_registry::helm_steering_system_id(),
-            ControlSource::Ai,
-        );
-
-        tick(&mut app);
-
-        assert_eq!(
-            get_waypoint_index(&mut app),
-            1,
-            "ai_helm_steering is the only per-axis system running, so it must \
-             commit AiMemory exactly once"
-        );
-    }
-
-    /// The both-axes-AI case: `ai_helm_thrust` and `ai_helm_steering` both call
-    /// `operate_helm`, but exactly one of them may commit the resulting
-    /// `AiMemory`. Two commits would double-advance the patrol waypoint,
-    /// silently skipping one every tick.
-    #[test]
-    fn helm_ai_memory_commits_exactly_once() {
-        let mut app = test_app();
-        stacked_patrol_world(&mut app);
-        set_per_axis_helm_ai(&mut app);
-
-        tick(&mut app);
-
-        assert_eq!(
-            get_waypoint_index(&mut app),
-            1,
-            "both per-axis systems run, but AiMemory must commit exactly once; \
-             2 = double-advance (both committed), 0 = frozen (neither did)"
-        );
-    }
-
-    /// Ported in #704 from `coarse_helm_ai_commits_memory_exactly_once`, which
-    /// pinned that the coarse path "runs alone and commits once, exactly as
-    /// before the per-axis split". Its subject was `operate_helm_ai`, so with
-    /// the monolith deleted the old assertion has no subject — and left as-is it
-    /// would have gone *vacuous* rather than red, because `set_helm_control_source`
-    /// now backfills the axes too and `ai_helm_steering` would have supplied the
-    /// commit it was crediting to the monolith.
-    ///
-    /// The faithful successor is the same fixture and the same question — how
-    /// many times does the coarse path commit? — with the answer the delete
-    /// changed it to: **zero**, because there is no coarse path. This is the
-    /// C=1, T=0, S=0 row of the commit table in the module note, which #704 moves
-    /// from one commit to none. It stays a real test: nothing else in the suite
-    /// would notice a coarse fallback quietly re-appearing and advancing the
-    /// waypoint off the coarse policy alone.
-    #[test]
-    fn coarse_helm_alone_commits_no_memory() {
-        let mut app = test_app();
-        stacked_patrol_world(&mut app);
-        set_coarse_helm_only_ai(&mut app);
-
-        tick(&mut app);
-
-        assert_eq!(
-            get_waypoint_index(&mut app),
-            0,
-            "the coarse helm system has no AI behaviour of its own since #704 deleted \
-             operate_helm_ai; with every per-axis system Human nobody runs, so nobody \
-             may commit AiMemory (1 = a coarse fallback has come back)"
-        );
+        // The third assertion here used to be a `nav_goal` probe for "did the
+        // AiMemory mutation get committed?" — the #701 commit rule's half of
+        // this test. #702 made `operate_helm` pure, so there is no commit to
+        // observe and no half-dead-AI failure mode to guard: a system that runs
+        // computes its axis from the shared surfaces and writes it, full stop.
     }
 
     /// Regression (issue #701 review, finding 1): `ai_helm_thrust` and
@@ -5174,25 +5105,40 @@ station = "helm"
         );
     }
 
-    /// AC3 (Retreat consumer, synthetic hull-triggered case): the Retreat that
-    /// `aggregate_doctrine_blackboards` injects below the entity's TOML
-    /// `[behaviour] retreat_hull_threshold` carries an *empty* anchor, so the
-    /// consumer must fall back to the ship's home position rather than idling.
+    /// AC3 (Retreat consumer, unresolvable case): a Retreat naming an anchor
+    /// the world does not declare resolves to nowhere and leaves the ship idle.
+    ///
+    /// This asserted the opposite until #702: an *empty*-anchor Retreat — which
+    /// is what `aggregate_doctrine_blackboards` synthesised below a
+    /// `[behaviour] retreat_hull_threshold` — used to fall back to the ship's
+    /// `AiMemory.home_position`. Both the injector and `home_position` are gone.
+    /// The fallback only ever looked like a safety net: `home_position` was
+    /// never seeded in production, so "retreat home" meant "fly to world
+    /// origin" on every shipped ship. Retreat is authored doctrine with a real
+    /// anchor now (see `assets/entities/pirate_raider.toml`), and an anchor that
+    /// resolves to nothing steers nowhere — see
+    /// `ai_helm_steering_retreats_toward_anchor` for the resolvable case.
     #[test]
-    fn ai_helm_steering_retreat_falls_back_to_home_position() {
+    fn ai_helm_steering_retreat_with_unknown_anchor_does_not_steer() {
         let mut app = test_app();
-        // Empty anchor + no anchors in the world config → home_position is the
-        // only thing that can resolve. Home is off the starboard bow.
+        // No anchors in the world config → the Retreat cannot resolve, and
+        // there is no lower-priority objective to fall through to.
         set_ship_blackboard_objectives(&mut app, vec![retreat_scored_objective("", 90.0)]);
         app.insert_resource(crate::world::config::WorldConfig::default());
-        set_ship_home_position(&mut app, [100.0, 0.0, 0.0]);
         set_per_axis_helm_ai(&mut app);
 
         tick(&mut app);
 
-        assert!(
-            get_steering_input(&mut app) > 0.0,
-            "synthetic empty-anchor Retreat must steer toward home_position"
+        assert_eq!(
+            get_steering_input(&mut app),
+            0.0,
+            "a Retreat that names nowhere must not steer; the old home_position \
+             fallback made this a flight to world origin"
+        );
+        assert_eq!(
+            get_thrust_input(&mut app),
+            0.0,
+            "and must not throttle up either"
         );
     }
 
@@ -5426,20 +5372,29 @@ station = "helm"
         );
     }
 
-    /// `ai_helm_impulse` must read **pre-commit** `AiMemory` — which is what its
-    /// `.before(operate_helm_ai)` registration buys — because it resolves its
-    /// target from post-decision memory by *replaying* the decision on a scratch
-    /// clone. Replaying on memory a committer has already advanced advances it a
-    /// second time and aims the drive at the wrong waypoint.
+    /// `ai_helm_impulse` must resolve its target from the *same* waypoint the
+    /// rest of the helm AI is steering at this tick — one leg further on than the
+    /// tick started, because `advance_objective_cursors` (`SimSet::Modifiers`)
+    /// runs before this system and has already advanced the cursor off the
+    /// waypoint underfoot.
     ///
-    /// The patrol makes that arithmetic observable. wp-a and wp-b both sit on
-    /// the ship, so each `operate_helm` call advances one leg; wp-c is 500 units
-    /// dead ahead.
+    /// The name is historical, and so is the failure it guards: this system used
+    /// to reach that leg by *replaying* the helm decision on a scratch clone of
+    /// `AiMemory`, which only matched the committer's view while the memory was
+    /// still pre-commit — hence `.before(operate_helm_ai)`. #702 deleted
+    /// `AiMemory` and with it the clone, the replay and the commit; the cursor is
+    /// now a read-only surface that cannot move underneath this system at all
+    /// (see the registration comment on `ai_helm_impulse`). What is left to pin
+    /// is the answer, not the mechanism that reached it.
     ///
-    ///   correct → clone index 0, replay once → index 1 → target wp-b underfoot
-    ///             → inside cancel_distance with a charge running → **Cancel**
-    ///   broken  → clone index 1 (already committed), replay → index 2 → target
-    ///             wp-c at 500 → far → NoChange → command stays `Charging`
+    /// The patrol makes the leg observable. wp-a and wp-b both sit on the ship,
+    /// so the cursor advances off wp-a during `Modifiers`; wp-c is 500 units dead
+    /// ahead.
+    ///
+    ///   correct → cursor 1 → target wp-b underfoot → inside cancel_distance
+    ///             with a charge running → **Cancel**
+    ///   broken  → a leg out of step → target wp-c at 500 → far → NoChange →
+    ///             command stays `Charging`
     ///
     /// So the correct answer is also the one that performs a write, which keeps
     /// a do-nothing regression from passing this too.
@@ -5452,8 +5407,9 @@ station = "helm"
         cfg.anchors.insert("wp-c".into(), [0.0, 0.0, -500.0]);
         app.insert_resource(cfg);
         set_behaviour_section(&mut app, impulse_doctrine("obj-defend"));
-        // Coarse helm on AI so `operate_helm_ai` runs and commits the advance —
-        // without a committer there is no pre/post distinction to get wrong.
+        // Coarse helm on AI, as this test has always run it. (This was once
+        // load-bearing: it put `operate_helm_ai` in the tick as the committer
+        // this system had to run ahead of. There is no committer now.)
         set_helm_control_source(&mut app, ControlSource::Ai);
         let mut state = crate::impulse::ImpulseState::new();
         state.start_charge();
@@ -5728,8 +5684,10 @@ station = "helm"
     /// fallback expressible, and what let the axes lie dormant undetected until
     /// #800. Post-#704 each writer must be a function of its own axis *alone*.
     /// So this test now sweeps C across all three sources for every fixed
-    /// (T,S,L,I) and demands the whole outcome — every component's writer and
-    /// the `AiMemory` commit — be invariant under it.
+    /// (T,S,L,I) and demands the whole outcome — every component's writer — be
+    /// invariant under it. (The sweep also covered the `AiMemory` commit until
+    /// #702 made `operate_helm` pure and deleted the commit; only the writers
+    /// remain.)
     ///
     /// Be clear about the limit of that, because it is easy to overrate: this
     /// is a **model** test. It states the gate algebra against the policy
@@ -5763,15 +5721,22 @@ station = "helm"
         ];
 
         // Every writer decision for one ship in one tick: which system writes
-        // each intent component, and who commits `AiMemory`.
+        // each intent component.
+        //
+        // Carried `thrust_commits` / `steering_commits` fields modelling the
+        // #701 "last helm-AI system to run owns the `AiMemory` commit" rule
+        // until #702 made `operate_helm` pure and dissolved the rule. They were
+        // in any case a model rather than an observation — computed from the
+        // policy booleans, then asserted against the same booleans — so the
+        // assertion over them reduced to arithmetic and could never have caught
+        // a real double-commit. What is left is the part that does observe
+        // something: which axis each system writes.
         #[derive(Debug, PartialEq, Eq)]
         struct HelmWriters {
             thrust: bool,
             steering: bool,
             lateral: bool,
             impulse: bool,
-            thrust_commits: bool,
-            steering_commits: bool,
         }
 
         let mut saw_all_four_running = false;
@@ -5802,19 +5767,11 @@ station = "helm"
                             let ll = r.policy_for(&lateral).operate_ai;
                             let ii = r.policy_for(&impulse).operate_ai;
 
-                            // "The last helm-AI system that runs owns the
-                            // commit", with registered order thrust → steering.
-                            // The monolith was the first term of that order
-                            // until #704; `ai_helm_lateral_thrust` never touches
-                            // memory and `ai_helm_impulse` always scratches, so
-                            // neither L nor I appears here — see the module note.
                             let writers = HelmWriters {
                                 thrust: tt,
                                 steering: ss,
                                 lateral: ll,
                                 impulse: ii,
-                                thrust_commits: tt && !ss,
-                                steering_commits: ss,
                             };
 
                             // Each component is written exactly when its own
@@ -5834,19 +5791,6 @@ station = "helm"
                                 );
                             }
 
-                            let commits = [writers.thrust_commits, writers.steering_commits]
-                                .iter()
-                                .filter(|x| **x)
-                                .count();
-                            let any_committer_runs = tt || ss;
-                            assert_eq!(
-                                commits,
-                                usize::from(any_committer_runs),
-                                "AiMemory must commit exactly once when any committing helm AI \
-                                 runs (and never otherwise): coarse={c:?} thrust={t:?} \
-                                 steering={s:?} lateral={l:?} impulse={i:?}"
-                            );
-
                             if tt && ss && ll && ii {
                                 saw_all_four_running = true;
                             }
@@ -5858,9 +5802,9 @@ station = "helm"
                         for (idx, other) in outcome_per_coarse.iter().enumerate().skip(1) {
                             assert_eq!(
                                 &outcome_per_coarse[0], other,
-                                "the coarse helm policy must not influence any helm-AI writer \
-                                 or the AiMemory commit — #704 deleted the only system that \
-                                 read it. Differed between coarse={:?} and coarse={:?} at \
+                                "the coarse helm policy must not influence any helm-AI \
+                                 writer — #704 deleted the only system that read it. \
+                                 Differed between coarse={:?} and coarse={:?} at \
                                  thrust={t:?} steering={s:?} lateral={l:?} impulse={i:?}",
                                 all[0], all[idx]
                             );
@@ -5894,9 +5838,11 @@ station = "helm"
     /// non-zero) or a dead per-axis path (both zero); the old test could not tell
     /// you about either, and this one fails on both.
     ///
-    /// This is the end-to-end companion to `coarse_helm_alone_commits_no_memory`:
-    /// that one pins the coarse system writes no `AiMemory`, this one that it
-    /// writes no intent.
+    /// This had an end-to-end companion, `coarse_helm_alone_commits_no_memory`,
+    /// pinning that the coarse system wrote no `AiMemory` while this one pins
+    /// that it writes no intent. #702 deleted `AiMemory`, so the companion had
+    /// nothing left to observe and went with it; "writes no intent" is now the
+    /// whole of the property.
     #[test]
     fn coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do() {
         let anchor = "station-alpha";
@@ -6069,11 +6015,14 @@ station = "helm"
             Transform::from_xyz(100.0, 0.0, 0.0),
         ));
         let mut runtime = crate::world::server::WorldContentRuntime::default();
+        let target_uuid_str = target_uuid.clone();
         runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
         app.insert_resource(runtime);
         set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
         set_helm_control_source(&mut app, ControlSource::Ai);
 
+        // Tactical's lock: what the helm pursues (issue #702).
+        set_ship_weapons_target(&mut app, &target_uuid_str);
         tick(&mut app);
 
         let last = get_last_helm_input(&mut app);
@@ -6129,6 +6078,7 @@ station = "helm"
             Transform::from_xyz(100.0, 0.0, 0.0),
         ));
         let mut runtime = crate::world::server::WorldContentRuntime::default();
+        let target_uuid_str = target_uuid.clone();
         runtime.name_to_uuid.insert("wave_1".into(), target_uuid);
         app.insert_resource(runtime);
         // Radar range (500.0) comfortably covers the hostile's distance (100.0).
@@ -6141,6 +6091,8 @@ station = "helm"
         set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
         set_helm_control_source(&mut app, ControlSource::Ai);
 
+        // Tactical's lock: what the helm pursues (issue #702).
+        set_ship_weapons_target(&mut app, &target_uuid_str);
         tick(&mut app);
 
         let last = get_last_helm_input(&mut app);
@@ -6164,6 +6116,7 @@ station = "helm"
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
         let mut runtime = crate::world::server::WorldContentRuntime::default();
+        let destroy_uuid_str = destroy_uuid.clone();
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
@@ -6189,6 +6142,8 @@ station = "helm"
             .entity_mut(ship)
             .insert(PendingArcBearingRequest(Some(bearing_uuid)));
 
+        // Tactical's lock: what the helm pursues (issue #702).
+        set_ship_weapons_target(&mut app, &destroy_uuid_str);
         tick(&mut app);
 
         let last = get_last_helm_input(&mut app);
@@ -6410,18 +6365,154 @@ station = "helm"
         );
     }
 
+    // ── Channel-3 Navigation→Helm clearance (issue #702) ──────────────────
+    //
+    // `cleared_nav_waypoint` is where the Channel-3 lag lives on the read side:
+    // the Helm follows the ship's `NavigationWaypoint` only while its
+    // `HelmWaypointClearance` names that waypoint's `generation`. These pin the
+    // gate itself — deleting the comparison must not be a silent no-op.
+
+    /// The happy path: clearance matches the waypoint's generation, so the Helm
+    /// is cleared to fly it.
+    #[test]
+    fn cleared_nav_waypoint_returns_the_waypoint_when_the_clearance_matches() {
+        let waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
+            x: 5.0,
+            z: -7.0,
+        });
+        let clearance = HelmWaypointClearance(Some(waypoint.generation()));
+
+        assert_eq!(
+            cleared_nav_waypoint(Some(&waypoint), Some(&clearance)),
+            Some([5.0, -7.0])
+        );
+    }
+
+    /// The lag itself: Navigation has set a *new* waypoint, but the `NavigateTo`
+    /// carrying its generation is still in the coordination queue. The Helm must
+    /// not fly it yet — it has been given the waypoint but not the order.
+    ///
+    /// This is why the clearance is a generation rather than a bool: a bool
+    /// ("Navigation has spoken") would go true once and wave every subsequent
+    /// waypoint straight through, so only the first order would ever be delayed.
+    #[test]
+    fn cleared_nav_waypoint_withholds_a_waypoint_newer_than_the_clearance() {
+        let mut waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
+            x: 5.0,
+            z: -7.0,
+        });
+        // The Helm was cleared for this one, and is flying it.
+        let clearance = HelmWaypointClearance(Some(waypoint.generation()));
+        assert!(cleared_nav_waypoint(Some(&waypoint), Some(&clearance)).is_some());
+
+        // Navigation now re-tasks the ship. The order has not arrived yet.
+        waypoint.set(WaypointMode::Free { x: 900.0, z: 900.0 });
+
+        assert_eq!(
+            cleared_nav_waypoint(Some(&waypoint), Some(&clearance)),
+            None,
+            "a re-tasked waypoint must re-incur the Channel-3 lag; without this \
+             every waypoint after the first would be followed instantly"
+        );
+
+        // …and once `process_coordination_lag` latches the new generation, it is.
+        let caught_up = HelmWaypointClearance(Some(waypoint.generation()));
+        assert_eq!(
+            cleared_nav_waypoint(Some(&waypoint), Some(&caught_up)),
+            Some([900.0, 900.0])
+        );
+    }
+
+    /// A ship never cleared for anything follows nothing.
+    #[test]
+    fn cleared_nav_waypoint_is_none_without_a_clearance() {
+        let waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
+            x: 5.0,
+            z: -7.0,
+        });
+
+        assert_eq!(
+            cleared_nav_waypoint(Some(&waypoint), Some(&HelmWaypointClearance(None))),
+            None,
+            "never cleared = never followed"
+        );
+        assert_eq!(
+            cleared_nav_waypoint(Some(&waypoint), None),
+            None,
+            "a ship with no clearance component at all is never cleared"
+        );
+        assert_eq!(
+            cleared_nav_waypoint(None, Some(&HelmWaypointClearance(Some(1)))),
+            None,
+            "a clearance with no waypoint names nowhere"
+        );
+    }
+
+    /// Through the real system: an uncleared waypoint does not move the ship,
+    /// and the same waypoint does once the clearance lands.
+    ///
+    /// The unit tests above pin `cleared_nav_waypoint`; this pins that
+    /// `ai_helm_thrust` actually consults it rather than reading the waypoint
+    /// directly and skipping the lag.
+    #[test]
+    fn ai_helm_flies_the_nav_waypoint_only_once_cleared() {
+        fn app_with_waypoint(clear_it: bool) -> App {
+            let mut app = test_app();
+            set_helm_control_source(&mut app, ControlSource::Ai);
+            // A Helm-relevant objective that cannot resolve, so the only thing
+            // left to fly is the Navigation waypoint.
+            set_ship_blackboard_objectives(
+                &mut app,
+                vec![reach_scored_objective("anchor-not-in-world-config", 8.0)],
+            );
+            if clear_it {
+                set_cleared_nav_waypoint(&mut app, 0.0, -900.0);
+            } else {
+                // Waypoint set, order not yet delivered.
+                let ship = find_ship_entity(&mut app);
+                let mut entity = app.world_mut().entity_mut(ship);
+                let mut waypoint = entity
+                    .get_mut::<crate::navigation_plugin::NavigationWaypoint>()
+                    .expect("ship must carry NavigationWaypoint");
+                waypoint.set(WaypointMode::Free { x: 0.0, z: -900.0 });
+            }
+            tick(&mut app);
+            app
+        }
+
+        assert_eq!(
+            get_thrust_input(&mut app_with_waypoint(false)),
+            0.0,
+            "the waypoint is set but the Channel-3 order has not been delivered, \
+             so the AI helm must not fly it yet"
+        );
+        assert!(
+            get_thrust_input(&mut app_with_waypoint(true)) > 0.0,
+            "once process_coordination_lag latches the clearance, the same \
+             waypoint must be flown"
+        );
+    }
+
     /// Regression (issue #696 review, finding 2): `[behaviour]
     /// waypoint_arrival_radius` is authored per entity template in TOML and
     /// read by the cursor evaluator at every LOD. The high-LOD helm's own
     /// turn-at-waypoint decision must agree with it rather than hardcoding
     /// `WAYPOINT_ARRIVAL_RADIUS` — otherwise a designer's widened radius is
     /// honoured for triggers but ignored for steering.
+    ///
+    /// Probed through the helm's *steering* rather than through a waypoint
+    /// index (issue #702). The helm no longer keeps an index of its own to
+    /// look at: `advance_objective_cursors` owns every cursor, and `helm_patrol`
+    /// only reads. What the radius still decides here — and all this test ever
+    /// really cared about — is the helm's own arrival branch: short of the
+    /// radius it turns toward the waypoint; inside it, it flies straight
+    /// through. That is directly observable.
     #[test]
     fn high_lod_helm_honours_toml_authored_waypoint_arrival_radius() {
         fn patrol_app(arrival_radius: Option<f32>) -> App {
             let mut app = test_app();
-            // wp0 sits 100 units out — inside a 150 radius, outside the
-            // default 20.
+            // wp0 sits 100 units to starboard — inside a 150 radius, outside
+            // the default 20.
             let mut cfg = crate::world::config::WorldConfig::default();
             cfg.anchors.insert("wp0".into(), [100.0, 0.0, 0.0]);
             cfg.anchors.insert("wp1".into(), [900.0, 0.0, 0.0]);
@@ -6446,25 +6537,18 @@ station = "helm"
             app
         }
 
-        fn helm_waypoint_index(app: &mut App) -> usize {
-            app.world_mut()
-                .query::<&crate::ai_plugin::ShipAiMemory>()
-                .single(app.world())
-                .expect("ship must carry ShipAiMemory")
-                .0
-                .waypoint_index
-        }
-
-        assert_eq!(
-            helm_waypoint_index(&mut patrol_app(None)),
-            0,
-            "with the default arrival radius the helm is still 100 units short of wp0"
+        assert!(
+            get_steering_input(&mut patrol_app(None)) > 0.0,
+            "with the default arrival radius the helm is still 100 units short of \
+             wp0, so it must turn toward it (wp0 is to starboard)"
         );
         assert_eq!(
-            helm_waypoint_index(&mut patrol_app(Some(150.0))),
-            1,
-            "a TOML-widened arrival radius must move the high-LOD helm on to wp1, \
-             the same call the cursor evaluator makes"
+            get_steering_input(&mut patrol_app(Some(150.0))),
+            0.0,
+            "a TOML-widened arrival radius must put the high-LOD helm *inside* \
+             wp0, so it flies straight through — the same radius, and the same \
+             call, the cursor evaluator makes. A hardcoded WAYPOINT_ARRIVAL_RADIUS \
+             would still be turning."
         );
     }
 
@@ -6849,8 +6933,8 @@ station = "helm"
             // `operate_helm_ai` zero the intent and skip the decision
             // entirely), but it must not *resolve* — a Reach whose anchor is
             // absent from the WorldConfig yields `None`, so `operate_helm`
-            // falls through to the nav_goal handoff, the only path that reads
-            // `nav_handoff_speed`.
+            // falls through to the Navigation waypoint handoff, the only path
+            // that reads `nav_handoff_speed`.
             set_ship_blackboard_objectives(
                 &mut app,
                 vec![reach_scored_objective("anchor-not-in-world-config", 8.0)],
@@ -6858,13 +6942,11 @@ station = "helm"
             if let Some(behaviour) = behaviour {
                 set_behaviour_section(&mut app, behaviour);
             }
-            let ship = find_ship_entity(&mut app);
-            app.world_mut()
-                .entity_mut(ship)
-                .get_mut::<crate::ai_plugin::ShipAiMemory>()
-                .expect("ship must carry ShipAiMemory")
-                .0
-                .nav_goal = Some([0.0, -900.0]);
+            // Post-#702 the handoff is the ship's own `NavigationWaypoint`,
+            // gated by a matching `HelmWaypointClearance`, rather than a
+            // private `AiMemory.nav_goal` copy. Dead ahead and far away, so the
+            // helm throttles up at exactly `nav_handoff_speed`.
+            set_cleared_nav_waypoint(&mut app, 0.0, -900.0);
             tick(&mut app);
             app
         }
@@ -7111,6 +7193,8 @@ station = "helm"
             vec![destroy_scored_objective("enemy_fighter", 60.0)],
         );
         set_helm_control_source(&mut app, ControlSource::Ai);
+        // Tactical's lock: what the helm pursues (issue #702).
+        set_ship_weapons_target(&mut app, &target_uuid);
 
         tick(&mut app);
 
@@ -7151,119 +7235,6 @@ station = "helm"
             yaw_delta <= max_step + 0.0001,
             "AI helm must not consume a long frame as one oversized yaw step; \
              yaw_delta={yaw_delta}, max_step={max_step}"
-        );
-    }
-
-    // (d) NPC helm finds nearest hostile via the loaded FactionRegistry.
-    //
-    // Regression guard for the #587 regression where `operate_helm_ai` was
-    // passing `FactionRegistry::default()` (empty) instead of the live
-    // `FactionRegistryResource`. With an empty registry `find_nearest_hostile`
-    // never finds anyone, so NPC ships with `Destroy { target: "" }` doctrine
-    // sat stationary even when enemies were present (combat_test.toml).
-    //
-    // Drives `operate_helm` (the pure core function) with a real vs empty
-    // registry to confirm the fix works and documents the regression shape.
-    #[test]
-    fn npc_helm_finds_hostile_via_faction_registry() {
-        use crate::faction::{FactionConfig, FactionRegistry};
-        use crate::messages::{
-            AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
-            SystemAffinity,
-        };
-
-        let fed_uuid = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
-        let harrow_uuid = uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
-        let target_uuid = uuid::Uuid::new_v4();
-
-        // Registry: Harrow lists Federation as an enemy (matches combat_test.toml
-        // `add_faction_enemy { faction = "Harrow", enemy = "Federation" }`).
-        let mut registry = FactionRegistry::new();
-        registry.insert(FactionConfig {
-            uuid: harrow_uuid,
-            name: "Harrow".into(),
-            enemies: vec![fed_uuid],
-        });
-        registry.insert(FactionConfig {
-            uuid: fed_uuid,
-            name: "Federation".into(),
-            enemies: vec![],
-        });
-
-        // Doctrine pool matching pirate_raider.toml: `Destroy { target: "" }`
-        // scored 35. With no explicit target, helm_destroy falls through to
-        // `find_nearest_hostile` which consults the registry.
-        let scored_pool = vec![ScoredObjective {
-            id: "destroy-hostiles".into(),
-            score: 35.0,
-            directive: AiDirective::Destroy {
-                target: String::new(),
-            },
-            source: ObjectiveSource::Doctrine,
-            relevance: vec![SystemAffinity::Helm, SystemAffinity::Weapons],
-            snapshot: ObjectiveSnapshot {
-                id: "destroy-hostiles".into(),
-                text: "Engage and destroy hostile ships".into(),
-                mandatory: false,
-                status: ObjectiveStatus::Active,
-                targets: vec![],
-                source: ObjectiveSource::Doctrine,
-            },
-        }];
-
-        // World view: NPC Harrow ship at origin, Federation target 100 units away.
-        let world_view = crate::ai::WorldView {
-            entity_pos: [0.0, 0.0, 0.0],
-            entity_yaw: 0.0,
-            self_faction: Some(harrow_uuid),
-            entities: vec![crate::ai::AiWorldEntity {
-                uuid: target_uuid,
-                faction: Some(fed_uuid),
-                position: [100.0, 0.0, 0.0],
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        // With the real registry: Harrow finds and pursues the Federation target.
-        let (thrust, _) = crate::ai::operate_helm(
-            &mut crate::ai::AiMemory::default(),
-            &world_view,
-            &scored_pool,
-            &[],
-            &Default::default(),
-            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
-            crate::ai::AVOIDANCE_BUFFER,
-            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &registry,
-            0.6,
-        );
-        assert!(
-            thrust > 0.0,
-            "With real FactionRegistry, NPC must produce non-zero thrust toward hostile; \
-             got thrust={}",
-            thrust
-        );
-
-        // With an empty registry (the pre-fix regression): no target found, zero thrust.
-        let (thrust_empty, _) = crate::ai::operate_helm(
-            &mut crate::ai::AiMemory::default(),
-            &world_view,
-            &scored_pool,
-            &[],
-            &Default::default(),
-            crate::ai::WAYPOINT_ARRIVAL_RADIUS,
-            crate::ai::AVOIDANCE_BUFFER,
-            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
-            0.0,
-            &FactionRegistry::default(),
-            0.6,
-        );
-        assert_eq!(
-            thrust_empty, 0.0,
-            "Empty FactionRegistry (regression) must produce zero thrust; got {}",
-            thrust_empty
         );
     }
 
@@ -7709,7 +7680,6 @@ station = "helm"
                 CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     hull_config,
                 )),
@@ -7736,6 +7706,12 @@ station = "helm"
             crate::ship::helm::LateralThrustInput::default(),
             crate::ship::helm::ImpulseCommand::default(),
             crate::ship::helm::BoostCommand::default(),
+            // The console-owned surfaces the AI helm derives its goals from
+            // (issue #702) — see `HelmAiSurfaces`.
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
+            HelmWaypointClearance::default(),
+            crate::ai_plugin::ObjectiveCursors::default(),
         ));
         app
     }
@@ -8018,7 +7994,6 @@ station = "helm"
                 CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     hull_config,
                 )),
@@ -8134,7 +8109,6 @@ station = "helm"
                 CoordinationQueue::default(),
                 crate::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ai_plugin::AiHighFidelity,
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
                     hull_config,
@@ -8160,6 +8134,12 @@ station = "helm"
             crate::ship::helm::LateralThrustInput::default(),
             crate::ship::helm::ImpulseCommand::default(),
             crate::ship::helm::BoostCommand::default(),
+            // The console-owned surfaces the AI helm derives its goals from
+            // (issue #702) — see `HelmAiSurfaces`.
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
+            HelmWaypointClearance::default(),
+            crate::ai_plugin::ObjectiveCursors::default(),
         ));
         app
     }

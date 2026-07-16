@@ -19,7 +19,6 @@ pub fn anchors_from_world_config(
 }
 
 use crate::ai::lod::{evaluate_lod, LodState};
-use crate::ai::AiMemory;
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 use crate::server_app::{LocalShip, Ship};
 use crate::ship_state::ShipPhysics;
@@ -155,10 +154,13 @@ impl AiTokenRegistry {
 
 // ── AiControllerComponent ─────────────────────────────────────────────────────
 
-/// Per-entity AI memory component. Carries helm steering state (waypoint cursor,
-/// target, last attacker) across ticks for all ship entities.
-#[derive(Component, Default, Clone, Debug)]
-pub struct ShipAiMemory(pub AiMemory);
+// `ShipAiMemory(AiMemory)` lived here until issue #702 deleted it. There is no
+// private per-entity AI memory any more: every goal the AI serves is read from
+// a surface some console owns and a human could equally drive —
+// `WeaponsTarget` (Tactical), `NavigationWaypoint` (Navigation),
+// `ObjectiveCursors` (the objective), `LastShipAttacker` (the world). Adding a
+// private mirror of any of them back re-creates the split brain — and the
+// helm/weapons targeting divergence — that removing it fixed.
 
 /// Empty marker component placed on NPC entities that carry a `BehaviourSection`.
 /// Used as a query filter in systems that target NPC ships specifically
@@ -184,24 +186,42 @@ pub struct LodTransitionTimer {
     pub last_state_change_secs: f64,
 }
 
-/// Per-objective patrol waypoint cursors.
+/// Per-objective route cursors: where this ship is on each objective's route.
 ///
 /// Each entry is a [`PatrolCursor`] tracking the current waypoint for one
-/// objective's patrol route. Entries are independent — advancing one does not
-/// affect others. Cursor state is interpreted (and its out-of-range terminal
-/// stop owned) by the pure `ai::patrol_cursor` module.
+/// objective. Entries are independent — advancing one does not affect others.
+/// Cursor state is interpreted (and its out-of-range terminal stop owned) by
+/// the pure `ai::patrol_cursor` module.
 ///
-/// `advance_objective_cursors` (`SimSet::Modifiers`) is the sole writer: it
-/// owns arrival detection and cursor advancement for every ship regardless of
-/// LOD. Everyone else is a reader — notably `simulate_low_lod_ships`
-/// (`SimSet::Physics`), which reads the cursor to cheaply steer NPCs outside
-/// sensor range toward their current waypoint. That split is what stops a
-/// cursor from being advanced twice in one tick.
+/// # Sole writer
 ///
-/// The high-LOD path (`helm_patrol`) tracks its waypoint separately via
-/// `AiMemory.waypoint_index`; unifying the two is issue #702 work.
+/// `advance_objective_cursors` (`SimSet::Modifiers`) is the only writer: it
+/// owns arrival detection and cursor advancement for every ship, every
+/// objective, at every LOD. Everyone else reads —
+/// `simulate_low_lod_ships` (`SimSet::Physics`) to cheaply steer NPCs outside
+/// sensor range, `helm_patrol` to steer high-LOD ships, `operate_navigation_ai`
+/// to place the waypoint. One writer in one set is what stops a cursor from
+/// being advanced twice in a tick.
+///
+/// # Why a side-table (issue #702)
+///
+/// Keyed by `objective_id` per ship, rather than living on the objective. It
+/// cannot live there: mission objectives are a single shared world-level
+/// record (every ship pursuing one would share a cursor), and doctrine
+/// objectives are rebuilt from TOML every tick (a cursor on one would be reset
+/// every tick).
+///
+/// Named `PatrolCursors` until #702 generalised it: the name always lied,
+/// since it handled `Reach` too. It is now *the* cursor surface for every
+/// directive. Before #702 the high-LOD helm path kept a rival cursor of its own
+/// in `AiMemory.waypoint_index`, so patrol position was tracked in two places
+/// that could disagree; there is now one.
+///
+/// Present on every ship (player + NPC). The player ship was missing it —
+/// `entities/spawner.rs` inserted it, `server_app.rs` did not — which silently
+/// disabled AI patrol on the player ship under `Backfill`.
 #[derive(Component, Clone, Debug, Default)]
-pub struct PatrolCursors(pub Vec<crate::ai::patrol_cursor::PatrolCursor>);
+pub struct ObjectiveCursors(pub Vec<crate::ai::patrol_cursor::PatrolCursor>);
 
 /// Marker component set on NPC entities currently in a warp-out sequence.
 /// Carries the data needed to draw the warp-exit visual and to populate
@@ -212,13 +232,6 @@ pub struct WarpOutMarker {
     pub remaining_secs: f32,
     pub target_speed: f32,
 }
-
-/// Component: carries the UUID of an entity that attacked this NPC during the
-/// current tick. Written by the simulation (or tests) to signal an incoming
-/// hit. Consumed by `tick_ai_controllers` to populate `attacker_this_tick` in
-/// the WorldView and emit an `AiEntityAttacked` event.
-#[derive(Component, Clone, Debug)]
-pub struct AttackerThisTick(pub uuid::Uuid);
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
@@ -234,11 +247,13 @@ pub struct ScenarioUnloadedMarker;
 #[derive(Resource, Default)]
 pub struct ScenariosBeingUnloaded(pub std::collections::HashSet<String>);
 
-/// Emitted by the AI plugin when an NPC entity's `last_attacker` in memory
-/// changes (a new attacker UUID arrives).
+/// Emitted by the AI plugin when a ship's [`LastShipAttacker`] changes to name
+/// a new attacker.
 ///
 /// The world plugin observes this event to evaluate `on_entity_attacked`
 /// trigger conditions without a direct dependency on the AI module.
+///
+/// [`LastShipAttacker`]: crate::weapons_plugin::LastShipAttacker
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityAttacked {
     pub entity_uuid: String,
@@ -367,58 +382,32 @@ fn aggregate_doctrine_blackboards(
             red_alert,
             hull_fraction,
         };
-        let mut scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
-        // Inject synthetic Retreat objective based on hull damage. The
-        // threshold is designer-tunable per entity template via
-        // `[behaviour] retreat_hull_threshold` (defaulting to
-        // `DEFAULT_RETREAT_THRESHOLD` while parsing when the field is
-        // absent), so a ship class can be made braver or more cautious
-        // without a recompile.
-        let retreat_score = crate::ai::retreat_score::score_retreat(
-            hull_fraction,
-            behaviour.0.retreat_hull_threshold,
-        );
-        if retreat_score > 0.0 {
-            scored.push(crate::messages::ScoredObjective {
-                id: "retreat".to_string(),
-                score: retreat_score,
-                // The empty anchor is intentional: the anchors map is not in
-                // scope here, and per PRD #685 the consumer (`operate_helm` /
-                // `resolve_helm_target_position`) resolves an empty/unknown
-                // anchor to the ship's `AiMemory.home_position` (spawn), which
-                // is the designed fallback retreat position. Not a bug.
-                directive: crate::messages::AiDirective::Retreat {
-                    anchor: String::new(),
-                },
-                source: crate::messages::ObjectiveSource::Doctrine,
-                relevance: crate::objectives::directive_relevance(
-                    &crate::messages::AiDirective::Retreat {
-                        anchor: String::new(),
-                    },
-                ),
-                snapshot: crate::messages::ObjectiveSnapshot {
-                    id: "retreat".to_string(),
-                    text: "Retreat — hull critically damaged".to_string(),
-                    mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec![],
-                    source: crate::messages::ObjectiveSource::Doctrine,
-                },
-            });
-            // Restore the descending-score order that `score_doctrine_pool`
-            // established and that every consumer relies on: `operate_helm`
-            // and `resolve_helm_target_position` both take the FIRST
-            // Helm-relevant entry as the top-scored directive rather than
-            // scanning for the maximum. Pushing the synthetic Retreat onto the
-            // tail without re-sorting would park it behind every doctrine
-            // objective, so a Retreat could never be selected however low the
-            // hull fell.
-            scored.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-        }
+        // Retreat is ordinary authored doctrine (issue #702). A synthetic
+        // hull-triggered Retreat used to be injected here; it was deleted
+        // because it could not work and never had:
+        //
+        //  1. Its anchor was always empty (the anchors map is not in scope
+        //     here), so it leaned on an `AiMemory.home_position` fallback that
+        //     production never seeded — `register_ai_tokens_on_spawn` only
+        //     seeded it when no memory existed, but the spawner had already
+        //     inserted a default in the same batch. Every shipped ship therefore
+        //     "retreated" to world origin.
+        //  2. Its score ran 0..1 while doctrine `base_priority` runs in the
+        //     tens, so it could never outrank anything even after re-sorting.
+        //
+        // A designer authors the same intent with vocabulary that already
+        // exists, on the right score scale and with a real anchor:
+        //
+        //     [[behaviour.doctrine]]
+        //     id               = "retreat-when-hurt"
+        //     directive_kind   = "Retreat"
+        //     directive_anchor = "pirate_haven"
+        //     base_priority    = 100.0
+        //     zero_gates       = [{ condition = "hull_below", threshold = 0.3 }]
+        //
+        // `hull_fraction` below is what `hull_below` gates on, so the trigger
+        // is unchanged — only now it is tunable per hull without a recompile.
+        let scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,
@@ -489,7 +478,7 @@ impl Plugin for AiPlugin {
             Update,
             (
                 register_ai_tokens_on_spawn,
-                process_attacker_this_tick
+                emit_attacked_on_new_attacker
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .in_set(crate::sim_sets::AiTickLabel),
                 unregister_on_despawn,
@@ -506,55 +495,56 @@ impl Plugin for AiPlugin {
 fn register_ai_tokens_on_spawn(
     mut commands: Commands,
     mut registry: ResMut<AiTokenRegistry>,
-    query: Query<
-        (Entity, &EntityUuid, &Transform, Option<&ShipAiMemory>),
-        (With<BehaviourSection>, Without<AiControllerComponent>),
-    >,
+    query: Query<(Entity, &EntityUuid), (With<BehaviourSection>, Without<AiControllerComponent>)>,
 ) {
-    for (entity, uuid, transform, existing_mem) in &query {
-        let home = [
-            transform.translation.x,
-            transform.translation.y,
-            transform.translation.z,
-        ];
+    for (entity, uuid) in &query {
         registry.register_with_entity(&uuid.0, entity);
-        let mut cmd = commands.entity(entity);
-        cmd.insert(AiControllerComponent);
-        // Seed ShipAiMemory with home_position if not already present (entities
-        // spawned via spawn_entity get it from the spawner; bare test entities don't).
-        if existing_mem.is_none() {
-            cmd.insert(ShipAiMemory(AiMemory {
-                home_position: home,
-                ..Default::default()
-            }));
-        }
+        commands.entity(entity).insert(AiControllerComponent);
     }
 }
 
-/// Update per-entity `ShipAiMemory.last_attacker` and emit `AiEntityAttacked`
-/// whenever an `AttackerThisTick` component arrives on an NPC entity.
-/// Replaces the attacker-tracking phase of the retired `tick_ai_controllers`.
+/// Emit `AiEntityAttacked` whenever a ship's [`LastShipAttacker`] changes to
+/// name a new attacker.
 ///
-/// Only processes entities that already have `ShipAiMemory` (i.e., that have been
-/// through at least one `register_ai_tokens_on_spawn` tick). On the very first
-/// frame of an entity's life the component arrives via deferred commands and will
-/// be processed on the following frame.
-fn process_attacker_this_tick(
-    mut commands: Commands,
-    mut query: Query<(Entity, &EntityUuid, &AttackerThisTick, &mut ShipAiMemory)>,
+/// [`LastShipAttacker`] *is* the "who last attacked me" surface — the same one
+/// `ai_target_selection` reads — so the rising-edge latch that fires this event
+/// is that component's own change detection (issue #702). It replaces the
+/// private `AiMemory.last_attacker` mirror and the `AttackerThisTick` one-tick
+/// component that used to carry the edge across.
+///
+/// Exactly one event per new attacker under sustained fire: `tick_beams`
+/// compares before writing, so a beam that keeps naming the same shooter never
+/// marks the component changed and this system never re-fires. The two clear
+/// paths (`clear_last_attacker_on_death` /
+/// `clear_last_attacker_on_red_alert_off`) do mark it changed, but only ever
+/// write `None` — which the `Some` guard below skips. Re-attack by the same
+/// shooter after a clear is a genuine new edge and correctly re-fires.
+///
+/// Runs in `SimSet::Physics`, i.e. *before* the `SimSet::Damage` `tick_beams`
+/// that writes the component, so the event lands on the tick after the hit —
+/// the same one-tick bridge `AttackerThisTick` gave it.
+///
+/// [`LastShipAttacker`]: crate::weapons_plugin::LastShipAttacker
+fn emit_attacked_on_new_attacker(
+    query: Query<
+        (&EntityUuid, &crate::weapons_plugin::LastShipAttacker),
+        Changed<crate::weapons_plugin::LastShipAttacker>,
+    >,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
-    for (entity, uuid, attacker, mut ai_mem) in query.iter_mut() {
-        let attacker_uuid = attacker.0;
-        let is_new = ai_mem.0.last_attacker != Some(attacker_uuid);
-        if is_new {
-            attacked_events.write(AiEntityAttacked {
-                entity_uuid: uuid.0.clone(),
-                attacker_uuid,
-            });
-            ai_mem.0.last_attacker = Some(attacker_uuid);
-        }
-        commands.entity(entity).remove::<AttackerThisTick>();
+    for (uuid, last_attacker) in query.iter() {
+        // `None` is a clear, not an attack; an unparseable UUID names nobody.
+        let Some(attacker_uuid) = last_attacker
+            .0
+            .as_deref()
+            .and_then(|a| uuid::Uuid::parse_str(a).ok())
+        else {
+            continue;
+        };
+        attacked_events.write(AiEntityAttacked {
+            entity_uuid: uuid.0.clone(),
+            attacker_uuid,
+        });
     }
 }
 
@@ -744,9 +734,9 @@ fn active_waypoint_route(
 ///
 /// Runs in `SimSet::Modifiers` — after `Physics` has moved the ships this
 /// tick, so arrival is judged against fresh positions, and before `Publish`.
-/// This is the single owner of `PatrolCursors` state: the low-LOD steering
-/// path (`simulate_low_lod_ships`) only *reads* the cursor, so a cursor can
-/// never be advanced twice in one tick.
+/// This is the single owner of `ObjectiveCursors` state: every steering path —
+/// low-LOD (`simulate_low_lod_ships`) and high-LOD (`helm_patrol`) alike — only
+/// *reads* the cursor, so a cursor can never be advanced twice in one tick.
 ///
 /// Per ship, per active Helm-relevant `Patrol`/`Reach` objective: advance the
 /// cursor via the pure `advance_cursor` (which judges arrival against the
@@ -754,16 +744,17 @@ fn active_waypoint_route(
 /// routes, and skipping waypoints whose anchors are unknown), then emit one
 /// `AiWaypointReached` per waypoint it reports as consumed.
 ///
-/// Covers all ships carrying a `BehaviourSection` regardless of LOD — the
-/// high-LOD helm path still tracks its own waypoint via
-/// `AiMemory.waypoint_index`; unifying the two is issue #702.
+/// Covers all ships carrying a `BehaviourSection` regardless of LOD. Since
+/// #702 that is the whole story: the high-LOD helm path (`helm_patrol`) reads
+/// these same cursors rather than advancing a rival `AiMemory.waypoint_index`
+/// of its own.
 pub(crate) fn advance_objective_cursors(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut ships: Query<(
         &BehaviourSection,
         &ShipPhysics,
         &crate::server_app::ShipSystemBlackboards,
-        &mut PatrolCursors,
+        &mut ObjectiveCursors,
         Option<&EntityUuid>,
     )>,
     mut reached: MessageWriter<AiWaypointReached>,
@@ -830,7 +821,7 @@ pub(crate) fn advance_objective_cursors(
 ///
 /// A low-LOD ship with an active Helm-relevant `Patrol`/`Reach` objective
 /// cheaply follows its route: it snaps its heading toward the waypoint its
-/// [`PatrolCursors`] entry currently points at and advances forward at
+/// [`ObjectiveCursors`] entry currently points at and advances forward at
 /// `forward_speed`. Ships with no such objective (or a stalled/terminal route)
 /// keep the pre-existing dumb forward-drift so they don't regress to standing
 /// still.
@@ -838,11 +829,10 @@ pub(crate) fn advance_objective_cursors(
 /// Read-only with respect to the cursor: arrival detection and advancement
 /// belong to `advance_objective_cursors` in `SimSet::Modifiers`.
 ///
-/// This is the *low-fidelity* path. It deliberately does NOT touch the
-/// high-LOD patrol path (`helm_patrol` / `AiMemory.waypoint_index` in
-/// `ai/core.rs`). The two coexist: low-LOD tracks the waypoint via
-/// `PatrolCursors`, high-LOD via `AiMemory.waypoint_index`. Unifying them is
-/// separate issue #702 work (a known, accepted limitation).
+/// This is the *low-fidelity* path. It reads the same `ObjectiveCursors` the
+/// high-LOD path (`helm_patrol` in `ai/core.rs`) reads — since #702 there is
+/// one cursor surface rather than two rival ones, so a ship promoted or demoted
+/// between LODs resumes its route exactly where it left off.
 ///
 /// # Sanctioned out-of-band `ShipPhysics` writer (issue #699)
 ///
@@ -861,7 +851,7 @@ fn simulate_low_lod_ships(
         (
             &mut ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
-            Option<&PatrolCursors>,
+            Option<&ObjectiveCursors>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -876,7 +866,7 @@ fn simulate_low_lod_ships(
         let route = blackboards.and_then(active_waypoint_route);
 
         // Steer along the route only when we have a Patrol/Reach objective AND
-        // a `PatrolCursors` component tracking the waypoint index. A low-LOD
+        // a `ObjectiveCursors` component tracking the waypoint index. A low-LOD
         // ship lacking either just falls through to the dumb forward-move
         // below. A ship whose cursor entry has not been created yet (the
         // evaluator inserts it at the end of this tick) steers toward the
@@ -1100,25 +1090,6 @@ mod tests {
     }
 
     #[test]
-    fn memory_seeded_with_spawn_position() {
-        let mut app = build_test_app();
-        let entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(10.0, 0.0, -5.0),
-                EntityUuid("ent-004".to_string()),
-                BehaviourSection(BehaviourConfig::default()),
-            ))
-            .id();
-        app.update();
-        // After register_ai_tokens_on_spawn, ShipAiMemory is inserted with home_position.
-        let mem = app.world().get::<ShipAiMemory>(entity).unwrap();
-        let home = mem.0.home_position;
-        assert!((home[0] - 10.0).abs() < 0.001, "home x must be spawn x");
-        assert!((home[2] - -5.0).abs() < 0.001, "home z must be spawn z");
-    }
-
-    #[test]
     fn token_unregistered_after_entity_despawn() {
         let mut app = build_test_app();
         let entity = spawn_behaviour_entity(&mut app, "ent-007");
@@ -1140,6 +1111,40 @@ mod tests {
     }
 
     // ── AiEntityAttacked event ─────────────────────────────────────────────
+    //
+    // Post-#702 the rising edge lives on `LastShipAttacker`'s change detection
+    // rather than on a private `AiMemory.last_attacker` mirror, so these drive
+    // that component. They pin the *reader's* half of the exactly-once
+    // contract: given a writer that compares before writing, the emitter fires
+    // once per new attacker. The writer's half — that `tick_beams` really does
+    // compare rather than blind-write under a live beam — is pinned by
+    // `sustained_beam_marks_last_attacker_changed_exactly_once` in
+    // `console::weapons::server`. Both halves are required; neither alone
+    // establishes the AC.
+
+    /// Write `LastShipAttacker` the way `tick_beams` does — via `set_if_neq`,
+    /// not `insert`. The distinction is the whole point: an `insert` marks the
+    /// component changed even when the value is identical, so a fixture that
+    /// inserted would fake an edge production never produces and this test
+    /// would pass on a blind-writing `tick_beams`.
+    fn beam_hit(app: &mut App, entity: Entity, attacker: &str) {
+        let mut e = app.world_mut().entity_mut(entity);
+        let mut last = e
+            .get_mut::<crate::weapons_plugin::LastShipAttacker>()
+            .expect("ship must carry LastShipAttacker");
+        last.set_if_neq(crate::weapons_plugin::LastShipAttacker(Some(
+            attacker.to_string(),
+        )));
+    }
+
+    fn attacked_count(app: &App, entity_uuid: &str) -> usize {
+        app.world()
+            .resource::<AttackedBox>()
+            .0
+            .iter()
+            .filter(|e| e.entity_uuid == entity_uuid)
+            .count()
+    }
 
     #[test]
     fn ai_entity_attacked_event_emitted_when_new_attacker_arrives() {
@@ -1147,56 +1152,136 @@ mod tests {
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
 
-        let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000099").unwrap();
-        app.world_mut().spawn((
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            EntityUuid("ent-attacked-001".to_string()),
-            BehaviourSection(BehaviourConfig::default()),
-            AttackerThisTick(attacker_id),
-        ));
+        let attacker_id = "aaaaaaaa-0000-0000-0000-000000000099";
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                EntityUuid("ent-attacked-001".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                crate::weapons_plugin::LastShipAttacker::default(),
+            ))
+            .id();
 
-        app.update(); // attach controller (AttackerThisTick still present)
-        app.update(); // tick processes AttackerThisTick — emits AiEntityAttacked
+        app.update(); // attach controller; no attacker yet
+        beam_hit(&mut app, entity, attacker_id);
+        app.update(); // the change is seen — emits AiEntityAttacked
 
         let events = app.world().resource::<AttackedBox>().0.clone();
-        assert!(
-            events.iter().any(|e| e.entity_uuid == "ent-attacked-001"),
-            "AiEntityAttacked must be emitted when new attacker arrives"
+        let event = events
+            .iter()
+            .find(|e| e.entity_uuid == "ent-attacked-001")
+            .expect("AiEntityAttacked must be emitted when a new attacker arrives");
+        assert_eq!(
+            event.attacker_uuid,
+            uuid::Uuid::parse_str(attacker_id).unwrap(),
+            "the event must name the attacker LastShipAttacker records"
         );
     }
 
+    /// Sustained fire: the beam keeps naming the same shooter every tick, and
+    /// the trigger must fire exactly once.
     #[test]
     fn ai_entity_attacked_not_re_emitted_for_same_attacker() {
         let mut app = build_test_app();
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
 
-        let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000088").unwrap();
+        let attacker_id = "aaaaaaaa-0000-0000-0000-000000000088";
         let entity = app
             .world_mut()
             .spawn((
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-attacked-002".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                AttackerThisTick(attacker_id),
+                crate::weapons_plugin::LastShipAttacker::default(),
             ))
             .id();
 
         app.update(); // attach
-        app.update(); // first attacker tick — emits AiEntityAttacked
 
-        // Insert the same attacker again
+        // Five ticks of a live beam from one shooter.
+        for _ in 0..5 {
+            beam_hit(&mut app, entity, attacker_id);
+            app.update();
+        }
+
+        assert_eq!(
+            attacked_count(&app, "ent-attacked-002"),
+            1,
+            "sustained fire from one shooter must emit AiEntityAttacked exactly once"
+        );
+    }
+
+    /// The other edge: a *different* shooter is a new attacker and must re-fire,
+    /// even though `LastShipAttacker` was already `Some`. Guards against a fix
+    /// for the test above that latches on "was ever attacked" instead of "who".
+    #[test]
+    fn ai_entity_attacked_re_emitted_for_a_different_attacker() {
+        let mut app = build_test_app();
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+
+        let first = "aaaaaaaa-0000-0000-0000-000000000077";
+        let second = "bbbbbbbb-0000-0000-0000-000000000077";
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                EntityUuid("ent-attacked-003".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                crate::weapons_plugin::LastShipAttacker::default(),
+            ))
+            .id();
+
+        app.update();
+        beam_hit(&mut app, entity, first);
+        app.update();
+        beam_hit(&mut app, entity, second);
+        app.update();
+
+        assert_eq!(
+            attacked_count(&app, "ent-attacked-003"),
+            2,
+            "a second, different attacker is a new edge and must re-emit"
+        );
+    }
+
+    /// Clearing the attacker (`clear_last_attacker_on_death` /
+    /// `clear_last_attacker_on_red_alert_off` both write `None`) marks the
+    /// component changed, but `None` names nobody and must not be reported as
+    /// an attack.
+    #[test]
+    fn clearing_the_attacker_emits_no_attacked_event() {
+        let mut app = build_test_app();
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                EntityUuid("ent-attacked-004".to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                crate::weapons_plugin::LastShipAttacker::default(),
+            ))
+            .id();
+
+        app.update();
+        beam_hit(&mut app, entity, "aaaaaaaa-0000-0000-0000-000000000066");
+        app.update();
+
+        // The threat passes — the attacker record is cleared.
         app.world_mut()
             .entity_mut(entity)
-            .insert(AttackerThisTick(attacker_id));
-        app.update(); // second attacker tick — must NOT re-emit
+            .insert(crate::weapons_plugin::LastShipAttacker(None));
+        app.update();
 
-        let events = app.world().resource::<AttackedBox>().0.clone();
-        let count = events
-            .iter()
-            .filter(|e| e.entity_uuid == "ent-attacked-002")
-            .count();
-        assert_eq!(count, 1, "same attacker must not re-emit AiEntityAttacked");
+        assert_eq!(
+            attacked_count(&app, "ent-attacked-004"),
+            1,
+            "clearing LastShipAttacker to None must not count as an attack"
+        );
     }
 
     // ── Issue #314: WorldView population from components ───────────────────
@@ -1514,38 +1599,96 @@ mod tests {
         }
     }
 
-    /// The published pool must stay sorted descending by score even once the
-    /// synthetic hull-triggered Retreat has been injected.
+    /// A `Retreat` doctrine entry gated on `hull_below` scores only once the
+    /// ship is actually hurt (issue #702).
+    ///
+    /// This is the replacement for the engine's synthetic hull-triggered
+    /// Retreat, which `aggregate_doctrine_blackboards` used to inject below a
+    /// `[behaviour] retreat_hull_threshold`. That mechanism was inert in
+    /// production and could not have worked: it scored 0..1 against doctrine
+    /// priorities in the tens, so it lost every contest even at zero hull. An
+    /// authored entry scores on the same scale as everything else, which is the
+    /// bug fix hiding inside the deletion.
+    #[test]
+    fn authored_retreat_outranks_doctrine_only_once_hull_is_low() {
+        let healthy = scored_pool_for(retreat_behaviour(0.3), 100.0, 100.0);
+        let hurt = scored_pool_for(retreat_behaviour(0.3), 10.0, 100.0);
+
+        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+            pool.iter()
+                .find(|o| o.id == id)
+                .unwrap_or_else(|| panic!("{id} must be in the pool"))
+                .score
+        };
+
+        assert_eq!(
+            score_of(&healthy, "retreat-when-hurt"),
+            0.0,
+            "at full hull the `hull_below` zero-gate must veto the Retreat \
+             outright, so its high base_priority costs nothing"
+        );
+        assert!(
+            score_of(&healthy, "loiter") > 0.0,
+            "precondition: the rival objective must be live at full hull"
+        );
+
+        assert!(
+            score_of(&hurt, "retreat-when-hurt") > score_of(&hurt, "loiter"),
+            "below the gate's threshold the Retreat must outrank ordinary \
+             doctrine — the score-scale bug the synthetic Retreat could never \
+             clear (0..1 against a base_priority in the tens)"
+        );
+        assert_eq!(
+            hurt[0].id, "retreat-when-hurt",
+            "and it must lead the pool, since every consumer takes the FIRST \
+             Helm-relevant entry rather than scanning for the maximum"
+        );
+    }
+
+    /// The retreat threshold is designer-tunable per entity template — two
+    /// ships at identical hull must disagree about retreating purely on their
+    /// TOML, with no recompile.
+    ///
+    /// Was `retreat_threshold_comes_from_behaviour_config`, which tuned the
+    /// engine's `[behaviour] retreat_hull_threshold`. The authored form is
+    /// strictly more expressive: the threshold, the destination anchor, the
+    /// urgency and the gate condition are all per-hull now, rather than one
+    /// hardwired hull ramp to a fixed place.
+    #[test]
+    fn retreat_threshold_is_authored_per_entity_template() {
+        // Both ships sit at 40% hull; only their authored gate differs.
+        let brave = scored_pool_for(retreat_behaviour(0.1), 40.0, 100.0);
+        let cautious = scored_pool_for(retreat_behaviour(0.9), 40.0, 100.0);
+
+        let retreat_score = |pool: &[crate::messages::ScoredObjective]| {
+            pool.iter()
+                .find(|o| o.id == "retreat-when-hurt")
+                .expect("retreat must be in the pool")
+                .score
+        };
+
+        assert_eq!(
+            retreat_score(&brave),
+            0.0,
+            "hull 0.4 is above a 0.1 threshold — a brave ship must not retreat"
+        );
+        assert!(
+            retreat_score(&cautious) > 0.0,
+            "hull 0.4 is below a 0.9 threshold — a cautious ship must retreat"
+        );
+    }
+
+    /// The published pool is sorted descending by score.
     ///
     /// `operate_helm` and `resolve_helm_target_position` both take the FIRST
     /// Helm-relevant entry as the top-scored directive rather than scanning for
-    /// the maximum, so a pool that is merely "mostly sorted" silently mis-selects.
+    /// the maximum, so a pool that is merely "mostly sorted" silently
+    /// mis-selects.
     #[test]
-    fn synthetic_retreat_keeps_the_pool_sorted_by_score() {
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+    fn published_pool_is_sorted_by_score_descending() {
+        let scored = scored_pool_for(retreat_behaviour(0.5), 10.0, 100.0);
 
-        let behaviour = BehaviourConfig {
-            // Retreat only ever scores in [0, 1], so a sub-1.0 doctrine entry is
-            // what makes the ordering observable at all.
-            doctrine: vec![DoctrineObjective {
-                id: "loiter".into(),
-                text: "Loiter".into(),
-                directive_kind: Some("Patrol".into()),
-                base_priority: 0.1,
-                directive_loop: true,
-                ..Default::default()
-            }],
-            retreat_hull_threshold: 0.5,
-            ..Default::default()
-        };
-
-        // Hull at 10% — well below the 0.5 threshold → retreat scores 0.8.
-        let scored = scored_pool_for(behaviour, 10.0, 100.0);
-
-        assert!(
-            scored.iter().any(|o| o.id == "retreat"),
-            "a badly damaged ship must have a synthetic Retreat injected"
-        );
+        assert!(scored.len() > 1, "precondition: need a pool to sort");
         for pair in scored.windows(2) {
             assert!(
                 pair[0].score >= pair[1].score,
@@ -1556,44 +1699,38 @@ mod tests {
                 pair[1].score
             );
         }
-        assert_eq!(
-            scored[0].id, "retreat",
-            "the highest-scoring objective must lead the pool"
-        );
     }
 
-    /// The retreat threshold is designer-tunable per entity template via
-    /// `[behaviour] retreat_hull_threshold` — two ships at identical hull must
-    /// disagree about retreating purely on their TOML.
-    #[test]
-    fn retreat_threshold_comes_from_behaviour_config() {
-        use crate::entity_config::BehaviourConfig;
-
-        let brave = scored_pool_for(
-            BehaviourConfig {
-                retreat_hull_threshold: 0.1,
-                ..Default::default()
-            },
-            40.0,
-            100.0,
-        );
-        let cautious = scored_pool_for(
-            BehaviourConfig {
-                retreat_hull_threshold: 0.9,
-                ..Default::default()
-            },
-            40.0,
-            100.0,
-        );
-
-        assert!(
-            !brave.iter().any(|o| o.id == "retreat"),
-            "hull 0.4 is above a 0.1 threshold — a brave ship must not retreat"
-        );
-        assert!(
-            cautious.iter().any(|o| o.id == "retreat"),
-            "hull 0.4 is below a 0.9 threshold — a cautious ship must retreat"
-        );
+    /// A hull carrying an authored `Retreat` gated at `threshold`, plus an
+    /// ordinary always-on objective to outrank. Mirrors the shape shipped in
+    /// `assets/entities/pirate_raider.toml`.
+    fn retreat_behaviour(threshold: f32) -> crate::entity_config::BehaviourConfig {
+        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+        BehaviourConfig {
+            doctrine: vec![
+                DoctrineObjective {
+                    id: "loiter".into(),
+                    text: "Loiter".into(),
+                    directive_kind: Some("Patrol".into()),
+                    base_priority: 20.0,
+                    directive_loop: true,
+                    ..Default::default()
+                },
+                DoctrineObjective {
+                    id: "retreat-when-hurt".into(),
+                    text: "Hull critical - run for the haven".into(),
+                    directive_kind: Some("Retreat".into()),
+                    directive_anchor: Some("pirate_haven".into()),
+                    base_priority: 100.0,
+                    zero_gates: vec![crate::objectives::ZeroGateCondition {
+                        condition: "hull_below".into(),
+                        threshold: Some(threshold),
+                    }],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -1787,7 +1924,7 @@ mod tests {
         );
     }
 
-    // ── Low-LOD patrol wiring (PatrolCursors / advance_cursor) ───────────────
+    // ── Low-LOD patrol wiring (ObjectiveCursors / advance_cursor) ───────────────
 
     /// Build a `ShipSystemBlackboards` carrying a single Helm-relevant Patrol
     /// objective under the viewscreen entry (mirrors what
@@ -1853,7 +1990,7 @@ mod tests {
                 },
                 EntityUuid(uuid.to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                PatrolCursors::default(),
+                ObjectiveCursors::default(),
                 blackboards_with_patrol(objective_id, waypoints, loop_path),
             ))
             .id()
@@ -1862,7 +1999,7 @@ mod tests {
     /// Every cursor on `entity` as `(objective_id, waypoint_index)`.
     fn cursor_state(app: &App, entity: Entity) -> Vec<(String, usize)> {
         app.world()
-            .get::<PatrolCursors>(entity)
+            .get::<ObjectiveCursors>(entity)
             .unwrap()
             .0
             .iter()
@@ -2034,7 +2171,7 @@ mod tests {
                 },
                 EntityUuid("npc-reach".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                PatrolCursors::default(),
+                ObjectiveCursors::default(),
                 bb,
             ))
             .id();
@@ -2465,7 +2602,7 @@ mod tests {
             physics.x,
         );
         assert!(
-            !app.world().get::<PatrolCursors>(npc).unwrap().0[0].settled(),
+            !app.world().get::<ObjectiveCursors>(npc).unwrap().0[0].settled(),
             "leaving the arrival radius must un-settle the cursor"
         );
     }
@@ -2498,7 +2635,7 @@ mod tests {
         let mut app = build_lod_test_app();
         spawn_player(&mut app, 0.0, 0.0);
 
-        // NPC carries PatrolCursors + an (empty) blackboard but NO patrol
+        // NPC carries ObjectiveCursors + an (empty) blackboard but NO patrol
         // objective — it must fall back to the pre-existing dumb forward-move.
         let npc = app
             .world_mut()
@@ -2516,7 +2653,7 @@ mod tests {
                     aggression: 0.5,
                     sensor_range: 100.0,
                 },
-                PatrolCursors::default(),
+                ObjectiveCursors::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
             .id();
@@ -2540,7 +2677,11 @@ mod tests {
         );
         // Cursor stays empty — nothing was advanced.
         assert!(
-            app.world().get::<PatrolCursors>(npc).unwrap().0.is_empty(),
+            app.world()
+                .get::<ObjectiveCursors>(npc)
+                .unwrap()
+                .0
+                .is_empty(),
             "cursor must stay empty when there is no patrol objective"
         );
     }

@@ -131,7 +131,16 @@ pub struct PhaserIntents(pub Vec<PhaserCmd>);
 /// `None` when no recent attacker is known.
 ///
 /// Per-ship `Component` — every ship (player + NPC) tracks its own attacker.
-#[derive(Component, Default, Clone, Debug)]
+///
+/// # Change detection is load-bearing (issue #702)
+///
+/// This is the single "who last attacked me" surface, and its change detection
+/// is the rising-edge latch that fires `AiEntityAttacked` — which in turn drives
+/// `on_entity_attacked` scenario triggers. Every writer must therefore
+/// **compare before writing** (`set_if_neq`), or sustained fire from one shooter
+/// re-fires the trigger every tick the beam is live. `PartialEq` exists for
+/// exactly that reason; do not replace it with a blind assignment.
+#[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct LastShipAttacker(pub Option<String>);
 
 /// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
@@ -743,7 +752,7 @@ fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &
 ///
 /// Merges the former `handle_npc_beam_fire` (NPC-only activation) into this
 /// system — final divergence closed. All target-marking (`ShipAttackedThisTick`
-/// / `LastShipAttacker` / `AttackerThisTick`) happens later in `tick_beams`.
+/// / `LastShipAttacker`) happens later in `tick_beams`.
 #[allow(clippy::too_many_arguments)]
 fn handle_fire_phaser(
     mut commands: Commands,
@@ -981,20 +990,18 @@ fn handle_fire_phaser(
 /// to a fight. `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity`
 /// pins this.
 ///
-/// Target selection: reads the ship's [`WeaponsTarget`] — the authoritative
-/// same-tick lock, written by `handle_set_target` for humans and by
+/// Target selection: reads the ship's [`WeaponsTarget`] — the one authoritative
+/// lock, written by `handle_set_target` for humans and by
 /// [`ai_target_selection`] (issue #697) for AI-operated tactical systems, so
-/// one surface serves both — and falls back to [`ShipAiMemory::target`] when
-/// empty. Post-#703 that fallback is redundant for every production NPC
-/// (`ai_target_selection` acquires the nearest hostile itself), and it is
-/// scheduled for deletion under a re-scoped #702; it stays for now so this
-/// commit lands only independently-verified behaviour. Arc/range checks mirror
+/// one surface serves both. The legacy `ShipAiMemory::target` fallback was
+/// deleted by #702, having been redundant for every production NPC since #703
+/// gave `ai_target_selection` its own nearest-hostile tier. Arc/range checks mirror
 /// [`handle_fire_phaser`], but use each bank's `auto_arc_deg` (looser cone
 /// than `fire_arc_deg`) so AI is less trigger-happy on peripheral targets.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_phaser_auto_fire(
     phaser_mode: Res<CurrentPhaserMode>,
-    // Every ship with weapons state. `ShipAiMemory` is `Option` because
+    // Every ship with weapons state. Components are `Option` because
     // pre-`AiPlugin` test apps may spawn ships without it. `ShipConfigComponent`
     // is `Option` for the same reason — some legacy tests spawn NPCs without
     // a ship config; those ships fall back to the coarse `tactical.operate_ai`
@@ -1011,7 +1018,6 @@ pub(crate) fn ai_phaser_auto_fire(
             &PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
-            Option<&crate::ai_plugin::ShipAiMemory>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1031,7 +1037,6 @@ pub(crate) fn ai_phaser_auto_fire(
         cooldown,
         combat_config_opt,
         modifiers_opt,
-        ai_memory_opt,
     ) in ship_q.iter_mut()
     {
         // Clear last tick's intent unconditionally — a stale intent must never
@@ -1070,17 +1075,12 @@ pub(crate) fn ai_phaser_auto_fire(
             continue;
         }
 
-        // Target selection: `WeaponsTarget` is the authoritative same-tick lock
-        // for every ship (see `ai_target_selection`), with a legacy
-        // `ShipAiMemory` fallback for NPCs. Post-#703 the fallback is dead for
-        // production NPCs — `ai_target_selection` now acquires the nearest
-        // hostile itself — and a re-scoped #702 deletes it.
-        let target_uuid: Option<String> = weapons_target.0.clone().or_else(|| {
-            ai_memory_opt
-                .and_then(|m| m.0.target)
-                .map(|u| u.to_string())
-        });
-        let Some(target_uuid) = target_uuid else {
+        // Target selection: `WeaponsTarget` is the ship's one authoritative lock,
+        // whether a human set it via `SetTarget` or `ai_target_selection` did
+        // (see that system). The legacy `ShipAiMemory.target` fallback that sat
+        // here is gone with #702 — it had already been dead for production NPCs
+        // since #703 gave `ai_target_selection` its own nearest-hostile tier.
+        let Some(target_uuid) = weapons_target.0.clone() else {
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -1471,9 +1471,10 @@ fn tick_weapons_arc_request(
 ///   `GameOver` on kill. Never despawns the LocalShip entity.
 ///
 /// Attacker tracking: every non-asteroid target has `ShipAttackedThisTick`
-/// set true and `LastShipAttacker` set to the shooter's UUID; the target
-/// also gains an `ai_plugin::AttackerThisTick` component so its AI's
-/// `on_attacked` transition can fire.
+/// set true and `LastShipAttacker` set to the shooter's UUID — the latter
+/// **compared before writing**, because its change detection is the rising edge
+/// that fires `AiEntityAttacked` and the `on_entity_attacked` triggers behind it
+/// (issue #702). See the note on [`LastShipAttacker`].
 ///
 /// Weapons-target clearing: when the player kills its locked target, its
 /// `WeaponsTarget.0` is set to `None`. NPC locks are re-evaluated by
@@ -1884,16 +1885,20 @@ fn tick_beams(
                         if let Some(mut atk) = attacked_opt {
                             atk.0 = true;
                         }
+                        // Compare before writing (issue #702). This branch runs
+                        // every tick a beam is live, so a blind write would mark
+                        // `LastShipAttacker` changed every one of them. Its
+                        // change detection is the rising-edge latch that fires
+                        // `AiEntityAttacked` (see
+                        // `ai_plugin::emit_attacked_on_new_attacker`), and
+                        // `on_entity_attacked` scenario triggers hang off that —
+                        // so sustained fire from one shooter must touch the
+                        // component exactly once, on the tick the shooter
+                        // changes. `Mut::set_if_neq` is the same pattern
+                        // `ai_target_selection` uses for `WeaponsTarget`.
                         if let Some(mut last) = last_attacker_opt {
-                            last.0 = Some(state.shooter_uuid.clone());
+                            last.set_if_neq(LastShipAttacker(Some(state.shooter_uuid.clone())));
                         }
-                    }
-                    // Insert AttackerThisTick component so the target's AI
-                    // on_attacked transition fires (see ai_plugin::AttackerThisTick).
-                    if let Ok(parsed) = uuid::Uuid::parse_str(&state.shooter_uuid) {
-                        commands
-                            .entity(te)
-                            .try_insert(crate::ai_plugin::AttackerThisTick(parsed));
                     }
                 }
             }
@@ -2711,9 +2716,10 @@ fn handle_fire_blaster(
 /// within the bank's fire arc. Ships whose config declares no `blaster_bank`
 /// fine systems fall back to the coarse `tactical.operate_ai` policy.
 ///
-/// Target selection: the ship's [`WeaponsTarget`] lock, with a legacy
-/// [`ShipAiMemory::target`] fallback for NPCs (redundant post-#703, deleted
-/// under a re-scoped #702). Range and arc checks use each bank's config values.
+/// Target selection: the ship's [`WeaponsTarget`] lock — the one authoritative
+/// surface, whoever set it. (A legacy `ShipAiMemory::target` fallback sat here
+/// until #702; it had been redundant for production NPCs since #703.) Range and
+/// arc checks use each bank's config values.
 fn tick_blaster_auto_fire(
     mut ship_q: Query<
         (
@@ -2722,7 +2728,6 @@ fn tick_blaster_auto_fire(
             &ShipPhysics,
             Option<&WeaponsTarget>,
             &mut BlasterSystemResource,
-            Option<&crate::ai_plugin::ShipAiMemory>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -2741,14 +2746,8 @@ fn tick_blaster_auto_fire(
         ship_count
     );
 
-    for (
-        control_sources,
-        ship_config_opt,
-        physics,
-        weapons_target_opt,
-        mut blaster_res,
-        ai_memory_opt,
-    ) in ship_q.iter_mut()
+    for (control_sources, ship_config_opt, physics, weapons_target_opt, mut blaster_res) in
+        ship_q.iter_mut()
     {
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
@@ -2776,15 +2775,10 @@ fn tick_blaster_auto_fire(
         #[cfg(not(target_arch = "wasm32"))]
         eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
-        // Target selection: the ship's authoritative `WeaponsTarget` lock
-        // (see `ai_target_selection`), with the legacy `ShipAiMemory` fallback
-        // for NPCs.
-        let target_uuid: Option<String> =
-            weapons_target_opt.and_then(|wt| wt.0.clone()).or_else(|| {
-                ai_memory_opt
-                    .and_then(|m| m.0.target)
-                    .map(|u| u.to_string())
-            });
+        // Target selection: the ship's one authoritative `WeaponsTarget` lock
+        // (see `ai_target_selection`). The legacy `ShipAiMemory` fallback is
+        // gone with #702.
+        let target_uuid: Option<String> = weapons_target_opt.and_then(|wt| wt.0.clone());
         let Some(target_uuid) = target_uuid else {
             #[cfg(target_arch = "wasm32")]
             web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
@@ -3775,89 +3769,66 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// written once a phaser beam connects. Without it an NPC could not fire until
 /// the player shot it first.
 ///
-/// "Hostile" and "nearest" are decided by `ai::core::find_nearest_hostile`, the
-/// same function the helm AI reaches through `resolve_destroy_target`, fed a
-/// similarly-built `WorldView` and the live `FactionRegistry`. Sharing that
-/// function is deliberate and load-bearing, because a ship that closes on one
-/// target while shooting at another is a bug.
+/// "Hostile" and "nearest" are decided by `ai::core::find_nearest_hostile`, fed
+/// a `WorldView` built below and the live `FactionRegistry`.
 ///
-/// Be precise about what that buys, though: the two paths agree on *who counts
-/// as an enemy* and on *which enemy is nearest* — they cannot disagree about
-/// the faction verdict or the distance ordering. They are **not** equivalent,
-/// and "helm and weapons always pick the same ship" is **not** an invariant
-/// this code establishes. See "Known differences" below: each path applies that
-/// shared verdict inside its own, separately-authored radar horizon, so the two
-/// can still disagree about a ship sitting between those horizons.
+/// ## This is the only selector (issue #702)
+///
+/// There is exactly one place a ship's target is chosen by AI, and this is it.
+/// The Helm does not acquire: `ai::core::helm_destroy` reads `WeaponsTarget` and
+/// closes on whatever it names, ignoring even the `Destroy` directive's own
+/// `target` (tier 1 resolves that, here). So "helm and weapons pick the same
+/// ship" is not an invariant two paths have to maintain in step — it is
+/// structural. There is one decision and one surface.
+///
+/// That is the whole point of #702, and it is worth stating plainly because the
+/// code it replaced was not obviously wrong: the Helm used to run its own
+/// four-tier `resolve_destroy_target` with the identical tiers in the identical
+/// order, and it still diverged, because each side applied its verdict inside
+/// its own separately-authored radar horizon (187.5 helm vs 75 weapons on the
+/// alliance hulls). Two selectors kept in step by documentation is the bug.
+/// **Do not reintroduce a second one.** If acquisition should change, it changes
+/// here, and every consumer follows because every consumer reads `WeaponsTarget`.
 ///
 /// ## Why this order, and not a different one
 ///
-/// Agreeing on who is hostile is not enough — the two paths must also agree on
-/// *when to change their minds*. So this order is `resolve_destroy_target`'s
-/// order (`ai/core.rs`), tier for tier:
-/// explicit → current → last attacker → nearest.
+/// The tiers no longer exist to mirror anybody, but the order still earns its
+/// keep on this side alone.
 ///
-/// Tier 2 is the weapons-side spelling of that function's "prefer current
-/// target if still in world view". It is what stops tier 4 from re-scanning
-/// every tick and handing the lock to whoever is nearest *right now*: with two
-/// hostiles converging, weapons would flip to the newcomer while the helm —
-/// which is sticky — kept closing on the original, and near-equidistant pairs
-/// would thrash the lock every tick, retargeting beams and restarting
-/// `tick_npc_auto_match_frequency`'s `delay_secs`.
+/// Tier 2 — keep the engagement we are already in — is what stops tier 4 from
+/// re-scanning every tick and handing the lock to whoever is nearest *right
+/// now*. Without it, two converging hostiles flip the lock to the newcomer, and
+/// near-equidistant pairs thrash it every tick, retargeting beams and restarting
+/// `tick_npc_auto_match_frequency`'s `delay_secs`. Because the Helm pursues this
+/// lock, that thrash is also the ship slewing between two bearings.
 ///
-/// Tier 2 sitting *above* `LastShipAttacker` is the deliberate part, and it is
-/// a change from #703's first cut. Retaliating instantly reads like the more
-/// aggressive choice, but weapons is not free to make it alone: the helm has no
-/// equivalent tier and keeps its current target when a second ship opens fire.
-/// Preferring the attacker here would reintroduce the exact divergence this
-/// system exists to prevent — closing on A while shooting B — one tier further
-/// down. The ship still shoots back at whoever hit it the moment it is not
-/// already engaged (no lock, or its lock died or slipped out of radar range),
-/// which is every case where the helm is free to turn too. "Weapons matches the
-/// helm" is the rule; if retaliation should preempt an existing engagement, that
-/// belongs in *both* paths — change `resolve_destroy_target` and this together,
-/// or they will disagree again.
+/// Tier 2 sitting *above* `LastShipAttacker` is the deliberate part, and it is a
+/// change from #703's first cut. Retaliating instantly reads like the more
+/// aggressive choice, but it means any bystander that grazes an engaged ship
+/// drags both its guns and its nose off the target it committed to. The ship
+/// still shoots back at whoever hit it the moment it is not already engaged (no
+/// lock, or its lock died or slipped out of radar range). Stickiness while
+/// engaged is the rule; if retaliation should preempt an existing engagement,
+/// reorder the tiers here — that is now a one-place change.
 ///
-/// ## Known differences
+/// ## Known behaviour worth knowing
 ///
-/// Two remain. Neither is fixed here; both are documented so the next reader
-/// does not mistake "shares `find_nearest_hostile`" for "picks the same ship".
+/// **Unresolvable tier-1 target (intentional).** When tier 1 names a target that
+/// cannot be resolved, selection falls through to tiers 2–3 (pre-existing #697
+/// behaviour). Note it is 2–3, not 2–4: `top_destroy` is `Some(name)` with
+/// `name` non-empty, so `destroy_is_untargeted` is `false` and the
+/// nearest-hostile tier is gated off — a `Destroy` naming someone specific never
+/// decays into "shoot whoever is closest".
 ///
-/// **1. Unresolvable tier-1 target (intentional).** When tier 1 names a target
-/// that cannot be resolved, the helm yields nothing at all, while weapons falls
-/// through to tiers 2–3 (pre-existing #697 behaviour). Note it is 2–3, not 2–4:
-/// `top_destroy` is `Some(name)` with `name` non-empty, so
-/// `destroy_is_untargeted` is `false` and the nearest-hostile tier is gated off
-/// — a `Destroy` naming someone specific never decays into "shoot whoever is
-/// closest". That cannot produce divergent pursuit — a helm with no target is
-/// not closing on anyone — so it is left alone rather than widened into a
-/// behaviour change here.
-///
-/// **2. Radar-horizon asymmetry (a real divergence, not yet fixed).** Both
-/// paths gate candidates on "in world view", but they measure it against
-/// different, independently-authored ranges:
-///
-/// - helm: `helm_ai_world_view` (`ship_plugin.rs`) → `[helm_console.radar] range`
-/// - weapons: `effective_tactical_range` below → `[weapons_console.radar] range`
-///
-/// In all three shipped player classes (`alliance_battleship.toml`,
-/// `alliance_cruiser.toml`, `alliance_destroyer.toml`) those are **187.5 (helm)
-/// vs 75 (weapons)** — a 2.5× gap. Shipped NPC templates declare neither, so
-/// both are unbounded and do agree; the mismatch is confined to the alliance
-/// hulls. That is not a safe place to leave it, because those hulls run this AI
-/// on any unmanned station (`Backfill`) and this system has no fidelity gate.
-///
-/// Concretely, on an alliance cruiser with helm and tactical both unmanned,
-/// untargeted `Destroy`, no `last_attacker`: hostiles A at 50 and B at 200 —
-/// both paths pick A. A drifts to 100 while B closes to 60. The helm still sees
-/// A (inside its 187.5 horizon) and keeps closing on A. Weapons' tier-2
-/// retention fails (A is outside its 75 horizon), so it falls to tier 4 and
-/// locks B. The ship closes on A while shooting B.
-///
-/// Do not "fix" this by reconciling the horizons here. The ranges are authored
-/// per console and consumed by both paths; making them agree is a behaviour
-/// change that belongs in `helm_ai_world_view` and this system together — the
-/// same "change both paths or they will disagree again" rule as above — not
-/// applied silently on the weapons side.
+/// **The Helm's radar horizon still gates pursuit.** This system locks against
+/// `effective_tactical_range` (`[weapons_console.radar] range`), while
+/// `helm_ai_world_view` (`ship_plugin.rs`) builds the Helm's view from
+/// `[helm_console.radar] range`. These differ on the alliance hulls, so Tactical
+/// can lock a ship the Helm cannot see. That no longer splits the decision — the
+/// lock is the lock — but `helm_destroy` returns `None` for a target outside its
+/// own view, and the Helm falls through to a lower-priority directive rather
+/// than flying at a bearing it cannot confirm. It shoots at the locked ship
+/// without closing on it, which is a coherent outcome, not a split brain.
 ///
 /// The decision is applied to `WeaponsTarget` here, in the same system that
 /// makes it. `WeaponsTarget` is the single source of truth every consumer reads
@@ -4024,13 +3995,11 @@ fn ai_target_selection(
             None => None,
         };
 
-        // Tier 2: keep the engagement we are already in. Mirrors
-        // `resolve_destroy_target`'s "prefer current target if still in world
-        // view" — with "in world view" spelled, on this side, as "still
-        // resolvable, and still inside our own radar horizon". See the ordering
-        // rationale on this system's doc comment: without this tier the
-        // nearest-hostile scan below re-decides from scratch every tick and
-        // drifts off whatever the helm is closing on.
+        // Tier 2: keep the engagement we are already in — "still resolvable,
+        // and still inside our own radar horizon". See the ordering rationale on
+        // this system's doc comment: without this tier the nearest-hostile scan
+        // below re-decides from scratch every tick, and since the helm pursues
+        // this lock, the ship slews between bearings as well as retargeting.
         let retained_lock = || -> Option<String> {
             let current = current_lock.clone()?;
             let alive = target_xz(&current).is_some();
@@ -4043,10 +4012,9 @@ fn ai_target_selection(
         // phaser hit (the only writer of `LastShipAttacker`), so shipped
         // hostiles never opened fire.
         //
-        // Delegates to the same `ai::core::find_nearest_hostile` the helm path
-        // uses via `resolve_destroy_target`, over an equivalently-built
-        // `WorldView`, so helm and weapons cannot disagree about who the enemy
-        // is or which one is nearest.
+        // Delegates the faction verdict and the distance ordering to
+        // `ai::core::find_nearest_hostile` over a `WorldView` built here, rather
+        // than open-coding "hostile" and "nearest" a second time.
         let nearest_hostile = |registry: &crate::faction::FactionRegistry| -> Option<String> {
             let self_faction_uuid = self_faction.map(|f| f.0)?;
             let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
@@ -7589,7 +7557,6 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 WeaponsTarget(Some(target_uuid.to_string())),
                 ActiveBeam::default(),
@@ -7748,6 +7715,86 @@ station = "tactical"
                 .0,
             Some(npc_uuid.to_string()),
             "beam hit must record the shooter UUID as the target's last attacker"
+        );
+    }
+
+    /// The writer's half of the `AiEntityAttacked` exactly-once contract
+    /// (issue #702).
+    ///
+    /// `tick_beams`' attacker-write branch runs every tick a beam is live.
+    /// Post-#702 the rising edge that fires `AiEntityAttacked` — and through it
+    /// `on_entity_attacked` scenario triggers — *is* `LastShipAttacker`'s change
+    /// detection, so a blind write would re-fire the trigger on every tick of a
+    /// sustained beam. This pins the compare: across many ticks of one live beam
+    /// from one shooter, the component is marked changed exactly once.
+    ///
+    /// `ai_entity_attacked_not_re_emitted_for_same_attacker` pins the reader's
+    /// half in `ai::server`.
+    #[test]
+    fn sustained_beam_marks_last_attacker_changed_exactly_once() {
+        use crate::ai_plugin::AiTokenRegistry;
+
+        #[derive(Resource, Default)]
+        struct ChangeCount(usize);
+
+        // Mirrors `ai_plugin::emit_attacked_on_new_attacker`'s guard: count the
+        // changes that would fire `AiEntityAttacked`, i.e. those that *name* an
+        // attacker. Component insertion also marks a component changed, and the
+        // fixture below inserts a `default()` (`None`) — which is a clear, not
+        // an attack, and which the emitter skips for exactly this reason.
+        fn count_changes(
+            q: Query<&LastShipAttacker, Changed<LastShipAttacker>>,
+            mut counter: ResMut<ChangeCount>,
+        ) {
+            counter.0 += q.iter().filter(|a| a.0.is_some()).count();
+        }
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+        app.init_resource::<ChangeCount>();
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000013";
+        let target_uuid_str = "00000000-0000-0000-0000-000000000014";
+
+        let (npc_entity, target_entity) =
+            setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+        app.world_mut()
+            .entity_mut(target_entity)
+            .insert(LastShipAttacker::default());
+
+        // Count in `PostUpdate` so each `Update` tick's write is observed on the
+        // tick it happens. (Ordering against `tick_beams` directly is not an
+        // option here: this fixture registers it a second time outside any
+        // SimSet, so its `SystemTypeSet` is ambiguous.)
+        app.add_systems(PostUpdate, count_changes);
+
+        {
+            let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
+            beam.target_uuid = Some(target_uuid_str.to_string());
+            beam.remaining_secs = 100.0;
+        }
+
+        // Many ticks of one continuous beam from one shooter.
+        for _ in 0..20 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world()
+                .get::<LastShipAttacker>(target_entity)
+                .unwrap()
+                .0,
+            Some(npc_uuid.to_string()),
+            "precondition: the sustained beam must actually have recorded the shooter"
+        );
+        assert_eq!(
+            app.world().resource::<ChangeCount>().0,
+            1,
+            "tick_beams must compare before writing LastShipAttacker: a sustained beam \
+             from one shooter may mark it changed exactly once, on the tick the attacker \
+             becomes known. More than one means a blind write, which re-fires \
+             AiEntityAttacked (and on_entity_attacked triggers) every tick the beam is live."
         );
     }
 
@@ -7932,19 +7979,16 @@ station = "tactical"
 
         // Spawn NPC entity using the new per-entity beam components.
         let npc_entity = {
-            use crate::ai::AiMemory;
-            let memory = AiMemory {
-                target: Some(player_uuid_parsed),
-                ..Default::default()
-            };
-
             let npc_ent = app
                 .world_mut()
                 .spawn((
                     crate::server_app::Ship,
                     EntityUuid(npc_uuid.to_string()),
                     crate::ai_plugin::AiControllerComponent,
-                    crate::ai_plugin::ShipAiMemory(memory),
+                    // The NPC's Tactical lock. Was seeded on the private
+                    // `ShipAiMemory.target` mirror until #702 deleted it;
+                    // `WeaponsTarget` is the surface every firing path reads.
+                    WeaponsTarget(Some(player_uuid_parsed.to_string())),
                     ActiveBeam::default(),
                     PhaserCooldown::default(),
                     ShipPhysics::default(),
@@ -8180,8 +8224,8 @@ station = "tactical"
             ))
             .id();
 
-        // Tick 1: `register_ai_tokens_on_spawn` runs → AiControllerComponent marker +
-        //         ShipAiMemory attached and token registered in AiTokenRegistry.
+        // Tick 1: `register_ai_tokens_on_spawn` runs → AiControllerComponent
+        //         marker attached and token registered in AiTokenRegistry.
         app.update();
 
         // Register the Bevy entity in AiTokenRegistry (needed by handle_fire_phaser).
@@ -8264,7 +8308,6 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 ActiveBeam {
                     target_uuid: Some(target_uuid.to_string()),
                     remaining_secs: 10.0,
@@ -8328,7 +8371,6 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 WeaponsTarget(Some(target_uuid.to_string())),
                 ActiveBeam::default(),
@@ -8793,7 +8835,6 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 WeaponsTarget(Some(target_uuid_parsed.to_string())),
                 ActiveBeam::default(),
@@ -9314,14 +9355,12 @@ station = "tactical"
     //
     // The nearest-hostile tier decides "who is closest *now*". Left ungated it
     // re-decides that every tick, so a lock follows whoever happens to be
-    // nearest at this instant. The helm does not work that way —
-    // `resolve_destroy_target` prefers its current target while it is still in
-    // world view — and the two paths diverging is the failure
-    // `ai_target_selection`'s doc comment calls out: closing on one ship while
-    // shooting at another. These pin the retention tier that keeps them in step.
+    // nearest at this instant — beams retargeting, and (because the helm pursues
+    // `WeaponsTarget`) the ship slewing between bearings with it. These pin the
+    // retention tier that keeps an engaged ship committed.
 
     /// The headline retention case: engaged with A, B closes inside it, and the
-    /// lock stays on A — because the helm's would.
+    /// lock stays on A.
     #[test]
     fn an_established_lock_is_retained_when_a_nearer_hostile_appears() {
         let mut app = test_app();
@@ -9352,7 +9391,7 @@ station = "tactical"
             get_weapons_target(&mut app).as_deref(),
             Some(engaged_uuid.as_str()),
             "an established lock on a live, in-range hostile must be retained when a nearer \
-             hostile appears — the helm keeps closing on A (resolve_destroy_target prefers its \
+             hostile appears — the helm keeps closing on A (the helm reads the retained WeaponsTarget, which prefers its \
              current target), so weapons flipping to B would have the ship shooting one ship \
              while flying at another"
         );
@@ -9509,7 +9548,7 @@ station = "tactical"
             get_weapons_target(&mut app).as_deref(),
             Some(engaged_uuid.as_str()),
             "taking a hit must not break off an engagement weapons is already in: the helm's \
-             resolve_destroy_target prefers its current target over its last_attacker, and \
+             ai_target_selection's retention tier outranks its last_attacker tier, and \
              weapons must match it tier for tier or the ship closes on A while shooting B. \
              last_attacker_takes_precedence_over_a_nearer_hostile pins the case that still \
              retaliates — no lock to keep"
@@ -11011,7 +11050,6 @@ ai_only = true
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 npc_ship_config,
                 WeaponsTarget(Some(target_uuid.to_string())),
@@ -12036,7 +12074,6 @@ ai_only = true
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 WeaponsTarget(Some(target_uuid.to_string())),
                 ShipPhysics::default(),
@@ -12110,14 +12147,11 @@ ai_only = true
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                // Seeds the NPC's target in `ShipAiMemory`, exercising the
-                // legacy `tick_blaster_auto_fire` fallback that this ship has
-                // no `WeaponsTarget` to satisfy. Kept until the re-scoped #702
-                // deletes that fallback.
-                crate::ai_plugin::ShipAiMemory(crate::ai::AiMemory {
-                    target: Some(target_uuid_parsed),
-                    ..Default::default()
-                }),
+                // Seeds the NPC's Tactical lock. This used to seed
+                // `ShipAiMemory.target` and rely on `tick_blaster_auto_fire`'s
+                // legacy fallback to read it; #702 deleted that fallback, so the
+                // lock goes where every other consumer looks for it.
+                WeaponsTarget(Some(target_uuid_parsed.to_string())),
                 crate::ship_plugin::ShipSystemControlSources(sources),
                 ShipPhysics::default(),
                 BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(

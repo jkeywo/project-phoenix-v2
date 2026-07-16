@@ -269,7 +269,7 @@ pub fn spawn_entity(
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             ship_physics,
-            crate::ai_plugin::ShipAiMemory::default(),
+            crate::ship_plugin::HelmWaypointClearance::default(),
             crate::weapons_plugin::WeaponsTarget::default(),
             crate::weapons_plugin::ActiveBeam::default(),
             crate::weapons_plugin::PhaserCooldown::default(),
@@ -289,11 +289,12 @@ pub fn spawn_entity(
         // thrust rather than pinning to an absolute level. Inserted
         // separately because Bevy's tuple Bundle max is 15 elements.
         entity_commands.insert(crate::ship_plugin::LastHelmInput::default());
-        // Per-objective patrol waypoint cursors, consumed by the low-LOD
-        // `simulate_low_lod_ships` path so out-of-sensor-range NPCs cheaply
-        // follow their patrol route. Inserted separately to stay under Bevy's
-        // tuple-Bundle element cap.
-        entity_commands.insert(crate::ai_plugin::PatrolCursors::default());
+        // Per-objective route cursors: where this ship is on each objective's
+        // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD
+        // `helm_patrol`, and `operate_navigation_ai`; written only by
+        // `advance_objective_cursors`. A ship without one cannot patrol.
+        // Inserted separately to stay under Bevy's tuple-Bundle element cap.
+        entity_commands.insert(crate::ai_plugin::ObjectiveCursors::default());
         // Per-ship coordination bus state (audit follow-up). Every ship
         // tracks its own shields down/restore notification cycle and its
         // own sensors→tactical frequency-hint dedupe state so the two

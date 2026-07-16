@@ -197,7 +197,7 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::ai::server::ShipAiMemory>,
+        Option<&crate::weapons_plugin::WeaponsTarget>,
     )>,
 ) {
     let count = entities.iter().count();
@@ -205,9 +205,12 @@ fn write_entity_debug_state(
     for (i, (_ai, transform, name, memory)) in entities.iter().enumerate() {
         let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
         let p = transform.translation;
+        // The ship's authoritative Tactical lock (issue #702). Was
+        // `ShipAiMemory.target`, a private mirror that could disagree with what
+        // the ship was actually shooting — so the overlay could report a target
+        // the ship had not selected.
         let target_str = memory
-            .and_then(|m| m.0.target)
-            .map(|u| u.to_string())
+            .and_then(|t| t.0.clone())
             .unwrap_or_else(|| "none".to_string());
         out.push_str(&format!(
             "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  target={}\n",
@@ -229,7 +232,7 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::ai::server::ShipAiMemory>,
+        Option<&crate::weapons_plugin::WeaponsTarget>,
     )>,
 ) {
 }
@@ -250,7 +253,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::ai::server::ShipAiMemory>,
+            Option<&crate::weapons_plugin::WeaponsTarget>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
@@ -422,7 +425,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::ai::server::ShipAiMemory>,
+            Option<&crate::weapons_plugin::WeaponsTarget>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,

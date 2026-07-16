@@ -1713,7 +1713,7 @@ fn tick_trigger_pipeline(
 /// the *live* per-layer store so that a flag mutation applied earlier in this
 /// same pass is visible to the next action's before/after preview. See
 /// `DispatchContext::base_flags` for why that matters.
-fn project_layer_views(layer_map: Option<&WorldLayerMap>) -> HashMap<String, LayerView> {
+pub(crate) fn project_layer_views(layer_map: Option<&WorldLayerMap>) -> HashMap<String, LayerView> {
     layer_map
         .map(|lm| {
             lm.0.iter()
@@ -1774,19 +1774,23 @@ fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
 ///
 /// The impure half of the dispatch table (issue #710): `world::dispatch` decides
 /// *what* should happen from read-only data, and this turns that into ECS
-/// mutations. It is the shared apply path for both `tick_trigger_pipeline` (immediate
-/// actions) and `tick_delayed_actions` (delayed ones).
+/// mutations. It is the shared apply path for `tick_trigger_pipeline` (immediate
+/// actions), `tick_delayed_actions` (delayed ones), and
+/// `console::comms::server::handle_respond_to_message` (comms-response actions,
+/// issue #722) — `pub(crate)` so the comms module can reach it.
 ///
 /// The one thing callers must decide for themselves is where `new_events` go, so
 /// they are written to the caller's `events_out`: `tick_trigger_pipeline` points that
 /// at the current pass's `next_events` (same tick, next chaining pass), whereas
-/// `tick_delayed_actions` drains it into `runtime.pending_world_events` (next
-/// tick). Same events, different destination.
+/// `tick_delayed_actions` and `handle_respond_to_message` both drain it into
+/// `runtime.pending_world_events` (next tick — there is no chaining loop in
+/// either of those two callers, only `tick_trigger_pipeline`'s). Same events,
+/// different destination.
 ///
 /// `log_ctx` prefixes the pure layer's `warnings` so each message still names
 /// the system it came from.
 #[allow(clippy::too_many_arguments)]
-fn apply_dispatch_result(
+pub(crate) fn apply_dispatch_result(
     result: DispatchResult,
     log_ctx: &str,
     events_out: &mut Vec<WorldEvent>,

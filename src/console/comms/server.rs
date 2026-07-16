@@ -15,10 +15,10 @@ use crate::world::server::{CommsInboxRes, WorldContentRuntime};
 use crate::entity_spawner::EntityUuid;
 use crate::messages::{CommsMessage, GamePhase};
 use crate::world::content::{
-    evaluate_comms_templates, ActiveDialogue, PendingFollowUp, TriggerAction, WorldEvent,
+    evaluate_comms_templates, ActiveDialogue, PendingFollowUp, WorldEvent,
 };
 use crate::world::server::{
-    CommsChannel2Event, OnScreenMessage, ShipModifiersParams, WorldLayerChange, WorldLayerParams,
+    CommsChannel2Event, OnScreenMessage, ShipModifiersParams, WorldLayerParams,
 };
 
 pub struct CommsConsolePlugin;
@@ -293,582 +293,96 @@ pub(crate) fn handle_respond_to_message(
 
         // Fire response actions.
         //
-        // PRD #397 fix 2: this dispatch is intentionally parallel to the
-        // per-action match in `tick_trigger_pipeline` below. Every `TriggerAction`
-        // variant a trigger can fire must produce the same observable
-        // effect when listed under a comms response. Comms responses do not
-        // currently carry an originating sub-world layer (the `CommsTemplate`
-        // type has no `origin_layer` field, unlike `TriggerState`), so all
-        // layer-scoped operations resolve against the base world (`None`).
-        // Flag-mutation transitions are pushed onto
-        // `runtime.pending_world_events` so `tick_trigger_pipeline` (later in the
-        // same Update tick via `SimSet::Physics`) picks them up and fires
-        // any chained `on_flag_set` / `on_flag_cleared` triggers.
-        //
-        // When adding a new `TriggerAction` variant, add an arm here AND in
-        // `tick_trigger_pipeline`. The `comms_response_dispatches_every_trigger_action_variant`
-        // parity test guards against drift.
+        // Issue #722: dispatched through the shared `world::dispatch` table
+        // (issue #708/#710), the same table `tick_trigger_pipeline` and
+        // `tick_delayed_actions` use. Comms responses do not carry an
+        // originating sub-world layer (the `CommsTemplate` type has no
+        // `origin_layer` field, unlike `TriggerState`), so `origin_layer` is
+        // always `None` here — every layer-scoped action resolves against
+        // the base world. This is a single-shot dispatch per response
+        // action, not a chaining pass: `new_events` are routed onto
+        // `runtime.pending_world_events` so `tick_trigger_pipeline` (later in
+        // the same Update tick via `SimSet::Physics`, since this handler
+        // runs in `SimSet::Input`) picks them up and fires any chained
+        // `on_flag_set` / `on_flag_cleared` / `on_destroyed` triggers —
+        // reproducing the previous same-tick-in-practice timing exactly.
         let origin_layer: Option<String> = None;
         let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
-        // Build reverse map (UUID → entity name) so we can associate objectives
-        // added by comms responses with the sender entity.
+        // Build reverse map (UUID → entity name) so `AddObjective`'s
+        // empty-`targets` fallback can resolve to the comms sender's name.
+        // Comms has no `TriggerState.entity_name` to fall back to instead —
+        // this pre-resolved name is what gets passed as
+        // `DispatchContext::entity_name` below.
         let uuid_to_name: std::collections::HashMap<&str, &str> = name_to_uuid_snapshot
             .iter()
             .map(|(name, uuid)| (uuid.as_str(), name.as_str()))
             .collect();
-        // Build UUID → ECS Entity map once per response so the six
-        // per-entity modifier/flag arms below can resolve their `entity`
+        // Build UUID → ECS Entity map once per response so the applier's
+        // per-entity modifier/flag commands can resolve their `entity`
         // target in O(1) instead of scanning `entity_uuid_query` each time.
-        // Used by `ApplyModifier` / `RemoveModifier` / `ApplyFlag` /
-        // `RemoveFlag` / `ApplyIntModifier` / `RemoveIntModifier` to write
-        // to the target entity's per-entity `ShipModifiers` Component.
         let uuid_to_entity: std::collections::HashMap<String, Entity> = entity_uuid_query
             .iter()
             .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
             .collect();
         let sender_uuid = inbox.0.sender_uuid_for(message_id);
+        let sender_entity_name: Option<String> = sender_uuid
+            .as_deref()
+            .and_then(|suid| uuid_to_name.get(suid).copied())
+            .map(String::from);
+
+        let empty_anchors: std::collections::HashMap<String, [f32; 3]> =
+            std::collections::HashMap::new();
+        // Same template source `tick_trigger_pipeline` / `tick_delayed_actions`
+        // use (issue #715): built once per system run, config cache first,
+        // filesystem fallback on native. Collapses comms's old three-message
+        // cfg-split loader (cache / native-fs / wasm) into this one path.
+        let template_loader = crate::entity_loader::WasmTemplateLoader;
+
         for action in &response.actions {
-            match action {
-                TriggerAction::AddObjective {
-                    id,
-                    text,
-                    mandatory,
-                    targets,
-                    directive,
-                    utility,
-                    source,
-                } => {
-                    // Explicit targets win; otherwise fall back to the comms
-                    // sender so legacy single-entity objectives still mark up.
-                    let resolved = if targets.is_empty() {
-                        sender_uuid
-                            .clone()
-                            .and_then(|suid| uuid_to_name.get(suid.as_str()).copied())
-                            .map(String::from)
-                            .into_iter()
-                            .collect()
-                    } else {
-                        targets.clone()
-                    };
-                    objectives.0.add_full(
-                        id,
-                        text,
-                        *mandatory,
-                        resolved,
-                        directive.clone(),
-                        utility.clone(),
-                        source.clone(),
-                    );
-                }
-                TriggerAction::CompleteObjective { id } => {
-                    objectives.0.complete(id);
-                }
-                TriggerAction::FailObjective { id } => {
-                    objectives.0.fail(id);
-                }
-                TriggerAction::SetAiState {
-                    entity,
-                    state,
-                    target: _,
-                } => {
-                    // No-op in doctrine-based AI (issue #572). FSM state slots are
-                    // gone; NPC behaviour is now driven by the scored doctrine pool.
-                    bevy::log::warn!(
-                        "handle_respond_to_message: SetAiState('{entity}' → '{state}') ignored — doctrine-based AI"
-                    );
-                }
-                TriggerAction::ApplyModifier {
-                    entity,
-                    tag,
-                    slot,
-                    bonus,
-                } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyModifier: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.add_or_update(crate::modifiers::Modifier {
-                        source: crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        slot: slot.clone(),
-                        bonus: *bonus,
-                    });
-                }
-                TriggerAction::RemoveModifier { entity, tag, slot } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveModifier: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.remove(
-                        &crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        slot,
-                    );
-                }
-                TriggerAction::ApplyFlag { entity, tag, kind } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyFlag: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyFlag: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.add_flag(
-                        crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        kind.clone(),
-                    );
-                }
-                TriggerAction::RemoveFlag { entity, tag, kind } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveFlag: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveFlag: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.remove_flag(
-                        crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        kind.clone(),
-                    );
-                }
-                TriggerAction::ApplyIntModifier {
-                    entity,
-                    tag,
-                    slot,
-                    bonus,
-                } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyIntModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.add_or_update_int(crate::modifiers::IntModifier {
-                        source: crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        slot: slot.clone(),
-                        bonus: *bonus,
-                    });
-                }
-                TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                    let Some(uuid) = name_to_uuid_snapshot.get(entity) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveIntModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                        );
-                        continue;
-                    };
-                    let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
-                        );
-                        continue;
-                    };
-                    mods.remove_int(
-                        &crate::messages::ModifierSource::World {
-                            id: "world".to_string(),
-                            tag: tag.clone(),
-                        },
-                        slot,
-                    );
-                }
-                TriggerAction::GameOver { message } => {
-                    let reason = message.clone().unwrap_or_default();
-                    if let Some(ref mut gr) = game_over_reason {
-                        gr.0 = Some(reason);
-                    }
-                    if let Some(ref mut ns) = next_state {
-                        ns.set(GamePhase::GameOver);
-                    }
-                }
-                TriggerAction::LoadWorld { path } => {
-                    if let Some(ref mut lc) = world_layers.pending_layers {
-                        // Comms responses load against the base world
-                        // (loader_path = None) since CommsTemplate has no
-                        // origin_layer concept today.
-                        lc.0.push(WorldLayerChange::Load {
-                            path: path.clone(),
-                            loader_path: origin_layer.clone(),
-                        });
-                    }
-                }
-                TriggerAction::UnloadWorld { path } => {
-                    if let Some(ref mut lc) = world_layers.pending_layers {
-                        lc.0.push(WorldLayerChange::Unload(path.clone()));
-                    }
-                }
-                TriggerAction::SetWorldFlag { name } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        crate::world::server::mutate_world_flag(
-                            &mut runtime.flags,
-                            world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            crate::world::server::FlagMutation::Set,
-                        )
-                    {
-                        crate::world::server::emit_flag_transition(
-                            &mut runtime.pending_world_events,
-                            &stripped,
-                            &target_layer,
-                            before,
-                            after,
-                        );
-                    }
-                }
-                TriggerAction::ClearWorldFlag { name } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        crate::world::server::mutate_world_flag(
-                            &mut runtime.flags,
-                            world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            crate::world::server::FlagMutation::Clear,
-                        )
-                    {
-                        crate::world::server::emit_flag_transition(
-                            &mut runtime.pending_world_events,
-                            &stripped,
-                            &target_layer,
-                            before,
-                            after,
-                        );
-                    }
-                }
-                TriggerAction::IncrementWorldFlag { name, by } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        crate::world::server::mutate_world_flag(
-                            &mut runtime.flags,
-                            world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            crate::world::server::FlagMutation::Increment(*by),
-                        )
-                    {
-                        crate::world::server::emit_flag_transition(
-                            &mut runtime.pending_world_events,
-                            &stripped,
-                            &target_layer,
-                            before,
-                            after,
-                        );
-                    }
-                }
-                TriggerAction::SetWorldFlagValue { name, value } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        crate::world::server::mutate_world_flag(
-                            &mut runtime.flags,
-                            world_layers.layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            crate::world::server::FlagMutation::SetValue(*value),
-                        )
-                    {
-                        crate::world::server::emit_flag_transition(
-                            &mut runtime.pending_world_events,
-                            &stripped,
-                            &target_layer,
-                            before,
-                            after,
-                        );
-                    }
-                }
-                TriggerAction::SpawnEntity {
-                    template_path,
-                    name,
-                    anchor,
-                    position,
-                    rotation,
-                    scale,
-                    groups: _,
-                } => {
-                    let pos_arr: [f32; 3] = if let Some(pos) = position {
-                        *pos
-                    } else if let Some(anchor_name) = anchor {
-                        // origin_layer = None: resolve against base world anchors only.
-                        let lookup = world_layers
-                            .base_world_config
-                            .as_ref()
-                            .and_then(|wc| wc.anchors.get(anchor_name).copied());
-                        match lookup {
-                            Some(p) => p,
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_respond_to_message: SpawnEntity '{name}' anchor '{anchor_name}' not found"
-                                );
-                                continue;
-                            }
-                        }
-                    } else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: SpawnEntity '{name}' has neither anchor nor position"
-                        );
-                        continue;
-                    };
+            let layers =
+                crate::world::server::project_layer_views(world_layers.layer_map.as_deref());
+            let result = {
+                let ctx = crate::world::dispatch::DispatchContext {
+                    origin_layer: origin_layer.clone(),
+                    entity_name: sender_entity_name.clone(),
+                    name_to_uuid: &name_to_uuid_snapshot,
+                    base_flags: &runtime.flags,
+                    layers: &layers,
+                    base_anchors: world_layers
+                        .base_world_config
+                        .as_ref()
+                        .map(|wc| &wc.anchors)
+                        .unwrap_or(&empty_anchors),
+                    factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
+                    uuid_source: &crate::entity_loader::assign_uuid,
+                    template_loader: &template_loader,
+                };
+                crate::world::dispatch::dispatch_action(action, &ctx)
+            };
 
-                    let config_cache = crate::config_cache::get_config_cache();
-                    let template_inst = crate::world::config::WorldEntity {
-                        template_path: template_path.clone(),
-                        ..Default::default()
-                    };
-                    let entity_config = match crate::entity_loader::resolve_entity(
-                        &template_inst,
-                        &config_cache,
-                    ) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                match std::fs::read_to_string(template_path) {
-                                    Ok(toml_str) => {
-                                        match crate::entity_config::EntityConfig::from_toml(
-                                            &toml_str,
-                                        ) {
-                                            Ok(c) => c,
-                                            Err(err) => {
-                                                bevy::log::warn!(
-                                                    "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
-                                                );
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        bevy::log::warn!(
-                                            "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
-                                        );
-                                        continue;
-                                    }
-                                }
-                            }
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                bevy::log::warn!(
-                                    "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
-                                );
-                                continue;
-                            }
-                        }
-                    };
-
-                    let uuid = crate::entity_loader::assign_uuid();
-                    let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
-                    let spawned = crate::entity_spawner::spawn_entity(
-                        &mut commands,
-                        &entity_config,
-                        pos_vec,
-                        uuid.clone(),
-                        None,
-                    );
-
-                    if rotation.is_some() || scale.is_some() {
-                        let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
-                        let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
-                        let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
-                        let scale_vec = Vec3::new(sx, sy, sz);
-                        commands.entity(spawned).insert(Transform {
-                            translation: pos_vec,
-                            rotation: quat,
-                            scale: scale_vec,
-                        });
-                    }
-
-                    runtime.name_to_uuid.insert(name.clone(), uuid);
-                    // origin_layer = None => entity is not attached to any
-                    // sub-world layer's spawned_entities list. It persists
-                    // for the session (matches base-world trigger semantics).
-                }
-                TriggerAction::DestroyEntity { entity } => {
-                    let uuid = match name_to_uuid_snapshot.get(entity) {
-                        Some(u) => u.clone(),
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: DestroyEntity: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        }
-                    };
-                    let mut target_entity: Option<Entity> = None;
-                    for (ent, uuid_comp) in entity_uuid_query.iter() {
-                        if uuid_comp.0 == uuid {
-                            target_entity = Some(ent);
-                            break;
-                        }
-                    }
-                    // Defer AiEntityDestroyed via Commands::queue so
-                    // external consumers (and chained on_destroyed triggers
-                    // in tick_trigger_pipeline later this tick) observe the event.
-                    runtime
-                        .pending_world_events
-                        .push(WorldEvent::Destroyed { uuid: uuid.clone() });
-                    let msg_uuid = uuid.clone();
-                    commands.queue(move |world: &mut World| {
-                        if let Some(mut msgs) = world
-                            .get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
-                        {
-                            msgs.write(crate::ai_plugin::AiEntityDestroyed {
-                                entity_uuid: msg_uuid,
-                            });
-                        }
-                    });
-                    if let Some(ent) = target_entity {
-                        commands.entity(ent).try_despawn();
-                    }
-                }
-                TriggerAction::AddFactionEnemy { faction, enemy } => {
-                    let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: AddFactionEnemy skipped: FactionRegistryResource not present"
-                        );
-                        continue;
-                    };
-                    let faction_uuid = match registry.0.uuid_by_name(faction) {
-                        Some(u) => u,
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: AddFactionEnemy: unknown faction name '{faction}'"
-                            );
-                            continue;
-                        }
-                    };
-                    let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                        Some(u) => u,
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: AddFactionEnemy: unknown enemy faction name '{enemy}'"
-                            );
-                            continue;
-                        }
-                    };
-                    // Idempotent. No target re-validation needed for the
-                    // add path — see tick_trigger_pipeline for the rationale.
-                    registry.0.add_enemy(faction_uuid, enemy_uuid);
-                }
-                TriggerAction::RemoveFactionEnemy { faction, enemy } => {
-                    let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                        bevy::log::warn!(
-                            "handle_respond_to_message: RemoveFactionEnemy skipped: FactionRegistryResource not present"
-                        );
-                        continue;
-                    };
-                    let faction_uuid = match registry.0.uuid_by_name(faction) {
-                        Some(u) => u,
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: RemoveFactionEnemy: unknown faction name '{faction}'"
-                            );
-                            continue;
-                        }
-                    };
-                    let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                        Some(u) => u,
-                        None => {
-                            bevy::log::warn!(
-                                "handle_respond_to_message: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
-                            );
-                            continue;
-                        }
-                    };
-                    let removed = registry.0.remove_enemy(faction_uuid, enemy_uuid);
-                    if removed {
-                        let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
-                            .iter()
-                            .filter_map(|(uid, _, fc)| {
-                                let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
-                                fc.map(|fc| (self_uuid, fc.0))
-                            })
-                            .collect();
-                        let uuid_to_faction = crate::world::server::build_uuid_to_faction(
-                            &faction_dispatch.non_ai_factions,
-                            &ai_factions,
-                        );
-                        crate::world::server::revalidate_ai_targets_after_faction_change(
-                            &mut ai_query,
-                            &registry.0,
-                            &uuid_to_faction,
-                        );
-                    }
-                }
-            }
+            // Single-shot dispatch, not a chaining pass — unlike
+            // `tick_trigger_pipeline` there is no within-tick loop here, so
+            // `new_events` always go onto `runtime.pending_world_events` for
+            // `tick_trigger_pipeline` to observe next, exactly like
+            // `tick_delayed_actions` does.
+            let mut new_events: Vec<WorldEvent> = Vec::new();
+            crate::world::server::apply_dispatch_result(
+                result,
+                "handle_respond_to_message",
+                &mut new_events,
+                &uuid_to_entity,
+                &mut runtime,
+                &mut objectives,
+                &mut commands,
+                &mut ship_modifiers,
+                world_layers.pending_layers.as_deref_mut(),
+                world_layers.layer_map.as_deref_mut(),
+                next_state.as_deref_mut(),
+                game_over_reason.as_deref_mut(),
+                &mut faction_dispatch,
+                &mut ai_query,
+            );
+            runtime.pending_world_events.extend(new_events);
         }
 
         // Record the chosen response on the inbox message.
@@ -1168,7 +682,7 @@ mod tests {
     // `pub(crate)`) and is imported here rather than duplicated.
     use crate::messages::{ClientMessage, CommsContact, ServerMessage};
     use crate::world::content::{
-        CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition,
+        CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerAction, TriggerCondition,
     };
     use crate::world::server::{
         tests::{
@@ -1604,9 +1118,14 @@ mod tests {
 
     #[test]
     fn comms_response_dispatches_spawn_entity() {
-        use crate::entities::spawner::EntityUuid;
+        use crate::entities::spawner::{EntityName, EntityUuid};
 
         let template_path = write_spawn_template_fixture();
+        // Issue #722 fix 3+4: comms's old inline SpawnEntity match arm
+        // destructured `groups: _` (discarding them) and never patched the
+        // spawned entity's `EntityName` with the response's `name`. Unifying
+        // onto the shared `dispatch_spawn_entity` table fixes both — assert
+        // on them here since this test predates the fix.
         let app = fire_response_with_actions(vec![TriggerAction::SpawnEntity {
             template_path,
             name: "comms_spawn".into(),
@@ -1614,7 +1133,7 @@ mod tests {
             position: Some([5.0, 0.0, 9.0]),
             rotation: None,
             scale: None,
-            groups: vec![],
+            groups: vec!["wave_1".into()],
         }]);
 
         let uuid = app
@@ -1625,16 +1144,38 @@ mod tests {
             .cloned()
             .expect("SpawnEntity from comms response must register name_to_uuid");
 
+        // Fix 3: the `groups` field must register the entity for
+        // `OnAllDestroyed`-style tracking, not be silently discarded.
+        let groups = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .entity_groups
+            .clone();
+        assert!(
+            groups
+                .get("wave_1")
+                .is_some_and(|members| members.contains("comms_spawn")),
+            "SpawnEntity's authored groups must register in entity_groups: got {groups:?}"
+        );
+
         let mut app = app;
         let mut q = app
             .world_mut()
-            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+            .query::<(&EntityUuid, &bevy::prelude::Transform, Option<&EntityName>)>();
         let mut found = false;
-        for (eu, t) in q.iter(app.world()) {
+        for (eu, t, entity_name) in q.iter(app.world()) {
             if eu.0 == uuid {
                 found = true;
                 assert!((t.translation.x - 5.0).abs() < 1e-3);
                 assert!((t.translation.z - 9.0).abs() < 1e-3);
+                // Fix 4: the response's `name` must patch the spawned
+                // entity's display name, not leave the template's own
+                // (the fixture template carries no `name` at all).
+                assert_eq!(
+                    entity_name.map(|n| n.0.as_str()),
+                    Some("comms_spawn"),
+                    "SpawnEntity must patch EntityName with the response's name field"
+                );
             }
         }
         assert!(found, "spawned entity must exist in ECS");
@@ -1793,10 +1334,18 @@ mod tests {
     }
 
     /// Exhaustive enumeration: matches on every `TriggerAction` variant and
-    /// drives it through `handle_respond_to_message`, asserting that *some*
-    /// observable side-effect occurs. Adding a new variant without wiring it
-    /// into the response dispatch will be caught here as either a compile
-    /// error (missing arm) or an assertion failure (no side-effect).
+    /// drives it through `handle_respond_to_message`, asserting that dispatch
+    /// completes without panicking for every variant in a single response.
+    ///
+    /// Issue #722: `handle_respond_to_message` no longer hand-duplicates a
+    /// per-variant match — it dispatches through the shared
+    /// `world::dispatch::dispatch_action` table, same as `tick_trigger_pipeline`
+    /// / `tick_delayed_actions`. The exhaustive match below is no longer a
+    /// guard on production dispatch code (there is none left to drift here);
+    /// it exists purely so that adding a new `TriggerAction` variant is a
+    /// compile error in *this test*, forcing the author to update
+    /// `enumerate_variants` and add a representative instance — a reminder to
+    /// extend coverage, not a correctness guard on comms-specific logic.
     #[test]
     fn comms_response_dispatches_every_trigger_action_variant() {
         // Build one representative instance of every variant. The match below
@@ -1925,6 +1474,200 @@ mod tests {
         // a single response.
         let variants = enumerate_variants();
         let _ = fire_response_with_actions(variants);
+    }
+
+    /// `RemoveFactionEnemy` re-validates every AI controller's target after a
+    /// successful removal (issue #710 gave the delayed path this too; the
+    /// audit for issue #722 found comms independently replicated it
+    /// correctly already). This test proves unifying comms onto the shared
+    /// `dispatch_action` table doesn't silently drop that behaviour: a comms
+    /// response that tears down a hostility must clear an in-progress AI
+    /// engagement on the now-friendly target, exactly like
+    /// `tick_trigger_pipeline`'s
+    /// `remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_friendly`
+    /// proves for the trigger path.
+    #[test]
+    fn comms_response_remove_faction_enemy_revalidates_ai_targets() {
+        use crate::ai_plugin::{AiPlugin, ShipAiMemory};
+        use crate::entities::spawner::FactionComponent;
+        use crate::entity_config::BehaviourConfig;
+        use crate::entity_spawner::BehaviourSection;
+
+        // Bundled TOML faction UUIDs (see `world::server::tests::{fed,harrow}_faction_uuid`).
+        let federation_uuid =
+            uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        let harrow_uuid = uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
+
+        let station_uuid = "station-parity-refe-uuid";
+        let mut app = comms_parity_test_app();
+        app.add_plugins(AiPlugin)
+            .insert_resource(crate::config_cache::FactionRegistryResource(
+                crate::config_cache::get_faction_registry(),
+            ));
+
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Identify {
+                token: "comms".into(),
+                name: "Uhura".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::SelectStation {
+                station: "Comms".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(&mut app, "captain", ClientMessage::SetReady { ready: true });
+        push_msg(&mut app, "comms", ClientMessage::SetReady { ready: true });
+        tick(&mut app);
+
+        // Federation-factioned "player ship".
+        let player_uuid_str = "11111111-1111-1111-1111-111111111111";
+        app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid(player_uuid_str.to_string()),
+            FactionComponent(federation_uuid),
+        ));
+
+        // Harrow-factioned NPC with an AI behaviour.
+        let npc_uuid_str = "22222222-2222-2222-2222-222222222222";
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(10.0, 0.0, 0.0),
+                EntityUuid(npc_uuid_str.to_string()),
+                BehaviourSection(BehaviourConfig::default()),
+                FactionComponent(harrow_uuid),
+            ))
+            .id();
+
+        // Let `AiPlugin` attach `AiControllerComponent` + `ShipAiMemory`.
+        app.update();
+
+        // Seed the engagement: NPC's ShipAiMemory.target = player.
+        {
+            let mut mem = app
+                .world_mut()
+                .get_mut::<ShipAiMemory>(npc_entity)
+                .expect("ShipAiMemory must be attached");
+            mem.0.target = Some(uuid::Uuid::parse_str(player_uuid_str).unwrap());
+        }
+
+        // Install the comms template: one response carries all three
+        // actions, dispatched in order — establish mutual hostility, then
+        // tear it back down, all from a single `RespondToMessage`.
+        {
+            let _ = spawn_modifier_target(&mut app, "starbase_alpha", station_uuid);
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.contacts.push(CommsContact {
+                uuid: station_uuid.into(),
+                name: "Starbase Alpha".into(),
+                in_range: true,
+                is_urgent: false,
+            });
+            runtime.comms_template_states.push(CommsTemplateState {
+                template: crate::world::content::CommsTemplate {
+                    from: "starbase_alpha".into(),
+                    trigger: TriggerCondition::OnHailed {
+                        entity_name: "starbase_alpha".into(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Hello, Phoenix.".into(),
+                        responses: vec![CommsResponse {
+                            text: "Acknowledge.".into(),
+                            actions: vec![
+                                TriggerAction::AddFactionEnemy {
+                                    faction: "Harrow".into(),
+                                    enemy: "Federation".into(),
+                                },
+                                TriggerAction::AddFactionEnemy {
+                                    faction: "Federation".into(),
+                                    enemy: "Harrow".into(),
+                                },
+                                TriggerAction::RemoveFactionEnemy {
+                                    faction: "Harrow".into(),
+                                    enemy: "Federation".into(),
+                                },
+                            ],
+                            follow_up: None,
+                        }],
+                        speaker: None,
+                        trigger: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
+                    root_follow_up: None,
+                },
+                fired: false,
+            });
+            runtime.needs_broadcast = true;
+        }
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let msg_id = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    messages.first().map(|msg| msg.id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("hail must deliver a comms message");
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id,
+                    response_index: 0,
+                },
+            },
+        );
+        let _ = tick(&mut app);
+
+        // The NPC's ShipAiMemory.target must be cleared: Harrow no longer
+        // considers Federation hostile after the response's third action.
+        let mem = app.world().get::<ShipAiMemory>(npc_entity).unwrap();
+        assert_eq!(
+            mem.0.target, None,
+            "comms RemoveFactionEnemy must clear memory.target when the target is no longer hostile"
+        );
     }
 
     // -- Comms conversation-cycle tests (issue #608, moved from
@@ -2135,6 +1878,17 @@ mod tests {
         let objectives = obj_summary.unwrap();
         assert_eq!(objectives.len(), 1);
         assert_eq!(objectives[0].text, "Complete the survey");
+        // Known difference #1: the fixture's AddObjective action carries no
+        // explicit `targets`, so it must fall back to the comms sender's
+        // resolved entity NAME ("starbase_alpha", from
+        // `name_to_uuid[station_uuid]`) rather than being left empty — the
+        // pre-resolved `DispatchContext::entity_name` comms passes in place
+        // of a `TriggerState.entity_name` (which comms has none of).
+        assert_eq!(
+            objectives[0].targets,
+            vec!["starbase_alpha".to_string()],
+            "AddObjective's empty-targets fallback must resolve to the comms sender's name"
+        );
     }
 
     // -- Cycle 4: clear comms removes read/orphaned messages ------------------

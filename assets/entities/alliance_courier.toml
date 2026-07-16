@@ -288,11 +288,13 @@ id = "sensors"
 kind = "sensors"
 station = "pilot"
 
-# Per-axis helm systems (issue #701, declared in #800). Owned by "pilot" and
-# absent from the pilot's `Std`
-# `automated_systems` list, because the pilot flies the ship by hand. An
-# unmanned pilot station gets `Backfill`, which automates every station-owned
-# system, so these two come up on AI exactly when the coarse helm does.
+# Per-axis helm systems (issue #701; thrust/steering declared in #800,
+# impulse/boost/lateral in #703/#704/#801 — no coarse `helm` system remains).
+# This hull declares five axes: helm-thrust, helm-steering, helm-impulse,
+# helm-boost and helm-lateral-thrust, all owned by "pilot" and absent from the
+# pilot's `Std` `automated_systems` list, because the pilot flies the ship by
+# hand. An unmanned pilot station gets `Backfill`, which automates every
+# station-owned system, so all five axes come up on AI together.
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"

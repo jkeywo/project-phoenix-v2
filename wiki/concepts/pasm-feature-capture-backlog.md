@@ -3,7 +3,7 @@ title: PASM Feature Capture Backlog
 type: concept
 tags: [pasm, audit, architecture, game-design, backlog]
 sources: [pasm/spec, src/, gui/, assets/, wiki/concepts/pasm-runtime.md]
-updated: 2026-07-14
+updated: 2026-07-16
 ---
 
 # PASM Feature Capture Backlog
@@ -216,7 +216,7 @@ cleanup, additive world layers, and load/unload cleanup. Atomic authoring
 failure and cross-world name collision detection remain required proposed
 behavior.
 
-Sources: `src/world/config.rs`, `src/world/server.rs`, `assets/worlds/`.
+Sources: `src/world/config.rs`, `src/world/server.rs`, `src/world/dispatch.rs`, `assets/worlds/`.
 
 ## 18. Terrain, space entities, and streaming — Captured
 

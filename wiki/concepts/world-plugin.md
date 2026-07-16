@@ -2,8 +2,8 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/world/server.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
-updated: 2026-06-27
+sources: [src/world/server.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
+updated: 2026-07-16
 ---
 
 # WorldPlugin
@@ -38,26 +38,26 @@ At `Startup`, `insert_world_config_resource` copies the `WORLD_CONFIG` thread-lo
 
 ## Startup chain
 
-Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/server.rs:152` for `insert_world_config_resource`):
+Run-once startup systems in `WorldPlugin`, chained in order (see `src/world/server.rs:391` for `insert_world_config_resource`):
 
-1. `insert_world_config_resource` (`src/world/server.rs:152`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
-2. `spawn_world_entities` — spawns all `[[entity]]` instances (asteroid-field and non-asteroid-field routed via `partition_immediate_entities`). Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:752`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:48`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
+1. `insert_world_config_resource` (`src/world/server.rs:391`) — copies `WORLD_CONFIG` thread-local → `Res<WorldConfig>`
+2. `spawn_world_entities` — spawns all `[[entity]]` instances (asteroid-field and non-asteroid-field routed via `partition_immediate_entities`). Per-instance placement is resolved by `resolve_entity_position_with` (`src/world/config.rs:1734`), which delegates to `TransformConfig::resolve` (`src/world/config.rs:80`) with precedence `relative_to+offset` > `anchor` > `position` > origin; `rotation` (XYZ Euler radians) and `scale` (default `[1, 1, 1]`) are applied from the same `transform = { ... }` table
 3. `init_world_runtime` — initialises `WorldContentRuntime`, `CommsInboxRes`, `ObjectiveManagerRes` from the loaded `WorldConfig`
 4. `load_extra_worlds` — loads any additional worlds declared in `WorldConfig.extra_worlds`
 
 Production always loads a world TOML via the WASM bridge; when no `WorldConfig` is present (native unit tests only), the startup chain is a no-op and the app boots with an empty world.
 
-The viewscreen space backdrop is no longer spawned by `WorldPlugin`: `RendererPlugin` attaches a Bevy `Skybox` to `GameCamera` and loads `assets/skybox/phoenix_space_cubemap.png` via `prepare_space_skybox_cubemap` (`src/server/renderer.rs:231`), replacing the old runtime star-sphere field.
+The viewscreen space backdrop is no longer spawned by `WorldPlugin`: `RendererPlugin` attaches a Bevy `Skybox` to `GameCamera` and loads `assets/skybox/phoenix_space_cubemap.png` via `prepare_space_skybox_cubemap` (`src/server/renderer.rs:247`), replacing the old runtime star-sphere field.
 
-A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/renderer.rs:209`, registered at `src/server/renderer.rs:91`), reads the optional `[ambient_light]` block (`AmbientLightConfig` at `src/world/config.rs:115`) and inserts the `AmbientLight` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`. Running it in `PostStartup` guarantees `insert_world_config_resource` has already executed.
+A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/renderer.rs:296`, registered at `src/server/renderer.rs:94`), reads the optional `[ambient_light]` block (`AmbientLightConfig` at `src/world/config.rs:113`) and inserts the `AmbientLight` resource. If absent, the renderer falls back to `Color::srgb(0.6, 0.55, 0.5)` at brightness `300.0`. Running it in `PostStartup` guarantees `insert_world_config_resource` has already executed.
 
 ## Update systems
 
-- `handle_hail` �?" Comms officer hails a contact; matching comms templates fire and inject messages
-- `handle_respond_to_message` �?" player picks a response, may emit follow-up dialogue, runs response actions
-- `handle_clear_comms` �?" drops orphaned and read messages
-- `broadcast_comms_state` / `broadcast_objective_summary` �?" push deltas on change
-- `tick_trigger_pipeline` �?" `WorldEvent` (attacked, destroyed, hailed, timer) drives trigger evaluation and the matching trigger actions
+- `handle_hail` — Comms officer hails a contact; matching comms templates fire and inject messages (lives in `src/console/comms/server.rs` since #608, still registered by `WorldPlugin`)
+- `handle_respond_to_message` — player picks a response, may emit follow-up dialogue, runs response actions (also in `src/console/comms/server.rs`)
+- `handle_clear_comms` — drops orphaned and read messages (also in `src/console/comms/server.rs`)
+- `broadcast_comms_state` / `broadcast_objective_summary` — push deltas on change
+- Trigger pipeline (issues #707–#719), chained in `SimSet::Physics`: `tick_pending_follow_ups` → `collect_world_events` (`src/world/server.rs:1271`, drains queued `WorldEvent`s — attacked, destroyed, hailed, timer, region, flag — into the per-tick `WorldEventBuffer` resource) → `inject_comms_templates` (`src/world/server.rs:1345`, fires matching `[[comms]]` templates) → `tick_trigger_pipeline` (`src/world/server.rs:1446`, evaluates `[[trigger]]` conditions and dispatches the matching trigger actions). `tick_delayed_actions` (`src/world/server.rs:2139`) runs after the pipeline, firing queued delayed actions through the same dispatch table
 
 ## Trigger conditions
 
@@ -78,14 +78,14 @@ Triggers in `[[trigger]]` blocks are matched against `WorldEvent`s by `evaluate_
 
 ## Trigger actions
 
-Action dispatch lives in two parallel `match` blocks: `tick_trigger_pipeline` (`src/world/server.rs:2001`) for actions fired by trigger conditions, and `handle_respond_to_message` (`src/world/server.rs:1073`) for actions attached to a comms response. The two sites must dispatch the **same** set of `TriggerAction` variants — a compile-time exhaustiveness test (`comms_response_dispatches_every_trigger_action_variant`, `src/world/server.rs:8721`) guards against drift.
+Trigger-fired actions are decided by a pure dispatch table in `src/world/dispatch.rs` (issues #710–#715): `dispatch_action` (`src/world/dispatch.rs:328`) covers every `TriggerAction` variant, routing grouped variants to five group functions (`dispatch_state_action`, `dispatch_entity_modifier_action`, `dispatch_world_flag_action`, `dispatch_destroy_entity`, `dispatch_spawn_entity` — spawn template loading goes through the injected `TemplateLoader` trait, `src/entities/loader.rs:70`). Each returns a `DispatchResult` that the applier `apply_dispatch_result` (`src/world/server.rs:1789`) turns into ECS mutations — the shared apply path for `tick_trigger_pipeline` (immediate actions) and `tick_delayed_actions` (delayed ones). Actions attached to a comms response still dispatch through a parallel inline `match` in `handle_respond_to_message` (`src/console/comms/server.rs:235`); the parity test `comms_response_dispatches_every_trigger_action_variant` (`src/console/comms/server.rs:1801`) guards against drift. Design rationale for the pipeline split lives in `pasm/spec/`.
 
 Authoring shape per action variant:
 
 | `type = ` | Required fields | Effect |
 |---|---|---|
 | `add_objective` / `complete_objective` / `fail_objective` | `id`, `text` (for add), `mandatory`, `targets` | Manage the objective list. |
-| `set_ai_state` | `entity`, `state`, optional `target` | Switch the named NPC's AI controller to a named behaviour state. |
+| `set_ai_state` | `entity`, `state`, optional `target` | Legacy no-op since doctrine-based AI (#572); logs a warning. |
 | `apply_modifier` / `remove_modifier` | `entity`, `tag`, `slot`, `bonus` | Float-valued ship stat modifier (`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`). |
 | `apply_flag` / `remove_flag` | `entity`, `tag`, `kind` | Boolean entity flag (`CommsJammed`, `SensorBlind`). |
 | `apply_int_modifier` / `remove_int_modifier` | `entity`, `tag`, `slot`, `int_bonus` | Integer modifier (`RepairTeams`). |
@@ -94,7 +94,7 @@ Authoring shape per action variant:
 | `set_flag` / `clear_flag` / `increment_flag` / `set_flag_value` | `name`, plus `by` / `value` | World-flag mutators with `parent:` prefix walking for sub-world layers. |
 | `spawn_entity` | `template_path`, `name`, one of `anchor` / `position`, optional `rotation` / `scale` | Ad-hoc spawn, registered in `name_to_uuid`; layer-tracked for `unload_world` cleanup. |
 | `destroy_entity` | `entity` | Despawn by name; emits `AiEntityDestroyed` so chained `on_destroyed` triggers fire. |
-| `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:64`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every `AiControllerComponent.blackboard.target` (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:2812`) so an in-progress engagement does not stick on a now-friendly target. |
+| `add_faction_enemy` / `remove_faction_enemy` | `faction`, `enemy` | Mutate the live `FactionRegistry` by faction `name` (resolved via `FactionRegistry::uuid_by_name`, `src/ai/faction.rs:68`). Idempotent. `is_enemy` is asymmetric — flipping a relationship in both directions requires two actions. `remove_faction_enemy` additionally re-validates every AI controller's remembered target (via `revalidate_ai_targets_after_faction_change`, `src/world/server.rs:2352`) so an in-progress engagement does not stick on a now-friendly target. |
 
 The editor mirrors this catalogue in `editor/action-schema.js`'s `ACTION_SCHEMA` map (plus a `covers every action type` regression test in `editor/tests/action-schema.test.js`).
 
@@ -106,9 +106,9 @@ The editor mirrors this catalogue in `editor/action-schema.js`'s `ACTION_SCHEMA`
 
 ### Factions
 
-Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:29`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:588`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:72`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. The AI's `enemy_in_range` transition (`src/ai/core.rs:879`) consults this predicate every tick when picking a target.
+Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/faction.rs:17`) into a `FactionRegistry` (`src/ai/faction.rs:29`) exposed as `FactionRegistryResource` (`src/entities/config_cache.rs:478`). The asymmetric `is_enemy(a, b, registry)` predicate (`src/ai/faction.rs:116`) returns `true` only when `a`'s `enemies` list contains `b`; factionless entities are neutral to everyone. The AI's shared nearest-hostile scan (`find_nearest_hostile`, `src/ai/core.rs:691`) consults this predicate when picking a target.
 
-**Defaults:** Federation is hostile to Pirate only. Harrow defaults to neutral so non-combat worlds (Starbase Alpha in `default.toml`, Before the Fire in `before_the_fire.toml`) can reuse the same Harrow ship templates as ambient patrols. Combat scenarios (`combat_test.toml`) flip the Federation↔Harrow relationship hostile on `on_world_loaded` via two `add_faction_enemy` actions before the first wave's `enemy_in_range` tick.
+**Defaults:** Federation is hostile to Pirate only. Harrow defaults to neutral so non-combat worlds (Starbase Alpha in `default.toml`, Before the Fire in `before_the_fire.toml`) can reuse the same Harrow ship templates as ambient patrols. Combat scenarios (`combat_test.toml`) flip the Federation↔Harrow relationship hostile on `on_world_loaded` via two `add_faction_enemy` actions before the first wave's hostile scan.
 
 
 ## Resources
@@ -119,7 +119,8 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 
 | File | Contents |
 |------|----------|
-| `src/world/server.rs` | `WorldPlugin`, `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `load_extra_worlds`, comms/trigger/objective Bevy systems |
+| `src/world/server.rs` | `WorldPlugin`, `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `load_extra_worlds`, the trigger-pipeline systems (`tick_pending_follow_ups`, `collect_world_events`, `inject_comms_templates`, `tick_trigger_pipeline`, `tick_delayed_actions`), the `apply_dispatch_result` applier, and broadcast systems |
+| `src/world/dispatch.rs` | Pure trigger-action decision layer: `dispatch_action` + five group functions returning `DispatchResult` for the applier |
 | `src/world/config.rs` | Pure (Bevy-free): `WorldConfig`, `parse_world`, `entity_template_paths`, `partition_immediate_entities` |
 | `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `CommsTemplateState`, `ActiveDialogue`, `FiredTrigger`, `FiredCommsTemplate`, `WorldEvent`, `evaluate_triggers`, `evaluate_comms_templates`, `process_response`, `trigger_states_from_world`, `comms_template_states_from_world`. Schema types re-exported from `world/config` |
 | `src/entities/config_cache.rs` | WASM-side storage: `wasm_load_world` (the real loader), `WORLD_CONFIG` thread-local, `get_world_config` |

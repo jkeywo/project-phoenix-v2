@@ -3,7 +3,7 @@ title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, fsa, vitest]
 sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/action-schema.js, editor/world-toml.js, editor/entity-toml.js]
-updated: 2026-05-22
+updated: 2026-07-16
 ---
 
 # Editor
@@ -115,9 +115,9 @@ Per-file op-log undo/redo (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z) capped at 100 ops per f
 
 The two PRD #350 runtime additions have **landed** in `src/world/config.rs` and `src/world/server.rs` (shipped via issue #352):
 
-- World TOML carries a top-level `extra_worlds: Vec<String>` field (`src/world/config.rs:240`). Paths listed here are auto-loaded additively at startup by `load_extra_worlds` (`src/world/server.rs:478`), which pushes one `WorldLayerChange::Load` per path onto `PendingWorldLayerChanges` so the same code path handles startup and trigger-fired loads.
-- Two new trigger actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:278`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:280`). Parsed from TOML at `src/world/config.rs:422` / `:425`. Dispatched at `src/world/server.rs:1017` / `:1022`, where each fires queues a `WorldLayerChange` onto `PendingWorldLayerChanges`.
-- Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs:83`–`:95`). `apply_world_layer_changes` (`src/world/server.rs:1146` doc comment, fn at `:1156`) drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`. Runtime test coverage lives at `src/world/server.rs:2308`–`:2710`.
+- World TOML carries a top-level `extra_worlds: Vec<String>` field (`src/world/config.rs:577`). Paths listed here are auto-loaded additively at startup by `load_extra_worlds` (`src/world/server.rs:730`), which pushes one `WorldLayerChange::Load` per path onto `PendingWorldLayerChanges` so the same code path handles startup and trigger-fired loads.
+- Two new trigger actions: `TriggerAction::LoadWorld { path }` (`src/world/config.rs:704`) and `TriggerAction::UnloadWorld { path }` (`src/world/config.rs:708`). Parsed from TOML at `src/world/config.rs:1110` / `:1116`. Decided by the pure dispatch table (`dispatch_action`, `src/world/dispatch.rs:370` / `:377`); the applier `apply_dispatch_result` turns each into a `WorldLayerChange` queued onto `PendingWorldLayerChanges` (`src/world/server.rs:1952` / `:1958`).
+- Additive-loading runtime state: `WorldLayerMap(HashMap<String, WorldRuntime>)` and `PendingWorldLayerChanges(Vec<WorldLayerChange>)` (`src/world/server.rs:161` / `:168`). `apply_world_layer_changes` (`src/world/server.rs:2628`) drains the queue each frame, mutating `WorldLayerMap` and `WorldContentRuntime`. Runtime test coverage lives in the `src/world/server.rs` test module (e.g. `load_world_trigger_action_queues_pending_layer_change`, `src/world/server.rs:5596`).
 
 The **remaining editor-side work** for this PRD: the World Mode layer tree must show `load_world`-reachable worlds in a "triggerable worlds" section with a session-only load/unload toggle for preview, and the trigger action editor needs file-picker wiring for `load_world` / `unload_world` paths. These are still in flight. The runtime additive-loading state machine that PRD #341 collapsed is partially reintroduced for these two actions only, scoped narrowly to path-keyed load/unload.
 

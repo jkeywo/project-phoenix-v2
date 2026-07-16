@@ -115,7 +115,7 @@ message   = "...Stand by — patching you through to Dr. Myst now."
 ```
 
 Implementation: scheduled in `handle_hail` (`src/world/server.rs:719`) and
-`handle_ai_events` (`src/world/server.rs:1786`) by pushing a
+`tick_trigger_pipeline` (`src/world/server.rs:1786`) by pushing a
 `PendingFollowUp` onto `runtime.pending_follow_ups` whose `placeholder_id =
 None`. The `tick_pending_follow_ups` system evaluates each pending
 follow-up's `trigger` each tick against current world state (region
@@ -178,7 +178,7 @@ text = "Understood, Axiom Station. We are proceeding to your location."
 Implementation: the pure evaluator `follow_up_trigger_holds` in
 `src/world/server.rs` returns true when the condition is met (or
 already-true at queue time). `tick_pending_follow_ups` runs in
-`SimSet::Physics` (ordered `.before(handle_ai_events)` so it observes
+`SimSet::Physics` (ordered `.before(tick_trigger_pipeline)` so it observes
 `pending_world_events` before they are drained) and snapshots region
 membership + live UUIDs + flag store for the evaluator.
 

@@ -149,7 +149,7 @@ pub(crate) fn handle_hail(
 
         // Route the Hailed event into the trigger system so that
         // on_hailed triggers (e.g. complete_objective, load_world)
-        // can fire. handle_ai_events drains pending_world_events
+        // can fire. tick_trigger_pipeline drains pending_world_events
         // in SimSet::Physics, which runs after SimSet::Input.
         runtime.pending_world_events.push(WorldEvent::Hailed {
             target_uuid: target_uuid.clone(),
@@ -294,19 +294,19 @@ pub(crate) fn handle_respond_to_message(
         // Fire response actions.
         //
         // PRD #397 fix 2: this dispatch is intentionally parallel to the
-        // per-action match in `handle_ai_events` below. Every `TriggerAction`
+        // per-action match in `tick_trigger_pipeline` below. Every `TriggerAction`
         // variant a trigger can fire must produce the same observable
         // effect when listed under a comms response. Comms responses do not
         // currently carry an originating sub-world layer (the `CommsTemplate`
         // type has no `origin_layer` field, unlike `TriggerState`), so all
         // layer-scoped operations resolve against the base world (`None`).
         // Flag-mutation transitions are pushed onto
-        // `runtime.pending_world_events` so `handle_ai_events` (later in the
+        // `runtime.pending_world_events` so `tick_trigger_pipeline` (later in the
         // same Update tick via `SimSet::Physics`) picks them up and fires
         // any chained `on_flag_set` / `on_flag_cleared` triggers.
         //
         // When adding a new `TriggerAction` variant, add an arm here AND in
-        // `handle_ai_events`. The `comms_response_dispatches_every_trigger_action_variant`
+        // `tick_trigger_pipeline`. The `comms_response_dispatches_every_trigger_action_variant`
         // parity test guards against drift.
         let origin_layer: Option<String> = None;
         let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
@@ -776,7 +776,7 @@ pub(crate) fn handle_respond_to_message(
                     }
                     // Defer AiEntityDestroyed via Commands::queue so
                     // external consumers (and chained on_destroyed triggers
-                    // in handle_ai_events later this tick) observe the event.
+                    // in tick_trigger_pipeline later this tick) observe the event.
                     runtime
                         .pending_world_events
                         .push(WorldEvent::Destroyed { uuid: uuid.clone() });
@@ -820,7 +820,7 @@ pub(crate) fn handle_respond_to_message(
                         }
                     };
                     // Idempotent. No target re-validation needed for the
-                    // add path — see handle_ai_events for the rationale.
+                    // add path — see tick_trigger_pipeline for the rationale.
                     registry.0.add_enemy(faction_uuid, enemy_uuid);
                 }
                 TriggerAction::RemoveFactionEnemy { faction, enemy } => {
@@ -1180,7 +1180,7 @@ mod tests {
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
     //
     // These tests assert that `handle_respond_to_message` dispatches every
-    // `TriggerAction` variant that `handle_ai_events` dispatches. The
+    // `TriggerAction` variant that `tick_trigger_pipeline` dispatches. The
     // "enumeration" test at the end matches on every variant of `TriggerAction`
     // so adding a new variant is a compile error until the new variant is
     // wired into both dispatch sites and a per-variant assertion is added.
@@ -1191,7 +1191,7 @@ mod tests {
     /// `apply_world_layer_changes` system is intentionally NOT wired in: we
     /// only assert that LoadWorld/UnloadWorld push commands into
     /// `PendingWorldLayerChanges`, matching the per-variant assertions used
-    /// by the `handle_ai_events` tests above.
+    /// by the `tick_trigger_pipeline` tests above.
     fn comms_parity_test_app() -> App {
         let mut app = comms_test_app();
         app.init_resource::<WorldLayerMap>()
@@ -1361,7 +1361,7 @@ mod tests {
                 e, WorldEvent::FlagSet { name, .. } if name == "comms_set"
             )),
             "SetWorldFlag from comms response must enqueue a FlagSet event \
-             for handle_ai_events to chain on"
+             for tick_trigger_pipeline to chain on"
         );
     }
 

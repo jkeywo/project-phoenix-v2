@@ -57,7 +57,7 @@ A separate `PostStartup` system, `spawn_world_ambient_light` (`src/server/render
 - `handle_respond_to_message` �?" player picks a response, may emit follow-up dialogue, runs response actions
 - `handle_clear_comms` �?" drops orphaned and read messages
 - `broadcast_comms_state` / `broadcast_objective_summary` �?" push deltas on change
-- `handle_ai_events` �?" `WorldEvent` (attacked, destroyed, hailed, timer) drives trigger evaluation and the matching trigger actions
+- `tick_trigger_pipeline` �?" `WorldEvent` (attacked, destroyed, hailed, timer) drives trigger evaluation and the matching trigger actions
 
 ## Trigger conditions
 
@@ -78,7 +78,7 @@ Triggers in `[[trigger]]` blocks are matched against `WorldEvent`s by `evaluate_
 
 ## Trigger actions
 
-Action dispatch lives in two parallel `match` blocks: `handle_ai_events` (`src/world/server.rs:2001`) for actions fired by trigger conditions, and `handle_respond_to_message` (`src/world/server.rs:1073`) for actions attached to a comms response. The two sites must dispatch the **same** set of `TriggerAction` variants — a compile-time exhaustiveness test (`comms_response_dispatches_every_trigger_action_variant`, `src/world/server.rs:8721`) guards against drift.
+Action dispatch lives in two parallel `match` blocks: `tick_trigger_pipeline` (`src/world/server.rs:2001`) for actions fired by trigger conditions, and `handle_respond_to_message` (`src/world/server.rs:1073`) for actions attached to a comms response. The two sites must dispatch the **same** set of `TriggerAction` variants — a compile-time exhaustiveness test (`comms_response_dispatches_every_trigger_action_variant`, `src/world/server.rs:8721`) guards against drift.
 
 Authoring shape per action variant:
 

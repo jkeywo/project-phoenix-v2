@@ -1,3 +1,4 @@
+pub mod blaster;
 pub mod server;
 pub mod shared;
 

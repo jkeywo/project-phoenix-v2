@@ -30,7 +30,7 @@ use bevy::prelude::Component;
 /// |---|---|---|---|
 /// | `simulate_low_lod_ships` | `src/ai/server.rs` | `x`, `z`, `yaw` | Dead reckoning for ships demoted out of `AiHighFidelity`. Those ships have no helm intent components at all, so the helm path cannot serve them. |
 /// | `handle_collisions` / `separate_ship_from_collision` | `src/server_app.rs` | `forward_speed`, `x`, `z` | Collision response: a hard stop plus a positional de-overlap. Routing it through helm intent would let the ship integrate *into* geometry for a frame before responding. |
-/// | `tick_blaster_system` recoil (issue #638) | `src/console/weapons/server.rs` | `forward_speed` | An impulse applied by weapons fire, not a helm decision. It adds to whatever the helm integrator produced. |
+/// | `tick_blaster_system` recoil (issue #638) | `src/console/weapons/blaster.rs` | `forward_speed` | An impulse applied by weapons fire, not a helm decision. It adds to whatever the helm integrator produced. |
 /// | `handle_slow_zone_speed_clamp` | `src/regions/server.rs` | `forward_speed` | An **observer** (`trigger: On<RegionEntered>`), not a scheduled system — it can fire at any point, outside any `SimSet` ordering window, so it cannot be sequenced relative to the helm integrator. |
 ///
 /// When adding a new writer, prefer helm intent components. Only write these

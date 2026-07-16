@@ -58,7 +58,7 @@ pub struct BoostCommand(pub bool);
 //
 //   * `simulate_low_lod_ships`        (src/ai/server.rs)      — dead reckoning
 //   * `handle_collisions` / `separate_ship_from_collision` (src/server_app.rs)
-//   * `tick_blaster_system` recoil    (src/console/weapons/server.rs)
+//   * `tick_blaster_system` recoil    (src/console/weapons/blaster.rs)
 //   * `handle_slow_zone_speed_clamp`  (src/regions/server.rs) — an observer
 //
 // Those four do NOT opt into this tracker and must never trip it: they are

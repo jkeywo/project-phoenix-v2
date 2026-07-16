@@ -170,13 +170,27 @@ pub struct PfxPlugin;
 impl Plugin for PfxPlugin {
     fn build(&self, app: &mut App) {
         // `MaterialPlugin` needs `Assets<Shader>`/`Assets<Image>` registered;
-        // normally supplied by `RenderPlugin`, but the headless server
-        // bootstrap (`server::bridge`) skips that, so register defensively
-        // here too (matches `StarRenderPlugin`'s dependency, guarded the
-        // same way in `bridge.rs`). Safe to call even if already registered.
-        app.init_asset::<bevy::shader::Shader>()
-            .init_asset_loader::<bevy::shader::ShaderLoader>()
-            .init_asset::<Image>();
+        // normally supplied by `RenderPlugin`/`ImagePlugin`, but the headless
+        // server bootstrap (`server::bridge`) skips those, so register them
+        // here when they are genuinely absent.
+        //
+        // The `contains_resource` guards are load-bearing: `init_asset` is not
+        // idempotent. It installs a fresh `Assets<A>` backed by a new
+        // `AssetIndexAllocator` and overwrites the `AssetServer`'s handle
+        // provider for `A`. Every handle already minted from the old allocator
+        // then indexes into storage that never allocated it, and the insert
+        // that lands when its load finishes panics out of bounds. It also
+        // discards the default and transparent images `ImagePlugin` seeds.
+        if !app
+            .world()
+            .contains_resource::<Assets<bevy::shader::Shader>>()
+        {
+            app.init_asset::<bevy::shader::Shader>()
+                .init_asset_loader::<bevy::shader::ShaderLoader>();
+        }
+        if !app.world().contains_resource::<Assets<Image>>() {
+            app.init_asset::<Image>();
+        }
 
         app.init_resource::<BeamPfxState>()
             .init_resource::<TorpedoPfxState>()
@@ -3281,6 +3295,52 @@ mod dust_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `PfxPlugin::build` must not re-register an asset type the bootstrap has
+    /// already registered.
+    ///
+    /// `init_asset` is not idempotent: it swaps in a fresh `Assets<A>` backed by
+    /// a new `AssetIndexAllocator` and overwrites the `AssetServer`'s handle
+    /// provider, orphaning every handle minted before it ran. Those handles
+    /// index past the end of the new storage, so the insert that lands when
+    /// their load finishes panics out of bounds — which is what crashed the
+    /// deployed server on load. Only the real bootstrap hit it: the automation
+    /// bootstrap skips `RendererPlugin`, and so never builds `PfxPlugin`.
+    #[test]
+    fn pfx_plugin_preserves_already_registered_image_assets() {
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_plugins(bevy::asset::AssetPlugin::default());
+
+        // Mirror `ImagePlugin::build`: register `Image`, then seed the default
+        // image that the rest of the engine expects to find.
+        app.init_asset::<Image>();
+        app.world_mut()
+            .resource_mut::<Assets<Image>>()
+            .insert(&Handle::<Image>::default(), Image::default())
+            .unwrap();
+
+        // A handle minted from the original allocator, standing in for the ones
+        // the render and UI plugins mint during `DefaultPlugins`.
+        let minted: Handle<Image> = app.world().resource::<Assets<Image>>().reserve_handle();
+
+        app.add_plugins(super::PfxPlugin);
+
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&Handle::<Image>::default())
+                .is_some(),
+            "PfxPlugin discarded the default image seeded by ImagePlugin"
+        );
+
+        // Completing that load must still land in this collection. Before the
+        // guard, this insert panicked with an out-of-bounds index.
+        app.world_mut()
+            .resource_mut::<Assets<Image>>()
+            .insert(minted.id(), Image::default())
+            .expect("a handle minted before PfxPlugin must still resolve after it");
+    }
 
     #[test]
     fn diff_torpedo_sets_spawns_new_uuids() {

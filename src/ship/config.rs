@@ -890,10 +890,7 @@ kind = "phaser_bank"
 station = "tactical"
 "#;
         let config = ShipConfig::from_toml(toml, KINDS).unwrap();
-        assert_eq!(
-            config.weapons_station(),
-            Some(StationId("tactical".into()))
-        );
+        assert_eq!(config.weapons_station(), Some(StationId("tactical".into())));
     }
 
     /// The Courier puts its blaster on the single "pilot" station. This is the
@@ -947,9 +944,6 @@ kind = "helm"
 station = "tactical"
 "#;
         let config = ShipConfig::from_toml(toml, KINDS).unwrap();
-        assert_eq!(
-            config.weapons_station(),
-            Some(StationId("tactical".into()))
-        );
+        assert_eq!(config.weapons_station(), Some(StationId("tactical".into())));
     }
 }

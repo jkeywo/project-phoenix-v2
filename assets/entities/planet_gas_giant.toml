@@ -1,0 +1,45 @@
+name = "Gas Giant"
+tags = ["planet"]
+
+[target]
+tags = ["planet"]
+threat_level = "none"
+description = "A banded gas giant"
+
+[collider]
+shape = "Ball"
+radius = 50.0
+length = 0.0
+
+[radar_appearance]
+colour = [0.9, 0.7, 0.5]
+size = 50.0
+icon = "planet"
+
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
+[mesh]
+shape = "sphere"
+radius = 50.0
+colour = [0.8, 0.6, 0.4]
+
+[planet]
+radius = 50.0
+
+[planet.surface]
+albedo = "assets/planets/gas_giant/albedo.webp"
+normal = "assets/planets/gas_giant/normal.webp"
+roughness = "assets/planets/gas_giant/roughness.webp"
+emissive_colour = "assets/planets/gas_giant/emissive_colour.webp"
+emissive_mask = "assets/planets/gas_giant/emissive_mask.webp"
+emissive_night_only = true
+emissive_strength = 1.0
+
+[planet.clouds]
+albedo = "assets/planets/gas_giant/cloud_albedo.webp"
+opacity = "assets/planets/gas_giant/cloud_opacity.webp"
+scale = 1.02
+
+[planet.atmosphere]
+colour = [0.9, 0.7, 0.5]
+strength = 1.2

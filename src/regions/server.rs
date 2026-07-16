@@ -426,6 +426,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -698,6 +699,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -755,6 +757,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1186,6 +1189,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1338,6 +1342,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1688,6 +1693,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1735,6 +1741,7 @@ mod tests {
         let config = EntityConfig {
             name: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,

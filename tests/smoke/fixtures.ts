@@ -286,7 +286,8 @@ export async function createTestClient(
 export function stripHeavyEntities(toml: string): string {
   const HEAVY_TEMPLATES = [
     'asteroid_field_',
-    'planet_earth',
+    'planet_',
+    'moon_',
     'star_sun',
     'region_nebula',
   ];

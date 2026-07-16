@@ -813,16 +813,56 @@ range = 5000.0
 
 ### 2.7 Planets
 
-Planets are ordinary entities composed of a `[mesh]` (typically a sphere) and,
-optionally, a `[collider]`. There is no dedicated `[planet]` section.
+Planets carry a dedicated `[planet]` section: a UV sphere rendered with a
+custom shader that samples equirectangular texture maps (1024×512, from
+`assets/planets/<type>/`). Lighting is computed relative to the star's actual
+position (soft day/night terminator), with optional nightside-gated emission
+(city lights, nightglow), an alpha-blended cloud/smog/ash shell on a slightly
+larger sphere, and a fresnel atmosphere rim glow. `[planet]` takes precedence
+over `[mesh]` on the viewscreen; keep a procedural `[mesh]` sphere as the
+fallback for headless/editor contexts.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `radius` | f32 | `20.0` | Sphere radius. |
+| `longitude_segments` | u32 | `64` | Mesh resolution. |
+| `latitude_segments` | u32 | `32` | Mesh resolution. |
+
+#### `[planet.surface]` (required)
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `albedo` | string | **required** | Base colour map (sRGB). |
+| `normal` | string | none | Tangent-space normal map. |
+| `roughness` | string | none | Grayscale; enables a subtle specular glint (oceans, ice). |
+| `emissive_colour` | string | none | City lights / nightglow / lava colour (sRGB). |
+| `emissive_mask` | string | none | Grayscale mask; omit when the colour map is black where unlit. |
+| `emissive_night_only` | bool | `true` | `false` for emission visible in daylight (lava). |
+| `emissive_strength` | f32 | `1.0` | Emission multiplier. |
+
+#### `[planet.clouds]` (optional)
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `albedo` | string | **required** | Cloud colour map (sRGB). |
+| `opacity` | string | none | Grayscale opacity; albedo luminance is used when omitted. |
+| `scale` | f32 | `1.03` | Shell radius as a multiple of the planet radius. |
+| `drift_speed` | f32 | `0.0` | Longitudinal UV wraps per second. `0` = static. |
+
+#### `[planet.atmosphere]` (optional)
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `colour` | `[f32; 3]` | **required** | Linear RGB rim-glow tint. |
+| `strength` | f32 | `1.0` | Rim-glow intensity. |
 
 #### Example
 
 ```toml
 name = "Earth"
-tags = ["planet"]
+tags = ["planet", "habitable"]
 
-[mesh]
+[mesh]                 # procedural fallback (headless/editor)
 shape = "sphere"
 colour = [0.0, 0.5, 1.0]
 radius = 20.0
@@ -831,7 +871,32 @@ radius = 20.0
 shape = "Ball"
 radius = 20.0
 length = 0.0
+
+[planet]
+radius = 20.0
+
+[planet.surface]
+albedo = "assets/planets/earth/albedo.webp"
+normal = "assets/planets/earth/normal.webp"
+roughness = "assets/planets/earth/roughness.webp"
+emissive_colour = "assets/planets/earth/emissive_colour.webp"
+emissive_night_only = true
+emissive_strength = 1.5
+
+[planet.clouds]
+albedo = "assets/planets/earth/cloud_albedo.webp"
+opacity = "assets/planets/earth/cloud_opacity.webp"
+scale = 1.03
+
+[planet.atmosphere]
+colour = [0.35, 0.55, 1.0]
+strength = 1.0
 ```
+
+Available texture sets: `earth`, `moon`, `gas_giant`, `ice_moon`,
+`lava_planet`, `ecumenopolis` — see the entity templates `planet_earth.toml`,
+`moon_luna.toml`, `planet_gas_giant.toml`, `moon_ice.toml`,
+`planet_lava.toml`, `planet_ecumenopolis.toml`.
 
 ### 2.8 Regions
 

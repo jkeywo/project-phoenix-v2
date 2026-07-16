@@ -16,8 +16,30 @@ colour = [0.0, 0.6, 1.0]
 size = 20.0
 icon = "planet"
 
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
 [mesh]
-model = "assets/models/planet_paradise.glb"
 shape = "sphere"
 radius = 20.0
 colour = [0.0, 0.5, 1.0]
+
+[planet]
+radius = 20.0
+
+[planet.surface]
+albedo = "assets/planets/earth/albedo.webp"
+normal = "assets/planets/earth/normal.webp"
+roughness = "assets/planets/earth/roughness.webp"
+# City lights: black where unlit, so no separate mask is needed.
+emissive_colour = "assets/planets/earth/emissive_colour.webp"
+emissive_night_only = true
+emissive_strength = 1.5
+
+[planet.clouds]
+albedo = "assets/planets/earth/cloud_albedo.webp"
+opacity = "assets/planets/earth/cloud_opacity.webp"
+scale = 1.03
+
+[planet.atmosphere]
+colour = [0.35, 0.55, 1.0]
+strength = 1.0

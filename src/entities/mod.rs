@@ -3,6 +3,7 @@ pub mod config_cache;
 pub mod entity_override;
 pub mod loader;
 pub mod model_rig;
+pub mod planet;
 pub mod spawner;
 pub mod star;
 pub mod tags;

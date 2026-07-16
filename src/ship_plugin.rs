@@ -3755,6 +3755,7 @@ mod tests {
             radar_appearance: None,
             mesh: None,
             star: None,
+            planet: None,
             class: None,
             hull_id: None,
             power_rating: None,

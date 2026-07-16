@@ -1,0 +1,40 @@
+name = "Ice Moon"
+tags = ["moon"]
+
+[target]
+tags = ["moon"]
+threat_level = "none"
+description = "A frozen cryovolcanic moon"
+
+[collider]
+shape = "Ball"
+radius = 7.0
+length = 0.0
+
+[radar_appearance]
+colour = [0.6, 0.8, 1.0]
+size = 7.0
+icon = "planet"
+
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
+[mesh]
+shape = "sphere"
+radius = 7.0
+colour = [0.7, 0.85, 1.0]
+
+[planet]
+radius = 7.0
+
+[planet.surface]
+albedo = "assets/planets/ice_moon/albedo.webp"
+normal = "assets/planets/ice_moon/normal.webp"
+roughness = "assets/planets/ice_moon/roughness.webp"
+emissive_colour = "assets/planets/ice_moon/emissive_colour.webp"
+emissive_mask = "assets/planets/ice_moon/emissive_mask.webp"
+emissive_night_only = true
+emissive_strength = 0.8
+
+[planet.atmosphere]
+colour = [0.6, 0.8, 1.0]
+strength = 0.5

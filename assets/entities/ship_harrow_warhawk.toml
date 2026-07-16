@@ -126,10 +126,17 @@ id = "helm"
 kind = "helm"
 ai_only = true
 
-# Per-axis helm systems (issue #701, declared in #800). This hull has no
-# stations, so — exactly like the coarse `helm` above — they are ownerless and
-# `ai_only`. The NPC spawn path sets every declared system to ControlSource::Ai,
-# so these come up on AI precisely when the coarse helm does.
+# Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
+# has no stations, so — exactly like the coarse `helm` above — they are ownerless
+# and `ai_only`. The NPC spawn path sets every declared system to
+# ControlSource::Ai, so these come up on AI precisely when the coarse helm does.
+#
+# #800 declared thrust + steering. #704 adds impulse + lateral-thrust, which the
+# deleted `operate_helm_ai` monolith used to drive on this hull's behalf: an
+# undeclared system resolves to ControlSource::Human (`operate_ai = false`), so
+# the monolith never stood down from those two axes here. Declaring them hands
+# both to `ai_helm_impulse` / `ai_helm_lateral_thrust` on exactly the ticks the
+# monolith drove them, which is what makes the delete behaviour-preserving.
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
@@ -138,6 +145,16 @@ ai_only = true
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
 ai_only = true
 
 # Fine Tactical systems (issue #512): port + starboard phaser banks. No torpedoes.

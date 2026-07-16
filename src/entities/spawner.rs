@@ -258,7 +258,7 @@ pub fn spawn_entity(
             yaw: {
                 let rot = bevy::math::Quat::from_euler(bevy::math::EulerRot::YXZ, 0.0, 0.0, 0.0);
                 let _ = rot;
-                0.0 // initial yaw; updated each tick by operate_helm_ai
+                0.0 // initial yaw; updated each tick by integrate_ship_physics
             },
             ..Default::default()
         };

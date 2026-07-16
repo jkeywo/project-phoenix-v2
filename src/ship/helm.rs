@@ -3,13 +3,15 @@
 // These components decouple *admission* (turning human `AdmittedCommands`
 // or AI decisions into a desired helm state) from *physics integration*
 // (actually advancing `ShipPhysics`/`ShipImpulse`/`ShipBoost` from that
-// desired state). Two writers — `process_helm_inputs` (human/admission
-// path) and `operate_helm_ai` (AI decision path) — each write these
-// components for whichever ship they're currently authoritative for
-// (mutually exclusive per tick via `ControlTickPolicy`). A single shared
-// system, `integrate_ship_physics`, reads them and performs the actual
-// physics/impulse/boost integration for both the player ship and any
-// AI-promoted NPC.
+// desired state). The writers are `process_helm_inputs` (human/admission
+// path) and the per-axis helm AI (`ai_helm_thrust`, `ai_helm_steering`,
+// `ai_helm_lateral_thrust`, `ai_helm_impulse` — one component each, gated on
+// its own system's `ControlTickPolicy`; the `operate_helm_ai` monolith was the
+// AI-side writer until #704 split and deleted it). They write these components
+// for whichever ship they're currently authoritative for, mutually exclusive
+// per tick. A single shared system, `integrate_ship_physics`, reads them and
+// performs the actual physics/impulse/boost integration for both the player
+// ship and any AI-promoted NPC.
 //
 // Scoped to `AiHighFidelity`: these components exist only on ships running
 // full-fidelity helm systems (the player's `LocalShip`, always, and NPCs

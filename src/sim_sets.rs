@@ -18,10 +18,12 @@ pub enum SimSet {
 }
 
 /// Ordering label within `SimSet::Physics` marking the AI decision phase:
-/// `build_world_snapshot` runs just before it, `operate_helm_ai` /
-/// `process_attacker_this_tick` run in/after it. `sync_ship_position` is
-/// ordered `.after(process_helm_inputs)`/`.after(operate_helm_ai)` (not
-/// relative to this label) so `Transform` reflects this tick's freshly
-/// computed `ShipPhysics` rather than a stale pre-movement value.
+/// `build_world_snapshot` runs just before it, the per-axis helm AI
+/// (`ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` /
+/// `ai_helm_impulse`) and `process_attacker_this_tick` run in/after it.
+/// `sync_ship_position` is ordered `.after(process_helm_inputs)` /
+/// `.after(integrate_ship_physics)` (not relative to this label) so `Transform`
+/// reflects this tick's freshly computed `ShipPhysics` rather than a stale
+/// pre-movement value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub struct AiTickLabel;

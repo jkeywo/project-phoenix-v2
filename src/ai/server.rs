@@ -698,7 +698,8 @@ fn lod_ai_ships(
 ///
 /// `aggregate_doctrine_blackboards` publishes `scored_objectives` there for
 /// every `BehaviourSection` ship regardless of LOD — the same entry
-/// `operate_helm_ai` reads on the high-LOD path (see `ship_plugin.rs` ~:527).
+/// the per-axis helm AI reads on the high-LOD path (see `ship_plugin.rs`, the
+/// "Shared helm-AI decision inputs" note).
 /// Both the low-LOD steering path and the cursor evaluator resolve their route
 /// through this one function so they can never disagree about which objective
 /// owns the cursor.
@@ -1411,8 +1412,8 @@ mod tests {
     /// `aggregate_doctrine_blackboards` must write a `ViewscreenBlackboard` with
     /// at least one `ScoredObjective` carrying `SystemAffinity::Helm` for an
     /// entity whose `BehaviourSection` contains a `Patrol` doctrine entry.
-    /// This is the gate that `operate_helm_ai` checks; without it the ship stays
-    /// still even when Backfill AI is active.
+    /// This is the gate the per-axis helm AI checks (`has_helm_objective`);
+    /// without it the ship stays still even when Backfill AI is active.
     #[test]
     fn aggregate_doctrine_blackboards_writes_scored_helm_objective() {
         use crate::damage::SystemHull;

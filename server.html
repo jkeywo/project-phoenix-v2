@@ -1251,6 +1251,12 @@
     if (s.phase === 'InProgress' && _lobbyPrevPhase !== 'InProgress') {
       startGameAudio();
     }
+    // Menu music: loop during lobby, stop when game starts
+    if (s.phase === 'Lobby') {
+      startMenuMusic();
+    } else if (s.phase === 'InProgress' || s.phase === 'Loading') {
+      stopMenuMusic();
+    }
     _lobbyPrevPhase = s.phase;
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
@@ -1820,6 +1826,7 @@
         selectedScenario = this.dataset.path;
         document.getElementById('scenario-panel').style.display = 'none';
         showLobbyPanel();
+        startMenuMusic();
         if (_returnedToSelection) {
           // Re-selection flow: server is already running, confirm the scenario.
           _returnedToSelection = false;
@@ -1875,12 +1882,29 @@
     let _blasterBuf = null;    // decoded AudioBuffer
     let _prevRedAlert = false;
     let _prevPhaser = false;
+    let _menuMusic = null;
 
     // HTMLMediaElement.volume throws IndexSizeError outside 0..1.
     function clampVol(v) {
       const n = Number(v);
       if (!isFinite(n)) return 0;
       return Math.min(1, Math.max(0, n));
+    }
+
+    function startMenuMusic() {
+      if (_menuMusic) return;
+      _menuMusic = new Audio('assets/sounds/exploration.mp3');
+      _menuMusic.loop = true;
+      _menuMusic.volume = 0.5;
+      _menuMusic.play().catch(function() {});
+    }
+
+    function stopMenuMusic() {
+      if (_menuMusic) {
+        _menuMusic.pause();
+        _menuMusic.currentTime = 0;
+        _menuMusic = null;
+      }
     }
 
     function mkLoop(key, spec, volume) {
@@ -2195,6 +2219,7 @@ function finishInit() {
     document.getElementById('scenario-panel').style.display = '';
     document.getElementById('lobby-panel').style.display = 'none';
     _returnedToSelection = true;
+    startMenuMusic();
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────

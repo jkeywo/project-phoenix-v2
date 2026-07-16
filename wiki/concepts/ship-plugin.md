@@ -14,11 +14,12 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 
 | System | Responsibility |
 |---|---|
-| `process_helm_inputs` | Reads `HelmInput` messages at 10 Hz, feeds into `compute_physics` |
+| `process_helm_inputs` | Turns admitted per-axis `ControlSystem` commands (`SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, #801) into the shared helm intent components, skipping AI-held axes |
 | `sync_ship_position` | Syncs `ShipState` → Rapier `Transform` for the ship entity |
 | `handle_impulse_messages` | Handles `StartImpulseCharge` / `CancelImpulse`, auto-cancels on hull damage |
 | `process_coordination_lag` | Delivers channel-3 `CoordinationEnqueue` messages from each ship's `CoordinationQueue`; sets `PendingArcBearingRequest` for AI Helm on `ArcBearingRequest` delivery; emits popup for human Helm |
-| `operate_helm_ai` | Applies NPC physics from AI intent; reads `PendingArcBearingRequest` and biases steering toward the requested bearing via `steer_toward` |
+| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | Per-axis AI helm ([details](./ai-helm-decomposition.md)); `ai_helm_steering` reads `PendingArcBearingRequest` and biases steering toward the requested bearing via `steer_toward` |
+| `integrate_ship_physics` | Sole helm-path writer of `ShipPhysics`; consumes the intent components for the player ship and every `AiHighFidelity` NPC |
 
 ### Systems that stayed in `simulation.rs`
 
@@ -34,7 +35,7 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 | `AiHelmTickTimer` / `AiHelmTickReady` | `ship_plugin.rs` | Shared fixed-rate AI-helm sim tick (issue #803): one `run_if(ai_helm_tick_ready)` gate on all four per-axis AI helm systems (`ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm decision cadence from frame rate. Rate is TOML-authored via `[global] ai_helm_tick_hz` (default 30 Hz) |
 | `LastHelmInput` (pub) | `ship_plugin.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
 | `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |
-| `PendingArcBearingRequest` | `ship_plugin.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; biases steering via `steer_toward`; cleared when the target entity is visible or arrives in firing arc |
+| `PendingArcBearingRequest` | `ship_plugin.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; `ai_helm_steering` biases steering via `steer_toward`; cleared when the target is no longer visible or a phaser arc already bears |
 
 ## Registration
 

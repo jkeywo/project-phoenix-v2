@@ -13,7 +13,7 @@ The ship's motion model is a **pure Rust function** — no Bevy, no Rapier, no g
 ```rust
 fn compute_physics(
     state: ShipPhysicsState,   // current speed, yaw
-    input: HelmInputs,         // thrust 0..1, steering -1..1
+    input: ShipPhysicsInput,   // thrust 0..1, steering -1..1
     dt: f32,                   // frame delta seconds
     config: ShipPhysicsConfig, // tunables
 ) -> ShipPhysicsResult { ... }

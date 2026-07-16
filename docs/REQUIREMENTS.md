@@ -278,7 +278,7 @@ Scenario-applied modifiers and flags have `ModifierSource::Scenario { id, tag }`
 ### Physics and controls
 - Thrust slider (0–100%) sets target forward speed.
 - Steering joystick (snap-to-centre on release) sets angular velocity.
-- Helm sends `HelmInput { thrust, steering }` at 10 Hz while controls are active.
+- Helm sends per-axis `ControlSystem` payloads at 10 Hz while controls are active: `SetThrust { value }` → `helm-thrust` and `SetSteering { value }` → `helm-steering` (the client joystick's combined `HelmInput` UI action fans out to both; issue #801).
 - Ship velocity lerps toward target at `max_acceleration` (~3s to max from rest); on zero thrust, decelerates at `max_deceleration` (~1s stop).
 - Ship is locked to the XZ plane with yaw-only rotation (no pitch, no roll).
 - Direct velocity control each tick on a dynamic Rapier rigid body; asteroids are static rigid bodies.
@@ -514,7 +514,7 @@ What the early PRDs called the Science console has been split into **three indep
 ## AI & Behaviour
 
 ### Architecture
-- AI controllers are architecturally separate from the entities they drive. A controller emits the same input messages a human player would (`HelmInput`, `SetTarget`, `FirePhaser`, `FireTorpedo`, `Hail`, `RespondToMessage`); the simulation cannot tell AI inputs from player inputs.
+- AI controllers are architecturally separate from the entities they drive. A controller emits the same input messages a human player would (`SetThrust`/`SetSteering`, `SetTarget`, `FirePhaser`, `FireTorpedo`, `Hail`, `RespondToMessage`); the simulation cannot tell AI inputs from player inputs.
 - Each AI-controlled entity has a synthetic token `ai:<entity_uuid>` registered in an `AiTokenRegistry`. The simulation's token-to-entity lookup falls back to this registry when the player session lookup misses.
 - The AI tick is a pure function: `tick(controller, world_view) -> AiTickOutput { new_state, inputs }`. No Bevy dependency.
 - `WorldView` is populated from the entity's console components: `WeaponsConsole` presence populates phaser-ready and weapons-range fields; `ShieldsConsole` presence populates shield fields; `ConsoleHull` populates `self_hull_fraction`. A console component absent means the corresponding `WorldView` field is `None` / `false` — the AI cannot attempt that action.
@@ -553,7 +553,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Factionless entities are neither enemies nor targets.
 
 ### Edge-triggered emission
-- AI ticks at simulation rate but `HelmInput` emissions are filtered by epsilon (~0.02) on each field so AI does not flood the message queue. `SetTarget` / `FirePhaser` / `FireTorpedo` are event-shaped.
+- AI ticks at simulation rate but helm-axis emissions (`SetThrust`/`SetSteering`) are filtered by epsilon (~0.02) on each field so AI does not flood the message queue. `SetTarget` / `FirePhaser` / `FireTorpedo` are event-shaped.
 
 ### Phase gating
 - AI tick systems run only during `InProgress`.
@@ -630,7 +630,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 #### Inbound (`ClientMessage`)
 - Identity / lobby: `Identify`, `SetName`, `SelectStation`, `ReleaseStation`, `StartGame`, `SetComplexity`.
 - Viewscreen / captain: `SetView`, `ToggleRedAlert`.
-- Helm: `HelmInput { thrust, steering }`, `StartImpulseCharge`, `CancelImpulse` (note: `CancelImpulse` is sent by the Navigation operator, not Helm).
+- Helm: `ControlSystem` with `SetThrust { value }` → `helm-thrust` / `SetSteering { value }` → `helm-steering` (per-axis wire, issue #801), `StartImpulseCharge`, `CancelImpulse` (note: `CancelImpulse` is sent by the Navigation operator, not Helm).
 - Tactical / weapons: `SetTarget`, `FirePhaser`, `SetPhaserMode { mode }`, `SetPhaserFrequency { frequency }`, `FireTorpedo { tube, target_uuid? }`.
 - Sensors: `SetSensorsTarget { uuid }` (current) and `SetScienceTarget { uuid }` (legacy, retained).
 - Shields: `SetShieldFocus { facing: Option<ViewDirection> }`.
@@ -721,7 +721,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Playwright-based smoke harness runs in Chromium against `dist/` served by `npx serve`.
 - A BroadcastChannel PeerJS shim is injected via Playwright's `addInitScript` to replace `window.Peer` with a fake transport — zero production-code footprint.
 - A `wasm-ready` window event from the shim signals reliable WASM readiness; tests then wait ~500ms before the first `Identify` to let Bevy startup systems complete.
-- Smoke specs cover: server.html loads + WASM initialises without console errors; client connect + Identify + Welcome handshake; station picker (replaces old console picker) including SelectStation/ReleaseStation, atomic swap, captain validation; reassignment cascades (2→3 join, 3→2 leave, spectator promotion); StartGame all-clients-receive-GameStarted; first SimState within 2s; HelmInput → next SimState reflects change; complexity broadcast; comms flow; AI patrol → pursue transition; regions render on Science radar; damage zone reduces hull; modifier flag at the wire level; debug-overlay toggle; native WebSocket transport reaches Connected.
+- Smoke specs cover: server.html loads + WASM initialises without console errors; client connect + Identify + Welcome handshake; station picker (replaces old console picker) including SelectStation/ReleaseStation, atomic swap, captain validation; reassignment cascades (2→3 join, 3→2 leave, spectator promotion); StartGame all-clients-receive-GameStarted; first SimState within 2s; `SetThrust` → next SimState reflects change; complexity broadcast; comms flow; AI patrol → pursue transition; regions render on Science radar; damage zone reduces hull; modifier flag at the wire level; debug-overlay toggle; native WebSocket transport reaches Connected.
 - Three additional smoke tests are written co-located with the features they validate: **tactical fire-flow** (phaser fires, hits hull-bearing target, damage applied — written alongside the phaser/NPC damage fix); **helm input/physics** (thrust and yaw inputs produce expected position and heading changes — written alongside the impulse data-driven fix); **view-selector** (switching view modes produces correct `SimSnapshot` view-mode fields — written alongside view-mode work).
 - Smoke tests run automatically on every pull request and push to `main`; depend on the build job's `dist/` artifact (no recompile).
 - The smoke test CI job is the required status check for `main`.

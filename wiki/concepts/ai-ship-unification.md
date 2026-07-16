@@ -2,12 +2,12 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, per-kind-plugin, control-source, prd-520]
-updated: 2026-07-03
+updated: 2026-07-16
 ---
 
 # AI Ship Unification
 
-Both the player ship and NPC ships are represented as ECS entities with the same `Ship` marker and the same four per-entity Components. AI control for each system kind (helm, tactical, etc.) is routed through a per-kind plugin (`operate_<kind>_ai`) gated by `ControlSourceResolver`. `src/ai/server.rs` writes intent only; the per-kind plugin applies physics.
+Both the player ship and NPC ships are represented as ECS entities with the same `Ship` marker and the same per-entity Components. AI control for each system kind is routed through a per-kind AI system (helm: four per-axis systems; other consoles: `operate_<kind>_ai` / `ai_<kind>` systems) gated by `ControlSourceResolver`. AI systems write intent only; shared integrators apply the effects.
 
 ## The unified Ship entity model
 
@@ -19,7 +19,7 @@ Every ship — player or NPC — carries these four Components:
 | `ShipSystemControlSources(ControlSourceResolver)` | Maps `SystemId → ControlSource` (Human or Ai) |
 | `ActiveStationRatings` | Live complexity ratings from connected station holders |
 | `CoordinationQueue` | Channel-3 lag queue for advisories |
-| `PendingArcBearingRequest` | Set by `process_coordination_lag` when AI Helm consumes a weapons `ArcBearingRequest`; biases `operate_helm_ai` steering via `steer_toward` until the target is visible or enters firing arc |
+| `PendingArcBearingRequest` | Set by `process_coordination_lag` when AI Helm consumes a weapons `ArcBearingRequest`; `ai_helm_steering` biases steering toward it via `steer_toward` until the target is gone or a phaser arc bears |
 
 Before PRD #520 these were singleton `Resource`s for the player ship only. After the unification, the player ship and NPC ships all carry them as Components on their ECS entity.
 
@@ -31,17 +31,14 @@ Lobby/Spawn
        ├─ Player ship: Human for all systems (toggled by rating changes)
        └─ NPC ship:    Ai for all systems (fixed at spawn)
 
-Per-tick (SimSet::Physics)
-  tick_ai_controllers (AiTickLabel)
-    ├─ runs behaviour tree → outputs AiInput list
-    ├─ writes last_helm_intent to AiControllerComponent (intent only)
-    └─ dispatches SetTarget / FirePhaser as synthetic InboundMessages
-
-  operate_helm_ai (after AiTickLabel)
-    ├─ Player ship path (Without<AiControllerComponent>)
-    │    policy.operate_ai? → write LastHelmInput { thrust: 0, steering: 0 }
-    └─ NPC ship path (With<AiControllerComponent>)
-         policy.operate_ai? → apply physics to Transform using last_helm_intent
+Per-tick (SimSet::Physics, on the shared AI-helm sim tick — issue #803)
+  ai_helm_thrust / ai_helm_steering / ai_helm_lateral_thrust / ai_helm_impulse
+    ├─ each gated on its OWN axis's policy_for(...).operate_ai (never coarse)
+    ├─ each calls the pure operate_helm / operate_lateral_thrust and keeps
+    │  only its own axis, writing one intent component
+    │  (ThrustInput / SteeringInput / LateralThrustInput / ImpulseCommand)
+    └─ integrate_ship_physics consumes the intent components for the player
+       ship and every AiHighFidelity NPC alike
 
   ai_target_selection (SimSet::Input)
     └─ every ship whose tactical surface is AI-operated: picks a target and
@@ -49,9 +46,11 @@ Per-tick (SimSet::Physics)
        (truth). Firing is separate: ai_phaser_auto_fire / ai_torpedo_auto_fire
        decide, integrate_weapons_state applies.
 
-  operate_shields_ai, operate_power_ai, operate_comms_ai, …  (stubs, #551)
+  ai_shield_focus, ai_power_allocation, operate_comms_ai, …
     └─ one system per kind; gated on policy.operate_ai
 ```
+
+See [AI Helm Decomposition](./ai-helm-decomposition.md) for the full per-axis helm architecture, the intent-component surface, and LOD.
 
 ## ControlSourceResolver
 
@@ -71,19 +70,19 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 | System | File | Status |
 |--------|------|--------|
-| `operate_helm_ai` | `src/ship_plugin.rs` | ✅ Full (applies NPC Transform physics; takes `FactionRegistryResource` for hostile detection) |
+| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship_plugin.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
 | `ai_target_selection` | `src/console/weapons/server.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
-| `operate_power_ai` | `src/ship/power.rs` | Stub |
-| `operate_shields_ai` | `src/ship/shields.rs` | Stub |
-| `operate_sensors_ai` | `src/ship/sensors.rs` | Stub (via `tick_sensors_frequency_hint`) |
+| `ai_power_allocation` | `src/console_ai/server.rs` | ✅ (replaced the `operate_power_ai` stub) |
+| `ai_shield_focus` | `src/console_ai/server.rs` | ✅ (replaced `operate_shields_ai`; high-LOD only) |
+| `operate_sensors_ai` | `src/ship/sensors.rs` | ✅ |
 | `operate_comms_ai` | `src/console/comms/server.rs` | Stub |
-| `operate_repair_ai` | `src/console/repair/server.rs` | Stub |
-| `operate_navigation_ai` | `src/console/navigation/mod.rs` | Stub |
+| `operate_repair_ai` | `src/console/repair/server.rs` | ✅ |
+| `operate_navigation_ai` | `src/console/navigation/mod.rs` | ✅ (writes `NavigationWaypoint` + channel-3 `NavigateTo`) |
 
 ## Objective-driven Backfill bridge
 
-Until issue #581 moves blackboards to per-ship components, the player ship's Backfill AI reads the singleton viewscreen blackboard as a bridge. `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries; `player_ship_helm_ai` consumes Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
+The player ship's Backfill AI is the same code path as NPC AI: `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries into the ship's viewscreen blackboard; the per-axis helm AI systems consume Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
 
 This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anchors around Starbase Alpha, while each spawned `wave_N` gets a higher-scored Destroy objective that resolves through the runtime `wave_N -> uuid` mapping. Missing named targets are ignored rather than falling back to an arbitrary hostile.
 
@@ -97,11 +96,11 @@ This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anch
 
 Directive selection distinguishes unresolved directives from resolved idle commands. `operate_helm` tries lower-priority directives only when a directive returns `None` (for example, a Destroy target name that is not yet visible); `Some((0.0, 0.0))` means the directive resolved and intentionally wants the ship to hold station. This prevents a high-priority Destroy objective that has reached weapons range from falling through to a lower-priority Patrol objective and sharply steering away from the target.
 
-`operate_helm_ai` caps its physics integration step to the same `1/30s` maximum used by the human helm timer. AI helm still runs every frame, but a long browser frame cannot be consumed as one oversized yaw step, so Backfill/NPC steering cannot visibly rotate faster than joystick-driven helm input.
+Since issue #803 the four per-axis AI helm systems run on a shared fixed-rate sim tick (`[global] ai_helm_tick_hz`, default 30 Hz) rather than every frame, so a 144 Hz host makes the same decisions at the same cadence as a 60 Hz one. Physics integration (`integrate_ship_physics`) still runs every frame and caps its step at `1/30s`, so a long browser frame cannot be consumed as one oversized yaw step.
 
 ### Arc-bearing steering bias
 
-When a `PendingArcBearingRequest` is set (by `process_coordination_lag` in `src/ship_plugin.rs` consuming a `CoordinationPayload::ArcBearingRequest` from the coordination queue), `operate_helm_ai` reads the pending entity's position and biases steering toward it using `steer_toward(physics.yaw, [dx/dist, dz/dist], PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD)` from `src/ai/mod.rs` (`PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`). The pending request is cleared when the target enters the firing arc or is no longer visible.
+When a `PendingArcBearingRequest` is set (by `process_coordination_lag` in `src/ship_plugin.rs` consuming a `CoordinationPayload::ArcBearingRequest` from the coordination queue), `ai_helm_steering` (via `apply_arc_bearing_request`) reads the pending entity's position and biases steering toward it using `steer_toward(physics.yaw, [dx/dist, dz/dist], PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD)` from `src/ai/mod.rs` (`PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`). The pending request is cleared when some phaser bank's arc already bears on the target or the target is no longer visible.
 
 ## NPC ship spawn
 

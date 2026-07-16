@@ -18,7 +18,7 @@ Inline `#[cfg(test)] mod tests` in each module. The Rust side is the test-heavy 
 |---|---|
 | `session.rs` | Registration, duplicates, console assignment, vacancy, reconnect, conflict resolution, `helm_token()`/`captain_token()` |
 | `codec.rs` | Round-trip for **every** `ClientMessage` and `ServerMessage` variant |
-| `lobby.rs` / `lobby_handler.rs` | Bevy App harness: Identify→Welcome, station selection, SetReady auto-start, HelmInput phase-gating, disconnect |
+| `lobby.rs` / `lobby_handler.rs` | Bevy App harness: Identify→Welcome, station selection, SetReady auto-start, `ControlSystem` (e.g. `SetThrust`) phase-gating, disconnect |
 | `ship_physics.rs` | Zero input, accel curve, decel curve, steering yaw, dt scaling, speed cap |
 | `ship_state.rs` | Red Alert toggle, snapshot generation |
 | `asteroid_spawner.rs` | Count, bounds, clear zone, no duplicates |
@@ -65,7 +65,7 @@ For tests that route a real production TOML but don't need its heavy entities, `
 | `server-load.spec.ts` | #54 | WASM boots, no JS console errors |
 | `client-connect.spec.ts` | #55 | Real `client.html` connects, `#status` = "Connected" after Welcome |
 | `lobby.spec.ts` | #56/#57 | Station assignment and lobby phase transitions |
-| `sim-state.spec.ts` | #58/#59 | `SimState` shape valid; `HelmInput` changes ship position |
+| `sim-state.spec.ts` | #58/#59 | `SimState` shape valid; `SetThrust` changes ship position |
 
 CI runs the suite on every push and pull request via `.github/workflows/ci.yml`.
 

@@ -23,7 +23,7 @@ Bevy runs at the browser's `requestAnimationFrame` rate (typically 60 Hz). On to
 
 | Channel | Direction | Trigger |
 |---|---|---|
-| `HelmInput` | client → server | Joystick active on the helm console |
+| Helm joystick (`HelmInput` UI action → two `ControlSystem` messages: `SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`) | client → server | Joystick active on the helm console |
 | `SimState { snapshot }` | server → all clients | Bevy timer system, every 100 ms |
 
 `SimState` carries `red_alert`, `view_mode`, `ship_x`, `ship_z`, `ship_yaw`. Clients render their UI from this. There's no client-side prediction — the server is fully authoritative.

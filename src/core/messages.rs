@@ -973,9 +973,10 @@ pub enum RepairTarget {
 /// Typed payload sent to a specific ship system through
 /// `ClientMessage::ControlSystem`.
 ///
-/// This is additive scaffolding for ADR-0002. Existing runtime handlers still
-/// consume the legacy console-addressed variants until the station/system
-/// migration lands.
+/// This is the primary control envelope of the station/system architecture
+/// (ADR-0002). A handful of weapons messages (`FirePhaser`, `FireTorpedo`,
+/// `LoadTube`, `UnloadTube`, `SetPhaserFrequency`) also survive as legacy
+/// top-level `ClientMessage` variants that runtime handlers still consume.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
@@ -1126,10 +1127,11 @@ pub enum ClientMessage {
     SetPhaserFrequency {
         frequency: f32,
     },
-    /// Future station/system architecture control envelope. Targets one
+    /// Primary station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed
-    /// payload for that system kind. Existing runtime handlers ignore this
-    /// additive variant until the migration lands.
+    /// payload for that system kind. Runtime handlers across every console
+    /// consume this variant; only a few weapons messages remain as legacy
+    /// top-level variants (see `SystemControlPayload`).
     ControlSystem {
         target: SystemId,
         payload: SystemControlPayload,

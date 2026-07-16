@@ -344,11 +344,8 @@ impl Plugin for ShipPlugin {
         .add_systems(
             Update,
             (
-                // `.after(AiTickLabel)` was inherited from the deleted
-                // `operate_helm_ai` (which carried it, and which this system was
-                // `.after`) until #704. It is stated directly now: this system
-                // reads the viewscreen blackboard's scored objectives, which the
-                // AI tick writes.
+                // `.after(AiTickLabel)`: this system reads the viewscreen
+                // blackboard's scored objectives, which the AI tick writes.
                 ai_helm_lateral_thrust
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
@@ -377,8 +374,7 @@ impl Plugin for ShipPlugin {
                 publish_joystick_to_engines
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(process_helm_inputs),
-                // A `LastHelmInput` thrust/steering pair reader. Its
-                // `.after(operate_helm_ai)` edge went with the monolith in #704;
+                // A `LastHelmInput` thrust/steering pair reader.
                 // `ai_helm_thrust`/`ai_helm_steering` declare
                 // `.before(operate_helm_engine_ai)` themselves, and
                 // `ai_helm_lateral_thrust` (the `.lateral` field's writer) is
@@ -428,53 +424,35 @@ impl Plugin for ShipPlugin {
         // Per-axis helm AI (issue #701). Registered separately from the tuple
         // above purely because that tuple is at Bevy's 20-element limit.
         //
-        // `.after(AiTickLabel)` was inherited from `.after(operate_helm_ai)`
-        // (the monolith carried it) until #704 deleted the monolith; it is
-        // stated directly now. Both systems read the viewscreen blackboard's
-        // scored objectives, which the AI tick writes.
-        //
-        // These two gate on their own axis alone (#800) and are the only writers
-        // of the axis each owns, so ordering no longer arbitrates write
-        // exclusion at all — since #704 there is no second writer to exclude.
-        //
-        // Ordered AFTER `process_helm_inputs`, unlike
-        // `ai_helm_lateral_thrust`. Lateral thrust has its own
-        // `LateralThrustInput` payload, so making its fine system AI-operated
-        // sets `accept_human_input = false` and no lateral command is ever
-        // admitted — nothing for `process_helm_inputs` to clobber it with.
-        // Thrust and steering are the same shape since #801 (`SetThrust` →
-        // `helm-thrust`, `SetSteering` → `helm-steering`, admitted per axis),
-        // and `process_helm_inputs` additionally skips writing an AI-held
-        // axis's intent. Running last still makes the per-axis AI the
-        // authoritative writer of the axis it owns, deterministically rather
-        // than by set-order luck.
-        //
-        // These two are deliberately *unordered* against each other since #702
-        // made `operate_helm` pure. `ai_helm_thrust.before(ai_helm_steering)`
-        // existed only to give the #701 `AiMemory` commit rule a well-defined
-        // "last system to run"; with no shared memory to commit, each system
-        // writes only the axis it owns and neither reads the other's output, so
-        // there is nothing left for an edge between them to arbitrate.
-        //
-        // Both systems also write `LastHelmInput.{thrust,steering}` for the
-        // player ship, one field each. Every reader of that *pair* in
-        // `SimSet::Physics` must therefore be ordered after BOTH of them, or
-        // it can observe a torn pair — this tick's AI throttle next to last
-        // tick's stale human steering. #800 made the monolith a field-wise
-        // writer of the same mirror, so no single writer covered the pair; #704
-        // removed the monolith, which makes these two the *only* writers of
-        // `.thrust` and `.steering` respectively. The tear argument is unchanged
-        // in form — the union of the writers still has to cover every field
-        // before any pair-reader runs — but the union is now just these two. The
-        // pair readers are `publish_joystick_to_engines`,
-        // `operate_helm_engine_ai` and `tick_boost`;
-        // `helm_ai_last_input_pair_is_not_torn` pins the result.
-        //
-        // (`ai_helm_lateral_thrust` also writes `LastHelmInput`, but only
-        // the disjoint `.lateral` field, and it is already
-        // `.before(process_helm_inputs)` — hence already before these two.
-        // `ai_power_allocation` reads `.thrust` alone, so it cannot see a torn
-        // pair; it needs no edge against these systems.)
+        // Ordering contract:
+        // - `.after(AiTickLabel)`: both systems read the viewscreen
+        //   blackboard's scored objectives, which the AI tick writes.
+        // - Each system gates on its own axis alone (#800) and is the sole
+        //   writer of the axis it owns, so no edge between them (or against a
+        //   second writer) is needed for write exclusion. They are
+        //   deliberately *unordered* against each other: each writes only its
+        //   own axis and neither reads the other's output.
+        // - Ordered AFTER `process_helm_inputs`, unlike
+        //   `ai_helm_lateral_thrust` (lateral's fine system being AI-operated
+        //   means no lateral command is ever admitted, so there is nothing
+        //   for `process_helm_inputs` to clobber it with). Thrust and
+        //   steering are per-axis admitted (`SetThrust` → `helm-thrust`,
+        //   `SetSteering` → `helm-steering`), and `process_helm_inputs`
+        //   additionally skips writing an AI-held axis's intent. Running last
+        //   makes the per-axis AI the authoritative writer of its axis
+        //   deterministically rather than by set-order luck.
+        // - Both systems write `LastHelmInput.{thrust,steering}` for the
+        //   player ship, one field each, and are the only writers of those
+        //   fields. Every reader of that *pair* in `SimSet::Physics` must be
+        //   ordered after BOTH of them, or it can observe a torn pair — this
+        //   tick's AI throttle next to last tick's stale human steering. The
+        //   pair readers are `publish_joystick_to_engines`,
+        //   `operate_helm_engine_ai` and `tick_boost`;
+        //   `helm_ai_last_input_pair_is_not_torn` pins the result.
+        //   (`ai_helm_lateral_thrust` writes only the disjoint `.lateral`
+        //   field and is already `.before(process_helm_inputs)`;
+        //   `ai_power_allocation` reads `.thrust` alone, so it cannot see a
+        //   torn pair and needs no edge.)
         app.add_systems(
             Update,
             (ai_helm_thrust, ai_helm_steering)
@@ -498,34 +476,11 @@ impl Plugin for ShipPlugin {
         // consumes `ImpulseCommand` into a `ShipImpulse` phase transition, and
         // it already runs before `process_helm_inputs`, so this system cannot
         // join `ai_helm_thrust`/`ai_helm_steering` in running last.
-        //
-        // `.before(ai_helm_thrust)` USED to sit here, and #702 removed it.
-        //
-        // Its reason was never about `ai_helm_thrust` as such: this system
-        // needed *pre-commit* `AiMemory`, because it replayed the helm decision
-        // on a scratch clone to reach the post-decision `waypoint_index` that
-        // `resolve_helm_target_position` then read. A scratch clone is only
-        // equivalent to what the committer sees if the memory it clones has not
-        // been committed yet — so it had to run before the tick's first possible
-        // committer, whichever system that was (`operate_helm_ai` until #704,
-        // then `ai_helm_thrust`).
-        //
-        // #702 deleted `AiMemory`. There is no commit, no clone, and no replay:
-        // the cursor is a read-only surface that `advance_objective_cursors`
-        // owns in `SimSet::Modifiers`, so it cannot move underneath this system
-        // within `Physics` at all, and every helm-AI system in the set reads the
-        // identical value regardless of order. The edge had nothing left to
-        // enforce.
-        //
-        // What remains is one real requirement — `.before(apply_helm_commands)`,
-        // which is what consumes `ImpulseCommand` into a `ShipImpulse` phase
-        // transition — plus `.after(AiTickLabel)` for the scored objectives this
-        // system reads. Note the surviving edge *transitively* keeps this system
-        // before `ai_helm_thrust` anyway (`apply_helm_commands` runs before
-        // `process_helm_inputs`, which `ai_helm_thrust` runs after), so removing
-        // the explicit edge changes no actual schedule — it removes a constraint
-        // whose stated justification no longer exists, rather than one holding
-        // something up.
+        // `.after(AiTickLabel)` covers the scored objectives this system reads.
+        // The `apply_helm_commands` edge also transitively keeps this system
+        // before `ai_helm_thrust` (`apply_helm_commands` runs before
+        // `process_helm_inputs`, which `ai_helm_thrust` runs after), so no
+        // explicit edge between them is needed.
         app.add_systems(
             Update,
             ai_helm_impulse
@@ -1159,18 +1114,9 @@ fn detect_reached_objective_completion(
 //
 //     if !<own axis>.operate_ai { continue; }
 //
-// They are the successors to the `operate_helm_ai` monolith, which #704 deleted.
-// The history is worth keeping because it is why the gates look like this.
-// Until #800 thrust and steering also carried a coarse half (`if
-// helm_control_policy(sources).operate_ai { continue; }`) which made them
-// mutually exclusive with the monolith *per ship*. That was only tenable while
-// `helm-thrust` / `helm-steering` were declared in zero TOMLs: their policy
-// defaulted to Human, so those systems never fired in shipped content and the
-// monolith did all the work. #800 declared both axes on all nine shipped hulls,
-// which turned them on — and the coarse half off. #703 brought lateral and
-// impulse into the same shape. #704 then declared the two axes that were still
-// missing from shipped content (impulse and lateral on the five NPC hulls,
-// lateral on `alliance_battleship`) and deleted the monolith.
+// They are the successors to the `operate_helm_ai` monolith (deleted in #704,
+// after #800/#703 declared every axis on every shipped hull and removed the
+// coarse half of each gate).
 //
 // **Each intent component has exactly one writer, and it is the component's own
 // system:**
@@ -1181,11 +1127,9 @@ fn detect_reached_objective_completion(
 //   ImpulseCommand     ← `ai_helm_impulse`        iff I
 //
 // (T/S/L/I = the helm-thrust / helm-steering / helm-lateral-thrust /
-// helm-impulse `operate_ai` policies.) Before #704 each row had a second term —
-// `else operate_helm_ai iff C` — and exclusion was a property of the monolith's
-// per-component stand-down. Now there is simply one writer per component, so
-// Bevy's arbitrary intra-set ordering cannot decide the outcome (the #697
-// failure mode) because there is nothing to decide between.
+// helm-impulse `operate_ai` policies.) One writer per component means Bevy's
+// arbitrary intra-set ordering cannot decide the outcome (the #697 failure
+// mode) because there is nothing to decide between.
 //
 // **The coarse `helm` policy C is no longer an input to any of this.** It gated
 // the monolith and nothing else; with the monolith gone, no helm-AI system reads
@@ -1193,11 +1137,10 @@ fn detect_reached_objective_completion(
 // coarse-fallback channel #800 spent an issue proving dormant, and re-admitting
 // it would resurrect the failure mode where an axis is silently driven by
 // something other than its own declaration.
-// `helm_ai_writers_are_mutually_exclusive` pins the whole outcome invariant
-// under C over every (C, T, S, L, I) combination;
+// `helm_writers_are_invariant_under_coarse_policy` pins the whole outcome
+// invariant under C over every (C, T, S, L, I) combination;
 // `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` pins it
-// end-to-end through a ticking app (it had a `coarse_helm_alone_commits_no_memory`
-// twin until #702 deleted `AiMemory` and left it nothing to observe);
+// end-to-end through a ticking app;
 // `shipped_hull_helm_is_driven_by_the_per_axis_declarations_alone` pins it on a
 // real hull's control sources.
 //
@@ -1222,28 +1165,15 @@ fn detect_reached_objective_completion(
 // it reads the ship's surfaces (`WeaponsTarget`, `NavigationWaypoint` +
 // `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
 // `(thrust, steering)`. Both systems can call it, in either order, and each
-// keeps only its own axis.
+// keeps only its own axis. Each goal lives with the console that owns it —
+// Tactical selects the target, Navigation sets the waypoint, the objective's
+// cursor tracks the route — so "how many times did `operate_helm` run?" is
+// not a question anyone has to answer.
 //
-// This is where the #701 "the last helm-AI system that actually runs owns the
-// `AiMemory` commit" rule used to be. That rule existed *solely* because
-// `operate_helm` mutated a shared `AiMemory` — advancing the patrol waypoint,
-// selecting the Destroy target, clearing `nav_goal` — which made calling it once
-// per axis unsafe: two commits double-advanced the waypoint on arrival, zero
-// commits froze it forever. The whole apparatus (a `steering_is_ai` probe, a
-// scratch clone in `ai_helm_thrust`, a four-row exactly-once table, five tests
-// that could only observe the rule through `AiMemory` mutations) existed to
-// arbitrate a hazard.
-//
-// #702 removed the hazard instead of guarding it. Each goal moved to the console
-// that owns it — Tactical selects the target, Navigation sets the waypoint, the
-// objective's cursor tracks the route — so `operate_helm` has nothing left to
-// mutate. Purity means "how many times did it run?" is not a question anyone has
-// to answer.
-//
-// What survives from #701 is the **`LastHelmInput` ordering**, which is about a
-// different hazard and remains load-bearing. Both systems write `LastHelmInput`
-// for the player ship, one field each (`.thrust` / `.steering`), and since #704
-// they are the only writers of those fields. Any reader of that *pair* in
+// The **`LastHelmInput` ordering** remains load-bearing. Both systems write
+// `LastHelmInput` for the player ship, one field each (`.thrust` /
+// `.steering`), and they are the only writers of those fields. Any reader of
+// that *pair* in
 // `SimSet::Physics` must therefore be ordered after BOTH, or it can observe a
 // torn pair — this tick's AI throttle beside last tick's stale human steering.
 // The pair readers are `publish_joystick_to_engines`, `operate_helm_engine_ai`
@@ -5723,7 +5653,7 @@ station = "helm"
     /// That asymmetry is what this test exploits: a nonzero lateral proves the
     /// half came off. (It cannot distinguish one writer from two — both compute
     /// the identical dodge from identical inputs — which is what
-    /// `helm_ai_writers_are_mutually_exclusive` is for.)
+    /// `helm_writers_are_invariant_under_coarse_policy` is for.)
     #[test]
     fn ai_helm_lateral_thrust_dodges_when_the_coarse_helm_is_also_ai() {
         let mut app = lateral_dodge_app();
@@ -6021,52 +5951,21 @@ station = "helm"
         );
     }
 
-    /// AC4 / the double-write guard, re-expressed for #704.
+    /// Pins the per-axis gate algebra: **the coarse helm policy `C` is not an
+    /// input to any intent writer.** Each writer is a function of its own axis
+    /// alone — this test sweeps C across all three control sources for every
+    /// fixed (T,S,L,I) and demands the whole outcome (every component's
+    /// writer) be invariant under it. It also pins the coverage half: each
+    /// component is written exactly when its own axis is AI.
     ///
-    /// History, because the subject has moved twice. Before #800 the invariant
-    /// was *per ship*: the coarse half of the per-axis dual gate meant either
-    /// `operate_helm_ai` ran or the per-axis systems did, never both. #800
-    /// declared `helm-thrust`/`helm-steering` on every shipped hull and dropped
-    /// that half, so all three systems ran for the same ship in the same tick
-    /// and the invariant became *per component* — each intent component had
-    /// exactly one writer because the monolith stood down from any component
-    /// whose own system owned it. #703 extended that to all four components.
-    ///
-    /// #704 deletes the monolith, so half of every pair this test used to
-    /// exclude is gone. The exclusion arm is now **vacuous by construction**:
-    /// each component has exactly one system that can write it, so "not two
-    /// writers" is a statement about the type system rather than about the
-    /// gates, and asserting it would prove nothing.
-    ///
-    /// What replaces it is the property the delete actually established, which
-    /// no earlier revision of this test could state: **the coarse policy `C` is
-    /// not an input to any writer.** Under the monolith every component's writer
-    /// was a function of (C, own axis) — that is exactly what made a coarse
-    /// fallback expressible, and what let the axes lie dormant undetected until
-    /// #800. Post-#704 each writer must be a function of its own axis *alone*.
-    /// So this test now sweeps C across all three sources for every fixed
-    /// (T,S,L,I) and demands the whole outcome — every component's writer — be
-    /// invariant under it. (The sweep also covered the `AiMemory` commit until
-    /// #702 made `operate_helm` pure and deleted the commit; only the writers
-    /// remain.)
-    ///
-    /// Be clear about the limit of that, because it is easy to overrate: this
-    /// is a **model** test. It states the gate algebra against the policy
-    /// resolver; it does not run the systems. So it pins that the *intended*
-    /// rule has no C term, and it holds for every control-source combination
-    /// rather than the few a fixture happens to tick — but it cannot notice a
-    /// call site drifting away from the rule. A coarse fallback re-introduced
-    /// into `ai_helm_thrust` leaves this test green; what actually catches that
-    /// is `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` and
+    /// This is a **model** test: it states the gate algebra against the policy
+    /// resolver, it does not run the systems. A coarse fallback re-introduced
+    /// into `ai_helm_thrust` leaves this test green; what catches that is
+    /// `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` and
     /// its siblings, which exercise the real systems. Read this test as the
     /// specification and those as the enforcement.
-    ///
-    /// The zero-writer half of the old coverage check is kept: it used to say
-    /// "if the coarse helm is AI, someone writes every component", which the
-    /// monolith's fallback made true by construction. It now says each
-    /// component is written exactly when its own axis is AI.
     #[test]
-    fn helm_ai_writers_are_mutually_exclusive() {
+    fn helm_writers_are_invariant_under_coarse_policy() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
         // #801: "helm" is not a system; seeding it (the C dimension) must
@@ -6085,15 +5984,6 @@ station = "helm"
 
         // Every writer decision for one ship in one tick: which system writes
         // each intent component.
-        //
-        // Carried `thrust_commits` / `steering_commits` fields modelling the
-        // #701 "last helm-AI system to run owns the `AiMemory` commit" rule
-        // until #702 made `operate_helm` pure and dissolved the rule. They were
-        // in any case a model rather than an observation — computed from the
-        // policy booleans, then asserted against the same booleans — so the
-        // assertion over them reduced to arithmetic and could never have caught
-        // a real double-commit. What is left is the part that does observe
-        // something: which axis each system writes.
         #[derive(Debug, PartialEq, Eq)]
         struct HelmWriters {
             thrust: bool,
@@ -7070,9 +6960,9 @@ station = "helm"
     //
     // `[behaviour] avoidance_buffer` / `avoidance_look_ahead_secs` are
     // declared with serde defaults, so a designer can author them per entity
-    // template. Three sites feed them to the pure AI: `helm_ai_decision`
-    // (steering/thrust), `operate_helm_ai` (lateral dodge) and the per-axis
-    // `ai_helm_lateral_thrust`. Each test below pins one of the tuning
+    // template. Two sites feed them to the pure AI: `helm_ai_decision`
+    // (steering/thrust) and the per-axis `ai_helm_lateral_thrust` (lateral
+    // dodge). Each test below pins one of the tuning
     // fields by choosing a geometry that the constant and the authored value
     // disagree about, so reverting a site to `crate::ai::AVOIDANCE_*` turns
     // the assertion red.
@@ -7706,8 +7596,9 @@ station = "helm"
     }
 
     // (c) Player ship Backfill runs full operate_helm (avoidance + doctrine).
-    // Verifies that the player ship on Backfill uses the same unified operate_helm_ai
-    // loop as NPC ships — not a Reach-only stub — satisfying issue #587 AC.
+    // Verifies that the player ship on Backfill goes through the same
+    // `operate_helm` decision (via the per-axis AI systems) as NPC ships — not
+    // a Reach-only stub — satisfying issue #587 AC.
     #[test]
     fn backfill_runs_full_operate_helm_with_objectives() {
         let mut app = test_app();
@@ -7917,7 +7808,8 @@ station = "helm"
     /// Minimal app exercising `integrate_ship_physics` in isolation, with the
     /// debug helm write-tracker wired up exactly as `ShipPlugin` wires it.
     ///
-    /// Deliberately excludes `process_helm_inputs`/`operate_helm_ai` so a test
+    /// Deliberately excludes `process_helm_inputs` and the per-axis AI helm
+    /// systems so a test
     /// can seed the intent components directly and observe what the integrator
     /// alone does with them — which is the whole point of the #695/#699 split.
     fn integrator_only_app() -> App {

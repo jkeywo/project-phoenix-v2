@@ -7,7 +7,7 @@ updated: 2026-07-16
 
 # Coarse-system migration
 
-Status of the migration from per-console message dispatch to the unified coarse-system control path. All 9 consoles must register a system kind, accept `ControlSystem` dispatch, gate on `ControlSourceResolver::policy_for`, and emit channel-3 traffic via `CoordinationEnqueue`.
+The migration from per-console message dispatch to the unified system control path is **complete**. Every console registers its system kind(s), accepts `ControlSystem` dispatch, gates on `ControlSourceResolver::policy_for`, and (where applicable) emits channel-3 traffic via `CoordinationEnqueue`. Helm and Tactical went further: their coarse system ids were deleted entirely in favour of fine (per-instance / per-axis) systems, with `"helm"` / `"tactical"` surviving only as station ids. This page records the resulting id namespaces and the per-console shape.
 
 ## The three id namespaces (issue #801)
 
@@ -37,7 +37,7 @@ Multi-word ids always use hyphens (`-`), never underscores. The `*_SYSTEM_ID` co
 
 The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for legacy reasons, while the wire `SystemId` is `"red-alert"` (kebab, `RED_ALERT_SYSTEM_ID`). All other systems have identical `*_KIND` and `*_SYSTEM_ID` values. New systems must use the same lowercase-kebab string for both.
 
-## Coarse-system status (as of issue #529)
+## Per-console shape
 
 | Console | Kind registered | `ControlSystem` dispatch | `policy_for` gating | Channel-3 via `CoordinationEnqueue` | Issue |
 |---------|----------------|--------------------------|---------------------|--------------------------------------|-------|
@@ -52,9 +52,9 @@ The registry kind key uses `"red_alert"` (snake_case, `RED_ALERT_KIND`) for lega
 | Repair | ✅ `repair` | ✅ (#526) | ✅ (#526) | n/a | #525/#526 |
 | Navigation | ✅ `navigation` | ✅ (#527) | ✅ (#527) | n/a | #527 |
 
-## Fine-system ids (in-flight, PRD C)
+## Fine-system ids
 
-Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) is tracked by issues #511–#515. Three have shipped:
+Fine-system decomposition (e.g. `"phaser-fore"`, `"torpedo-tube-fore-port"`) shipped via issues #511–#515 and #701/#800/#801:
 
 | Issue | Coarse system | Shipped fine kinds |
 |-------|---------------|--------------------|
@@ -83,12 +83,12 @@ Under #514, the coarse `shields` `[[system]]` block was **deleted** from `player
 - `src/ship/system_registry.rs` — All `*_SYSTEM_ID`, `*_KIND`, `*_AI_CONTROLLER` constants, `*_system_id()` helpers, and the station-key helpers (`helm_station_key()`, `tactical_station_key()`).
 - `src/ship/control_source.rs` — `ControlSourceResolver` and `policy_for`.
 - `src/ship/coordination.rs` — `process_coordination_lag` delivers channel-3 messages to `PendingArcBearingRequest` (`coordination.rs:1495`)
-- `src/ship_plugin.rs` — `PendingArcBearingRequest` component set when AI Helm consumes `ArcBearingRequest` (`ship_plugin.rs:69`); `operate_helm_ai` reads pending bearing and biases steering via `steer_toward`
+- `src/ship_plugin.rs` — `PendingArcBearingRequest` component set when AI Helm consumes `ArcBearingRequest`; `ai_helm_steering` reads the pending bearing and biases steering via `steer_toward` (see [AI Helm Decomposition](./ai-helm-decomposition.md))
 - `src/ai/mod.rs` — `steer_toward(yaw, target_dir, deadband_rad, full_steer_rad)` pure steering helper; `PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`.
 
 ## AI ship unification and per-kind AI plugins (PRD #520)
 
-After `ControlSourceResolver` was established as the control-gating authority (PRD #517), PRD #520 extended it to NPC ships. Each coarse system now has (or will have) a dedicated `operate_<kind>_ai` Bevy system that runs after `AiTickLabel` and is gated on `policy_for(system_id).operate_ai`. This makes the AI/human split uniform: the same gate that prevents a human from driving a Backfill console also enables the per-kind plugin to operate it.
+After `ControlSourceResolver` was established as the control-gating authority (PRD #517), PRD #520 extended it to NPC ships. Each system has a dedicated AI Bevy system (helm: the four per-axis systems — see [AI Helm Decomposition](./ai-helm-decomposition.md)) that runs after `AiTickLabel` and is gated on `policy_for(system_id).operate_ai`. This makes the AI/human split uniform: the same gate that prevents a human from driving a Backfill console also enables the per-kind system to operate it.
 
 NPC ships carry `ShipSystemControlSources` seeded with `ControlSource::Ai` for all systems; player ships default to `ControlSource::Human` (modified by rating changes).
 

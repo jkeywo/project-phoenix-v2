@@ -186,8 +186,8 @@ pub enum WorldLayerChange {
 ///
 /// Producer: `collect_world_events` (drains the `AiEventReaders` messages and
 /// `WorldContentRuntime::pending_world_events`, and synthesises the per-tick
-/// `TimerElapsed` event). Consumer: `tick_trigger_pipeline`, which seeds its
-/// comms-template evaluation and trigger-chaining loop from the buffer.
+/// `TimerElapsed` event). Consumers: `inject_comms_templates` (comms-template
+/// evaluation) and `tick_trigger_pipeline` (seeds its trigger-chaining loop).
 ///
 /// The chaining loop's internally-produced events (`FlagSet`, `FlagCleared`,
 /// `Destroyed` from a `DestroyEntity` action) stay LOCAL to the pipeline and
@@ -258,19 +258,22 @@ impl Plugin for WorldPlugin {
                 )
                     .chain(),
             )
-            // Explicit trigger-pipeline ordering (#718): `tick_pending_follow_ups`
-            // must observe `pending_world_events` BEFORE `collect_world_events`
-            // drains them into `WorldEventBuffer` (same-tick follow-up
-            // reaction), and `tick_trigger_pipeline` consumes the buffer.
-            // `.chain()` rather than separate `.before()`s: all three take
-            // `ResMut<WorldContentRuntime>` so they would serialise anyway;
-            // chaining documents the pipeline. (Comms injection joins this
-            // chain in #719.)
+            // Explicit trigger-pipeline ordering (#718/#719):
+            // `tick_pending_follow_ups` must observe `pending_world_events`
+            // BEFORE `collect_world_events` drains them into
+            // `WorldEventBuffer` (same-tick follow-up reaction);
+            // `inject_comms_templates` reads the buffer and must run before
+            // `tick_trigger_pipeline`'s dispatch can mutate
+            // `runtime.name_to_uuid` (`SpawnEntity`); the pipeline consumes
+            // the buffer last. `.chain()` rather than separate `.before()`s:
+            // all four take `ResMut<WorldContentRuntime>` so they would
+            // serialise anyway; chaining documents the pipeline.
             .add_systems(
                 Update,
                 (
                     tick_pending_follow_ups,
                     collect_world_events,
+                    inject_comms_templates,
                     tick_trigger_pipeline,
                 )
                     .chain()
@@ -1258,8 +1261,8 @@ fn broadcast_objective_summary(
 ///
 /// Ordering: chained after `tick_pending_follow_ups` (which snapshots
 /// `pending_world_events` before this system drains them) and before
-/// `tick_trigger_pipeline` (which consumes the buffer for both comms-template
-/// injection and trigger evaluation).
+/// `inject_comms_templates` and `tick_trigger_pipeline` (which consume the
+/// buffer for comms-template injection and trigger evaluation respectively).
 ///
 /// Change detection: `runtime` is only mutably dereferenced when
 /// `pending_world_events` has entries to drain, and the buffer is only
@@ -1317,6 +1320,117 @@ fn collect_world_events(
     buffer.0 = world_events;
 }
 
+/// Auto-fire comms templates that match this tick's external `WorldEvent`s
+/// (e.g. `on_attacked` distress calls) and inject the resulting messages onto
+/// channel-2. These are broadcast messages — no player hailing involved.
+///
+/// Reads `WorldEventBuffer` directly: only EXTERNAL events reach comms
+/// templates — `tick_trigger_pipeline`'s internally-produced chaining events
+/// (`FlagSet`, `FlagCleared`, `Destroyed` from a `DestroyEntity` action)
+/// never do.
+///
+/// Ordering (#719): chained after `collect_world_events` (which fills the
+/// buffer) and before `tick_trigger_pipeline`. Running before the pipeline
+/// means `runtime.name_to_uuid` read here is identical to the tick-level
+/// clone the pipeline takes — no `SpawnEntity` dispatch has mutated the map
+/// yet this tick — so reading the live map directly matches the pre-#719
+/// inline behaviour exactly.
+///
+/// Change detection (#716/#718 discipline): early-out on an empty buffer
+/// WITHOUT mutably dereferencing `runtime`. This is behaviour-preserving
+/// even on the tick where the buffer is empty but the pipeline still runs
+/// for pending delayed actions: `evaluate_comms_templates` over an empty
+/// events slice is a guaranteed no-op (`events.iter().any(..)` is `false`
+/// for every template, so no `fired` flag flips and nothing is returned).
+fn inject_comms_templates(
+    mut runtime: ResMut<WorldContentRuntime>,
+    buffer: Res<WorldEventBuffer>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
+) {
+    if buffer.0.is_empty() {
+        return;
+    }
+
+    // Reborrow the `ResMut` as a plain `&mut` so disjoint field borrows can
+    // be split (`&mut runtime.comms_template_states` while
+    // `&runtime.name_to_uuid` is read). Placed after the early return so an
+    // event-free tick never marks the resource changed; a tick with events
+    // marks it exactly as the pre-#719 inline pipeline did.
+    let runtime = &mut *runtime;
+
+    let fired_comms = evaluate_comms_templates(
+        &mut runtime.comms_template_states,
+        &buffer.0,
+        &runtime.name_to_uuid,
+    );
+    for fc in fired_comms {
+        let thread_id = fc
+            .thread_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // `_self` is the reserved synthetic internal-sender name; render it as
+        // "Internal Report" in the comms UI so the crew sees a ship-generated
+        // intelligence summary rather than a literal "_self" sender label.
+        let channel_name = if fc.from == "_self" {
+            "Internal Report".to_string()
+        } else {
+            fc.from.clone()
+        };
+        let sender_name = fc.node.speaker.clone().unwrap_or(channel_name);
+        // Keyed on the RAW `fc.from` (not the mapped display name): a
+        // synthetic sender like `_self` deliberately falls through to the
+        // name itself, which `current_sender_in_range` treats as
+        // always-in-range via its non-UUID escape hatch.
+        let sender_uuid = runtime
+            .name_to_uuid
+            .get(&fc.from)
+            .cloned()
+            .unwrap_or_else(|| fc.from.clone());
+
+        // Root templates inject immediately when their template-level
+        // `trigger` fires. Per-node triggers are reserved for follow-ups.
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
+        let msg = crate::messages::CommsMessage {
+            id: msg_id.clone(),
+            sender_uuid: sender_uuid.clone(),
+            sender_name: sender_name.clone(),
+            subject: fc.node.body.chars().take(40).collect(),
+            body: fc.node.body.clone(),
+            responses,
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range: current_sender_in_range(runtime, &sender_uuid),
+            thread_id: thread_id.clone(),
+            is_urgent: fc.urgent,
+        };
+        channel2_writer.write(CommsChannel2Event { message: msg });
+        runtime.active_dialogues.insert(
+            msg_id,
+            ActiveDialogue {
+                current_node: fc.node.clone(),
+                thread_id: thread_id.clone(),
+            },
+        );
+
+        // Schedule the chained root follow_up, if any. See the
+        // matching block in `handle_hail` for the rationale.
+        if let Some(ref fu) = fc.root_follow_up {
+            let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
+            runtime.pending_follow_ups.push(PendingFollowUp {
+                node: fu.clone(),
+                sender_uuid: sender_uuid.clone(),
+                sender_name: fu_sender_name,
+                thread_id: thread_id.clone(),
+                elapsed_secs: 0.0,
+                placeholder_id: None,
+                urgent: fc.urgent,
+            });
+        }
+    }
+}
+
 /// Upper bound on `tick_trigger_pipeline`'s within-tick trigger-chaining passes.
 ///
 /// A `set_flag` action emits a `FlagSet` event that a downstream `on_flag_set`
@@ -1332,7 +1446,6 @@ const MAX_CHAIN_PASSES: i32 = 16;
 fn tick_trigger_pipeline(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
-    mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut commands: Commands,
     buffer: Res<WorldEventBuffer>,
     mut ai_query: Query<
@@ -1398,73 +1511,8 @@ fn tick_trigger_pipeline(
         .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
         .collect();
 
-    // Auto-fire comms templates that match the world events (e.g. on_attacked distress calls).
-    // These are injected without any player hailing ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they are broadcast messages.
-    // Reads the buffer directly: only EXTERNAL events reach comms templates —
-    // the chaining loop's internally-produced events below never do.
-    let fired_comms =
-        evaluate_comms_templates(&mut runtime.comms_template_states, &buffer.0, &name_to_uuid);
-    for fc in fired_comms {
-        let thread_id = fc
-            .thread_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        // `_self` is the reserved synthetic internal-sender name; render it as
-        // "Internal Report" in the comms UI so the crew sees a ship-generated
-        // intelligence summary rather than a literal "_self" sender label.
-        let channel_name = if fc.from == "_self" {
-            "Internal Report".to_string()
-        } else {
-            fc.from.clone()
-        };
-        let sender_name = fc.node.speaker.clone().unwrap_or(channel_name);
-        let sender_uuid = name_to_uuid
-            .get(&fc.from)
-            .cloned()
-            .unwrap_or_else(|| fc.from.clone());
-
-        // Root templates inject immediately when their template-level
-        // `trigger` fires. Per-node triggers are reserved for follow-ups.
-        let msg_id = uuid::Uuid::new_v4().to_string();
-        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
-        let msg = crate::messages::CommsMessage {
-            id: msg_id.clone(),
-            sender_uuid: sender_uuid.clone(),
-            sender_name: sender_name.clone(),
-            subject: fc.node.body.chars().take(40).collect(),
-            body: fc.node.body.clone(),
-            responses,
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-            sender_in_range: current_sender_in_range(runtime, &sender_uuid),
-            thread_id: thread_id.clone(),
-            is_urgent: fc.urgent,
-        };
-        channel2_writer.write(CommsChannel2Event { message: msg });
-        runtime.active_dialogues.insert(
-            msg_id,
-            ActiveDialogue {
-                current_node: fc.node.clone(),
-                thread_id: thread_id.clone(),
-            },
-        );
-
-        // Schedule the chained root follow_up, if any. See the
-        // matching block in `handle_hail` for the rationale.
-        if let Some(ref fu) = fc.root_follow_up {
-            let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
-            runtime.pending_follow_ups.push(PendingFollowUp {
-                node: fu.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: fu_sender_name,
-                thread_id: thread_id.clone(),
-                elapsed_secs: 0.0,
-                placeholder_id: None,
-                urgent: fc.urgent,
-            });
-        }
-    }
+    // Comms-template injection happens in `inject_comms_templates`, chained
+    // immediately before this system (#719).
 
     // Loop to support within-tick chaining: a trigger that fires a
     // `set_flag` action emits a `FlagSet` event which a downstream
@@ -3026,7 +3074,7 @@ pub(crate) mod tests {
         assert!(messages[0].is_urgent);
     }
 
-    /// `tick_trigger_pipeline` (auto-fire path: `on_world_loaded`,
+    /// `inject_comms_templates` (auto-fire path: `on_world_loaded`,
     /// `on_attacked`, `on_destroyed`, `on_flag_set`) also schedules the
     /// chained `root_follow_up`. Verified by emitting `WorldLoaded` on a
     /// template with a chained node.
@@ -3114,6 +3162,7 @@ pub(crate) mod tests {
                 (
                     tick_pending_follow_ups,
                     collect_world_events,
+                    inject_comms_templates,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
                 )
@@ -6834,6 +6883,7 @@ condition = "on_world_loaded"
                 Update,
                 (
                     collect_world_events,
+                    inject_comms_templates,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
                 )
@@ -8721,7 +8771,7 @@ size_max = 2.0
 
     // -- Issue #506: channel-2 routing tests ------------------------------------
 
-    /// Scenario hail arrives in CommsInboxRes via channel-2 (tick_trigger_pipeline
+    /// Scenario hail arrives in CommsInboxRes via channel-2 (inject_comms_templates
     /// writes to CommsChannel2Event; handle_comms_channel2 injects into inbox).
     #[test]
     fn scenario_hail_arrives_in_inbox_via_channel2() {
@@ -8749,7 +8799,7 @@ size_max = 2.0
                 },
                 fired: false,
             });
-            // Queue a WorldLoaded event so tick_trigger_pipeline fires the template.
+            // Queue a WorldLoaded event so inject_comms_templates fires the template.
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
 

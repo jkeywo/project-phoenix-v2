@@ -3510,9 +3510,8 @@ fn spawn_dust_motes(
                     layer.max_lifetime_secs,
                     rng.random_range(0.8..1.2),
                 );
-                let mote_width = layer.width
-                    * dust_view_height_at(depth, fov)
-                    * rng.random_range(0.7..1.3);
+                let mote_width =
+                    layer.width * dust_view_height_at(depth, fov) * rng.random_range(0.7..1.3);
                 let mote_length_scale = rng.random_range(0.75..1.25);
                 let initial_length =
                     mote_width * dust_ramp(layer.length, state.streak_s) * mote_length_scale;
@@ -3526,8 +3525,11 @@ fn spawn_dust_motes(
                     },
                     Mesh3d(state.quad.clone().expect("quad built above")),
                     MeshMaterial3d(material),
-                    Transform::from_translation(pos)
-                        .with_scale(Vec3::new(initial_length, mote_width, 1.0)),
+                    Transform::from_translation(pos).with_scale(Vec3::new(
+                        initial_length,
+                        mote_width,
+                        1.0,
+                    )),
                     PfxLifetime { age: 0.0, lifetime },
                 ));
             }
@@ -3556,9 +3558,8 @@ fn spawn_dust_motes(
                 0.35,
                 &mut rng,
             );
-            let mote_width = cfg.warp.width
-                * dust_view_height_at(depth, fov)
-                * rng.random_range(0.6..1.4);
+            let mote_width =
+                cfg.warp.width * dust_view_height_at(depth, fov) * rng.random_range(0.6..1.4);
             let mote_length_scale = rng.random_range(0.6..1.4);
             let initial_length = mote_width
                 * dust_ramp([1.0, cfg.warp.length_multiplier], state.warp_ramp)
@@ -3573,8 +3574,11 @@ fn spawn_dust_motes(
                 },
                 Mesh3d(state.quad.clone().expect("quad built above")),
                 MeshMaterial3d(warp_material.clone()),
-                Transform::from_translation(pos)
-                    .with_scale(Vec3::new(initial_length, mote_width, 1.0)),
+                Transform::from_translation(pos).with_scale(Vec3::new(
+                    initial_length,
+                    mote_width,
+                    1.0,
+                )),
                 PfxLifetime {
                     age: 0.0,
                     lifetime: dust_lifetime(depth, mote_speed, 1.0, rng.random_range(0.8..1.2)),

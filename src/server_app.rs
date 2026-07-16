@@ -1395,8 +1395,9 @@ fn is_command_authorized(
     }
 }
 
-/// When a player reconnects mid-game (Identify during InProgress), `process_lobby`
-/// queues a `Welcome { .. }` into `LobbyOutbox` targeted at that player's
+/// When a player reconnects mid-game (Identify during InProgress),
+/// `handle_identify_system` (in `LobbySystemSet`) queues a `Welcome { .. }` into
+/// `LobbyOutbox` targeted at that player's
 /// token. Detect this and push a full-state resync to *just that token* via
 /// [`crate::core::broadcast::cache_registry::resync_for_token`] (issue #613).
 ///
@@ -3772,7 +3773,7 @@ station = "pilot"
         );
         tick(app);
         push(app, "captain", ClientMessage::SetReady { ready: true });
-        tick(app); // process_lobby → starts countdown
+        tick(app); // handle_set_ready_system → starts countdown
         fast_forward_countdown(app);
         tick(app); // tick_countdown → emits GameStarted, sets NextState::Set(InProgress)
         tick(app); // NextState takes effect: Phase switches to InProgress

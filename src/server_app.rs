@@ -713,20 +713,32 @@ fn clear_last_attacker_on_death(
     }
 }
 
-/// When the ship's red alert transitions from on to off, clear the attacker
+/// When a ship's red alert transitions from on to off, clear the attacker
 /// record — the threat has passed and the old attacker is no longer relevant.
+///
+/// Covers every ship (player + NPC), not just `LocalShip`: NPC captain-AI can
+/// toggle its own `ShipRedAlert` (`handle_toggle_red_alert` in
+/// `console::captain::server` dispatches `ToggleRedAlert` per-ship), and an
+/// NPC that stands down should stop retaliating just like the player does.
+///
+/// `ShipRedAlert` only changes via an explicit toggle/assignment (never a
+/// same-value rewrite in production), so `Changed<ShipRedAlert>` combined
+/// with a boolean component reduces to exactly the on→off edge: the only way
+/// a two-valued component both changes and reads `false` is if it was `true`
+/// the instant before. This also sidesteps needing a per-entity "previous
+/// value" store — a single shared `Local<bool>` (the pre-#685-followup
+/// version) does not work once more than one ship is in the query, since it
+/// would still only remember one entity's last state.
 fn clear_last_attacker_on_red_alert_off(
     mut attacker_q: Query<
         (&mut LastShipAttacker, &crate::ship_state::ShipRedAlert),
-        With<LocalShip>,
+        Changed<crate::ship_state::ShipRedAlert>,
     >,
-    mut last_ra: Local<bool>,
 ) {
-    for (mut attacker, ra) in attacker_q.iter_mut() {
-        if *last_ra && !ra.0 {
+    for (mut attacker, ra) in &mut attacker_q {
+        if !ra.0 {
             attacker.0 = None;
         }
-        *last_ra = ra.0;
     }
 }
 
@@ -7303,6 +7315,94 @@ station = "pilot"
         assert_eq!(
             app.world().get::<LastShipAttacker>(ship).unwrap().0,
             Some("attacker-1".to_string())
+        );
+    }
+
+    /// Regression test: `clear_last_attacker_on_red_alert_off` used to be
+    /// filtered `With<LocalShip>`, so an NPC whose red alert stood down kept
+    /// retaliating against a stale attacker forever. NPC captain-AI can
+    /// toggle its own `ShipRedAlert` (`handle_toggle_red_alert` dispatches
+    /// per-ship), so the clear handler must cover NPCs too.
+    #[test]
+    fn clear_on_red_alert_off_clears_for_an_npc_not_just_local_ship() {
+        let mut app = last_attacker_test_app();
+        app.world_mut()
+            .spawn((EntityUuid("attacker-1".to_string()),));
+        let npc = app
+            .world_mut()
+            .spawn((
+                LastShipAttacker(Some("attacker-1".to_string())),
+                crate::ship_state::ShipRedAlert(true),
+                // No `LocalShip` marker — this is an NPC.
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(npc).unwrap().0,
+            Some("attacker-1".to_string())
+        );
+        app.world_mut()
+            .get_mut::<crate::ship_state::ShipRedAlert>(npc)
+            .unwrap()
+            .0 = false;
+        app.update();
+        assert!(
+            app.world()
+                .get::<LastShipAttacker>(npc)
+                .unwrap()
+                .0
+                .is_none(),
+            "an NPC standing down from red alert must clear its attacker record too"
+        );
+    }
+
+    /// Two ships (one player, one NPC) toggling red alert off independently
+    /// must each clear their own attacker record without a shared `Local`
+    /// mixing up whose transition is whose.
+    #[test]
+    fn clear_on_red_alert_off_handles_multiple_ships_independently() {
+        let mut app = last_attacker_test_app();
+        app.world_mut()
+            .spawn((EntityUuid("attacker-1".to_string()),));
+        app.world_mut()
+            .spawn((EntityUuid("attacker-2".to_string()),));
+
+        let local = app
+            .world_mut()
+            .spawn((
+                LastShipAttacker(Some("attacker-1".to_string())),
+                crate::ship_state::ShipRedAlert(true),
+                LocalShip,
+            ))
+            .id();
+        let npc = app
+            .world_mut()
+            .spawn((
+                LastShipAttacker(Some("attacker-2".to_string())),
+                crate::ship_state::ShipRedAlert(true),
+            ))
+            .id();
+        app.update();
+
+        // Only the NPC stands down this tick; the player stays at red alert.
+        app.world_mut()
+            .get_mut::<crate::ship_state::ShipRedAlert>(npc)
+            .unwrap()
+            .0 = false;
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<LastShipAttacker>(npc)
+                .unwrap()
+                .0
+                .is_none(),
+            "the NPC that stood down must have its attacker cleared"
+        );
+        assert_eq!(
+            app.world().get::<LastShipAttacker>(local).unwrap().0,
+            Some("attacker-1".to_string()),
+            "the player ship, still at red alert, must keep its attacker record"
         );
     }
 }

@@ -207,6 +207,20 @@ impl ShipConfig {
             })
     }
 
+    /// The station whose holder is authoritative for this ship's Sensors
+    /// system, mirroring [`weapons_station`](Self::weapons_station)'s
+    /// claimed/unclaimed resolution for the `auto_hint` `ai_tuning` rule.
+    ///
+    /// Returns `None` for ships with no human Sensors owner (NPCs declare no
+    /// `station` on their `sensors` system, if they declare one at all);
+    /// callers treat that as "unclaimed".
+    pub fn sensors_station(&self) -> Option<StationId> {
+        self.systems
+            .iter()
+            .find(|s| s.kind == crate::system_registry::SENSORS_KIND)
+            .and_then(|s| s.station.clone())
+    }
+
     /// Look up a named rating for a station.
     pub fn rating_for_station<'a>(
         &'a self,
@@ -406,6 +420,7 @@ mod tests {
         "torpedo_magazine",
         "torpedo_tube",
         "viewscreen",
+        "sensors",
     ];
 
     fn valid_toml() -> &'static str {
@@ -944,5 +959,50 @@ station = "tactical"
 "#;
         let config = ShipConfig::from_toml(toml, KINDS).unwrap();
         assert_eq!(config.weapons_station(), Some(StationId("tactical".into())));
+    }
+
+    // ── sensors_station ──────────────────────────────────────────────────
+
+    #[test]
+    fn sensors_station_resolves_declared_station() {
+        let toml = r#"
+[[station]]
+id = "sensors"
+name = "Sensors"
+description = "Long-range sensors."
+rank = "Ens."
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "sensors"
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(config.sensors_station(), Some(StationId("sensors".into())));
+    }
+
+    /// NPCs declare no `station` on their sensors system — no human owns it.
+    #[test]
+    fn sensors_station_is_none_for_npc_shape() {
+        let toml = r#"
+[[system]]
+id = "sensors"
+kind = "sensors"
+ai_only = true
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(config.sensors_station(), None);
+    }
+
+    #[test]
+    fn sensors_station_is_none_when_no_sensors_system_declared() {
+        let toml = r#"
+[[system]]
+id = "helm"
+kind = "helm"
+ai_only = true
+"#;
+        let config = ShipConfig::from_toml(toml, KINDS).unwrap();
+        assert_eq!(config.sensors_station(), None);
     }
 }

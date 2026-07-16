@@ -45,6 +45,22 @@ pub fn evaluate_lod(
     dwell_secs: f64,
     hysteresis: f32,
 ) -> LodState {
+    // Guard against a malformed `sensor_range` (NaN, +/-infinity, or
+    // negative/zero) reaching the comparisons below. NaN comparisons are
+    // always `false`, which would leave a High-fidelity ship stuck High
+    // forever — the demote check `distance > NaN` never fires. `+infinity`
+    // has the opposite failure: `distance <= infinity` is always true and
+    // `distance > infinity` is never true, so every ship promotes and none
+    // ever demotes, pinning the whole scenario permanently High. Both are
+    // worse than the safe default: treat any non-finite or non-positive
+    // sensor range as zero, so a malformed `AiProfile` fails toward the
+    // cheap Low-fidelity path (no promotion; any High ship demotes once its
+    // dwell timer elapses) rather than either extreme.
+    let sensor_range = if sensor_range.is_finite() && sensor_range > 0.0 {
+        sensor_range
+    } else {
+        0.0
+    };
     let demote_threshold = sensor_range * (1.0 + hysteresis);
     match current_state {
         LodState::Low => {
@@ -185,6 +201,87 @@ mod tests {
     #[test]
     fn just_above_demote_threshold_with_dwell_demotes() {
         let result = evaluate_lod(LodState::High, 120.001, 100.0, 10.0, 0.0, 2.0, 0.2);
+        assert_eq!(result, LodState::Low);
+    }
+
+    // ── Malformed sensor_range: safe defaults (zero/negative/non-finite) ────
+    //
+    // A malformed `AiProfile.sensor_range` must fail toward the cheap
+    // Low-fidelity path — never permanently stuck High (the way a naive NaN
+    // comparison would produce), and never permanently promoted (the way a
+    // naive +infinity comparison would produce).
+
+    #[test]
+    fn zero_sensor_range_never_promotes() {
+        let result = evaluate_lod(LodState::Low, 1.0, 0.0, 0.0, 0.0, 2.0, 0.2);
+        assert_eq!(result, LodState::Low);
+    }
+
+    #[test]
+    fn zero_sensor_range_demotes_a_high_ship_once_dwell_elapses() {
+        let result = evaluate_lod(LodState::High, 1.0, 0.0, 10.0, 0.0, 2.0, 0.2);
+        assert_eq!(result, LodState::Low);
+    }
+
+    #[test]
+    fn negative_sensor_range_never_promotes() {
+        let result = evaluate_lod(LodState::Low, 1.0, -50.0, 0.0, 0.0, 2.0, 0.2);
+        assert_eq!(result, LodState::Low);
+    }
+
+    #[test]
+    fn negative_sensor_range_demotes_a_high_ship_once_dwell_elapses() {
+        let result = evaluate_lod(LodState::High, 1.0, -50.0, 10.0, 0.0, 2.0, 0.2);
+        assert_eq!(result, LodState::Low);
+    }
+
+    #[test]
+    fn nan_sensor_range_never_promotes() {
+        let result = evaluate_lod(LodState::Low, 1.0, f32::NAN, 0.0, 0.0, 2.0, 0.2);
+        assert_eq!(
+            result,
+            LodState::Low,
+            "a NaN sensor range must not promote (fails closed to Low)"
+        );
+    }
+
+    #[test]
+    fn nan_sensor_range_does_not_leave_a_high_ship_stuck_forever() {
+        // A naive `distance > (NaN * 1.2)` demote check is always false
+        // (NaN comparisons never succeed), which would pin the ship High
+        // forever. The sanitizing guard must prevent that.
+        let result = evaluate_lod(LodState::High, 1.0, f32::NAN, 10.0, 0.0, 2.0, 0.2);
+        assert_eq!(
+            result,
+            LodState::Low,
+            "a NaN sensor range must still allow demotion once dwell elapses"
+        );
+    }
+
+    #[test]
+    fn positive_infinity_sensor_range_does_not_pin_every_ship_high_forever() {
+        // A naive `distance <= infinity` promote check and
+        // `distance > infinity` demote check would promote everything and
+        // demote nothing, permanently pinning every ship High. The
+        // sanitizing guard must prevent that too.
+        let promoted = evaluate_lod(LodState::Low, 1.0, f32::INFINITY, 0.0, 0.0, 2.0, 0.2);
+        assert_eq!(
+            promoted,
+            LodState::Low,
+            "+infinity sensor range must not promote (fails closed to Low)"
+        );
+
+        let demoted = evaluate_lod(LodState::High, 1.0, f32::INFINITY, 10.0, 0.0, 2.0, 0.2);
+        assert_eq!(
+            demoted,
+            LodState::Low,
+            "+infinity sensor range must still allow demotion once dwell elapses"
+        );
+    }
+
+    #[test]
+    fn negative_infinity_sensor_range_behaves_like_zero() {
+        let result = evaluate_lod(LodState::High, 1.0, f32::NEG_INFINITY, 10.0, 0.0, 2.0, 0.2);
         assert_eq!(result, LodState::Low);
     }
 }

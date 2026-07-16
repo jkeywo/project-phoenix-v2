@@ -35,15 +35,12 @@ use bevy::prelude::*;
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
 pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
 /// Matches `[[station.rating]].ai_tuning.auto_hint` for the Sensors station.
-/// Not yet consulted by `ai_frequency_hint` — that system currently gates
-/// only on `AiHighFidelity` + the coarse `operate_ai` policy (issue #692).
-/// A claimed/unclaimed split mirroring `AI_RULE_TORPEDO_AUTO_FIRE`'s use in
-/// `ai_torpedo_auto_fire` is a reasonable
-/// follow-up, but wiring it here would require consulting the global
-/// `Sessions`/`ActiveStationRatings` resources per-ship, which — unlike
-/// Tactical's single-crewed-ship assumption — risks cross-ship coupling for
-/// NPC entities that also match the query. Left unwired pending a
-/// per-ship-aware `Sessions` lookup.
+/// Consulted by `ai_frequency_hint` via a per-ship claimed/unclaimed split
+/// mirroring `AI_RULE_TORPEDO_AUTO_FIRE`'s use in `ai_torpedo_auto_fire`:
+/// `ShipConfig::sensors_station()` resolves the owning station per-ship (no
+/// global "Tactical" assumption), so a claimed NPC never sees a human
+/// session's rating and an unclaimed ship (every NPC, and the player ship
+/// before anyone takes Sensors) hints unconditionally.
 pub const AI_RULE_AUTO_HINT: &str = "auto_hint";
 pub const AI_RULE_MOVEMENT_RULE: &str = "movement_rule";
 pub const AI_RULE_RED_ALERT_RULE: &str = "red_alert_rule";
@@ -767,12 +764,22 @@ pub(crate) fn ai_torpedo_auto_fire(
 /// # Gating
 /// - `ShipSystemControlSources.policy_for(sensors_system_id()).operate_ai`.
 /// - `AiHighFidelity` (query filter).
+/// - Claimed/unclaimed Sensors station distinction, mirroring
+///   `ai_torpedo_auto_fire`'s `AI_RULE_TORPEDO_AUTO_FIRE` gate: when a session
+///   holds this ship's Sensors station, the hint additionally requires the
+///   holder's active rating to declare the `auto_hint` `ai_tuning` rule; when
+///   unclaimed (the NPC case — no human ever mans a synthetic ship's Sensors),
+///   the hint fires unconditionally. `ShipConfigComponent`/`ActiveStationRatings`
+///   are read as `Option` so ships in tests or contexts that predate this gate
+///   (no config, no ratings) fall back to "unclaimed" rather than being
+///   silently excluded from the query.
 ///
 /// `tick_sensors_frequency_hint` explicitly skips ships that satisfy both of
 /// these conditions, so the two systems never double-emit for the same ship.
 fn ai_frequency_hint(
     time: Res<Time>,
     global_ai_config: Res<crate::ship::sensors::SensorsAiConfigResource>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
     mut ships: Query<
         (
             Entity,
@@ -780,6 +787,8 @@ fn ai_frequency_hint(
             &crate::weapons_plugin::WeaponsTarget,
             &mut ShipFrequencyHintState,
             Option<&crate::ship::sensors::SensorsAiConfigResource>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship_plugin::ActiveStationRatings>,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -795,14 +804,47 @@ fn ai_frequency_hint(
     let dt = time.delta_secs();
     let sensors_sid = crate::system_registry::sensors_system_id();
 
-    for (entity, control_sources, weapons_target, mut hint_state, ai_config_comp) in
-        ships.iter_mut()
+    for (
+        entity,
+        control_sources,
+        weapons_target,
+        mut hint_state,
+        ai_config_comp,
+        ship_config_comp,
+        active_ratings_comp,
+    ) in ships.iter_mut()
     {
         let policy = control_sources.0.policy_for(&sensors_sid);
         if !policy.operate_ai {
             // Not (or no longer) AI-driven — reset so a later hand-back to
             // AI control doesn't fire an instantly-stale hint.
             *hint_state = ShipFrequencyHintState::default();
+            continue;
+        }
+
+        // Claimed/unclaimed Sensors distinction (issue #692 follow-up: the
+        // `auto_hint` rule key was parsed but never consulted). No
+        // `ShipConfigComponent` or no claimed session both fall back to
+        // "unclaimed" — hint unconditionally, matching the NPC default.
+        let auto_hint_enabled = match (&ship_config_comp, &sessions) {
+            (Some(ship_config), Some(sessions)) => {
+                let sensors_station = ship_config.0.sensors_station().unwrap_or_else(|| {
+                    crate::messages::StationId(crate::system_registry::SENSORS_SYSTEM_ID.into())
+                });
+                match sessions.0.holder_for_station(&sensors_station) {
+                    Some(_) => active_ratings_comp
+                        .and_then(|r| r.0.get(&sensors_station))
+                        .is_some_and(|rating| {
+                            ship_config
+                                .0
+                                .has_ai_rule(&sensors_station, rating, AI_RULE_AUTO_HINT)
+                        }),
+                    None => true,
+                }
+            }
+            _ => true,
+        };
+        if !auto_hint_enabled {
             continue;
         }
 
@@ -1171,6 +1213,128 @@ mod tests {
                 .iter()
                 .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
             "human-operated Sensors must not be hinted by the AI system"
+        );
+    }
+
+    // ── ai_frequency_hint: AI_RULE_AUTO_HINT claimed/unclaimed gate ─────────
+    //
+    // `ai_torpedo_auto_fire`'s claimed/unclaimed pattern: an unclaimed Sensors
+    // station (no human session holder — every NPC, and any ship before a
+    // human takes Sensors) hints unconditionally; once claimed, the hint
+    // additionally requires the holder's active rating to declare
+    // `auto_hint` in its `ai_tuning` table.
+
+    fn sensors_ship_config() -> crate::ship::config::ShipConfig {
+        let toml = r#"
+[[station]]
+id = "sensors"
+name = "Sensors"
+description = "Long-range sensors."
+rank = "Ens."
+
+[[station.rating]]
+name = "Assisted"
+automated_systems = []
+[station.rating.ai_tuning]
+auto_hint = {}
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "sensors"
+"#;
+        crate::ship::config::ShipConfig::from_toml(toml, &["sensors"]).unwrap()
+    }
+
+    /// Adds `ShipConfigComponent` + `ActiveStationRatings` to the ship spawned
+    /// by `freq_hint_test_app`, and a `Sessions` resource with the Sensors
+    /// station claimed by `holder_token`. Returns the source ship entity.
+    fn claim_sensors_station(app: &mut App, holder_token: &str, rating: &str) -> Entity {
+        let source = app.world().resource::<SourceShip>().0;
+        let sensors_station = crate::messages::StationId("sensors".into());
+
+        let mut sm = crate::lobby::session::SessionManager::new();
+        sm.register(holder_token.into(), "Operator".into()).unwrap();
+        sm.set_station(holder_token, Some(sensors_station.clone()));
+        app.insert_resource(crate::lobby::Sessions(sm));
+
+        let mut active_ratings = crate::ship_plugin::ActiveStationRatings::default();
+        active_ratings.0.insert(sensors_station, rating.into());
+
+        app.world_mut()
+            .entity_mut(source)
+            .insert(crate::ship_plugin::ShipConfigComponent(
+                sensors_ship_config(),
+            ))
+            .insert(active_ratings);
+
+        source
+    }
+
+    #[test]
+    fn ai_frequency_hint_fires_when_claimed_station_rating_declares_auto_hint() {
+        let mut app = freq_hint_test_app();
+        claim_sensors_station(&mut app, "op1", "Assisted");
+
+        tick_with_dt(&mut app, 4.0);
+
+        let coord = &app.world().resource::<CoordBox>().0;
+        assert!(
+            coord
+                .iter()
+                .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
+            "a claimed Sensors station whose active rating declares auto_hint \
+             must still be hinted by the AI system"
+        );
+    }
+
+    #[test]
+    fn ai_frequency_hint_stays_silent_when_claimed_station_rating_lacks_auto_hint() {
+        let mut app = freq_hint_test_app();
+        claim_sensors_station(&mut app, "op1", "Std");
+
+        tick_with_dt(&mut app, 4.0);
+
+        let coord = &app.world().resource::<CoordBox>().0;
+        assert!(
+            !coord
+                .iter()
+                .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
+            "a claimed Sensors station on a rating without auto_hint in its \
+             ai_tuning table must not be hinted by the AI system"
+        );
+    }
+
+    #[test]
+    fn ai_frequency_hint_fires_unconditionally_when_sensors_station_is_unclaimed() {
+        let mut app = freq_hint_test_app();
+        let source = app.world().resource::<SourceShip>().0;
+
+        // Ship config + ratings present, but no session holds the station —
+        // e.g. an NPC, or the player ship before anyone takes Sensors.
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ));
+        app.world_mut()
+            .entity_mut(source)
+            .insert(crate::ship_plugin::ShipConfigComponent(
+                sensors_ship_config(),
+            ))
+            .insert(crate::ship_plugin::ActiveStationRatings::default());
+
+        tick_with_dt(&mut app, 4.0);
+
+        let coord = &app.world().resource::<CoordBox>().0;
+        assert!(
+            coord
+                .iter()
+                .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
+            "an unclaimed Sensors station must be hinted unconditionally, \
+             regardless of any rating's ai_tuning table"
         );
     }
 

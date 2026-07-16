@@ -74,403 +74,564 @@ pub fn process_message(
     // Per-station active ratings to embed in Welcome for (re)connecting clients.
     station_ratings: &HashMap<StationId, String>,
 ) -> LobbyHandlerResult {
-    let mut outbound = Vec::new();
-    let mut new_phase: Option<GamePhase> = None;
-    let mut station_rating_update: Option<(StationId, String)> = None;
-    let mut countdown_action = None;
-
     match msg {
         ClientMessage::Identify {
             token: id_token,
             name,
-        } => {
-            // Clamp token to 64 chars and name to 32 chars (issue #602).
-            let id_token = id_token.chars().take(64).collect::<String>();
-            let name = name.chars().take(32).collect::<String>();
-            let is_reconnect = sessions.reconnect(&id_token).is_some();
-            let joined = if is_reconnect {
-                true
-            } else {
-                sessions.register(id_token.clone(), name.clone()).is_ok()
-            };
-
-            if joined {
-                // Reconnect-yield: if the player had a station and it is still
-                // unclaimed (no connected peer holds that station), restore
-                // their seat and broadcast the pre-disconnect rating.
-                let mut reconnect_station_update: Option<(StationId, String)> = None;
-                if is_reconnect && !ship_stations.stations.is_empty() {
-                    let station_id = sessions.station_for_token(&id_token).cloned();
-                    if let Some(ref sid) = station_id {
-                        let occupied = sessions.players().iter().any(|p| {
-                            p.connected && p.token != *id_token && p.station.as_ref() == Some(sid)
-                        });
-                        if !occupied {
-                            // Capture restore info for post-Welcome broadcasts.
-                            let last_rating = sessions
-                                .players()
-                                .iter()
-                                .find(|p| p.token == *id_token)
-                                .and_then(|p| p.last_rating.clone());
-                            let rating = last_rating.unwrap_or_else(|| "Std".to_string());
-                            reconnect_station_update = Some((sid.clone(), rating));
-                        } else {
-                            sessions.set_station(&id_token, None);
-                        }
-                    }
-                }
-
-                // Send Welcome and PlayerJoined
-                let player = sessions
-                    .players()
-                    .iter()
-                    .find(|p| p.token == *id_token)
-                    .cloned()
-                    .unwrap();
-                let state = derive_game_state(sessions, &phase, world);
-                outbound.push((
-                    Target::Token(id_token.clone()),
-                    ServerMessage::Welcome {
-                        state,
-                        ship_stations: ship_stations.clone(),
-                        ship_config: ship_config.clone(),
-                        station_ratings: station_ratings.clone(),
-                    },
-                ));
-                outbound.push((
-                    Target::AllExcept(id_token.clone()),
-                    ServerMessage::PlayerJoined { player },
-                ));
-
-                // Broadcast restored station + rating (after Welcome so client is ready).
-                if let Some((ref restored_sid, ref restored_rating)) = reconnect_station_update {
-                    if let Some(station_def) = ship_stations
-                        .stations
-                        .iter()
-                        .find(|sd| &sd.id == restored_sid)
-                    {
-                        outbound.push((
-                            Target::All,
-                            ServerMessage::StationAssigned {
-                                token: id_token.clone(),
-                                station: Some(station_def.name.clone()),
-                                station_id: Some(restored_sid.clone()),
-                            },
-                        ));
-                        outbound.push((
-                            Target::All,
-                            ServerMessage::RatingChanged {
-                                station_id: restored_sid.clone(),
-                                rating_name: restored_rating.clone(),
-                            },
-                        ));
-                        // Clear last_rating now that it has been applied.
-                        sessions.set_last_rating(&id_token, None);
-                        station_rating_update = reconnect_station_update;
-                    }
-                }
-
-                // Fixed roster per #495: no advance_on_join cascade.
-                // Existing players keep their stations when new players join.
-                // The new joiner selects a station manually via SelectStation.
-
-                if !ship_stations.stations.is_empty() {
-                    let connected_with_stations = sessions
-                        .players()
-                        .iter()
-                        .filter(|p| p.connected && p.station.is_some())
-                        .count() as u32;
-                    let player_has_station = sessions
-                        .players()
-                        .iter()
-                        .find(|p| p.token == *id_token)
-                        .map(|p| p.station.is_some())
-                        .unwrap_or(false);
-                    if !player_has_station {
-                        let capacity = ship_stations.stations.len() as u32;
-                        let at_capacity = connected_with_stations >= capacity;
-                        if at_capacity {
-                            outbound.push((
-                                Target::Token(id_token.clone()),
-                                ServerMessage::StationAssigned {
-                                    token: id_token.clone(),
-                                    station: None,
-                                    station_id: None,
-                                },
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        ClientMessage::SetName { name } => {
-            sessions.set_name(token, name.clone());
-            outbound.push((
-                Target::All,
-                ServerMessage::NameChanged {
-                    token: token.to_string(),
-                    name: name.clone(),
-                },
-            ));
-        }
+        } => handle_identify(
+            id_token,
+            name,
+            sessions,
+            phase,
+            world,
+            ship_stations,
+            ship_config,
+            station_ratings,
+        ),
+        ClientMessage::SetName { name } => handle_set_name(token, name, sessions),
         ClientMessage::SelectStation { station } => {
-            if ship_stations.stations.is_empty() {
-                // No station config loaded — silently ignore (no backward-compat toggle).
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                    countdown_action: None,
-                };
-            }
-
-            let station_def = get_station(ship_stations, station);
-            let Some(station_def) = station_def else {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                    countdown_action: None,
-                };
-            };
-
-            // Check if sender already holds this station (own station → no-op)
-            let sender_station = sessions.station_for_token(token).cloned();
-            if sender_station.as_ref() == Some(&station_def.id) {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                    countdown_action: None,
-                };
-            }
-
-            // Check if occupied by another connected player
-            let occupied = sessions.players().iter().any(|p| {
-                p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id)
-            });
-            if occupied {
-                return LobbyHandlerResult {
-                    new_phase,
-                    outbound,
-                    station_rating_update: None,
-                    countdown_action: None,
-                };
-            }
-
-            let mid_game_claim = phase == GamePhase::InProgress;
-            if mid_game_claim {
-                sessions.set_ready(token, false);
-                outbound.push((
-                    Target::All,
-                    ServerMessage::ReadyChanged {
-                        token: token.to_string(),
-                        ready: false,
-                    },
-                ));
-            }
-
-            // Release current station if held.
-            if let Some(previous_station) = sender_station {
-                sessions.set_station(token, None);
-                outbound.push((
-                    Target::All,
-                    ServerMessage::StationAssigned {
-                        token: token.to_string(),
-                        station: None,
-                        station_id: None,
-                    },
-                ));
-                if mid_game_claim {
-                    let backfill = rating::BACKFILL_RATING.to_string();
-                    outbound.push((
-                        Target::All,
-                        ServerMessage::RatingChanged {
-                            station_id: previous_station.clone(),
-                            rating_name: backfill.clone(),
-                        },
-                    ));
-                    station_rating_update = Some((previous_station, backfill));
-                } else {
-                    // Pre-InProgress: don't let a new claimant inherit a
-                    // stranger's lobby-chosen complexity toggle.
-                    sessions.clear_pending_rating(&previous_station);
-                    let base_rating = get_station(ship_stations, &previous_station.0)
-                        .and_then(|def| def.ratings.first().cloned())
-                        .unwrap_or_else(|| "Std".to_string());
-                    outbound.push((
-                        Target::All,
-                        ServerMessage::RatingChanged {
-                            station_id: previous_station,
-                            rating_name: base_rating,
-                        },
-                    ));
-                }
-            }
-
-            // Assign the station.
-            sessions.set_station(token, Some(station_def.id.clone()));
-            outbound.push((
-                Target::All,
-                ServerMessage::StationAssigned {
-                    token: token.to_string(),
-                    station: Some(station.clone()),
-                    station_id: Some(station_def.id.clone()),
-                },
-            ));
-
-            // Mid-game claim is a pending join: the player can read the station
-            // help and press Ready, but Backfill AI remains in control until
-            // SetReady(true) below applies the normal human rating.
+            handle_select_station(token, station, sessions, phase, ship_stations)
         }
         ClientMessage::ReleaseStation => {
-            let released_station = sessions.station_for_token(token).cloned();
-            sessions.set_station(token, None);
-            sessions.set_ready(token, false);
-            outbound.push((
-                Target::All,
-                ServerMessage::StationAssigned {
-                    token: token.to_string(),
-                    station: None,
-                    station_id: None,
-                },
-            ));
-            outbound.push((
-                Target::All,
-                ServerMessage::ReadyChanged {
-                    token: token.to_string(),
-                    ready: false,
-                },
-            ));
-            if phase == GamePhase::InProgress {
-                if let Some(station_id) = released_station {
-                    let backfill = rating::BACKFILL_RATING.to_string();
-                    outbound.push((
-                        Target::All,
-                        ServerMessage::RatingChanged {
-                            station_id: station_id.clone(),
-                            rating_name: backfill.clone(),
-                        },
-                    ));
-                    station_rating_update = Some((station_id, backfill));
-                }
-            } else if let Some(station_id) = released_station {
-                // Pre-InProgress: don't let a new claimant inherit a
-                // stranger's lobby-chosen complexity toggle.
-                sessions.clear_pending_rating(&station_id);
-                let base_rating = get_station(ship_stations, &station_id.0)
-                    .and_then(|def| def.ratings.first().cloned())
-                    .unwrap_or_else(|| "Std".to_string());
-                outbound.push((
-                    Target::All,
-                    ServerMessage::RatingChanged {
-                        station_id,
-                        rating_name: base_rating,
-                    },
-                ));
-            }
+            handle_release_station(token, sessions, phase, ship_stations)
         }
-        ClientMessage::SetReady { ready } => {
-            sessions.set_ready(token, *ready);
-            outbound.push((
-                Target::All,
-                ServerMessage::ReadyChanged {
-                    token: token.to_string(),
-                    ready: *ready,
-                },
-            ));
-            // Start 5-second countdown when all players ready up during Lobby.
-            // If someone unreadies during the countdown, cancel it.
-            if phase == GamePhase::Lobby {
-                if sessions.all_ready() {
-                    let pending_phase = if preload_complete || ship_stations.stations.is_empty() {
-                        GamePhase::InProgress
-                    } else {
-                        GamePhase::Loading
-                    };
-                    countdown_action = Some(CountdownAction::Start {
-                        secs: 5,
-                        pending_phase,
-                    });
-                } else if !*ready {
-                    // Unready while countdown may be active → cancel it.
-                    countdown_action = Some(CountdownAction::Cancel);
-                }
-            } else if phase == GamePhase::InProgress && *ready {
-                if let Some(station_id) = sessions.station_for_token(token).cloned() {
-                    let default_rating = "Std".to_string();
-                    outbound.push((
-                        Target::All,
-                        ServerMessage::RatingChanged {
-                            station_id: station_id.clone(),
-                            rating_name: default_rating.clone(),
-                        },
-                    ));
-                    station_rating_update = Some((station_id, default_rating));
-                }
-            }
-        }
-        ClientMessage::ReturnToLobby => {
-            if phase == GamePhase::GameOver {
-                sessions.reset_ready();
-                sessions.clear_all_pending_ratings();
-                for p in sessions.players() {
-                    outbound.push((
-                        Target::All,
-                        ServerMessage::ReadyChanged {
-                            token: p.token.clone(),
-                            ready: false,
-                        },
-                    ));
-                }
-                outbound.push((Target::All, ServerMessage::ReturnedToLobby));
-                new_phase = Some(GamePhase::Lobby);
-            }
-        }
-        ClientMessage::ConfirmScenario => {
-            if phase == GamePhase::Lobby {
-                outbound.push((Target::All, ServerMessage::ScenarioLoaded));
-            }
-        }
+        ClientMessage::SetReady { ready } => handle_set_ready(
+            token,
+            *ready,
+            sessions,
+            phase,
+            preload_complete,
+            ship_stations,
+        ),
+        ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
+        ClientMessage::ConfirmScenario => handle_confirm_scenario(phase),
         ClientMessage::SetStationRating { rating_name } => {
-            // InProgress is handled by `ship_plugin::handle_station_rating_change`
-            // against the live Ship entity. Pre-spawn (Lobby/Loading), there is
-            // no ControlSourceResolver to apply to yet, so record the choice as
-            // "pending" and apply it once the ship spawns
-            // (`spawn_game_start_entities`), while still broadcasting it live so
-            // other lobby clients see the toggle update immediately.
-            if phase == GamePhase::Lobby || phase == GamePhase::Loading {
-                if let Some(station_id) = sessions.station_for_token(token).cloned() {
-                    let valid = get_station(ship_stations, &station_id.0)
-                        .map(|def| def.ratings.iter().any(|r| r == rating_name))
-                        .unwrap_or(false);
-                    if valid {
-                        sessions.set_pending_rating(&station_id, rating_name.clone());
-                        outbound.push((
-                            Target::All,
-                            ServerMessage::RatingChanged {
-                                station_id,
-                                rating_name: rating_name.clone(),
-                            },
-                        ));
-                    }
-                }
-            }
+            handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
         }
-        // SetReady IS handled above (not a no-op in lobby).
+        // SetReady IS handled above (not a no-op in lobby). The seven runtime
+        // variants are no-ops here — they are handled by the console server
+        // plugins, not the lobby handler.
         ClientMessage::FirePhaser { .. }
         | ClientMessage::FireTorpedo { .. }
         | ClientMessage::ControlSystem { .. }
         | ClientMessage::SendCoordination { .. }
         | ClientMessage::LoadTube { .. }
-        | ClientMessage::UnloadTube { .. } => {}
+        | ClientMessage::UnloadTube { .. } => LobbyHandlerResult {
+            new_phase: None,
+            outbound: Vec::new(),
+            station_rating_update: None,
+            countdown_action: None,
+        },
+    }
+}
+
+/// Handle `Identify`: (re)register the session, restore a held station on
+/// reconnect-yield, and emit `Welcome` / `PlayerJoined` (and, at capacity, an
+/// empty `StationAssigned`). `token` from the envelope is ignored — the session
+/// token comes from the message body.
+fn handle_identify(
+    id_token: &str,
+    name: &str,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    world: Option<&WorldData>,
+    ship_stations: &ShipStations,
+    ship_config: &ShipClientConfig,
+    station_ratings: &HashMap<StationId, String>,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+
+    // Clamp token to 64 chars and name to 32 chars (issue #602).
+    let id_token = id_token.chars().take(64).collect::<String>();
+    let name = name.chars().take(32).collect::<String>();
+    let is_reconnect = sessions.reconnect(&id_token).is_some();
+    let joined = if is_reconnect {
+        true
+    } else {
+        sessions.register(id_token.clone(), name.clone()).is_ok()
+    };
+
+    if joined {
+        // Reconnect-yield: if the player had a station and it is still
+        // unclaimed (no connected peer holds that station), restore
+        // their seat and broadcast the pre-disconnect rating.
+        let mut reconnect_station_update: Option<(StationId, String)> = None;
+        if is_reconnect && !ship_stations.stations.is_empty() {
+            let station_id = sessions.station_for_token(&id_token).cloned();
+            if let Some(ref sid) = station_id {
+                let occupied = sessions.players().iter().any(|p| {
+                    p.connected && p.token != *id_token && p.station.as_ref() == Some(sid)
+                });
+                if !occupied {
+                    // Capture restore info for post-Welcome broadcasts.
+                    let last_rating = sessions
+                        .players()
+                        .iter()
+                        .find(|p| p.token == *id_token)
+                        .and_then(|p| p.last_rating.clone());
+                    let rating = last_rating.unwrap_or_else(|| "Std".to_string());
+                    reconnect_station_update = Some((sid.clone(), rating));
+                } else {
+                    sessions.set_station(&id_token, None);
+                }
+            }
+        }
+
+        // Send Welcome and PlayerJoined
+        let player = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == *id_token)
+            .cloned()
+            .unwrap();
+        let state = derive_game_state(sessions, &phase, world);
+        outbound.push((
+            Target::Token(id_token.clone()),
+            ServerMessage::Welcome {
+                state,
+                ship_stations: ship_stations.clone(),
+                ship_config: ship_config.clone(),
+                station_ratings: station_ratings.clone(),
+            },
+        ));
+        outbound.push((
+            Target::AllExcept(id_token.clone()),
+            ServerMessage::PlayerJoined { player },
+        ));
+
+        // Broadcast restored station + rating (after Welcome so client is ready).
+        if let Some((ref restored_sid, ref restored_rating)) = reconnect_station_update {
+            if let Some(station_def) = ship_stations
+                .stations
+                .iter()
+                .find(|sd| &sd.id == restored_sid)
+            {
+                outbound.push((
+                    Target::All,
+                    ServerMessage::StationAssigned {
+                        token: id_token.clone(),
+                        station: Some(station_def.name.clone()),
+                        station_id: Some(restored_sid.clone()),
+                    },
+                ));
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id: restored_sid.clone(),
+                        rating_name: restored_rating.clone(),
+                    },
+                ));
+                // Clear last_rating now that it has been applied.
+                sessions.set_last_rating(&id_token, None);
+                station_rating_update = reconnect_station_update;
+            }
+        }
+
+        // Fixed roster per #495: no advance_on_join cascade.
+        // Existing players keep their stations when new players join.
+        // The new joiner selects a station manually via SelectStation.
+
+        if !ship_stations.stations.is_empty() {
+            let connected_with_stations = sessions
+                .players()
+                .iter()
+                .filter(|p| p.connected && p.station.is_some())
+                .count() as u32;
+            let player_has_station = sessions
+                .players()
+                .iter()
+                .find(|p| p.token == *id_token)
+                .map(|p| p.station.is_some())
+                .unwrap_or(false);
+            if !player_has_station {
+                let capacity = ship_stations.stations.len() as u32;
+                let at_capacity = connected_with_stations >= capacity;
+                if at_capacity {
+                    outbound.push((
+                        Target::Token(id_token.clone()),
+                        ServerMessage::StationAssigned {
+                            token: id_token.clone(),
+                            station: None,
+                            station_id: None,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action: None,
+    }
+}
+
+/// Handle `SetName`: update the session's display name and broadcast
+/// `NameChanged` to everyone.
+fn handle_set_name(token: &str, name: &str, sessions: &mut SessionManager) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    sessions.set_name(token, name.to_string());
+    outbound.push((
+        Target::All,
+        ServerMessage::NameChanged {
+            token: token.to_string(),
+            name: name.to_string(),
+        },
+    ));
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update: None,
+        countdown_action: None,
+    }
+}
+
+/// Handle `SelectStation`: claim `station` for `token`, releasing any current
+/// station first. Silently ignores unknown stations, own-station re-selects,
+/// and stations occupied by another connected player.
+fn handle_select_station(
+    token: &str,
+    station: &str,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    ship_stations: &ShipStations,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+
+    if ship_stations.stations.is_empty() {
+        // No station config loaded — silently ignore (no backward-compat toggle).
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
+    let station_def = get_station(ship_stations, station);
+    let Some(station_def) = station_def else {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    };
+
+    // Check if sender already holds this station (own station → no-op)
+    let sender_station = sessions.station_for_token(token).cloned();
+    if sender_station.as_ref() == Some(&station_def.id) {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
+    // Check if occupied by another connected player
+    let occupied = sessions
+        .players()
+        .iter()
+        .any(|p| p.connected && p.token != token && p.station.as_ref() == Some(&station_def.id));
+    if occupied {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
+    let mid_game_claim = phase == GamePhase::InProgress;
+    if mid_game_claim {
+        sessions.set_ready(token, false);
+        outbound.push((
+            Target::All,
+            ServerMessage::ReadyChanged {
+                token: token.to_string(),
+                ready: false,
+            },
+        ));
+    }
+
+    // Release current station if held.
+    if let Some(previous_station) = sender_station {
+        sessions.set_station(token, None);
+        outbound.push((
+            Target::All,
+            ServerMessage::StationAssigned {
+                token: token.to_string(),
+                station: None,
+                station_id: None,
+            },
+        ));
+        if mid_game_claim {
+            let backfill = rating::BACKFILL_RATING.to_string();
+            outbound.push((
+                Target::All,
+                ServerMessage::RatingChanged {
+                    station_id: previous_station.clone(),
+                    rating_name: backfill.clone(),
+                },
+            ));
+            station_rating_update = Some((previous_station, backfill));
+        } else {
+            // Pre-InProgress: don't let a new claimant inherit a
+            // stranger's lobby-chosen complexity toggle.
+            sessions.clear_pending_rating(&previous_station);
+            let base_rating = get_station(ship_stations, &previous_station.0)
+                .and_then(|def| def.ratings.first().cloned())
+                .unwrap_or_else(|| "Std".to_string());
+            outbound.push((
+                Target::All,
+                ServerMessage::RatingChanged {
+                    station_id: previous_station,
+                    rating_name: base_rating,
+                },
+            ));
+        }
+    }
+
+    // Assign the station.
+    sessions.set_station(token, Some(station_def.id.clone()));
+    outbound.push((
+        Target::All,
+        ServerMessage::StationAssigned {
+            token: token.to_string(),
+            station: Some(station.to_string()),
+            station_id: Some(station_def.id.clone()),
+        },
+    ));
+
+    // Mid-game claim is a pending join: the player can read the station
+    // help and press Ready, but Backfill AI remains in control until
+    // SetReady(true) applies the normal human rating.
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action: None,
+    }
+}
+
+/// Handle `ReleaseStation`: give up the caller's station, unready them, and
+/// reset the vacated station's rating (Backfill mid-game, base rating pre-game).
+fn handle_release_station(
+    token: &str,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    ship_stations: &ShipStations,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+
+    let released_station = sessions.station_for_token(token).cloned();
+    sessions.set_station(token, None);
+    sessions.set_ready(token, false);
+    outbound.push((
+        Target::All,
+        ServerMessage::StationAssigned {
+            token: token.to_string(),
+            station: None,
+            station_id: None,
+        },
+    ));
+    outbound.push((
+        Target::All,
+        ServerMessage::ReadyChanged {
+            token: token.to_string(),
+            ready: false,
+        },
+    ));
+    if phase == GamePhase::InProgress {
+        if let Some(station_id) = released_station {
+            let backfill = rating::BACKFILL_RATING.to_string();
+            outbound.push((
+                Target::All,
+                ServerMessage::RatingChanged {
+                    station_id: station_id.clone(),
+                    rating_name: backfill.clone(),
+                },
+            ));
+            station_rating_update = Some((station_id, backfill));
+        }
+    } else if let Some(station_id) = released_station {
+        // Pre-InProgress: don't let a new claimant inherit a
+        // stranger's lobby-chosen complexity toggle.
+        sessions.clear_pending_rating(&station_id);
+        let base_rating = get_station(ship_stations, &station_id.0)
+            .and_then(|def| def.ratings.first().cloned())
+            .unwrap_or_else(|| "Std".to_string());
+        outbound.push((
+            Target::All,
+            ServerMessage::RatingChanged {
+                station_id,
+                rating_name: base_rating,
+            },
+        ));
+    }
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action: None,
+    }
+}
+
+/// Handle `SetReady`: record the caller's ready flag and broadcast it. During
+/// Lobby, manage the 5-second start countdown; while InProgress, applying a
+/// ready flag restores the caller's station to the default human rating.
+fn handle_set_ready(
+    token: &str,
+    ready: bool,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    preload_complete: bool,
+    ship_stations: &ShipStations,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+    let mut countdown_action = None;
+
+    sessions.set_ready(token, ready);
+    outbound.push((
+        Target::All,
+        ServerMessage::ReadyChanged {
+            token: token.to_string(),
+            ready,
+        },
+    ));
+    // Start 5-second countdown when all players ready up during Lobby.
+    // If someone unreadies during the countdown, cancel it.
+    if phase == GamePhase::Lobby {
+        if sessions.all_ready() {
+            let pending_phase = if preload_complete || ship_stations.stations.is_empty() {
+                GamePhase::InProgress
+            } else {
+                GamePhase::Loading
+            };
+            countdown_action = Some(CountdownAction::Start {
+                secs: 5,
+                pending_phase,
+            });
+        } else if !ready {
+            // Unready while countdown may be active → cancel it.
+            countdown_action = Some(CountdownAction::Cancel);
+        }
+    } else if phase == GamePhase::InProgress && ready {
+        if let Some(station_id) = sessions.station_for_token(token).cloned() {
+            let default_rating = "Std".to_string();
+            outbound.push((
+                Target::All,
+                ServerMessage::RatingChanged {
+                    station_id: station_id.clone(),
+                    rating_name: default_rating.clone(),
+                },
+            ));
+            station_rating_update = Some((station_id, default_rating));
+        }
+    }
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action,
+    }
+}
+
+/// Handle `ReturnToLobby`: from `GameOver`, reset ready flags + pending ratings,
+/// broadcast the cleared readies and `ReturnedToLobby`, and transition to
+/// `Lobby`. No-op in any other phase.
+fn handle_return_to_lobby(sessions: &mut SessionManager, phase: GamePhase) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut new_phase: Option<GamePhase> = None;
+
+    if phase == GamePhase::GameOver {
+        sessions.reset_ready();
+        sessions.clear_all_pending_ratings();
+        for p in sessions.players() {
+            outbound.push((
+                Target::All,
+                ServerMessage::ReadyChanged {
+                    token: p.token.clone(),
+                    ready: false,
+                },
+            ));
+        }
+        outbound.push((Target::All, ServerMessage::ReturnedToLobby));
+        new_phase = Some(GamePhase::Lobby);
     }
 
     LobbyHandlerResult {
         new_phase,
         outbound,
-        station_rating_update,
-        countdown_action,
+        station_rating_update: None,
+        countdown_action: None,
+    }
+}
+
+/// Handle `ConfirmScenario`: broadcast `ScenarioLoaded` during Lobby.
+fn handle_confirm_scenario(phase: GamePhase) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    if phase == GamePhase::Lobby {
+        outbound.push((Target::All, ServerMessage::ScenarioLoaded));
+    }
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update: None,
+        countdown_action: None,
+    }
+}
+
+/// Handle `SetStationRating` in Lobby/Loading: validate the rating against the
+/// station def, record it as pending, and broadcast the live toggle. InProgress
+/// is handled by `ship_plugin::handle_station_rating_change` instead.
+fn handle_set_station_rating(
+    token: &str,
+    rating_name: &str,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    ship_stations: &ShipStations,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+
+    // InProgress is handled by `ship_plugin::handle_station_rating_change`
+    // against the live Ship entity. Pre-spawn (Lobby/Loading), there is
+    // no ControlSourceResolver to apply to yet, so record the choice as
+    // "pending" and apply it once the ship spawns
+    // (`spawn_game_start_entities`), while still broadcasting it live so
+    // other lobby clients see the toggle update immediately.
+    if phase == GamePhase::Lobby || phase == GamePhase::Loading {
+        if let Some(station_id) = sessions.station_for_token(token).cloned() {
+            let valid = get_station(ship_stations, &station_id.0)
+                .map(|def| def.ratings.iter().any(|r| r == rating_name))
+                .unwrap_or(false);
+            if valid {
+                sessions.set_pending_rating(&station_id, rating_name.to_string());
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id,
+                        rating_name: rating_name.to_string(),
+                    },
+                ));
+            }
+        }
+    }
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update: None,
+        countdown_action: None,
     }
 }
 

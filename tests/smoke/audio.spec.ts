@@ -53,15 +53,19 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
 
   await serverPage.goto('/?scenario=assets/worlds/combat_test.toml');
 
-  // combat_test.toml declares three [[available_ships]], so the scenario
-  // panel becomes a ship picker. Deliberately pick the Battleship (the
-  // *last* card, not the default cruiser) so a passing assertion proves the
-  // config came from the lobby-selected hull rather than a stale default.
+  // combat_test.toml declares four [[available_ships]] (destroyer, cruiser,
+  // battleship, courier). Deliberately pick the crewed Battleship by its
+  // template path, not the default cruiser and not by card position — the
+  // Courier is single-station and has no "Captain" station, so this test's
+  // multi-station client flow below needs a crewed hull regardless of where
+  // new ships get added to the roster.
   await serverPage.waitForSelector('#scenario-panel ph-ship-picker .ship-card', {
     state: 'visible',
     timeout: 60_000,
   });
-  await serverPage.click('#scenario-panel ph-ship-picker .ship-card:last-child');
+  await serverPage.click(
+    '#scenario-panel ph-ship-picker .ship-card[data-template="assets/entities/alliance_battleship.toml"]',
+  );
 
   await waitForWasmReady(serverPage);
 

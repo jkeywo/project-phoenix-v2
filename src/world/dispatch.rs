@@ -300,142 +300,6 @@ pub struct DispatchResult {
     pub warnings: Vec<String>,
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-/// Push a `FlagSet` / `FlagCleared` event when the boolean view (`counter != 0`)
-/// of a flag flips.
-///
-/// `target_layer` is the *resolved* layer of the mutation (after `parent:`
-/// walking) — embedded in the event so layer-scoped `on_flag_set` /
-/// `on_flag_cleared` triggers only react to transitions in their own layer.
-fn push_flag_transition(
-    events: &mut Vec<WorldEvent>,
-    name: &str,
-    target_layer: &Option<String>,
-    before: i64,
-    after: i64,
-) {
-    let was_set = before != 0;
-    let is_set = after != 0;
-    if was_set == is_set {
-        return;
-    }
-    if is_set {
-        events.push(WorldEvent::FlagSet {
-            name: name.to_string(),
-            origin_layer: target_layer.clone(),
-        });
-    } else {
-        events.push(WorldEvent::FlagCleared {
-            name: name.to_string(),
-            origin_layer: target_layer.clone(),
-        });
-    }
-}
-
-/// Resolve which layer a flag mutation targets, honouring `parent:` prefixes.
-///
-/// Each leading `parent:` walks one step up the loader chain from
-/// `ctx.origin_layer`. Returns `(target_layer, stripped_name)` on success, or
-/// the warning text on failure. There are two distinct failure modes and one
-/// deliberate silent case:
-///
-/// * The walk overruns the base world → `Err` (no mutation, no event). This
-///   keeps two scenarios from polluting each other's flag namespace.
-/// * The resolved target layer is absent from the layer map → `Err`.
-/// * A layer is missing from the map *mid-walk* → silently treated as the base
-///   world, and the walk continues.
-fn resolve_flag_target(
-    ctx: &DispatchContext,
-    name: &str,
-) -> Result<(Option<String>, String), String> {
-    let mut depth = 0usize;
-    let mut rest = name;
-    while let Some(stripped) = rest.strip_prefix("parent:") {
-        depth += 1;
-        rest = stripped;
-    }
-    let stripped = rest.to_string();
-
-    let origin_layer = &ctx.origin_layer;
-    let mut cur = origin_layer.clone();
-    for _ in 0..depth {
-        match cur {
-            None => {
-                return Err(format!(
-                    "'{name}' from origin {origin_layer:?} walks past base world — ignoring"
-                ));
-            }
-            Some(ref path) => {
-                // A missing layer entry resolves to `None` — i.e. treated as
-                // the base world — and the walk continues from there.
-                cur = ctx.layers.get(path).and_then(|l| l.loader_path.clone());
-            }
-        }
-    }
-    let target_layer = cur;
-
-    if let Some(path) = &target_layer {
-        if !ctx.layers.contains_key(path) {
-            return Err(format!(
-                "target layer '{path}' missing from WorldLayerMap — ignoring '{name}'"
-            ));
-        }
-    }
-    Ok((target_layer, stripped))
-}
-
-/// Compute what `mutation` *would* do to `name` in `store`, without mutating.
-///
-/// Mirrors `FlagStore::set_flag` / `clear_flag` / `increment_flag` /
-/// `set_flag_value` exactly, including `increment`'s saturating add.
-fn preview_mutation(store: &FlagStore, name: &str, mutation: &FlagMutation) -> (i64, i64) {
-    let before = store.counter(name);
-    let after = match mutation {
-        FlagMutation::Set => 1,
-        FlagMutation::Clear => 0,
-        FlagMutation::Increment(by) => before.saturating_add(*by),
-        FlagMutation::SetValue(v) => *v,
-    };
-    (before, after)
-}
-
-/// Read-only lookup of the store a resolved `target_layer` points at.
-fn store_for<'a>(ctx: &'a DispatchContext, target_layer: &Option<String>) -> &'a FlagStore {
-    match target_layer {
-        None => ctx.base_flags,
-        // `resolve_flag_target` already proved the entry exists.
-        Some(path) => ctx
-            .layers
-            .get(path)
-            .map(|l| &l.flags)
-            .unwrap_or(ctx.base_flags),
-    }
-}
-
-/// Shared body of the four flag-mutation arms.
-fn dispatch_flag_mutation(
-    ctx: &DispatchContext,
-    name: &str,
-    mutation: FlagMutation,
-    out: &mut DispatchResult,
-) {
-    let (target_layer, stripped) = match resolve_flag_target(ctx, name) {
-        Ok(v) => v,
-        Err(warning) => {
-            out.warnings.push(warning);
-            return;
-        }
-    };
-    let (before, after) = preview_mutation(store_for(ctx, &target_layer), &stripped, &mutation);
-    out.commands.push(ActionCmd::MutateFlag {
-        target_layer: target_layer.clone(),
-        name: stripped.clone(),
-        mutation,
-    });
-    push_flag_transition(&mut out.new_events, &stripped, &target_layer, before, after);
-}
-
 // ── Dispatch ──────────────────────────────────────────────────────────────
 
 /// Decide what a single `TriggerAction` should do.
@@ -496,20 +360,14 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 .push(ActionCmd::UnloadWorld { path: path.clone() });
         }
 
-        TriggerAction::SetWorldFlag { name } => {
-            dispatch_flag_mutation(context, name, FlagMutation::Set, &mut out);
-        }
-
-        TriggerAction::ClearWorldFlag { name } => {
-            dispatch_flag_mutation(context, name, FlagMutation::Clear, &mut out);
-        }
-
-        TriggerAction::IncrementWorldFlag { name, by } => {
-            dispatch_flag_mutation(context, name, FlagMutation::Increment(*by), &mut out);
-        }
-
-        TriggerAction::SetWorldFlagValue { name, value } => {
-            dispatch_flag_mutation(context, name, FlagMutation::SetValue(*value), &mut out);
+        // World-flag actions — the four mutations of a named flag in a
+        // layer-resolved store — are handled by `dispatch_world_flag_action`
+        // (issue #713). Same routing shape as the mission-state arm above.
+        TriggerAction::SetWorldFlag { .. }
+        | TriggerAction::ClearWorldFlag { .. }
+        | TriggerAction::IncrementWorldFlag { .. }
+        | TriggerAction::SetWorldFlagValue { .. } => {
+            return dispatch_world_flag_action(action, context);
         }
 
         TriggerAction::SpawnEntity {
@@ -850,6 +708,192 @@ fn dispatch_entity_modifier_action(
     }
 
     out
+}
+
+/// Decide what one world-flag `TriggerAction` should do.
+///
+/// Owns the four actions that mutate a named world flag — `SetWorldFlag`,
+/// `ClearWorldFlag`, `IncrementWorldFlag`, and `SetWorldFlagValue`. Split out
+/// of `dispatch_action` (issue #713), which routes exactly these four
+/// variants here.
+///
+/// All four share one body, `dispatch_flag_mutation` (below): resolve the
+/// target layer across the loader chain (`resolve_flag_target`, honouring
+/// `parent:` prefixes), preview the mutation against the resolved *live*
+/// store (`preview_mutation` — see `DispatchContext::base_flags` for why it
+/// must be live), emit the `ActionCmd::MutateFlag`, and push a `FlagSet` /
+/// `FlagCleared` event when the boolean view flips (`push_flag_transition`).
+/// The write itself stays in the applier — see "Purity boundaries" at the top
+/// of this file.
+///
+/// Pure, like `dispatch_action`: reads `context`, mutates nothing, returns a
+/// `DispatchResult`. Called only for the four variants above; any other
+/// variant is a routing bug in `dispatch_action` and trips the `unreachable!`.
+fn dispatch_world_flag_action(action: &TriggerAction, context: &DispatchContext) -> DispatchResult {
+    let mut out = DispatchResult::default();
+
+    match action {
+        TriggerAction::SetWorldFlag { name } => {
+            dispatch_flag_mutation(context, name, FlagMutation::Set, &mut out);
+        }
+
+        TriggerAction::ClearWorldFlag { name } => {
+            dispatch_flag_mutation(context, name, FlagMutation::Clear, &mut out);
+        }
+
+        TriggerAction::IncrementWorldFlag { name, by } => {
+            dispatch_flag_mutation(context, name, FlagMutation::Increment(*by), &mut out);
+        }
+
+        TriggerAction::SetWorldFlagValue { name, value } => {
+            dispatch_flag_mutation(context, name, FlagMutation::SetValue(*value), &mut out);
+        }
+
+        other => {
+            unreachable!("dispatch_world_flag_action called with non-world-flag action: {other:?}")
+        }
+    }
+
+    out
+}
+
+// ── Flag-mutation helpers ─────────────────────────────────────────────────
+//
+// Used exclusively by `dispatch_world_flag_action` above (via
+// `dispatch_flag_mutation`), so they live next to it.
+
+/// Push a `FlagSet` / `FlagCleared` event when the boolean view (`counter != 0`)
+/// of a flag flips.
+///
+/// `target_layer` is the *resolved* layer of the mutation (after `parent:`
+/// walking) — embedded in the event so layer-scoped `on_flag_set` /
+/// `on_flag_cleared` triggers only react to transitions in their own layer.
+fn push_flag_transition(
+    events: &mut Vec<WorldEvent>,
+    name: &str,
+    target_layer: &Option<String>,
+    before: i64,
+    after: i64,
+) {
+    let was_set = before != 0;
+    let is_set = after != 0;
+    if was_set == is_set {
+        return;
+    }
+    if is_set {
+        events.push(WorldEvent::FlagSet {
+            name: name.to_string(),
+            origin_layer: target_layer.clone(),
+        });
+    } else {
+        events.push(WorldEvent::FlagCleared {
+            name: name.to_string(),
+            origin_layer: target_layer.clone(),
+        });
+    }
+}
+
+/// Resolve which layer a flag mutation targets, honouring `parent:` prefixes.
+///
+/// Each leading `parent:` walks one step up the loader chain from
+/// `ctx.origin_layer`. Returns `(target_layer, stripped_name)` on success, or
+/// the warning text on failure. There are two distinct failure modes and one
+/// deliberate silent case:
+///
+/// * The walk overruns the base world → `Err` (no mutation, no event). This
+///   keeps two scenarios from polluting each other's flag namespace.
+/// * The resolved target layer is absent from the layer map → `Err`.
+/// * A layer is missing from the map *mid-walk* → silently treated as the base
+///   world, and the walk continues.
+fn resolve_flag_target(
+    ctx: &DispatchContext,
+    name: &str,
+) -> Result<(Option<String>, String), String> {
+    let mut depth = 0usize;
+    let mut rest = name;
+    while let Some(stripped) = rest.strip_prefix("parent:") {
+        depth += 1;
+        rest = stripped;
+    }
+    let stripped = rest.to_string();
+
+    let origin_layer = &ctx.origin_layer;
+    let mut cur = origin_layer.clone();
+    for _ in 0..depth {
+        match cur {
+            None => {
+                return Err(format!(
+                    "'{name}' from origin {origin_layer:?} walks past base world — ignoring"
+                ));
+            }
+            Some(ref path) => {
+                // A missing layer entry resolves to `None` — i.e. treated as
+                // the base world — and the walk continues from there.
+                cur = ctx.layers.get(path).and_then(|l| l.loader_path.clone());
+            }
+        }
+    }
+    let target_layer = cur;
+
+    if let Some(path) = &target_layer {
+        if !ctx.layers.contains_key(path) {
+            return Err(format!(
+                "target layer '{path}' missing from WorldLayerMap — ignoring '{name}'"
+            ));
+        }
+    }
+    Ok((target_layer, stripped))
+}
+
+/// Compute what `mutation` *would* do to `name` in `store`, without mutating.
+///
+/// Mirrors `FlagStore::set_flag` / `clear_flag` / `increment_flag` /
+/// `set_flag_value` exactly, including `increment`'s saturating add.
+fn preview_mutation(store: &FlagStore, name: &str, mutation: &FlagMutation) -> (i64, i64) {
+    let before = store.counter(name);
+    let after = match mutation {
+        FlagMutation::Set => 1,
+        FlagMutation::Clear => 0,
+        FlagMutation::Increment(by) => before.saturating_add(*by),
+        FlagMutation::SetValue(v) => *v,
+    };
+    (before, after)
+}
+
+/// Read-only lookup of the store a resolved `target_layer` points at.
+fn store_for<'a>(ctx: &'a DispatchContext, target_layer: &Option<String>) -> &'a FlagStore {
+    match target_layer {
+        None => ctx.base_flags,
+        // `resolve_flag_target` already proved the entry exists.
+        Some(path) => ctx
+            .layers
+            .get(path)
+            .map(|l| &l.flags)
+            .unwrap_or(ctx.base_flags),
+    }
+}
+
+/// Shared body of `dispatch_world_flag_action`'s four flag-mutation arms.
+fn dispatch_flag_mutation(
+    ctx: &DispatchContext,
+    name: &str,
+    mutation: FlagMutation,
+    out: &mut DispatchResult,
+) {
+    let (target_layer, stripped) = match resolve_flag_target(ctx, name) {
+        Ok(v) => v,
+        Err(warning) => {
+            out.warnings.push(warning);
+            return;
+        }
+    };
+    let (before, after) = preview_mutation(store_for(ctx, &target_layer), &stripped, &mutation);
+    out.commands.push(ActionCmd::MutateFlag {
+        target_layer: target_layer.clone(),
+        name: stripped.clone(),
+        mutation,
+    });
+    push_flag_transition(&mut out.new_events, &stripped, &target_layer, before, after);
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────
@@ -2637,5 +2681,276 @@ mod tests {
             path: "worlds/sub.toml".to_string(),
         };
         let _ = dispatch_entity_modifier_action(&action, &fx.ctx());
+    }
+
+    // ── dispatch_world_flag_action (direct) ───────────────────────────────
+    //
+    // The tests above drive the four world-flag arms through
+    // `dispatch_action`, proving the routing arm delegates. These call
+    // `dispatch_world_flag_action` directly, proving the extracted function
+    // is what produces the result and that the two entry points agree
+    // (issue #713).
+
+    #[test]
+    fn world_flag_set_emits_mutation_and_flag_set_event_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::SetWorldFlag {
+            name: "alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::Set,
+                }],
+                new_events: vec![WorldEvent::FlagSet {
+                    name: "alarm".to_string(),
+                    origin_layer: None,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_clear_emits_mutation_and_flag_cleared_event_directly() {
+        let mut fx = Fixture::new();
+        fx.base_flags.set_flag_value("alarm", 1);
+        let action = TriggerAction::ClearWorldFlag {
+            name: "alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::Clear,
+                }],
+                new_events: vec![WorldEvent::FlagCleared {
+                    name: "alarm".to_string(),
+                    origin_layer: None,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_increment_zero_to_nonzero_emits_flag_set_directly() {
+        let fx = Fixture::new();
+        let action = TriggerAction::IncrementWorldFlag {
+            name: "kills".to_string(),
+            by: 2,
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "kills".to_string(),
+                    mutation: FlagMutation::Increment(2),
+                }],
+                new_events: vec![WorldEvent::FlagSet {
+                    name: "kills".to_string(),
+                    origin_layer: None,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_set_value_to_zero_emits_flag_cleared_directly() {
+        let mut fx = Fixture::new();
+        fx.base_flags.set_flag_value("alarm", 7);
+        let action = TriggerAction::SetWorldFlagValue {
+            name: "alarm".to_string(),
+            value: 0,
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::SetValue(0),
+                }],
+                new_events: vec![WorldEvent::FlagCleared {
+                    name: "alarm".to_string(),
+                    origin_layer: None,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    /// Layer-chain happy path: a `parent:` prefix from a nested layer resolves
+    /// to its loader layer, and both the command and the event carry the
+    /// stripped name plus the *resolved* target layer.
+    #[test]
+    fn world_flag_parent_prefix_resolves_to_the_loader_layer_directly() {
+        let mut fx = Fixture::new();
+        fx.origin_layer = Some("inner.toml".to_string());
+        // inner was loaded by outer; outer was loaded by the base world.
+        fx.layers
+            .insert("inner.toml".to_string(), layer(Some("outer.toml")));
+        fx.layers.insert("outer.toml".to_string(), layer(None));
+        let action = TriggerAction::SetWorldFlag {
+            name: "parent:alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: Some("outer.toml".to_string()),
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::Set,
+                }],
+                new_events: vec![WorldEvent::FlagSet {
+                    name: "alarm".to_string(),
+                    origin_layer: Some("outer.toml".to_string()),
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_walk_past_base_world_warns_and_emits_nothing_directly() {
+        // Origin is already the base world, so any `parent:` overruns.
+        let fx = Fixture::new();
+        let action = TriggerAction::SetWorldFlag {
+            name: "parent:alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec![
+                    "'parent:alarm' from origin None walks past base world — ignoring".to_string()
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_target_layer_missing_warns_and_emits_nothing_directly() {
+        let mut fx = Fixture::new();
+        // The trigger's own layer is not in the map, and there is no `parent:`
+        // to walk, so the resolved target is a layer we cannot find.
+        fx.origin_layer = Some("ghost.toml".to_string());
+        let action = TriggerAction::SetWorldFlag {
+            name: "alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                warnings: vec![
+                    "target layer 'ghost.toml' missing from WorldLayerMap — ignoring 'alarm'"
+                        .to_string()
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_layer_missing_mid_walk_is_silent_and_treated_as_base_directly() {
+        let mut fx = Fixture::new();
+        // `ghost.toml` is absent from the map: the walk silently resolves its
+        // loader_path to `None` (base) and carries on. This is deliberate —
+        // only the *final* lookup warns.
+        fx.origin_layer = Some("ghost.toml".to_string());
+        let action = TriggerAction::SetWorldFlag {
+            name: "parent:alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::Set,
+                }],
+                new_events: vec![WorldEvent::FlagSet {
+                    name: "alarm".to_string(),
+                    origin_layer: None,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    /// Transition-edge case: setting an already-set flag still commands the
+    /// mutation but emits no event, because the boolean view did not flip.
+    /// The routed twin (`set_world_flag_on_already_set_flag_emits_no_transition_event`,
+    /// issue #708) pins why this depends on `base_flags` being the live store.
+    #[test]
+    fn world_flag_set_on_already_set_flag_emits_no_event_directly() {
+        let mut fx = Fixture::new();
+        fx.base_flags.set_flag_value("alarm", 1);
+        let action = TriggerAction::SetWorldFlag {
+            name: "alarm".to_string(),
+        };
+        let out = dispatch_world_flag_action(&action, &fx.ctx());
+
+        assert_eq!(
+            out,
+            DispatchResult {
+                commands: vec![ActionCmd::MutateFlag {
+                    target_layer: None,
+                    name: "alarm".to_string(),
+                    mutation: FlagMutation::Set,
+                }],
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn world_flag_set_matches_dispatch_action_routing() {
+        let mut fx = Fixture::new();
+        fx.origin_layer = Some("sub.toml".to_string());
+        fx.layers.insert("sub.toml".to_string(), layer(None));
+        let action = TriggerAction::SetWorldFlag {
+            name: "parent:alarm".to_string(),
+        };
+
+        // Both entry points must produce byte-identical results.
+        assert_eq!(
+            dispatch_action(&action, &fx.ctx()),
+            dispatch_world_flag_action(&action, &fx.ctx())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch_world_flag_action called with non-world-flag action")]
+    fn world_flag_action_on_non_world_flag_variant_panics() {
+        // The guard exists so a routing bug in `dispatch_action` fails loudly
+        // rather than silently returning an empty result.
+        let fx = Fixture::new();
+        let action = TriggerAction::UnloadWorld {
+            path: "worlds/sub.toml".to_string(),
+        };
+        let _ = dispatch_world_flag_action(&action, &fx.ctx());
     }
 }

@@ -20,6 +20,10 @@ use crate::world::content::{
     ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction, TriggerCondition,
     TriggerState, WorldEvent,
 };
+use crate::world::dispatch::{
+    dispatch_action, ActionCmd, DispatchContext, DispatchResult, LayerView,
+    WORLD_MODIFIER_SOURCE_ID,
+};
 
 /// An action queued for deferred dispatch via the `action_delays` trigger field.
 #[derive(Clone, Debug)]
@@ -1208,6 +1212,13 @@ fn broadcast_objective_summary(
 
 // -- AI-event trigger system -------------------------------------------------
 
+/// Upper bound on `handle_ai_events`' within-tick trigger-chaining passes.
+///
+/// A `set_flag` action emits a `FlagSet` event that a downstream `on_flag_set`
+/// trigger can react to in the same Bevy frame, which can in turn set another
+/// flag. The cap stops a pathological feedback loop from hanging the frame.
+const MAX_CHAIN_PASSES: i32 = 16;
+
 /// Read `AiEntityAttacked` and `AiEntityDestroyed` messages, translate them
 /// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
 /// resulting actions (including `SetAiState`, `ApplyModifier`, `RemoveModifier`,
@@ -1236,6 +1247,7 @@ fn handle_ai_events(
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
 ) {
+    let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {
         world_events.push(WorldEvent::Attacked {
@@ -1382,7 +1394,6 @@ fn handle_ai_events(
     // and are observed on the next pass).
     let mut current_events = world_events.clone();
     let mut pass = 0;
-    let max_passes = 16;
     loop {
         pass += 1;
         // Compute current_elapsed from TimerElapsed events in current_events.
@@ -1426,6 +1437,18 @@ fn handle_ai_events(
             .map(|s| s.origin_layer.clone())
             .collect();
         let entity_groups = runtime.entity_groups.clone();
+        // Issue #710: ONE name -> uuid map for *action dispatch*, rebuilt at
+        // the top of every chaining pass — the same per-pass freshness rule
+        // `entity_groups` above already follows. Previously the six modifier
+        // arms read the tick-level `name_to_uuid` clone while `DestroyEntity`
+        // read the live `runtime.name_to_uuid`; unifying on per-pass makes the
+        // modifier arms slightly fresher and `DestroyEntity` slightly staler,
+        // and lets an action resolve a name that a `SpawnEntity` in an earlier
+        // pass of this same tick registered.
+        //
+        // Trigger *condition* evaluation deliberately keeps using the
+        // tick-level `name_to_uuid` clone above: only the dispatch arms change.
+        let dispatch_names = runtime.name_to_uuid.clone();
         for (idx, origin) in trigger_origins.iter().enumerate() {
             // Build the flag-store and layer-path chains for this trigger.
             let mut flag_chain_owned: Vec<&crate::world::flags::FlagStore> = Vec::new();
@@ -1486,604 +1509,67 @@ fn handle_ai_events(
                     }
                     continue;
                 }
-                match action {
-                    TriggerAction::AddObjective {
-                        id,
-                        text,
-                        mandatory,
-                        targets,
-                        directive,
-                        utility,
-                        source,
-                    } => {
-                        // Explicit targets win; otherwise fall back to the
-                        // trigger condition's entity (legacy behaviour).
-                        let resolved = if targets.is_empty() {
-                            ft.entity_name.clone().into_iter().collect()
-                        } else {
-                            targets.clone()
-                        };
-                        objectives.0.add_full(
-                            id.clone(),
-                            text.clone(),
-                            *mandatory,
-                            resolved,
-                            directive.clone(),
-                            utility.clone(),
-                            source.clone(),
-                        );
-                    }
-                    TriggerAction::CompleteObjective { id } => {
-                        objectives.0.complete(id);
-                    }
-                    TriggerAction::FailObjective { id } => {
-                        objectives.0.fail(id);
-                    }
-                    TriggerAction::SetAiState {
-                        entity,
-                        state,
-                        target: _,
-                    } => {
-                        // No-op in doctrine-based AI (issue #572). FSM state slots are
-                        // gone; NPC behaviour is now driven by the scored doctrine pool.
-                        bevy::log::warn!(
-                            "handle_ai_events: SetAiState(â€˜{entity}â€™ \u{2192} â€˜{state}â€™) ignored \u{2014} doctrine-based AI"
-                        );
-                    }
-                    TriggerAction::ApplyModifier {
-                        entity,
-                        tag,
-                        slot,
-                        bonus,
-                    } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyModifier: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.add_or_update(crate::modifiers::Modifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
-                    }
-                    TriggerAction::RemoveModifier { entity, tag, slot } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveModifier: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.remove(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
-                        );
-                    }
-                    TriggerAction::ApplyFlag { entity, tag, kind } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyFlag: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.add_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
-                        );
-                    }
-                    TriggerAction::RemoveFlag { entity, tag, kind } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveFlag: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.remove_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
-                        );
-                    }
-                    TriggerAction::ApplyIntModifier {
-                        entity,
-                        tag,
-                        slot,
-                        bonus,
-                    } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.add_or_update_int(crate::modifiers::IntModifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
-                    }
-                    TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                        let Some(uuid) = name_to_uuid.get(entity) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                            );
-                            continue;
-                        };
-                        let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
-                            );
-                            continue;
-                        };
-                        mods.remove_int(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
-                        );
-                    }
-                    TriggerAction::GameOver { message } => {
-                        let reason = message.clone().unwrap_or_default();
-                        if let Some(ref mut gr) = game_over_reason {
-                            gr.0 = Some(reason);
-                        }
-                        if let Some(ref mut ns) = next_state {
-                            ns.set(GamePhase::GameOver);
-                        }
-                    }
-                    TriggerAction::LoadWorld { path } => {
-                        if let Some(ref mut lc) = pending_layers {
-                            // PRD #397 fix 1: record the layer that issued
-                            // this LoadWorld so `parent:` from the new
-                            // sub-world resolves up to it.
-                            lc.0.push(WorldLayerChange::Load {
-                                path: path.clone(),
-                                loader_path: ft.origin_layer.clone(),
-                            });
-                        }
-                    }
-                    TriggerAction::UnloadWorld { path } => {
-                        if let Some(ref mut lc) = pending_layers {
-                            lc.0.push(WorldLayerChange::Unload(path.clone()));
-                        }
-                    }
-                    TriggerAction::SetWorldFlag { name } => {
-                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &ft.origin_layer,
-                            name,
-                            FlagMutation::Set,
-                        ) {
-                            emit_flag_transition(
-                                &mut next_events,
-                                &stripped,
-                                &target_layer,
-                                before,
-                                after,
-                            );
-                        }
-                    }
-                    TriggerAction::ClearWorldFlag { name } => {
-                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &ft.origin_layer,
-                            name,
-                            FlagMutation::Clear,
-                        ) {
-                            emit_flag_transition(
-                                &mut next_events,
-                                &stripped,
-                                &target_layer,
-                                before,
-                                after,
-                            );
-                        }
-                    }
-                    TriggerAction::IncrementWorldFlag { name, by } => {
-                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &ft.origin_layer,
-                            name,
-                            FlagMutation::Increment(*by),
-                        ) {
-                            emit_flag_transition(
-                                &mut next_events,
-                                &stripped,
-                                &target_layer,
-                                before,
-                                after,
-                            );
-                        }
-                    }
-                    TriggerAction::SetWorldFlagValue { name, value } => {
-                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &ft.origin_layer,
-                            name,
-                            FlagMutation::SetValue(*value),
-                        ) {
-                            emit_flag_transition(
-                                &mut next_events,
-                                &stripped,
-                                &target_layer,
-                                before,
-                                after,
-                            );
-                        }
-                    }
-                    TriggerAction::SpawnEntity {
-                        template_path,
-                        name,
-                        anchor,
-                        position,
-                        rotation,
-                        scale,
-                        groups,
-                    } => {
-                        // Resolve spawn position. `anchor` looks up in the
-                        // origin layer's anchors (or the base world's anchors
-                        // for `None` origin). `position` is used directly.
-                        let pos_arr: [f32; 3] = if let Some(pos) = position {
-                            *pos
-                        } else if let Some(anchor_name) = anchor {
-                            let lookup = match &ft.origin_layer {
-                                Some(layer_path) => layer_map
-                                    .as_ref()
-                                    .and_then(|lm| lm.0.get(layer_path))
-                                    .map(|wr| wr.anchors.get(anchor_name).copied())
-                                    .unwrap_or(None),
-                                None => base_world_config
-                                    .as_ref()
-                                    .and_then(|wc| wc.anchors.get(anchor_name).copied()),
-                            };
-                            match lookup {
-                                Some(p) => p,
-                                None => {
-                                    bevy::log::warn!(
-                                        "handle_ai_events: SpawnEntity '{name}' anchor '{anchor_name}' not found"
-                                    );
-                                    continue;
-                                }
-                            }
-                        } else {
-                            bevy::log::warn!(
-                                "handle_ai_events: SpawnEntity '{name}' has neither anchor nor position"
-                            );
-                            continue;
-                        };
+                // Issue #710: the action-dispatch table lives in the pure
+                // `world::dispatch` module. Decide first, then apply.
+                //
+                // The flag stores handed to the context MUST be the LIVE ones
+                // — `runtime.flags` plus `layer_map`'s per-layer stores,
+                // re-projected for every action — never the per-pass
+                // `base_flags_snapshot` / `layer_flags_snapshot` above. Those
+                // exist for condition evaluation only (deciding which triggers
+                // fire). `dispatch_action` computes each flag mutation's
+                // before/after against these stores to decide whether a
+                // transition event fires at all, so two triggers that both
+                // `set_flag` the same flag must see 0 -> 1 and then 1 -> 1
+                // (one `FlagSet` total), not 0 -> 1 twice.
+                let layers = project_layer_views(layer_map.as_deref());
+                let result = {
+                    let ctx = DispatchContext {
+                        origin_layer: ft.origin_layer.clone(),
+                        entity_name: ft.entity_name.clone(),
+                        name_to_uuid: &dispatch_names,
+                        base_flags: &runtime.flags,
+                        layers: &layers,
+                        base_anchors: base_world_config
+                            .as_ref()
+                            .map(|wc| &wc.anchors)
+                            .unwrap_or(&empty_anchors),
+                        factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
+                        uuid_source: &crate::entity_loader::assign_uuid,
+                    };
+                    dispatch_action(action, &ctx)
+                };
 
-                        // Resolve template via config cache.
-                        let config_cache = crate::config_cache::get_config_cache();
-                        let template_inst = crate::world::config::WorldEntity {
-                            template_path: template_path.clone(),
-                            ..Default::default()
-                        };
-                        let entity_config = match crate::entity_loader::resolve_entity(
-                            &template_inst,
-                            &config_cache,
-                        ) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                // Native fallback: try reading from disk.
-                                #[cfg(not(target_arch = "wasm32"))]
-                                {
-                                    match std::fs::read_to_string(template_path) {
-                                        Ok(toml_str) => {
-                                            match crate::entity_config::EntityConfig::from_toml(
-                                                &toml_str,
-                                            ) {
-                                                Ok(c) => c,
-                                                Err(err) => {
-                                                    bevy::log::warn!(
-                                                        "handle_ai_events: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
-                                                    );
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                        Err(_) => {
-                                            bevy::log::warn!(
-                                                "handle_ai_events: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                }
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    bevy::log::warn!(
-                                        "handle_ai_events: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
-                                    );
-                                    continue;
-                                }
-                            }
-                        };
-
-                        let uuid = crate::entity_loader::assign_uuid();
-                        let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
-                        // Patch the entity name with the trigger's `name` field so that the
-                        // spawned ECS entity gets EntityName("wave_1") (not the template's
-                        // display name like "Harrow Destroyer"). This mirrors what
-                        // `spawn_world_entities` does for static `[[entity]]` entries and is
-                        // required for `resolve_objective_target` to match Destroy directives
-                        // by the scenario name (e.g. `target = "wave_1"`).
-                        let mut entity_config = entity_config;
-                        if !name.is_empty() {
-                            entity_config.name = Some(name.clone());
-                        }
-                        let spawned = crate::entity_spawner::spawn_entity(
-                            &mut commands,
-                            &entity_config,
-                            pos_vec,
-                            uuid.clone(),
-                            None,
-                        );
-
-                        // Apply optional rotation (XYZ Euler radians) and
-                        // scale (per-axis), mirroring `TransformConfig`
-                        // semantics from the static `[[entity]]` schema.
-                        // `spawn_entity` only set translation; we overwrite
-                        // the Transform with translation + rotation + scale
-                        // when either is supplied.
-                        if rotation.is_some() || scale.is_some() {
-                            let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
-                            let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
-                            let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
-                            let scale_vec = Vec3::new(sx, sy, sz);
-                            commands.entity(spawned).insert(Transform {
-                                translation: pos_vec,
-                                rotation: quat,
-                                scale: scale_vec,
-                            });
-                        }
-
-                        // Register name ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ uuid for subsequent triggers.
-                        runtime.name_to_uuid.insert(name.clone(), uuid);
-
-                        // Register entity in groups for OnAllDestroyed tracking.
-                        for g in groups {
-                            runtime
-                                .entity_groups
-                                .entry(g.clone())
-                                .or_default()
-                                .insert(name.clone());
-                        }
-
-                        // Attach to the parent layer's spawned_entities so
-                        // `UnloadWorld` despawns the entity (base-world
-                        // origin: entity just persists for the session).
-                        if let (Some(layer_path), Some(ref mut lm)) =
-                            (&ft.origin_layer, &mut layer_map)
-                        {
-                            if let Some(layer) = lm.0.get_mut(layer_path) {
-                                layer.spawned_entities.push(spawned);
-                            }
-                        }
-                    }
-                    TriggerAction::DestroyEntity { entity } => {
-                        let uuid = match runtime.name_to_uuid.get(entity) {
-                            Some(u) => u.clone(),
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: DestroyEntity: unknown entity name '{entity}'"
-                                );
-                                continue;
-                            }
-                        };
-                        // Find the Bevy entity with that UUID.
-                        let mut target_entity: Option<Entity> = None;
-                        for (ent, uuid_comp) in entity_uuid_query.iter() {
-                            if uuid_comp.0 == uuid {
-                                target_entity = Some(ent);
-                                break;
-                            }
-                        }
-                        // Push into our local pipeline so chained
-                        // on_destroyed triggers in the same frame fire.
-                        // We deliberately do NOT use
-                        // MessageWriter<AiEntityDestroyed> directly here
-                        // because this system already holds the matching
-                        // reader, which would trigger Bevy's B0002 access
-                        // check. Instead, defer the message write via a
-                        // command so it runs after this system exits and
-                        // external consumers (telemetry, save/load,
-                        // achievements) observe script-killed entities the
-                        // same as combat-killed ones.
-                        next_events.push(WorldEvent::Destroyed { uuid: uuid.clone() });
-                        let msg_uuid = uuid.clone();
-                        commands.queue(move |world: &mut World| {
-                            if let Some(mut msgs) = world
-                                .get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
-                            {
-                                msgs.write(crate::ai_plugin::AiEntityDestroyed {
-                                    entity_uuid: msg_uuid,
-                                });
-                            }
-                        });
-                        // Despawn the underlying entity if we found it.
-                        if let Some(ent) = target_entity {
-                            commands.entity(ent).try_despawn();
-                        }
-                    }
-                    TriggerAction::AddFactionEnemy { faction, enemy } => {
-                        let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: AddFactionEnemy skipped: FactionRegistryResource not present"
-                            );
-                            continue;
-                        };
-                        let faction_uuid = match registry.0.uuid_by_name(faction) {
-                            Some(u) => u,
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: AddFactionEnemy: unknown faction name '{faction}'"
-                                );
-                                continue;
-                            }
-                        };
-                        let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                            Some(u) => u,
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: AddFactionEnemy: unknown enemy faction name '{enemy}'"
-                                );
-                                continue;
-                            }
-                        };
-                        // Idempotent: returns false if `enemy_uuid` is
-                        // already listed. Either way no target re-validation
-                        // is needed because adding a new hostility cannot
-                        // invalidate an existing engagement Ã¢â‚¬â€ the next
-                        // `enemy_in_range` tick organically picks up the
-                        // new relationship.
-                        registry.0.add_enemy(faction_uuid, enemy_uuid);
-                    }
-                    TriggerAction::RemoveFactionEnemy { faction, enemy } => {
-                        let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                            bevy::log::warn!(
-                                "handle_ai_events: RemoveFactionEnemy skipped: FactionRegistryResource not present"
-                            );
-                            continue;
-                        };
-                        let faction_uuid = match registry.0.uuid_by_name(faction) {
-                            Some(u) => u,
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: RemoveFactionEnemy: unknown faction name '{faction}'"
-                                );
-                                continue;
-                            }
-                        };
-                        let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                            Some(u) => u,
-                            None => {
-                                bevy::log::warn!(
-                                    "handle_ai_events: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
-                                );
-                                continue;
-                            }
-                        };
-                        let removed = registry.0.remove_enemy(faction_uuid, enemy_uuid);
-                        if removed {
-                            // Snapshot every AI controller's own faction
-                            // BEFORE we take the &mut on the query for
-                            // re-validation. `iter()` on a `&mut Query`
-                            // yields immutable refs so no borrow conflict
-                            // with the subsequent `iter_mut()`.
-                            let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
-                                .iter()
-                                .filter_map(|(uid, _, fc)| {
-                                    let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
-                                    fc.map(|fc| (self_uuid, fc.0))
-                                })
-                                .collect();
-                            let uuid_to_faction = build_uuid_to_faction(
-                                &faction_dispatch.non_ai_factions,
-                                &ai_factions,
-                            );
-                            revalidate_ai_targets_after_faction_change(
-                                &mut ai_query,
-                                &registry.0,
-                                &uuid_to_faction,
-                            );
-                        }
-                    }
-                }
+                // Applied before the next action is dispatched, so the next
+                // `DispatchContext` observes this action's writes. `new_events`
+                // route into this pass's `next_events` — i.e. the next chaining
+                // pass of the SAME tick (`tick_delayed_actions` instead queues
+                // them onto `runtime.pending_world_events` for the next tick).
+                apply_dispatch_result(
+                    result,
+                    "handle_ai_events",
+                    &mut next_events,
+                    &uuid_to_entity,
+                    &mut runtime,
+                    &mut objectives,
+                    &mut commands,
+                    &mut ship_modifiers,
+                    pending_layers.as_deref_mut(),
+                    layer_map.as_deref_mut(),
+                    next_state.as_deref_mut(),
+                    game_over_reason.as_deref_mut(),
+                    &mut faction_dispatch,
+                    &mut ai_query,
+                );
             }
         }
 
         if next_events.is_empty() {
             break;
         }
-        if pass >= max_passes {
+        if pass >= MAX_CHAIN_PASSES {
             bevy::log::warn!(
-                "handle_ai_events: trigger chain exceeded {max_passes} passes; \
+                "handle_ai_events: trigger chain exceeded {MAX_CHAIN_PASSES} passes; \
                  stopping to prevent infinite loop"
             );
             break;
@@ -2092,538 +1578,503 @@ fn handle_ai_events(
     }
 }
 
-/// Dispatch a single `TriggerAction` using the provided execution context.
+/// Project the live `WorldLayerMap` into the read-only `LayerView`s that
+/// `dispatch_action` reads.
 ///
-/// This is the shared action-dispatch path used by both `handle_ai_events` (for
-/// immediate actions) and `tick_delayed_actions` (for `action_delays` queue).
+/// Called once per action rather than once per pass: `LayerView::flags` must be
+/// the *live* per-layer store so that a flag mutation applied earlier in this
+/// same pass is visible to the next action's before/after preview. See
+/// `DispatchContext::base_flags` for why that matters.
+fn project_layer_views(layer_map: Option<&WorldLayerMap>) -> HashMap<String, LayerView> {
+    layer_map
+        .map(|lm| {
+            lm.0.iter()
+                .map(|(path, wr)| {
+                    (
+                        path.clone(),
+                        LayerView {
+                            flags: wr.flags.clone(),
+                            loader_path: wr.loader_path.clone(),
+                            anchors: wr.anchors.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Resolve a dispatched UUID to its target entity's `ShipModifiers` component.
 ///
-/// All parameters are consumed/borrowed directly to avoid lifetime issues when
-/// called from `tick_delayed_actions`, which re-builds `uuid_to_entity` each tick
-/// rather than capturing a handle-ai-events-local binding.
+/// The pure layer resolves entity *name* -> *UUID* and stops there (writing a
+/// component is irreducibly impure), so the last two hops — UUID -> `Entity` ->
+/// component — land here. `what` names the calling action for the warn text.
+fn world_modifiers<'a>(
+    ship_modifiers: &'a mut ShipModifiersParams,
+    uuid_to_entity: &HashMap<String, Entity>,
+    uuid: &str,
+    log_ctx: &str,
+    what: &str,
+) -> Option<Mut<'a, crate::modifiers::ShipModifiers>> {
+    let Some(target) = uuid_to_entity.get(uuid).copied() else {
+        bevy::log::warn!("{log_ctx}: {what}: no ECS entity with UUID '{uuid}'");
+        return None;
+    };
+    match ship_modifiers.components.get_mut(target) {
+        Ok(mods) => Some(mods),
+        Err(_) => {
+            bevy::log::warn!(
+                "{log_ctx}: {what}: entity with UUID '{uuid}' has no ShipModifiers component"
+            );
+            None
+        }
+    }
+}
+
+/// Rebuild the `ModifierSource::World` that identifies a world-applied modifier.
+///
+/// Not a tunable value: this identity is what lets a later `RemoveModifier`
+/// find what an earlier `ApplyModifier` added.
+fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
+    crate::messages::ModifierSource::World {
+        id: WORLD_MODIFIER_SOURCE_ID.to_string(),
+        tag,
+    }
+}
+
+/// Perform everything one `DispatchResult` decided.
+///
+/// The impure half of the dispatch table (issue #710): `world::dispatch` decides
+/// *what* should happen from read-only data, and this turns that into ECS
+/// mutations. It is the shared apply path for both `handle_ai_events` (immediate
+/// actions) and `tick_delayed_actions` (delayed ones).
+///
+/// The one thing callers must decide for themselves is where `new_events` go, so
+/// they are written to the caller's `events_out`: `handle_ai_events` points that
+/// at the current pass's `next_events` (same tick, next chaining pass), whereas
+/// `tick_delayed_actions` drains it into `runtime.pending_world_events` (next
+/// tick). Same events, different destination.
+///
+/// `log_ctx` prefixes the pure layer's `warnings` so each message still names
+/// the system it came from.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn dispatch_single_action(
-    action: &TriggerAction,
-    origin_layer: &Option<String>,
-    entity_name: &Option<String>,
-    name_to_uuid: &HashMap<String, String>,
-    uuid_to_entity: &std::collections::HashMap<String, Entity>,
+fn apply_dispatch_result(
+    result: DispatchResult,
+    log_ctx: &str,
+    events_out: &mut Vec<WorldEvent>,
+    uuid_to_entity: &HashMap<String, Entity>,
     runtime: &mut WorldContentRuntime,
     objectives: &mut ObjectiveManagerRes,
-    mut pending_layers: Option<&mut PendingWorldLayerChanges>,
-    mut layer_map: Option<&mut WorldLayerMap>,
-    base_world_config: Option<&crate::world::config::WorldConfig>,
-    entity_uuid_query: &Query<(Entity, &EntityUuid)>,
     commands: &mut Commands,
     ship_modifiers: &mut ShipModifiersParams,
+    mut pending_layers: Option<&mut PendingWorldLayerChanges>,
+    mut layer_map: Option<&mut WorldLayerMap>,
     mut next_state: Option<&mut NextState<GamePhase>>,
     mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,
     faction_dispatch: &mut FactionDispatchParams,
+    ai_query: &mut Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
 ) {
-    match action {
-        TriggerAction::AddObjective {
-            id,
-            text,
-            mandatory,
-            targets,
-            directive,
-            utility,
-            source,
-        } => {
-            let resolved = if targets.is_empty() {
-                entity_name.clone().into_iter().collect()
-            } else {
-                targets.clone()
-            };
-            objectives.0.add_full(
-                id.clone(),
-                text.clone(),
-                *mandatory,
-                resolved,
-                directive.clone(),
-                utility.clone(),
-                source.clone(),
-            );
-        }
-        TriggerAction::CompleteObjective { id } => {
-            objectives.0.complete(id);
-        }
-        TriggerAction::FailObjective { id } => {
-            objectives.0.fail(id);
-        }
-        TriggerAction::SetAiState {
-            entity,
-            state,
-            target: _,
-        } => {
-            bevy::log::warn!(
-                "dispatch_single_action: SetAiState('{entity}' → '{state}') ignored — doctrine-based AI"
-            );
-        }
-        TriggerAction::ApplyModifier {
-            entity,
-            tag,
-            slot,
-            bonus,
-        } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyModifier: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyModifier: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.add_or_update(crate::modifiers::Modifier {
-                source: crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                slot: slot.clone(),
-                bonus: *bonus,
-            });
-        }
-        TriggerAction::RemoveModifier { entity, tag, slot } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveModifier: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveModifier: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.remove(
-                &crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                slot,
-            );
-        }
-        TriggerAction::ApplyFlag { entity, tag, kind } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyFlag: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyFlag: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.add_flag(
-                crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                kind.clone(),
-            );
-        }
-        TriggerAction::RemoveFlag { entity, tag, kind } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveFlag: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveFlag: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveFlag: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.remove_flag(
-                crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                kind.clone(),
-            );
-        }
-        TriggerAction::ApplyIntModifier {
-            entity,
-            tag,
-            slot,
-            bonus,
-        } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyIntModifier: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: ApplyIntModifier: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.add_or_update_int(crate::modifiers::IntModifier {
-                source: crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                slot: slot.clone(),
-                bonus: *bonus,
-            });
-        }
-        TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-            let Some(uuid) = name_to_uuid.get(entity) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveIntModifier: unknown entity name '{entity}'"
-                );
-                return;
-            };
-            let Some(target) = uuid_to_entity.get(uuid).copied() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveIntModifier: no ECS entity with UUID '{uuid}' for name '{entity}'"
-                );
-                return;
-            };
-            let Ok(mut mods) = ship_modifiers.components.get_mut(target) else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveIntModifier: entity '{entity}' has no ShipModifiers component"
-                );
-                return;
-            };
-            mods.remove_int(
-                &crate::messages::ModifierSource::World {
-                    id: "world".to_string(),
-                    tag: tag.clone(),
-                },
-                slot,
-            );
-        }
-        TriggerAction::GameOver { message } => {
-            let reason = message.clone().unwrap_or_default();
-            if let Some(ref mut gr) = game_over_reason {
-                gr.0 = Some(reason);
+    let DispatchResult {
+        commands: action_cmds,
+        new_events,
+        name_to_uuid_inserts,
+        entity_group_inserts,
+        warnings,
+    } = result;
+
+    for warning in warnings {
+        bevy::log::warn!("{log_ctx}: {warning}");
+    }
+
+    events_out.extend(new_events);
+
+    // `name_to_uuid_inserts` / `entity_group_inserts` are contingent on the
+    // accompanying `SpawnEntity` command actually spawning — template loading is
+    // still the applier's job (issue #715 moves it into the pure layer), so the
+    // pure layer cannot know whether the spawn resolved. Registering a name for
+    // an entity that never spawned would leave a phantom name -> uuid entry, and
+    // a later `DestroyEntity` would then emit `WorldEvent::Destroyed` for a
+    // ghost, firing `on_destroyed` triggers for an entity that never existed.
+    let mut spawn_failed = false;
+
+    for cmd in action_cmds {
+        match cmd {
+            ActionCmd::AddObjective {
+                id,
+                text,
+                mandatory,
+                targets,
+                directive,
+                utility,
+                source,
+            } => {
+                objectives
+                    .0
+                    .add_full(id, text, mandatory, targets, directive, utility, source);
             }
-            if let Some(ref mut ns) = next_state {
-                ns.set(GamePhase::GameOver);
+
+            ActionCmd::CompleteObjective { id } => {
+                objectives.0.complete(&id);
             }
-        }
-        TriggerAction::LoadWorld { path } => {
-            if let Some(ref mut lc) = pending_layers {
-                lc.0.push(WorldLayerChange::Load {
-                    path: path.clone(),
-                    loader_path: origin_layer.clone(),
+
+            ActionCmd::FailObjective { id } => {
+                objectives.0.fail(&id);
+            }
+
+            ActionCmd::ApplyModifier {
+                uuid,
+                tag,
+                slot,
+                bonus,
+            } => {
+                let Some(mut mods) = world_modifiers(
+                    ship_modifiers,
+                    uuid_to_entity,
+                    &uuid,
+                    log_ctx,
+                    "ApplyModifier",
+                ) else {
+                    continue;
+                };
+                mods.add_or_update(crate::modifiers::Modifier {
+                    source: world_modifier_source(tag),
+                    slot,
+                    bonus,
                 });
             }
-        }
-        TriggerAction::UnloadWorld { path } => {
-            if let Some(ref mut lc) = pending_layers {
-                lc.0.push(WorldLayerChange::Unload(path.clone()));
-            }
-        }
-        TriggerAction::SetWorldFlag { name } => {
-            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                &mut runtime.flags,
-                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                origin_layer,
-                name,
-                FlagMutation::Set,
-            ) {
-                let mut next_events: Vec<WorldEvent> = Vec::new();
-                emit_flag_transition(&mut next_events, &stripped, &target_layer, before, after);
-                runtime.pending_world_events.extend(next_events);
-            }
-        }
-        TriggerAction::ClearWorldFlag { name } => {
-            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                &mut runtime.flags,
-                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                origin_layer,
-                name,
-                FlagMutation::Clear,
-            ) {
-                let mut next_events: Vec<WorldEvent> = Vec::new();
-                emit_flag_transition(&mut next_events, &stripped, &target_layer, before, after);
-                runtime.pending_world_events.extend(next_events);
-            }
-        }
-        TriggerAction::IncrementWorldFlag { name, by } => {
-            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                &mut runtime.flags,
-                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                origin_layer,
-                name,
-                FlagMutation::Increment(*by),
-            ) {
-                let mut next_events: Vec<WorldEvent> = Vec::new();
-                emit_flag_transition(&mut next_events, &stripped, &target_layer, before, after);
-                runtime.pending_world_events.extend(next_events);
-            }
-        }
-        TriggerAction::SetWorldFlagValue { name, value } => {
-            if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
-                &mut runtime.flags,
-                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                origin_layer,
-                name,
-                FlagMutation::SetValue(*value),
-            ) {
-                let mut next_events: Vec<WorldEvent> = Vec::new();
-                emit_flag_transition(&mut next_events, &stripped, &target_layer, before, after);
-                runtime.pending_world_events.extend(next_events);
-            }
-        }
-        TriggerAction::SpawnEntity {
-            template_path,
-            name,
-            anchor,
-            position,
-            rotation,
-            scale,
-            groups,
-        } => {
-            let pos_arr: [f32; 3] = if let Some(pos) = position {
-                *pos
-            } else if let Some(anchor_name) = anchor {
-                let lookup = match origin_layer {
-                    Some(layer_path) => layer_map
-                        .as_ref()
-                        .and_then(|lm| lm.0.get(layer_path))
-                        .map(|wr| wr.anchors.get(anchor_name).copied())
-                        .unwrap_or(None),
-                    None => base_world_config.and_then(|wc| wc.anchors.get(anchor_name).copied()),
-                };
-                match lookup {
-                    Some(p) => p,
-                    None => {
-                        bevy::log::warn!(
-                            "dispatch_single_action: SpawnEntity '{name}' anchor '{anchor_name}' not found"
-                        );
-                        return;
-                    }
-                }
-            } else {
-                bevy::log::warn!(
-                    "dispatch_single_action: SpawnEntity '{name}' has neither anchor nor position"
-                );
-                return;
-            };
 
-            let config_cache = crate::config_cache::get_config_cache();
-            let template_inst = crate::world::config::WorldEntity {
-                template_path: template_path.clone(),
-                ..Default::default()
-            };
-            let entity_config = match crate::entity_loader::resolve_entity(
-                &template_inst,
-                &config_cache,
-            ) {
-                Ok(c) => c,
-                Err(e) => {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        match std::fs::read_to_string(template_path) {
-                            Ok(toml_str) => {
-                                match crate::entity_config::EntityConfig::from_toml(&toml_str) {
-                                    Ok(c) => c,
-                                    Err(err) => {
-                                        bevy::log::warn!(
-                                            "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
-                                        );
-                                        return;
+            ActionCmd::RemoveModifier { uuid, tag, slot } => {
+                let Some(mut mods) = world_modifiers(
+                    ship_modifiers,
+                    uuid_to_entity,
+                    &uuid,
+                    log_ctx,
+                    "RemoveModifier",
+                ) else {
+                    continue;
+                };
+                mods.remove(&world_modifier_source(tag), &slot);
+            }
+
+            ActionCmd::ApplyFlag { uuid, tag, kind } => {
+                let Some(mut mods) =
+                    world_modifiers(ship_modifiers, uuid_to_entity, &uuid, log_ctx, "ApplyFlag")
+                else {
+                    continue;
+                };
+                mods.add_flag(world_modifier_source(tag), kind);
+            }
+
+            ActionCmd::RemoveFlag { uuid, tag, kind } => {
+                let Some(mut mods) =
+                    world_modifiers(ship_modifiers, uuid_to_entity, &uuid, log_ctx, "RemoveFlag")
+                else {
+                    continue;
+                };
+                mods.remove_flag(world_modifier_source(tag), kind);
+            }
+
+            ActionCmd::ApplyIntModifier {
+                uuid,
+                tag,
+                slot,
+                bonus,
+            } => {
+                let Some(mut mods) = world_modifiers(
+                    ship_modifiers,
+                    uuid_to_entity,
+                    &uuid,
+                    log_ctx,
+                    "ApplyIntModifier",
+                ) else {
+                    continue;
+                };
+                mods.add_or_update_int(crate::modifiers::IntModifier {
+                    source: world_modifier_source(tag),
+                    slot,
+                    bonus,
+                });
+            }
+
+            ActionCmd::RemoveIntModifier { uuid, tag, slot } => {
+                let Some(mut mods) = world_modifiers(
+                    ship_modifiers,
+                    uuid_to_entity,
+                    &uuid,
+                    log_ctx,
+                    "RemoveIntModifier",
+                ) else {
+                    continue;
+                };
+                mods.remove_int(&world_modifier_source(tag), &slot);
+            }
+
+            // Always applied before `SetNextState` below —
+            // `OnEnter(GamePhase::GameOver)` reads the reason resource.
+            ActionCmd::SetGameOverReason { reason } => {
+                if let Some(gr) = game_over_reason.as_deref_mut() {
+                    gr.0 = Some(reason);
+                }
+            }
+
+            ActionCmd::SetNextState { phase } => {
+                if let Some(ns) = next_state.as_deref_mut() {
+                    ns.set(phase);
+                }
+            }
+
+            ActionCmd::LoadWorld { path, loader_path } => {
+                if let Some(lc) = pending_layers.as_deref_mut() {
+                    lc.0.push(WorldLayerChange::Load { path, loader_path });
+                }
+            }
+
+            ActionCmd::UnloadWorld { path } => {
+                if let Some(lc) = pending_layers.as_deref_mut() {
+                    lc.0.push(WorldLayerChange::Unload(path));
+                }
+            }
+
+            // `target_layer` and `name` arrive already resolved: `parent:`
+            // prefixes are stripped and walked, and the layer was proved to
+            // exist against the same projection this applier writes to. The
+            // transition event (if any) is already in `events_out`.
+            ActionCmd::MutateFlag {
+                target_layer,
+                name,
+                mutation,
+            } => {
+                let store = match &target_layer {
+                    None => Some(&mut runtime.flags),
+                    Some(path) => layer_map
+                        .as_deref_mut()
+                        .and_then(|lm| lm.0.get_mut(path))
+                        .map(|wr| &mut wr.flags),
+                };
+                let Some(store) = store else {
+                    bevy::log::warn!(
+                        "{log_ctx}: MutateFlag: target layer {target_layer:?} missing from \
+                         WorldLayerMap — ignoring '{name}'"
+                    );
+                    continue;
+                };
+                match mutation {
+                    crate::world::dispatch::FlagMutation::Set => store.set_flag(&name),
+                    crate::world::dispatch::FlagMutation::Clear => store.clear_flag(&name),
+                    crate::world::dispatch::FlagMutation::Increment(by) => {
+                        store.increment_flag(&name, by)
+                    }
+                    crate::world::dispatch::FlagMutation::SetValue(v) => {
+                        store.set_flag_value(&name, v)
+                    }
+                };
+            }
+
+            ActionCmd::SpawnEntity {
+                template_path,
+                name,
+                uuid,
+                position,
+                rotation,
+                scale,
+                groups: _,
+                layer_path,
+            } => {
+                // Template loading stays here for now (issue #715 moves it into
+                // the pure layer behind a `TemplateLoader`). A failure here is
+                // what makes the name / group registrations contingent.
+                let config_cache = crate::config_cache::get_config_cache();
+                let template_inst = crate::world::config::WorldEntity {
+                    template_path: template_path.clone(),
+                    ..Default::default()
+                };
+                let entity_config = match crate::entity_loader::resolve_entity(
+                    &template_inst,
+                    &config_cache,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        // Native fallback: try reading from disk.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            match std::fs::read_to_string(&template_path) {
+                                Ok(toml_str) => {
+                                    match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                        Ok(c) => c,
+                                        Err(err) => {
+                                            bevy::log::warn!(
+                                                    "{log_ctx}: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
+                                                );
+                                            spawn_failed = true;
+                                            continue;
+                                        }
                                     }
                                 }
-                            }
-                            Err(_) => {
-                                bevy::log::warn!(
-                                    "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
-                                );
-                                return;
+                                Err(_) => {
+                                    bevy::log::warn!(
+                                            "{log_ctx}: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
+                                        );
+                                    spawn_failed = true;
+                                    continue;
+                                }
                             }
                         }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            bevy::log::warn!(
+                                    "{log_ctx}: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
+                                );
+                            spawn_failed = true;
+                            continue;
+                        }
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        bevy::log::warn!(
-                            "dispatch_single_action: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
-                        );
-                        return;
-                    }
+                };
+
+                let pos_vec = Vec3::new(position[0], position[1], position[2]);
+                // Patch the entity name with the trigger's `name` field so the
+                // spawned ECS entity gets EntityName("wave_1") (not the
+                // template's display name like "Harrow Destroyer"). This mirrors
+                // what `spawn_world_entities` does for static `[[entity]]`
+                // entries and is required for `resolve_objective_target` to
+                // match Destroy directives by the scenario name.
+                let mut entity_config = entity_config;
+                if !name.is_empty() {
+                    entity_config.name = Some(name.clone());
                 }
-            };
+                let spawned = crate::entity_spawner::spawn_entity(
+                    commands,
+                    &entity_config,
+                    pos_vec,
+                    uuid,
+                    None,
+                );
 
-            let uuid = crate::entity_loader::assign_uuid();
-            let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
-            let mut entity_config = entity_config;
-            if !name.is_empty() {
-                entity_config.name = Some(name.clone());
-            }
-            let spawned = crate::entity_spawner::spawn_entity(
-                commands,
-                &entity_config,
-                pos_vec,
-                uuid.clone(),
-                None,
-            );
-
-            if rotation.is_some() || scale.is_some() {
-                let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
-                let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
-                let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
-                let scale_vec = Vec3::new(sx, sy, sz);
-                commands.entity(spawned).insert(Transform {
-                    translation: pos_vec,
-                    rotation: quat,
-                    scale: scale_vec,
-                });
-            }
-
-            runtime.name_to_uuid.insert(name.clone(), uuid);
-
-            for g in groups {
-                runtime
-                    .entity_groups
-                    .entry(g.clone())
-                    .or_default()
-                    .insert(name.clone());
-            }
-
-            if let (Some(layer_path), Some(ref mut lm)) = (origin_layer, &mut layer_map) {
-                if let Some(layer) = lm.0.get_mut(layer_path) {
-                    layer.spawned_entities.push(spawned);
-                }
-            }
-        }
-        TriggerAction::DestroyEntity { entity } => {
-            let uuid = match runtime.name_to_uuid.get(entity) {
-                Some(u) => u.clone(),
-                None => {
-                    bevy::log::warn!(
-                        "dispatch_single_action: DestroyEntity: unknown entity name '{entity}'"
-                    );
-                    return;
-                }
-            };
-            let mut target_entity: Option<Entity> = None;
-            for (ent, uuid_comp) in entity_uuid_query.iter() {
-                if uuid_comp.0 == uuid {
-                    target_entity = Some(ent);
-                    break;
-                }
-            }
-            runtime
-                .pending_world_events
-                .push(WorldEvent::Destroyed { uuid: uuid.clone() });
-            let msg_uuid = uuid.clone();
-            commands.queue(move |world: &mut World| {
-                if let Some(mut msgs) =
-                    world.get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
-                {
-                    msgs.write(crate::ai_plugin::AiEntityDestroyed {
-                        entity_uuid: msg_uuid,
+                // Apply optional rotation (XYZ Euler radians) and scale
+                // (per-axis), mirroring `TransformConfig` semantics from the
+                // static `[[entity]]` schema. `spawn_entity` only set
+                // translation; overwrite the whole Transform when either is
+                // supplied.
+                if rotation.is_some() || scale.is_some() {
+                    let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
+                    let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
+                    let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
+                    commands.entity(spawned).insert(Transform {
+                        translation: pos_vec,
+                        rotation: quat,
+                        scale: Vec3::new(sx, sy, sz),
                     });
                 }
-            });
-            if let Some(ent) = target_entity {
-                commands.entity(ent).try_despawn();
+
+                // Attach to the authoring layer's spawned_entities so
+                // `UnloadWorld` despawns the entity (base-world origin: the
+                // entity just persists for the session).
+                if let (Some(path), Some(lm)) = (&layer_path, layer_map.as_deref_mut()) {
+                    if let Some(layer) = lm.0.get_mut(path) {
+                        layer.spawned_entities.push(spawned);
+                    }
+                }
+            }
+
+            ActionCmd::DestroyEntity { uuid } => {
+                let target_entity = uuid_to_entity.get(&uuid).copied();
+                // The matching `WorldEvent::Destroyed` is already in
+                // `events_out` so chained `on_destroyed` triggers fire.
+                //
+                // We deliberately do NOT use `MessageWriter<AiEntityDestroyed>`
+                // directly: `handle_ai_events` already holds the matching
+                // reader, which would trip Bevy's B0002 access check. Deferring
+                // the write via a command runs it after the system exits, so
+                // external consumers (telemetry, save/load, achievements)
+                // observe script-killed entities the same as combat-killed ones.
+                commands.queue(move |world: &mut World| {
+                    if let Some(mut msgs) =
+                        world.get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+                    {
+                        msgs.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: uuid });
+                    }
+                });
+                if let Some(ent) = target_entity {
+                    commands.entity(ent).try_despawn();
+                }
+            }
+
+            ActionCmd::AddFactionEnemy {
+                faction_uuid,
+                enemy_uuid,
+            } => {
+                let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: AddFactionEnemy skipped: FactionRegistryResource not present"
+                    );
+                    continue;
+                };
+                // Idempotent: returns false if `enemy_uuid` is already listed.
+                // Either way no target re-validation is needed, because adding a
+                // hostility cannot invalidate an existing engagement — the next
+                // `enemy_in_range` tick organically picks the new relationship
+                // up. `RemoveFactionEnemy` below is deliberately asymmetric.
+                registry.0.add_enemy(faction_uuid, enemy_uuid);
+            }
+
+            ActionCmd::RemoveFactionEnemy {
+                faction_uuid,
+                enemy_uuid,
+            } => {
+                let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
+                    bevy::log::warn!(
+                        "{log_ctx}: RemoveFactionEnemy skipped: FactionRegistryResource not present"
+                    );
+                    continue;
+                };
+                let removed = registry.0.remove_enemy(faction_uuid, enemy_uuid);
+                if removed {
+                    // Snapshot every AI controller's own faction BEFORE taking
+                    // the &mut on the query for re-validation. `iter()` on a
+                    // `&mut Query` yields immutable refs, so there is no borrow
+                    // conflict with the subsequent `iter_mut()`.
+                    let ai_factions: Vec<(uuid::Uuid, uuid::Uuid)> = ai_query
+                        .iter()
+                        .filter_map(|(uid, _, fc)| {
+                            let self_uuid = uuid::Uuid::parse_str(&uid.0).ok()?;
+                            fc.map(|fc| (self_uuid, fc.0))
+                        })
+                        .collect();
+                    let uuid_to_faction =
+                        build_uuid_to_faction(&faction_dispatch.non_ai_factions, &ai_factions);
+                    revalidate_ai_targets_after_faction_change(
+                        ai_query,
+                        &registry.0,
+                        &uuid_to_faction,
+                    );
+                }
             }
         }
-        TriggerAction::AddFactionEnemy { faction, enemy } => {
-            let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: AddFactionEnemy skipped: FactionRegistryResource not present"
-                );
-                return;
-            };
-            let faction_uuid = match registry.0.uuid_by_name(faction) {
-                Some(u) => u,
-                None => {
-                    bevy::log::warn!(
-                        "dispatch_single_action: AddFactionEnemy: unknown faction name '{faction}'"
-                    );
-                    return;
-                }
-            };
-            let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                Some(u) => u,
-                None => {
-                    bevy::log::warn!(
-                        "dispatch_single_action: AddFactionEnemy: unknown enemy faction name '{enemy}'"
-                    );
-                    return;
-                }
-            };
-            registry.0.add_enemy(faction_uuid, enemy_uuid);
+    }
+
+    if !spawn_failed {
+        for (name, uuid) in name_to_uuid_inserts {
+            runtime.name_to_uuid.insert(name, uuid);
         }
-        TriggerAction::RemoveFactionEnemy { faction, enemy } => {
-            let Some(registry) = faction_dispatch.registry.as_deref_mut() else {
-                bevy::log::warn!(
-                    "dispatch_single_action: RemoveFactionEnemy skipped: FactionRegistryResource not present"
-                );
-                return;
-            };
-            let faction_uuid = match registry.0.uuid_by_name(faction) {
-                Some(u) => u,
-                None => {
-                    bevy::log::warn!(
-                        "dispatch_single_action: RemoveFactionEnemy: unknown faction name '{faction}'"
-                    );
-                    return;
-                }
-            };
-            let enemy_uuid = match registry.0.uuid_by_name(enemy) {
-                Some(u) => u,
-                None => {
-                    bevy::log::warn!(
-                        "dispatch_single_action: RemoveFactionEnemy: unknown enemy faction name '{enemy}'"
-                    );
-                    return;
-                }
-            };
-            registry.0.remove_enemy(faction_uuid, enemy_uuid);
+        for (group, name) in entity_group_inserts {
+            runtime.entity_groups.entry(group).or_default().insert(name);
         }
     }
 }
 
 /// Drain actions from `pending_delayed_actions` whose `fire_at_elapsed` has
-/// elapsed and dispatch them via `dispatch_single_action`.
+/// elapsed and dispatch them through the same `world::dispatch` table
+/// `handle_ai_events` uses.
 ///
 /// Registered after `handle_ai_events` in `SimSet::Physics` so that it sees
 /// the same tick's `world_loaded_at_secs` anchor.
+#[allow(clippy::too_many_arguments)]
 fn tick_delayed_actions(
     mut runtime: ResMut<WorldContentRuntime>,
     time: Option<Res<bevy::time::Time>>,
@@ -2637,6 +2088,20 @@ fn tick_delayed_actions(
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
+    // Issue #710: `RemoveFactionEnemy` re-validates AI targets after a
+    // successful removal. The immediate path always did; the delayed path did
+    // not, because the old duplicated dispatch table it called had no
+    // `ai_query` — a latent bug that let a delayed `remove_faction_enemy` leave
+    // an in-progress engagement stuck on a now-friendly target. Both paths now
+    // share one table, so both re-validate.
+    mut ai_query: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
         runtime
@@ -2655,7 +2120,7 @@ fn tick_delayed_actions(
         .map(|(ent, uuid_comp)| (uuid_comp.0.clone(), ent))
         .collect();
 
-    let name_to_uuid = runtime.name_to_uuid.clone();
+    let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
 
     let mut ready: Vec<DelayedAction> = Vec::new();
     let mut still_pending: Vec<DelayedAction> = Vec::new();
@@ -2669,24 +2134,48 @@ fn tick_delayed_actions(
     runtime.pending_delayed_actions = still_pending;
 
     for pda in ready {
-        dispatch_single_action(
-            &pda.action,
-            &pda.origin_layer,
-            &pda.entity_name,
-            &name_to_uuid,
+        // Same live-store rule as `handle_ai_events`: re-project per action so
+        // each dispatch sees the previous one's writes.
+        let name_to_uuid = runtime.name_to_uuid.clone();
+        let layers = project_layer_views(layer_map.as_deref());
+        let result = {
+            let ctx = DispatchContext {
+                origin_layer: pda.origin_layer.clone(),
+                entity_name: pda.entity_name.clone(),
+                name_to_uuid: &name_to_uuid,
+                base_flags: &runtime.flags,
+                layers: &layers,
+                base_anchors: base_world_config
+                    .as_ref()
+                    .map(|wc| &wc.anchors)
+                    .unwrap_or(&empty_anchors),
+                factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
+                uuid_source: &crate::entity_loader::assign_uuid,
+            };
+            dispatch_action(&pda.action, &ctx)
+        };
+
+        // Unlike `handle_ai_events`, a delayed action's `new_events` are queued
+        // for the NEXT tick: this system runs after `handle_ai_events` has
+        // already drained `pending_world_events` for this one.
+        let mut out_events: Vec<WorldEvent> = Vec::new();
+        apply_dispatch_result(
+            result,
+            "tick_delayed_actions",
+            &mut out_events,
             &uuid_to_entity,
             &mut runtime,
             &mut objectives,
-            pending_layers.as_deref_mut(),
-            layer_map.as_deref_mut(),
-            base_world_config.as_deref(),
-            &entity_uuid_query,
             &mut commands,
             &mut ship_modifiers,
+            pending_layers.as_deref_mut(),
+            layer_map.as_deref_mut(),
             next_state.as_deref_mut(),
             game_over_reason.as_deref_mut(),
             &mut faction_dispatch,
+            &mut ai_query,
         );
+        runtime.pending_world_events.extend(out_events);
     }
 }
 
@@ -3615,6 +3104,134 @@ pub(crate) mod tests {
         app.world_mut()
             .insert_resource(State::new(GamePhase::InProgress));
         app
+    }
+
+    /// Issue #710: the `DispatchContext` flag stores must be the LIVE ones, not
+    /// `handle_ai_events`' per-pass `base_flags_snapshot` (which exists for
+    /// condition evaluation only). `dispatch_action` computes before/after
+    /// against them to decide whether a transition event fires at all, so a
+    /// snapshot silently drops transitions.
+    ///
+    /// Set-then-clear in a single pass is the discriminating case: against the
+    /// live store the clear reads before = 1 and emits `FlagCleared`; against a
+    /// snapshot it reads before = 0, sees no change, and emits nothing. The
+    /// sibling case — two triggers both `set_flag` the same flag
+    /// (`assets/worlds/before_the_fire.toml:276`) — is not observable here,
+    /// because a duplicated `FlagSet` is masked by single-shot trigger firing.
+    #[test]
+    fn flag_stores_handed_to_dispatch_are_live_within_a_pass() {
+        let mut app = ai_trigger_test_app();
+        let npc_uuid = "src-uuid-001";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
+            let mk = |condition, actions| TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition,
+                    actions,
+                    when: None,
+                    action_predicates: vec![],
+                    action_delays: vec![],
+                },
+                fired: false,
+                origin_layer: None,
+                seen_destroyed: HashSet::new(),
+            };
+            runtime.trigger_states = vec![
+                mk(
+                    TriggerCondition::OnDestroyed {
+                        entity_name: "source".into(),
+                    },
+                    vec![TriggerAction::SetWorldFlag { name: "a".into() }],
+                ),
+                mk(
+                    TriggerCondition::OnDestroyed {
+                        entity_name: "source".into(),
+                    },
+                    vec![TriggerAction::ClearWorldFlag { name: "a".into() }],
+                ),
+                mk(
+                    TriggerCondition::OnFlagCleared { name: "a".into() },
+                    vec![TriggerAction::AddObjective {
+                        id: "obj-cleared".into(),
+                        text: "Reacted to flag cleared".into(),
+                        mandatory: false,
+                        targets: vec![],
+                        directive: crate::messages::AiDirective::None,
+                        utility: crate::objectives::UtilityConfig::default(),
+                        source: crate::messages::ObjectiveSource::default(),
+                    }],
+                ),
+            ];
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
+        app.update();
+
+        // Both setter and clearer fire in the same pass. Against the LIVE store
+        // the clear sees before = 1 and emits FlagCleared, so the downstream
+        // on_flag_cleared trigger fires. Against a per-pass snapshot the clear
+        // would see before = 0, emit nothing, and this objective would never
+        // appear.
+        let objectives = app.world().resource::<ObjectiveManagerRes>();
+        assert!(
+            objectives
+                .0
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-cleared"),
+            "clear_flag must emit FlagCleared against the live store"
+        );
+    }
+
+    /// Issue #710: `tick_delayed_actions` now shares the `world::dispatch`
+    /// table with `handle_ai_events`. The routing of `new_events` is the one
+    /// thing that must stay different: a delayed action's events queue onto
+    /// `pending_world_events` for the NEXT tick, because this system runs after
+    /// `handle_ai_events` has already drained that queue for this one.
+    #[test]
+    fn delayed_action_dispatches_and_queues_event_for_next_tick() {
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_delayed_actions.after(handle_ai_events));
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.world_loaded_at_secs = Some(0.0);
+            runtime.pending_delayed_actions.push(DelayedAction {
+                action: TriggerAction::SetWorldFlag {
+                    name: "aphelion_armed".to_string(),
+                },
+                origin_layer: None,
+                entity_name: None,
+                fire_at_elapsed: 0.0,
+            });
+        }
+
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.flags.counter("aphelion_armed"),
+            1,
+            "delayed set_flag must mutate the live base flag store"
+        );
+        assert!(
+            runtime.pending_delayed_actions.is_empty(),
+            "the fired delayed action must be drained"
+        );
+        assert_eq!(
+            runtime.pending_world_events,
+            vec![WorldEvent::FlagSet {
+                name: "aphelion_armed".to_string(),
+                origin_layer: None,
+            }],
+            "a delayed action's new_events must queue for the NEXT tick"
+        );
     }
 
     /// A scenario trigger fires when the named ship reaches the named

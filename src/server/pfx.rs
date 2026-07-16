@@ -49,13 +49,39 @@ const TORPEDO_TRAIL_LIFETIME_SECS: f32 = 0.32;
 const TORPEDO_TRAIL_MIN_DISTANCE: f32 = 0.35;
 const TORPEDO_BURST_LIFETIME_SECS: f32 = 0.35;
 
-// Blaster projectile visuals (issue #638).
-const BLASTER_BOLT_RADIUS: f32 = 0.18;
-const BLASTER_SPHERE_RADIUS: f32 = 0.55;
+// Blaster projectile visuals (issue #638; textured crossed-quad bolt
+// replacing the earlier flat sphere placeholder).
 const BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD: f32 = 1.5;
 const BLASTER_BOLT_COLOR: [f32; 4] = [0.3, 0.8, 1.0, 1.0];
 const BLASTER_SPHERE_COLOR: [f32; 4] = [1.0, 0.4, 0.05, 1.0];
 const BLASTER_EMISSIVE: f32 = 5.0;
+
+// Bolt mesh proportions: half-length feeds `segment_transform` directly as
+// the distance from tail to front, so these are full visible lengths.
+const BLASTER_BOLT_LENGTH: f32 = 0.9;
+const BLASTER_BOLT_GLOW_WIDTH: f32 = 0.22;
+const BLASTER_BOLT_CORE_WIDTH: f32 = 0.07;
+// Heavy blaster (visual_scale >= threshold) gets a proportionally larger bolt.
+const BLASTER_SPHERE_BOLT_LENGTH: f32 = 1.6;
+const BLASTER_SPHERE_GLOW_WIDTH: f32 = 0.4;
+const BLASTER_SPHERE_CORE_WIDTH: f32 = 0.14;
+
+const BLASTER_TRAIL_MIN_DISTANCE: f32 = 0.12;
+const BLASTER_TRAIL_LIFETIME_SECS: f32 = 0.08;
+const BLASTER_TRAIL_WIDTH_SCALE: f32 = 0.6;
+
+const BLASTER_MUZZLE_FLASH_LIFETIME_SECS: f32 = 0.05;
+const BLASTER_MUZZLE_FLASH_START_SIZE: f32 = 0.12;
+const BLASTER_MUZZLE_FLASH_END_SIZE: f32 = 0.4;
+
+const BLASTER_IMPACT_RING_LIFETIME_SECS: f32 = 0.22;
+const BLASTER_IMPACT_RING_START_SIZE: f32 = 0.12;
+const BLASTER_IMPACT_RING_END_SIZE: f32 = 0.6;
+
+const BLASTER_IMPACT_SPARK_LIFETIME_SECS: f32 = 0.18;
+const BLASTER_IMPACT_SPARK_SIZE: f32 = 0.22;
+const BLASTER_IMPACT_SPARK_COUNT: usize = 4;
+const BLASTER_IMPACT_SPARK_SPREAD: f32 = 0.35;
 
 const ENGINE_DEFAULT_COLOR: [f32; 4] = [0.25, 0.75, 1.0, 0.72];
 const ENGINE_TRAIL_RADIUS: f32 = 1.5;
@@ -198,6 +224,7 @@ impl Plugin for PfxPlugin {
             .init_resource::<EngineTrailState>()
             .init_resource::<DustFieldState>()
             .init_resource::<PhaserPfxAssets>()
+            .init_resource::<BlasterBoltPfxAssets>()
             .add_plugins(MaterialPlugin::<DustMoteMaterial>::default())
             .add_plugins(MaterialPlugin::<EngineTrailMaterial>::default())
             .add_systems(Startup, load_engine_trail_textures)
@@ -352,6 +379,27 @@ impl FromWorld for PhaserPfxAssets {
             radial_glow: asset_server.load("pfx/radial_glow.png"),
             impact_ring: asset_server.load("pfx/impact_ring.png"),
             spark_streak: asset_server.load("pfx/spark_streak.png"),
+        }
+    }
+}
+
+/// Texture handles for the textured blaster-bolt PFX layers, loaded once at
+/// plugin build time from `assets/pfx/blaster/`. Muzzle flash, impact ring
+/// and impact sparks reuse the generic `PhaserPfxAssets` textures (same
+/// radial-glow/ring/streak shapes work for any energy-weapon burst — only
+/// the travelling bolt itself needs the asymmetric bolt-specific core/glow).
+#[derive(Resource)]
+struct BlasterBoltPfxAssets {
+    bolt_core: Handle<Image>,
+    bolt_glow: Handle<Image>,
+}
+
+impl FromWorld for BlasterBoltPfxAssets {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        Self {
+            bolt_core: asset_server.load("pfx/blaster/blaster_core.png"),
+            bolt_glow: asset_server.load("pfx/blaster/blaster_glow.png"),
         }
     }
 }
@@ -530,8 +578,15 @@ struct TorpedoPfxState {
 }
 
 struct BlasterPfxEntities {
-    body: Entity,
+    glow_a: Entity,
+    glow_b: Entity,
+    core_a: Entity,
+    core_b: Entity,
     last_pos: Vec3,
+    half_len: f32,
+    glow_width: f32,
+    core_width: f32,
+    color: [f32; 4],
 }
 
 #[derive(Resource, Default)]
@@ -1153,95 +1208,390 @@ fn sync_torpedo_pfx(
 /// Iterates `Query<..., With<Ship>>` so NPC blasters render alongside the
 /// player's. Uses `visual_scale` to switch between two visual variants:
 ///
-///  - `visual_scale < BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: small glowing
-///    bolt (cyan, small radius) — used by Destroyer blasters.
-///  - `visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: large glowing
-///    sphere (orange, larger radius) — used by Battleship heavy blaster.
+///  - `visual_scale < BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: standard bolt
+///    (cyan, smaller) — used by Destroyer blasters.
+///  - `visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD`: heavy bolt
+///    (orange, larger) — used by Battleship heavy blaster.
+///
+/// Each bolt is a textured crossed-quad (glow + hot core layers, per the
+/// phaser-beam pattern) oriented along the projectile's `heading` so it
+/// reads correctly from any camera angle and never degenerates into an
+/// invisible edge-on plane. A brief muzzle flash fires when a projectile
+/// first appears in `in_flight`; an impact burst fires when it disappears
+/// (hit or expiry — both look identical from here, matching the existing
+/// torpedo-burst-on-despawn convention).
+#[allow(clippy::too_many_arguments)]
 fn sync_blaster_pfx(
     ships_q: Query<&BlasterSystemResource, With<crate::server_app::Ship>>,
+    bolt_pfx_assets: Res<BlasterBoltPfxAssets>,
+    phaser_pfx_assets: Res<PhaserPfxAssets>,
     mut state: ResMut<BlasterPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut transforms: Query<&mut Transform, With<BlasterBolt>>,
+    mut body_q: Query<&mut Transform, With<BlasterBolt>>,
 ) {
-    let mut all_in_flight: Vec<(String, f32, f32)> = Vec::new();
+    let mut all_in_flight: Vec<(String, f32, f32, f32, bool)> = Vec::new();
     for blaster_sys in ships_q.iter() {
         for bank in &blaster_sys.0 {
+            let is_heavy = bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
             for p in &bank.in_flight {
-                all_in_flight.push((p.id.clone(), p.x, p.z));
+                all_in_flight.push((p.id.clone(), p.x, p.z, p.heading, is_heavy));
             }
         }
     }
 
-    let live: HashSet<String> = all_in_flight.iter().map(|(u, _, _)| u.clone()).collect();
+    let live: HashSet<String> = all_in_flight.iter().map(|(u, ..)| u.clone()).collect();
     let tracked: HashSet<String> = state.active.keys().cloned().collect();
     let (to_spawn, to_despawn) = diff_torpedo_sets(&live, &tracked);
 
     for uuid in to_despawn {
         if let Some(entities) = state.active.remove(&uuid) {
-            commands.entity(entities.body).try_despawn();
-        }
-    }
-
-    // Re-find visual_scale per projectile (need the bank config again).
-    // Build a quick lookup: projectile_id -> is_sphere.
-    let sphere_lookup: HashSet<String> = {
-        let mut s = HashSet::new();
-        for blaster_sys in ships_q.iter() {
-            for bank in &blaster_sys.0 {
-                let is_sphere = bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
-                for p in &bank.in_flight {
-                    if is_sphere {
-                        s.insert(p.id.clone());
-                    }
-                }
-            }
-        }
-        s
-    };
-
-    for uuid in to_spawn {
-        if let Some((_, x, z)) = all_in_flight.iter().find(|(u, _, _)| u == &uuid) {
-            let pos = Vec3::new(*x, 0.1, *z);
-            let is_sphere = sphere_lookup.contains(&uuid);
-            let (radius, color) = if is_sphere {
-                (BLASTER_SPHERE_RADIUS, BLASTER_SPHERE_COLOR)
-            } else {
-                (BLASTER_BOLT_RADIUS, BLASTER_BOLT_COLOR)
-            };
-            let body = commands
-                .spawn((
-                    PfxEntity,
-                    BlasterBolt,
-                    Mesh3d(meshes.add(Sphere { radius })),
-                    MeshMaterial3d(glow_material(
-                        &mut materials,
-                        color,
-                        BLASTER_EMISSIVE,
-                        AlphaMode::Opaque,
-                    )),
-                    Transform::from_translation(pos),
-                ))
-                .id();
-            state.active.insert(
-                uuid,
-                BlasterPfxEntities {
-                    body,
-                    last_pos: pos,
-                },
+            commands.entity(entities.glow_a).try_despawn();
+            commands.entity(entities.glow_b).try_despawn();
+            commands.entity(entities.core_a).try_despawn();
+            commands.entity(entities.core_b).try_despawn();
+            spawn_blaster_impact_burst(
+                entities.last_pos,
+                &phaser_pfx_assets,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
             );
         }
     }
 
-    for (uuid, x, z) in &all_in_flight {
-        let pos = Vec3::new(*x, 0.1, *z);
-        if let Some(entities) = state.active.get_mut(uuid) {
-            entities.last_pos = pos;
-            if let Ok(mut transform) = transforms.get_mut(entities.body) {
-                transform.translation = pos;
-            }
+    for uuid in to_spawn {
+        if let Some((_, x, z, heading, is_heavy)) = all_in_flight.iter().find(|(u, ..)| u == &uuid)
+        {
+            let pos = Vec3::new(*x, 0.1, *z);
+            spawn_blaster_bolt(
+                uuid,
+                pos,
+                *heading,
+                *is_heavy,
+                &bolt_pfx_assets,
+                &mut state,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+            );
         }
+    }
+
+    for (uuid, x, z, heading, _) in &all_in_flight {
+        let pos = Vec3::new(*x, 0.1, *z);
+        update_blaster_bolt(uuid, pos, *heading, &mut state, &mut commands, &mut meshes, &mut materials, &mut body_q);
+    }
+}
+
+/// The bolt's forward direction from its `heading` (radians, ship-forward
+/// convention `atan2(dx, -dz)` — see `src/weapons/blaster.rs`).
+fn blaster_bolt_forward(heading: f32) -> Vec3 {
+    Vec3::new(heading.sin(), 0.0, -heading.cos())
+}
+
+/// Spawns the crossed-quad bolt body for a newly-appeared projectile, plus
+/// its muzzle flash. Called once per projectile, the tick it first shows up
+/// in `in_flight` — which is also the correct moment for the muzzle flash
+/// (spec: "the muzzle flash should begin at the moment the projectile is
+/// spawned, not one frame afterward").
+#[allow(clippy::too_many_arguments)]
+fn spawn_blaster_bolt(
+    uuid: String,
+    pos: Vec3,
+    heading: f32,
+    is_heavy: bool,
+    pfx_assets: &BlasterBoltPfxAssets,
+    state: &mut BlasterPfxState,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let (half_len, glow_width, core_width, color) = if is_heavy {
+        (
+            BLASTER_SPHERE_BOLT_LENGTH * 0.5,
+            BLASTER_SPHERE_GLOW_WIDTH,
+            BLASTER_SPHERE_CORE_WIDTH,
+            BLASTER_SPHERE_COLOR,
+        )
+    } else {
+        (
+            BLASTER_BOLT_LENGTH * 0.5,
+            BLASTER_BOLT_GLOW_WIDTH,
+            BLASTER_BOLT_CORE_WIDTH,
+            BLASTER_BOLT_COLOR,
+        )
+    };
+    let forward = blaster_bolt_forward(heading);
+    let tail = pos - forward * half_len;
+    let front = pos + forward * half_len;
+    let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+
+    let ribbon_mesh = meshes.add(unit_ribbon_quad_mesh());
+    let glow_color = [color[0], color[1], color[2], color[3] * 0.8];
+    let core_color = [
+        color[0] * 0.3 + 0.7,
+        color[1] * 0.3 + 0.7,
+        color[2] * 0.3 + 0.7,
+        color[3],
+    ];
+    let glow_mat = phaser_texture_material(
+        materials,
+        pfx_assets.bolt_glow.clone(),
+        glow_color,
+        BLASTER_EMISSIVE * 0.7,
+    );
+    let core_mat = phaser_texture_material(
+        materials,
+        pfx_assets.bolt_core.clone(),
+        core_color,
+        BLASTER_EMISSIVE,
+    );
+
+    let glow_t = segment_transform(tail, front, glow_width);
+    let core_t = segment_transform(tail, front, core_width);
+
+    let glow_a = commands
+        .spawn((
+            PfxEntity,
+            BlasterBolt,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(glow_mat.clone()),
+            glow_t,
+        ))
+        .id();
+    let glow_b = commands
+        .spawn((
+            PfxEntity,
+            BlasterBolt,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(glow_mat),
+            Transform {
+                rotation: glow_t.rotation * cross,
+                ..glow_t
+            },
+        ))
+        .id();
+    let core_a = commands
+        .spawn((
+            PfxEntity,
+            BlasterBolt,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(core_mat.clone()),
+            core_t,
+        ))
+        .id();
+    let core_b = commands
+        .spawn((
+            PfxEntity,
+            BlasterBolt,
+            Mesh3d(ribbon_mesh),
+            MeshMaterial3d(core_mat),
+            Transform {
+                rotation: core_t.rotation * cross,
+                ..core_t
+            },
+        ))
+        .id();
+
+    spawn_blaster_muzzle_flash(tail, color, commands, meshes, materials);
+
+    state.active.insert(
+        uuid,
+        BlasterPfxEntities {
+            glow_a,
+            glow_b,
+            core_a,
+            core_b,
+            last_pos: pos,
+            half_len,
+            glow_width,
+            core_width,
+            color,
+        },
+    );
+}
+
+/// Updates an already-live bolt's transform to its new position/heading each
+/// frame, and lays down a short fading trail segment behind it once it has
+/// moved far enough (spec: "a blaster bolt does not usually need a long
+/// continuous trail — a short afterimage is enough").
+fn update_blaster_bolt(
+    uuid: &str,
+    pos: Vec3,
+    heading: f32,
+    state: &mut BlasterPfxState,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    body_q: &mut Query<&mut Transform, With<BlasterBolt>>,
+) {
+    let Some(entities) = state.active.get_mut(uuid) else {
+        return;
+    };
+
+    if entities.last_pos.distance(pos) >= BLASTER_TRAIL_MIN_DISTANCE {
+        spawn_trail_segment(
+            entities.last_pos,
+            pos,
+            entities.glow_width * BLASTER_TRAIL_WIDTH_SCALE,
+            [
+                entities.color[0],
+                entities.color[1],
+                entities.color[2],
+                entities.color[3] * 0.5,
+            ],
+            BLASTER_EMISSIVE * 0.5,
+            BLASTER_TRAIL_LIFETIME_SECS,
+            commands,
+            meshes,
+            materials,
+        );
+    }
+    entities.last_pos = pos;
+
+    let forward = blaster_bolt_forward(heading);
+    let tail = pos - forward * entities.half_len;
+    let front = pos + forward * entities.half_len;
+    let glow_width = entities.glow_width;
+    let core_width = entities.core_width;
+    let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let glow_t = segment_transform(tail, front, glow_width);
+    let core_t = segment_transform(tail, front, core_width);
+
+    if let Ok(mut t) = body_q.get_mut(entities.glow_a) {
+        *t = glow_t;
+    }
+    if let Ok(mut t) = body_q.get_mut(entities.glow_b) {
+        *t = Transform {
+            rotation: glow_t.rotation * cross,
+            ..glow_t
+        };
+    }
+    if let Ok(mut t) = body_q.get_mut(entities.core_a) {
+        *t = core_t;
+    }
+    if let Ok(mut t) = body_q.get_mut(entities.core_b) {
+        *t = Transform {
+            rotation: core_t.rotation * cross,
+            ..core_t
+        };
+    }
+}
+
+/// Brief bright flash establishing the bolt's origin point, reusing the
+/// generic radial-glow texture (same shape as the phaser muzzle flash —
+/// only color, size and lifetime differ per weapon).
+fn spawn_blaster_muzzle_flash(
+    pos: Vec3,
+    color: [f32; 4],
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let mat = glow_material(materials, color, BLASTER_EMISSIVE * 1.4, AlphaMode::Add);
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(meshes.add(unit_billboard_mesh())),
+        MeshMaterial3d(mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(BLASTER_MUZZLE_FLASH_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: BLASTER_MUZZLE_FLASH_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: BLASTER_MUZZLE_FLASH_START_SIZE,
+            end_scale: BLASTER_MUZZLE_FLASH_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: mat,
+            color,
+            emissive_strength: BLASTER_EMISSIVE * 1.4,
+        },
+    ));
+}
+
+/// One-shot impact burst where a bolt disappears (hit or expiry): an
+/// expanding ring plus a handful of outward sparks, reusing the phaser's
+/// generic impact textures per the "separate weapon energy from surface
+/// response" pattern in the design spec.
+fn spawn_blaster_impact_burst(
+    pos: Vec3,
+    phaser_pfx_assets: &PhaserPfxAssets,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let billboard_mesh = meshes.add(unit_billboard_mesh());
+    let color = BLASTER_BOLT_COLOR;
+    let ring_color = [color[0], color[1], color[2], color[3] * 0.9];
+    let ring_mat = phaser_texture_material(
+        materials,
+        phaser_pfx_assets.impact_ring.clone(),
+        ring_color,
+        BLASTER_EMISSIVE,
+    );
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(ring_mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(BLASTER_IMPACT_RING_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: BLASTER_IMPACT_RING_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: BLASTER_IMPACT_RING_START_SIZE,
+            end_scale: BLASTER_IMPACT_RING_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: ring_mat,
+            color: ring_color,
+            emissive_strength: BLASTER_EMISSIVE,
+        },
+    ));
+
+    let mut rng = rand::rng();
+    for _ in 0..BLASTER_IMPACT_SPARK_COUNT {
+        let offset = Vec3::new(
+            rng.random_range(-1.0_f32..1.0),
+            rng.random_range(-0.3_f32..0.3),
+            rng.random_range(-1.0_f32..1.0),
+        )
+        .normalize_or_zero()
+            * BLASTER_IMPACT_SPARK_SPREAD;
+        let spark_color = [
+            color[0] * 0.5 + 0.5,
+            color[1] * 0.5 + 0.5,
+            color[2] * 0.5 + 0.5,
+            color[3],
+        ];
+        let spark_mat = phaser_texture_material(
+            materials,
+            phaser_pfx_assets.spark_streak.clone(),
+            spark_color,
+            BLASTER_EMISSIVE,
+        );
+        commands.spawn((
+            PfxEntity,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(spark_mat.clone()),
+            Transform::from_translation(pos + offset)
+                .with_scale(Vec3::splat(BLASTER_IMPACT_SPARK_SIZE)),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: BLASTER_IMPACT_SPARK_LIFETIME_SECS,
+            },
+            PfxFadingMaterial {
+                handle: spark_mat,
+                color: spark_color,
+                emissive_strength: BLASTER_EMISSIVE,
+            },
+        ));
     }
 }
 

@@ -4691,8 +4691,8 @@ colour = [0.5, 0.5, 0.5]
 // world-tree concerns and so live alongside the entity-template schema rather
 // than in world::config.
 
-/// Global configuration block (currently used only for the deterministic seed
-/// surfaced through WorldConfig).
+/// Global configuration block (deterministic seed, lobby metadata, and the
+/// shared AI-helm sim-tick rate, all surfaced through WorldConfig).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
     /// Global seed for deterministic generation.
@@ -4704,6 +4704,13 @@ pub struct GlobalConfig {
     /// Short description shown below the title in the lobby.
     #[serde(default)]
     pub description: Option<String>,
+    /// Fixed rate (Hz) of the shared AI-helm sim tick that gates every
+    /// per-axis AI helm system (`ai_helm_thrust`, `ai_helm_steering`,
+    /// `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm
+    /// decision cadence from the host's frame rate (issue #803, PRD #620).
+    /// The default matches the old `AiLateralThrustTimer` period.
+    #[serde(default = "default_ai_helm_tick_hz")]
+    pub ai_helm_tick_hz: f32,
 }
 
 impl Default for GlobalConfig {
@@ -4712,12 +4719,17 @@ impl Default for GlobalConfig {
             seed: 42,
             title: None,
             description: None,
+            ai_helm_tick_hz: default_ai_helm_tick_hz(),
         }
     }
 }
 
 fn default_global_seed() -> u64 {
     42
+}
+
+fn default_ai_helm_tick_hz() -> f32 {
+    30.0
 }
 
 /// Configuration for the grid-based asteroid spawner.

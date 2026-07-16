@@ -1802,6 +1802,26 @@ mod tests {
         assert_eq!(cfg.global.seed, 42);
     }
 
+    /// `[global] ai_helm_tick_hz` (issue #803): serde default when omitted,
+    /// authored value when present. The default is the one hardcoded value the
+    /// TOML-parse rule allows, and it matches the old `AiLateralThrustTimer`
+    /// period so worlds that don't author the key see no cadence change.
+    #[test]
+    fn parse_world_reads_ai_helm_tick_hz() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.ai_helm_tick_hz, 30.0,
+            "omitted ai_helm_tick_hz must default to 30 Hz"
+        );
+
+        let authored =
+            parse_world("[global]\nai_helm_tick_hz = 12.5\n").expect("TOML should parse");
+        assert_eq!(
+            authored.global.ai_helm_tick_hz, 12.5,
+            "an authored ai_helm_tick_hz must be read verbatim"
+        );
+    }
+
     #[test]
     fn parse_world_reads_dust_layers_and_warp() {
         let toml = r#"

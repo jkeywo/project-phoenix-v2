@@ -399,14 +399,10 @@ fn update_entity_inspector(
         }
 
         // AI state
-        if let Some(ai_ctrl) = ai {
+        if let Some(target) = ai {
             out.push_str(&format!(
                 "    ai: target={}\n",
-                ai_ctrl
-                    .0
-                    .target
-                    .map(|u| u.to_string())
-                    .unwrap_or_else(|| "none".to_string())
+                target.0.clone().unwrap_or_else(|| "none".to_string())
             ));
         }
     }

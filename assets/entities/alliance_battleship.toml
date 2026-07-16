@@ -615,7 +615,8 @@ power_group = "helm"
 # lateral avoidance dodge on its behalf: an undeclared system resolves to
 # ControlSource::Human (`operate_ai = false`), so the monolith never stood down
 # from the lateral axis here. Declaring it hands the axis to
-# `ai_helm_lateral_thrust` on exactly the ticks the monolith drove it. Unlike the
+# `ai_helm_lateral_thrust` (which since #803 decides on the shared AI-helm sim
+# tick — `[global] ai_helm_tick_hz`, default 30 Hz). Unlike the
 # cruiser and destroyer, this hull has no `Simplified` Helm rating, so — matching
 # the monolith, which only ran with the coarse helm on AI — lateral thrust is not
 # automated for a manned Helm.

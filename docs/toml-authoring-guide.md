@@ -74,6 +74,7 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `seed` | u64 | `42` | Seeds deterministic generators (asteroid spawner, etc.). |
+| `ai_helm_tick_hz` | f32 | `30.0` | Fixed rate (Hz) of the shared AI-helm sim tick gating every per-axis AI helm system (thrust, steering, lateral thrust, impulse), decoupling AI helm decision cadence from the host frame rate (issue #803). |
 
 ### `[anchors]`
 

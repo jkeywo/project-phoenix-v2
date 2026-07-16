@@ -33,18 +33,80 @@ struct HelmInputTimer(Timer);
 
 const HELM_AI_MAX_DT_SECS: f32 = 1.0 / 30.0;
 
-/// Throttles `ai_helm_lateral_thrust` to ~30 Hz, decoupling the AI's dodge
-/// cadence from the frame rate. Production time is rAF-driven — `bridge.rs`
-/// installs `WinitSettings` with `UpdateMode::Continuous` for both focused and
-/// unfocused — so `Update` runs at the host's display refresh, ~16.7 ms at
-/// 60 Hz and ~6.9 ms at 144 Hz. Without this gate the dodge would recompute
-/// once per rendered frame and a 144 Hz host would dodge on ~4x fresher data
-/// than a 60 Hz one; the timer is what keeps the two the same. (`WorldSnapshot`
-/// itself is rebuilt every frame — see `ai::server::build_world_snapshot` — so
-/// the ticks this gate skips would have seen genuinely fresh data, not a
-/// recomputation of an identical result.)
+/// The shared fixed-rate AI-helm sim tick (issue #803). One repeating timer
+/// gates **all four** per-axis AI helm systems (`ai_helm_thrust`,
+/// `ai_helm_steering`, `ai_helm_lateral_thrust`, `ai_helm_impulse`) so the
+/// AI's helm decision cadence is decoupled from the frame rate. Production
+/// time is rAF-driven — `bridge.rs` installs `WinitSettings` with
+/// `UpdateMode::Continuous` for both focused and unfocused — so `Update` runs
+/// at the host's display refresh, ~16.7 ms at 60 Hz and ~6.9 ms at 144 Hz.
+/// Without this gate the helm AI would recompute once per rendered frame and
+/// a 144 Hz host would steer on ~4x fresher data than a 60 Hz one — precisely
+/// the nondeterminism PRD #620 (P2P deterministic lockstep) exists to remove.
+/// (`WorldSnapshot` itself is rebuilt every frame — see
+/// `ai::server::build_world_snapshot` — so the ticks this gate skips would
+/// have seen genuinely fresh data, not a recomputation of an identical
+/// result.)
+///
+/// The rate is TOML-authored: `[global] ai_helm_tick_hz` in the world TOML
+/// (`GlobalConfig::ai_helm_tick_hz`, serde default 30 Hz — the old
+/// `AiLateralThrustTimer` period). The resource is created at plugin build,
+/// before any `WorldConfig` exists, so `tick_ai_helm_timer` reconciles the
+/// period against the loaded world config on each frame (a cheap
+/// duration-equality check that only writes when the authored rate differs).
 #[derive(Resource)]
-struct AiLateralThrustTimer(Timer);
+struct AiHelmTickTimer(Timer);
+
+impl Default for AiHelmTickTimer {
+    fn default() -> Self {
+        Self(Timer::from_seconds(
+            1.0 / crate::entity_config::GlobalConfig::default().ai_helm_tick_hz,
+            TimerMode::Repeating,
+        ))
+    }
+}
+
+/// Boolean latch set each frame by `tick_ai_helm_timer` (issue #803).
+/// `run_if` conditions must use read-only params, so the timer is advanced by
+/// a dedicated system that writes this flag, which the condition then reads —
+/// the same shape as `ai::server::AiSnapshotReady`. Initialises to `true` so
+/// the very first update always runs the helm AI (before the timer has had a
+/// chance to fire).
+#[derive(Resource)]
+struct AiHelmTickReady(bool);
+
+/// Advance the `AiHelmTickTimer` and set `AiHelmTickReady`. Registered
+/// `.after` all four per-axis AI helm systems so the flag is consumed before
+/// it is re-armed for the next frame. Only leaves `true` when the timer
+/// fires; on frames where it doesn't the flag is explicitly cleared so the
+/// gated systems skip their work.
+///
+/// Also reconciles the timer period against the TOML-authored
+/// `[global] ai_helm_tick_hz` once `WorldConfig` exists — the timer resource
+/// is created at plugin build, before the world TOML has been parsed.
+fn tick_ai_helm_timer(
+    time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut timer: ResMut<AiHelmTickTimer>,
+    mut ready: ResMut<AiHelmTickReady>,
+) {
+    if let Some(wc) = world_config.as_deref() {
+        let hz = wc.global.ai_helm_tick_hz;
+        if hz > 0.0 {
+            let configured = std::time::Duration::from_secs_f32(1.0 / hz);
+            if timer.0.duration() != configured {
+                timer.0.set_duration(configured);
+            }
+        }
+    }
+    ready.0 = timer.0.tick(time.delta()).just_finished();
+}
+
+/// Read-only run condition for the four per-axis AI helm systems: fires only
+/// on shared sim-tick frames (issue #803).
+fn ai_helm_tick_ready(ready: Res<AiHelmTickReady>) -> bool {
+    ready.0
+}
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LastHelmInput {
@@ -264,10 +326,21 @@ impl Plugin for ShipPlugin {
         .init_resource::<BankConfigResource>()
         .add_message::<CoordinationEnqueue>()
         .add_message::<AiChatterEvent>()
-        .insert_resource(AiLateralThrustTimer(Timer::from_seconds(
-            1.0 / 30.0,
-            TimerMode::Repeating,
-        )))
+        // Shared AI-helm sim tick (issue #803): the timer/latch pair that
+        // gates all four per-axis AI helm systems, plus the dedicated system
+        // that advances it. The tick system runs `.after` every gated system
+        // so the latch is consumed before it is re-armed — the same
+        // consume-then-arm shape as `ai::server::tick_ai_snapshot_timer`.
+        .init_resource::<AiHelmTickTimer>()
+        .insert_resource(AiHelmTickReady(true))
+        .add_systems(
+            Update,
+            tick_ai_helm_timer
+                .after(ai_helm_thrust)
+                .after(ai_helm_steering)
+                .after(ai_helm_lateral_thrust)
+                .after(ai_helm_impulse),
+        )
         .add_systems(
             Update,
             (
@@ -279,7 +352,10 @@ impl Plugin for ShipPlugin {
                 ai_helm_lateral_thrust
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
-                    .before(process_helm_inputs),
+                    .before(process_helm_inputs)
+                    // Shared AI-helm sim tick (issue #803) — one fixed-rate
+                    // cadence for all four per-axis systems.
+                    .run_if(ai_helm_tick_ready),
                 // Applies commanded impulse/boost phase transitions (issue
                 // #695). Must run before `process_helm_inputs` — whose
                 // stale-input edge-detection reads `ShipImpulse.phase` and
@@ -409,7 +485,10 @@ impl Plugin for ShipPlugin {
                 .before(publish_joystick_to_engines)
                 .before(operate_helm_engine_ai)
                 .before(tick_boost)
-                .before(integrate_ship_physics),
+                .before(integrate_ship_physics)
+                // Shared AI-helm sim tick (issue #803) — one fixed-rate
+                // cadence for all four per-axis systems.
+                .run_if(ai_helm_tick_ready),
         );
 
         // Per-axis helm AI: impulse (issue #703). Registered on its own because
@@ -453,7 +532,10 @@ impl Plugin for ShipPlugin {
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::process_lobby)
                 .after(crate::sim_sets::AiTickLabel)
-                .before(apply_helm_commands),
+                .before(apply_helm_commands)
+                // Shared AI-helm sim tick (issue #803) — one fixed-rate
+                // cadence for all four per-axis systems.
+                .run_if(ai_helm_tick_ready),
         );
 
         // Debug-only helm-path single-writer tripwire (issue #699). The frame
@@ -1673,21 +1755,28 @@ fn ai_helm_impulse(
 //     the monolith zeroes the axis so `integrate_ship_physics` decelerates it
 //     off through the normal physics curve. Now zeroes.
 //
-// The `AiLateralThrustTimer` ~30 Hz gate does *not* go with them: it is load-
-// bearing and stays. Production `Update` is rAF-driven (`server/bridge.rs`
-// installs `WinitSettings` with `UpdateMode::Continuous`), i.e. ~16.7 ms at
-// 60 Hz, so the 33.3 ms timer fires roughly every *other* tick — a real
-// throttle, and the only one on this path, since `build_world_snapshot` runs
-// every frame. Dropping it would both change the dodge cadence on the three
-// shipped hulls that declare helm-lateral-thrust and couple that cadence to the
-// host's display refresh rate, which is precisely the nondeterminism PRD #620
-// (P2P deterministic lockstep) exists to remove. `ai_helm_lateral_thrust_is_
-// throttled_below_the_timer_period` pins it.
+// The ~30 Hz throttle on this system predates the split (it was the private
+// `AiLateralThrustTimer` until #803) and is load-bearing: production `Update`
+// is rAF-driven (`server/bridge.rs` installs `WinitSettings` with
+// `UpdateMode::Continuous`), i.e. ~16.7 ms at 60 Hz, so a 33.3 ms period fires
+// roughly every *other* frame — a real throttle, and the only one on this
+// path, since `build_world_snapshot` runs every frame. Coupling the dodge
+// cadence to the host's display refresh rate is precisely the nondeterminism
+// PRD #620 (P2P deterministic lockstep) exists to remove.
 //
-// The two sibling per-axis systems (`ai_helm_thrust`/`ai_helm_steering`) have no
-// such gate, so the helm axes run at different cadences. That predates #703 and
-// is left alone here deliberately rather than papered over by throttling the
-// siblings or dropping this gate; see the note on the issue.
+// #803 generalised the gate: the private timer became the shared
+// `AiHelmTickTimer` / `AiHelmTickReady` sim tick (see the resource note at the
+// top of this file), and **all four** per-axis systems — this one,
+// `ai_helm_thrust`, `ai_helm_steering` and `ai_helm_impulse` — now attach the
+// same `run_if(ai_helm_tick_ready)` condition, so the whole helm AI decides on
+// one fixed-rate cadence instead of the lateral axis alone being throttled
+// while its siblings ran per rendered frame. The rate is TOML-authored
+// (`[global] ai_helm_tick_hz`, default 30 Hz — the old timer's period, so the
+// lateral cadence is unchanged). A skipped frame runs none of the four, so an
+// axis simply holds its last intent through the gap and
+// `integrate_ship_physics` keeps integrating it.
+// `*_runs_on_the_shared_sim_tick_not_per_frame` pins the cadence for each of
+// the four systems.
 
 /// Per-axis helm AI: lateral thrust. Writes `LateralThrustInput` for ships
 /// whose helm-lateral-thrust system is AI-operated, whatever the coarse helm is
@@ -1710,8 +1799,6 @@ fn ai_helm_impulse(
 /// tuning. It is therefore outside the commit ordering in the module note above.
 #[allow(clippy::too_many_arguments)]
 fn ai_helm_lateral_thrust(
-    time: Res<Time>,
-    mut timer: ResMut<AiLateralThrustTimer>,
     mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -1737,18 +1824,13 @@ fn ai_helm_lateral_thrust(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // ~30 Hz throttle, whole-system (issue #703 review). A skipped tick writes
-    // nothing at all rather than writing a stale value — including the
-    // no-objective zeroing below — which is exactly what this gate did before
-    // the per-axis split, so the axis simply holds its last value through the
-    // gap and `integrate_ship_physics` keeps integrating it. The first tick
-    // writes nothing because `Time`'s opening delta does not reach the period;
-    // that is pre-existing and deliberate here, so tests that assert a dodge
-    // must tick twice.
-    if !timer.0.tick(time.delta()).just_finished() {
-        return;
-    }
-
+    // The ~30 Hz throttle that used to live here as a private timer is now
+    // the shared `run_if(ai_helm_tick_ready)` sim-tick gate on the
+    // registration (issue #803), common to all four per-axis systems. A
+    // skipped frame runs nothing at all rather than writing a stale value —
+    // including the no-objective zeroing below — so the axis simply holds its
+    // last value through the gap and `integrate_ship_physics` keeps
+    // integrating it.
     let anchors = world_config
         .as_ref()
         .map(|wc| wc.anchors.clone())
@@ -5709,22 +5791,90 @@ station = "helm"
             .0 = value;
     }
 
-    /// The `AiLateralThrustTimer` is a real ~30 Hz throttle, not a formality —
-    /// the premise that it fired on every tick came from reading a 34 ms
-    /// `ManualDuration` that lives in a `#[cfg(test)]` beam-renderer harness.
-    /// Production `Update` is rAF-driven: `server/bridge.rs` installs
-    /// `WinitSettings` with `UpdateMode::Continuous` for both focused and
-    /// unfocused, so a 60 Hz host frames at ~16.7 ms — under the 33.3 ms period
-    /// — and the dodge must recompute on only *some* frames. Without the gate
-    /// the AI's dodge cadence would follow the host's display refresh rate (a
-    /// 144 Hz host dodging on ~4x fresher data than a 60 Hz one), which is
-    /// exactly the nondeterminism PRD #620's lockstep has to eliminate.
+    /// A sentinel the helm-AI maths can never produce — intents are
+    /// normalised to [-1, 1] — so a frame that leaves the sentinel standing
+    /// is a frame the probed system did not run on.
+    const CADENCE_SENTINEL: f32 = 123.456;
+
+    /// Drive `app` at 10 ms per frame — under the 33.3 ms shared sim-tick
+    /// period, i.e. what a 60 Hz rAF-driven host actually does — and count
+    /// the frames on which the probed system ran. `arm` re-stamps the probe
+    /// before each frame; `ran_this_frame` reads it back after.
     ///
-    /// Driven at 10 ms/frame, well under the period. Each tick first stamps a
-    /// sentinel the dodge maths can never produce — lateral thrust is
-    /// normalised to [-1, 1] — so a tick that leaves the sentinel standing is a
-    /// tick the system did not run on.
-    ///
+    /// The shared AI-helm sim tick (issue #803) is a real fixed-rate
+    /// throttle, not a formality. Production `Update` is rAF-driven:
+    /// `server/bridge.rs` installs `WinitSettings` with
+    /// `UpdateMode::Continuous` for both focused and unfocused, so a 60 Hz
+    /// host frames at ~16.7 ms — under the period — and the helm AI must
+    /// recompute on only *some* frames. Without the gate the AI's decision
+    /// cadence would follow the host's display refresh rate (a 144 Hz host
+    /// deciding on ~4x fresher data than a 60 Hz one), which is exactly the
+    /// nondeterminism PRD #620's lockstep has to eliminate. Until #803 only
+    /// the lateral axis was throttled (by the private `AiLateralThrustTimer`);
+    /// all four per-axis systems now share one cadence, and there is one of
+    /// these tests per system.
+    fn count_sim_tick_runs(
+        app: &mut App,
+        mut arm: impl FnMut(&mut App),
+        mut ran_this_frame: impl FnMut(&mut App) -> bool,
+    ) -> (usize, usize) {
+        const FRAME_MS: u64 = 10;
+        const TICKS: usize = 12;
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(FRAME_MS),
+        ));
+        let mut ran = 0usize;
+        for _ in 0..TICKS {
+            arm(app);
+            tick(app);
+            if ran_this_frame(app) {
+                ran += 1;
+            }
+        }
+        (ran, TICKS)
+    }
+
+    /// Shared assertions for the four cadence tests. `ran > 0` guards the
+    /// probe itself; `ran <= ticks / 2` is the throttle. Over 12 frames x
+    /// 10 ms the 33.3 ms timer fires ~3 times, plus the first frame's
+    /// `AiHelmTickReady`-initialises-`true` free run (mirroring
+    /// `AiSnapshotReady`); `ticks / 2` leaves generous margin while still
+    /// failing loudly if the gate goes away.
+    fn assert_shared_sim_tick_cadence(system: &str, (ran, ticks): (usize, usize)) {
+        assert!(
+            ran > 0,
+            "precondition: {ticks} frames x 10 ms spans several 33.3 ms periods, so \
+             {system} must run at least once — 0 runs means the probe is broken and \
+             this test proves nothing about cadence"
+        );
+        assert!(
+            ran <= ticks / 2,
+            "the shared AI-helm sim tick must throttle {system}: at 10 ms/frame — \
+             under the 33.3 ms period, i.e. what a 60 Hz rAF-driven host actually \
+             does — it ran on {ran} of {ticks} frames. Running every frame means the \
+             run_if(ai_helm_tick_ready) gate is gone and the decision cadence \
+             follows display refresh rate again (PRD #620)"
+        );
+    }
+
+    fn set_thrust_intent(app: &mut App, value: f32) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<ThrustInput>()
+            .expect("ship must carry ThrustInput")
+            .0 = value;
+    }
+
+    fn set_steering_intent(app: &mut App, value: f32) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<SteeringInput>()
+            .expect("ship must carry SteeringInput")
+            .0 = value;
+    }
+
     /// The coarse helm is set to **AI** purely to isolate the writer, and that
     /// is load-bearing: `process_helm_inputs` also writes `LateralThrustInput`
     /// (from `LastHelmInput`), on its own 30 Hz `HelmInputTimer`, and it only
@@ -5732,43 +5882,111 @@ station = "helm"
     /// does not stop it. Left Human (as `lateral_thrust_ai_app` leaves it) it
     /// would clear the sentinel on its own cadence and this test would pass
     /// even with `ai_helm_lateral_thrust` disabled outright. With the coarse
-    /// helm on AI, `process_helm_inputs` early-returns and `operate_helm_ai`
-    /// skips the axis (`lateral_is_ai`), leaving this system the sole writer.
+    /// helm on AI, `process_helm_inputs` early-returns, leaving this system
+    /// the sole writer.
     #[test]
-    fn ai_helm_lateral_thrust_is_throttled_below_the_timer_period() {
-        const SENTINEL: f32 = 123.456;
-        const FRAME_MS: u64 = 10;
-        const TICKS: usize = 12;
-
+    fn ai_helm_lateral_thrust_runs_on_the_shared_sim_tick_not_per_frame() {
         let mut app = lateral_dodge_app();
         set_helm_control_source(&mut app, ControlSource::Ai);
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(FRAME_MS),
-        ));
 
-        let mut ran = 0usize;
-        for _ in 0..TICKS {
-            set_lateral_intent(&mut app, SENTINEL);
-            tick(&mut app);
-            if lateral_intent(&mut app) != SENTINEL {
-                ran += 1;
-            }
-        }
-
-        assert!(
-            ran > 0,
-            "precondition: {TICKS} ticks x {FRAME_MS} ms spans several 33.3 ms \
-             periods, so the timer must fire at least once — {ran} runs means the \
-             system never ran and this test proves nothing about throttling"
+        let counts = count_sim_tick_runs(
+            &mut app,
+            |app| set_lateral_intent(app, CADENCE_SENTINEL),
+            |app| lateral_intent(app) != CADENCE_SENTINEL,
         );
-        // ~110 ms of advanced time over the period is 3 fires; TICKS / 2 leaves
-        // generous margin while still failing loudly if the gate goes away.
+        assert_shared_sim_tick_cadence("ai_helm_lateral_thrust", counts);
+    }
+
+    /// AC (issue #803): `ai_helm_thrust` used to run once per rendered frame;
+    /// it must now run on the shared sim tick. `set_per_axis_helm_ai` puts the
+    /// thrust axis on AI, so `process_helm_inputs` skips the axis and this
+    /// system is `ThrustInput`'s sole writer — the sentinel can only be
+    /// cleared by it.
+    #[test]
+    fn ai_helm_thrust_runs_on_the_shared_sim_tick_not_per_frame() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+
+        let counts = count_sim_tick_runs(
+            &mut app,
+            |app| set_thrust_intent(app, CADENCE_SENTINEL),
+            |app| get_thrust_input(app) != CADENCE_SENTINEL,
+        );
+        assert_shared_sim_tick_cadence("ai_helm_thrust", counts);
+    }
+
+    /// AC (issue #803): `ai_helm_steering` on the shared sim tick — same
+    /// isolation argument as the thrust test.
+    #[test]
+    fn ai_helm_steering_runs_on_the_shared_sim_tick_not_per_frame() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+
+        let counts = count_sim_tick_runs(
+            &mut app,
+            |app| set_steering_intent(app, CADENCE_SENTINEL),
+            |app| get_steering_input(app) != CADENCE_SENTINEL,
+        );
+        assert_shared_sim_tick_cadence("ai_helm_steering", counts);
+    }
+
+    /// AC (issue #803): `ai_helm_impulse` on the shared sim tick.
+    /// `ImpulseCommand` is an enum, so the probe is a reset-and-observe
+    /// rather than a sentinel: each frame re-arms the drive to `Idle` (both
+    /// the command and the `ShipImpulse` phase, so `decide_impulse` sees the
+    /// same Engage-able geometry every time — the anchor 500 units dead
+    /// ahead, past `engage_distance`); a frame that ends `Charging` is a
+    /// frame the system ran on.
+    #[test]
+    fn ai_helm_impulse_runs_on_the_shared_sim_tick_not_per_frame() {
+        let anchor = "station-alpha";
+        let mut app = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+
+        let counts = count_sim_tick_runs(
+            &mut app,
+            |app| {
+                set_ship_impulse(app, crate::impulse::ImpulseState::new());
+                set_impulse_command(app, crate::impulse::ImpulsePhase::Idle);
+            },
+            |app| get_impulse_command(app) == crate::impulse::ImpulsePhase::Charging,
+        );
+        assert_shared_sim_tick_cadence("ai_helm_impulse", counts);
+    }
+
+    /// The shared sim-tick rate is TOML-authored (`[global] ai_helm_tick_hz`),
+    /// not hardcoded: `tick_ai_helm_timer` must reconcile the timer period
+    /// against a loaded `WorldConfig` that authors a different rate. At an
+    /// authored 100 Hz the 10 ms frames land exactly on the period, so the
+    /// lateral dodge recomputes every frame — where the default 30 Hz gate
+    /// (asserted by the cadence tests above) allows at most half.
+    #[test]
+    fn ai_helm_tick_rate_is_reconfigured_from_world_config() {
+        let mut app = lateral_dodge_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.global.ai_helm_tick_hz = 100.0;
+        // `lateral_dodge_app` leaves no WorldConfig installed; the dodge only
+        // needs the snapshot obstacle, so the empty-anchor config is inert
+        // apart from the authored tick rate.
+        app.insert_resource(cfg);
+
+        let (ran, ticks) = count_sim_tick_runs(
+            &mut app,
+            |app| set_lateral_intent(app, CADENCE_SENTINEL),
+            |app| lateral_intent(app) != CADENCE_SENTINEL,
+        );
         assert!(
-            ran <= TICKS / 2,
-            "the AiLateralThrustTimer must throttle the dodge: at {FRAME_MS} ms/frame \
-             — under the 33.3 ms period, i.e. what a 60 Hz rAF-driven host actually \
-             does — the system ran on {ran} of {TICKS} ticks. Running every tick means \
-             the gate is gone and the dodge cadence now follows display refresh rate"
+            ran > ticks / 2,
+            "with [global] ai_helm_tick_hz = 100 the 10 ms period fires every frame, \
+             so the dodge must recompute on (nearly) all of them — {ran} of {ticks} \
+             means tick_ai_helm_timer never applied the TOML-authored rate"
         );
     }
 
@@ -6781,8 +6999,9 @@ station = "helm"
 
         let mut default_app = lateral_thrust_ai_app(None);
         snapshot_with_obstacle(&mut default_app, obstacle, 1.0);
-        // Two ticks: the 30 Hz `AiLateralThrustTimer` writes nothing on the
-        // first, whose opening delta does not reach the period.
+        // Two ticks: belt-and-braces against the shared AI-helm sim tick
+        // (#803) — the first update runs on the ready latch's initial `true`,
+        // and the second's 200 ms delta fires the timer outright.
         tick_twice(&mut default_app);
         assert_eq!(
             lateral_intent(&mut default_app),
@@ -6989,9 +7208,8 @@ station = "helm"
     /// hull, obstacle and geometry as before. What the delete changed is only
     /// *which* system performs the write, and hence the tick count: the
     /// monolith's call was unthrottled, whereas `ai_helm_lateral_thrust` is
-    /// gated by the deliberate 30 Hz `AiLateralThrustTimer`, which writes
-    /// nothing on the first tick (its opening delta does not reach the period).
-    /// Hence `tick_twice`, matching `lateral_thrust_ai_honours_*`.
+    /// gated by the deliberate shared AI-helm sim tick (~30 Hz by default,
+    /// issue #803). Hence `tick_twice`, matching `lateral_thrust_ai_honours_*`.
     #[test]
     fn full_ai_helm_honours_toml_authored_avoidance_buffer() {
         // Projected 30 units ahead (10 u/s × the default 3 s), the obstacle is
@@ -7029,8 +7247,8 @@ station = "helm"
     /// every helm axis on AI rather than the Simplified rating's lateral-only.
     ///
     /// Ported in #704 exactly as its `avoidance_buffer` sibling above was — same
-    /// property, same geometry, new writer, hence `tick_twice` for the 30 Hz
-    /// `AiLateralThrustTimer`. See that test's note.
+    /// property, same geometry, new writer, hence `tick_twice` for the shared
+    /// AI-helm sim tick. See that test's note.
     #[test]
     fn full_ai_helm_honours_toml_authored_avoidance_look_ahead() {
         // Forward at yaw 0 is -Z. At 10 u/s the default 3 s horizon projects

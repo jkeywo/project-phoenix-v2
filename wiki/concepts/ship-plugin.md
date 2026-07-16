@@ -30,7 +30,8 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 
 | Resource | Defined In | Purpose |
 |---|---|---|
-| `HelmInputTimer` | `ship_plugin.rs` | 10 Hz throttle for physics ticks |
+| `HelmInputTimer` | `ship_plugin.rs` | 30 Hz throttle for human helm-input processing |
+| `AiHelmTickTimer` / `AiHelmTickReady` | `ship_plugin.rs` | Shared fixed-rate AI-helm sim tick (issue #803): one `run_if(ai_helm_tick_ready)` gate on all four per-axis AI helm systems (`ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm decision cadence from frame rate. Rate is TOML-authored via `[global] ai_helm_tick_hz` (default 30 Hz) |
 | `LastHelmInput` (pub) | `ship_plugin.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
 | `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |
 | `PendingArcBearingRequest` | `ship_plugin.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; biases steering via `steer_toward`; cleared when the target entity is visible or arrives in firing arc |

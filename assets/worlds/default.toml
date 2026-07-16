@@ -16,6 +16,11 @@
 seed = 42
 title = "Starbase Alpha"
 description = "Defend the Federation outpost against an incoming raider patrol."
+# Fixed rate (Hz) of the shared AI-helm sim tick: every per-axis AI helm
+# system (thrust, steering, lateral thrust, impulse) decides at this cadence,
+# independent of the host's frame rate (issue #803). Omitting the key
+# defaults to 30.
+ai_helm_tick_hz = 30.0
 
 [ambient_light]
 color      = [0.6, 0.55, 0.5]

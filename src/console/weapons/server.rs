@@ -8,7 +8,7 @@ use crate::messages::{
     AdmittedCommands, BlasterBankState, ClientMessage, CoordinationPayload, GamePhase,
     InterSystemMsg, InterSystemPayload, InterSystemQueue, ModifierSlot, PhaserBank,
     PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip, RadarRegion, ServerMessage,
-    SystemBlackboard, SystemControlPayload, SystemId, TorpedoTubeClientConfig, TorpedoTubeState,
+    SystemBlackboard, SystemControlPayload, TorpedoTubeClientConfig, TorpedoTubeState,
     WeaponsBlackboard,
 };
 use crate::model_rig::ModelMarkers;
@@ -461,31 +461,12 @@ impl Plugin for WeaponsPlugin {
 
 // ── Systems ─────────────────────────────────────────────────────────────────
 
-/// Look up the live (x, z) world position of an entity by its string UUID.
-///
-/// `WorldResource.0.entities` is a snapshot populated at spawn / first-report
-/// time and never updated, so it cannot be used for gameplay decisions
-/// involving moving entities (NPC ships, torpedoes, etc.). Always query the
-/// live ECS `Transform` instead. Asteroids carry [`AsteroidUuid`]; NPCs and
-/// stations carry [`crate::entity_spawner::EntityUuid`]. This helper checks
-/// both.
-fn live_entity_xz(
-    uuid: &str,
-    asteroid_q: &Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: &Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-) -> Option<(f32, f32)> {
-    for (u, t) in asteroid_q.iter() {
-        if u.0 == uuid {
-            return Some((t.translation.x, t.translation.z));
-        }
-    }
-    for (u, t) in entity_q.iter() {
-        if u.0 == uuid {
-            return Some((t.translation.x, t.translation.z));
-        }
-    }
-    None
-}
+// Shared weapons utilities extracted to `shared.rs` (issue #721). Re-exported
+// so `use super::*;` in the test module keeps resolving them.
+pub(crate) use super::shared::{
+    any_bank_accepts_human_input, any_bank_operates_ai, any_blaster_bank_operates_ai,
+    any_tactical_system_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
+};
 
 fn handle_set_target(
     ship_query: Query<
@@ -559,147 +540,6 @@ fn handle_set_target(
             ));
         }
     }
-}
-
-/// Returns true if `token` is authorized to issue Tactical fire orders.
-///
-/// Either the token is the connected player currently holding the station that
-/// owns this ship's weapons, or it is the local HTML-console operator
-/// ([`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]) — the browser server
-/// viewscreen / native wry server case, where the operator drives the console
-/// directly with no remote PeerJS session (issue #422 / PRD #419).
-///
-/// The weapons owner is resolved from the ship config rather than assumed to
-/// be a station named "tactical", so single-station hulls (the Courier, whose
-/// blaster lives on "pilot") authorize correctly.
-fn tactical_authorized(
-    sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigComponent,
-    token: &str,
-) -> bool {
-    ship_config
-        .0
-        .weapons_station()
-        .and_then(|station| sessions.0.holder_for_station(&station))
-        == Some(token)
-        || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
-}
-
-/// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency)
-/// are gated on "any phaser bank accepts human input"
-/// (issue #512, option c). This preserves the "fire when only one bank is
-/// alive" semantic.
-///
-/// Returns `true` when any bank in the ship's `phaser_banks` config has an
-/// operable fine system (`accept_human_input == true`), or when the config
-/// declares no `phaser_bank` fine systems at all — nothing to gate on, and
-/// the per-target admission gate has already authorised the command (the
-/// dead coarse `tactical` fallback was deleted by #801).
-fn any_bank_accepts_human_input(
-    control_sources: &ShipSystemControlSources,
-    ship_config: &crate::ship::config::ShipConfig,
-) -> bool {
-    // Find bank ids from the systems list (fine `phaser_bank` kinds).
-    let bank_system_ids: Vec<SystemId> = ship_config
-        .systems
-        .iter()
-        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
-        .map(|s| s.id.clone())
-        .collect();
-    if bank_system_ids.is_empty() {
-        // No fine banks declared: nothing to gate on — admission on the
-        // target system has already authorised the command. (The dead
-        // coarse `tactical` fallback was deleted by #801.)
-        return true;
-    }
-    bank_system_ids
-        .iter()
-        .any(|id| control_sources.0.policy_for(id).accept_human_input)
-}
-
-/// True when ANY phaser bank on the ship has an operable fine system whose
-/// policy has `operate_ai == true`.
-///
-/// Used as the ship-level early-skip gate in `ai_phaser_auto_fire` after
-/// issue #512 deleted the coarse `[[system]] id = "tactical"` block. Before
-/// the fix, the auto-fire loop gated on the coarse tactical policy — that
-/// always returned the default `Human` policy for any ship whose config no
-/// longer declared the coarse system, so NPCs with fine phaser banks
-/// silently stopped auto-firing.
-///
-/// No coarse fallback: a config with no `phaser_bank` fine systems has no
-/// bank that could be AI-operated, so this returns `false`. (The coarse
-/// `tactical` fallback that used to sit here was provably dead — the id was
-/// declared in zero TOMLs and registered in no resolver — and was deleted
-/// by #801.)
-fn any_bank_operates_ai(
-    control_sources: &ShipSystemControlSources,
-    ship_config: &crate::ship::config::ShipConfig,
-) -> bool {
-    ship_config
-        .systems
-        .iter()
-        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
-        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
-}
-
-/// True when ANY blaster bank on the ship has an operable fine system whose
-/// policy has `operate_ai == true`.
-///
-/// Used as the ship-level early-skip gate in `tick_blaster_auto_fire`.
-///
-/// No coarse fallback: a config with no `blaster_bank` fine systems has no
-/// bank that could be AI-operated, so this returns `false` (dead coarse
-/// `tactical` fallback deleted by #801, as in [`any_bank_operates_ai`]).
-fn any_blaster_bank_operates_ai(
-    control_sources: &ShipSystemControlSources,
-    ship_config: &crate::ship::config::ShipConfig,
-) -> bool {
-    ship_config
-        .systems
-        .iter()
-        .filter(|s| s.kind == crate::system_registry::BLASTER_BANK_KIND)
-        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
-}
-
-/// True when ANY tactical fine system (phaser bank, torpedo tube, or the
-/// torpedo magazine) has an operable fine system whose policy has
-/// `operate_ai == true`.
-///
-/// Used as the ship-level early-skip gate in `ai_target_selection` after
-/// issue #512 deleted the coarse `[[system]] id = "tactical"` block.
-/// Mirrors the shape of `any_bank_operates_ai` but covers the full tactical
-/// surface (weapons_target sync + torpedo auto-fire both need to run when
-/// any tactical fine system is AI-driven).
-///
-/// No coarse fallback: a config with no tactical fine systems has nothing
-/// that could be AI-operated, so this returns `false` (dead coarse
-/// `tactical` fallback deleted by #801, as in [`any_bank_operates_ai`]).
-fn any_tactical_system_operates_ai(
-    control_sources: &ShipSystemControlSources,
-    ship_config: &crate::ship::config::ShipConfig,
-) -> bool {
-    let tactical_fine_kinds = [
-        crate::system_registry::PHASER_BANK_KIND,
-        crate::system_registry::TORPEDO_TUBE_KIND,
-        crate::system_registry::TORPEDO_MAGAZINE_KIND,
-    ];
-    ship_config
-        .systems
-        .iter()
-        .filter(|s| tactical_fine_kinds.contains(&s.kind.as_str()))
-        .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
-}
-
-/// True when `system_id` is registered on this ship's `ControlSourceResolver`
-/// (either in the `sources` map or in the damage-driven `offline_systems`
-/// set). Used to decide whether per-fine-instance gating applies to a
-/// message, or whether the default-source policy applies (ships that haven't
-/// opted into the fine-system decomposition; issue #801 removed the coarse
-/// `tactical` fallback that used to sit behind this check).
-fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &SystemId) -> bool {
-    control_sources.0.entries().any(|(id, _)| id == system_id)
-        || control_sources.0.offline_systems.contains(system_id)
 }
 
 /// Unified `FirePhaser` handler for every ship (player + NPC).

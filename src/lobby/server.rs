@@ -101,9 +101,10 @@ pub struct OutboundMessage {
 
 // ── System set ─────────────────────────────────────────────────────────────
 
-/// Ordering anchor for every lobby `Update` system: the `handle_disconnect →
-/// process_lobby → tick_countdown → update_game_state_cache` chain plus the
-/// four per-variant station-management systems. Downstream systems that must
+/// Ordering anchor for every lobby `Update` system: `handle_disconnect` runs
+/// first, then the eight per-variant message systems (Identify / SetName /
+/// ReturnToLobby / ConfirmScenario plus the four station-management systems),
+/// then `tick_countdown → update_game_state_cache`. Downstream systems that must
 /// observe the post-lobby world state order themselves with
 /// `.after(LobbySystemSet)`.
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -134,44 +135,73 @@ impl Plugin for LobbyPlugin {
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
             .add_systems(Startup, update_session_with_config)
-            // Order matters: `handle_disconnect` must run before `process_lobby`
-            // so that when a stale disconnect and the reconnect `Identify` land
-            // in the same frame (a browser refresh), the seat is vacated+saved
+            // Ordering scaffold (replaces the former monolithic `process_lobby`
+            // chain). `handle_disconnect` must run before the per-variant message
+            // systems so that when a stale disconnect and the reconnect `Identify`
+            // land in the same frame (a browser refresh), the seat is vacated+saved
             // first and then restored — not the reverse, which would leave the
-            // player marked disconnected with their seat cleared.
-            // `tick_countdown` runs after processing messages but before the
-            // outbox drain so countdown broadcasts reach the outbound bus.
+            // player marked disconnected with their seat cleared. `tick_countdown`
+            // runs after the message systems (but before the outbox drain) so
+            // countdown broadcasts reach the outbound bus.
             .add_systems(
                 Update,
-                (
-                    handle_disconnect,
-                    process_lobby,
-                    tick_countdown,
-                    update_game_state_cache,
-                )
+                (handle_disconnect, tick_countdown, update_game_state_cache)
                     .chain()
                     .in_set(LobbySystemSet),
             )
-            // Per-variant station-management systems (issue #733). Each owns
-            // exactly one ClientMessage variant, reading it via its own
-            // `MessageReader` cursor; `process_lobby` no longer processes these
-            // four variants. All four gate on Lobby/Loading/InProgress so
-            // players can claim/release stations and toggle ratings both in the
-            // lobby and mid-game.
+            // Per-variant message systems (issues #733 + #734). Each owns exactly
+            // one ClientMessage variant, reading it via its own `MessageReader`
+            // cursor. They replace the monolithic `process_lobby`/`process_message`
+            // dispatch. All run after `handle_disconnect` and before
+            // `tick_countdown`. They carry different phase gates, so they are
+            // registered per matching gate:
+            //
+            // Identify + the four station systems gate on
+            // Lobby/Loading/InProgress (claim/release/toggle + mid-game reconnect).
             .add_systems(
                 Update,
                 (
+                    handle_identify_system,
                     handle_select_station_system,
                     handle_release_station_system,
                     handle_set_ready_system,
                     handle_set_station_rating_system,
                 )
                     .in_set(LobbySystemSet)
+                    .after(handle_disconnect)
+                    .before(tick_countdown)
                     .run_if(
                         in_state(GamePhase::Lobby)
                             .or(in_state(GamePhase::Loading))
                             .or(in_state(GamePhase::InProgress)),
                     ),
+            )
+            // SetName gates on Lobby/Loading (rename before the game starts).
+            .add_systems(
+                Update,
+                handle_set_name_system
+                    .in_set(LobbySystemSet)
+                    .after(handle_disconnect)
+                    .before(tick_countdown)
+                    .run_if(in_state(GamePhase::Lobby).or(in_state(GamePhase::Loading))),
+            )
+            // ReturnToLobby gates on GameOver (the game-over screen's button).
+            .add_systems(
+                Update,
+                handle_return_to_lobby_system
+                    .in_set(LobbySystemSet)
+                    .after(handle_disconnect)
+                    .before(tick_countdown)
+                    .run_if(in_state(GamePhase::GameOver)),
+            )
+            // ConfirmScenario gates on Lobby (scenario picker confirmation).
+            .add_systems(
+                Update,
+                handle_confirm_scenario_system
+                    .in_set(LobbySystemSet)
+                    .after(handle_disconnect)
+                    .before(tick_countdown)
+                    .run_if(in_state(GamePhase::Lobby)),
             );
     }
 }
@@ -390,7 +420,15 @@ pub fn update_game_state_cache(
 
 // ── Systems ────────────────────────────────────────────────────────────────
 
-pub fn process_lobby(
+/// Per-variant system for `ClientMessage::Identify` (issue #734) — the reconnect
+/// handshake. Gated on Lobby/Loading/InProgress so a browser refresh mid-game
+/// still receives its `Welcome` and has its seat restored. Every parameter is
+/// sourced exactly as the former `process_lobby` Identify path did:
+/// `world` from `WorldResource`, `ship_stations` with a `default()` fallback,
+/// `ship_config` from `ShipClientConfigResource`, and the ratings SNAPSHOT from
+/// either `active_ratings` (ship present) or `pending_ratings()` (pre-spawn).
+/// `handle_identify` takes no `preload_complete` (only `SetReady` needed it).
+pub fn handle_identify_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
     state: Res<State<GamePhase>>,
@@ -399,7 +437,6 @@ pub fn process_lobby(
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
-    preload: Option<Res<crate::server::asset_preload::AssetPreloadResource>>,
     mut ship_query: Query<
         (
             &ShipConfigComponent,
@@ -410,102 +447,36 @@ pub fn process_lobby(
     >,
     mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
-    // During the Lobby phase this system owns the inbound queue and handles
-    // every message type. Outside the lobby the simulation systems own it, so
-    // here we handle *only* the reconnect handshake (`Identify`) — a browser
-    // refresh mid-game must still receive its `Welcome` and have its seat
-    // restored. Additionally, station management messages (`SelectStation`,
-    // `ReleaseStation`, `SetReady`) are allowed during `InProgress` so players
-    // can claim vacated stations mid-game and press Ready to hand control back
-    // from Backfill AI — `SetReady`'s InProgress branch in
-    // `lobby_handler::process_message` is unreachable without this, since it's
-    // the only place that handles that message. `ReturnToLobby` is allowed so
-    // the GameOver screen's button works even though GameOver isn't `accepts_all`.
-    // All other message types are left for the in-game systems.
-    // (Bevy `MessageReader`s have independent cursors, so reading here never
-    // hides messages from those systems.)
-    //
-    // During `Loading` the lobby system also handles inbound messages (reconnect,
-    // Identify, etc.) while the asset pre-cache runs.
-    let accepts_all = state.get() == &GamePhase::Lobby || state.get() == &GamePhase::Loading;
     let default_stations = ShipStations::default();
     let stations = ship_stations
         .as_ref()
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
-    // Preload gate: only Engage when the asset pre-cache has finished.
-    // - If the resource is missing entirely (test app, native build that
-    //   hasn't run `begin_asset_preload`), treat as complete.
-    // - If the resource exists but `!started`, treat as complete too — the
-    //   preload system runs every `Update` and may not have observed the
-    //   lobby state yet on the first frame. This avoids a deadlock where
-    //   `process_lobby` would refuse Engage forever waiting for a system
-    //   that never runs.
-    // - In Playwright automation mode the renderer plugins are skipped
-    //   (MinimalPlugins), and asset preloading can never complete because
-    //   the renderer asset pipeline isn't available. Treat preload as
-    //   complete unconditionally in this environment.
-    // - Otherwise gate on `preload.complete`, which is set by
-    //   `poll_asset_preload` once all icons, sidecars, sub-worlds, and GLBs
-    //   reach a terminal LoadState (Loaded or Failed).
-    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
-        true
-    } else {
-        preload
-            .as_ref()
-            .map(|p| !p.started || p.complete)
-            .unwrap_or(true)
-    };
-    // Collect all messages first to avoid borrow conflicts with ship_query.
-    //
-    // The four station-management variants (SelectStation, ReleaseStation,
-    // SetReady, SetStationRating) are owned exclusively by the per-variant
-    // systems (`handle_select_station_system` et al., issue #733) — they must
-    // never be processed here, in any phase, or they would be double-read (this
-    // system and the per-variant system have independent `MessageReader`
-    // cursors). `process_lobby` retains Identify (reconnect handshake) plus, in
-    // Lobby/Loading (`accepts_all`), SetName / ConfirmScenario / the runtime
-    // no-op catch-all, and ReturnToLobby in every phase (GameOver's button).
-    let events: Vec<_> = inbound
-        .read()
-        .filter(|ev| {
-            if matches!(
-                ev.msg,
-                ClientMessage::SelectStation { .. }
-                    | ClientMessage::ReleaseStation
-                    | ClientMessage::SetReady { .. }
-                    | ClientMessage::SetStationRating { .. }
-            ) {
-                return false;
-            }
-            accepts_all
-                || matches!(ev.msg, ClientMessage::Identify { .. })
-                || matches!(ev.msg, ClientMessage::ReturnToLobby)
-        })
-        .cloned()
-        .collect();
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
-        if let Ok((ship_config, mut control_sources, mut active_ratings)) = ship_query.single_mut()
-        {
+        let ClientMessage::Identify { token, name } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let ratings_snapshot = active_ratings.0.clone();
-            let result = lobby_handler::process_message(
-                &ev.token,
-                &ev.msg,
+            let result = lobby_handler::handle_identify(
+                token,
+                name,
                 &mut sessions.0,
-                state.get().clone(),
+                phase.clone(),
                 world_data,
                 stations,
                 &ship_client_config.0,
-                preload_complete,
                 &ratings_snapshot,
             );
             apply_result(
                 result,
                 &mut outbox,
                 &mut next_state,
-                Some(ship_config),
-                Some(&mut control_sources),
+                Some(cfg),
+                Some(&mut cs),
                 &mut active_ratings,
                 countdown.as_deref_mut(),
             );
@@ -514,17 +485,171 @@ pub fn process_lobby(
             // ratings players have picked in the lobby so far, so (re)joining
             // clients' Welcome reflects current toggle state.
             let pending_ratings = sessions.0.pending_ratings().clone();
-            let result = lobby_handler::process_message(
-                &ev.token,
-                &ev.msg,
+            let result = lobby_handler::handle_identify(
+                token,
+                name,
                 &mut sessions.0,
-                state.get().clone(),
+                phase.clone(),
                 world_data,
                 stations,
                 &ship_client_config.0,
-                preload_complete,
                 &pending_ratings,
             );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SetName` (issue #734). Gated on
+/// Lobby/Loading. The result only carries outbound (a `NameChanged` broadcast),
+/// but the dual-path `apply_result` call mirrors the other systems for
+/// consistency.
+pub fn handle_set_name_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SetName { name } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_set_name(&ev.token, name, &mut sessions.0);
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_set_name(&ev.token, name, &mut sessions.0);
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::ReturnToLobby` (issue #734). Gated on
+/// GameOver — the game-over screen's "return to lobby" button. `apply_result`
+/// routes the phase transition back to `Lobby` plus the cleared-ready / returned
+/// broadcasts.
+pub fn handle_return_to_lobby_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::ReturnToLobby = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone());
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone());
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::ConfirmScenario` (issue #734). Gated
+/// on Lobby. Needs almost nothing, but still routes its outbound
+/// (`ScenarioLoaded`) through `apply_result`.
+pub fn handle_confirm_scenario_system(
+    mut inbound: MessageReader<InboundMessage>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::ConfirmScenario = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_confirm_scenario(phase.clone());
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_confirm_scenario(phase.clone());
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,
@@ -542,8 +667,9 @@ pub fn process_lobby(
 /// Per-variant system for `ClientMessage::SelectStation` (issue #733).
 /// Reads its variant off the inbound bus with its own cursor, calls the pure
 /// `lobby_handler::handle_select_station`, then applies the result to Bevy
-/// resources via `apply_result` — mirroring `process_lobby`'s dual-path
-/// (real ship entity vs. pre-spawn fallback) handling.
+/// resources via `apply_result` — using the same dual-path
+/// (real ship entity vs. pre-spawn fallback) handling as the other lobby
+/// message systems.
 pub fn handle_select_station_system(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
@@ -702,7 +828,7 @@ pub fn handle_set_ready_system(
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let phase = state.get().clone();
-    // Preload gate: same logic as process_lobby / handle_disconnect.
+    // Preload gate: same logic as handle_disconnect.
     let preload_complete = if crate::debug_overlay::is_playwright_automation() {
         true
     } else {
@@ -851,7 +977,7 @@ fn handle_disconnect(
     let empty_stations = ShipStations::default();
     let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
 
-    // Preload gate: same logic as process_lobby.
+    // Preload gate: same logic as handle_set_ready_system.
     let preload_complete = if crate::debug_overlay::is_playwright_automation() {
         true
     } else {
@@ -1017,7 +1143,7 @@ fn tick_countdown(
 /// Plugin that drains [`LobbyOutbox`] into the `OutboundMessage` bus every
 /// frame, regardless of the current game phase.
 ///
-/// This phase-agnostic drain is intentional: `process_lobby` both transitions
+/// This phase-agnostic drain is intentional: `tick_countdown` both transitions
 /// the phase to `InProgress` *and* queues `GameStarted` in the same frame.
 /// A phase-gated drain (such as routing through `LobbyBroadcaster`) would skip
 /// the outbox on that transition frame, causing `GameStarted` to be lost.

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::messages::{
-    ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
+    GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
 };
 use crate::session::SessionManager;
 use crate::ship::config::ShipConfig;
@@ -32,7 +32,7 @@ pub struct LobbyHandlerResult {
     /// Station rating change the Bevy runtime must apply to the control-source
     /// resolver and active_ratings map (in addition to broadcasting it).
     /// Set by `process_disconnect_with_stations` (backfill) and the reconnect
-    /// branch of `process_message` (restore).
+    /// branch of `handle_identify` (restore).
     pub station_rating_update: Option<(StationId, String)>,
     /// Optional countdown action. When set, `new_phase` and the corresponding
     /// `GameStarted` outbound message must NOT be produced for this round —
@@ -58,78 +58,11 @@ pub fn derive_game_state(
     }
 }
 
-/// Handle one decoded `ClientMessage` from a peer. `token` is the session token
-/// for non-Identify messages; for Identify it is ignored (the session token is
-/// taken from the message body).
-pub fn process_message(
-    token: &str,
-    msg: &ClientMessage,
-    sessions: &mut SessionManager,
-    phase: GamePhase,
-    world: Option<&WorldData>,
-    ship_stations: &ShipStations,
-    ship_config: &ShipClientConfig,
-    // When `false`, `SetReady` transitions to `Loading` instead of `InProgress`.
-    preload_complete: bool,
-    // Per-station active ratings to embed in Welcome for (re)connecting clients.
-    station_ratings: &HashMap<StationId, String>,
-) -> LobbyHandlerResult {
-    match msg {
-        ClientMessage::Identify {
-            token: id_token,
-            name,
-        } => handle_identify(
-            id_token,
-            name,
-            sessions,
-            phase,
-            world,
-            ship_stations,
-            ship_config,
-            station_ratings,
-        ),
-        ClientMessage::SetName { name } => handle_set_name(token, name, sessions),
-        ClientMessage::SelectStation { station } => {
-            handle_select_station(token, station, sessions, phase, ship_stations)
-        }
-        ClientMessage::ReleaseStation => {
-            handle_release_station(token, sessions, phase, ship_stations)
-        }
-        ClientMessage::SetReady { ready } => handle_set_ready(
-            token,
-            *ready,
-            sessions,
-            phase,
-            preload_complete,
-            ship_stations,
-        ),
-        ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
-        ClientMessage::ConfirmScenario => handle_confirm_scenario(phase),
-        ClientMessage::SetStationRating { rating_name } => {
-            handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
-        }
-        // SetReady IS handled above (not a no-op in lobby). The seven runtime
-        // variants are no-ops here — they are handled by the console server
-        // plugins, not the lobby handler.
-        ClientMessage::FirePhaser { .. }
-        | ClientMessage::FireTorpedo { .. }
-        | ClientMessage::ControlSystem { .. }
-        | ClientMessage::SendCoordination { .. }
-        | ClientMessage::LoadTube { .. }
-        | ClientMessage::UnloadTube { .. } => LobbyHandlerResult {
-            new_phase: None,
-            outbound: Vec::new(),
-            station_rating_update: None,
-            countdown_action: None,
-        },
-    }
-}
-
 /// Handle `Identify`: (re)register the session, restore a held station on
 /// reconnect-yield, and emit `Welcome` / `PlayerJoined` (and, at capacity, an
 /// empty `StationAssigned`). `token` from the envelope is ignored — the session
 /// token comes from the message body.
-fn handle_identify(
+pub(crate) fn handle_identify(
     id_token: &str,
     name: &str,
     sessions: &mut SessionManager,
@@ -271,7 +204,11 @@ fn handle_identify(
 
 /// Handle `SetName`: update the session's display name and broadcast
 /// `NameChanged` to everyone.
-fn handle_set_name(token: &str, name: &str, sessions: &mut SessionManager) -> LobbyHandlerResult {
+pub(crate) fn handle_set_name(
+    token: &str,
+    name: &str,
+    sessions: &mut SessionManager,
+) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     sessions.set_name(token, name.to_string());
     outbound.push((
@@ -549,7 +486,10 @@ pub(crate) fn handle_set_ready(
 /// Handle `ReturnToLobby`: from `GameOver`, reset ready flags + pending ratings,
 /// broadcast the cleared readies and `ReturnedToLobby`, and transition to
 /// `Lobby`. No-op in any other phase.
-fn handle_return_to_lobby(sessions: &mut SessionManager, phase: GamePhase) -> LobbyHandlerResult {
+pub(crate) fn handle_return_to_lobby(
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase: Option<GamePhase> = None;
 
@@ -578,7 +518,7 @@ fn handle_return_to_lobby(sessions: &mut SessionManager, phase: GamePhase) -> Lo
 }
 
 /// Handle `ConfirmScenario`: broadcast `ScenarioLoaded` during Lobby.
-fn handle_confirm_scenario(phase: GamePhase) -> LobbyHandlerResult {
+pub(crate) fn handle_confirm_scenario(phase: GamePhase) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     if phase == GamePhase::Lobby {
         outbound.push((Target::All, ServerMessage::ScenarioLoaded));
@@ -758,9 +698,76 @@ pub fn process_disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{EntitySnapshot, StationId, WorldData};
+    use crate::messages::{ClientMessage, EntitySnapshot, StationId, WorldData};
     use crate::ship::control_source::ControlSourceResolver;
     use crate::stations_config::{ShipStations, StationDef};
+
+    /// Test-only dispatch matching the former production `process_message`
+    /// signature. Production now routes each `ClientMessage` lobby variant
+    /// through its own per-variant Bevy system in `LobbySystemSet` (issue #734),
+    /// so this helper preserves the exact per-variant pure-fn calls the tests
+    /// exercise (including dropping `preload_complete` for the `Identify` arm,
+    /// which `handle_identify` never took).
+    fn dispatch(
+        token: &str,
+        msg: &ClientMessage,
+        sessions: &mut SessionManager,
+        phase: GamePhase,
+        world: Option<&WorldData>,
+        ship_stations: &ShipStations,
+        ship_config: &ShipClientConfig,
+        preload_complete: bool,
+        station_ratings: &HashMap<StationId, String>,
+    ) -> LobbyHandlerResult {
+        match msg {
+            ClientMessage::Identify {
+                token: id_token,
+                name,
+            } => handle_identify(
+                id_token,
+                name,
+                sessions,
+                phase,
+                world,
+                ship_stations,
+                ship_config,
+                station_ratings,
+            ),
+            ClientMessage::SetName { name } => handle_set_name(token, name, sessions),
+            ClientMessage::SelectStation { station } => {
+                handle_select_station(token, station, sessions, phase, ship_stations)
+            }
+            ClientMessage::ReleaseStation => {
+                handle_release_station(token, sessions, phase, ship_stations)
+            }
+            ClientMessage::SetReady { ready } => handle_set_ready(
+                token,
+                *ready,
+                sessions,
+                phase,
+                preload_complete,
+                ship_stations,
+            ),
+            ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
+            ClientMessage::ConfirmScenario => handle_confirm_scenario(phase),
+            ClientMessage::SetStationRating { rating_name } => {
+                handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
+            }
+            // The six runtime variants are no-ops in the lobby — handled by the
+            // console server plugins, not the lobby handler.
+            ClientMessage::FirePhaser { .. }
+            | ClientMessage::FireTorpedo { .. }
+            | ClientMessage::ControlSystem { .. }
+            | ClientMessage::SendCoordination { .. }
+            | ClientMessage::LoadTube { .. }
+            | ClientMessage::UnloadTube { .. } => LobbyHandlerResult {
+                new_phase: None,
+                outbound: Vec::new(),
+                station_rating_update: None,
+                countdown_action: None,
+            },
+        }
+    }
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
         let mut s = SessionManager::new();
@@ -845,7 +852,7 @@ max_level = 4
         phase: GamePhase,
         world: Option<&WorldData>,
     ) -> LobbyHandlerResult {
-        process_message(
+        dispatch(
             token,
             msg,
             sessions,
@@ -1199,7 +1206,7 @@ max_level = 4
         phase: GamePhase,
         world: Option<&WorldData>,
     ) -> LobbyHandlerResult {
-        process_message(
+        dispatch(
             token,
             msg,
             sessions,
@@ -1500,7 +1507,7 @@ max_level = 4
             StationId("captain".into()),
             rating::BACKFILL_RATING.to_string(),
         )]);
-        let result = process_message(
+        let result = dispatch(
             "t1",
             &ClientMessage::SelectStation {
                 station: "Captain".into(),
@@ -1580,7 +1587,7 @@ max_level = 4
             StationId("captain".into()),
             rating::BACKFILL_RATING.to_string(),
         )]);
-        let result = process_message(
+        let result = dispatch(
             "t1",
             &ClientMessage::SetReady { ready: true },
             &mut sessions,
@@ -1634,7 +1641,7 @@ max_level = 4
         let mut sessions = sessions_with("t1", "Alice");
         sessions.set_station("t1", Some(StationId("captain".into())));
         sessions.set_ready("t1", true);
-        let result = process_message(
+        let result = dispatch(
             "t1",
             &ClientMessage::ReleaseStation,
             &mut sessions,
@@ -1912,7 +1919,7 @@ max_level = 4
             token: "t1".into(),
             name: "Alice".into(),
         };
-        let _result = process_message(
+        let _result = dispatch(
             "t1",
             &msg,
             &mut sessions,
@@ -1963,7 +1970,7 @@ max_level = 4
             token: "t1".into(),
             name: "Alice".into(),
         };
-        let result = process_message(
+        let result = dispatch(
             "t1",
             &msg,
             &mut sessions,
@@ -2002,7 +2009,7 @@ max_level = 4
             token: "t2".into(),
             name: "Bob".into(),
         };
-        let result = process_message(
+        let result = dispatch(
             "t2",
             &msg,
             &mut sessions,
@@ -2252,7 +2259,7 @@ max_level = 4
             true,
         );
         // t1 reconnects via Identify
-        let reconnect_result = process_message(
+        let reconnect_result = dispatch(
             "t1",
             &ClientMessage::Identify {
                 token: "t1".into(),
@@ -2328,7 +2335,7 @@ max_level = 4
             None,
         );
         // t1 reconnects
-        let reconnect_result = process_message(
+        let reconnect_result = dispatch(
             "t1",
             &ClientMessage::Identify {
                 token: "t1".into(),

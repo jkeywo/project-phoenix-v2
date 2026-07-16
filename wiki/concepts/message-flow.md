@@ -2,8 +2,8 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, events, routing, delivery-class, snapshot]
-sources: [src/server/bridge.rs, src/lobby/server.rs, src/server_app.rs, AGENTS.md]
-updated: 2026-07-15
+sources: [src/server/bridge.rs, src/lobby/server.rs, src/lobby/handler.rs, src/server_app.rs, AGENTS.md]
+updated: 2026-07-16
 ---
 
 # Message Flow
@@ -45,6 +45,33 @@ This project uses Bevy's **pull-based** message system (not legacy events):
 - `app.add_message::<InboundMessage>()`, `add_message::<OutboundMessage>()`, `add_message::<PlayerDisconnected>()`.
 - Producers use `MessageWriter<T>`. Consumers use `MessageReader<T>`.
 - Messages live one frame and are drained.
+
+## Lobby message dispatch (per-variant systems)
+
+Inbound `ClientMessage` lobby variants are no longer routed through a single
+monolithic `process_lobby` / `process_message` dispatch (deleted in #734). Each
+lobby variant is now handled by its own dedicated Bevy system in `LobbySystemSet`
+(`src/lobby/server.rs`), reading the inbound bus with its own `MessageReader`
+cursor and calling the matching pure handler in `src/lobby/handler.rs`:
+
+| System | Variant | Phase gate |
+|---|---|---|
+| `handle_identify_system` | `Identify` | Lobby / Loading / InProgress (mid-game reconnect) |
+| `handle_set_name_system` | `SetName` | Lobby / Loading |
+| `handle_return_to_lobby_system` | `ReturnToLobby` | GameOver |
+| `handle_confirm_scenario_system` | `ConfirmScenario` | Lobby |
+| `handle_select_station_system` | `SelectStation` | Lobby / Loading / InProgress |
+| `handle_release_station_system` | `ReleaseStation` | Lobby / Loading / InProgress |
+| `handle_set_ready_system` | `SetReady` | Lobby / Loading / InProgress |
+| `handle_set_station_rating_system` | `SetStationRating` | Lobby / Loading / InProgress |
+
+Ordering within the set: `handle_disconnect` runs first (so a same-frame
+disconnect+reconnect vacates then restores a seat in the right order), then the
+per-variant message systems, then `tick_countdown → update_game_state_cache`.
+The seven in-game runtime variants (`ControlSystem`, `FirePhaser`, `FireTorpedo`,
+`SetPhaserFrequency`, `SendCoordination`, `LoadTube`, `UnloadTube`) are simply
+not read by any lobby system — the console server plugins own them under
+`SimSet::Input`.
 
 ## Routing targets
 

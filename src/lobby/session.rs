@@ -21,8 +21,8 @@ pub enum RegisterError {
 ///   same token would miss `idx()` and fall through to `register()` as a
 ///   brand-new player — losing `last_rating` and, for a player who still
 ///   holds a station, breaking the reconnect-yield seat/rating restore in
-///   `process_disconnect_with_stations` / `process_message`'s `Identify`
-///   handler (`src/lobby/handler.rs`).
+///   `process_disconnect_with_stations` / `handle_identify` (the `Identify`
+///   handler in `src/lobby/handler.rs`).
 /// - Even a station-less disconnected player is not safe to prune purely on
 ///   "disconnected + no station": nothing in `SessionManager` distinguishes
 ///   "never held a station this game" from "held one and had it stolen by a

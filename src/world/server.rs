@@ -80,9 +80,10 @@ pub struct WorldContentRuntime {
     /// trigger table in the same tick so chained `on_flag_set` /
     /// `on_flag_cleared` triggers fire as part of the same Bevy frame.
     pub flags: crate::world::flags::FlagStore,
-    /// Queue of synthesised `WorldEvent`s to be drained by `tick_trigger_pipeline`
-    /// on the next Update tick. Used by `init_world_runtime` (base-world
-    /// Startup) and `apply_world_layer_changes` (sub-world Load) to inject
+    /// Queue of synthesised `WorldEvent`s to be drained by `collect_world_events`
+    /// into `WorldEventBuffer` on the next Update tick. Used by
+    /// `init_world_runtime` (base-world Startup) and
+    /// `apply_world_layer_changes` (sub-world Load) to inject
     /// `WorldEvent::WorldLoaded` into the trigger evaluation pipeline
     /// without duplicating the dispatch logic that lives inside
     /// `tick_trigger_pipeline`.
@@ -95,7 +96,7 @@ pub struct WorldContentRuntime {
     /// (set by `init_world_runtime`). `on_timer` triggers fire when
     /// `time.elapsed_secs() - world_loaded_at_secs >= after_secs`.
     /// `None` while no world is loaded (lobby, fallback bootstrap), in
-    /// which case `tick_trigger_pipeline` skips emitting `TimerElapsed` events.
+    /// which case `collect_world_events` skips emitting `TimerElapsed` events.
     /// (#475)
     pub world_loaded_at_secs: Option<f32>,
     /// Maps named groups to the set of entity names currently in that group.
@@ -181,6 +182,22 @@ pub enum WorldLayerChange {
     Unload(String),
 }
 
+/// Per-tick buffer of the externally-sourced `WorldEvent`s observed this tick.
+///
+/// Producer: `collect_world_events` (drains the `AiEventReaders` messages and
+/// `WorldContentRuntime::pending_world_events`, and synthesises the per-tick
+/// `TimerElapsed` event). Consumer: `tick_trigger_pipeline`, which seeds its
+/// comms-template evaluation and trigger-chaining loop from the buffer.
+///
+/// The chaining loop's internally-produced events (`FlagSet`, `FlagCleared`,
+/// `Destroyed` from a `DestroyEntity` action) stay LOCAL to the pipeline and
+/// are never written here, preserving the contract that comms templates fire
+/// only from external events. Contents are valid for one tick:
+/// `collect_world_events` rebuilds the buffer every run, so stale events
+/// never leak into the next tick.
+#[derive(Resource, Default)]
+pub struct WorldEventBuffer(pub Vec<WorldEvent>);
+
 /// The comms message currently being displayed on the viewscreen.
 ///
 /// Set when a Comms officer sends `ShowOnScreen { message_id }`.
@@ -209,6 +226,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<PendingScenarioLoad>()
             .init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
+            .init_resource::<WorldEventBuffer>()
             .init_resource::<OnScreenMessage>()
             .add_message::<CommsChannel2Event>()
             .add_systems(
@@ -240,14 +258,28 @@ impl Plugin for WorldPlugin {
                 )
                     .chain(),
             )
+            // Explicit trigger-pipeline ordering (#718): `tick_pending_follow_ups`
+            // must observe `pending_world_events` BEFORE `collect_world_events`
+            // drains them into `WorldEventBuffer` (same-tick follow-up
+            // reaction), and `tick_trigger_pipeline` consumes the buffer.
+            // `.chain()` rather than separate `.before()`s: all three take
+            // `ResMut<WorldContentRuntime>` so they would serialise anyway;
+            // chaining documents the pipeline. (Comms injection joins this
+            // chain in #719.)
             .add_systems(
                 Update,
-                tick_trigger_pipeline.in_set(crate::sim_sets::SimSet::Physics),
+                (
+                    tick_pending_follow_ups,
+                    collect_world_events,
+                    tick_trigger_pipeline,
+                )
+                    .chain()
+                    .in_set(crate::sim_sets::SimSet::Physics),
             )
             // Cursor advancement is a `Modifiers` evaluator: `Physics` has
             // finished moving every ship by then, so waypoint arrival is
             // judged against this tick's final positions. It emits
-            // `AiWaypointReached`, which `tick_trigger_pipeline` turns into a
+            // `AiWaypointReached`, which `collect_world_events` turns into a
             // `WorldEvent::WaypointReached` on the next tick (the same
             // one-tick event bridge `AiEntityAttacked` already uses).
             .add_systems(
@@ -263,12 +295,6 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                tick_pending_follow_ups
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .before(tick_trigger_pipeline),
-            )
-            .add_systems(
-                Update,
                 apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
             )
             .add_systems(
@@ -281,8 +307,8 @@ impl Plugin for WorldPlugin {
 }
 
 /// Observer: bridge `RegionEntered` (player ship boundary crossing into a
-/// region) into a queued `WorldEvent::EnteredRegion` so `tick_trigger_pipeline`
-/// can fan it out to matching triggers on the next tick.
+/// region) into a queued `WorldEvent::EnteredRegion` so `collect_world_events`
+/// can buffer it for the trigger pipeline on the next tick.
 ///
 /// Looks up the region entity's UUID via `RegionMembership.region_uuids`
 /// (populated each tick by `update_region_membership`, and persisted after
@@ -630,7 +656,7 @@ fn init_world_runtime(
     };
 
     // (#475) Stamp the load-time anchor for `on_timer` triggers. All
-    // `after_secs` values are measured relative to this; `tick_trigger_pipeline`
+    // `after_secs` values are measured relative to this; `collect_world_events`
     // emits `WorldEvent::TimerElapsed { elapsed_secs }` each tick using
     // `time.elapsed_secs() - world_loaded_at_secs`. `Time` is wrapped in
     // `Option` so older test apps that don't install `TimePlugin` continue
@@ -737,9 +763,10 @@ fn mark_comms_dirty_on_game_start(
 /// trigger conditions against current world state plus this tick's pending
 /// events, and inject any follow-ups whose conditions are now met.
 ///
-/// Ordering: scheduled `.before(tick_trigger_pipeline)` so this system observes
-/// `pending_world_events` BEFORE `tick_trigger_pipeline` drains them. This lets
-/// follow-ups react to events on the same tick they fire.
+/// Ordering: chained BEFORE `collect_world_events` (see `WorldPlugin::build`)
+/// so this system observes `pending_world_events` BEFORE they are drained
+/// into `WorldEventBuffer`. This lets follow-ups react to events on the same
+/// tick they fire.
 ///
 /// "Fire immediately if already true" semantics applies to state-based
 /// triggers: `OnEnteredRegion` fires if the ship is currently inside the
@@ -1212,45 +1239,38 @@ fn broadcast_objective_summary(
 
 // -- AI-event trigger system -------------------------------------------------
 
-/// Upper bound on `tick_trigger_pipeline`'s within-tick trigger-chaining passes.
+/// Collect this tick's externally-sourced `WorldEvent`s into `WorldEventBuffer`.
 ///
-/// A `set_flag` action emits a `FlagSet` event that a downstream `on_flag_set`
-/// trigger can react to in the same Bevy frame, which can in turn set another
-/// flag. The cap stops a pathological feedback loop from hanging the frame.
-const MAX_CHAIN_PASSES: i32 = 16;
-
-/// Read `AiEntityAttacked` and `AiEntityDestroyed` messages, translate them
-/// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
-/// resulting actions (including `SetAiState`, `ApplyModifier`, `RemoveModifier`,
-/// `ApplyFlag`, and `RemoveFlag`).
-fn tick_trigger_pipeline(
-    mut runtime: ResMut<WorldContentRuntime>,
-    mut objectives: ResMut<ObjectiveManagerRes>,
-    mut channel2_writer: MessageWriter<CommsChannel2Event>,
-    mut commands: Commands,
+/// Three sources, in order:
+/// 1. AI-plugin messages (`AiEntityAttacked` / `AiEntityDestroyed` /
+///    `AiWaypointReached`) bridged into `WorldEvent`s via `AiEventReaders`.
+/// 2. `runtime.pending_world_events` (`WorldLoaded`, `EnteredRegion`, ...
+///    queued by `init_world_runtime`, `apply_world_layer_changes`, the region
+///    observers, and `tick_delayed_actions` on the previous tick).
+/// 3. (#475) A synthesised `TimerElapsed` event once the world has loaded.
+///    `on_timer` triggers fire when `elapsed_secs >= after_secs`, measured
+///    from `world_loaded_at_secs` (so `after_secs = 0` fires on the first
+///    post-load tick, and `after_secs = 300` fires 300s into the scenario
+///    regardless of how long the lobby was up beforehand). Single-shot
+///    semantics on `TriggerState.fired` prevent re-firing. `Time` is optional
+///    so test apps without `TimePlugin` continue to work (they just never see
+///    `TimerElapsed`).
+///
+/// Ordering: chained after `tick_pending_follow_ups` (which snapshots
+/// `pending_world_events` before this system drains them) and before
+/// `tick_trigger_pipeline` (which consumes the buffer for both comms-template
+/// injection and trigger evaluation).
+///
+/// Change detection: `runtime` is only mutably dereferenced when
+/// `pending_world_events` has entries to drain, and the buffer is only
+/// mutably dereferenced when its contents change, so an event-free tick
+/// (minimal test apps without `TimePlugin`) marks neither resource changed.
+fn collect_world_events(
     mut ai_events: AiEventReaders,
-    mut ai_query: Query<
-        (
-            &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
-            Option<&crate::entities::spawner::FactionComponent>,
-        ),
-        With<AiControllerComponent>,
-    >,
-    mut ship_modifiers: ShipModifiersParams,
-    mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
-    mut world_layers: WorldLayerParams,
-    entity_uuid_query: Query<(Entity, &EntityUuid)>,
-    mut faction_dispatch: FactionDispatchParams,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut buffer: ResMut<WorldEventBuffer>,
     time: Option<Res<bevy::time::Time>>,
 ) {
-    let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
-    // Template source for `SpawnEntity` dispatch (issue #715), built once per
-    // system run. `WasmTemplateLoader` unconditionally: it serves the
-    // preloaded config cache first and, on native, falls back to the
-    // filesystem — reproducing the old cfg-split inline block on both targets.
-    let template_loader = crate::entity_loader::WasmTemplateLoader;
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {
         world_events.push(WorldEvent::Attacked {
@@ -1273,21 +1293,12 @@ fn tick_trigger_pipeline(
         });
     }
     // Drain any externally-queued world events (e.g. WorldLoaded pushed by
-    // init_world_runtime or apply_world_layer_changes). This lets those
-    // emission sites participate in the existing evaluate+dispatch+chain
-    // loop below without duplicating the action dispatch table.
+    // init_world_runtime or apply_world_layer_changes). The emptiness check
+    // is a read: it keeps event-free ticks from marking WorldContentRuntime
+    // changed via a no-op DerefMut.
     if !runtime.pending_world_events.is_empty() {
-        let drained: Vec<WorldEvent> = runtime.pending_world_events.drain(..).collect();
-        world_events.extend(drained);
+        world_events.append(&mut runtime.pending_world_events);
     }
-    // (#475) Emit a `TimerElapsed` event each tick once the world has
-    // loaded. `on_timer` triggers fire when `elapsed_secs >= after_secs`,
-    // measured from `world_loaded_at_secs` (so `after_secs = 0` fires on
-    // the first post-load tick, and `after_secs = 300` fires 300s into
-    // the scenario regardless of how long the lobby was up beforehand).
-    // Single-shot semantics on `TriggerState.fired` prevent re-firing.
-    // `Time` is optional so test apps without `TimePlugin` continue to
-    // work (they just never see `TimerElapsed`).
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
             .world_loaded_at_secs
@@ -1296,9 +1307,74 @@ fn tick_trigger_pipeline(
     if let Some(es) = elapsed_secs {
         world_events.push(WorldEvent::TimerElapsed { elapsed_secs: es });
     }
-    if world_events.is_empty() && runtime.pending_delayed_actions.is_empty() {
+    // Leave the buffer holding exactly THIS tick's events. Skip the mutable
+    // deref when both the old and new contents are empty — replacing an
+    // empty Vec with an empty Vec is a no-op that would otherwise mark the
+    // buffer changed every tick.
+    if world_events.is_empty() && buffer.0.is_empty() {
         return;
     }
+    buffer.0 = world_events;
+}
+
+/// Upper bound on `tick_trigger_pipeline`'s within-tick trigger-chaining passes.
+///
+/// A `set_flag` action emits a `FlagSet` event that a downstream `on_flag_set`
+/// trigger can react to in the same Bevy frame, which can in turn set another
+/// flag. The cap stops a pathological feedback loop from hanging the frame.
+const MAX_CHAIN_PASSES: i32 = 16;
+
+/// Read this tick's externally-sourced `WorldEvent`s from `WorldEventBuffer`
+/// (filled by `collect_world_events` earlier in the Physics chain), evaluate
+/// the scenario trigger table, and execute the resulting actions (including
+/// `SetAiState`, `ApplyModifier`, `RemoveModifier`, `ApplyFlag`, and
+/// `RemoveFlag`).
+fn tick_trigger_pipeline(
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut objectives: ResMut<ObjectiveManagerRes>,
+    mut channel2_writer: MessageWriter<CommsChannel2Event>,
+    mut commands: Commands,
+    buffer: Res<WorldEventBuffer>,
+    mut ai_query: Query<
+        (
+            &EntityUuid,
+            Option<&mut crate::ai_plugin::ShipAiMemory>,
+            Option<&crate::entities::spawner::FactionComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
+    mut ship_modifiers: ShipModifiersParams,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut world_layers: WorldLayerParams,
+    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    mut faction_dispatch: FactionDispatchParams,
+    time: Option<Res<bevy::time::Time>>,
+) {
+    let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
+    // Template source for `SpawnEntity` dispatch (issue #715), built once per
+    // system run. `WasmTemplateLoader` unconditionally: it serves the
+    // preloaded config cache first and, on native, falls back to the
+    // filesystem — reproducing the old cfg-split inline block on both targets.
+    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    if buffer.0.is_empty() && runtime.pending_delayed_actions.is_empty() {
+        return;
+    }
+
+    // (#475/#718) `elapsed_secs` anchors delayed-action scheduling below
+    // (`fire_at_elapsed = elapsed_secs + delay`). Recomputed from `Time`
+    // rather than derived from the buffer's `TimerElapsed` event because the
+    // delay check distinguishes `None` (no `Time` resource or no world-load
+    // anchor — delayed actions are silently dropped) from `Some`, and tests
+    // push `TimerElapsed` events into `pending_world_events` without a
+    // world-load anchor; deriving from the buffer would flip `None` to
+    // `Some` there. `Time` is updated once per frame, so this reads the same
+    // value `collect_world_events` used earlier in the chain.
+    let elapsed_secs = time.as_ref().and_then(|t| {
+        runtime
+            .world_loaded_at_secs
+            .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
+    });
 
     // Reborrow the `ResMut` as a plain `&mut` so the evaluation loop below can
     // split disjoint field borrows (`&runtime.flags` for condition chains while
@@ -1324,11 +1400,10 @@ fn tick_trigger_pipeline(
 
     // Auto-fire comms templates that match the world events (e.g. on_attacked distress calls).
     // These are injected without any player hailing ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they are broadcast messages.
-    let fired_comms = evaluate_comms_templates(
-        &mut runtime.comms_template_states,
-        &world_events,
-        &name_to_uuid,
-    );
+    // Reads the buffer directly: only EXTERNAL events reach comms templates —
+    // the chaining loop's internally-produced events below never do.
+    let fired_comms =
+        evaluate_comms_templates(&mut runtime.comms_template_states, &buffer.0, &name_to_uuid);
     for fc in fired_comms {
         let thread_id = fc
             .thread_id
@@ -1406,7 +1481,11 @@ fn tick_trigger_pipeline(
     // later triggers in the same pass see the same flag values as earlier
     // ones; their mutations land in `next_events` and are observed on the
     // next pass.
-    let mut current_events = world_events;
+    // Seed the chain from the buffer's contents. The buffer stays borrowed
+    // (`collect_world_events` owns refilling it next tick), so clone rather
+    // than move — one Vec clone per non-empty tick, the same cost the
+    // pre-#716 local `world_events.clone()` paid.
+    let mut current_events = buffer.0.clone();
     let mut pass = 0;
     loop {
         pass += 1;
@@ -2179,10 +2258,10 @@ pub struct ShipModifiersParams<'w, 's> {
     pub components: Query<'w, 's, &'static mut crate::modifiers::ShipModifiers>,
 }
 
-/// The AI-plugin messages `tick_trigger_pipeline` bridges into `WorldEvent`s.
+/// The AI-plugin messages `collect_world_events` bridges into `WorldEvent`s.
 ///
 /// Grouped into a `SystemParam` for the same reason as `ShipModifiersParams`:
-/// it keeps `tick_trigger_pipeline` clear of Bevy's 16-parameter limit, and
+/// it keeps `collect_world_events` clear of Bevy's 16-parameter limit, and
 /// each new AI event source would otherwise eat one slot of that budget.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AiEventReaders<'w, 's> {
@@ -3028,11 +3107,13 @@ pub(crate) mod tests {
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
+            .init_resource::<WorldEventBuffer>()
             .add_message::<CommsChannel2Event>()
             .add_systems(
                 Update,
                 (
                     tick_pending_follow_ups,
+                    collect_world_events,
                     tick_trigger_pipeline,
                     handle_comms_channel2,
                 )
@@ -6444,11 +6525,94 @@ entity = "layer_npc"
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
             runtime.pending_world_events.is_empty(),
-            "pending_world_events must be drained by tick_trigger_pipeline"
+            "pending_world_events must be drained by collect_world_events"
         );
         assert!(
             runtime.trigger_states[0].fired,
             "trigger must be marked fired"
+        );
+    }
+
+    /// (#718) Pins the follow-ups -> collect -> pipeline chain ordering:
+    /// `tick_pending_follow_ups` must snapshot `pending_world_events` BEFORE
+    /// `collect_world_events` drains them into `WorldEventBuffer`. A
+    /// registration that ran collection first would leave the snapshot empty
+    /// and the event-only `OnAttacked` follow-up trigger used here would
+    /// never observe its event (it is consumed this tick, not requeued).
+    #[test]
+    fn pending_follow_up_reacts_to_event_queued_same_tick() {
+        let mut app = ai_trigger_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("freighter".to_string(), "freighter-uuid".to_string());
+            runtime.pending_follow_ups.push(PendingFollowUp {
+                node: CommsDialogueNode {
+                    body: "Mayday! We are under attack!".to_string(),
+                    responses: vec![],
+                    speaker: Some("Freighter".to_string()),
+                    trigger: Some(TriggerCondition::OnAttacked {
+                        entity_name: "freighter".to_string(),
+                    }),
+                },
+                sender_uuid: "freighter-uuid".to_string(),
+                sender_name: "Freighter".to_string(),
+                thread_id: "convoy-thread".to_string(),
+                elapsed_secs: 0.0,
+                placeholder_id: None,
+                urgent: true,
+            });
+            // Queued before this tick's update, e.g. by `tick_delayed_actions`
+            // on the previous tick or by a region observer.
+            runtime.pending_world_events.push(WorldEvent::Attacked {
+                uuid: "freighter-uuid".to_string(),
+                attacker_uuid: "raider-uuid".to_string(),
+            });
+        }
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(
+            messages.len(),
+            1,
+            "an OnAttacked follow-up must fire on the SAME tick its event sits \
+             in pending_world_events — tick_pending_follow_ups must run before \
+             collect_world_events drains the queue"
+        );
+        assert_eq!(messages[0].body, "Mayday! We are under attack!");
+    }
+
+    /// (#718) `WorldEventBuffer` is per-tick state: `collect_world_events`
+    /// rebuilds it every run. An event queued for tick N flows through the
+    /// buffer to the pipeline, and tick N+1 (with no new sources) must leave
+    /// the buffer empty — stale events must not leak into later ticks.
+    #[test]
+    fn world_event_buffer_holds_only_current_tick_events() {
+        let mut app = ai_trigger_test_app();
+
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_world_events
+            .push(WorldEvent::WorldLoaded);
+
+        app.update();
+        {
+            let buffer = app.world().resource::<WorldEventBuffer>();
+            assert_eq!(
+                buffer.0,
+                vec![WorldEvent::WorldLoaded],
+                "collect_world_events must publish this tick's external events"
+            );
+        }
+
+        app.update();
+        let buffer = app.world().resource::<WorldEventBuffer>();
+        assert!(
+            buffer.0.is_empty(),
+            "stale events must not leak into the next tick's buffer"
         );
     }
 
@@ -6555,7 +6719,7 @@ entity = "layer_npc"
                 loader_path: None,
             });
         app.update(); // applies load + queues WorldLoaded
-        app.update(); // tick_trigger_pipeline drains pending event + fires trigger
+        app.update(); // collect_world_events drains pending event; pipeline fires trigger
 
         {
             let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
@@ -6661,13 +6825,19 @@ condition = "on_world_loaded"
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
+            .init_resource::<WorldEventBuffer>()
             .add_message::<crate::ai::server::AiEntityAttacked>()
             .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_message::<crate::ai::server::AiWaypointReached>()
             .add_message::<CommsChannel2Event>()
             .add_systems(
                 Update,
-                (tick_trigger_pipeline, handle_comms_channel2).chain(),
+                (
+                    collect_world_events,
+                    tick_trigger_pipeline,
+                    handle_comms_channel2,
+                )
+                    .chain(),
             )
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);
@@ -6814,7 +6984,7 @@ condition = "on_world_loaded"
         // documented `WorldLoaded` two-tick pattern.
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update(); // queues EnteredRegion
-        app.update(); // tick_trigger_pipeline drains + fires
+        app.update(); // collect_world_events drains; tick_trigger_pipeline fires
         assert!(
             objective_present(&app, "obj-entered"),
             "trigger must fire on entry"

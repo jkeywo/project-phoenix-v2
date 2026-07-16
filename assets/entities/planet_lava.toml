@@ -1,0 +1,46 @@
+name = "Lava Planet"
+tags = ["planet"]
+
+[target]
+tags = ["planet"]
+threat_level = "none"
+description = "A volcanic hellscape"
+
+[collider]
+shape = "Ball"
+radius = 15.0
+length = 0.0
+
+[radar_appearance]
+colour = [1.0, 0.4, 0.1]
+size = 15.0
+icon = "planet"
+
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
+[mesh]
+shape = "sphere"
+radius = 15.0
+colour = [0.6, 0.2, 0.1]
+
+[planet]
+radius = 15.0
+
+[planet.surface]
+albedo = "assets/planets/lava_planet/albedo.webp"
+normal = "assets/planets/lava_planet/normal.webp"
+roughness = "assets/planets/lava_planet/roughness.webp"
+emissive_colour = "assets/planets/lava_planet/emissive_colour.webp"
+emissive_mask = "assets/planets/lava_planet/emissive_mask.webp"
+# Lava glows on the day side too.
+emissive_night_only = false
+emissive_strength = 2.5
+
+[planet.clouds]
+albedo = "assets/planets/lava_planet/cloud_albedo.webp"
+opacity = "assets/planets/lava_planet/cloud_opacity.webp"
+scale = 1.03
+
+[planet.atmosphere]
+colour = [1.0, 0.35, 0.1]
+strength = 1.0

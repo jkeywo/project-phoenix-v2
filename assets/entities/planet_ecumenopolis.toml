@@ -1,0 +1,45 @@
+name = "Ecumenopolis"
+tags = ["planet", "habitable"]
+
+[target]
+tags = ["planet"]
+threat_level = "none"
+description = "A world-spanning city"
+
+[collider]
+shape = "Ball"
+radius = 22.0
+length = 0.0
+
+[radar_appearance]
+colour = [1.0, 0.8, 0.4]
+size = 22.0
+icon = "planet"
+
+# Procedural fallback for headless/editor contexts; [planet] wins on the
+# viewscreen.
+[mesh]
+shape = "sphere"
+radius = 22.0
+colour = [0.7, 0.6, 0.45]
+
+[planet]
+radius = 22.0
+
+[planet.surface]
+albedo = "assets/planets/ecumenopolis/albedo.webp"
+normal = "assets/planets/ecumenopolis/normal.webp"
+roughness = "assets/planets/ecumenopolis/roughness.webp"
+emissive_colour = "assets/planets/ecumenopolis/emissive_colour.webp"
+emissive_mask = "assets/planets/ecumenopolis/emissive_mask.webp"
+emissive_night_only = true
+emissive_strength = 2.0
+
+[planet.clouds]
+albedo = "assets/planets/ecumenopolis/cloud_albedo.webp"
+opacity = "assets/planets/ecumenopolis/cloud_opacity.webp"
+scale = 1.025
+
+[planet.atmosphere]
+colour = [0.8, 0.6, 0.4]
+strength = 0.8

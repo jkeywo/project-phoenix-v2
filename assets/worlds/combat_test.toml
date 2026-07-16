@@ -18,10 +18,11 @@
 # Starbase Alpha sits at [500, 0, 100] — within the clear zone. Player ship
 # spawns at [400, 0, 200] (~140u from the starbase) ready to defend.
 #
-# Ship selection: all three Alliance hulls are available in the lobby.
+# Ship selection: four Alliance hulls are available in the lobby.
+#   Alliance Courier    power_rating = 25   (single-station, solo)
 #   Alliance Destroyer  power_rating = 70
 #   Alliance Cruiser    power_rating = 90
-#   Alliance Battleship power_rating = 100
+#   Alliance Battleship power_rating = 120
 #
 # Wave timeline (locked from the design interview):
 #   t=0   destroyer    enemy_n_outer
@@ -91,16 +92,32 @@ siren_volume = 0.7
 music_file   = "assets/sounds/last_stand_in_space_looped.ogg"
 music_volume = 0.35
 
+# Denser, closer and brighter than the default world: combat happens at short
+# range, so the field is pulled in tight to keep motion readable at low speed
+# while manoeuvring. Layers are matched to the built-in near/mid/far set by
+# position; omitted fields keep their defaults.
 [dust]
-max_motes         = 240
-max_spawn_rate    = 40.0
-spawn_radius      = 30.0
-lifetime_secs     = 3.5
-mote_radius       = 0.04
-color             = [0.9, 0.92, 1.0, 0.6]
-min_opacity       = 0.05
-max_opacity       = 0.6
-emissive_strength = 1.5
+enabled = true
+
+[[dust.layer]]
+name       = "near"
+max_motes  = 32
+depth_band = [3.0, 18.0]
+brightness = [1.0, 3.5]
+
+[[dust.layer]]
+name       = "mid"
+max_motes  = 200
+depth_band = [8.0, 45.0]
+brightness = [0.4, 2.0]
+
+[[dust.layer]]
+name       = "far"
+max_motes  = 260
+depth_band = [30.0, 100.0]
+
+[dust.warp]
+enabled = true
 
 # ── Anchors ───────────────────────────────────────────────────────────────────
 #
@@ -171,6 +188,12 @@ label = "Alliance Cruiser"
 [[available_ships]]
 template_path = "assets/entities/alliance_battleship.toml"
 label = "Alliance Battleship"
+
+# Single-station hull: one player flies the whole ship. power_rating = 25 keeps
+# it under both bonus-spawn gates below, so a solo pilot faces the base waves.
+[[available_ships]]
+template_path = "assets/entities/alliance_courier.toml"
+label = "Alliance Courier"
 
 [player_spawn]
 position = [400.0, 0.0, 200.0]

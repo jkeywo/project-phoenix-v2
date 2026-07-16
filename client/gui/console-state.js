@@ -1250,6 +1250,41 @@ export function buildDestroyerTacticalConsoleState(state) {
 }
 
 /**
+ * Courier Pilot console — the whole ship on one console.
+ *
+ * Composes weapons + sensors + navigation + comms + captain + helm, nesting
+ * each under its own key so the single iframe gets every panel's data without
+ * key collision (same approach as buildDestroyerTacticalConsoleState).
+ *
+ * The one radar is the weapons radar: its blips come from
+ * `[weapons_console.radar]`, authored as the union of the helm/sensors/tactical
+ * `shows` lists. A single tap drives both the blaster target and the sensor
+ * readout because ph-courier-radar fans it out to `set_target` and
+ * `set_sensors_target`, which is why both `weapons` and `sensors` are here.
+ *
+ * No power / shields / repair sub-objects: those systems are AI-run on this
+ * hull and the pilot has no panel for them.
+ *
+ * Note the sub-builders hardcode the 'tactical' / 'sensors' / 'comms' station
+ * ids internally. That is harmless here — their nested `own_hull` values are
+ * ignored (the console reads the top-level one that `withStationDamage`
+ * computes for 'pilot'), and their `*_auto` flags resolve to false, which is
+ * correct for a hull where nothing on the pilot station is backfilled while
+ * it's held.
+ *
+ * @param {object} state
+ */
+export function buildCourierConsoleState(state) {
+  const weapons = JSON.parse(buildWeaponsConsoleState(state));
+  const sensors = JSON.parse(buildSensorsConsoleState(state));
+  const navigation = JSON.parse(buildNavigationConsoleState(state));
+  const comms = JSON.parse(buildCommsConsoleState(state));
+  const captain = JSON.parse(buildCaptainConsoleState(state));
+  const helm = JSON.parse(buildHelmConsoleState(state));
+  return JSON.stringify({ weapons, sensors, navigation, comms, captain, helm });
+}
+
+/**
  * Destroyer Engineering console — combined Shields + Power + Repair view.
  *
  * Delegates to buildShieldsConsoleState, buildPowerConsoleState, and
@@ -1316,6 +1351,10 @@ if (typeof window !== 'undefined') {
           return buildDestroyerCaptainConsoleState(state);
         }
         return buildCaptainConsoleState(state);
+      // Courier pilot = the whole ship on one console. No stationSystems
+      // sub-branch needed: only the Courier declares a 'pilot' station, unlike
+      // 'tactical'/'captain'/'comms' which several hulls define differently.
+      case 'pilot':       return buildCourierConsoleState(state);
       case 'helm':        return buildHelmConsoleState(state);
       case 'repair':      return buildRepairConsoleState(state);
       case 'power':       return buildPowerConsoleState(state);

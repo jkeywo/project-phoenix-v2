@@ -1,0 +1,393 @@
+# Alliance Courier — the single-player hull.
+#
+# Every other playable ship assumes a crew of 4-6. This one has a single
+# station, "pilot", that owns everything the player touches: flying, the one
+# blaster, the one radar, comms, nav and objectives. Red alert, shields and the
+# repair team run themselves.
+#
+# Two things here are deliberate and easy to break:
+#
+#  1. Everything the player must NOT touch is automated through the "Std"
+#     rating's `automated_systems`, NOT through `ai_only`. `ai_only` is inert on
+#     the player spawn path — ship::rating::ai_only_systems() has no production
+#     caller, so an ownerless ai_only system on a player hull would sit at
+#     ControlSource::Human forever with no AI and no panel. Every system below
+#     therefore declares `station = "pilot"`.
+#
+#  2. There is no [power] block and no [power_groups], so no [[system]] may
+#     declare a `power_group` (ShipConfigError::UnknownPowerGroup).
+
+name = "Alliance Courier"
+class = "courier"
+hull_id = "NCC-0912"
+# Independent of the (absent) [power] block: feeds the lobby card and
+# combat_test's ship_power counter. Low enough to stay under that scenario's
+# >=90 / >=100 bonus-spawn gates, which is the point of flying solo.
+power_rating = 25
+tags = [ "player", "ship" ]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+model = "assets/models/alliance_courier.glb"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+
+# ── Per-system hull ──────────────────────────────────────────────────────────
+# One entry per damageable system, plus "core" — the ownerless bucket that
+# RepairTarget::Core dispatches to. No power-reactor/power-battery: this hull
+# has no power system. Shield-arc hull comes from [[shield_arc]].hull_max_hp,
+# not from here.
+
+[[hull.system_hull]]
+system_id = "core"
+display_name = "Core"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+
+[[hull.system_hull]]
+system_id = "helm-engine-port"
+display_name = "Port Engine"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-engine-starboard"
+display_name = "Starboard Engine"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-lateral-thrust"
+display_name = "Lateral Thrusters"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "pilot-radar"
+display_name = "Radar"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "blaster-fore"
+display_name = "Blaster"
+max_hp = 12
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+# ── Repair ───────────────────────────────────────────────────────────────────
+# One team for the whole ship, and slower than the crewed hulls (the destroyer
+# runs 2 teams at 0.5 hp/sec with a 5s walk). Nobody is flying this thing AND
+# running damage control, so the AI does it.
+
+[repair]
+repair_team_count = 1
+travel_duration_secs = 9
+repair_rate_hp_per_sec = 0.25
+
+# ── Weapons ──────────────────────────────────────────────────────────────────
+
+[weapons_console]
+torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
+
+# The one radar. Its `shows` list is the union of what helm, sensors and
+# tactical each show on the crewed hulls, at the sensors radar's range — the
+# pilot has one scope and it has to cover all three jobs. Blips are computed
+# server-side from these two fields, so authoring the union here IS the
+# feature; there is no client-side merge.
+[weapons_console.radar]
+range = 250
+shows = [ "player", "ship", "station", "asteroid", "asteroid_field", "planet", "star", "missile", "torpedo", "region" ]
+selects = [ "ship", "station", "asteroid", "planet" ]
+
+# Exactly one weapon. No [[weapons_console.phaser_banks]] and no [torpedoes]:
+# both spawn paths read `phaser_banks.first()`, so an absent list is a ship
+# with no phasers rather than a ship with a default one.
+[[weapons_console.blaster_banks]]
+id = "fore"
+marker = "blaster_fore"
+facing_deg = 0
+fire_arc_deg = 45
+volley_count = 3
+volley_interval_secs = 0.5
+cooldown_secs = 5
+projectile_speed = 50
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 15
+shield_pierce = 0.1
+range = 35
+
+# ── Sensors ──────────────────────────────────────────────────────────────────
+# Gives the sensor panel its range and set_sensors_target a home. The pilot has
+# no separate sensors scope — tapping the one radar fills this panel.
+
+[sensors_console]
+
+[sensors_console.long_range_radar]
+range = 250
+shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
+selects = [ "ship", "station", "planet" ]
+
+# ── Helm ─────────────────────────────────────────────────────────────────────
+# Quicker and twitchier than the destroyer, and much less able to take a hit.
+# No [helm_console.radar]: the pilot console renders the weapons radar.
+
+[helm_console]
+max_speed = 20
+max_reverse_speed = 8
+acceleration = 9
+deceleration = 18
+max_yaw_rate = 0.9
+max_bank_deg = 18
+impulse_charge_duration = 2.0
+impulse_speed_multiplier = 14
+impulse_acceleration_multiplier = 9
+
+[helm_console.engine_pfx]
+color = [ 0.25, 0.75, 1, 0.72 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.45
+trail_spawn_interval_secs = 0.05
+
+[helm_console.lateral_thrust]
+max_lateral_speed = 22
+lateral_acceleration = 16
+
+[helm_console.boost]
+multiplier = 3.5
+steering_multiplier = 2.0
+active_duration = 6.0
+recharge_duration = 15.0
+
+# ── Nav / comms / captain ────────────────────────────────────────────────────
+
+[navigation_console]
+
+[navigation_console.system_chart]
+range = 800
+shows = [ "region", "asteroid_field", "star", "planet", "station", "player", "objective_marker" ]
+selects = [ "station", "planet", "star", "region" ]
+
+[comms]
+range = 1000
+
+[captain_console]
+
+[radar_appearance]
+colour = [ 0, 1, 0.2 ]
+size = 4
+icon = "playerShip"
+
+# Required for the pilot console's Cinematic button: the synthetic "cinematic"
+# view only resolves when this block exists.
+[cinematic_camera]
+position = [0, 6, 12]
+default_pitch_deg = 12
+entity_look_range = 50
+look_ahead_distance = 80
+hysteresis_secs = 3
+yaw_follow_deg_per_sec = 45
+
+# ── Shields ──────────────────────────────────────────────────────────────────
+# Two arcs, fore and aft. AI-run via the Std rating — the pilot has no shield
+# panel. The `shields-system` [[system]] below must exist, or arc synthesis
+# gives these arcs station = None and they fall off the pilot's station.
+
+[shields_console]
+focus_bonus_max_hp = 0
+focus_bonus_regen = 4
+focus_penalty_max_hp = 0
+focus_penalty_regen = 1.0
+focus_decay_rate = 10
+focus_focused_damage_multiplier = 0.5
+focus_unfocused_damage_multiplier = 1.25
+
+[shields_console.base]
+max_hp = 40
+regen_per_sec = 2.0
+offline_duration = 8
+
+[[shield_arc]]
+id = "fore"
+label = "Fore"
+center_deg = 0
+width_deg = 180
+hull_max_hp = 4
+
+[[shield_arc]]
+id = "aft"
+label = "Aft"
+center_deg = 180
+width_deg = 180
+hull_max_hp = 4
+
+# ── Station ──────────────────────────────────────────────────────────────────
+
+[[station]]
+id = "pilot"
+name = "Pilot"
+description = "Fly the ship, run the gun, and talk to everyone."
+rank = "Ltn."
+short_code = "PLT"
+console = "gui/courier/pilot.html"
+
+# One rating only. The client renders the complexity toggle solely when a
+# station has more than one, so a single rating keeps the solo lobby clean.
+# Everything listed here is permanently AI-run: the pilot has no panel for any
+# of it. This list — not `ai_only` — is what actually drives the AI.
+[[station.rating]]
+name = "Std"
+automated_systems = [
+  "red-alert",
+  "repair",
+  "shields-system",
+  "shield-arc-fore",
+  "shield-arc-aft",
+]
+
+# ── Systems ──────────────────────────────────────────────────────────────────
+# All owned by "pilot"; none declare a power_group (no [power_groups] exist).
+
+[[system]]
+id = "captain"
+kind = "captain"
+station = "pilot"
+
+# The wire target of set_view is `viewscreen`, but authorisation resolves
+# through source_system_for_view_mode to `captain` for both Camera and
+# Cinematic. The Fore/Cinematic buttons need both systems present.
+[[system]]
+id = "viewscreen"
+kind = "viewscreen"
+station = "pilot"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "pilot"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "pilot"
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "pilot"
+
+[[system]]
+id = "helm-joystick"
+kind = "helm_joystick"
+station = "pilot"
+
+[[system]]
+id = "helm-engine-port"
+kind = "helm_engine"
+station = "pilot"
+
+[[system]]
+id = "helm-engine-starboard"
+kind = "helm_engine"
+station = "pilot"
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+station = "pilot"
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+station = "pilot"
+
+# The one radar. Kind is tactical_radar, which is also one of the kinds
+# ShipConfig::weapons_station() keys on to resolve the pilot as the weapons
+# owner.
+[[system]]
+id = "pilot-radar"
+kind = "tactical_radar"
+station = "pilot"
+
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "pilot"
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "pilot"
+
+[[system]]
+id = "comms"
+kind = "comms"
+station = "pilot"
+
+[[system]]
+id = "shields-system"
+kind = "shields"
+station = "pilot"
+marker = "ship"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "pilot"
+
+# ── Audio ────────────────────────────────────────────────────────────────────
+# Every sound this ship makes. Playback is server-side only (the host page's
+# JS builds the audio graph from this). Omit a sub-block to silence that
+# sound; a sub-block that IS present must specify all of its fields.
+# Red-alert siren/music are configured per-world, not here.
+#
+# No [audio.phaser_loop]: the courier has no phaser bank, so that sound would
+# never play — same tuning as the crewed hulls otherwise.
+
+[audio.ambient]
+file   = "assets/sounds/Ambient.mp3"
+volume = 0.25
+
+[audio.engine]
+# volume = idle_volume + thrust_fraction * volume_at_full_thrust
+file                  = "assets/sounds/Engine.mp3"
+volume_at_full_thrust = 0.15
+idle_volume           = 0.0
+
+[audio.blaster]
+# Positional one-shot — every rolloff field maps to a Web Audio PannerNode.
+file           = "assets/sounds/Blaster.mp3"
+volume         = 0.9
+ref_distance   = 30.0
+max_distance   = 800.0
+rolloff_factor = 1.2
+distance_model = "inverse"
+panning_model  = "equalpower"
+
+[audio.forcefield]
+# Continuous bed at base_volume; damage spikes it toward spike_volume, then it
+# decays back. Damage below damage_threshold HP is ignored entirely.
+file               = "assets/sounds/ForcefieldHit.mp3"
+base_volume        = 0.06
+spike_volume       = 0.80
+damage_threshold   = 1.0
+damage_full_spike  = 30.0
+decay_rate_per_sec = 1.5
+source             = "shield"

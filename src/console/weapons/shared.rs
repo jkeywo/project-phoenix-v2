@@ -166,6 +166,55 @@ pub(crate) fn any_tactical_system_operates_ai(
         .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
+/// Per-shooter snapshot of everything phase 1 of the beam tick computes:
+/// owned copies of the shooter's identity/position, the resolved (possibly
+/// LOS-blocked) target, and the pre-computed damage/cooldown numbers, so
+/// later phases can apply damage without holding a mutable borrow on the
+/// ship query (issue #722).
+#[derive(Debug, Clone)]
+pub struct ShooterState {
+    pub shooter_entity: Entity,
+    pub shooter_uuid: String,
+    pub shooter_x: f32,
+    pub shooter_z: f32,
+    pub target_uuid: String,
+    pub active_bank: String,
+    pub cooldown_secs: f32,
+    pub damage_to_apply: i32,
+    pub shield_pierce: f32,
+    pub end_beam_early: bool,
+    pub is_local_shooter: bool,
+    pub shooter_phaser_freq: f32,
+    /// UUID of the entity that will actually receive damage this tick.
+    /// Equals `target_uuid` when LOS is clear; set to the blocker's UUID
+    /// when a blocking entity intercepts the beam.
+    pub effective_target_uuid: String,
+    /// Position of the effective target (for VFX positioning on destruction).
+    pub effective_target_x: f32,
+    pub effective_target_z: f32,
+    /// True when a friendly ship is blocking — beam is absorbed with no
+    /// damage applied to anyone this tick.
+    pub zero_damage: bool,
+}
+
+/// One-tick beam context shared across the beam-tick phases (issue #722).
+///
+/// Lifecycle: phase 1 (snapshot + cooldown tick) calls [`BeamContext::clear`]
+/// at the start of each frame and repopulates the vec; phases 2 and 3
+/// (damage application, beam end/VFX) read it later in the same tick. It
+/// carries no state across frames. Not yet wired into any schedule —
+/// issue #723 wires the phases.
+#[derive(Resource, Default)]
+pub struct BeamContext(pub Vec<ShooterState>);
+
+impl BeamContext {
+    /// Empty the per-tick shooter snapshots. Phase 1 calls this at the
+    /// start of every frame before repopulating.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
 /// True when `system_id` is registered on this ship's `ControlSourceResolver`
 /// (either in the `sources` map or in the damage-driven `offline_systems`
 /// set). Used to decide whether per-fine-instance gating applies to a
@@ -175,4 +224,75 @@ pub(crate) fn any_tactical_system_operates_ai(
 pub(crate) fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &SystemId) -> bool {
     control_sources.0.entries().any(|(id, _)| id == system_id)
         || control_sources.0.offline_systems.contains(system_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_shooter() -> ShooterState {
+        ShooterState {
+            shooter_entity: Entity::PLACEHOLDER,
+            shooter_uuid: "shooter-1".to_string(),
+            shooter_x: 10.0,
+            shooter_z: -5.0,
+            target_uuid: "target-1".to_string(),
+            active_bank: "phaser_bank_fore".to_string(),
+            cooldown_secs: 0.25,
+            damage_to_apply: 3,
+            shield_pierce: 0.5,
+            end_beam_early: false,
+            is_local_shooter: true,
+            shooter_phaser_freq: 42.0,
+            effective_target_uuid: "blocker-1".to_string(),
+            effective_target_x: 12.0,
+            effective_target_z: -4.0,
+            zero_damage: true,
+        }
+    }
+
+    #[test]
+    fn shooter_state_construction_preserves_fields() {
+        let s = sample_shooter();
+        assert_eq!(s.shooter_entity, Entity::PLACEHOLDER);
+        assert_eq!(s.shooter_uuid, "shooter-1");
+        assert_eq!(s.shooter_x, 10.0);
+        assert_eq!(s.shooter_z, -5.0);
+        assert_eq!(s.target_uuid, "target-1");
+        assert_eq!(s.active_bank, "phaser_bank_fore");
+        assert_eq!(s.cooldown_secs, 0.25);
+        assert_eq!(s.damage_to_apply, 3);
+        assert_eq!(s.shield_pierce, 0.5);
+        assert!(!s.end_beam_early);
+        assert!(s.is_local_shooter);
+        assert_eq!(s.shooter_phaser_freq, 42.0);
+        assert_eq!(s.effective_target_uuid, "blocker-1");
+        assert_eq!(s.effective_target_x, 12.0);
+        assert_eq!(s.effective_target_z, -4.0);
+        assert!(s.zero_damage);
+    }
+
+    #[test]
+    fn shooter_state_is_cloneable() {
+        let s = sample_shooter();
+        let c = s.clone();
+        assert_eq!(c.shooter_uuid, s.shooter_uuid);
+        assert_eq!(c.effective_target_uuid, s.effective_target_uuid);
+    }
+
+    #[test]
+    fn beam_context_default_is_empty() {
+        let ctx = BeamContext::default();
+        assert!(ctx.0.is_empty());
+    }
+
+    #[test]
+    fn beam_context_clear_empties_after_push() {
+        let mut ctx = BeamContext::default();
+        ctx.0.push(sample_shooter());
+        ctx.0.push(sample_shooter());
+        assert_eq!(ctx.0.len(), 2);
+        ctx.clear();
+        assert!(ctx.0.is_empty());
+    }
 }

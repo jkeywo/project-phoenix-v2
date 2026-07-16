@@ -9,7 +9,7 @@
 // # Why a pure table
 //
 // The dispatch table used to be inlined twice inside `world::server` — once in
-// `handle_ai_events` for immediate actions and once in `dispatch_single_action`
+// `tick_trigger_pipeline` for immediate actions and once in `dispatch_single_action`
 // for delayed ones. Both copies mixed decision logic (name lookups, `parent:`
 // walking, anchor resolution, transition detection) with ECS mutation, so none
 // of it could be tested without spinning up a Bevy `App`. Splitting the
@@ -117,10 +117,11 @@ pub struct DispatchContext<'a> {
     /// the next action. `before`/`after` — and hence whether a transition event
     /// is emitted at all — are computed against it.
     ///
-    /// `server::handle_ai_events`'s per-pass `base_flags_snapshot` /
-    /// `layer_flags_snapshot` locals exist for **condition evaluation only**
-    /// (deciding which triggers fire) and MUST NOT be passed here. They are in
-    /// scope at the call site, so this is the tempting wrong move. It breaks
+    /// Condition evaluation in `server::tick_trigger_pipeline` borrows these
+    /// same live stores, which is safe only because every condition of a pass
+    /// is evaluated before any of its actions is dispatched. What MUST NOT be
+    /// passed here is a store copied before the pass's dispatches began — the
+    /// tempting wrong move when refactoring the call site. It breaks
     /// flag idempotence: two triggers both `set_flag aphelion_armed`
     /// (`assets/worlds/before_the_fire.toml:275`) against live stores go `0→1`
     /// (emits `FlagSet`) then `1→1` (emits nothing) = one event, so the

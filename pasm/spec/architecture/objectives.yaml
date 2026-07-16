@@ -112,7 +112,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/config.rs, src/world/server.rs, src/console/comms/server.rs]
-      symbols: [TriggerAction, handle_ai_events]
+      symbols: [TriggerAction, tick_trigger_pipeline]
       tests: [cargo test]
 
   - component: objective-manager

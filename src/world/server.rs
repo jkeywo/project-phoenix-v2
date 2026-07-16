@@ -75,17 +75,17 @@ pub struct WorldContentRuntime {
     /// World flag / counter store consumed by predicate-gated triggers
     /// (`when = "..."`) and mutated by `set_flag` / `clear_flag` /
     /// `increment_flag` / `set_flag_value` trigger actions. Mutations are
-    /// observed inside `handle_ai_events`, which emits `FlagSet` /
+    /// observed inside `tick_trigger_pipeline`, which emits `FlagSet` /
     /// `FlagCleared` `WorldEvent`s on transitions and re-evaluates the
     /// trigger table in the same tick so chained `on_flag_set` /
     /// `on_flag_cleared` triggers fire as part of the same Bevy frame.
     pub flags: crate::world::flags::FlagStore,
-    /// Queue of synthesised `WorldEvent`s to be drained by `handle_ai_events`
+    /// Queue of synthesised `WorldEvent`s to be drained by `tick_trigger_pipeline`
     /// on the next Update tick. Used by `init_world_runtime` (base-world
     /// Startup) and `apply_world_layer_changes` (sub-world Load) to inject
     /// `WorldEvent::WorldLoaded` into the trigger evaluation pipeline
     /// without duplicating the dispatch logic that lives inside
-    /// `handle_ai_events`.
+    /// `tick_trigger_pipeline`.
     pub pending_world_events: Vec<WorldEvent>,
     /// Comms follow-ups awaiting their trigger condition before injection.
     /// Response follow-ups carry a `placeholder_id` so the inbox shows a
@@ -95,7 +95,7 @@ pub struct WorldContentRuntime {
     /// (set by `init_world_runtime`). `on_timer` triggers fire when
     /// `time.elapsed_secs() - world_loaded_at_secs >= after_secs`.
     /// `None` while no world is loaded (lobby, fallback bootstrap), in
-    /// which case `handle_ai_events` skips emitting `TimerElapsed` events.
+    /// which case `tick_trigger_pipeline` skips emitting `TimerElapsed` events.
     /// (#475)
     pub world_loaded_at_secs: Option<f32>,
     /// Maps named groups to the set of entity names currently in that group.
@@ -161,7 +161,7 @@ pub struct WorldLayerMap(pub HashMap<String, WorldRuntime>);
 
 /// Queue of `LoadWorld` / `UnloadWorld` actions to execute on the next frame.
 ///
-/// `handle_ai_events` pushes path-keyed commands here; `apply_world_layer_changes`
+/// `tick_trigger_pipeline` pushes path-keyed commands here; `apply_world_layer_changes`
 /// drains it and mutates `WorldLayerMap` + `WorldContentRuntime` accordingly.
 #[derive(Resource, Default)]
 pub struct PendingWorldLayerChanges(pub Vec<WorldLayerChange>);
@@ -242,12 +242,12 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                handle_ai_events.in_set(crate::sim_sets::SimSet::Physics),
+                tick_trigger_pipeline.in_set(crate::sim_sets::SimSet::Physics),
             )
             // Cursor advancement is a `Modifiers` evaluator: `Physics` has
             // finished moving every ship by then, so waypoint arrival is
             // judged against this tick's final positions. It emits
-            // `AiWaypointReached`, which `handle_ai_events` turns into a
+            // `AiWaypointReached`, which `tick_trigger_pipeline` turns into a
             // `WorldEvent::WaypointReached` on the next tick (the same
             // one-tick event bridge `AiEntityAttacked` already uses).
             .add_systems(
@@ -259,13 +259,13 @@ impl Plugin for WorldPlugin {
                 Update,
                 tick_delayed_actions
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(handle_ai_events),
+                    .after(tick_trigger_pipeline),
             )
             .add_systems(
                 Update,
                 tick_pending_follow_ups
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .before(handle_ai_events),
+                    .before(tick_trigger_pipeline),
             )
             .add_systems(
                 Update,
@@ -281,7 +281,7 @@ impl Plugin for WorldPlugin {
 }
 
 /// Observer: bridge `RegionEntered` (player ship boundary crossing into a
-/// region) into a queued `WorldEvent::EnteredRegion` so `handle_ai_events`
+/// region) into a queued `WorldEvent::EnteredRegion` so `tick_trigger_pipeline`
 /// can fan it out to matching triggers on the next tick.
 ///
 /// Looks up the region entity's UUID via `RegionMembership.region_uuids`
@@ -630,7 +630,7 @@ fn init_world_runtime(
     };
 
     // (#475) Stamp the load-time anchor for `on_timer` triggers. All
-    // `after_secs` values are measured relative to this; `handle_ai_events`
+    // `after_secs` values are measured relative to this; `tick_trigger_pipeline`
     // emits `WorldEvent::TimerElapsed { elapsed_secs }` each tick using
     // `time.elapsed_secs() - world_loaded_at_secs`. `Time` is wrapped in
     // `Option` so older test apps that don't install `TimePlugin` continue
@@ -683,7 +683,7 @@ fn init_world_runtime(
     // Issue #415: emit a WorldLoaded event so `on_world_loaded` triggers
     // declared in the base world fire on the first Update tick. Pushed onto
     // the pending queue (rather than evaluated here) so the dispatch logic
-    // inside `handle_ai_events` is the single owner of trigger action
+    // inside `tick_trigger_pipeline` is the single owner of trigger action
     // execution.
     runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 
@@ -737,8 +737,8 @@ fn mark_comms_dirty_on_game_start(
 /// trigger conditions against current world state plus this tick's pending
 /// events, and inject any follow-ups whose conditions are now met.
 ///
-/// Ordering: scheduled `.before(handle_ai_events)` so this system observes
-/// `pending_world_events` BEFORE `handle_ai_events` drains them. This lets
+/// Ordering: scheduled `.before(tick_trigger_pipeline)` so this system observes
+/// `pending_world_events` BEFORE `tick_trigger_pipeline` drains them. This lets
 /// follow-ups react to events on the same tick they fire.
 ///
 /// "Fire immediately if already true" semantics applies to state-based
@@ -1212,7 +1212,7 @@ fn broadcast_objective_summary(
 
 // -- AI-event trigger system -------------------------------------------------
 
-/// Upper bound on `handle_ai_events`' within-tick trigger-chaining passes.
+/// Upper bound on `tick_trigger_pipeline`'s within-tick trigger-chaining passes.
 ///
 /// A `set_flag` action emits a `FlagSet` event that a downstream `on_flag_set`
 /// trigger can react to in the same Bevy frame, which can in turn set another
@@ -1223,7 +1223,7 @@ const MAX_CHAIN_PASSES: i32 = 16;
 /// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
 /// resulting actions (including `SetAiState`, `ApplyModifier`, `RemoveModifier`,
 /// `ApplyFlag`, and `RemoveFlag`).
-fn handle_ai_events(
+fn tick_trigger_pipeline(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
@@ -1240,9 +1240,7 @@ fn handle_ai_events(
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
-    mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
-    mut layer_map: Option<ResMut<WorldLayerMap>>,
-    base_world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
@@ -1302,6 +1300,15 @@ fn handle_ai_events(
         return;
     }
 
+    // Reborrow the `ResMut` as a plain `&mut` so the evaluation loop below can
+    // split disjoint field borrows (`&runtime.flags` for condition chains while
+    // `&mut runtime.trigger_states[idx]` is handed to the evaluator) — a smart
+    // pointer cannot split, a plain reference can. Placed after the early
+    // return so change detection still only marks the resource on ticks that
+    // actually process events (the pre-existing behaviour: every path past
+    // this point mutated through the `ResMut` anyway).
+    let runtime = &mut *runtime;
+
     let name_to_uuid = runtime.name_to_uuid.clone();
 
     // Build UUID â†’ ECS Entity map once per tick so the six per-entity
@@ -1355,7 +1362,7 @@ fn handle_ai_events(
             selected_response: None,
             is_read: false,
             is_orphaned: false,
-            sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+            sender_in_range: current_sender_in_range(runtime, &sender_uuid),
             thread_id: thread_id.clone(),
             is_urgent: fc.urgent,
         };
@@ -1392,12 +1399,14 @@ fn handle_ai_events(
     // PRD #397 fix 1: each trigger is evaluated with its OWN flag chain
     // and layer chain, computed from its `origin_layer` by walking
     // `loader_path` pointers up via `WorldLayerMap` until reaching the
-    // base world (whose store is `runtime.flags`). The chains are
-    // snapshotted once per pass so trigger ordering within a pass is
-    // deterministic (later triggers in the same pass see the same
-    // flag values as earlier ones; their mutations land in `next_events`
-    // and are observed on the next pass).
-    let mut current_events = world_events.clone();
+    // base world (whose store is `runtime.flags`). Trigger ordering within
+    // a pass is deterministic because each pass is two-phase: ALL
+    // conditions are evaluated (reading the live stores, which nothing
+    // mutates during evaluation) before ANY fired action is dispatched, so
+    // later triggers in the same pass see the same flag values as earlier
+    // ones; their mutations land in `next_events` and are observed on the
+    // next pass.
+    let mut current_events = world_events;
     let mut pass = 0;
     loop {
         pass += 1;
@@ -1412,30 +1421,16 @@ fn handle_ai_events(
                 }
             })
             .fold(0.0_f32, |max_e, e| e.max(max_e));
-        // Snapshot per-layer flag stores and loader pointers once per pass.
-        let base_flags_snapshot = runtime.flags.clone();
-        let layer_flags_snapshot: HashMap<String, crate::world::flags::FlagStore> = layer_map
-            .as_ref()
-            .map(|lm| {
-                lm.0.iter()
-                    .map(|(p, wr)| (p.clone(), wr.flags.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let layer_loaders_snapshot: HashMap<String, Option<String>> = layer_map
-            .as_ref()
-            .map(|lm| {
-                lm.0.iter()
-                    .map(|(p, wr)| (p.clone(), wr.loader_path.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Per-trigger evaluation: build chain from origin_layer up.
+        // Per-trigger evaluation: build chain from origin_layer up. The
+        // chains borrow the LIVE stores (`runtime.flags` and `layer_map`'s
+        // per-layer stores) rather than per-pass clones: evaluation is safe
+        // against them because the pass is two-phase — every condition is
+        // evaluated before any fired action is dispatched, so no store
+        // mutates while these borrows are alive.
         let mut fired: Vec<crate::world::content::FiredTrigger> = Vec::new();
-        // We have to clone the origin_layer slice up front to avoid
-        // holding a borrow on `runtime.trigger_states` across the chain
-        // build (chain references the snapshot, not the live store).
+        // We have to clone the origin_layer slice up front: the evaluator
+        // below takes `&mut runtime.trigger_states[idx]`, so nothing may
+        // hold a borrow on `runtime.trigger_states` across the loop.
         let trigger_origins: Vec<Option<String>> = runtime
             .trigger_states
             .iter()
@@ -1456,25 +1451,26 @@ fn handle_ai_events(
         let dispatch_names = runtime.name_to_uuid.clone();
         for (idx, origin) in trigger_origins.iter().enumerate() {
             // Build the flag-store and layer-path chains for this trigger.
-            let mut flag_chain_owned: Vec<&crate::world::flags::FlagStore> = Vec::new();
+            let mut flag_chain: Vec<&crate::world::flags::FlagStore> = Vec::new();
             let mut layer_chain: Vec<Option<String>> = Vec::new();
             let mut cur = origin.clone();
             loop {
                 layer_chain.push(cur.clone());
                 match &cur {
                     Some(p) => {
-                        if let Some(fs) = layer_flags_snapshot.get(p) {
-                            flag_chain_owned.push(fs);
+                        if let Some(wr) = world_layers.layer_map.as_ref().and_then(|lm| lm.0.get(p))
+                        {
+                            flag_chain.push(&wr.flags);
+                            cur = wr.loader_path.clone();
                         } else {
-                            // Layer missing from snapshot Ã¢â‚¬â€ treat as empty.
+                            // Layer missing from the map Ã¢â‚¬â€ treat as empty.
                             // (Shouldn't happen in normal flow.)
-                            flag_chain_owned.push(&base_flags_snapshot);
+                            flag_chain.push(&runtime.flags);
                             break;
                         }
-                        cur = layer_loaders_snapshot.get(p).cloned().flatten();
                     }
                     None => {
-                        flag_chain_owned.push(&base_flags_snapshot);
+                        flag_chain.push(&runtime.flags);
                         break;
                     }
                 }
@@ -1485,7 +1481,7 @@ fn handle_ai_events(
                 &mut runtime.trigger_states[idx],
                 &current_events,
                 &name_to_uuid,
-                &flag_chain_owned,
+                &flag_chain,
                 &layer_chain,
                 &entity_groups,
                 current_elapsed,
@@ -1519,15 +1515,13 @@ fn handle_ai_events(
                 //
                 // The flag stores handed to the context MUST be the LIVE ones
                 // — `runtime.flags` plus `layer_map`'s per-layer stores,
-                // re-projected for every action — never the per-pass
-                // `base_flags_snapshot` / `layer_flags_snapshot` above. Those
-                // exist for condition evaluation only (deciding which triggers
-                // fire). `dispatch_action` computes each flag mutation's
+                // re-projected for every action, never a stale copy.
+                // `dispatch_action` computes each flag mutation's
                 // before/after against these stores to decide whether a
                 // transition event fires at all, so two triggers that both
                 // `set_flag` the same flag must see 0 -> 1 and then 1 -> 1
                 // (one `FlagSet` total), not 0 -> 1 twice.
-                let layers = project_layer_views(layer_map.as_deref());
+                let layers = project_layer_views(world_layers.layer_map.as_deref());
                 let result = {
                     let ctx = DispatchContext {
                         origin_layer: ft.origin_layer.clone(),
@@ -1535,7 +1529,8 @@ fn handle_ai_events(
                         name_to_uuid: &dispatch_names,
                         base_flags: &runtime.flags,
                         layers: &layers,
-                        base_anchors: base_world_config
+                        base_anchors: world_layers
+                            .base_world_config
                             .as_ref()
                             .map(|wc| &wc.anchors)
                             .unwrap_or(&empty_anchors),
@@ -1553,15 +1548,15 @@ fn handle_ai_events(
                 // them onto `runtime.pending_world_events` for the next tick).
                 apply_dispatch_result(
                     result,
-                    "handle_ai_events",
+                    "tick_trigger_pipeline",
                     &mut next_events,
                     &uuid_to_entity,
-                    &mut runtime,
+                    runtime,
                     &mut objectives,
                     &mut commands,
                     &mut ship_modifiers,
-                    pending_layers.as_deref_mut(),
-                    layer_map.as_deref_mut(),
+                    world_layers.pending_layers.as_deref_mut(),
+                    world_layers.layer_map.as_deref_mut(),
                     next_state.as_deref_mut(),
                     game_over_reason.as_deref_mut(),
                     &mut faction_dispatch,
@@ -1575,7 +1570,7 @@ fn handle_ai_events(
         }
         if pass >= MAX_CHAIN_PASSES {
             bevy::log::warn!(
-                "handle_ai_events: trigger chain exceeded {MAX_CHAIN_PASSES} passes; \
+                "tick_trigger_pipeline: trigger chain exceeded {MAX_CHAIN_PASSES} passes; \
                  stopping to prevent infinite loop"
             );
             break;
@@ -1652,11 +1647,11 @@ fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
 ///
 /// The impure half of the dispatch table (issue #710): `world::dispatch` decides
 /// *what* should happen from read-only data, and this turns that into ECS
-/// mutations. It is the shared apply path for both `handle_ai_events` (immediate
+/// mutations. It is the shared apply path for both `tick_trigger_pipeline` (immediate
 /// actions) and `tick_delayed_actions` (delayed ones).
 ///
 /// The one thing callers must decide for themselves is where `new_events` go, so
-/// they are written to the caller's `events_out`: `handle_ai_events` points that
+/// they are written to the caller's `events_out`: `tick_trigger_pipeline` points that
 /// at the current pass's `next_events` (same tick, next chaining pass), whereas
 /// `tick_delayed_actions` drains it into `runtime.pending_world_events` (next
 /// tick). Same events, different destination.
@@ -1925,7 +1920,7 @@ fn apply_dispatch_result(
                 // `events_out` so chained `on_destroyed` triggers fire.
                 //
                 // We deliberately do NOT use `MessageWriter<AiEntityDestroyed>`
-                // directly: `handle_ai_events` already holds the matching
+                // directly: `tick_trigger_pipeline` already holds the matching
                 // reader, which would trip Bevy's B0002 access check. Deferring
                 // the write via a command runs it after the system exits, so
                 // external consumers (telemetry, save/load, achievements)
@@ -2009,9 +2004,9 @@ fn apply_dispatch_result(
 
 /// Drain actions from `pending_delayed_actions` whose `fire_at_elapsed` has
 /// elapsed and dispatch them through the same `world::dispatch` table
-/// `handle_ai_events` uses.
+/// `tick_trigger_pipeline` uses.
 ///
-/// Registered after `handle_ai_events` in `SimSet::Physics` so that it sees
+/// Registered after `tick_trigger_pipeline` in `SimSet::Physics` so that it sees
 /// the same tick's `world_loaded_at_secs` anchor.
 #[allow(clippy::too_many_arguments)]
 fn tick_delayed_actions(
@@ -2060,7 +2055,7 @@ fn tick_delayed_actions(
         .collect();
 
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
-    // Same template source as `handle_ai_events` (issue #715): one
+    // Same template source as `tick_trigger_pipeline` (issue #715): one
     // `WasmTemplateLoader` per system run, both targets.
     let template_loader = crate::entity_loader::WasmTemplateLoader;
 
@@ -2076,7 +2071,7 @@ fn tick_delayed_actions(
     runtime.pending_delayed_actions = still_pending;
 
     for pda in ready {
-        // Same live-store rule as `handle_ai_events`: re-project per action so
+        // Same live-store rule as `tick_trigger_pipeline`: re-project per action so
         // each dispatch sees the previous one's writes.
         let name_to_uuid = runtime.name_to_uuid.clone();
         let layers = project_layer_views(layer_map.as_deref());
@@ -2098,8 +2093,8 @@ fn tick_delayed_actions(
             dispatch_action(&pda.action, &ctx)
         };
 
-        // Unlike `handle_ai_events`, a delayed action's `new_events` are queued
-        // for the NEXT tick: this system runs after `handle_ai_events` has
+        // Unlike `tick_trigger_pipeline`, a delayed action's `new_events` are queued
+        // for the NEXT tick: this system runs after `tick_trigger_pipeline` has
         // already drained `pending_world_events` for this one.
         let mut out_events: Vec<WorldEvent> = Vec::new();
         apply_dispatch_result(
@@ -2152,14 +2147,14 @@ pub(crate) fn build_uuid_to_faction(
 
 /// Bundle of system params used by the two trigger-dispatch sites for
 /// the `add_faction_enemy` / `remove_faction_enemy` actions. Grouping
-/// these keeps both `handle_ai_events` and `handle_respond_to_message`
+/// these keeps both `tick_trigger_pipeline` and `handle_respond_to_message`
 /// under Bevy's per-system parameter cap (16).
 ///
 /// `registry` is `Option<ResMut<_>>` so test apps that don't insert
 /// `FactionRegistryResource` (most of `world::server::tests`) still load
 /// the systems without a "resource does not exist" panic. Production
 /// Bundles the optional world-layer mutation resources used by
-/// `handle_respond_to_message` and `handle_ai_events` into a single
+/// `handle_respond_to_message` and `tick_trigger_pipeline` into a single
 /// `SystemParam` so both functions stay within Bevy's 16-parameter limit.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct WorldLayerParams<'w> {
@@ -2169,7 +2164,7 @@ pub struct WorldLayerParams<'w> {
 }
 
 /// Bundle of per-entity `ShipModifiers` writers used by
-/// `handle_respond_to_message` and `handle_ai_events` to route
+/// `handle_respond_to_message` and `tick_trigger_pipeline` to route
 /// `TriggerAction::{Apply,Remove}{Modifier,Flag,IntModifier}` actions to
 /// the named target entity's Component (not the legacy global Resource).
 ///
@@ -2184,11 +2179,11 @@ pub struct ShipModifiersParams<'w, 's> {
     pub components: Query<'w, 's, &'static mut crate::modifiers::ShipModifiers>,
 }
 
-/// The AI-plugin messages `handle_ai_events` bridges into `WorldEvent`s.
+/// The AI-plugin messages `tick_trigger_pipeline` bridges into `WorldEvent`s.
 ///
 /// Grouped into a `SystemParam` for the same reason as `ShipModifiersParams`:
-/// `handle_ai_events` is at Bevy's 16-parameter limit, and each new AI event
-/// source would otherwise push it over.
+/// it keeps `tick_trigger_pipeline` clear of Bevy's 16-parameter limit, and
+/// each new AI event source would otherwise eat one slot of that budget.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AiEventReaders<'w, 's> {
     pub attacked: MessageReader<'w, 's, crate::ai_plugin::AiEntityAttacked>,
@@ -2620,7 +2615,7 @@ fn apply_world_layer_changes(
                                 // `on_world_loaded` triggers declared inside
                                 // this sub-world (and merged into the live
                                 // runtime above) fire on the next Update
-                                // tick via `handle_ai_events`.
+                                // tick via `tick_trigger_pipeline`.
                                 runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 
                                 layer_map.0.insert(
@@ -2952,7 +2947,7 @@ pub(crate) mod tests {
         assert!(messages[0].is_urgent);
     }
 
-    /// `handle_ai_events` (auto-fire path: `on_world_loaded`,
+    /// `tick_trigger_pipeline` (auto-fire path: `on_world_loaded`,
     /// `on_attacked`, `on_destroyed`, `on_flag_set`) also schedules the
     /// chained `root_follow_up`. Verified by emitting `WorldLoaded` on a
     /// template with a chained node.
@@ -3020,7 +3015,7 @@ pub(crate) mod tests {
 
     // -- AI-event trigger tests -----------------------------------------------
 
-    /// Build a minimal test app that includes just what handle_ai_events needs.
+    /// Build a minimal test app that includes just what tick_trigger_pipeline needs.
     fn ai_trigger_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
@@ -3038,7 +3033,7 @@ pub(crate) mod tests {
                 Update,
                 (
                     tick_pending_follow_ups,
-                    handle_ai_events,
+                    tick_trigger_pipeline,
                     handle_comms_channel2,
                 )
                     .chain(),
@@ -3049,9 +3044,10 @@ pub(crate) mod tests {
         app
     }
 
-    /// Issue #710: the `DispatchContext` flag stores must be the LIVE ones, not
-    /// `handle_ai_events`' per-pass `base_flags_snapshot` (which exists for
-    /// condition evaluation only). `dispatch_action` computes before/after
+    /// Issue #710: the `DispatchContext` flag stores must be the LIVE ones,
+    /// never a per-pass copy taken before dispatch began (condition
+    /// evaluation reads the stores before any dispatch, which is safe;
+    /// dispatch itself must not). `dispatch_action` computes before/after
     /// against them to decide whether a transition event fires at all, so a
     /// snapshot silently drops transitions.
     ///
@@ -3133,14 +3129,14 @@ pub(crate) mod tests {
     }
 
     /// Issue #710: `tick_delayed_actions` now shares the `world::dispatch`
-    /// table with `handle_ai_events`. The routing of `new_events` is the one
+    /// table with `tick_trigger_pipeline`. The routing of `new_events` is the one
     /// thing that must stay different: a delayed action's events queue onto
     /// `pending_world_events` for the NEXT tick, because this system runs after
-    /// `handle_ai_events` has already drained that queue for this one.
+    /// `tick_trigger_pipeline` has already drained that queue for this one.
     #[test]
     fn delayed_action_dispatches_and_queues_event_for_next_tick() {
         let mut app = ai_trigger_test_app();
-        app.add_systems(Update, tick_delayed_actions.after(handle_ai_events));
+        app.add_systems(Update, tick_delayed_actions.after(tick_trigger_pipeline));
 
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
@@ -3452,7 +3448,7 @@ pub(crate) mod tests {
 
     // -- AI-event ApplyModifier / per-entity target regression tests -------
     //
-    // The following six tests exercise `handle_ai_events` dispatch of the
+    // The following six tests exercise `tick_trigger_pipeline` dispatch of the
     // per-entity trigger actions (`ApplyModifier`, `RemoveModifier`,
     // `ApplyFlag`, `RemoveFlag`, `ApplyIntModifier`, `RemoveIntModifier`)
     // and prove that the action lands on the target entity's per-entity
@@ -3492,7 +3488,7 @@ pub(crate) mod tests {
 
     /// Installs a single `OnDestroyed { raider_alpha }` trigger whose
     /// action list is `actions`, emits `AiEntityDestroyed { npc-target-uuid }`,
-    /// and ticks once so `handle_ai_events` dispatches the actions.
+    /// and ticks once so `tick_trigger_pipeline` dispatches the actions.
     fn fire_ai_event_trigger(app: &mut App, actions: Vec<TriggerAction>) {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.trigger_states = vec![TriggerState {
@@ -4515,7 +4511,7 @@ pub(crate) mod tests {
     // -- add_faction_enemy / remove_faction_enemy dispatch tests --------------
 
     /// Helper: fire a single trigger with the given action via
-    /// `handle_ai_events`. Uses `on_world_loaded` so we only need a
+    /// `tick_trigger_pipeline`. Uses `on_world_loaded` so we only need a
     /// `WorldLoaded` event to fire it. Returns the post-update App so
     /// tests can inspect mutated resources.
     fn fire_world_loaded_action(actions: Vec<TriggerAction>) -> App {
@@ -6403,7 +6399,7 @@ entity = "layer_npc"
 
     // -- on_world_loaded (issue #415) ----------------------------------------
 
-    /// `handle_ai_events` drains `pending_world_events` and dispatches their
+    /// `tick_trigger_pipeline` drains `pending_world_events` and dispatches their
     /// matching triggers' actions. Seeds a `WorldLoaded` event directly into
     /// the queue and asserts the `add_objective` action fires.
     #[test]
@@ -6448,7 +6444,7 @@ entity = "layer_npc"
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
             runtime.pending_world_events.is_empty(),
-            "pending_world_events must be drained by handle_ai_events"
+            "pending_world_events must be drained by tick_trigger_pipeline"
         );
         assert!(
             runtime.trigger_states[0].fired,
@@ -6559,7 +6555,7 @@ entity = "layer_npc"
                 loader_path: None,
             });
         app.update(); // applies load + queues WorldLoaded
-        app.update(); // handle_ai_events drains pending event + fires trigger
+        app.update(); // tick_trigger_pipeline drains pending event + fires trigger
 
         {
             let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
@@ -6654,7 +6650,7 @@ condition = "on_world_loaded"
     use crate::regions::server::RegionPlugin;
 
     /// Build a minimal app that wires `RegionPlugin` + the issue-#416
-    /// observers + `handle_ai_events` into the same world. Skips the
+    /// observers + `tick_trigger_pipeline` into the same world. Skips the
     /// heavyweight `WorldPlugin`/`AiPlugin`/`LobbyPlugin` bootstrap so the
     /// test focuses on the region-event ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ trigger-fire path.
     fn region_trigger_test_app() -> App {
@@ -6669,7 +6665,10 @@ condition = "on_world_loaded"
             .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_message::<crate::ai::server::AiWaypointReached>()
             .add_message::<CommsChannel2Event>()
-            .add_systems(Update, (handle_ai_events, handle_comms_channel2).chain())
+            .add_systems(
+                Update,
+                (tick_trigger_pipeline, handle_comms_channel2).chain(),
+            )
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);
         // Spawn the player ship (with a Transform so RegionPlugin's
@@ -6810,12 +6809,12 @@ condition = "on_world_loaded"
         );
 
         // Move ship inside. The membership system runs in Physics and
-        // queues a WorldEvent via the observer; `handle_ai_events` (also
+        // queues a WorldEvent via the observer; `tick_trigger_pipeline` (also
         // in Physics) drains the queue on the NEXT tick ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â matching the
         // documented `WorldLoaded` two-tick pattern.
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update(); // queues EnteredRegion
-        app.update(); // handle_ai_events drains + fires
+        app.update(); // tick_trigger_pipeline drains + fires
         assert!(
             objective_present(&app, "obj-entered"),
             "trigger must fire on entry"
@@ -7780,7 +7779,7 @@ size_max = 2.0
 
     /// (#475) `on_timer` triggers fire when `time.elapsed_secs() -
     /// runtime.world_loaded_at_secs >= after_secs`. Verify the producer
-    /// in `handle_ai_events` emits `TimerElapsed` events using the
+    /// in `tick_trigger_pipeline` emits `TimerElapsed` events using the
     /// load-time anchor, and that an `on_timer` trigger correctly fires
     /// a `spawn_entity` action.
     #[test]
@@ -7817,7 +7816,7 @@ size_max = 2.0
             }];
         }
 
-        // Tick twice: first runs handle_ai_events which fires the trigger
+        // Tick twice: first runs tick_trigger_pipeline which fires the trigger
         // and queues the spawn via Commands; second flushes Commands.
         app.update();
         app.update();
@@ -7831,7 +7830,7 @@ size_max = 2.0
         assert!(
             uuid.is_some(),
             "on_timer after_secs=0 must have fired its SpawnEntity action Ã¢â‚¬â€ \
-             handle_ai_events must emit TimerElapsed events when \
+             tick_trigger_pipeline must emit TimerElapsed events when \
              world_loaded_at_secs is set"
         );
 
@@ -8552,7 +8551,7 @@ size_max = 2.0
 
     // -- Issue #506: channel-2 routing tests ------------------------------------
 
-    /// Scenario hail arrives in CommsInboxRes via channel-2 (handle_ai_events
+    /// Scenario hail arrives in CommsInboxRes via channel-2 (tick_trigger_pipeline
     /// writes to CommsChannel2Event; handle_comms_channel2 injects into inbox).
     #[test]
     fn scenario_hail_arrives_in_inbox_via_channel2() {
@@ -8580,7 +8579,7 @@ size_max = 2.0
                 },
                 fired: false,
             });
-            // Queue a WorldLoaded event so handle_ai_events fires the template.
+            // Queue a WorldLoaded event so tick_trigger_pipeline fires the template.
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
 

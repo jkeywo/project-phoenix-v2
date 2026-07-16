@@ -272,7 +272,7 @@ pub struct AiEntityDestroyed {
 /// Emitted by `advance_objective_cursors` when a ship reaches the waypoint its
 /// cursor is currently pointing at, immediately before the cursor advances.
 ///
-/// The world plugin reads this in `handle_ai_events` and turns it into a
+/// The world plugin reads this in `tick_trigger_pipeline` and turns it into a
 /// `WorldEvent::WaypointReached`, which drives `on_waypoint_reached` scenario
 /// triggers — the same event-bridge shape `AiEntityAttacked` /
 /// `AiEntityDestroyed` already use, so the AI module stays free of any

@@ -3860,7 +3860,7 @@ transform = { position = [0.0, 0.0, 0.0] }
         // blocks reference entity templates that must be preloaded into the
         // EntityConfig cache before the trigger fires. Without this walk,
         // timer-driven wave spawns silently fail on WASM (cache miss →
-        // `continue` in handle_ai_events).
+        // `continue` in tick_trigger_pipeline).
         let toml = r#"
 [[trigger]]
 condition = "on_timer"

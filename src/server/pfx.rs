@@ -43,11 +43,42 @@ const IMPACT_SPARK_SIZE: f32 = 0.35;
 const IMPACT_SPARK_COUNT: usize = 4;
 const IMPACT_SPARK_SPREAD: f32 = 0.6;
 
-const TORPEDO_RADIUS: f32 = 0.45;
+// Photon torpedo visuals (issue #826; textured core+shell+flare replacing
+// the flat-sphere placeholder, matching the blaster/explosion PFX pattern).
 const TORPEDO_TRAIL_RADIUS: f32 = 0.18;
 const TORPEDO_TRAIL_LIFETIME_SECS: f32 = 0.32;
 const TORPEDO_TRAIL_MIN_DISTANCE: f32 = 0.35;
-const TORPEDO_BURST_LIFETIME_SECS: f32 = 0.35;
+const TORPEDO_COLOR: [f32; 4] = [1.0, 0.55, 0.12, 1.0];
+const TORPEDO_CORE_COLOR: [f32; 4] = [1.0, 0.95, 0.85, 1.0];
+
+const TORPEDO_CORE_SIZE: f32 = 0.3;
+const TORPEDO_CORE_EMISSIVE: f32 = 9.0;
+const TORPEDO_SHELL_SIZE: f32 = 0.7;
+const TORPEDO_SHELL_EMISSIVE: f32 = 3.5;
+const TORPEDO_FLARE_LENGTH: f32 = 1.4;
+const TORPEDO_FLARE_WIDTH: f32 = 0.4;
+const TORPEDO_FLARE_EMISSIVE: f32 = 3.0;
+
+const TORPEDO_LAUNCH_FLASH_LIFETIME_SECS: f32 = 0.12;
+const TORPEDO_LAUNCH_FLASH_START_SIZE: f32 = 0.25;
+const TORPEDO_LAUNCH_FLASH_END_SIZE: f32 = 0.9;
+
+const TORPEDO_IMPACT_FLASH_LIFETIME_SECS: f32 = 0.08;
+const TORPEDO_IMPACT_FLASH_START_SIZE: f32 = 0.2;
+const TORPEDO_IMPACT_FLASH_END_SIZE: f32 = 0.55;
+
+const TORPEDO_IMPACT_PLASMA_LIFETIME_SECS: f32 = 0.6;
+const TORPEDO_IMPACT_PLASMA_START_SCALE: f32 = 0.4;
+const TORPEDO_IMPACT_PLASMA_END_SCALE: f32 = 1.6;
+
+const TORPEDO_IMPACT_RING_LIFETIME_SECS: f32 = 0.4;
+const TORPEDO_IMPACT_RING_START_SCALE: f32 = 0.2;
+const TORPEDO_IMPACT_RING_END_SCALE: f32 = 2.2;
+
+const TORPEDO_IMPACT_SPARK_COUNT: usize = 8;
+const TORPEDO_IMPACT_SPARK_LIFETIME_SECS: f32 = 0.35;
+const TORPEDO_IMPACT_SPARK_SCALE: f32 = 0.3;
+const TORPEDO_IMPACT_SPARK_SPREAD: f32 = 0.6;
 
 // Blaster projectile visuals (issue #638; textured crossed-quad bolt
 // replacing the earlier flat sphere placeholder).
@@ -225,6 +256,7 @@ impl Plugin for PfxPlugin {
             .init_resource::<DustFieldState>()
             .init_resource::<PhaserPfxAssets>()
             .init_resource::<BlasterBoltPfxAssets>()
+            .init_resource::<TorpedoPfxAssets>()
             .init_resource::<ShipExplosionPfxAssets>()
             // `spawn_ship_explosions` reads this message; registering it here
             // too (redundantly with `WeaponsPlugin`) means test apps that add
@@ -411,6 +443,26 @@ impl FromWorld for BlasterBoltPfxAssets {
     }
 }
 
+/// Texture handle for the one new photon-torpedo PFX asset — a hard, small,
+/// bright energy core (harder falloff than the generic `radial_glow`, used
+/// for the shell). The directional flare reuses `BlasterBoltPfxAssets::
+/// bolt_glow` (same asymmetric trailing-streak shape); launch flash, impact
+/// ring and sparks reuse `PhaserPfxAssets`; the impact plasma bloom reuses
+/// `ShipExplosionPfxAssets::puff`.
+#[derive(Resource)]
+struct TorpedoPfxAssets {
+    core: Handle<Image>,
+}
+
+impl FromWorld for TorpedoPfxAssets {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+        Self {
+            core: asset_server.load("pfx/torpedo/torpedo_core.png"),
+        }
+    }
+}
+
 /// Marker for PFX entities that should always face the game camera —
 /// textured quads (beam contact glow, muzzle flash, impact ring, sparks)
 /// rendered as billboards rather than surfaces with fixed orientation.
@@ -575,7 +627,10 @@ struct BeamPfxState {
 }
 
 struct TorpedoEntities {
-    body: Entity,
+    core: Entity,
+    shell: Entity,
+    flare_a: Entity,
+    flare_b: Entity,
     last_pos: Vec3,
 }
 
@@ -1124,32 +1179,52 @@ fn phaser_texture_material(
 /// Iterates `Query<..., With<Ship>>` so NPC torpedoes render alongside the
 /// player's. Torpedo UUIDs are globally unique (uuid::Uuid::new_v4), so
 /// merging in-flight lists across ships never collides on tracker keys.
+///
+/// Each torpedo is a hard core + soft shell billboard pair plus a
+/// velocity-aligned directional flare (crossed ribbon, reusing the blaster
+/// bolt's asymmetric glow texture), per the photon-torpedo PFX guide. A
+/// launch flash fires when a torpedo first appears in `in_flight`; a
+/// richer impact burst (contact flash, plasma bloom, ring, sparks) fires
+/// on despawn — torpedoes get a more elaborate detonation than blaster
+/// bolts, matching their heavier-weapon role.
+#[allow(clippy::too_many_arguments)]
 fn sync_torpedo_pfx(
     ships_q: Query<&TorpedoSystemResource, With<crate::simulation::Ship>>,
+    torpedo_pfx_assets: Res<TorpedoPfxAssets>,
+    bolt_pfx_assets: Res<BlasterBoltPfxAssets>,
+    phaser_pfx_assets: Res<PhaserPfxAssets>,
+    explosion_pfx_assets: Res<ShipExplosionPfxAssets>,
     mut state: ResMut<TorpedoPfxState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut transforms: Query<&mut Transform, With<TorpedoBody>>,
+    mut body_q: Query<&mut Transform, With<TorpedoBody>>,
 ) {
-    // Collect (uuid, x, z) triples for every in-flight torpedo across every
-    // ship. A single flat list makes the diff-against-tracker trivial.
-    let mut all_in_flight: Vec<(String, f32, f32)> = Vec::new();
+    // Collect (uuid, x, z, heading) quadruples for every in-flight torpedo
+    // across every ship. A single flat list makes the diff-against-tracker
+    // trivial, and heading lets the flare orient correctly for homing
+    // torpedoes that curve mid-flight.
+    let mut all_in_flight: Vec<(String, f32, f32, f32)> = Vec::new();
     for torpedo_sys in ships_q.iter() {
         for t in &torpedo_sys.0.in_flight {
-            all_in_flight.push((t.uuid.clone(), t.x, t.z));
+            all_in_flight.push((t.uuid.clone(), t.x, t.z, t.heading));
         }
     }
 
-    let live: HashSet<String> = all_in_flight.iter().map(|(u, _, _)| u.clone()).collect();
+    let live: HashSet<String> = all_in_flight.iter().map(|(u, ..)| u.clone()).collect();
     let tracked: HashSet<String> = state.active.keys().cloned().collect();
     let (to_spawn, to_despawn) = diff_torpedo_sets(&live, &tracked);
 
     for uuid in to_despawn {
         if let Some(entities) = state.active.remove(&uuid) {
-            commands.entity(entities.body).try_despawn();
-            spawn_torpedo_burst(
+            commands.entity(entities.core).try_despawn();
+            commands.entity(entities.shell).try_despawn();
+            commands.entity(entities.flare_a).try_despawn();
+            commands.entity(entities.flare_b).try_despawn();
+            spawn_torpedo_impact_burst(
                 entities.last_pos,
+                &phaser_pfx_assets,
+                &explosion_pfx_assets,
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -1158,55 +1233,373 @@ fn sync_torpedo_pfx(
     }
 
     for uuid in to_spawn {
-        if let Some((_, x, z)) = all_in_flight.iter().find(|(u, _, _)| u == &uuid) {
+        if let Some((_, x, z, heading)) = all_in_flight.iter().find(|(u, ..)| u == &uuid) {
             let pos = Vec3::new(*x, 0.1, *z);
-            let body = commands
-                .spawn((
-                    PfxEntity,
-                    TorpedoBody,
-                    Mesh3d(meshes.add(Sphere {
-                        radius: TORPEDO_RADIUS,
-                    })),
-                    MeshMaterial3d(glow_material(
-                        &mut materials,
-                        [1.0, 0.78, 0.18, 1.0],
-                        9.0,
-                        AlphaMode::Opaque,
-                    )),
-                    Transform::from_translation(pos),
-                ))
-                .id();
-            state.active.insert(
+            spawn_torpedo_pfx(
                 uuid,
-                TorpedoEntities {
-                    body,
-                    last_pos: pos,
-                },
+                pos,
+                *heading,
+                &torpedo_pfx_assets,
+                &bolt_pfx_assets,
+                &phaser_pfx_assets,
+                &mut state,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
             );
         }
     }
 
-    for (uuid, x, z) in &all_in_flight {
+    for (uuid, x, z, heading) in &all_in_flight {
         let pos = Vec3::new(*x, 0.1, *z);
-        if let Some(entities) = state.active.get_mut(uuid) {
-            if entities.last_pos.distance(pos) >= TORPEDO_TRAIL_MIN_DISTANCE {
-                spawn_trail_segment(
-                    entities.last_pos,
-                    pos,
-                    TORPEDO_TRAIL_RADIUS,
-                    [1.0, 0.45, 0.08, 0.5],
-                    4.0,
-                    TORPEDO_TRAIL_LIFETIME_SECS,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                );
-            }
-            entities.last_pos = pos;
-            if let Ok(mut transform) = transforms.get_mut(entities.body) {
-                transform.translation = pos;
-            }
-        }
+        update_torpedo_pfx(
+            uuid,
+            pos,
+            *heading,
+            &mut state,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut body_q,
+        );
+    }
+}
+
+/// Spawns the core+shell billboards and directional flare for a
+/// newly-appeared torpedo, plus its launch flash. Called once per torpedo,
+/// the tick it first shows up in `in_flight`.
+#[allow(clippy::too_many_arguments)]
+fn spawn_torpedo_pfx(
+    uuid: String,
+    pos: Vec3,
+    heading: f32,
+    torpedo_pfx_assets: &TorpedoPfxAssets,
+    bolt_pfx_assets: &BlasterBoltPfxAssets,
+    phaser_pfx_assets: &PhaserPfxAssets,
+    state: &mut TorpedoPfxState,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let billboard_mesh = meshes.add(unit_billboard_mesh());
+
+    let core_mat = phaser_texture_material(
+        materials,
+        torpedo_pfx_assets.core.clone(),
+        TORPEDO_CORE_COLOR,
+        TORPEDO_CORE_EMISSIVE,
+    );
+    let core = commands
+        .spawn((
+            PfxEntity,
+            TorpedoBody,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(core_mat),
+            Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_CORE_SIZE)),
+        ))
+        .id();
+
+    let shell_mat = phaser_texture_material(
+        materials,
+        phaser_pfx_assets.radial_glow.clone(),
+        TORPEDO_COLOR,
+        TORPEDO_SHELL_EMISSIVE,
+    );
+    let shell = commands
+        .spawn((
+            PfxEntity,
+            TorpedoBody,
+            Billboard,
+            Mesh3d(billboard_mesh),
+            MeshMaterial3d(shell_mat),
+            Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_SHELL_SIZE)),
+        ))
+        .id();
+
+    // Directional flare: a crossed ribbon trailing behind the torpedo,
+    // reusing the blaster bolt's asymmetric glow texture (bright rounded
+    // tip at the "front"/current position, tapered fade at the "tail").
+    let ribbon_mesh = meshes.add(unit_ribbon_quad_mesh());
+    let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let forward = blaster_bolt_forward(heading);
+    let front = pos;
+    let tail = pos - forward * TORPEDO_FLARE_LENGTH;
+    let flare_t = segment_transform(tail, front, TORPEDO_FLARE_WIDTH);
+    let flare_mat = phaser_texture_material(
+        materials,
+        bolt_pfx_assets.bolt_glow.clone(),
+        TORPEDO_COLOR,
+        TORPEDO_FLARE_EMISSIVE,
+    );
+    let flare_a = commands
+        .spawn((
+            PfxEntity,
+            TorpedoBody,
+            Mesh3d(ribbon_mesh.clone()),
+            MeshMaterial3d(flare_mat.clone()),
+            flare_t,
+        ))
+        .id();
+    let flare_b = commands
+        .spawn((
+            PfxEntity,
+            TorpedoBody,
+            Mesh3d(ribbon_mesh),
+            MeshMaterial3d(flare_mat),
+            Transform {
+                rotation: flare_t.rotation * cross,
+                ..flare_t
+            },
+        ))
+        .id();
+
+    spawn_torpedo_launch_flash(pos, phaser_pfx_assets, commands, meshes, materials);
+
+    state.active.insert(
+        uuid,
+        TorpedoEntities {
+            core,
+            shell,
+            flare_a,
+            flare_b,
+            last_pos: pos,
+        },
+    );
+}
+
+/// Updates an already-live torpedo's billboards/flare to its new
+/// position/heading each frame, and lays down a trail segment behind it.
+fn update_torpedo_pfx(
+    uuid: &str,
+    pos: Vec3,
+    heading: f32,
+    state: &mut TorpedoPfxState,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    body_q: &mut Query<&mut Transform, With<TorpedoBody>>,
+) {
+    let Some(entities) = state.active.get_mut(uuid) else {
+        return;
+    };
+
+    if entities.last_pos.distance(pos) >= TORPEDO_TRAIL_MIN_DISTANCE {
+        spawn_trail_segment(
+            entities.last_pos,
+            pos,
+            TORPEDO_TRAIL_RADIUS,
+            [1.0, 0.45, 0.08, 0.5],
+            4.0,
+            TORPEDO_TRAIL_LIFETIME_SECS,
+            commands,
+            meshes,
+            materials,
+        );
+    }
+    entities.last_pos = pos;
+
+    if let Ok(mut t) = body_q.get_mut(entities.core) {
+        t.translation = pos;
+    }
+    if let Ok(mut t) = body_q.get_mut(entities.shell) {
+        t.translation = pos;
+    }
+
+    let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    let forward = blaster_bolt_forward(heading);
+    let front = pos;
+    let tail = pos - forward * TORPEDO_FLARE_LENGTH;
+    let flare_t = segment_transform(tail, front, TORPEDO_FLARE_WIDTH);
+    if let Ok(mut t) = body_q.get_mut(entities.flare_a) {
+        *t = flare_t;
+    }
+    if let Ok(mut t) = body_q.get_mut(entities.flare_b) {
+        *t = Transform {
+            rotation: flare_t.rotation * cross,
+            ..flare_t
+        };
+    }
+}
+
+/// Brief flash establishing the torpedo's launch point, reusing the
+/// generic radial-glow texture (same shape as the phaser/blaster muzzle
+/// flash — only color, size and lifetime differ per weapon).
+fn spawn_torpedo_launch_flash(
+    pos: Vec3,
+    phaser_pfx_assets: &PhaserPfxAssets,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let mat = phaser_texture_material(
+        materials,
+        phaser_pfx_assets.radial_glow.clone(),
+        TORPEDO_COLOR,
+        TORPEDO_CORE_EMISSIVE,
+    );
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(meshes.add(unit_billboard_mesh())),
+        MeshMaterial3d(mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_LAUNCH_FLASH_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: TORPEDO_LAUNCH_FLASH_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: TORPEDO_LAUNCH_FLASH_START_SIZE,
+            end_scale: TORPEDO_LAUNCH_FLASH_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: mat,
+            color: TORPEDO_COLOR,
+            emissive_strength: TORPEDO_CORE_EMISSIVE,
+        },
+    ));
+}
+
+/// Detonation burst where a torpedo disappears (hit or expiry): a hard
+/// contact flash, an irregular plasma bloom (reusing the ship-explosion
+/// puff texture at torpedo scale), an expanding ring, and radial sparks —
+/// a richer sequence than the blaster's ring+sparks, matching the
+/// torpedo's heavier-weapon role in the design guide.
+fn spawn_torpedo_impact_burst(
+    pos: Vec3,
+    phaser_pfx_assets: &PhaserPfxAssets,
+    explosion_pfx_assets: &ShipExplosionPfxAssets,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let billboard_mesh = meshes.add(unit_billboard_mesh());
+
+    // Contact flash.
+    let flash_mat = phaser_texture_material(
+        materials,
+        phaser_pfx_assets.radial_glow.clone(),
+        TORPEDO_CORE_COLOR,
+        TORPEDO_CORE_EMISSIVE,
+    );
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(flash_mat.clone()),
+        Transform::from_translation(pos)
+            .with_scale(Vec3::splat(TORPEDO_IMPACT_FLASH_START_SIZE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: TORPEDO_IMPACT_FLASH_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: TORPEDO_IMPACT_FLASH_START_SIZE,
+            end_scale: TORPEDO_IMPACT_FLASH_END_SIZE,
+        },
+        PfxFadingMaterial {
+            handle: flash_mat,
+            color: TORPEDO_CORE_COLOR,
+            emissive_strength: TORPEDO_CORE_EMISSIVE,
+        },
+    ));
+
+    // Irregular plasma bloom.
+    let plasma_mat = phaser_texture_material(
+        materials,
+        explosion_pfx_assets.puff.clone(),
+        TORPEDO_COLOR,
+        TORPEDO_SHELL_EMISSIVE,
+    );
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(plasma_mat.clone()),
+        Transform::from_translation(pos)
+            .with_scale(Vec3::splat(TORPEDO_IMPACT_PLASMA_START_SCALE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: TORPEDO_IMPACT_PLASMA_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: TORPEDO_IMPACT_PLASMA_START_SCALE,
+            end_scale: TORPEDO_IMPACT_PLASMA_END_SCALE,
+        },
+        PfxFadingMaterial {
+            handle: plasma_mat,
+            color: TORPEDO_COLOR,
+            emissive_strength: TORPEDO_SHELL_EMISSIVE,
+        },
+    ));
+
+    // Expanding ring.
+    let ring_mat = phaser_texture_material(
+        materials,
+        phaser_pfx_assets.impact_ring.clone(),
+        TORPEDO_COLOR,
+        TORPEDO_SHELL_EMISSIVE,
+    );
+    commands.spawn((
+        PfxEntity,
+        Billboard,
+        Mesh3d(billboard_mesh.clone()),
+        MeshMaterial3d(ring_mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::splat(TORPEDO_IMPACT_RING_START_SCALE)),
+        PfxLifetime {
+            age: 0.0,
+            lifetime: TORPEDO_IMPACT_RING_LIFETIME_SECS,
+        },
+        PfxBurst {
+            start_scale: TORPEDO_IMPACT_RING_START_SCALE,
+            end_scale: TORPEDO_IMPACT_RING_END_SCALE,
+        },
+        PfxFadingMaterial {
+            handle: ring_mat,
+            color: TORPEDO_COLOR,
+            emissive_strength: TORPEDO_SHELL_EMISSIVE,
+        },
+    ));
+
+    // Radial sparks.
+    let mut rng = rand::rng();
+    for _ in 0..TORPEDO_IMPACT_SPARK_COUNT {
+        let offset = Vec3::new(
+            rng.random_range(-1.0_f32..1.0),
+            rng.random_range(-0.3_f32..0.3),
+            rng.random_range(-1.0_f32..1.0),
+        )
+        .normalize_or_zero()
+            * TORPEDO_IMPACT_SPARK_SPREAD;
+        let spark_color = [
+            TORPEDO_COLOR[0] * 0.5 + 0.5,
+            TORPEDO_COLOR[1] * 0.5 + 0.5,
+            TORPEDO_COLOR[2] * 0.5 + 0.5,
+            TORPEDO_COLOR[3],
+        ];
+        let spark_mat = phaser_texture_material(
+            materials,
+            phaser_pfx_assets.spark_streak.clone(),
+            spark_color,
+            TORPEDO_SHELL_EMISSIVE,
+        );
+        commands.spawn((
+            PfxEntity,
+            Billboard,
+            Mesh3d(billboard_mesh.clone()),
+            MeshMaterial3d(spark_mat.clone()),
+            Transform::from_translation(pos + offset)
+                .with_scale(Vec3::splat(TORPEDO_IMPACT_SPARK_SCALE)),
+            PfxLifetime {
+                age: 0.0,
+                lifetime: TORPEDO_IMPACT_SPARK_LIFETIME_SECS,
+            },
+            PfxFadingMaterial {
+                handle: spark_mat,
+                color: spark_color,
+                emissive_strength: TORPEDO_SHELL_EMISSIVE,
+            },
+        ));
     }
 }
 
@@ -3351,35 +3744,6 @@ fn spawn_trail_segment(
             },
         ))
         .id()
-}
-
-fn spawn_torpedo_burst(
-    pos: Vec3,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-) {
-    let color = [1.0, 0.72, 0.16, 0.75];
-    let mat = glow_material(materials, color, 10.0, AlphaMode::Add);
-    commands.spawn((
-        PfxEntity,
-        Mesh3d(meshes.add(Sphere { radius: 1.0 })),
-        MeshMaterial3d(mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::splat(0.25)),
-        PfxLifetime {
-            age: 0.0,
-            lifetime: TORPEDO_BURST_LIFETIME_SECS,
-        },
-        PfxBurst {
-            start_scale: 0.25,
-            end_scale: 2.2,
-        },
-        PfxFadingMaterial {
-            handle: mat,
-            color,
-            emissive_strength: 10.0,
-        },
-    ));
 }
 
 fn engine_emitters(

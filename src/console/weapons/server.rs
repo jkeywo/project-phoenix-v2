@@ -737,8 +737,7 @@ fn system_is_registered(control_sources: &ShipSystemControlSources, system_id: &
 ///   local operator).
 ///
 /// After resolution the same per-ship code path runs for both: read the
-/// shooter's [`WeaponsTarget`] (falling back to [`ShipAiMemory::target`] when
-/// empty for NPC controllers), verify the requested bank is in-arc using the
+/// shooter's [`WeaponsTarget`], verify the requested bank is in-arc using the
 /// shooter's own [`PhaserCombatConfigResource`], and activate its
 /// [`ActiveBeam`] + trigger [`BeamStartedEvent`].
 ///
@@ -756,8 +755,6 @@ fn handle_fire_phaser(
         With<crate::server_app::LocalShip>,
     >,
     // Per-ship state read for every candidate shooter (player + NPC).
-    // `ShipAiMemory` is `Option` because pre-`AiPlugin` test apps may spawn
-    // ships without it; the fallback then simply produces `None`.
     mut ship_q: Query<
         (
             Entity,
@@ -768,7 +765,6 @@ fn handle_fire_phaser(
             &PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
-            Option<&crate::ai_plugin::ShipAiMemory>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -815,7 +811,6 @@ fn handle_fire_phaser(
             cooldown,
             combat_config_opt,
             modifiers_opt,
-            ai_memory_opt,
         )) = ship_q.get_mut(shooter_entity)
         else {
             continue;
@@ -853,15 +848,14 @@ fn handle_fire_phaser(
             continue;
         }
 
-        // Target selection: WeaponsTarget first, then ShipAiMemory fallback
-        // for NPCs (backward compat — NPCs write their target into AiMemory
-        // via operate_helm_ai, not into WeaponsTarget).
-        let target_uuid: Option<String> = weapons_target.0.clone().or_else(|| {
-            ai_memory_opt
-                .and_then(|m| m.0.target)
-                .map(|u| u.to_string())
-        });
-        let Some(target_uuid) = target_uuid else {
+        // Target selection: `WeaponsTarget` is the authoritative, same-tick
+        // lock for every ship — humans set it via `handle_set_target`, AI via
+        // `ai_target_selection` (issue #697), which runs for any ship whose
+        // tactical systems are AI-operated. No AI-only fallback: reading a
+        // private AI target here would fire at a target the ship's own
+        // tactical radar never acquired, and would branch on human-vs-AI
+        // below admission.
+        let Some(target_uuid) = weapons_target.0.clone() else {
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -987,9 +981,14 @@ fn handle_fire_phaser(
 /// to a fight. `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity`
 /// pins this.
 ///
-/// Target selection: reads the ship's [`WeaponsTarget`] and falls back to
-/// [`ShipAiMemory::target`] when empty (low-LOD NPCs write targets into
-/// `AiMemory`, not `WeaponsTarget`). Arc/range checks mirror
+/// Target selection: reads the ship's [`WeaponsTarget`] — the authoritative
+/// same-tick lock, written by `handle_set_target` for humans and by
+/// [`ai_target_selection`] (issue #697) for AI-operated tactical systems, so
+/// one surface serves both — and falls back to [`ShipAiMemory::target`] when
+/// empty. Post-#703 that fallback is redundant for every production NPC
+/// (`ai_target_selection` acquires the nearest hostile itself), and it is
+/// scheduled for deletion under a re-scoped #702; it stays for now so this
+/// commit lands only independently-verified behaviour. Arc/range checks mirror
 /// [`handle_fire_phaser`], but use each bank's `auto_arc_deg` (looser cone
 /// than `fire_arc_deg`) so AI is less trigger-happy on peripheral targets.
 #[allow(clippy::too_many_arguments)]
@@ -1071,7 +1070,11 @@ pub(crate) fn ai_phaser_auto_fire(
             continue;
         }
 
-        // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
+        // Target selection: `WeaponsTarget` is the authoritative same-tick lock
+        // for every ship (see `ai_target_selection`), with a legacy
+        // `ShipAiMemory` fallback for NPCs. Post-#703 the fallback is dead for
+        // production NPCs — `ai_target_selection` now acquires the nearest
+        // hostile itself — and a re-scoped #702 deletes it.
         let target_uuid: Option<String> = weapons_target.0.clone().or_else(|| {
             ai_memory_opt
                 .and_then(|m| m.0.target)
@@ -1473,8 +1476,8 @@ fn tick_weapons_arc_request(
 /// `on_attacked` transition can fire.
 ///
 /// Weapons-target clearing: when the player kills its locked target, its
-/// `WeaponsTarget.0` is set to `None`. NPCs track their target in
-/// `ShipAiMemory` and clear it via a separate AI path.
+/// `WeaponsTarget.0` is set to `None`. NPC locks are re-evaluated by
+/// `ai_target_selection`, whose staleness guard clears a dead target.
 ///
 /// Merges the former `tick_active_beam` (player-only) and `tick_npc_beams`
 /// (NPC-only) systems — final divergence closed under PRD #597.
@@ -1498,9 +1501,11 @@ fn tick_beams(
             &mut PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
-            // Only the player ship carries WeaponsTarget as a lock reflected on
-            // the UI. NPCs track their target in ShipAiMemory; we clear the
-            // WeaponsTarget only on the LocalShip.
+            // Every production ship carries WeaponsTarget (`Option` only for
+            // minimal test spawns). We clear it here on the LocalShip alone,
+            // because that lock is also the player's UI selection and nothing
+            // else would drop it. NPC locks are left to `ai_target_selection`,
+            // whose staleness guard clears a dead target on the next tick.
             Option<&mut WeaponsTarget>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             // Shooter's faction for LOS friendly-fire check.
@@ -2575,7 +2580,6 @@ fn handle_fire_blaster(
             &ShipPhysics,
             Option<&WeaponsTarget>,
             &mut BlasterSystemResource,
-            Option<&crate::ai_plugin::ShipAiMemory>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -2623,7 +2627,7 @@ fn handle_fire_blaster(
             }
         };
 
-        let Ok((control_sources, physics, weapons_target_opt, mut blaster_res, ai_memory_opt)) =
+        let Ok((control_sources, physics, weapons_target_opt, mut blaster_res)) =
             ship_q.get_mut(shooter_entity)
         else {
             continue;
@@ -2651,17 +2655,11 @@ fn handle_fire_blaster(
 
         // Arc check: resolve the player's locked target and verify it's within the
         // bank's fire arc. Target selection mirrors tick_blaster_auto_fire:
-        // WeaponsTarget first, then ShipAiMemory fallback for NPCs.
+        // the ship's authoritative `WeaponsTarget` lock.
         // AI tokens skip this check — arc enforcement for AI fire is handled by
         // tick_blaster_auto_fire instead.
         if is_charge_start && !is_ai_token {
-            let target_uuid: Option<String> =
-                weapons_target_opt.and_then(|wt| wt.0.clone()).or_else(|| {
-                    ai_memory_opt
-                        .and_then(|m| m.0.target)
-                        .map(|u| u.to_string())
-                });
-            let Some(target_uuid) = target_uuid else {
+            let Some(target_uuid) = weapons_target_opt.and_then(|wt| wt.0.clone()) else {
                 continue;
             };
             let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -2713,8 +2711,9 @@ fn handle_fire_blaster(
 /// within the bank's fire arc. Ships whose config declares no `blaster_bank`
 /// fine systems fall back to the coarse `tactical.operate_ai` policy.
 ///
-/// Target selection: [`WeaponsTarget`] first, [`ShipAiMemory::target`] fallback
-/// for NPCs. Range and arc checks use each bank's config values.
+/// Target selection: the ship's [`WeaponsTarget`] lock, with a legacy
+/// [`ShipAiMemory::target`] fallback for NPCs (redundant post-#703, deleted
+/// under a re-scoped #702). Range and arc checks use each bank's config values.
 fn tick_blaster_auto_fire(
     mut ship_q: Query<
         (
@@ -2777,7 +2776,9 @@ fn tick_blaster_auto_fire(
         #[cfg(not(target_arch = "wasm32"))]
         eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
-        // Target selection: WeaponsTarget first, ShipAiMemory fallback for NPCs.
+        // Target selection: the ship's authoritative `WeaponsTarget` lock
+        // (see `ai_target_selection`), with the legacy `ShipAiMemory` fallback
+        // for NPCs.
         let target_uuid: Option<String> =
             weapons_target_opt.and_then(|wt| wt.0.clone()).or_else(|| {
                 ai_memory_opt
@@ -3749,15 +3750,114 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
     }
 }
 
-/// Tactical AI target prioritisation (issues #697, #700).
+/// Tactical AI target prioritisation (issues #697, #700, #703).
 ///
 /// Runs for every ship whose Tactical surface is AI-controlled — player ship
 /// and NPC alike, with no `AiHighFidelity` gate.
 ///
-/// Selection order: the highest-scoring Weapons-relevant `Destroy` objective,
-/// else the ship's last attacker, else keep the current lock. Any candidate
-/// must be inside the damage-scaled tactical radar range (issue #680), and a
-/// lock that goes dead or drifts out of range is dropped.
+/// Acquisition precedence, highest first:
+///
+/// 1. The explicit target of the highest-scoring Weapons-relevant `Destroy`
+///    objective.
+/// 2. The lock the ship already holds, while it is still resolvable and still
+///    inside radar range.
+/// 3. The ship's `LastShipAttacker` — whoever last hit it with a beam.
+/// 4. The nearest hostile (issue #703), but *only* when that top `Destroy`
+///    objective is untargeted (`Destroy { target: "" }`), i.e. standing
+///    "engage anything hostile" doctrine.
+///
+/// If no tier yields a candidate the current lock is kept. Any candidate must
+/// be inside the damage-scaled tactical radar range (issue #680), and a lock
+/// that goes dead or drifts out of range is dropped.
+///
+/// Tier 4 exists because tiers 1 and 3 both come up empty for shipped content:
+/// no asset TOML authors a `directive_target`, and `LastShipAttacker` is only
+/// written once a phaser beam connects. Without it an NPC could not fire until
+/// the player shot it first.
+///
+/// "Hostile" and "nearest" are decided by `ai::core::find_nearest_hostile`, the
+/// same function the helm AI reaches through `resolve_destroy_target`, fed a
+/// similarly-built `WorldView` and the live `FactionRegistry`. Sharing that
+/// function is deliberate and load-bearing, because a ship that closes on one
+/// target while shooting at another is a bug.
+///
+/// Be precise about what that buys, though: the two paths agree on *who counts
+/// as an enemy* and on *which enemy is nearest* — they cannot disagree about
+/// the faction verdict or the distance ordering. They are **not** equivalent,
+/// and "helm and weapons always pick the same ship" is **not** an invariant
+/// this code establishes. See "Known differences" below: each path applies that
+/// shared verdict inside its own, separately-authored radar horizon, so the two
+/// can still disagree about a ship sitting between those horizons.
+///
+/// ## Why this order, and not a different one
+///
+/// Agreeing on who is hostile is not enough — the two paths must also agree on
+/// *when to change their minds*. So this order is `resolve_destroy_target`'s
+/// order (`ai/core.rs`), tier for tier:
+/// explicit → current → last attacker → nearest.
+///
+/// Tier 2 is the weapons-side spelling of that function's "prefer current
+/// target if still in world view". It is what stops tier 4 from re-scanning
+/// every tick and handing the lock to whoever is nearest *right now*: with two
+/// hostiles converging, weapons would flip to the newcomer while the helm —
+/// which is sticky — kept closing on the original, and near-equidistant pairs
+/// would thrash the lock every tick, retargeting beams and restarting
+/// `tick_npc_auto_match_frequency`'s `delay_secs`.
+///
+/// Tier 2 sitting *above* `LastShipAttacker` is the deliberate part, and it is
+/// a change from #703's first cut. Retaliating instantly reads like the more
+/// aggressive choice, but weapons is not free to make it alone: the helm has no
+/// equivalent tier and keeps its current target when a second ship opens fire.
+/// Preferring the attacker here would reintroduce the exact divergence this
+/// system exists to prevent — closing on A while shooting B — one tier further
+/// down. The ship still shoots back at whoever hit it the moment it is not
+/// already engaged (no lock, or its lock died or slipped out of radar range),
+/// which is every case where the helm is free to turn too. "Weapons matches the
+/// helm" is the rule; if retaliation should preempt an existing engagement, that
+/// belongs in *both* paths — change `resolve_destroy_target` and this together,
+/// or they will disagree again.
+///
+/// ## Known differences
+///
+/// Two remain. Neither is fixed here; both are documented so the next reader
+/// does not mistake "shares `find_nearest_hostile`" for "picks the same ship".
+///
+/// **1. Unresolvable tier-1 target (intentional).** When tier 1 names a target
+/// that cannot be resolved, the helm yields nothing at all, while weapons falls
+/// through to tiers 2–3 (pre-existing #697 behaviour). Note it is 2–3, not 2–4:
+/// `top_destroy` is `Some(name)` with `name` non-empty, so
+/// `destroy_is_untargeted` is `false` and the nearest-hostile tier is gated off
+/// — a `Destroy` naming someone specific never decays into "shoot whoever is
+/// closest". That cannot produce divergent pursuit — a helm with no target is
+/// not closing on anyone — so it is left alone rather than widened into a
+/// behaviour change here.
+///
+/// **2. Radar-horizon asymmetry (a real divergence, not yet fixed).** Both
+/// paths gate candidates on "in world view", but they measure it against
+/// different, independently-authored ranges:
+///
+/// - helm: `helm_ai_world_view` (`ship_plugin.rs`) → `[helm_console.radar] range`
+/// - weapons: `effective_tactical_range` below → `[weapons_console.radar] range`
+///
+/// In all three shipped player classes (`alliance_battleship.toml`,
+/// `alliance_cruiser.toml`, `alliance_destroyer.toml`) those are **187.5 (helm)
+/// vs 75 (weapons)** — a 2.5× gap. Shipped NPC templates declare neither, so
+/// both are unbounded and do agree; the mismatch is confined to the alliance
+/// hulls. That is not a safe place to leave it, because those hulls run this AI
+/// on any unmanned station (`Backfill`) and this system has no fidelity gate.
+///
+/// Concretely, on an alliance cruiser with helm and tactical both unmanned,
+/// untargeted `Destroy`, no `last_attacker`: hostiles A at 50 and B at 200 —
+/// both paths pick A. A drifts to 100 while B closes to 60. The helm still sees
+/// A (inside its 187.5 horizon) and keeps closing on A. Weapons' tier-2
+/// retention fails (A is outside its 75 horizon), so it falls to tier 4 and
+/// locks B. The ship closes on A while shooting B.
+///
+/// Do not "fix" this by reconciling the horizons here. The ranges are authored
+/// per console and consumed by both paths; making them agree is a behaviour
+/// change that belongs in `helm_ai_world_view` and this system together — the
+/// same "change both paths or they will disagree again" rule as above — not
+/// applied silently on the weapons side.
 ///
 /// The decision is applied to `WeaponsTarget` here, in the same system that
 /// makes it. `WeaponsTarget` is the single source of truth every consumer reads
@@ -3786,11 +3886,20 @@ fn ai_target_selection(
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
+            // Self identity + faction, for the nearest-hostile tier (#703):
+            // the UUID excludes self from the scan, the faction decides who
+            // counts as hostile. Both `Option` because minimal test spawns
+            // omit them; a ship with no faction acquires nothing this way.
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&FactionComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // `Option` so test apps without the entity-config cache still run; an
+    // absent registry behaves as an empty one, i.e. nobody is hostile.
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     other_ships_q: Query<
         (
             &crate::entity_spawner::EntityUuid,
@@ -3799,7 +3908,30 @@ fn ai_target_selection(
         ),
         Without<crate::simulation::Asteroid>,
     >,
+    // The tier-4 scan surface, deliberately narrower than `other_ships_q`.
+    // That query is `Without<Asteroid>`, which is wide enough for resolving an
+    // authored name (a mission may name anything, and a miss is harmless), but
+    // as an *auto-acquisition* surface it would lock any factioned entity that
+    // happens to carry an `EntityUuid` + `Transform`. `With<Ship>` is the code
+    // spelling of the tactical radar's own `shows: [EntityTag::Ship]`: today
+    // every shipped asset declaring a `faction` is a ship, so the two agree by
+    // accident — the first factioned station, mine, or probe template is what
+    // this filter is here for.
+    hostile_scan_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&FactionComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
+    let registry_default = crate::faction::FactionRegistry::default();
+    let registry: &crate::faction::FactionRegistry = faction_registry
+        .as_deref()
+        .map(|r| &r.0)
+        .unwrap_or(&registry_default);
+
     // World-space (x, z) of a targetable UUID, asteroid or entity.
     let target_xz = |uuid: &str| -> Option<(f32, f32)> {
         asteroid_q
@@ -3821,6 +3953,8 @@ fn ai_target_selection(
         mut blackboards,
         modifiers,
         weapons_section,
+        self_uuid,
+        self_faction,
     ) in ship_query.iter_mut()
     {
         // Only select for ships whose Tactical surface is AI-controlled.
@@ -3866,19 +4000,100 @@ fn ai_target_selection(
         // Start from the ship's current lock: acquisition below only *replaces*
         // it when a fresh in-range candidate exists, and the staleness guard
         // only clears it — preserving the pre-split semantics exactly.
-        let mut selected: Option<String> = weapons_target.0.clone();
+        //
+        // Cloned out of the `Mut` once, so the retention tier below can read it
+        // without holding a borrow across the write-back at the end.
+        let current_lock: Option<String> = weapons_target.0.clone();
+        let mut selected: Option<String> = current_lock.clone();
 
-        // Acquire from Destroy objectives, falling back to the last attacker
-        // when no Destroy objective is available (or its target entity can't
-        // be resolved).
-        let objective_target = match top_destroy_objective_target(Some(&*blackboards)) {
+        // Acquire from Destroy objectives, falling back to the lock we already
+        // hold, then to the last attacker, then to the nearest hostile.
+        let top_destroy = top_destroy_objective_target(Some(&*blackboards));
+        // An *untargeted* Destroy directive — `Destroy { target: "" }` — is
+        // standing "engage any hostile you detect" doctrine, which is what
+        // every shipped hostile TOML authors (`directive_kind = "Destroy"` with
+        // no `directive_target`). It is the only case that licenses the
+        // nearest-hostile scan: a Destroy naming someone specific must not
+        // wander onto a different ship just because that ship is closer.
+        let destroy_is_untargeted = matches!(top_destroy, Some(""));
+        let objective_target = match top_destroy {
             Some("") => None,
             Some(target_name) => {
                 resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
             }
             None => None,
         };
-        if let Some(uuid) = objective_target.or_else(|| last_attacker.0.clone()) {
+
+        // Tier 2: keep the engagement we are already in. Mirrors
+        // `resolve_destroy_target`'s "prefer current target if still in world
+        // view" — with "in world view" spelled, on this side, as "still
+        // resolvable, and still inside our own radar horizon". See the ordering
+        // rationale on this system's doc comment: without this tier the
+        // nearest-hostile scan below re-decides from scratch every tick and
+        // drifts off whatever the helm is closing on.
+        let retained_lock = || -> Option<String> {
+            let current = current_lock.clone()?;
+            let alive = target_xz(&current).is_some();
+            (alive && (!range_bounds_targets || within_range(&current))).then_some(current)
+        };
+
+        // Tier 4 (issue #703): standing Destroy doctrine with nobody named,
+        // nothing already locked, and nobody having shot us yet. Before this
+        // tier an NPC could only acquire a weapons target *after* taking a
+        // phaser hit (the only writer of `LastShipAttacker`), so shipped
+        // hostiles never opened fire.
+        //
+        // Delegates to the same `ai::core::find_nearest_hostile` the helm path
+        // uses via `resolve_destroy_target`, over an equivalently-built
+        // `WorldView`, so helm and weapons cannot disagree about who the enemy
+        // is or which one is nearest.
+        let nearest_hostile = |registry: &crate::faction::FactionRegistry| -> Option<String> {
+            let self_faction_uuid = self_faction.map(|f| f.0)?;
+            let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
+            let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
+                .iter()
+                .filter(|(u, _, _)| u.0 != self_uuid_str)
+                .filter_map(|(u, t, faction)| {
+                    // Only canonically-UUID'd entities can take part: an
+                    // unparseable id would collapse to the nil UUID and let
+                    // two entities alias each other in the scan.
+                    let parsed = uuid::Uuid::parse_str(&u.0).ok()?;
+                    Some(crate::ai::AiWorldEntity {
+                        uuid: parsed,
+                        position: [t.translation.x, t.translation.y, t.translation.z],
+                        faction: faction.map(|f| f.0),
+                        ..Default::default()
+                    })
+                })
+                .collect();
+            let world_view = crate::ai::WorldView {
+                entity_pos: [physics.x, 0.0, physics.z],
+                entity_yaw: physics.yaw,
+                entities,
+                self_faction: Some(self_faction_uuid),
+                ..crate::ai::WorldView::default()
+            };
+            let found = crate::ai::find_nearest_hostile(&world_view, registry)?;
+            // Map back to the entity's own UUID string rather than
+            // re-serialising, so the result is byte-identical to what
+            // `target_xz` / `live_entity_xz` look up.
+            hostile_scan_q.iter().find_map(|(u, _, _)| {
+                (uuid::Uuid::parse_str(&u.0).ok() == Some(found)).then(|| u.0.clone())
+            })
+        };
+
+        let acquired = objective_target
+            .or_else(retained_lock)
+            .or_else(|| last_attacker.0.clone())
+            .or_else(|| {
+                destroy_is_untargeted
+                    .then(|| nearest_hostile(registry))
+                    .flatten()
+            });
+
+        // The radar gate applies to every tier alike (issue #680): a ship must
+        // not lock what its own damage-scaled tactical radar cannot see.
+        if let Some(uuid) = acquired {
             if !range_bounds_targets || within_range(&uuid) {
                 selected = Some(uuid);
             }
@@ -7348,16 +7563,8 @@ station = "tactical"
         target_x: f32,
         target_z: f32,
     ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
-        use crate::ai::AiMemory;
         use crate::ai_plugin::AiControllerComponent;
         use crate::entity_spawner::{EntitySystemHull, EntityUuid};
-
-        // Register the AI token (including Bevy entity link for handle_fire_phaser).
-        let target_as_uuid = uuid::Uuid::parse_str(target_uuid).ok();
-        let memory = AiMemory {
-            target: target_as_uuid,
-            ..Default::default()
-        };
 
         // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
         // Includes the Ship marker so the unified `tick_beams` picks it up as
@@ -7365,8 +7572,11 @@ station = "tactical"
         // path where every ship gets `Ship` — see PRD #597).
         //
         // Also mirrors production by inserting `ShipSystemControlSources` with
-        // the Tactical system set to `Ai`, and `WeaponsTarget::default()` —
-        // both required by the unified `handle_fire_phaser` per-ship query.
+        // the Tactical system set to `Ai`, and the NPC's target lock in
+        // `WeaponsTarget` — both required by the unified `handle_fire_phaser`
+        // per-ship query. `WeaponsTarget` is the ship's authoritative lock
+        // whether a human or `ai_target_selection` set it, so an AI shooter
+        // seeds it exactly as a human one would.
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
         sources.set(
             crate::system_registry::tactical_system_id(),
@@ -7379,9 +7589,9 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory(memory),
+                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
-                WeaponsTarget::default(),
+                WeaponsTarget(Some(target_uuid.to_string())),
                 ActiveBeam::default(),
                 PhaserCooldown::default(),
                 ShipPhysics::default(),
@@ -7982,13 +8192,16 @@ station = "tactical"
             reg.register_with_entity(npc_uuid_str, npc_entity);
         }
 
-        // Set ShipAiMemory.target so handle_fire_phaser can look up the target.
+        // Set the NPC's target lock so handle_fire_phaser can look up the
+        // target. `WeaponsTarget` is the authoritative lock for every ship —
+        // in production `ai_target_selection` writes it for AI-operated
+        // tactical systems; here we seed it directly.
         {
-            let mut mem = app
+            let mut target = app
                 .world_mut()
-                .get_mut::<crate::ai_plugin::ShipAiMemory>(npc_entity)
-                .unwrap();
-            mem.0.target = Some(target_uuid_parsed);
+                .get_mut::<WeaponsTarget>(npc_entity)
+                .expect("NPC must have WeaponsTarget");
+            target.0 = Some(target_uuid_parsed.to_string());
         }
 
         // Push a synthetic FirePhaser message for the NPC's ai: token.
@@ -8580,12 +8793,9 @@ station = "tactical"
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
-                crate::ai_plugin::ShipAiMemory(crate::ai::AiMemory {
-                    target: Some(target_uuid_parsed),
-                    ..Default::default()
-                }),
+                crate::ai_plugin::ShipAiMemory::default(),
                 crate::ship_plugin::ShipSystemControlSources(sources),
-                WeaponsTarget::default(),
+                WeaponsTarget(Some(target_uuid_parsed.to_string())),
                 ActiveBeam::default(),
                 PhaserCooldown::default(),
                 ShipPhysics::default(),
@@ -8751,6 +8961,111 @@ station = "tactical"
         ));
     }
 
+    // ── Nearest-hostile acquisition fixtures (issue #703) ──────────────────
+
+    /// Faction UUIDs for the nearest-hostile tests. Mirrors combat_test.toml:
+    /// Harrow lists Federation as an enemy.
+    fn harrow_faction() -> uuid::Uuid {
+        uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap()
+    }
+
+    fn federation_faction() -> uuid::Uuid {
+        uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap()
+    }
+
+    /// Declare the ship's tactical radar horizon. In production this is
+    /// authored per entity template under `[weapons_console] radar.range`; the
+    /// tests read it from the same component rather than any literal in code.
+    fn set_tactical_radar_range(app: &mut App, range: f32) {
+        use crate::entity_tags::EntityTag;
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        let entity = q.single_mut(app.world_mut()).expect("LocalShip");
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(crate::entity_spawner::WeaponsConsoleSection(
+                crate::entity_config::WeaponsConsoleConfig {
+                    torpedo_arc_color: vec![],
+                    power_multipliers: None,
+                    phaser_banks: vec![],
+                    blaster_banks: vec![],
+                    radar: Some(crate::radar_config::RadarConfig {
+                        range,
+                        shows: vec![EntityTag::Ship],
+                        selects: vec![],
+                    }),
+                },
+            ));
+    }
+
+    /// Put the LocalShip in the Harrow faction and load a registry in which
+    /// Harrow is hostile to Federation — the same shape `combat_test.toml`
+    /// builds via `add_faction_enemy`.
+    fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
+        use crate::faction::{FactionConfig, FactionRegistry};
+
+        let mut registry = FactionRegistry::new();
+        registry.insert(FactionConfig {
+            uuid: harrow_faction(),
+            name: "Harrow".into(),
+            enemies: vec![federation_faction()],
+        });
+        registry.insert(FactionConfig {
+            uuid: federation_faction(),
+            name: "Federation".into(),
+            enemies: vec![],
+        });
+        app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            registry,
+        ));
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        let entity = q.single_mut(app.world_mut()).expect("LocalShip");
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(FactionComponent(harrow_faction()));
+    }
+
+    /// A factioned **ship** — the entity shape the nearest-hostile tier is
+    /// allowed to auto-acquire. The `Ship` marker is not decoration: the tier-4
+    /// scan is `With<Ship>`, matching the tactical radar's `shows:
+    /// [EntityTag::Ship]`. See `tier_four_does_not_acquire_a_factioned_non_ship`
+    /// for the other side of that filter.
+    fn spawn_factioned_target(
+        app: &mut App,
+        uuid: &str,
+        x: f32,
+        z: f32,
+        faction: uuid::Uuid,
+    ) -> Entity {
+        app.world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::entity_spawner::EntityUuid(uuid.into()),
+                Transform::from_xyz(x, 0.0, z),
+                FactionComponent(faction),
+            ))
+            .id()
+    }
+
+    /// Author an *untargeted* `Destroy` objective — `Destroy { target: "" }`.
+    /// This is what every shipped hostile TOML produces (`directive_kind =
+    /// "Destroy"` with no `directive_target`), and the only directive shape
+    /// that licenses the nearest-hostile tier.
+    fn insert_untargeted_destroy_objective(app: &mut App, score: f32) {
+        insert_destroy_objective_blackboard(app, "", score);
+    }
+
+    /// Set the LocalShip's `LastShipAttacker`. Wraps the entity-taking
+    /// `set_last_attacker` defined further down this module.
+    fn set_local_last_attacker(app: &mut App, uuid: Option<String>) {
+        let entity = local_ship_entity(app);
+        set_last_attacker(app, entity, uuid);
+    }
+
     #[test]
     fn tactical_ai_respects_radar_range() {
         let mut app = test_app();
@@ -8815,6 +9130,424 @@ station = "tactical"
             get_weapons_target(&mut app).as_deref(),
             Some(near_uuid.as_str()),
             "Tactical AI must acquire a target within radar range"
+        );
+    }
+
+    // ── Nearest-hostile acquisition tier (issue #703) ──────────────────────
+    //
+    // Regression guards for the shipped-content bug: `ai_target_selection`
+    // acquired only from an explicit `Destroy` target or `LastShipAttacker`.
+    // No asset TOML authors a `directive_target`, and `LastShipAttacker` is
+    // written only by `tick_beams` — so an NPC could not fire until the player
+    // shot it first. These pin the third tier that closes that gap.
+
+    /// The headline fix: an NPC on standing "destroy hostiles" doctrine
+    /// acquires a hostile it can see, *without* having been attacked.
+    #[test]
+    fn tactical_ai_acquires_nearest_hostile_without_being_shot_first() {
+        let mut app = test_app();
+        let hostile_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // A Federation ship well inside the 100-unit radar horizon.
+        spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -50.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+
+        // Nobody has shot us: no LastShipAttacker, and the objective names
+        // no one. Pre-#703 both acquisition tiers came up empty here.
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(hostile_uuid.as_str()),
+            "an NPC on untargeted Destroy doctrine must acquire the nearest hostile in radar \
+             range without waiting to be shot first — this is the whole point of issue #703"
+        );
+    }
+
+    /// The nearest hostile is picked among several — and it is the *nearest*,
+    /// agreeing with the helm AI, which closes on the same ship.
+    #[test]
+    fn tactical_ai_acquires_the_nearest_of_several_hostiles() {
+        let mut app = test_app();
+        let near_uuid = uuid::Uuid::new_v4().to_string();
+        let far_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Both in range; spawn the far one first so the result cannot be an
+        // artefact of iteration order.
+        spawn_factioned_target(&mut app, &far_uuid, 0.0, -90.0, federation_faction());
+        spawn_factioned_target(&mut app, &near_uuid, 0.0, -20.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(near_uuid.as_str()),
+            "the nearest-hostile tier must pick the nearest, not the first found — the helm AI \
+             closes on the nearest via the same find_nearest_hostile, and the two must agree"
+        );
+    }
+
+    /// The radar gate binds the new tier exactly as it binds the others: a
+    /// ship must not lock what it cannot detect.
+    #[test]
+    fn tactical_ai_does_not_acquire_a_hostile_beyond_radar_range() {
+        let mut app = test_app();
+        let hostile_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Hostile at 500 units — far beyond the 100-unit radar horizon.
+        spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -500.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "the nearest-hostile tier must be gated by the damage-scaled tactical radar range — \
+             an NPC must not acquire a target it cannot detect"
+        );
+    }
+
+    /// Faction filtering: a ship of our own faction is not a hostile, however
+    /// close it is.
+    #[test]
+    fn tactical_ai_does_not_acquire_a_non_hostile() {
+        let mut app = test_app();
+        let friendly_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Another Harrow ship — our own faction — right next to us.
+        spawn_factioned_target(&mut app, &friendly_uuid, 0.0, -10.0, harrow_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "the nearest-hostile tier must filter by faction through the live FactionRegistry — \
+             a same-faction ship is never a weapons target, however near"
+        );
+    }
+
+    /// Precedence, tier 1 over tier 3: a `Destroy` naming someone specific must
+    /// not wander onto a nearer ship.
+    #[test]
+    fn explicit_destroy_target_takes_precedence_over_a_nearer_hostile() {
+        let mut app = test_app();
+        let named_uuid = uuid::Uuid::new_v4().to_string();
+        let nearer_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // The named target is further away than an unnamed hostile. Both are
+        // Federation, both in radar range.
+        spawn_factioned_target(&mut app, &named_uuid, 0.0, -80.0, federation_faction());
+        spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), named_uuid.clone());
+        insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(named_uuid.as_str()),
+            "an explicit Destroy target must outrank the nearest-hostile tier — a mission that \
+             names a target must not be silently retargeted onto whoever is closest"
+        );
+    }
+
+    /// Precedence, tier 2 over tier 3: whoever shot us still outranks a nearer
+    /// bystander, exactly as before #703.
+    #[test]
+    fn last_attacker_takes_precedence_over_a_nearer_hostile() {
+        let mut app = test_app();
+        let attacker_uuid = uuid::Uuid::new_v4().to_string();
+        let nearer_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // The attacker is further away than an unengaged hostile.
+        spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -80.0, federation_faction());
+        spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, Some(attacker_uuid.clone()));
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(attacker_uuid.as_str()),
+            "LastShipAttacker must outrank the nearest-hostile tier — shooting back at whoever \
+             hit us must not be displaced by a closer bystander"
+        );
+    }
+
+    // ── Target retention (tier 2) ──────────────────────────────────────────
+    //
+    // The nearest-hostile tier decides "who is closest *now*". Left ungated it
+    // re-decides that every tick, so a lock follows whoever happens to be
+    // nearest at this instant. The helm does not work that way —
+    // `resolve_destroy_target` prefers its current target while it is still in
+    // world view — and the two paths diverging is the failure
+    // `ai_target_selection`'s doc comment calls out: closing on one ship while
+    // shooting at another. These pin the retention tier that keeps them in step.
+
+    /// The headline retention case: engaged with A, B closes inside it, and the
+    /// lock stays on A — because the helm's would.
+    #[test]
+    fn an_established_lock_is_retained_when_a_nearer_hostile_appears() {
+        let mut app = test_app();
+        let engaged_uuid = uuid::Uuid::new_v4().to_string();
+        let nearer_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        // Tick once with only A present: the ship acquires and engages it.
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "precondition: the ship must be engaged with A before B arrives"
+        );
+
+        // B arrives, closer than A, and equally hostile.
+        spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -10.0, federation_faction());
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "an established lock on a live, in-range hostile must be retained when a nearer \
+             hostile appears — the helm keeps closing on A (resolve_destroy_target prefers its \
+             current target), so weapons flipping to B would have the ship shooting one ship \
+             while flying at another"
+        );
+    }
+
+    /// The other half: retention is not a freeze. A lock that dies is re-scanned.
+    #[test]
+    fn the_lock_is_rescanned_when_the_current_target_dies() {
+        let mut app = test_app();
+        let engaged_uuid = uuid::Uuid::new_v4().to_string();
+        let other_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let engaged =
+            spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+        spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "precondition: the nearer hostile is the one engaged"
+        );
+
+        // A is destroyed.
+        app.world_mut().entity_mut(engaged).despawn();
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(other_uuid.as_str()),
+            "retention must not outlive the target: once the locked ship is gone the \
+             nearest-hostile tier must acquire afresh, or the AI sits idle beside a live enemy"
+        );
+    }
+
+    /// The liveness half of retention, on the one path where the radar gate
+    /// cannot stand in for it. A ship that declares no `radar.range` has an
+    /// unbounded horizon (`range_bounds_targets == false`), so `within_range`
+    /// is never consulted and "the locked entity no longer exists" is the only
+    /// thing that can release the lock. Without that check the retention tier
+    /// hands the dead UUID on, the stale guard clears it, and the ship spends
+    /// the tick idle next to a live enemy instead of acquiring it.
+    #[test]
+    fn the_lock_is_rescanned_when_the_current_target_dies_with_no_radar_horizon() {
+        let mut app = test_app();
+        let engaged_uuid = uuid::Uuid::new_v4().to_string();
+        let other_uuid = uuid::Uuid::new_v4().to_string();
+
+        // Deliberately no set_tactical_radar_range: no WeaponsConsoleSection
+        // means a base range of 0, which the system reads as "unbounded".
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let engaged =
+            spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+        spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "precondition: the nearer hostile is the one engaged"
+        );
+
+        app.world_mut().entity_mut(engaged).despawn();
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(other_uuid.as_str()),
+            "retention must check that the locked entity still exists, not lean on the radar \
+             gate to notice — an unbounded horizon never range-checks, so a dead lock would \
+             block acquisition for the tick"
+        );
+    }
+
+    /// Retention is bounded by the same radar horizon as acquisition (issue
+    /// #680): a lock that runs out of detection range is re-scanned, not held.
+    #[test]
+    fn the_lock_is_rescanned_when_the_current_target_leaves_radar_range() {
+        let mut app = test_app();
+        let fleeing_uuid = uuid::Uuid::new_v4().to_string();
+        let other_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let fleeing =
+            spawn_factioned_target(&mut app, &fleeing_uuid, 0.0, -60.0, federation_faction());
+        spawn_factioned_target(&mut app, &other_uuid, 0.0, -90.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(fleeing_uuid.as_str()),
+            "precondition: the nearer hostile is the one engaged"
+        );
+
+        // A runs beyond the 100-unit tactical radar horizon.
+        app.world_mut()
+            .entity_mut(fleeing)
+            .insert(Transform::from_xyz(0.0, 0.0, -500.0));
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(other_uuid.as_str()),
+            "retention must be gated by the damage-scaled radar range exactly as acquisition is \
+             — a target the ship can no longer detect must not pin the lock and starve the scan"
+        );
+    }
+
+    /// The ordering decision, pinned: retention outranks `LastShipAttacker`,
+    /// because the helm has no retaliation tier and would keep closing on A.
+    /// The reverse order is the tempting one — see this system's doc comment.
+    #[test]
+    fn an_established_lock_outranks_a_new_last_attacker() {
+        let mut app = test_app();
+        let engaged_uuid = uuid::Uuid::new_v4().to_string();
+        let attacker_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        spawn_factioned_target(&mut app, &engaged_uuid, 0.0, -60.0, federation_faction());
+        spawn_factioned_target(&mut app, &attacker_uuid, 0.0, -90.0, federation_faction());
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "precondition: the ship is engaged with A"
+        );
+
+        // B opens fire on us mid-engagement.
+        set_local_last_attacker(&mut app, Some(attacker_uuid.clone()));
+        tick(&mut app);
+
+        assert_eq!(
+            get_weapons_target(&mut app).as_deref(),
+            Some(engaged_uuid.as_str()),
+            "taking a hit must not break off an engagement weapons is already in: the helm's \
+             resolve_destroy_target prefers its current target over its last_attacker, and \
+             weapons must match it tier for tier or the ship closes on A while shooting B. \
+             last_attacker_takes_precedence_over_a_nearer_hostile pins the case that still \
+             retaliates — no lock to keep"
+        );
+    }
+
+    /// Advisory from the #703 review: the tier-4 scan is an *auto-acquisition*
+    /// surface, so it must be `With<Ship>` — the tactical radar `shows:
+    /// [EntityTag::Ship]` and nothing else. No shipped non-ship template
+    /// declares a `faction` today; this pins the filter before one does.
+    #[test]
+    fn tier_four_does_not_acquire_a_factioned_non_ship() {
+        let mut app = test_app();
+        let station_uuid = uuid::Uuid::new_v4().to_string();
+
+        set_tactical_radar_range(&mut app, 100.0);
+        setup_harrow_ship_hostile_to_federation(&mut app);
+        set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // A hostile-factioned entity that is *not* a ship — the shape a
+        // factioned station / mine / probe template would spawn. Everything
+        // else about it would qualify: in radar range, enemy faction, closer
+        // than anything else in the world.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(station_uuid),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+            FactionComponent(federation_faction()),
+        ));
+        insert_untargeted_destroy_objective(&mut app, 35.0);
+        set_local_last_attacker(&mut app, None);
+
+        tick(&mut app);
+
+        assert!(
+            get_weapons_target(&mut app).is_none(),
+            "the nearest-hostile tier must only auto-acquire ships — a factioned non-ship is \
+             not what the tactical radar shows, and locking one would have the AI open fire on \
+             scenery it cannot even see"
         );
     }
 
@@ -11377,6 +12110,10 @@ ai_only = true
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
                 crate::ai_plugin::AiControllerComponent,
+                // Seeds the NPC's target in `ShipAiMemory`, exercising the
+                // legacy `tick_blaster_auto_fire` fallback that this ship has
+                // no `WeaponsTarget` to satisfy. Kept until the re-scoped #702
+                // deletes that fallback.
                 crate::ai_plugin::ShipAiMemory(crate::ai::AiMemory {
                     target: Some(target_uuid_parsed),
                     ..Default::default()

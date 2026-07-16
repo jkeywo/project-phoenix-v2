@@ -673,7 +673,16 @@ pub fn resolve_objective_target(target: &str, world_view: &WorldView) -> Option<
 }
 
 /// Find the nearest entity that is hostile to this AI's faction.
-fn find_nearest_hostile(
+///
+/// The single definition of "who is the enemy, and which one is closest",
+/// shared by the helm path (`resolve_destroy_target`) and the weapons path
+/// (`ai_target_selection`'s nearest-hostile tier, issue #703). Both must agree
+/// — a helm that closes on one ship while weapons locks another is a bug — so
+/// neither may grow a second hostile scan.
+///
+/// Distance is measured in the XZ plane (see [`dist_sq`]), matching the
+/// range checks both callers gate on.
+pub fn find_nearest_hostile(
     world_view: &WorldView,
     faction_registry: &crate::faction::FactionRegistry,
 ) -> Option<Uuid> {

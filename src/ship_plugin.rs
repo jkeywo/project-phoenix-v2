@@ -1061,8 +1061,10 @@ fn detect_reached_objective_completion(
 // **AiMemory ownership**: `operate_helm` mutates `AiMemory` (patrol waypoint
 // advance, Destroy target selection, nav_goal clearing). Committing that twice
 // in one tick would double-advance the patrol waypoint on arrival; committing
-// it zero times freezes the waypoint and starves `ShipAiMemory.target`, which
-// `ai_phaser_auto_fire` / `ai_torpedo_auto_fire` use as their target fallback.
+// it zero times freezes the waypoint. (`ShipAiMemory.target` is no longer the
+// weapons AI's bridge: `ai_torpedo_auto_fire` reads `WeaponsTarget` alone
+// post-#698, and post-#703 `ai_target_selection` acquires the nearest hostile
+// itself, leaving `ai_phaser_auto_fire`'s memory fallback vestigial.)
 // So the rule is:
 //
 //     **The first per-axis system that actually runs owns the commit.**

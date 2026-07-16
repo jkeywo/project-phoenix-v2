@@ -99,6 +99,16 @@ pub struct OutboundMessage {
     pub delivery: DeliveryClass,
 }
 
+// ── System set ─────────────────────────────────────────────────────────────
+
+/// Ordering anchor for every lobby `Update` system: the `handle_disconnect →
+/// process_lobby → tick_countdown → update_game_state_cache` chain plus the
+/// four per-variant station-management systems. Downstream systems that must
+/// observe the post-lobby world state order themselves with
+/// `.after(LobbySystemSet)`.
+#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LobbySystemSet;
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct LobbyPlugin;
@@ -139,7 +149,29 @@ impl Plugin for LobbyPlugin {
                     tick_countdown,
                     update_game_state_cache,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(LobbySystemSet),
+            )
+            // Per-variant station-management systems (issue #733). Each owns
+            // exactly one ClientMessage variant, reading it via its own
+            // `MessageReader` cursor; `process_lobby` no longer processes these
+            // four variants. All four gate on Lobby/Loading/InProgress so
+            // players can claim/release stations and toggle ratings both in the
+            // lobby and mid-game.
+            .add_systems(
+                Update,
+                (
+                    handle_select_station_system,
+                    handle_release_station_system,
+                    handle_set_ready_system,
+                    handle_set_station_rating_system,
+                )
+                    .in_set(LobbySystemSet)
+                    .run_if(
+                        in_state(GamePhase::Lobby)
+                            .or(in_state(GamePhase::Loading))
+                            .or(in_state(GamePhase::InProgress)),
+                    ),
             );
     }
 }
@@ -426,16 +458,29 @@ pub fn process_lobby(
             .unwrap_or(true)
     };
     // Collect all messages first to avoid borrow conflicts with ship_query.
-    // During InProgress, allow station management messages (SelectStation, ReleaseStation)
-    // so players can claim stations mid-game.
+    //
+    // The four station-management variants (SelectStation, ReleaseStation,
+    // SetReady, SetStationRating) are owned exclusively by the per-variant
+    // systems (`handle_select_station_system` et al., issue #733) — they must
+    // never be processed here, in any phase, or they would be double-read (this
+    // system and the per-variant system have independent `MessageReader`
+    // cursors). `process_lobby` retains Identify (reconnect handshake) plus, in
+    // Lobby/Loading (`accepts_all`), SetName / ConfirmScenario / the runtime
+    // no-op catch-all, and ReturnToLobby in every phase (GameOver's button).
     let events: Vec<_> = inbound
         .read()
         .filter(|ev| {
+            if matches!(
+                ev.msg,
+                ClientMessage::SelectStation { .. }
+                    | ClientMessage::ReleaseStation
+                    | ClientMessage::SetReady { .. }
+                    | ClientMessage::SetStationRating { .. }
+            ) {
+                return false;
+            }
             accepts_all
                 || matches!(ev.msg, ClientMessage::Identify { .. })
-                || matches!(ev.msg, ClientMessage::SelectStation { .. })
-                || matches!(ev.msg, ClientMessage::ReleaseStation)
-                || matches!(ev.msg, ClientMessage::SetReady { .. })
                 || matches!(ev.msg, ClientMessage::ReturnToLobby)
         })
         .cloned()
@@ -479,6 +524,297 @@ pub fn process_lobby(
                 &ship_client_config.0,
                 preload_complete,
                 &pending_ratings,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SelectStation` (issue #733).
+/// Reads its variant off the inbound bus with its own cursor, calls the pure
+/// `lobby_handler::handle_select_station`, then applies the result to Bevy
+/// resources via `apply_result` — mirroring `process_lobby`'s dual-path
+/// (real ship entity vs. pre-spawn fallback) handling.
+pub fn handle_select_station_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    ship_stations: Option<Res<ShipStations>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let default_stations = ShipStations::default();
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SelectStation { station } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_select_station(
+                &ev.token,
+                station,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_select_station(
+                &ev.token,
+                station,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::ReleaseStation` (issue #733).
+pub fn handle_release_station_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    ship_stations: Option<Res<ShipStations>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let default_stations = ShipStations::default();
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::ReleaseStation = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_release_station(
+                &ev.token,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_release_station(
+                &ev.token,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SetReady` (issue #733).
+pub fn handle_set_ready_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    ship_stations: Option<Res<ShipStations>>,
+    preload: Option<Res<AssetPreloadResource>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let default_stations = ShipStations::default();
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
+    let phase = state.get().clone();
+    // Preload gate: same logic as process_lobby / handle_disconnect.
+    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
+        true
+    } else {
+        preload
+            .as_ref()
+            .map(|p| !p.started || p.complete)
+            .unwrap_or(true)
+    };
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SetReady { ready } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_set_ready(
+                &ev.token,
+                *ready,
+                &mut sessions.0,
+                phase.clone(),
+                preload_complete,
+                stations,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_set_ready(
+                &ev.token,
+                *ready,
+                &mut sessions.0,
+                phase.clone(),
+                preload_complete,
+                stations,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SetStationRating` (issue #733).
+/// The pure handler only acts in Lobby/Loading (InProgress rating changes are
+/// applied against the live Ship entity by
+/// `ship_plugin::handle_station_rating_change`), so the InProgress run is a
+/// no-op here — but the system is still gated on InProgress per the user's
+/// decision to keep the four station systems on a uniform phase gate.
+pub fn handle_set_station_rating_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    ship_stations: Option<Res<ShipStations>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let default_stations = ShipStations::default();
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_set_station_rating(
+                &ev.token,
+                rating_name,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_set_station_rating(
+                &ev.token,
+                rating_name,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
             );
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(

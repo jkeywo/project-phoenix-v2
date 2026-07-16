@@ -292,7 +292,7 @@ fn handle_set_name(token: &str, name: &str, sessions: &mut SessionManager) -> Lo
 /// Handle `SelectStation`: claim `station` for `token`, releasing any current
 /// station first. Silently ignores unknown stations, own-station re-selects,
 /// and stations occupied by another connected player.
-fn handle_select_station(
+pub(crate) fn handle_select_station(
     token: &str,
     station: &str,
     sessions: &mut SessionManager,
@@ -421,7 +421,7 @@ fn handle_select_station(
 
 /// Handle `ReleaseStation`: give up the caller's station, unready them, and
 /// reset the vacated station's rating (Backfill mid-game, base rating pre-game).
-fn handle_release_station(
+pub(crate) fn handle_release_station(
     token: &str,
     sessions: &mut SessionManager,
     phase: GamePhase,
@@ -487,7 +487,7 @@ fn handle_release_station(
 /// Handle `SetReady`: record the caller's ready flag and broadcast it. During
 /// Lobby, manage the 5-second start countdown; while InProgress, applying a
 /// ready flag restores the caller's station to the default human rating.
-fn handle_set_ready(
+pub(crate) fn handle_set_ready(
     token: &str,
     ready: bool,
     sessions: &mut SessionManager,
@@ -594,7 +594,7 @@ fn handle_confirm_scenario(phase: GamePhase) -> LobbyHandlerResult {
 /// Handle `SetStationRating` in Lobby/Loading: validate the rating against the
 /// station def, record it as pending, and broadcast the live toggle. InProgress
 /// is handled by `ship_plugin::handle_station_rating_change` instead.
-fn handle_set_station_rating(
+pub(crate) fn handle_set_station_rating(
     token: &str,
     rating_name: &str,
     sessions: &mut SessionManager,

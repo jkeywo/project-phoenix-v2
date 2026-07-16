@@ -113,7 +113,7 @@ impl Plugin for LobbyBroadcaster {
             app.insert_resource(LobbyBroadcastRegistry::new());
             app.add_systems(
                 Update,
-                dispatch_lobby_broadcasts.after(crate::lobby::process_lobby),
+                dispatch_lobby_broadcasts.after(crate::lobby::LobbySystemSet),
             );
         }
         let mut registry = app.world_mut().resource_mut::<LobbyBroadcastRegistry>();

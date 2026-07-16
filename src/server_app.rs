@@ -231,7 +231,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         )
             .chain()
             .run_if(in_state(GamePhase::InProgress))
-            .after(crate::lobby::process_lobby),
+            .after(crate::lobby::LobbySystemSet),
     )
     .add_plugins(RapierPhysicsPlugin::<()>::default())
     .add_plugins(crate::region_plugin::RegionPlugin)
@@ -291,13 +291,13 @@ pub fn add_simulation_plugins(app: &mut App) {
         Update,
         (reconcile_runtime_entities, broadcast_world_setup_on_start)
             .chain()
-            .after(crate::lobby::process_lobby)
+            .after(crate::lobby::LobbySystemSet)
             .before(crate::sim_sets::SimSet::Input),
     )
     .add_systems(
         Update,
         (admit_system_commands, clear_inter_system_queue)
-            .after(crate::lobby::process_lobby)
+            .after(crate::lobby::LobbySystemSet)
             .before(crate::sim_sets::SimSet::Input)
             .run_if(in_state(GamePhase::InProgress)),
     )
@@ -308,7 +308,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_systems(
         Update,
         refresh_caches_on_midgame_reconnect
-            .after(crate::lobby::process_lobby)
+            .after(crate::lobby::LobbySystemSet)
             .before(crate::lobby::server::drain_lobby_outbox)
             .before(crate::sim_sets::SimSet::Broadcast),
     )
@@ -319,7 +319,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,
         )
-            .after(crate::lobby::process_lobby),
+            .after(crate::lobby::LobbySystemSet),
     )
     .add_systems(
         Update,
@@ -1229,7 +1229,7 @@ impl Plugin for AdmissionPlugin {
             .configure_sets(
                 Update,
                 AdmissionSet
-                    .after(crate::lobby::process_lobby)
+                    .after(crate::lobby::LobbySystemSet)
                     .before(crate::sim_sets::SimSet::Input),
             )
             .add_systems(
@@ -3466,7 +3466,7 @@ station = "pilot"
         .add_systems(
             Update,
             (admit_system_commands, clear_inter_system_queue)
-                .after(crate::lobby::process_lobby)
+                .after(crate::lobby::LobbySystemSet)
                 .before(crate::sim_sets::SimSet::Input),
         )
         .add_systems(
@@ -3475,10 +3475,10 @@ station = "pilot"
                 handle_impulse_messages,
                 broadcast_shield_status,
                 reconcile_runtime_entities
-                    .after(crate::lobby::process_lobby)
+                    .after(crate::lobby::LobbySystemSet)
                     .before(broadcast_world_setup_on_start),
-                broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                refresh_caches_on_midgame_reconnect.after(crate::lobby::process_lobby),
+                broadcast_world_setup_on_start.after(crate::lobby::LobbySystemSet),
+                refresh_caches_on_midgame_reconnect.after(crate::lobby::LobbySystemSet),
             ),
         )
         .add_systems(

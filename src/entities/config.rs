@@ -451,6 +451,14 @@ fn default_planet_atmosphere_strength() -> f32 {
     1.0
 }
 
+fn default_planet_longitude_segments() -> u32 {
+    128
+}
+
+fn default_planet_latitude_segments() -> u32 {
+    64
+}
+
 /// Textured planet visual definition (`[planet]` section).
 ///
 /// Renders as a UV sphere with a custom shader sampling equirectangular
@@ -463,9 +471,9 @@ fn default_planet_atmosphere_strength() -> f32 {
 pub struct PlanetConfig {
     #[serde(default = "default_planet_radius")]
     pub radius: f32,
-    #[serde(default = "default_star_longitude_segments")]
+    #[serde(default = "default_planet_longitude_segments")]
     pub longitude_segments: u32,
-    #[serde(default = "default_star_latitude_segments")]
+    #[serde(default = "default_planet_latitude_segments")]
     pub latitude_segments: u32,
     /// Core surface texture set (`[planet.surface]`). Required.
     pub surface: PlanetSurfaceConfig,

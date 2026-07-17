@@ -25,6 +25,8 @@ colour = [0.8, 0.6, 0.4]
 
 [planet]
 radius = 50.0
+longitude_segments = 192
+latitude_segments = 96
 
 [planet.surface]
 albedo = "assets/planets/gas_giant/albedo.webp"

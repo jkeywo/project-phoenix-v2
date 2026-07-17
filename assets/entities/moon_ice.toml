@@ -25,6 +25,8 @@ colour = [0.7, 0.85, 1.0]
 
 [planet]
 radius = 7.0
+longitude_segments = 128
+latitude_segments = 64
 
 [planet.surface]
 albedo = "assets/planets/ice_moon/albedo.webp"

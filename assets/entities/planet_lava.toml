@@ -25,6 +25,8 @@ colour = [0.6, 0.2, 0.1]
 
 [planet]
 radius = 15.0
+longitude_segments = 128
+latitude_segments = 64
 
 [planet.surface]
 albedo = "assets/planets/lava_planet/albedo.webp"

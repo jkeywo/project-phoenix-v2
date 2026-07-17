@@ -847,7 +847,7 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['HelmInput', 'LateralThrustInput', 'Identify', 'SetName']);
+    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName']);
 
     const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
 

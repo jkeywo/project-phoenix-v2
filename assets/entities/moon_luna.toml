@@ -25,6 +25,8 @@ colour = [0.6, 0.6, 0.6]
 
 [planet]
 radius = 6.0
+longitude_segments = 128
+latitude_segments = 64
 
 [planet.surface]
 albedo = "assets/planets/moon/albedo.webp"

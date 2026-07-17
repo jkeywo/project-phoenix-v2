@@ -25,6 +25,8 @@ colour = [0.7, 0.6, 0.45]
 
 [planet]
 radius = 22.0
+longitude_segments = 128
+latitude_segments = 64
 
 [planet.surface]
 albedo = "assets/planets/ecumenopolis/albedo.webp"

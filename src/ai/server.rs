@@ -753,7 +753,7 @@ fn active_waypoint_route(
 pub(crate) fn advance_objective_cursors(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut ships: Query<(
-        &BehaviourSection,
+        Option<&BehaviourSection>,
         &ShipPhysics,
         &crate::server_app::ShipSystemBlackboards,
         &mut ObjectiveCursors,
@@ -774,7 +774,9 @@ pub(crate) fn advance_objective_cursors(
         // Arrival radius is authored per entity template in TOML
         // (`[behaviour] waypoint_arrival_radius`), so designers can tune how
         // close a ship must get before its cursor advances.
-        let arrival_radius = behaviour.0.waypoint_arrival_radius;
+        let arrival_radius = behaviour
+            .map(|b| b.0.waypoint_arrival_radius)
+            .unwrap_or(crate::ai::WAYPOINT_ARRIVAL_RADIUS);
         let entity_pos = [physics.x, 0.0, physics.z];
 
         // Look up (or lazily insert) this objective's cursor by objective id.

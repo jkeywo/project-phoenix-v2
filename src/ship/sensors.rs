@@ -1032,9 +1032,6 @@ mod tests {
 
     // ── operate_sensors_ai tests ────────────────────────────────────────────
 
-    #[derive(Resource)]
-    struct ShipEntity(Entity);
-
     fn sensors_ai_test_app() -> App {
         let mut app = App::new();
         app.insert_resource(bevy::time::Time::<()>::default())
@@ -1047,18 +1044,14 @@ mod tests {
             ControlSource::Ai,
         );
 
-        let ship = app
-            .world_mut()
-            .spawn((
-                crate::server_app::Ship,
-                control_sources,
-                crate::server_app::ShipSystemBlackboards::default(),
-                SensorsTarget::default(),
-                crate::simulation::WeaponsTarget::default(),
-            ))
-            .id();
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            control_sources,
+            crate::server_app::ShipSystemBlackboards::default(),
+            SensorsTarget::default(),
+            crate::simulation::WeaponsTarget::default(),
+        ));
 
-        app.insert_resource(ShipEntity(ship));
         app
     }
 

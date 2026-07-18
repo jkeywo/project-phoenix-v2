@@ -926,7 +926,32 @@ fn ai_target_selection(
         let retained_lock = || -> Option<String> {
             let current = current_lock.clone()?;
             let alive = target_xz(&current).is_some();
-            (alive && (!range_bounds_targets || within_range(&current))).then_some(current)
+            // An untargeted Destroy directive is combat doctrine: retain only
+            // an opposing ship. This lets a combat_test attacker drop its
+            // factionless Starbase assault lock after `not_attacked` closes
+            // that named objective, then acquire the player/attacker.
+            let combat_appropriate = if destroy_is_untargeted {
+                self_faction.map(|f| f.0).is_some_and(|self_faction_uuid| {
+                    hostile_scan_q
+                        .iter()
+                        .find_map(|(u, _, faction)| {
+                            (u.0 == current)
+                                .then_some(faction.and_then(|f| Some(f.0)))
+                                .flatten()
+                        })
+                        .is_some_and(|target_faction| {
+                            crate::faction::is_enemy(
+                                Some(self_faction_uuid),
+                                Some(target_faction),
+                                registry,
+                            )
+                        })
+                })
+            } else {
+                true
+            };
+            (alive && combat_appropriate && (!range_bounds_targets || within_range(&current)))
+                .then_some(current)
         };
 
         // Tier 4 (issue #703): standing Destroy doctrine with nobody named,

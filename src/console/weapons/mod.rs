@@ -936,7 +936,7 @@ fn ai_target_selection(
                         .iter()
                         .find_map(|(u, _, faction)| {
                             (u.0 == current)
-                                .then_some(faction.and_then(|f| Some(f.0)))
+                                .then_some(faction.map(|f| f.0))
                                 .flatten()
                         })
                         .is_some_and(|target_faction| {

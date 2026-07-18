@@ -966,8 +966,12 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
 
             // 2b. Apply overrides if present.
             if let Some(overrides_val) = overrides {
-                let Ok(config_str) = toml::to_string(&config) else { return out; };
-                let Ok(template_value): Result<toml::Value, _> = toml::from_str(&config_str) else { return out; };
+                let Ok(config_str) = toml::to_string(&config) else {
+                    return out;
+                };
+                let Ok(template_value): Result<toml::Value, _> = toml::from_str(&config_str) else {
+                    return out;
+                };
                 let merged = crate::entity_override::merge_entity_config_toml(
                     &template_value,
                     overrides_val,

@@ -475,11 +475,7 @@ pub fn operate_sensors_ai(
             .get(&crate::system_registry::viewscreen_system_id());
         if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
             let mut selected: Option<String> = None;
-            for objective in bb
-                .scored_objectives
-                .iter()
-                .filter(|o| o.score > 0.0)
-            {
+            for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
                 if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
                     if target.is_empty() {
                         continue;
@@ -489,8 +485,7 @@ pub fn operate_sensors_ai(
                         .and_then(|rt| rt.name_to_uuid.get(target).cloned())
                         .or_else(|| {
                             entity_q.iter().find_map(|(u, name)| {
-                                (u.0 == *target
-                                    || name.is_some_and(|n| n.0 == *target))
+                                (u.0 == *target || name.is_some_and(|n| n.0 == *target))
                                     .then(|| u.0.clone())
                             })
                         });
@@ -1047,9 +1042,10 @@ mod tests {
             .add_systems(Update, operate_sensors_ai);
 
         let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
-        control_sources
-            .0
-            .set(crate::system_registry::sensors_system_id(), ControlSource::Ai);
+        control_sources.0.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Ai,
+        );
 
         let ship = app
             .world_mut()
@@ -1094,7 +1090,9 @@ mod tests {
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::Ship>>();
-        let mut bbs = q.single_mut(app.world_mut()).expect("Ship must have ShipSystemBlackboards");
+        let mut bbs = q
+            .single_mut(app.world_mut())
+            .expect("Ship must have ShipSystemBlackboards");
         bbs.0.insert(
             crate::system_registry::viewscreen_system_id(),
             crate::messages::SystemBlackboard::Viewscreen(viewscreen),
@@ -1119,16 +1117,13 @@ mod tests {
         let mut app = sensors_ai_test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
 
-        app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.clone()),
-        ));
+        app.world_mut()
+            .spawn((crate::entity_spawner::EntityUuid(target_uuid.clone()),));
         {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
-            q.single_mut(app.world_mut())
-                .unwrap()
-                .0 = Some(target_uuid.clone());
+            q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
         tick_sensors_ai(&mut app);
@@ -1168,9 +1163,7 @@ mod tests {
             scored_objectives: vec![crate::messages::ScoredObjective {
                 id: "obj-destroy-any".into(),
                 score: 80.0,
-                directive: crate::messages::AiDirective::Destroy {
-                    target: "".into(),
-                },
+                directive: crate::messages::AiDirective::Destroy { target: "".into() },
                 source: crate::messages::ObjectiveSource::Doctrine,
                 relevance: vec![
                     crate::messages::SystemAffinity::Helm,
@@ -1192,7 +1185,9 @@ mod tests {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::Ship>>();
-            let mut bbs = q.single_mut(app.world_mut()).expect("Ship must have ShipSystemBlackboards");
+            let mut bbs = q
+                .single_mut(app.world_mut())
+                .expect("Ship must have ShipSystemBlackboards");
             bbs.0.insert(
                 crate::system_registry::viewscreen_system_id(),
                 crate::messages::SystemBlackboard::Viewscreen(viewscreen),
@@ -1220,16 +1215,13 @@ mod tests {
             .insert("wave_1".into(), objective_uuid.clone());
         insert_viewscreen_objective(&mut app, "wave_1", 80.0);
 
-        app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(combat_uuid.clone()),
-        ));
+        app.world_mut()
+            .spawn((crate::entity_spawner::EntityUuid(combat_uuid.clone()),));
         {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
-            q.single_mut(app.world_mut())
-                .unwrap()
-                .0 = Some(combat_uuid.clone());
+            q.single_mut(app.world_mut()).unwrap().0 = Some(combat_uuid.clone());
         }
 
         tick_sensors_ai(&mut app);
@@ -1258,9 +1250,7 @@ mod tests {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
-            q.single_mut(app.world_mut())
-                .unwrap()
-                .0 = Some(dead_uuid);
+            q.single_mut(app.world_mut()).unwrap().0 = Some(dead_uuid);
         }
 
         tick_sensors_ai(&mut app);

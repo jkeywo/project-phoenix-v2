@@ -935,9 +935,7 @@ fn ai_target_selection(
                     hostile_scan_q
                         .iter()
                         .find_map(|(u, _, faction)| {
-                            (u.0 == current)
-                                .then_some(faction.map(|f| f.0))
-                                .flatten()
+                            (u.0 == current).then_some(faction.map(|f| f.0)).flatten()
                         })
                         .is_some_and(|target_faction| {
                             crate::faction::is_enemy(

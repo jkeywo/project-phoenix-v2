@@ -168,7 +168,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         spawn_rate: [0.0, 12.0],
         opacity: [0.1, 0.5],
         brightness: [0.8, 3.0],
-        width: 0.03,
+        width: 0.006,
         length: [3.0, 20.0],
         max_lifetime_secs: 0.8,
         depth_band: [4.0, 25.0],
@@ -183,7 +183,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         spawn_rate: [5.0, 160.0],
         opacity: [0.05, 0.35],
         brightness: [0.3, 1.8],
-        width: 0.012,
+        width: 0.0024,
         length: [1.0, 12.0],
         max_lifetime_secs: 2.0,
         depth_band: [10.0, 70.0],
@@ -200,7 +200,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
         // screen doesn't white out at speed (spec §8/§20).
         opacity: [0.015, 0.125],
         brightness: [0.15, 0.8],
-        width: 0.004,
+        width: 0.0008,
         length: [1.0, 5.0],
         max_lifetime_secs: 4.0,
         depth_band: [40.0, 150.0],
@@ -216,7 +216,7 @@ const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
 
 const DUST_WARP_TEXTURE: &str = "pfx/space_mote_streak_soft.png";
 const DUST_WARP_MOTES: u32 = 40;
-const DUST_WARP_WIDTH: f32 = 0.018;
+const DUST_WARP_WIDTH: f32 = 0.0036;
 const DUST_WARP_LENGTH_MULTIPLIER: f32 = 40.0;
 const DUST_WARP_BRIGHTNESS: f32 = 1.6;
 const DUST_WARP_ENTER_SECS: f32 = 0.4;

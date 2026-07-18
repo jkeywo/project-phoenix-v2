@@ -138,10 +138,10 @@ enemy_s_outer  = [900.0, 0.0, 800.0]     # 1204
 enemy_ene      = [1100.0, 0.0, -150.0]   # 1110
 enemy_ese      = [1100.0, 0.0, 350.0]    # 1154
 enemy_e_far    = [1400.0, 0.0, 100.0]    # 1404
-starbase_patrol_north = [500.0, 0.0, -80.0]   # starbase + [  0, 0, -180]
-starbase_patrol_east  = [680.0, 0.0, 100.0]   # starbase + [+180, 0,    0]
-starbase_patrol_south = [500.0, 0.0, 280.0]   # starbase + [  0, 0, +180]
-starbase_patrol_west  = [320.0, 0.0, 100.0]   # starbase + [-180, 0,    0]
+starbase_patrol_north = [500.0, 0.0, -100.0]   # starbase + [  0, 0, -200]
+starbase_patrol_east  = [700.0, 0.0, 100.0]   # starbase + [+200, 0,    0]
+starbase_patrol_south = [500.0, 0.0, 300.0]   # starbase + [  0, 0, +200]
+starbase_patrol_west  = [300.0, 0.0, 100.0]   # starbase + [-200, 0,    0]
 
 # Patrol anchors for enemy ship [[behaviour.doctrine]] routes. These must match
 # the `directive_anchors` referenced in the entity TOMLs so that low-LOD ships

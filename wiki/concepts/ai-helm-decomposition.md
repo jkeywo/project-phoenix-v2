@@ -37,6 +37,17 @@ The helm AI owns no goals; it reads shared surfaces a human could equally drive 
 
 A missing surface means "no goal from that console", never a fabricated default.
 
+### Shared combat targets
+
+For an active `Destroy` directive, Helm also consumes explicit targets already
+selected by Tactical, Sensors, or an entity-anchored Navigation waypoint.
+Those selections add only the selected live entity to Helm's actionable view,
+so Helm may pursue it beyond its own radar range without gaining general
+long-range detection. Untargeted `Destroy` combat doctrine accepts only an
+opposing-faction candidate (Tactical first, then Sensors, Navigation, then
+Helm's own radar-limited hostile scan); named Destroy objectives retain their
+authored target.
+
 ### Shared sim tick (issue #803)
 
 All four systems share one `run_if(ai_helm_tick_ready)` gate. `AiHelmTickTimer` is a repeating timer; `tick_ai_helm_timer` advances it (after all four systems, so the flag is consumed before re-arming) and latches `AiHelmTickReady`. This decouples AI helm cadence from the rAF-driven frame rate — without it a 144 Hz host would steer on ~4x fresher data than a 60 Hz one, the nondeterminism PRD #620 exists to remove. The rate is TOML-authored: `[global] ai_helm_tick_hz` (`GlobalConfig::ai_helm_tick_hz` in `src/world/config.rs`, serde default 30 Hz), reconciled against the loaded world config each frame.

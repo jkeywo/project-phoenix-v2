@@ -4679,6 +4679,33 @@ fn an_established_lock_outranks_a_new_last_attacker() {
     );
 }
 
+/// A named assault target may be factionless (Starbase Alpha). Once that
+/// objective is vetoed and the active Destroy doctrine becomes untargeted
+/// combat, retaining that old lock would prevent the hostile scan from ever
+/// engaging the player.
+#[test]
+fn combat_doctrine_drops_a_retained_factionless_assault_lock() {
+    let mut app = test_app();
+    let starbase_uuid = uuid::Uuid::new_v4().to_string();
+    let hostile_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target(&mut app, &starbase_uuid, 0.0, -40.0);
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -60.0, federation_faction());
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_weapons_target(&mut app, Some(starbase_uuid));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(hostile_uuid.as_str()),
+        "untargeted combat doctrine must discard a factionless assault lock and acquire an opposing ship"
+    );
+}
+
 /// Advisory from the #703 review: the tier-4 scan is an *auto-acquisition*
 /// surface, so it must be `With<Ship>` — the tactical radar `shows:
 /// [EntityTag::Ship]` and nothing else. No shipped non-ship template

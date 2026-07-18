@@ -812,6 +812,89 @@ fn helm_ai_world_view(
     }
 }
 
+/// Explicit console selections are shared intent, not new Helm detections.
+/// Add only those live entities to the Helm view, so Helm may act on a target
+/// selected by Tactical, Sensors, or Navigation without gaining broad
+/// out-of-range awareness.
+fn helm_shared_target_view(
+    mut world_view: crate::ai::WorldView,
+    snapshot_entities: &[crate::ai::AiWorldEntity],
+    blackboards: &crate::server_app::ShipSystemBlackboards,
+    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
+    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+) -> (crate::ai::WorldView, Vec<uuid::Uuid>) {
+    let mut ids = Vec::new();
+    let mut push = |id: Option<String>| {
+        if let Some(id) = id.and_then(|id| uuid::Uuid::parse_str(&id).ok()) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    };
+    push(weapons_target.and_then(|t| t.0.clone()));
+    if let Some(crate::messages::SystemBlackboard::Weapons(bb)) = blackboards
+        .0
+        .get(&crate::system_registry::tactical_station_key())
+    {
+        push(bb.target_uuid.clone());
+        push(bb.locked_target.clone());
+    }
+    if let Some(crate::messages::SystemBlackboard::Sensors(bb)) = blackboards
+        .0
+        .get(&crate::system_registry::sensors_system_id())
+    {
+        push(bb.science_target_uuid.clone());
+    }
+    if let Some(crate::navigation_plugin::WaypointMode::Anchored { source_uuid, .. }) =
+        waypoint.and_then(|w| w.mode())
+    {
+        push(Some(source_uuid.clone()));
+    }
+    for id in &ids {
+        if !world_view.entities.iter().any(|e| e.uuid == *id) {
+            if let Some(entity) = snapshot_entities.iter().find(|e| e.uuid == *id) {
+                world_view.entities.push(entity.clone());
+            }
+        }
+    }
+    (world_view, ids)
+}
+
+/// Choose Helm's target for the active Destroy directive. Named objectives keep
+/// their authored target; untargeted combat directives prefer explicit console
+/// selections, then acquire the nearest hostile visible to Helm itself.
+fn helm_destroy_target(
+    scored: &[crate::messages::ScoredObjective],
+    world_view: &crate::ai::WorldView,
+    shared: &[uuid::Uuid],
+    registry: &crate::faction::FactionRegistry,
+) -> Option<uuid::Uuid> {
+    use crate::messages::{AiDirective, SystemAffinity};
+    let objective = scored.iter().find(|o| {
+        o.score > 0.0
+            && o.relevance.contains(&SystemAffinity::Helm)
+            && matches!(o.directive, AiDirective::Destroy { .. })
+    })?;
+    let AiDirective::Destroy { target } = &objective.directive else {
+        return None;
+    };
+    if !target.is_empty() {
+        return crate::ai::resolve_objective_target(target, world_view);
+    }
+    let hostile = |id: &uuid::Uuid| {
+        world_view
+            .entities
+            .iter()
+            .find(|e| e.uuid == *id)
+            .is_some_and(|e| crate::faction::is_enemy(world_view.self_faction, e.faction, registry))
+    };
+    shared
+        .iter()
+        .find(|id| hostile(id))
+        .copied()
+        .or_else(|| crate::ai::find_nearest_hostile(world_view, registry))
+}
+
 /// The Navigation waypoint this ship's AI Helm is currently *cleared* to follow
 /// (issue #702), or `None` if there is none or the clearance has not caught up.
 ///
@@ -882,6 +965,7 @@ fn helm_ai_decision(
     anchors: &std::collections::HashMap<String, [f32; 3]>,
     cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
     weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
+    destroy_target: Option<uuid::Uuid>,
     nav_waypoint: Option<[f32; 2]>,
     forward_speed: f32,
 ) -> (f32, f32) {
@@ -894,7 +978,7 @@ fn helm_ai_decision(
             .unwrap_or(&[]),
         anchors,
         cursors.map(|c| c.0.as_slice()).unwrap_or(NO_CURSORS),
-        helm_weapons_target(weapons_target),
+        destroy_target.or_else(|| helm_weapons_target(weapons_target)),
         nav_waypoint,
         // Authored per entity template in TOML (`[behaviour]
         // waypoint_arrival_radius`), same as the cursor evaluator reads —
@@ -1212,6 +1296,7 @@ fn ai_helm_thrust(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: HelmAiFallbackQuery,
     mut ships: Query<
@@ -1289,6 +1374,19 @@ fn ai_helm_thrust(
             &anchors,
             &snapshot_entities,
         );
+        let (world_view, shared_targets) = helm_shared_target_view(
+            world_view,
+            &snapshot_entities,
+            blackboards,
+            surfaces.weapons_target,
+            surfaces.waypoint,
+        );
+        let default_registry = crate::faction::FactionRegistry::default();
+        let registry = faction_registry
+            .as_deref()
+            .map(|r| &r.0)
+            .unwrap_or(&default_registry);
+        let destroy_target = helm_destroy_target(&scored, &world_view, &shared_targets, registry);
 
         // No commit rule, and no scratch clone to dodge one: `operate_helm` is
         // pure, so we simply ask it and keep our axis (issue #702).
@@ -1299,6 +1397,7 @@ fn ai_helm_thrust(
             &anchors,
             surfaces.cursors,
             surfaces.weapons_target,
+            destroy_target,
             cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
             physics.forward_speed,
         );
@@ -1348,6 +1447,7 @@ fn ai_helm_steering(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     entity_fallback_q: HelmAiFallbackQuery,
     mut ships: Query<
@@ -1427,6 +1527,19 @@ fn ai_helm_steering(
             &anchors,
             &snapshot_entities,
         );
+        let (world_view, shared_targets) = helm_shared_target_view(
+            world_view,
+            &snapshot_entities,
+            blackboards,
+            surfaces.weapons_target,
+            surfaces.waypoint,
+        );
+        let default_registry = crate::faction::FactionRegistry::default();
+        let registry = faction_registry
+            .as_deref()
+            .map(|r| &r.0)
+            .unwrap_or(&default_registry);
+        let destroy_target = helm_destroy_target(&scored, &world_view, &shared_targets, registry);
 
         // Pure call, no commit — see the module note (issue #702).
         let (_thrust, mut steering) = helm_ai_decision(
@@ -1436,6 +1549,7 @@ fn ai_helm_steering(
             &anchors,
             surfaces.cursors,
             surfaces.weapons_target,
+            destroy_target,
             cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
             physics.forward_speed,
         );

@@ -21,8 +21,10 @@ pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Valu
 /// Merge two TOML values with entity-config–aware special-casing:
 ///
 /// * All table keys deep-merge as in `merge_toml`.
-/// * `behaviour.state` arrays merge **by name**: override entries replace
-///   template entries with the same `name`; unmentioned entries are kept.
+/// * `behaviour.state` arrays merge **by name** (`name` key): override entries
+///   replace template entries with the same `name`; unmentioned entries are kept.
+/// * `behaviour.doctrine` arrays merge **by id** (`id` key): override entries
+///   replace template entries with the same `id`; unmentioned entries are kept.
 /// * `behaviour.transition` arrays are **full-replacement** when the override
 ///   supplies one (this is the default for arrays in `merge_toml`).
 ///
@@ -30,17 +32,15 @@ pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Valu
 pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     let mut result = merge_toml(template, override_);
 
-    // Post-process: re-apply by-name merge for behaviour.state if both sides
-    // supply a `state` array (merge_toml will have replaced it wholesale).
     let t_beh = template.get("behaviour").and_then(|v| v.as_table());
     let o_beh = override_.get("behaviour").and_then(|v| v.as_table());
     if let (Some(tb), Some(ob)) = (t_beh, o_beh) {
+        // Post-process: re-apply by-name merge for behaviour.state
         if let (Some(t_states), Some(o_states)) = (
             tb.get("state").and_then(|v| v.as_array()),
             ob.get("state").and_then(|v| v.as_array()),
         ) {
             let merged_states = merge_named_array(t_states, o_states);
-            // Write merged_states back into result.behaviour.state
             if let Some(result_beh) = result
                 .as_table_mut()
                 .and_then(|t| t.get_mut("behaviour"))
@@ -49,8 +49,48 @@ pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value)
                 result_beh.insert("state".to_string(), toml::Value::Array(merged_states));
             }
         }
+
+        // Post-process: re-apply by-id merge for behaviour.doctrine
+        if let (Some(t_doctrines), Some(o_doctrines)) = (
+            tb.get("doctrine").and_then(|v| v.as_array()),
+            ob.get("doctrine").and_then(|v| v.as_array()),
+        ) {
+            let merged_doctrines = merge_id_array(t_doctrines, o_doctrines);
+            if let Some(result_beh) = result
+                .as_table_mut()
+                .and_then(|t| t.get_mut("behaviour"))
+                .and_then(|v| v.as_table_mut())
+            {
+                result_beh.insert("doctrine".to_string(), toml::Value::Array(merged_doctrines));
+            }
+        }
     }
 
+    result
+}
+
+/// Merge two arrays whose elements are TOML tables with an `id` field.
+///
+/// Override entries replace template entries with the same id.
+/// Template entries with no matching override are kept at their original
+/// position. Override entries with no matching template entry are appended.
+pub fn merge_id_array(template: &[toml::Value], overrides: &[toml::Value]) -> Vec<toml::Value> {
+    let mut result = template.to_vec();
+    for o_entry in overrides {
+        let o_id = o_entry.get("id").and_then(|v| v.as_str());
+        match o_id {
+            Some(id) => {
+                let pos = result
+                    .iter()
+                    .position(|e| e.get("id").and_then(|v| v.as_str()) == Some(id));
+                match pos {
+                    Some(i) => result[i] = merge_toml(&result[i], o_entry),
+                    None => result.push(o_entry.clone()),
+                }
+            }
+            None => result.push(o_entry.clone()),
+        }
+    }
     result
 }
 

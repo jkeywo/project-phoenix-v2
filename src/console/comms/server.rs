@@ -1134,6 +1134,7 @@ mod tests {
             rotation: None,
             scale: None,
             groups: vec!["wave_1".into()],
+            overrides: None,
         }]);
 
         let uuid = app
@@ -1425,6 +1426,7 @@ mod tests {
                     rotation: None,
                     scale: None,
                     groups: vec![],
+                    overrides: None,
                 },
                 TriggerAction::DestroyEntity { entity: "x".into() },
                 TriggerAction::AddFactionEnemy {

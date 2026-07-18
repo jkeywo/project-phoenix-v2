@@ -262,6 +262,7 @@ fn publish_captain_blackboard(
     let conditions = WorldConditions {
         red_alert,
         hull_fraction,
+        attacked: false,
     };
     let captain_boost = boost.as_ref().and_then(|b| {
         b.boosted_id

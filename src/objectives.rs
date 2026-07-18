@@ -26,7 +26,7 @@ use crate::messages::{
 /// evaluates to true at scoring time.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConditionModifier {
-    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
+    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`, `"attacked"`, `"not_attacked"`.
     pub condition: String,
     /// Optional numeric threshold (required for `hull_below` / `hull_above`).
     pub threshold: Option<f32>,
@@ -38,7 +38,7 @@ pub struct ConditionModifier {
 /// score is forced to 0 and it is never selected by the AI.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ZeroGateCondition {
-    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`.
+    /// Condition name: `"red_alert"`, `"hull_below"`, `"hull_above"`, `"attacked"`, `"not_attacked"`.
     pub condition: String,
     /// Optional numeric threshold (required for `hull_below` / `hull_above`).
     pub threshold: Option<f32>,
@@ -68,6 +68,8 @@ pub struct WorldConditions {
     pub red_alert: bool,
     /// Current hull integrity fraction [0.0, 1.0].
     pub hull_fraction: f32,
+    /// Whether the ship has an attacker in `LastShipAttacker`.
+    pub attacked: bool,
 }
 
 fn evaluate_condition(condition: &str, threshold: Option<f32>, cond: &WorldConditions) -> bool {
@@ -75,6 +77,8 @@ fn evaluate_condition(condition: &str, threshold: Option<f32>, cond: &WorldCondi
         "red_alert" => cond.red_alert,
         "hull_below" => cond.hull_fraction < threshold.unwrap_or(0.3),
         "hull_above" => cond.hull_fraction > threshold.unwrap_or(0.3),
+        "attacked" => cond.attacked,
+        "not_attacked" => !cond.attacked,
         _ => false,
     }
 }
@@ -655,6 +659,7 @@ mod tests {
         let pool = mgr.scored_pool(&WorldConditions {
             red_alert: true,
             hull_fraction: 1.0,
+            attacked: false,
         });
         assert!((pool[0].score - 70.0).abs() < f32::EPSILON);
     }
@@ -684,6 +689,7 @@ mod tests {
         let pool = mgr.scored_pool(&WorldConditions {
             red_alert: false,
             hull_fraction: 1.0,
+            attacked: false,
         });
         assert!((pool[0].score - 50.0).abs() < f32::EPSILON);
     }

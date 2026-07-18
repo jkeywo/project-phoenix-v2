@@ -286,6 +286,11 @@ after_secs = 0.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_1"
   anchor        = "enemy_n_outer"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -308,6 +313,11 @@ when       = "counter(ship_power) >= 90"
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_1b"
   position      = [900.0, 0.0, -560.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 2: destroyer at t=45
 [[trigger]]
@@ -319,6 +329,11 @@ after_secs = 45.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_2"
   anchor        = "enemy_se"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -341,6 +356,11 @@ when       = "counter(ship_power) >= 100"
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_2b"
   position      = [1000.0, 0.0, 640.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 3: destroyer at t=60
 [[trigger]]
@@ -352,6 +372,11 @@ after_secs = 60.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_3"
   anchor        = "enemy_e"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -374,6 +399,11 @@ when       = "counter(ship_power) >= 90"
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_3b"
   position      = [1200.0, 0.0, 140.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 4: cruiser at t=120
 [[trigger]]
@@ -385,6 +415,11 @@ after_secs = 120.0
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_4"
   anchor        = "enemy_ne"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -407,6 +442,11 @@ when       = "counter(ship_power) >= 100"
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_4b"
   position      = [1000.0, 0.0, -360.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 5: destroyer at t=210
 [[trigger]]
@@ -418,6 +458,11 @@ after_secs = 210.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_5"
   anchor        = "enemy_ese"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -440,6 +485,11 @@ when       = "counter(ship_power) >= 90"
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_5b"
   position      = [1100.0, 0.0, 390.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 6: cruiser at t=240
 [[trigger]]
@@ -451,6 +501,11 @@ after_secs = 240.0
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_6"
   anchor        = "enemy_ene"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -473,6 +528,11 @@ when       = "counter(ship_power) >= 100"
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_6b"
   position      = [1100.0, 0.0, -110.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 7: destroyer at t=270
 [[trigger]]
@@ -484,6 +544,11 @@ after_secs = 270.0
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_7"
   anchor        = "enemy_s_outer"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -506,6 +571,11 @@ when       = "counter(ship_power) >= 90"
   template_path = "assets/entities/pirate_raider.toml"
   name          = "wave_7b"
   position      = [900.0, 0.0, 840.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # Wave 8 (final): battleship at t=300
 [[trigger]]
@@ -517,6 +587,11 @@ after_secs = 300.0
   template_path = "assets/entities/ship_harrow_warhawk.toml"
   name          = "wave_8"
   anchor        = "enemy_e_far"
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -539,6 +614,11 @@ when       = "counter(ship_power) >= 100"
   template_path = "assets/entities/ship_harrow_patrol.toml"
   name          = "wave_8b"
   position      = [1400.0, 0.0, 140.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
+      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
+      zero_gates = [{ condition = "not_attacked" }] },
+  ] } }
 
 # ── Endings ──────────────────────────────────────────────────────────────────
 

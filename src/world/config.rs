@@ -444,6 +444,10 @@ struct RawActionEntry {
     /// member of each group and removed from all groups on destruction.
     #[serde(default)]
     groups: Option<Vec<String>>,
+    /// Optional inline TOML overrides for `spawn_entity` action, same shape
+    /// as the static `[[entity]] overrides` field.
+    #[serde(default)]
+    overrides: Option<toml::Value>,
     /// Per-action predicate gate. When `Some`, the action only fires if the
     /// predicate evaluates to true at dispatch time.
     #[serde(default)]
@@ -744,6 +748,10 @@ pub enum TriggerAction {
         /// removed from each group when it is destroyed, enabling
         /// `OnAllDestroyed { group }` triggers to track dynamic membership.
         groups: Vec<String>,
+        /// Optional inline TOML overrides merged on top of the template,
+        /// mirroring the static `[[entity]] overrides` field. Uses the same
+        /// by-id merge semantics for `behaviour.doctrine` arrays.
+        overrides: Option<toml::Value>,
     },
     /// Destroy an entity by `name` (looked up in `name_to_uuid`).
     ///
@@ -1181,6 +1189,7 @@ fn parse_raw_actions(
                         rotation: raw_action.rotation,
                         scale: raw_action.scale,
                         groups: raw_action.groups.clone().unwrap_or_default(),
+                        overrides: raw_action.overrides.clone(),
                     }
                 }
                 "destroy_entity" => TriggerAction::DestroyEntity {
@@ -4442,6 +4451,7 @@ condition = "on_world_loaded"
                 rotation,
                 scale,
                 groups: _,
+                overrides: _,
             } => {
                 assert_eq!(template_path, "assets/entities/pirate_raider.toml");
                 assert_eq!(name, "raider_beta");

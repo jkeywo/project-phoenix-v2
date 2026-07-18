@@ -378,9 +378,11 @@ fn aggregate_doctrine_blackboards(
             }
         };
         let red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
+        let attacked = last_attacker_opt.is_some();
         let conditions = crate::objectives::WorldConditions {
             red_alert,
             hull_fraction,
+            attacked,
         };
         // Retreat is ordinary authored doctrine (issue #702). A synthetic
         // hull-triggered Retreat used to be injected here; it was deleted

@@ -2159,6 +2159,7 @@ mod tests {
         let cond = WorldConditions {
             red_alert: false,
             hull_fraction: 1.0,
+            attacked: false,
         };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool.len(), 1);
@@ -2185,6 +2186,7 @@ mod tests {
         let cond = WorldConditions {
             red_alert: false,
             hull_fraction: 1.0,
+            attacked: false,
         };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool[0].score, 0.0, "zero-gate must veto at full hull");
@@ -2218,6 +2220,7 @@ mod tests {
         let cond = WorldConditions {
             red_alert: false,
             hull_fraction: 1.0,
+            attacked: false,
         };
         let pool = score_doctrine_pool(&doctrine, &cond);
         assert_eq!(pool[0].id, "b");

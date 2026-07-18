@@ -269,6 +269,9 @@ pub enum ActionCmd {
         rotation: Option<[f32; 3]>,
         scale: Option<[f32; 3]>,
         layer_path: Option<String>,
+        /// Optional inline TOML overrides already applied to `config` by the
+        /// dispatch function; preserved here for auditing / test assertions.
+        overrides: Option<toml::Value>,
     },
     /// Destroy the entity with `uuid` and run the destruction cascade.
     DestroyEntity { uuid: String },
@@ -922,6 +925,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
             rotation,
             scale,
             groups,
+            overrides,
         } => {
             // 1. Resolve spawn position. `anchor` looks up in the origin
             // layer's anchors (or the base world's anchors for a `None`
@@ -960,6 +964,22 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 return out;
             };
 
+            // 2b. Apply overrides if present.
+            if let Some(overrides_val) = overrides {
+                let Ok(config_str) = toml::to_string(&config) else { return out; };
+                let Ok(template_value): Result<toml::Value, _> = toml::from_str(&config_str) else { return out; };
+                let merged = crate::entity_override::merge_entity_config_toml(
+                    &template_value,
+                    overrides_val,
+                );
+                let merged_str = toml::to_string(&merged).unwrap_or_default();
+                if let Ok(merged_config) =
+                    crate::entity_config::EntityConfig::from_toml(&merged_str)
+                {
+                    config = merged_config;
+                }
+            }
+
             // 3. Only a spawn that will actually happen consumes a uuid.
             let uuid = (context.uuid_source)();
 
@@ -981,6 +1001,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 rotation: *rotation,
                 scale: *scale,
                 layer_path: context.origin_layer.clone(),
+                overrides: overrides.clone(),
             });
 
             // Register name → uuid for subsequent triggers, and the entity in
@@ -1148,6 +1169,7 @@ mod tests {
             rotation: None,
             scale: None,
             groups: groups.into_iter().map(str::to_string).collect(),
+            overrides: None,
         }
     }
 
@@ -1993,6 +2015,7 @@ mod tests {
                 rotation: None,
                 scale: None,
                 layer_path: None,
+                overrides: None,
             }]
         );
         assert_eq!(
@@ -2039,6 +2062,7 @@ mod tests {
                 rotation: None,
                 scale: None,
                 layer_path: Some("sub.toml".to_string()),
+                overrides: None,
             }]
         );
     }
@@ -2135,6 +2159,7 @@ mod tests {
             rotation: Some([0.0, 1.57, 0.0]),
             scale: Some([2.0, 2.0, 2.0]),
             groups: vec![],
+            overrides: None,
         };
         let out = dispatch_action(&action, &fx.ctx());
 
@@ -3231,6 +3256,7 @@ mod tests {
                     rotation: None,
                     scale: None,
                     layer_path: None,
+                    overrides: None,
                 }],
                 name_to_uuid_inserts: vec![("wave_1".to_string(), STUB_UUID.to_string())],
                 entity_group_inserts: vec![
@@ -3291,6 +3317,7 @@ mod tests {
             rotation: None,
             scale: None,
             groups: vec![],
+            overrides: None,
         };
         let out = dispatch_spawn_entity(&missing, &ctx);
         assert_eq!(out.warnings.len(), 1);
@@ -3385,6 +3412,7 @@ mod tests {
             rotation: Some([0.0, 1.57, 0.0]),
             scale: Some([2.0, 2.0, 2.0]),
             groups: vec![],
+            overrides: None,
         };
         let out = dispatch_spawn_entity(&action, &fx.ctx());
 
@@ -3428,6 +3456,7 @@ mod tests {
             rotation: None,
             scale: None,
             groups: vec![],
+            overrides: None,
         };
         let out = dispatch_spawn_entity(&action, &fx.ctx());
 

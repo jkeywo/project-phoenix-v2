@@ -792,6 +792,7 @@ fn publish_viewscreen_blackboard(
     let conditions = WorldConditions {
         red_alert,
         hull_fraction: hull_integrity_pct / 100.0,
+        attacked: false,
     };
     let captain_boost = boost.as_ref().and_then(|b| {
         b.boosted_id

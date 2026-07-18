@@ -430,41 +430,80 @@ pub fn publish_sensors_blackboard(
 /// Per-entity AI loop for the Sensors system. Loops over all ship entities
 /// where the Sensors system is `ControlSource::Ai`.
 ///
-/// Currently a compile-verified stub — Sensors AI logic is deferred since
-/// the sensor AI produces no active decisions in the current game design
-/// (Sensors is purely advisory: the AI auto-suggests scan targets to Tactical
-/// via the coordination bus in `tick_sensors_frequency_hint`).
-///
-/// Reads the damage-scaled `SensorsBlackboard.radar_range` so future perception
-/// is already clipped to the long-range sensor horizon (issue #680).
+/// Selection priority:
+///   1. Combat target — mirror the ship's `WeaponsTarget` (set by
+///      `ai_target_selection`) so the Sensors console shows what Tactical is
+///      engaging.
+///   2. Objective entity — scan scored objectives for a `Destroy` directive
+///      with a named target (not the `""` engage-any sentinel), resolve the
+///      name to an entity UUID, and select it on the Sensors console.
 pub fn operate_sensors_ai(
-    ships: Query<
+    mut ships: Query<
         (
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
+            &mut SensorsTarget,
+            &crate::simulation::WeaponsTarget,
         ),
         With<crate::server_app::Ship>,
     >,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    entity_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        Option<&crate::entities::spawner::EntityName>,
+    )>,
 ) {
-    for (sources, blackboards) in &ships {
+    for (sources, blackboards, mut sensors_target, weapons_target) in &mut ships {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::sensors_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // Read the sensors blackboard radar range so the stub is wired to
-        // the live damage-scaled value. Future AI logic uses this to gate
-        // entity perception.
-        let _radar_range = blackboards
+
+        // Priority 1: mirror the combat target.
+        if let Some(target_uuid) = &weapons_target.0 {
+            if entity_q.iter().any(|(u, _)| u.0 == *target_uuid) {
+                sensors_target.0 = Some(target_uuid.clone());
+                continue;
+            }
+        }
+
+        // Priority 2: scan scored objectives for a named Destroy target.
+        let viewscreen_bb = blackboards
             .0
-            .get(&crate::system_registry::sensors_system_id())
-            .and_then(|bb| match bb {
-                crate::messages::SystemBlackboard::Sensors(sbb) => Some(sbb.radar_range),
-                _ => None,
-            })
-            .unwrap_or(0.0);
-        // TODO: implement sensors AI logic (target suggestion, scan selection)
+            .get(&crate::system_registry::viewscreen_system_id());
+        if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+            let mut selected: Option<String> = None;
+            for objective in bb
+                .scored_objectives
+                .iter()
+                .filter(|o| o.score > 0.0)
+            {
+                if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
+                    if target.is_empty() {
+                        continue;
+                    }
+                    let uuid = runtime
+                        .as_ref()
+                        .and_then(|rt| rt.name_to_uuid.get(target).cloned())
+                        .or_else(|| {
+                            entity_q.iter().find_map(|(u, name)| {
+                                (u.0 == *target
+                                    || name.is_some_and(|n| n.0 == *target))
+                                    .then(|| u.0.clone())
+                            })
+                        });
+                    if let Some(uuid) = uuid {
+                        selected = Some(uuid);
+                        break;
+                    }
+                }
+            }
+            sensors_target.0 = selected;
+        } else {
+            sensors_target.0 = None;
+        }
     }
 }
 
@@ -475,6 +514,7 @@ mod tests {
     use super::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::*;
+    use crate::ship::control_source::ControlSource;
     use crate::simulation::{ShipImpulse, SimOutbox};
 
     #[derive(Resource, Default)]
@@ -992,6 +1032,243 @@ mod tests {
         assert_eq!(
             state, None,
             "state should be cleared when no threat remains"
+        );
+    }
+
+    // ── operate_sensors_ai tests ────────────────────────────────────────────
+
+    #[derive(Resource)]
+    struct ShipEntity(Entity);
+
+    fn sensors_ai_test_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(bevy::time::Time::<()>::default())
+            .init_resource::<crate::world::server::WorldContentRuntime>()
+            .add_systems(Update, operate_sensors_ai);
+
+        let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
+        control_sources
+            .0
+            .set(crate::system_registry::sensors_system_id(), ControlSource::Ai);
+
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                control_sources,
+                crate::server_app::ShipSystemBlackboards::default(),
+                SensorsTarget::default(),
+                crate::simulation::WeaponsTarget::default(),
+            ))
+            .id();
+
+        app.insert_resource(ShipEntity(ship));
+        app
+    }
+
+    fn insert_viewscreen_objective(app: &mut App, target_name: &str, score: f32) {
+        let viewscreen = crate::messages::ViewscreenBlackboard {
+            scored_objectives: vec![crate::messages::ScoredObjective {
+                id: format!("obj-destroy-{target_name}"),
+                score,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: target_name.into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![
+                    crate::messages::SystemAffinity::Helm,
+                    crate::messages::SystemAffinity::Weapons,
+                    crate::messages::SystemAffinity::Captain,
+                ],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: format!("obj-destroy-{target_name}"),
+                    text: format!("Destroy {target_name}"),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![target_name.into()],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }],
+            ..Default::default()
+        };
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::Ship>>();
+        let mut bbs = q.single_mut(app.world_mut()).expect("Ship must have ShipSystemBlackboards");
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            crate::messages::SystemBlackboard::Viewscreen(viewscreen),
+        );
+    }
+
+    fn get_sensors_target(app: &mut App) -> Option<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&SensorsTarget, With<crate::server_app::Ship>>();
+        q.single(app.world()).unwrap().0.clone()
+    }
+
+    fn tick_sensors_ai(app: &mut App) {
+        let mut time = app.world_mut().resource_mut::<bevy::time::Time>();
+        time.advance_by(std::time::Duration::from_secs_f32(0.1));
+        app.update();
+    }
+
+    #[test]
+    fn ai_sensors_mirrors_weapons_target() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+        ));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut())
+                .unwrap()
+                .0 = Some(target_uuid.clone());
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "sensors AI should mirror WeaponsTarget"
+        );
+    }
+
+    #[test]
+    fn ai_sensors_selects_destroy_objective_when_no_weapons_target() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "sensors AI should select named Destroy objective target"
+        );
+    }
+
+    #[test]
+    fn ai_sensors_skips_untargeted_destroy() {
+        let mut app = sensors_ai_test_app();
+
+        let viewscreen = crate::messages::ViewscreenBlackboard {
+            scored_objectives: vec![crate::messages::ScoredObjective {
+                id: "obj-destroy-any".into(),
+                score: 80.0,
+                directive: crate::messages::AiDirective::Destroy {
+                    target: "".into(),
+                },
+                source: crate::messages::ObjectiveSource::Doctrine,
+                relevance: vec![
+                    crate::messages::SystemAffinity::Helm,
+                    crate::messages::SystemAffinity::Weapons,
+                    crate::messages::SystemAffinity::Captain,
+                ],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "obj-destroy-any".into(),
+                    text: "Engage hostiles".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Doctrine,
+                },
+            }],
+            ..Default::default()
+        };
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<crate::server_app::Ship>>();
+            let mut bbs = q.single_mut(app.world_mut()).expect("Ship must have ShipSystemBlackboards");
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                crate::messages::SystemBlackboard::Viewscreen(viewscreen),
+            );
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "sensors AI should skip untargeted Destroy directives"
+        );
+    }
+
+    #[test]
+    fn ai_sensors_prefers_weapons_target_over_objective() {
+        let mut app = sensors_ai_test_app();
+        let objective_uuid = uuid::Uuid::new_v4().to_string();
+        let combat_uuid = uuid::Uuid::new_v4().to_string();
+
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), objective_uuid.clone());
+        insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(combat_uuid.clone()),
+        ));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut())
+                .unwrap()
+                .0 = Some(combat_uuid.clone());
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(combat_uuid.as_str()),
+            "sensors AI should prefer WeaponsTarget over objective target"
+        );
+    }
+
+    #[test]
+    fn ai_sensors_does_not_select_objective_when_weapons_target_is_some_but_entity_gone() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+
+        // WeaponsTarget names a UUID that no entity carries → existence check fails
+        let dead_uuid = uuid::Uuid::new_v4().to_string();
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut())
+                .unwrap()
+                .0 = Some(dead_uuid);
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "sensors AI should fall through to objective when WeaponsTarget entity is gone"
         );
     }
 }

@@ -1,11 +1,9 @@
 use bevy::camera::ClearColorConfig;
 use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::core_pipeline::core_3d::graph::Core3d;
-use bevy::core_pipeline::Skybox;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use bevy::render::camera::CameraRenderGraph;
-use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
 use rand::Rng;
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
@@ -21,6 +19,10 @@ use crate::model_rig::ModelMarkers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
+use crate::render_setup::{
+    default_ambient_light, game_camera_projection, space_skybox, SpaceSkyboxAsset,
+    SpaceSkyboxPlugin,
+};
 use crate::server::pfx::PfxPlugin;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::AsteroidDestroyedVfx;
@@ -40,8 +42,6 @@ struct RippleEffect {
 
 const RIPPLE_DURATION: f32 = 1.2;
 const RIPPLE_MAX_RADIUS: f32 = 30.0;
-const SPACE_SKYBOX_PATH: &str = "skybox/phoenix_space_cubemap.png";
-const SPACE_SKYBOX_BRIGHTNESS: f32 = 450.0;
 
 // ── Marker Components ─────────────────────────────────────────────
 
@@ -50,12 +50,6 @@ struct LobbyCamera;
 
 #[derive(Component)]
 pub struct GameCamera;
-
-#[derive(Resource)]
-struct SpaceSkyboxAsset {
-    image: Handle<Image>,
-    is_loaded: bool,
-}
 
 /// FPS counter text — rendered in the Bevy UI overlay.
 #[derive(Component)]
@@ -81,6 +75,7 @@ pub struct RendererPlugin;
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(PfxPlugin)
+            .add_plugins(SpaceSkyboxPlugin)
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
             .init_resource::<CinematicCameraState>()
@@ -98,7 +93,6 @@ impl Plugin for RendererPlugin {
                 (
                     update_fps_counter,
                     update_camera_aspect,
-                    prepare_space_skybox_cubemap,
                     toggle_cameras,
                     update_view_screen_text,
                     update_view_direction_label,
@@ -128,13 +122,7 @@ impl Plugin for RendererPlugin {
 
 // ── Setup ─────────────────────────────────────────────────────────
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let skybox_image = asset_server.load(SPACE_SKYBOX_PATH);
-    commands.insert_resource(SpaceSkyboxAsset {
-        image: skybox_image.clone(),
-        is_loaded: false,
-    });
-
+fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // 2D camera — active during lobby phase. `IsDefaultUiCamera` marks
     // this as the canonical UI target for all UI nodes. It stays active
     // throughout InProgress so the FPS counter, radar widgets, and viewscreen
@@ -163,15 +151,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             ..default()
         },
         CameraRenderGraph::new(Core3d),
-        Projection::Perspective(PerspectiveProjection {
-            far: 5000.0,
-            ..default()
-        }),
-        Skybox {
-            image: skybox_image,
-            brightness: SPACE_SKYBOX_BRIGHTNESS,
-            ..default()
-        },
+        game_camera_projection(),
+        space_skybox(&skybox),
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
 
@@ -244,70 +225,26 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 // ── Systems ───────────────────────────────────────────────────────
 
-fn prepare_space_skybox_cubemap(
-    asset_server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    skybox_asset: Option<ResMut<SpaceSkyboxAsset>>,
-    mut skyboxes: Query<&mut Skybox, With<GameCamera>>,
-) {
-    let Some(mut skybox_asset) = skybox_asset else {
-        return;
-    };
-    if skybox_asset.is_loaded || !asset_server.load_state(&skybox_asset.image).is_loaded() {
-        return;
-    }
-
-    let Some(image) = images.get_mut(&skybox_asset.image) else {
-        return;
-    };
-    if image.texture_descriptor.array_layer_count() == 1 {
-        let layers = image.height() / image.width();
-        if layers != 6 {
-            bevy::log::error!(
-                "space skybox expected a vertical 6-face cubemap, got {}x{}",
-                image.width(),
-                image.height()
-            );
-            skybox_asset.is_loaded = true;
-            return;
-        }
-        if let Err(err) = image.reinterpret_stacked_2d_as_array(layers) {
-            bevy::log::error!("space skybox cubemap conversion failed: {err}");
-            skybox_asset.is_loaded = true;
-            return;
-        }
-
-        image.texture_view_descriptor = Some(TextureViewDescriptor {
-            dimension: Some(TextureViewDimension::Cube),
-            ..default()
-        });
-    }
-
-    for mut skybox in &mut skyboxes {
-        skybox.image = skybox_asset.image.clone();
-    }
-    skybox_asset.is_loaded = true;
-}
-
 /// PostStartup: spawn the scene's ambient light. Reads the optional
-/// `[ambient_light]` block from `WorldConfig` if present; otherwise falls
-/// back to a warm fill (`Color::srgb(0.6, 0.55, 0.5)`, `brightness = 300.0`).
-/// Stars contribute per-system point lights on top of this fill.
+/// `[ambient_light]` block from `WorldConfig` if present; otherwise falls back
+/// to [`crate::render_setup::default_ambient_light`]. Stars contribute
+/// per-system point lights on top of this fill.
 fn spawn_world_ambient_light(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
+    let fallback = default_ambient_light();
     let (color, brightness) = world_config
         .as_ref()
         .and_then(|wc| wc.ambient_light.as_ref())
         .map(|al| {
-            let c = al.color.unwrap_or([0.6, 0.55, 0.5]);
-            (
-                Color::srgb(c[0], c[1], c[2]),
-                al.brightness.unwrap_or(300.0),
-            )
+            let color = al
+                .color
+                .map(|c| Color::srgb(c[0], c[1], c[2]))
+                .unwrap_or(fallback.color);
+            (color, al.brightness.unwrap_or(fallback.brightness))
         })
-        .unwrap_or_else(|| (Color::srgb(0.6, 0.55, 0.5), 300.0));
+        .unwrap_or((fallback.color, fallback.brightness));
 
     commands.spawn(AmbientLight {
         color,

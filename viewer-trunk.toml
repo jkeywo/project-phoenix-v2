@@ -1,0 +1,33 @@
+# Trunk config for the standalone model/shader viewer (see viewer.html).
+#
+# Separate from Trunk.toml so the viewer builds and serves independently of the
+# game's server page. Launch it with `npm run dev:viewer`, NOT `trunk serve`
+# directly — scripts/dev-viewer.mjs also starts the static server that /assets
+# is proxied to (viewer.html has no copy-dir link; see that script for why).
+#
+# Dev-only target: no wasm-opt-fixup post_build hook (that exists to shrink the
+# deployed game bundle; the viewer is never deployed).
+
+[build]
+target = "viewer.html"
+dist = "dist-viewer"
+public_url = "./"
+
+[watch]
+# Editing a .wgsl or a .model.toml triggers a rebuild + page reload. Bevy's
+# asset hot-reload does not work on wasm, so this reload IS the iteration loop.
+# Cargo is warm, so a shader-only change is a re-link and copy, not a compile.
+watch_path = ["assets/shaders/", "assets/models/", "viewer.html", "src/"]
+include = "*.toml"
+# The pre_build hook regenerates this inside a watched directory; without the
+# ignore, each build triggers the next one forever.
+ignore = ["assets/models/index.json"]
+
+[serve]
+port = 8081
+
+# Keeps the model dropdown in step with what is actually on disk.
+[[hooks]]
+stage = "pre_build"
+command = "node"
+command_arguments = ["scripts/generate-model-index.mjs"]

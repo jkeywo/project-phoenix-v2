@@ -2695,186 +2695,22 @@ fn dump_tracked_entities(
 #[derive(Component)]
 struct RenderProcessed;
 
-/// Holds a pending GLB scene handle so the asset server keeps the asset alive
-/// across frames until it finishes loading.
-#[derive(Component)]
-struct PendingSceneHandle(Handle<bevy::scene::Scene>);
+pub use crate::entities::glb_visual::{
+    resolve_sidecar_rig, spawn_glb_visual, GlbSpawnOutcome, PendingSceneHandle,
+};
 
-/// Read a model-rig sidecar TOML for `path`.
+/// Tag a freshly spawned GLB `SceneRoot` as the local ship's model: hidden by
+/// default (shown only by the cinematic camera) and exempt from frustum culling
+/// because it sits at the camera origin.
 ///
-/// - **Native**: `std::fs::read_to_string` (returns `None` when absent).
-/// - **WASM**: checks the pending-sidecar queue populated by JS via
-///   `wasm_push_sidecar_toml`; fires a deferred JS fetch on first miss and
-///   returns `None` until the fetch resolves. An empty pushed string (404)
-///   resolves to `Some(String::new())`, which parses to an identity rig.
-///
-/// **Important**: this call is destructive — the entry is removed from the
-/// queue once read. The renderer is the sole intended consumer; callers that
-/// only need readiness (e.g. preload progress) must use
-/// [`crate::config_cache::is_pending_sidecar_delivered`] instead, or the
-/// renderer will lose the race and the model will never appear.
-fn load_sidecar_toml(path: &str) -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::fs::read_to_string(path).ok()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        crate::config_cache::take_pending_sidecar_toml(path).or_else(|| {
-            crate::config_cache::request_sidecar_fetch(path.to_string());
-            None
-        })
-    }
-}
-
-/// Resolve a model's rig sidecar to a `ModelRig`.
-///
-/// Returns:
-/// - `Some(rig)` once the sidecar is resolved — either parsed, or an identity
-///   rig when the sidecar is genuinely absent (native: file missing; wasm: JS
-///   pushed an empty string for a 404) or fails to parse.
-/// - `None` while a wasm fetch is still in flight (caller retries next frame).
-///   On native this never returns `None` (the filesystem read is synchronous).
-fn resolve_sidecar_rig(
-    model_path: &str,
-    variant: Option<&str>,
-) -> Option<crate::model_rig::ModelRig> {
-    let path = crate::model_rig::sidecar_path(model_path, variant);
-    match load_sidecar_toml(&path) {
-        Some(toml_str) => {
-            if toml_str.trim().is_empty() {
-                // Absent (404 / empty) → identity rig so the model still renders.
-                Some(crate::model_rig::ModelRig::default())
-            } else {
-                match crate::model_rig::ModelRig::from_toml(&toml_str) {
-                    Ok(rig) => Some(rig),
-                    Err(e) => {
-                        // A present-but-malformed sidecar degrades to an identity
-                        // rig so the model still renders, but we surface the parse
-                        // error so an authoring typo isn't silently invisible.
-                        bevy::log::warn!(
-                            "rig sidecar {path} failed to parse: {e}; using identity rig"
-                        );
-                        Some(crate::model_rig::ModelRig::default())
-                    }
-                }
-            }
-        }
-        None => {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                // Native: a missing file is "genuinely absent" → identity rig.
-                Some(crate::model_rig::ModelRig::default())
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                // WASM: fetch still in flight → retry next frame.
-                None
-            }
-        }
-    }
-}
-
-/// Outcome of attempting to spawn a GLB visual (flat render or LOD swap).
-enum GlbSpawnOutcome {
-    /// The scene + rig resolved; the `SceneRoot` child entity was spawned.
-    Spawned(Entity),
-    /// The scene asset or rig sidecar is still loading — retry next frame.
-    Pending,
-    /// The GLB failed to load permanently.
-    Failed,
-}
-
-/// Spawn a GLB scene as a child of `entity`, mirroring PATH A of the flat
-/// renderer. Resolves the scene handle (storing a [`PendingSceneHandle`] on the
-/// parent to keep it alive across frames), waits for both the scene asset and
-/// the rig sidecar, then spawns the `SceneRoot` child (hidden +
-/// `NoFrustumCulling` for the local ship) and attaches
-/// [`crate::model_rig::ModelMarkers`] to the parent. Returns the spawned child
-/// so the LOD system can tear it down on a level switch.
-///
-/// Shared by [`render_spawned_entities`] (initial flat render) and
-/// [`update_mesh_lod`] (LOD-level swaps) so both go through identical async
-/// loading + rig-composition logic.
-fn spawn_glb_visual(
-    commands: &mut Commands,
-    asset_server: &AssetServer,
-    scenes: &Assets<bevy::scene::Scene>,
-    entity: Entity,
-    model_path: &str,
-    variant: Option<&str>,
-    is_local_ship: bool,
-    pending: Option<&PendingSceneHandle>,
-) -> GlbSpawnOutcome {
-    let scene: Handle<bevy::scene::Scene> = match pending {
-        Some(p) => p.0.clone(),
-        None => {
-            // `asset_server` resolves paths relative to the `assets/` root, but
-            // the TOML `model` field carries an `assets/` prefix. Strip it so
-            // the GLB resolves instead of looking for `assets/assets/...`.
-            let rel = model_path.strip_prefix("assets/").unwrap_or(model_path);
-            let path = format!("{}#Scene0", rel);
-            let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
-            bevy::log::info!(
-                "spawn_glb_visual: requesting scene {path} (load_state={:?})",
-                asset_server.load_state(h.id())
-            );
-            commands
-                .entity(entity)
-                .insert(PendingSceneHandle(h.clone()));
-            h
-        }
-    };
-    // A `LoadState::Failed` GLB never appears in `Assets<Scene>`, so stop
-    // retrying and let the caller settle without a mesh.
-    if matches!(
-        asset_server.load_state(scene.id()),
-        bevy::asset::LoadState::Failed(_)
-    ) {
-        bevy::log::warn!(
-            "spawn_glb_visual: GLB failed to load for entity {entity:?}, path={model_path} — entity will exist without a mesh"
-        );
-        commands.entity(entity).remove::<PendingSceneHandle>();
-        return GlbSpawnOutcome::Failed;
-    }
-    // Wait for BOTH the GLB scene AND the rig sidecar before finalising.
-    if scenes.get(&scene).is_none() {
-        return GlbSpawnOutcome::Pending;
-    }
-    let rig = match resolve_sidecar_rig(model_path, variant) {
-        Some(rig) => rig,
-        // Sidecar fetch still in flight (wasm) — retry next frame.
-        None => return GlbSpawnOutcome::Pending,
-    };
-    commands.entity(entity).remove::<PendingSceneHandle>();
-
-    // Composition: entityTransform ∘ baseRig ∘ model. The base rig is applied
-    // INNER to the per-entity transform by spawning the GLB SceneRoot as a
-    // CHILD carrying `base_bevy_transform()`.
-    let base_tf = rig.base_bevy_transform();
-    let child = if is_local_ship {
-        // Local ship model: hidden by default; shown only in cinematic camera.
-        commands
-            .spawn((
-                bevy::scene::SceneRoot(scene),
-                base_tf,
-                Visibility::Hidden,
-                LocalShipModel,
-                bevy::camera::visibility::NoFrustumCulling,
-            ))
-            .id()
-    } else {
-        commands
-            .spawn((bevy::scene::SceneRoot(scene), base_tf))
-            .id()
-    };
-    commands.entity(entity).add_child(child);
-    // Attach the resolved marker map so downstream systems (weapons, exhaust, …)
-    // can resolve mount points by name.
-    commands
-        .entity(entity)
-        .insert(crate::model_rig::ModelMarkers::from_rig(&rig));
-    GlbSpawnOutcome::Spawned(child)
+/// `spawn_glb_visual` is deliberately ignorant of the simulation, so this
+/// decoration is applied by the caller to the child entity it returns.
+fn decorate_local_ship_model(commands: &mut Commands, child: Entity) {
+    commands.entity(child).insert((
+        Visibility::Hidden,
+        LocalShipModel,
+        bevy::camera::visibility::NoFrustumCulling,
+    ));
 }
 
 /// Rounded key for a cached procedural mesh (geometry only — colour/emissive do
@@ -3078,68 +2914,28 @@ fn render_spawned_entities(
         let mesh_cfg_for_transform = mesh_sec.map(|mesh_sec| &mesh_sec.0);
 
         if let Some(star_sec) = star_sec {
-            let cfg = &star_sec.0;
-            let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
-                cfg.radius,
-                cfg.longitude_segments,
-                cfg.latitude_segments,
-            ));
-            let surface_mat =
-                star_surface_materials.add(crate::entity_star::surface_material_from_config(cfg));
-            let halo_radius = cfg.radius * cfg.halo_radius_multiplier.max(1.0);
-            let halo_mesh = meshes.add(crate::entity_star::halo_quad_mesh(halo_radius));
-            let halo_mat =
-                star_halo_materials.add(crate::entity_star::halo_material_from_config(cfg));
-            let mut ec = commands.entity(entity);
-            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
-            ec.with_children(|parent| {
-                parent.spawn((
-                    Mesh3d(halo_mesh),
-                    MeshMaterial3d(halo_mat),
-                    Transform::default(),
-                    crate::entity_star::StarHalo {
-                        radius: halo_radius,
-                    },
-                ));
-            });
+            crate::entities::celestial_visual::insert_star_visual(
+                &mut commands,
+                &mut meshes,
+                &mut star_surface_materials,
+                &mut star_halo_materials,
+                entity,
+                &star_sec.0,
+            );
         } else if let Some(planet_sec) = planet_sec {
             // Textured planet: UV sphere with the custom planet shader, plus
             // an optional alpha-blended cloud shell child. Checked before the
             // `[mesh]` branch — planet templates keep a procedural `[mesh]`
             // fallback for headless/editor contexts that must not win here.
-            let cfg = &planet_sec.0;
-            let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
-                cfg.radius,
-                cfg.longitude_segments,
-                cfg.latitude_segments,
-            ));
-            let surface_mat = planet_surface_materials.add(
-                crate::entity_planet::surface_material_from_config(cfg, &asset_server),
+            crate::entities::celestial_visual::insert_planet_visual(
+                &mut commands,
+                &mut meshes,
+                &mut planet_surface_materials,
+                &mut planet_cloud_materials,
+                &asset_server,
+                entity,
+                &planet_sec.0,
             );
-            let mut ec = commands.entity(entity);
-            ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
-            if let Some(cloud_mat) =
-                crate::entity_planet::cloud_material_from_config(cfg, &asset_server)
-            {
-                let shell_scale = cfg
-                    .clouds
-                    .as_ref()
-                    .map(|c| c.scale.max(1.001))
-                    .unwrap_or(1.03);
-                let cloud_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
-                    cfg.radius * shell_scale,
-                    cfg.longitude_segments,
-                    cfg.latitude_segments,
-                ));
-                let cloud_mat = planet_cloud_materials.add(cloud_mat);
-                ec.with_children(|parent| {
-                    parent.spawn((
-                        Mesh3d(cloud_mesh),
-                        MeshMaterial3d(cloud_mat),
-                        Transform::default(),
-                    ));
-                });
-            }
         } else if let Some(mesh_sec) = mesh_sec {
             let cfg = &mesh_sec.0;
 
@@ -3164,10 +2960,13 @@ fn render_spawned_entities(
                     entity,
                     model_path,
                     cfg.variant.as_deref(),
-                    local_ship.is_some(),
                     pending,
                 ) {
-                    GlbSpawnOutcome::Spawned(_) => {}
+                    GlbSpawnOutcome::Spawned(child) => {
+                        if local_ship.is_some() {
+                            decorate_local_ship_model(&mut commands, child);
+                        }
+                    }
                     // GLB / rig not loaded yet — try again next frame.
                     GlbSpawnOutcome::Pending => continue,
                     GlbSpawnOutcome::Failed => {
@@ -3302,7 +3101,6 @@ fn update_mesh_lod(
                 entity,
                 model_path,
                 variant.as_deref(),
-                lods.is_local_ship,
                 pending,
             ) {
                 // Keep the current visual until the new GLB resolves — avoids a
@@ -3315,6 +3113,9 @@ fn update_mesh_lod(
                     lods.current = Some(target);
                 }
                 GlbSpawnOutcome::Spawned(child) => {
+                    if lods.is_local_ship {
+                        decorate_local_ship_model(&mut commands, child);
+                    }
                     teardown_lod_visual(&mut commands, entity, &mut lods);
                     lods.scene_child = Some(child);
                     lods.current = Some(target);

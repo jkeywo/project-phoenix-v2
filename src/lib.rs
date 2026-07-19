@@ -117,6 +117,15 @@ pub mod viewscreen_border {
 
 pub mod debug_overlay;
 
+/// Shared 3D render setup (skybox, camera optics, ambient fill) — used by both
+/// the game renderer and the standalone model viewer.
+pub mod render_setup;
+
+/// Standalone model/shader viewer (`viewer.html`), a dev tool built as its own
+/// Trunk target. Not part of the game binary.
+#[cfg(feature = "viewer")]
+pub mod viewer;
+
 // Generic GUI widget library — needed by the server viewscreen radar
 // (ServerViewscreenRadarPlugin).
 #[cfg(feature = "server")]

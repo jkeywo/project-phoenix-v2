@@ -27,6 +27,17 @@ default = ["server"]
 # the lobby, simulation, and 3D renderer. Includes the JS↔WASM bridge in
 # `bridge.rs`.
 server = []
+# Viewer feature: builds the standalone model/shader viewer (Trunk →
+# viewer.html), a dev tool for iterating on model appearance, lighting and
+# WGSL without booting the game.
+#
+# Depends on `server` because the simulation modules reference `crate::bridge`
+# and `crate::server::renderer` directly, so the crate does not currently
+# compile without it. The viewer only *runs* its own plugin — none of the
+# simulation systems are registered — so this costs binary size, not
+# behaviour. If viewer rebuilds ever get painful, breaking those references is
+# the thing to fix.
+viewer = ["server"]
 # Debug feature: enables Bevy's debug feature for local development.
 # Not included in release/deployed builds (opt in via `--features debug`).
 debug = ["bevy/debug"]
@@ -60,7 +71,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"
-web-sys = { version = "0.3.97", features = ["Window", "Navigator", "NavigatorAutomationInformation", "console"] }
+web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console"] }
 # Routes Rust panics through console.error with a real message + location.
 # Without this, a panic anywhere in the Bevy app (e.g. inside a system) traps
 # the wasm instance and every subsequent JS→WASM call surfaces as a bare

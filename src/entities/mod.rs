@@ -1,6 +1,8 @@
+pub mod celestial_visual;
 pub mod config;
 pub mod config_cache;
 pub mod entity_override;
+pub mod glb_visual;
 pub mod loader;
 pub mod model_rig;
 pub mod planet;

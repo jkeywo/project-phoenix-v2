@@ -3,6 +3,9 @@
 debug
 target
 dist
+# Model-viewer Trunk output + its generated model index (scripts/generate-model-index.mjs)
+dist-viewer
+assets/models/index.json
 raw
 .planning
 .obsidian

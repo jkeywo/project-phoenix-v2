@@ -23,65 +23,67 @@
 // migrating away from the Console enum toward the `StationId` newtype.
 
 /** @type {Record<string, Array<[string, string]>>} */
+import { t } from './strings.js';
+
 const HELP_SECTIONS = {
   captain: [
-    ['Command', 'You set the ship\'s posture. Coordinate the crew and call the shots — no one else has the full picture.'],
-    ['Red Alert', 'Raises ship-wide combat readiness. Call it before entering a fight, not after taking the first hit.'],
-    ['View Selector', 'Keep the main screen camera updated so the whole bridge sees what matters right now.'],
+    ['help.captain.0.heading', 'help.captain.0.body'],
+    ['help.captain.1.heading', 'help.captain.1.body'],
+    ['help.captain.2.heading', 'help.captain.2.body'],
   ],
   helm: [
-    ['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.'],
-    ['Thrust & Steering', 'Drag to accelerate, reverse, or steer. WASD or the arrow keys steer too, as does a gamepad stick.'],
-    ['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel. Press Ctrl or gamepad B to charge, again to cancel.'],
-    ['Boost', 'Hold Shift or gamepad A for 3× speed while the battery lasts. It drains in a few seconds and takes far longer to refill, so save it for closing a gap.'],
-    ['On Screen', 'Push your radar to the viewscreen when someone needs to see your situation.'],
+    ['help.helm.0.heading', 'help.helm.0.body'],
+    ['help.helm.1.heading', 'help.helm.1.body'],
+    ['help.helm.2.heading', 'help.helm.2.body'],
+    ['help.helm.3.heading', 'help.helm.3.body'],
+    ['help.helm.4.heading', 'help.helm.4.body'],
   ],
   tactical: [
-    ['Weapons Officer', 'Deliver firepower to the enemy.'],
-    ['Target Lock', 'Lock first — phasers and torpedoes both require an active lock by clicking on the target.'],
-    ['Phasers', 'Fast and continuous but arc-limited. Enable Auto so they fire the instant the target crosses your fire arc.'],
-    ['Torpedoes', 'Use them when on priority target. They do less damage to shields than hull, sensors can monitor target shields.'],
+    ['help.tactical.0.heading', 'help.tactical.0.body'],
+    ['help.tactical.1.heading', 'help.tactical.1.body'],
+    ['help.tactical.2.heading', 'help.tactical.2.body'],
+    ['help.tactical.3.heading', 'help.tactical.3.body'],
   ],
   repair: [
-    ['Damage Control', 'Keep the ship in the fight. Damaged systems degrade everyone\'s performance — act early.'],
-    ['Hull Status', 'Your ship health gauge, it doesn\'t show where the damage is, the other bridge officers should ask for repairs.'],
-    ['Repair Teams', 'Dispatch teams to damaged consoles, sooner rather than later.'],
+    ['help.repair.0.heading', 'help.repair.0.body'],
+    ['help.repair.1.heading', 'help.repair.1.body'],
+    ['help.repair.2.heading', 'help.repair.2.body'],
   ],
   power: [
-    ['Power Officer', 'You decide how much performance each system gets. Shift allocations as the battle changes.'],
-    ['Power Allocation', 'Distribute 6 base points across systems. Higher level means better performance from that station.'],
-    ['Battery Reserve', 'Holds up to 2 emergency power points. Let it drain completely and everyone gets locked out for a time.'],
+    ['help.power.0.heading', 'help.power.0.body'],
+    ['help.power.1.heading', 'help.power.1.body'],
+    ['help.power.2.heading', 'help.power.2.body'],
   ],
   shields: [
-    ['Shield Officer', 'Absorb incoming fire and keep the ship alive.'],
-    ['Shield Facings', 'Four quadrants: Fore, Aft, Port, Starboard.'],
-    ['Focus', 'Concentrate capacity on one facing to tank heavy fire by tapping it. Tap again to rebalance shields'],
+    ['help.shields.0.heading', 'help.shields.0.body'],
+    ['help.shields.1.heading', 'help.shields.1.body'],
+    ['help.shields.2.heading', 'help.shields.2.body'],
   ],
   sensors: [
-    ['Sensors Officer', 'Extend the crew\'s awareness beyond visual range.'],
-    ['Long-Range Scan', 'Detect contacts before they enter combat range and provides some extra information on their status'],
+    ['help.sensors.0.heading', 'help.sensors.0.body'],
+    ['help.sensors.1.heading', 'help.sensors.1.body'],
   ],
   navigation: [
-    ['Navigator', 'Read the map to keep the ship heading in the right direction.'],
-    ['System Chart', 'Overlay the nav chart on the main screen so the Captain and Helm see the strategic picture.'],
-    ['Cancel Impulse', 'Abort an active impulse charge if Helm is about to overshoot or fly into a hazard.'],
+    ['help.navigation.0.heading', 'help.navigation.0.body'],
+    ['help.navigation.1.heading', 'help.navigation.1.body'],
+    ['help.navigation.2.heading', 'help.navigation.2.body'],
   ],
   comms: [
-    ['Comms Officer', 'Connect the ship to the outside world. You are the first to know about orders, threats, and opportunities.'],
-    ['Contacts', 'Track who is in hailing range.'],
-    ['Messages', 'Incoming transmissions can carry mission-critical intelligence.'],
-    ['Objectives', 'Mission goals update as the situation changes. Alert the Captain when new orders arrive.'],
+    ['help.comms.0.heading', 'help.comms.0.body'],
+    ['help.comms.1.heading', 'help.comms.1.body'],
+    ['help.comms.2.heading', 'help.comms.2.body'],
+    ['help.comms.3.heading', 'help.comms.3.body'],
   ],
   engineering: [
-    ['Engineering Officer', 'Keep the ship running under fire. You manage shields, power, and repairs from a single station.'],
-    ['Shields', 'Four facings: Fore, Aft, Port, Starboard. Focus one to tank heavy fire, tap again to rebalance.'],
-    ['Power Allocation', 'Distribute base points across systems. Higher level means better performance. Keep an eye on the battery reserve.'],
-    ['Repair Teams', 'Dispatch teams to damaged systems. Damaged systems degrade everyone\'s performance — act early.'],
+    ['help.engineering.0.heading', 'help.engineering.0.body'],
+    ['help.engineering.1.heading', 'help.engineering.1.body'],
+    ['help.engineering.2.heading', 'help.engineering.2.body'],
+    ['help.engineering.3.heading', 'help.engineering.3.body'],
   ],
   science: [
-    ['Science Officer', 'Extend the crew\'s awareness and keep the shields up. You monitor long-range sensors and manage defensive coverage.'],
-    ['Long-Range Scan', 'Detect contacts before they enter combat range and provide extra information on their status.'],
-    ['Shield Facings', 'Four quadrants: Fore, Aft, Port, Starboard. Focus capacity on one facing to tank heavy fire.'],
+    ['help.science.0.heading', 'help.science.0.body'],
+    ['help.science.1.heading', 'help.science.1.body'],
+    ['help.science.2.heading', 'help.science.2.body'],
   ],
 };
 
@@ -94,7 +96,9 @@ const HELP_SECTIONS = {
  * @returns {Array<[string, string]>}
  */
 export function helpSections(panel) {
-  return HELP_SECTIONS[panel] || [];
+  // Entries are string-id pairs; resolve to display text at read time so a
+  // late-loaded table (or locale switch) is picked up on next open.
+  return (HELP_SECTIONS[panel] || []).map(([h, b]) => [t(h), t(b)]);
 }
 
 /** True when `panel` has help text defined. */
@@ -147,7 +151,7 @@ function renderOverlayContent(overlay, panel) {
 
   const heading = doc.createElement('div');
   heading.className = 'help-heading';
-  heading.textContent = 'HELP — tap to dismiss';
+  heading.textContent = t('help.modal_heading');
   overlay.appendChild(heading);
 
   const body = doc.createElement('div');

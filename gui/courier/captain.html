@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Courier Captain</title>
+  <title data-i18n="console.courier_captain.doc_title">Project Phoenix — Courier Captain</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -26,37 +26,37 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Courier Captain">
+  <div class="frame" data-screen-label="Courier Captain" data-i18n-attr="data-screen-label:console.courier_captain.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>CAPTAIN<small>COURIER COMMAND</small></h1>
-        <button id="nav-toggle">Nav</button>
-        <button id="comms-toggle">Comms</button>
+        <h1><span data-i18n="console.captain.title">CAPTAIN</span><small data-i18n="console.courier_captain.subtitle">COURIER COMMAND</small></h1>
+        <button id="nav-toggle" data-i18n="console.common.nav_toggle">Nav</button>
+        <button id="comms-toggle" data-i18n="console.common.comms_toggle">Comms</button>
       </div>
       <div class="body">
         <div class="col">
-          <h2>Command</h2>
+          <h2 data-i18n="console.captain.command">Command</h2>
           <ph-camera-select id="camera"></ph-camera-select>
           <ph-red-alert id="red-alert"></ph-red-alert>
           <ph-objective-list id="objectives"></ph-objective-list>
         </div>
         <div class="col">
-          <h2>Shields & Power</h2>
+          <h2 data-i18n="console.captain.shields_power">Shields & Power</h2>
           <ph-shield-facings id="shields"></ph-shield-facings>
           <ph-power-controls id="power"></ph-power-controls>
           <ph-battery-bar id="battery"></ph-battery-bar>
         </div>
         <div class="col">
-          <h2>Repair</h2>
+          <h2 data-i18n="console.captain.repair">Repair</h2>
           <ph-hull-integrity id="hull"></ph-hull-integrity>
           <ph-repair-teams id="repair"></ph-repair-teams>
         </div>
       </div>
-      <footer class="footer"><span class="dot"></span><span>CAPTAIN STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
+      <footer class="footer"><span class="dot"></span><span data-i18n="console.captain.station_footer">CAPTAIN STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
     </div>
-    <section class="overlay" id="nav-overlay"><button id="nav-back">← Back</button><h2>Navigation</h2><ph-navigation-map id="nav"></ph-navigation-map></section>
-    <section class="overlay" id="comms-overlay"><button id="comms-back">← Back</button><h2>Comms</h2><ph-comms-contact-list id="contacts"></ph-comms-contact-list><ph-comms-current-message id="message"></ph-comms-current-message></section>
+    <section class="overlay" id="nav-overlay"><button id="nav-back">← Back</button><h2 data-i18n="console.captain.navigation">Navigation</h2><ph-navigation-map id="nav"></ph-navigation-map></section>
+    <section class="overlay" id="comms-overlay"><button id="comms-back">← Back</button><h2 data-i18n="console.captain.comms">Comms</h2><ph-comms-contact-list id="contacts"></ph-comms-contact-list><ph-comms-current-message id="message"></ph-comms-current-message></section>
   </div>
   <script type="module">
     import '../components/ph-camera-select.js';
@@ -72,6 +72,7 @@
     import '../components/ph-comms-current-message.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
 
     function system(s, ...ids) {
       for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id];

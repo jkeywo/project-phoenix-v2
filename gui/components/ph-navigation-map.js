@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhNavigationMap extends HTMLElement {
   #state = null;
   #canvas = null;
@@ -32,8 +39,8 @@ export class PhNavigationMap extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = [
+    const tpl = document.createElement('template');
+    tpl.innerHTML = [
       '<style>',
       ':host { display: block; position: relative; touch-action: none; }',
       'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
@@ -64,7 +71,7 @@ export class PhNavigationMap extends HTMLElement {
       '  </div>',
       '</div>',
     ].join('\n');
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#canvas = this.shadowRoot.querySelector('canvas');
     this.#ctx = this.#canvas.getContext('2d', { alpha: false });
     this.#overlay = this.shadowRoot.getElementById('overlay');
@@ -390,9 +397,9 @@ export class PhNavigationMap extends HTMLElement {
       this.#overlay.classList.remove('show');
       return;
     }
-    nameEl.textContent = blip.name || blip.uuid || 'UNKNOWN';
+    nameEl.textContent = blip.name || blip.uuid || t('console.common.unknown');
     kindEl.textContent = (blip.kind || 'unknown').toUpperCase();
-    stanceEl.textContent = (blip.stance || 'UNKNOWN').toUpperCase();
+    stanceEl.textContent = blip.stance ? t('console.stance.' + blip.stance) : t('console.common.unknown');
     stanceEl.className = 'st-' + (blip.stance || 'unknown');
     this.#overlay.classList.add('show');
   }

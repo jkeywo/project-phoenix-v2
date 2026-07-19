@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-blasters-controls.js';
 
@@ -45,13 +46,13 @@ describe('PhBlastersControls', () => {
   it('renders NO BLASTER BANKS placeholder with empty banks', () => {
     const { el } = setup();
     el.state = { banks: [] };
-    expect(queryText(el, '#banks')).toBe('NO BLASTER BANKS');
+    expect(queryText(el, '#banks')).toBe(t('component.blasters.empty'));
   });
 
   it('renders NO BLASTER BANKS placeholder with null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '#banks')).toBe('NO BLASTER BANKS');
+    expect(queryText(el, '#banks')).toBe(t('component.blasters.empty'));
   });
 
   it('renders idle bank with label and FIRE button (instant-fire, no charge time)', () => {
@@ -61,7 +62,7 @@ describe('PhBlastersControls', () => {
     };
     expect(queryText(el, '.lbl')).toBe('Port');
     const btn = el.shadowRoot.querySelector('.btn');
-    expect(btn.textContent.trim()).toBe('FIRE');
+    expect(btn.textContent.trim()).toBe(t('console.common.fire'));
     expect(btn.disabled).toBe(false);
   });
 
@@ -71,7 +72,7 @@ describe('PhBlastersControls', () => {
       banks: [{ id: 'heavy', label: 'Heavy', on_cooldown: false, charge_progress: 0, has_charge: true }],
     };
     const btn = el.shadowRoot.querySelector('.btn');
-    expect(btn.textContent.trim()).toBe('CHARGE');
+    expect(btn.textContent.trim()).toBe(t('component.blasters.charge'));
   });
 
   it('shows FIRING... while a charge is in progress', () => {
@@ -80,7 +81,7 @@ describe('PhBlastersControls', () => {
       banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0.6 }],
     };
     const btn = el.shadowRoot.querySelector('.btn');
-    expect(btn.textContent.trim()).toBe('FIRING...');
+    expect(btn.textContent.trim()).toBe(t('component.blasters.firing'));
     expect(btn.classList.contains('tactical')).toBe(true);
   });
 
@@ -90,7 +91,7 @@ describe('PhBlastersControls', () => {
       banks: [{ id: 'port', label: 'Port', on_cooldown: true, charge_progress: 0 }],
     };
     const btn = el.shadowRoot.querySelector('.btn');
-    expect(btn.textContent.trim()).toBe('COOLDOWN');
+    expect(btn.textContent.trim()).toBe(t('console.common.cooldown'));
     expect(btn.disabled).toBe(true);
   });
 
@@ -104,7 +105,7 @@ describe('PhBlastersControls', () => {
     expect(fills[0].classList.contains('charge')).toBe(true);
     expect(fills[0].style.display).not.toBe('none');
     expect(fills[1].style.display).toBe('none');
-    expect(queryText(el, '.bar-label')).toBe('CHARGE');
+    expect(queryText(el, '.bar-label')).toBe(t('component.blasters.charge'));
   });
 
   it('shows the cooldown bar while cooling', () => {
@@ -116,7 +117,7 @@ describe('PhBlastersControls', () => {
     expect(fills[1].classList.contains('cooldown')).toBe(true);
     expect(fills[0].style.display).toBe('none');
     expect(fills[1].style.display).not.toBe('none');
-    expect(queryText(el, '.bar-label')).toBe('COOLDOWN');
+    expect(queryText(el, '.bar-label')).toBe(t('console.common.cooldown'));
   });
 
   it('hides both bars when idle', () => {

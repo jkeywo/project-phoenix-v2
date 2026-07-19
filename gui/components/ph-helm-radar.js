@@ -1,4 +1,10 @@
 import './ph-radar.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhHelmRadar extends HTMLElement {
   #state = null;
@@ -7,8 +13,8 @@ export class PhHelmRadar extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = [
+    const tpl = document.createElement('template');
+    tpl.innerHTML = [
       '<style>',
       ':host { display: block; position: relative; }',
       '.container { position: relative; width: 100%; height: 100%; }',
@@ -44,10 +50,10 @@ export class PhHelmRadar extends HTMLElement {
       '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
       '  <div class="corner-label top-right" id="label-bearing">000°</div>',
       '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
-      '  <button class="on-screen-btn" id="on-screen-btn" type="button">ON SCREEN</button>',
+      '  <button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
       '</div>',
     ].join('\n');
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
   }
 
@@ -89,7 +95,7 @@ export class PhHelmRadar extends HTMLElement {
     if (posLabel) {
       const x = s.x != null ? s.x : 0;
       const z = s.z != null ? s.z : 0;
-      posLabel.textContent = 'X: ' + x.toFixed(0) + '  Z: ' + z.toFixed(0);
+      posLabel.textContent = t('console.common.radar_pos', { x: x.toFixed(0), z: z.toFixed(0) });
     }
 
     const bearingLabel = this.shadowRoot.getElementById('label-bearing');

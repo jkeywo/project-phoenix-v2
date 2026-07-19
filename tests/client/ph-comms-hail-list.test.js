@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-hail-list.js';
 
@@ -40,19 +41,19 @@ describe('PhCommsHailList', () => {
   it('renders NO MESSAGES placeholder with empty array', () => {
     const { el } = setup();
     el.state = { messages: [] };
-    expect(queryText(el, '.list')).toBe('NO MESSAGES');
+    expect(queryText(el, '.list')).toBe(t('component.comms_hails.empty'));
   });
 
   it('renders NO MESSAGES placeholder with null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '.list')).toBe('NO MESSAGES');
+    expect(queryText(el, '.list')).toBe(t('component.comms_hails.empty'));
   });
 
   it('renders NO MESSAGES placeholder with messages: null', () => {
     const { el } = setup();
     el.state = { messages: null };
-    expect(queryText(el, '.list')).toBe('NO MESSAGES');
+    expect(queryText(el, '.list')).toBe(t('component.comms_hails.empty'));
   });
 
   it('renders an unread message with bold sender and blue dot', () => {

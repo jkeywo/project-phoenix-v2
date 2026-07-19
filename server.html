@@ -9,7 +9,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Project Phoenix — View Screen</title>
+  <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -900,10 +900,10 @@
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
     <div id="world-list">
-      <div id="world-list-label">Select a world</div>
-      <button class="world-btn" data-path="assets/worlds/default.toml">Starbase Alpha</button>
-      <button class="world-btn" data-path="assets/worlds/combat_test.toml">Combat Test</button>
-      <button class="world-btn" data-path="assets/worlds/before_the_fire.toml">Before the Fire</button>
+      <div id="world-list-label" data-i18n="server.select_world">Select a world</div>
+      <button class="world-btn" data-path="assets/worlds/default.toml" data-i18n="world.default.global.title">Starbase Alpha</button>
+      <button class="world-btn" data-path="assets/worlds/combat_test.toml" data-i18n="world.combat_test.global.title">Combat Test</button>
+      <button class="world-btn" data-path="assets/worlds/before_the_fire.toml" data-i18n="world.before_the_fire.global.title">Before the Fire</button>
     </div>
   </div>
 
@@ -922,17 +922,17 @@
       <!-- Header row: title + crew counter + ready badge -->
       <div class="lobby-header">
         <div class="lobby-title-block">
-          <div id="lobby-title">Loading…</div>
+          <div id="lobby-title" data-i18n="server.loading">Loading…</div>
           <div id="lobby-subtitle"></div>
         </div>
         <div class="lobby-status-block">
           <div class="lobby-crew-info">
-            <span class="lobby-crew-label">Crew</span>
+            <span class="lobby-crew-label" data-i18n="server.crew">Crew</span>
             <span id="lobby-crew-count">0/0</span>
             <div id="lobby-crew-dots"></div>
-            <span id="lobby-spectator-tag" style="display:none;">Spectator</span>
+            <span id="lobby-spectator-tag" style="display:none;" data-i18n="server.spectator">Spectator</span>
           </div>
-          <div id="lobby-ready-badge">AWAITING SELECTION</div>
+          <div id="lobby-ready-badge" data-i18n="server.awaiting_selection">AWAITING SELECTION</div>
         </div>
       </div>
 
@@ -948,11 +948,11 @@
         <!-- Log rail: spectators + status -->
         <aside class="lobby-rail">
           <div>
-            <div class="lobby-rail-label">Connected</div>
+            <div class="lobby-rail-label" data-i18n="server.connected">Connected</div>
             <div id="lobby-spectator-list" class="lobby-rail-section"></div>
           </div>
           <div class="lobby-rail-spacer"></div>
-          <div id="lobby-status-hint" class="lobby-status-hint">Waiting for players to connect…</div>
+          <div id="lobby-status-hint" class="lobby-status-hint" data-i18n="server.waiting_players">Waiting for players to connect…</div>
           <div id="lobby-countdown" class="lobby-countdown" style="display:none;">5</div>
         </aside>
       </div>
@@ -964,7 +964,7 @@
       <!-- Loading spinner shown until WASM is ready -->
       <div id="wasm-spinner">
         <div class="spinner-ring"></div>
-        <span>Loading…</span>
+        <span data-i18n="server.loading">Loading…</span>
       </div>
 
       <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
@@ -979,7 +979,7 @@
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
-        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
+        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
       </div>
 
       <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
@@ -994,7 +994,7 @@
         <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
           <span id="hud-heading">000</span>
           <span id="hud-hull">100</span>
-          <span id="hud-condition">NOMINAL</span>
+          <span id="hud-condition" data-i18n="server.hud_nominal">NOMINAL</span>
         </div>
 
         <!-- Viewscreen border frame (tiled edges) -->
@@ -1011,13 +1011,13 @@
         <div class="vs-piece vs-cap top"></div>
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
-        <div class="vs-designation" id="hud-designation">PHOENIX</div>
+        <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
-          <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_tac">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_eng">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_sys">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
         </div>
 
         <!-- AI chatter bubbles (bottom-left) -->
@@ -1085,7 +1085,23 @@
   <link data-trunk rel="copy-dir" href="assets/shaders" />
   <!-- HTML console pages (issue #422): copied to dist/gui/ -->
   <link data-trunk rel="copy-dir" href="gui" />
+  <script type="module">
+    // Localisation bridge (same pattern as client.html): the page logic below
+    // is classic-script, so publish the strings API on window and substitute
+    // the static data-i18n markup once the table loads.
+    import './gui/strings-boot.js';
+    import { t, has, applyToDom } from './gui/strings.js';
+    window.phStrings = { t, has, applyToDom };
+    applyToDom(document);
+  </script>
+
   <script>
+    // Resolve a string id via the module bridge; falls back to the raw id
+    // before modules load. Render loops re-resolve on every state message.
+    function t(id, params) {
+      return window.phStrings ? window.phStrings.t(id, params) : id;
+    }
+
   // ── Ship selection logic (issue #623, inlined from gui/ship-picker.js) ──
   function resolveShipSelection(ships) {
     if (!ships || ships.length === 0) {
@@ -1181,13 +1197,13 @@
     const vEng = document.getElementById('v-eng');
     const vSys = document.getElementById('v-sys');
     if (vNav && typeof s.heading === 'number') {
-      vNav.textContent = 'HEADING ' + String(s.heading).padStart(3, '0');
+      vNav.textContent = t('server.hud_heading', { deg: String(s.heading).padStart(3, '0') });
     }
     if (vTac) {
       vTac.textContent = s.red_alert ? 'WEAPONS HOT' : 'CLEAR';
     }
     if (vEng && typeof s.hull_pct === 'number') {
-      vEng.textContent = 'HULL ' + s.hull_pct;
+      vEng.textContent = t('server.hud_hull', { pct: s.hull_pct });
     }
     if (vSys && typeof s.condition === 'string') {
       vSys.textContent = s.condition;
@@ -1322,13 +1338,13 @@
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
       if (s.countdown_secs > 0) {
-        badge.textContent = 'LAUNCHING IN ' + s.countdown_secs + 's';
+        badge.textContent = t('server.launching_in', { secs: s.countdown_secs });
         badge.className = 'go';
       } else if (s.all_ready) {
-        badge.textContent = 'ALL CREW READY';
+        badge.textContent = t('client.all_crew_ready');
         badge.className = 'go';
       } else {
-        badge.textContent = 'AWAITING CREW';
+        badge.textContent = t('client.awaiting_crew');
         badge.className = '';
       }
     }
@@ -1418,7 +1434,7 @@
         card.className = 'station-card empty per-slot';
         const label = document.createElement('div');
         label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
-        label.textContent = 'RESERVED';
+        label.textContent = t('server.reserved');
         card.appendChild(label);
       }
 
@@ -1463,7 +1479,7 @@
       if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
         const empty = document.createElement('span');
         empty.className = 'spectator-empty';
-        empty.textContent = 'No players connected yet';
+        empty.textContent = t('server.no_players');
         specList.appendChild(empty);
       }
     }
@@ -1472,16 +1488,16 @@
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
       if (s.countdown_secs > 0) {
-        hint.textContent = 'Launching in ' + s.countdown_secs + 's — anyone can unready to cancel';
+        hint.textContent = t('server.hint_launching', { secs: s.countdown_secs });
         hint.style.color = '#5fd8e8';
       } else if (crewN === 0) {
-        hint.textContent = 'Waiting for players to connect…';
+        hint.textContent = t('server.waiting_players');
         hint.style.color = '#667';
       } else if (s.all_ready) {
-        hint.textContent = 'All crew ready — launching!';
+        hint.textContent = t('client.status_all_ready');
         hint.style.color = '#5fd8e8';
       } else {
-        hint.textContent = 'Waiting for crew to ready up…';
+        hint.textContent = t('server.waiting_ready');
         hint.style.color = '#889';
       }
     }
@@ -1567,10 +1583,10 @@
       const label = document.getElementById('conn-label');
       if (state === 'disconnected') {
         dot.style.background = '#f44';
-        label.textContent = 'Disconnected — reconnecting…';
+        label.textContent = t('client.reconnecting');
       } else if (state === 'error') {
         dot.style.background = '#f44';
-        label.textContent = 'Error — refresh to retry';
+        label.textContent = t('server.conn_error_refresh');
       } else {
         dot.style.background = '#4c4';
         label.textContent = '';
@@ -2323,7 +2339,7 @@ function finishInit() {
     // Multiple ships — show ph-ship-picker component, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
     const worldList = document.getElementById('world-list');
-    document.getElementById('world-list-label').textContent = 'Select a ship';
+    document.getElementById('world-list-label').textContent = t('server.select_ship');
     worldList.innerHTML = '';
 
     // Dynamically import the ship-picker web component (registers custom element).

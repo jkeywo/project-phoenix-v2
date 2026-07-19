@@ -1,3 +1,4 @@
+import { t } from '../../gui/strings.js';
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
@@ -66,6 +67,6 @@ describe('renderRedAlertFragment', () => {
     expect(btn.disabled).toBe(true);
     expect(btn.classList.contains('readonly')).toBe(true);
     expect(badge.hidden).toBe(false);
-    expect(badge.textContent).toBe('AUTO');
+    expect(badge.textContent).toBe(t('console.common.auto'));
   });
 });

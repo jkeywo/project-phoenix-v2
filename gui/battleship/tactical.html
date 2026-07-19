@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Tactical Console</title>
+  <title data-i18n="console.tactical.doc_title">Project Phoenix - Tactical Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -22,12 +22,12 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Tactical Console">
+  <div class="frame" data-screen-label="Tactical Console" data-i18n-attr="data-screen-label:console.tactical.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>TACTICAL<span class="sub">WEAPONS CONTROL</span></h1>
-        <span class="auto-badge" id="tactical-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.tactical.title">TACTICAL</span><span class="sub" data-i18n="console.tactical.subtitle">WEAPONS CONTROL</span></h1>
+        <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <ph-tactical-radar id="tactical-radar"></ph-tactical-radar>
@@ -36,9 +36,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>TACTICAL STATION</span>
+        <span data-i18n="console.tactical.station_footer">TACTICAL STATION</span>
         <span class="spacer"></span>
-        <span id="footer-target">NO TARGET</span>
+        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
         <ph-station-damage id="station-damage"></ph-station-damage>
       </footer>
     </div>
@@ -49,6 +49,7 @@
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'tactical',
@@ -57,7 +58,7 @@
         document.getElementById('phasers-controls').state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
         document.getElementById('torpedo-controls').state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
         document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = s.target_name || (s.target_uuid ? 'LOCKED' : 'NO TARGET');
+        document.getElementById('footer-target').textContent = s.target_name || (s.target_uuid ? t('console.common.locked') : t('console.common.no_target'));
         setAutoState(null, document.getElementById('tactical-auto-badge'), !!s.tactical_auto);
       }
     });

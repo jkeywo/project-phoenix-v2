@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-battery-bar.js';
 
@@ -60,7 +61,7 @@ describe('PhBatteryBar', () => {
     el.state = { level_pct: 50, charging: true, emergency_threshold_pct: 20 };
     const indicator = el.shadowRoot.getElementById('charging-indicator');
     expect(indicator.style.display).toBe('flex');
-    expect(indicator.textContent.trim()).toBe('CHARGING');
+    expect(indicator.textContent.trim()).toBe(t('component.battery_bar.charging'));
   });
 
   it('hides charging indicator when charging is false', () => {

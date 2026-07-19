@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Science Console</title>
+  <title data-i18n="console.science.doc_title">Project Phoenix — Science Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -25,30 +25,30 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Science Console">
+  <div class="frame" data-screen-label="Science Console" data-i18n-attr="data-screen-label:console.science.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>SCIENCE<span class="sub">SENSORS &amp; SHIELDS</span></h1>
-        <span class="auto-badge" id="science-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.science.title">SCIENCE</span><span class="sub" data-i18n="console.science.subtitle">SENSORS &amp; SHIELDS</span></h1>
+        <span class="auto-badge" id="science-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Sensors</h2>
+          <h2 data-i18n="console.science.sensors">Sensors</h2>
           <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
           <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
         </div>
         <div class="col">
-          <h2>Shields</h2>
+          <h2 data-i18n="console.science.shields">Shields</h2>
           <ph-shield-panel id="shield-panel"></ph-shield-panel>
           <ph-shield-facings id="shield-facings"></ph-shield-facings>
         </div>
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">SCIENCE STATION</span>
+        <span id="footer-status" data-i18n="console.science.station_footer">SCIENCE STATION</span>
         <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -62,6 +62,7 @@
     import '../components/ph-shield-facings.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'science',

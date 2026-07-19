@@ -1,6 +1,7 @@
 // Issue #55 — Smoke test: client connects to host and receives Welcome.
 
 import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
+import { ts } from './strings';
 
 test('client receives Welcome containing its player token', async ({ context }) => {
   // ── Server page ────────────────────────────────────────────────────────────
@@ -15,9 +16,12 @@ test('client receives Welcome containing its player token', async ({ context }) 
   const clientPage = await context.newPage();
   await clientPage.goto(`/client/#${hostId}`);
 
-  // client.html sets #status to 'Connected' after processing Welcome
+  // client.html sets #status to the connected string after processing Welcome.
+  // The predicate runs in the browser, so the expected text resolves here in
+  // Node and is passed in as an argument.
   await clientPage.waitForFunction(
-    () => (document.getElementById('status') as HTMLElement | null)?.textContent === 'Connected',
+    (expected) => (document.getElementById('status') as HTMLElement | null)?.textContent === expected,
+    ts('client.status_connected'),
     { timeout: 10_000 },
   );
 

@@ -113,6 +113,25 @@ Rust tests therefore assert on **ids**, not English — the id is Rust's contrac
 - a `t()` / `data-i18n` id with no CSV row
 - a localisable TOML key still holding prose
 
-It also warns about hardcoded text still in the client. Those are warnings
-rather than errors while the client migration is in progress; once `gui/` is
-fully migrated, switch the job to `--strict` so they fail the build.
+CI runs it with `--strict`, so hardcoded display text in the client fails the
+build. The only sanctioned English-in-place is developer/operator tooling (the
+host debug panel, crash guidance pointing at DevTools) — allowlisted in
+`DEV_FACING` inside the checker.
+
+## Tests
+
+Test assertions resolve through the table too, so they survive copy edits:
+
+- **vitest** — `tests/client/setup-strings.js` loads the real CSV before every
+  suite; assert with `t('some.id')` from `gui/strings.js`.
+- **Playwright smoke** — import `ts()` from `tests/smoke/strings.ts` (its own
+  small loader; the smoke package is CommonJS). `:has-text("Captain")`
+  selectors survive bracketing because Playwright matches substrings.
+
+## Known gaps
+
+A few strings are still composed in Rust and reach the screen as plain
+English (repair-request comms text, game-over reasons, AI sender labels, the
+HUD condition token). They need structured id+params payloads rather than a
+CSV row — tracked as follow-up work, see the wire-boundary notes in
+`gui/strings.js`.

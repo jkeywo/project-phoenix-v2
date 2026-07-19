@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { ts } from './strings';
 
 const CONSOLE_URL = '/gui/battleship/sensors.html';
 
@@ -22,7 +23,7 @@ test('sensors console: __updateConsole renders scan range', async ({ page }) => 
 test('sensors console: contact summary shows blip count', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => (window as any).__updateConsole('sensors', JSON.stringify(s)), NOMINAL_STATE);
-  await expect(page.locator('#contact-sub')).toContainText('2 CONTACTS');
+  await expect(page.locator('#contact-sub')).toContainText(ts('console.common.contacts.other', { n: 2 }));
 });
 
 test('sensors console: sensor radar shows on-screen state when active', async ({ page }) => {
@@ -37,8 +38,8 @@ test('sensors console: sensor radar shows on-screen state when active', async ({
 test('sensors console: target panel shows NO TARGET when no target set', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => (window as any).__updateConsole('sensors', JSON.stringify(s)), NOMINAL_STATE);
-  await expect(page.locator('#tgt-name')).toHaveText('NO TARGET');
-  await expect(page.locator('#tgt-kind-tag')).toHaveText('NO CONTACT');
+  await expect(page.locator('#tgt-name')).toHaveText(ts('console.common.no_target'));
+  await expect(page.locator('#tgt-kind-tag')).toHaveText(ts('console.common.no_contact'));
 });
 
 test('sensors console: target panel renders target name when target set', async ({ page }) => {
@@ -67,9 +68,9 @@ test('sensors console: renders single shield bar when target_shield_fraction set
     target_shields: [],
   });
   await expect(page.locator('#shield-facings .s-facing')).toHaveCount(1);
-  await expect(page.locator('#shield-facings .s-facing .lbl')).toHaveText('SHLD');
+  await expect(page.locator('#shield-facings .s-facing .lbl')).toHaveText(ts('console.shield.shld'));
   await expect(page.locator('#shield-facings .s-facing .pct')).toHaveText('50%');
-  await expect(page.locator('#shields-tag')).toHaveText('ONLINE');
+  await expect(page.locator('#shields-tag')).toHaveText(ts('console.shield.online'));
 });
 
 test('sensors console: renders SHIELD DOWN when target_shield_fraction is zero', async ({ page }) => {
@@ -82,8 +83,8 @@ test('sensors console: renders SHIELD DOWN when target_shield_fraction is zero',
     target_shield_fraction: 0,
     target_shields: [],
   });
-  await expect(page.locator('#shield-facings .s-facing .pct')).toHaveText('DOWN');
-  await expect(page.locator('#shields-tag')).toHaveText('SHIELD DOWN');
+  await expect(page.locator('#shield-facings .s-facing .pct')).toHaveText(ts('console.shield.down'));
+  await expect(page.locator('#shields-tag')).toHaveText(ts('console.shield.shield_down'));
 });
 
 test('sensors console: renders NO SHIELD DATA when target has no shield_fraction', async ({ page }) => {
@@ -95,7 +96,7 @@ test('sensors console: renders NO SHIELD DATA when target has no shield_fraction
     target_kind: 'asteroid',
     target_shields: [],
   });
-  await expect(page.locator('#shield-facings')).toContainText('NO SHIELD DATA');
+  await expect(page.locator('#shield-facings')).toContainText(ts('console.common.no_shield_data'));
 });
 
 test('sensors console: cancel impulse button hidden when charge=0', async ({ page }) => {

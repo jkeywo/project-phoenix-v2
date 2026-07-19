@@ -1,4 +1,10 @@
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhBlastersControls extends HTMLElement {
   #state = null;
@@ -7,8 +13,8 @@ export class PhBlastersControls extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -25,10 +31,10 @@ export class PhBlastersControls extends HTMLElement {
     .bar-label { font-size: 0.55rem; color: var(--ink-dim); min-width: 2rem; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
-  <div class="header"><span>BLASTERS</span></div>
+  <div class="header"><span>${t('component.blasters.title')}</span></div>
   <div id="banks"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
   }
 
@@ -49,7 +55,7 @@ export class PhBlastersControls extends HTMLElement {
     const container = this.shadowRoot.getElementById('banks');
 
     if (banks.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO BLASTER BANKS'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.blasters.empty'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -81,12 +87,12 @@ export class PhBlastersControls extends HTMLElement {
         top.appendChild(wrap);
         const badge = document.createElement('span');
         badge.className = 'auto-badge';
-        badge.textContent = 'AUTO';
+        badge.textContent = t('console.common.auto');
         top.appendChild(badge);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
-        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">CHARGE</span>';
+        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('component.blasters.charge') + '</span>';
         btn.addEventListener('mousedown', () => {
           if (!btn.disabled && this.sendAction) {
             this.sendAction('charge_blaster_start', { bank: bank.id });
@@ -142,7 +148,7 @@ export class PhBlastersControls extends HTMLElement {
         }
       }
 
-      row.querySelector('.lbl').textContent = bank.label || bank.id || 'BLASTER';
+      row.querySelector('.lbl').textContent = bank.label || bank.id || t('component.blasters.bank_fallback');
 
       // Wire type BlasterBankState (core/messages.rs): fire_ready / on_cooldown
       // / cooldown_remaining / charge_progress / has_charge / pending_volley.
@@ -161,7 +167,10 @@ export class PhBlastersControls extends HTMLElement {
       // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
       btn.className = 'btn ' + (isCharging ? 'tactical' : isCooling ? 'disabled' : 'armed');
       btn.querySelector('.led').className = 'led' + (isCharging ? ' amber keep' : isCooling ? '' : ' on');
-      btn.querySelector('.label').textContent = isCharging ? 'FIRING...' : isCooling ? 'COOLDOWN' : hasCharge ? 'CHARGE' : 'FIRE';
+      btn.querySelector('.label').textContent = isCharging ? t('component.blasters.firing')
+        : isCooling ? t('console.common.cooldown')
+        : hasCharge ? t('component.blasters.charge')
+        : t('console.common.fire');
 
       const fills = row.querySelectorAll('.bar-fill');
       const chargeFill = fills[0];
@@ -173,13 +182,13 @@ export class PhBlastersControls extends HTMLElement {
         chargeFill.className = 'bar-fill charge';
         chargeFill.style.display = 'block';
         cooldownFill.style.display = 'none';
-        row.querySelector('.bar-label').textContent = 'CHARGE';
+        row.querySelector('.bar-label').textContent = t('component.blasters.charge');
       } else if (isCooling) {
         cooldownFill.style.width = '100%';
         cooldownFill.className = 'bar-fill cooldown';
         cooldownFill.style.display = 'block';
         chargeFill.style.display = 'none';
-        row.querySelector('.bar-label').textContent = 'COOLDOWN';
+        row.querySelector('.bar-label').textContent = t('console.common.cooldown');
       } else {
         chargeFill.style.display = 'none';
         cooldownFill.style.display = 'none';

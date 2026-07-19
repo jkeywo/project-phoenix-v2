@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-shield-panel.js';
 
@@ -35,8 +36,8 @@ describe('PhShieldPanel', () => {
     const { el } = setup();
     el.state = {};
     expect(queryText(el, '#panel-hull-val')).toBe('100%');
-    expect(queryText(el, '#grid-status')).toBe('GRID NOMINAL');
-    expect(queryText(el, '#panel-focus-display')).toBe('FOCUS: OMNI');
+    expect(queryText(el, '#grid-status')).toBe(t('component.shield_panel.grid_nominal'));
+    expect(queryText(el, '#panel-focus-display')).toBe(t('component.shield_panel.focus', { name: t('console.common.omni') }));
   });
 
   it('renders shield facings from state', () => {
@@ -53,7 +54,7 @@ describe('PhShieldPanel', () => {
     };
     expect(el.shadowRoot.textContent).toContain('FORE');
     expect(el.shadowRoot.textContent).toContain('PORT');
-    expect(el.shadowRoot.textContent).toContain('FOCUS: Fore');
+    expect(el.shadowRoot.textContent).toContain(t('component.shield_panel.focus', { name: 'Fore' }));
     expect(queryText(el, '#panel-hull-val')).toBe('78%');
   });
 
@@ -64,7 +65,7 @@ describe('PhShieldPanel', () => {
       hull_integrity_pct: 100,
       grid_status: 'GRID OFFLINE',
     };
-    expect(queryText(el, '#grid-status')).toBe('GRID OFFLINE');
+    expect(queryText(el, '#grid-status')).toBe(t('component.shield_panel.grid_offline'));
   });
 
   it('updates when state changes', () => {

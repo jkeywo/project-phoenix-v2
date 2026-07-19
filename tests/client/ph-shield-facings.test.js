@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-shield-facings.js';
 
@@ -39,13 +40,13 @@ describe('PhShieldFacings', () => {
   it('renders empty state with no facing data', () => {
     const { el } = setup();
     el.state = {};
-    expect(el.shadowRoot.textContent).toContain('NO FACING DATA');
+    expect(el.shadowRoot.textContent).toContain(t('component.shield_facings.empty'));
   });
 
   it('renders empty state when facings is null', () => {
     const { el } = setup();
     el.state = { facings: null };
-    expect(el.shadowRoot.textContent).toContain('NO FACING DATA');
+    expect(el.shadowRoot.textContent).toContain(t('component.shield_facings.empty'));
   });
 
   it('renders facings with SVG arcs', () => {

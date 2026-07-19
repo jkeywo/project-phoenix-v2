@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Comms Console</title>
+  <title data-i18n="console.cruiser_comms.doc_title">Project Phoenix — Comms Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -34,23 +34,23 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Comms Console">
+  <div class="frame" data-screen-label="Comms Console" data-i18n-attr="data-screen-label:console.comms.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>COMMS<span class="sub">COMMUNICATIONS &amp; NAV</span></h1>
+        <h1><span data-i18n="console.comms.title">COMMS</span><span class="sub" data-i18n="console.cruiser_comms.subtitle">COMMUNICATIONS &amp; NAV</span></h1>
         <div class="hero-controls">
-          <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+          <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
         </div>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Navigation</h2>
+          <h2 data-i18n="console.comms.navigation">Navigation</h2>
           <ph-navigation-map id="navigation-map"></ph-navigation-map>
         </div>
         <div class="col">
-          <h2>Comms</h2>
+          <h2 data-i18n="console.comms.comms">Comms</h2>
           <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
           <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
           <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
@@ -58,9 +58,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">COMMS STATION</span>
+        <span id="footer-status" data-i18n="console.comms.station_footer">COMMS STATION</span>
         <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)">NO WAYPOINT</span>
+        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_waypoint">NO WAYPOINT</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -68,7 +68,7 @@
     </div>
     <div class="overlay-panel" id="nav-overlay">
       <button class="overlay-back" id="nav-back">&#8592; Back</button>
-      <h2>Navigation</h2>
+      <h2 data-i18n="console.comms.navigation">Navigation</h2>
       <ph-navigation-map id="nav-overlay-map"></ph-navigation-map>
     </div>
   </div>
@@ -79,6 +79,7 @@
     import '../components/ph-navigation-map.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
     function closeAllOverlays() {
@@ -123,7 +124,7 @@
         nm.state = navState;
         if (nmOv) nmOv.state = navState;
         var wp = nav.waypoint;
-        document.getElementById('footer-target').textContent = wp ? wp.name || 'WAYPOINT' : 'NO WAYPOINT';
+        document.getElementById('footer-target').textContent = wp ? wp.name || t('console.common.waypoint') : t('console.common.no_waypoint');
         var msgCount = msgs.length;
         document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
         setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);

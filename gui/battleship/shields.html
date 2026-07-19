@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Shields Console</title>
+  <title data-i18n="console.shields.doc_title">Project Phoenix - Shields Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -25,19 +25,19 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Shields Console">
+  <div class="frame" data-screen-label="Shields Console" data-i18n-attr="data-screen-label:console.shields.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>SHIELDS<span class="sub">DEFENSIVE GRID</span></h1>
-        <span class="auto-badge" id="shields-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.shields.title">SHIELDS</span><span class="sub" data-i18n="console.shields.subtitle">DEFENSIVE GRID</span></h1>
+        <span class="auto-badge" id="shields-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="panel-col">
-          <div class="metric"><span>Hull</span><strong id="hull-tag">100%</strong></div>
-          <div class="metric"><span>Focus</span><strong id="focus-display">OMNI</strong></div>
-          <div class="metric"><span>Grid</span><strong id="footer-grid">GRID NOMINAL</strong></div>
-          <div class="metric" id="threat-row"><span>Threat Bearing</span><strong id="threat-bearing">—</strong></div>
+          <div class="metric"><span data-i18n="console.shields.hull">Hull</span><strong id="hull-tag">100%</strong></div>
+          <div class="metric"><span data-i18n="console.shields.focus">Focus</span><strong id="focus-display" data-i18n="console.common.omni">OMNI</strong></div>
+          <div class="metric"><span data-i18n="console.shields.grid">Grid</span><strong id="footer-grid" data-i18n="component.shield_panel.grid_nominal">GRID NOMINAL</strong></div>
+          <div class="metric" id="threat-row"><span data-i18n="console.shields.threat_bearing">Threat Bearing</span><strong id="threat-bearing">—</strong></div>
           <ph-shield-panel id="shield-panel"></ph-shield-panel>
         </div>
         <div class="panel-col">
@@ -47,9 +47,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>SHIELDS STATION</span>
+        <span data-i18n="console.shields.station_footer">SHIELDS STATION</span>
         <span class="spacer"></span>
-        <span id="footer-focus">OMNI</span>
+        <span id="footer-focus" data-i18n="console.common.omni">OMNI</span>
         <span id="hull-val">100%</span>
       </footer>
     </div>
@@ -59,6 +59,7 @@
     import '../components/ph-shield-facings.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'shields',
@@ -69,9 +70,9 @@
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('hull-tag').textContent = hullPct + '%';
         document.getElementById('hull-val').textContent = hullPct + '%';
-        document.getElementById('focus-display').textContent = s.focused_facing || 'OMNI';
-        document.getElementById('footer-focus').textContent = s.focused_facing || 'OMNI';
-        document.getElementById('footer-grid').textContent = s.grid_status || 'GRID NOMINAL';
+        document.getElementById('focus-display').textContent = s.focused_facing || t('console.common.omni');
+        document.getElementById('footer-focus').textContent = s.focused_facing || t('console.common.omni');
+        document.getElementById('footer-grid').textContent = (s.grid_status || 'GRID NOMINAL') === 'GRID OFFLINE' ? t('component.shield_panel.grid_offline') : t('component.shield_panel.grid_nominal');
         var threatRow = document.getElementById('threat-row');
         if (s.target_bearing != null) {
           threatRow.classList.add('active');

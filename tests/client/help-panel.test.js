@@ -1,3 +1,4 @@
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   helpSections,
@@ -13,35 +14,37 @@ import {
 // ── helpSections static text (mirrors elements.rs help_sections) ─────────────
 
 describe('helpSections', () => {
+  // Sections resolve through the string table (help.<station>.<n>.heading/body)
+  // so assertions go through t() — the id, not the English, is the contract.
   it('returns the captain tuples', () => {
     expect(helpSections('captain')).toEqual([
-      ['Command', 'You set the ship\'s posture. Coordinate the crew and call the shots — no one else has the full picture.'],
-      ['Red Alert', 'Raises ship-wide combat readiness. Call it before entering a fight, not after taking the first hit.'],
-      ['View Selector', 'Keep the main screen camera updated so the whole bridge sees what matters right now.'],
+      [t('help.captain.0.heading'), t('help.captain.0.body')],
+      [t('help.captain.1.heading'), t('help.captain.1.body')],
+      [t('help.captain.2.heading'), t('help.captain.2.body')],
     ]);
   });
 
   it('returns the helm tuples (5 sections incl. the 10× burst)', () => {
     const h = helpSections('helm');
     expect(h).toHaveLength(5);
-    expect(h[0]).toEqual(['Pilot', 'Keep the ship moving and the target in arc for Tactical. You control where the fight happens.']);
-    expect(h[2]).toEqual(['Impulse Drive', '10× speed burst for rapid travel. Damage cancels it, so it\'s best for non-combat travel. Press Ctrl or gamepad B to charge, again to cancel.']);
+    expect(h[0]).toEqual([t('help.helm.0.heading'), t('help.helm.0.body')]);
+    expect(h[2]).toEqual([t('help.helm.2.heading'), t('help.helm.2.body')]);
   });
 
   it('documents the impulse and boost bindings on helm', () => {
     const byTitle = Object.fromEntries(helpSections('helm'));
-    expect(byTitle['Impulse Drive']).toContain('Ctrl');
-    expect(byTitle['Impulse Drive']).toContain('gamepad B');
-    expect(byTitle['Boost']).toContain('Hold Shift');
-    expect(byTitle['Boost']).toContain('gamepad A');
+    expect(byTitle[t('help.helm.2.heading')]).toContain('Ctrl');
+    expect(byTitle[t('help.helm.2.heading')]).toContain('gamepad B');
+    expect(byTitle[t('help.helm.3.heading')]).toContain('Hold Shift');
+    expect(byTitle[t('help.helm.3.heading')]).toContain('gamepad A');
   });
 
   it('returns the tactical tuples', () => {
     expect(helpSections('tactical')).toEqual([
-      ['Weapons Officer', 'Deliver firepower to the enemy.'],
-      ['Target Lock', 'Lock first — phasers and torpedoes both require an active lock by clicking on the target.'],
-      ['Phasers', 'Fast and continuous but arc-limited. Enable Auto so they fire the instant the target crosses your fire arc.'],
-      ['Torpedoes', 'Use them when on priority target. They do less damage to shields than hull, sensors can monitor target shields.'],
+      [t('help.tactical.0.heading'), t('help.tactical.0.body')],
+      [t('help.tactical.1.heading'), t('help.tactical.1.body')],
+      [t('help.tactical.2.heading'), t('help.tactical.2.body')],
+      [t('help.tactical.3.heading'), t('help.tactical.3.body')],
     ]);
   });
 
@@ -55,7 +58,7 @@ describe('helpSections', () => {
   });
 
   it('preserves the literal × glyph in helm Impulse text', () => {
-    const impulse = helpSections('helm').find(([t]) => t === 'Impulse Drive');
+    const impulse = helpSections('helm').find(([h]) => h === t('help.helm.2.heading'));
     expect(impulse[1]).toContain('×');
   });
 
@@ -138,7 +141,7 @@ describe('help modal open/close', () => {
 
     // Heading + one section per Repair tuple.
     const heading = overlay.children.find((c) => c.className === 'help-heading');
-    expect(heading.textContent).toBe('HELP — tap to dismiss');
+    expect(heading.textContent).toBe(t('help.modal_heading'));
     const sections = overlay.children.find((c) => c.className === 'help-sections');
     expect(sections.children).toHaveLength(helpSections('repair').length);
   });
@@ -294,6 +297,11 @@ describe('renderInlineHelp', () => {
     renderInlineHelp(root, ['tactical'], doc);
     const sections = root.children[0].children.find((c) => c.className === 'help-sections');
     const titles = sections.children.map((s) => s.children.find((c) => c.className === 'help-section-title').textContent);
-    expect(titles).toEqual(['Weapons Officer', 'Target Lock', 'Phasers', 'Torpedoes']);
+    expect(titles).toEqual([
+      t('help.tactical.0.heading'),
+      t('help.tactical.1.heading'),
+      t('help.tactical.2.heading'),
+      t('help.tactical.3.heading'),
+    ]);
   });
 });

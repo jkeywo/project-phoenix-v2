@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-boost-btn.js';
 
@@ -124,7 +125,7 @@ describe('PhBoostBtn', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('BOOST');
+    expect(btn.textContent.trim()).toBe(t('component.boost.ready'));
     expect(btn.className).toContain('available');
     expect(btn.disabled).toBe(false);
   });
@@ -133,7 +134,7 @@ describe('PhBoostBtn', () => {
     const { el } = setup();
     el.state = { available: true, active: true, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('BOOSTING');
+    expect(btn.textContent.trim()).toBe(t('component.boost.boosting_full'));
     expect(btn.className).toContain('active');
     expect(btn.disabled).toBe(false);
   });
@@ -142,7 +143,7 @@ describe('PhBoostBtn', () => {
     const { el } = setup();
     el.state = { available: true, active: true, recharge_pct: 65, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('BOOSTING 65%');
+    expect(btn.textContent.trim()).toBe(t('component.boost.boosting', { pct: 65 }));
     expect(btn.className).toContain('active');
     expect(btn.disabled).toBe(false);
   });
@@ -151,7 +152,7 @@ describe('PhBoostBtn', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 45, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('RECHARGING 45%');
+    expect(btn.textContent.trim()).toBe(t('component.boost.recharging', { pct: 45 }));
     expect(btn.className).toContain('recharging');
     expect(btn.disabled).toBe(true);
   });
@@ -181,7 +182,7 @@ describe('PhBoostBtn', () => {
     el.state = { available: true, active: false, recharge_pct: 100, system_id: '', auto: true };
     const badge = el.shadowRoot.getElementById('auto-badge');
     expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    expect(badge.textContent.trim()).toBe(t('console.common.auto'));
     const btn = el.shadowRoot.getElementById('btn');
     expect(btn.disabled).toBe(true);
   });
@@ -226,7 +227,7 @@ describe('PhBoostBtn', () => {
     const { el } = setup();
     el.state = { available: false, active: false, recharge_pct: 100, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('BOOST');
+    expect(btn.textContent.trim()).toBe(t('component.boost.ready'));
     expect(btn.className).toContain('available');
   });
 });

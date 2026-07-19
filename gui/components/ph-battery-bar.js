@@ -1,11 +1,18 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhBatteryBar extends HTMLElement {
   #state = null;
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -25,10 +32,10 @@ export class PhBatteryBar extends HTMLElement {
     <div class="fill" id="bar-fill" style="width:100%"></div>
     <div class="threshold-marker" id="threshold-marker" style="left:20%"></div>
     <span class="label" id="bar-label">—%</span>
-    <span class="charging-indicator" id="charging-indicator">CHARGING</span>
+    <span class="charging-indicator" id="charging-indicator">${t('component.battery_bar.charging')}</span>
   </div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {}

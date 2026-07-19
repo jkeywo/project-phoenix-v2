@@ -1,4 +1,10 @@
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhRepairTeams extends HTMLElement {
   #state = null;
@@ -9,8 +15,8 @@ export class PhRepairTeams extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -34,12 +40,12 @@ export class PhRepairTeams extends HTMLElement {
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
-    <span>REPAIR TEAMS</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.repair_teams.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="teams-container"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
   }
 
@@ -103,7 +109,7 @@ export class PhRepairTeams extends HTMLElement {
     badge.style.display = auto ? 'inline' : 'none';
 
     if (teams.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO REPAIR TEAMS'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.repair_teams.empty'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -138,9 +144,9 @@ export class PhRepairTeams extends HTMLElement {
       }
 
       const status = team.status || 'idle';
-      card.querySelector('.team-label').textContent = team.label || 'Team ' + team.id;
+      card.querySelector('.team-label').textContent = team.label || t('component.repair_teams.team', { n: team.id });
       const badgeEl = card.querySelector('.status-badge');
-      badgeEl.textContent = status.toUpperCase();
+      badgeEl.textContent = t('component.repair_teams.status.' + status);
       badgeEl.className = 'status-badge ' + status;
 
       const isIdle = status === 'idle';
@@ -153,7 +159,7 @@ export class PhRepairTeams extends HTMLElement {
       if (isIdle) {
         const hasTargets = targets.length > 0;
         label.style.display = hasTargets ? 'none' : 'block';
-        if (!hasTargets) label.textContent = 'No repair targets';
+        if (!hasTargets) label.textContent = t('component.repair_teams.no_targets');
         drow.style.display = hasTargets ? 'flex' : 'none';
 
         const sig = targets.map(t => t.id).join('|');
@@ -183,7 +189,7 @@ export class PhRepairTeams extends HTMLElement {
         // Busy team: show its current target; dispatch is not offered.
         drow.style.display = 'none';
         label.style.display = 'block';
-        label.textContent = 'Target: ' + (team.target || '—');
+        label.textContent = t('component.repair_teams.target', { target: team.target || '—' });
       }
 
       const fill = card.querySelector('.progress-fill');

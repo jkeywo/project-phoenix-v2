@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-current-message.js';
 
@@ -40,19 +41,19 @@ describe('PhCommsCurrentMessage', () => {
   it('renders NO ACTIVE HAIL placeholder when thread is null', () => {
     const { el } = setup();
     el.state = { thread: null };
-    expect(queryText(el, '#container')).toBe('NO ACTIVE HAIL');
+    expect(queryText(el, '#container')).toBe(t('component.comms_message.no_active_hail'));
   });
 
   it('renders NO ACTIVE HAIL placeholder when thread is undefined', () => {
     const { el } = setup();
     el.state = {};
-    expect(queryText(el, '#container')).toBe('NO ACTIVE HAIL');
+    expect(queryText(el, '#container')).toBe(t('component.comms_message.no_active_hail'));
   });
 
   it('renders NO ACTIVE HAIL placeholder when state is null', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '#container')).toBe('NO ACTIVE HAIL');
+    expect(queryText(el, '#container')).toBe(t('component.comms_message.no_active_hail'));
   });
 
   it('renders thread with sender label and message body', () => {

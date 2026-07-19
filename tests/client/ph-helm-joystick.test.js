@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { softenAxis, GAMEPAD_DEADZONE } from '../../gui/components/ph-helm-joystick.js';
 
@@ -75,7 +76,7 @@ describe('PhHelmJoystick', () => {
     el.state = { auto: true };
     const badge = el.shadowRoot.getElementById('auto-badge');
     expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    expect(badge.textContent.trim()).toBe(t('console.common.auto'));
     expect(el.shadowRoot.getElementById('well').classList.contains('auto')).toBe(true);
   });
 

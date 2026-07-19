@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-comms-contact-list.js';
 
@@ -40,13 +41,13 @@ describe('PhCommsContactList', () => {
   it('renders NO CONTACTS placeholder with empty array', () => {
     const { el } = setup();
     el.state = { contacts: [] };
-    expect(queryText(el, '.list')).toBe('NO CONTACTS');
+    expect(queryText(el, '.list')).toBe(t('component.comms_contacts.empty'));
   });
 
   it('renders NO CONTACTS placeholder with null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '.list')).toBe('NO CONTACTS');
+    expect(queryText(el, '.list')).toBe(t('component.comms_contacts.empty'));
   });
 
   it('renders in-range contact with correct stance badge color', () => {
@@ -58,7 +59,7 @@ describe('PhCommsContactList', () => {
     };
     const badge = el.shadowRoot.querySelector('.badge');
     expect(badge.classList.contains('friendly')).toBe(true);
-    expect(badge.textContent.trim()).toBe('friendly');
+    expect(badge.textContent.trim()).toBe(t('console.stance.friendly'));
   });
 
   it('applies different stance colors: hostile, friendly, neutral, allied', () => {

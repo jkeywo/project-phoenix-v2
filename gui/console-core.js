@@ -42,6 +42,12 @@
  *     3. wasmBindings.wasm_ui_action  (browser WASM)
  *     4. BroadcastChannel    (separate-tab mode)
  */
+// strings-boot's top-level await blocks this module (and therefore every
+// console page) until the string table is loaded, so data-i18n substitution
+// below and t() calls in console render functions never see an empty table.
+// In Node tests strings-boot is a no-op; setup-strings.js loads the table.
+import './strings-boot.js';
+import { applyToDom } from './strings.js';
 import { mountHelp } from './help-panel.js';
 
 export function initConsole({ name, render }) {
@@ -164,6 +170,19 @@ export function initConsole({ name, render }) {
       document.addEventListener('DOMContentLoaded', function() { mountHelp(name); });
     } else {
       mountHelp(name);
+    }
+  }
+
+  // ── Static text (localisation) ─────────────────────────────────────────
+  // Substitute every data-i18n / data-i18n-attr node in the page. Console
+  // markup carries string ids, not English — this is the pass that turns
+  // them into display text. Runs once at init; dynamic text goes through
+  // t() inside the console's own render function instead.
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { applyToDom(document); });
+    } else {
+      applyToDom(document);
     }
   }
 

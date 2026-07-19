@@ -20,6 +20,25 @@
  * Supports both flat `e.x` field and 3-element `e.position` array.
  * @param {{ x?: number, position?: number[] }} e
  */
+import { t, has } from './strings.js';
+
+/**
+ * Display name for a station id.
+ *
+ * Station names in TOML are lookup identifiers (Rust matches them by name, see
+ * scripts/strings-rules.mjs), so they are localised here from a derived id
+ * instead: `station.<id>.name`. Unknown ids fall back to Title Case so a new
+ * station renders legibly before its CSV row exists.
+ */
+export function stationDisplayName(id) {
+  const key = 'station.' + id + '.name';
+  if (has(key)) return t(key);
+  return String(id)
+    .split(/[-_]/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 export function entityX(e) {
   return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0);
 }
@@ -107,23 +126,18 @@ export function repairCoreAndTargets(systemHull, stationSystems) {
 
   const coreSystems = hull.filter(h => !owned.has(h.system_id));
 
-  const titleCase = (id) => String(id)
-    .split(/[-_]/)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-
   const targets = [];
   Object.keys(stations).forEach(st => {
     const agg = aggregateStationHull(st, hull, stations);
     if (agg.totalMax > 0) {
-      targets.push({ id: st, label: titleCase(st), damage_pct: agg.damagePct });
+      targets.push({ id: st, label: stationDisplayName(st), damage_pct: agg.damagePct });
     }
   });
 
   const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
   if (coreMax > 0) {
     const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
-    targets.push({ id: 'core', label: 'Core', damage_pct: 1 - coreCur / coreMax });
+    targets.push({ id: 'core', label: t('console.repair.core'), damage_pct: 1 - coreCur / coreMax });
   }
 
   return { coreSystems, targets };
@@ -329,7 +343,7 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     kind: 'waypoint',
     icon: 'waypoint',
     color: [0.83, 0.66, 0.13],
-    name: 'WAYPOINT',
+    name: t('console.common.waypoint'),
     selectable: sourceUuid !== null,
     objective_target: false,
     edge,
@@ -394,7 +408,7 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
     kind: opts.kind || 'target-marker',
     icon: opts.icon || 'target-marker',
     color: opts.color || [1.0, 1.0, 1.0],
-    name: opts.label || target.name || 'TARGET',
+    name: opts.label || target.name || t('console.common.target'),
     selectable: false,
     objective_target: false,
     edge,
@@ -521,7 +535,7 @@ export function buildWeaponsConsoleState(state) {
   const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
   const sciMarker = buildTargetBlip(
     sciTargetUuid, entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
-    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
+    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: t('console.radar.science_target') }
   );
   if (sciMarker) blips.push(sciMarker);
   const waypoint = buildWaypointBlip(
@@ -646,13 +660,13 @@ export function buildHelmConsoleState(state) {
   const sensBb = state.blackboards?.['sensors'];
   const tacMarker = buildTargetBlip(
     tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
-    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
+    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
   );
   if (tacMarker) blips.push(tacMarker);
   const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
   const sciMarker = buildTargetBlip(
     sciTargetUuid, entities, shipX, shipZ, shipYaw, range,
-    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: 'SCIENCE TARGET' }
+    { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: t('console.radar.science_target') }
   );
   if (sciMarker) blips.push(sciMarker);
 
@@ -703,7 +717,7 @@ export function buildHelmConsoleState(state) {
  */
 function normalizeTeamSlot(slot, idx, travelDurationSecs) {
   const id = idx;
-  const label = 'Team ' + (idx + 1);
+  const label = t('component.repair_teams.team', { n: idx + 1 });
   const dur = travelDurationSecs > 0 ? travelDurationSecs : 5.0;
 
   // Detect which enum variant is active by checking for known variant keys.
@@ -982,7 +996,7 @@ export function buildSensorsConsoleState(state) {
   const tacBb = state.blackboards?.['tactical'];
   const tacMarker = buildTargetBlip(
     tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
-    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: 'TACTICAL TARGET' }
+    { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
   );
   if (tacMarker) blips.push(tacMarker);
   const waypoint = buildWaypointBlip(

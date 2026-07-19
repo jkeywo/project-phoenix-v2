@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Pilot Console</title>
+  <title data-i18n="console.pilot.doc_title">Project Phoenix — Pilot Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -54,29 +54,29 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Pilot Console">
+  <div class="frame" data-screen-label="Pilot Console" data-i18n-attr="data-screen-label:console.pilot.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>PILOT<span class="sub">COURIER</span></h1>
+        <h1><span data-i18n="console.pilot.title">PILOT</span><span class="sub" data-i18n="console.pilot.subtitle">COURIER</span></h1>
         <div class="hero-controls">
-          <span class="alert-badge" id="red-alert-badge">Red Alert</span>
-          <button class="overlay-toggle" id="nav-toggle" data-active="false">Nav</button>
-          <button class="overlay-toggle" id="comms-toggle" data-active="false">Comms<span class="unread-badge" id="comms-unread">!</span></button>
-          <button class="overlay-toggle" id="obj-toggle" data-active="false">Objectives</button>
+          <span class="alert-badge" id="red-alert-badge" data-i18n="console.common.red_alert_badge">Red Alert</span>
+          <button class="overlay-toggle" id="nav-toggle" data-active="false" data-i18n="console.common.nav_toggle">Nav</button>
+          <button class="overlay-toggle" id="comms-toggle" data-active="false"><span data-i18n="console.common.comms_toggle">Comms</span><span class="unread-badge" id="comms-unread">!</span></button>
+          <button class="overlay-toggle" id="obj-toggle" data-active="false" data-i18n="console.common.objectives_toggle">Objectives</button>
           <span class="cam-sep"></span>
-          <button class="cam-btn" id="cam-cinematic">Cinematic</button>
-          <button class="cam-btn" id="cam-fore">Fore</button>
+          <button class="cam-btn" id="cam-cinematic" data-i18n="console.pilot.cam_cinematic">Cinematic</button>
+          <button class="cam-btn" id="cam-fore" data-i18n="console.pilot.cam_fore">Fore</button>
         </div>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Radar</h2>
+          <h2 data-i18n="console.pilot.radar">Radar</h2>
           <ph-courier-radar id="courier-radar"></ph-courier-radar>
           <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
         </div>
         <div class="col">
-          <h2>Flight &amp; Weapons</h2>
+          <h2 data-i18n="console.pilot.flight_and_weapons">Flight &amp; Weapons</h2>
           <div class="stick-row">
             <ph-helm-joystick id="helm-joystick"></ph-helm-joystick>
             <ph-lateral-thrust-joystick id="lateral-thrust-joystick"></ph-lateral-thrust-joystick>
@@ -90,9 +90,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">PILOT STATION</span>
+        <span id="footer-status" data-i18n="console.pilot.station_footer">PILOT STATION</span>
         <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -100,18 +100,18 @@
     </div>
     <div class="overlay-panel" id="nav-overlay">
       <button class="overlay-back" id="nav-back">&#8592; Back</button>
-      <h2>Navigation</h2>
+      <h2 data-i18n="console.pilot.navigation">Navigation</h2>
       <ph-navigation-map id="navigation-map"></ph-navigation-map>
     </div>
     <div class="overlay-panel" id="comms-overlay">
       <button class="overlay-back" id="comms-back">&#8592; Back</button>
-      <h2>Comms</h2>
+      <h2 data-i18n="console.pilot.comms">Comms</h2>
       <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
       <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
     </div>
     <div class="overlay-panel" id="obj-overlay">
       <button class="overlay-back" id="obj-back">&#8592; Back</button>
-      <h2>Objectives</h2>
+      <h2 data-i18n="console.pilot.objectives">Objectives</h2>
       <ph-objective-list id="objective-list"></ph-objective-list>
     </div>
   </div>
@@ -129,6 +129,7 @@
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
 
     var OVERLAY_IDS = ['nav-overlay', 'comms-overlay', 'obj-overlay'];
 

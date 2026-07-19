@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-ship-picker.js';
 

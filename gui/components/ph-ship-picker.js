@@ -4,8 +4,8 @@ export class PhShipPicker extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; }
     :host * { box-sizing: border-box; }
@@ -42,7 +42,7 @@ export class PhShipPicker extends HTMLElement {
   </style>
   <div class="ship-grid" id="grid"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {

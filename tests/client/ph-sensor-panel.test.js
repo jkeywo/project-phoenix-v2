@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-sensor-panel.js';
 
@@ -35,9 +36,9 @@ describe('PhSensorPanel', () => {
     const { el } = setup();
     el.state = {};
     expect(queryText(el, '#range-val')).toBe('0');
-    expect(queryText(el, '#blip-count')).toBe('0 CONTACTS');
+    expect(queryText(el, '#blip-count')).toBe(t('console.common.contacts.other', { n: 0 }));
     const targetArea = el.shadowRoot.querySelector('#target-area');
-    expect(targetArea.textContent).toContain('NO TARGET');
+    expect(targetArea.textContent).toContain(t('console.common.no_target'));
   });
 
   it('renders target info when state has target_uuid', () => {

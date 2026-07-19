@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhCommsContactList extends HTMLElement {
   #state = null;
   #pillCache = new Map();
@@ -6,8 +13,8 @@ export class PhCommsContactList extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -27,7 +34,7 @@ export class PhCommsContactList extends HTMLElement {
   </style>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
@@ -52,7 +59,7 @@ export class PhCommsContactList extends HTMLElement {
     }
 
     if (raw.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO CONTACTS'; list.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.comms_contacts.empty'); list.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -66,7 +73,7 @@ export class PhCommsContactList extends HTMLElement {
       if (!pill) {
         pill = document.createElement('div');
         pill.className = 'pill';
-        pill.innerHTML = '<span class="name"></span><span class="badge"></span><button class="hail-btn">HAIL</button>';
+        pill.innerHTML = '<span class="name"></span><span class="badge"></span><button class="hail-btn">' + t('component.comms_contacts.hail') + '</button>';
         pill.lastChild.addEventListener('click', (e) => {
           e.stopPropagation();
           if (this.sendAction) {
@@ -80,7 +87,9 @@ export class PhCommsContactList extends HTMLElement {
       pill.className = inRange ? 'pill' : 'pill out-of-range';
       pill.children[0].textContent = name;
       pill.children[1].className = 'badge ' + stance;
-      pill.children[1].textContent = stance;
+      // stance is a wire token ('friendly'/'hostile'/'neutral') — keep it as
+      // the CSS class, localise only the visible badge text.
+      pill.children[1].textContent = t('console.stance.' + stance);
       pill.children[2].disabled = !inRange;
     });
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Power Console</title>
+  <title data-i18n="console.power.doc_title">Project Phoenix - Power Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -22,12 +22,12 @@
 </head>
 <body>
   <div id="power-data" hidden></div>
-  <div class="frame" data-screen-label="Power Console">
+  <div class="frame" data-screen-label="Power Console" data-i18n-attr="data-screen-label:console.power.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>POWER<span class="sub">ALLOCATION &amp; BATTERY</span></h1>
-        <span class="auto-badge" id="power-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.power.title">POWER</span><span class="sub" data-i18n="console.power.subtitle">ALLOCATION &amp; BATTERY</span></h1>
+        <span class="auto-badge" id="power-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <ph-power-controls id="power-controls"></ph-power-controls>
@@ -35,7 +35,7 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>POWER STATION</span>
+        <span data-i18n="console.power.station_footer">POWER STATION</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="bat-val">0%</span>
@@ -47,6 +47,7 @@
     import '../components/ph-battery-bar.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'power',

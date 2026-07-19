@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-red-alert.js';
 
@@ -36,7 +37,7 @@ describe('PhRedAlert', () => {
     const { el } = setup();
     el.state = { system_id: 'red-alert', active: false, auto: false };
     const btn = el.shadowRoot.getElementById('alert-btn');
-    expect(btn.textContent.trim()).toBe('STAND DOWN');
+    expect(btn.textContent.trim()).toBe(t('component.red_alert.standby'));
     expect(btn.className).toContain('standby');
     expect(btn.className).not.toContain('active');
   });
@@ -45,7 +46,7 @@ describe('PhRedAlert', () => {
     const { el } = setup();
     el.state = { system_id: 'red-alert', active: true, auto: false };
     const btn = el.shadowRoot.getElementById('alert-btn');
-    expect(btn.textContent.trim()).toBe('RED ALERT');
+    expect(btn.textContent.trim()).toBe(t('component.red_alert.active'));
     expect(btn.className).toContain('active');
     expect(btn.className).not.toContain('standby');
   });
@@ -55,7 +56,7 @@ describe('PhRedAlert', () => {
     el.state = { system_id: 'red-alert', active: false, auto: true };
     const badge = el.shadowRoot.getElementById('auto-badge');
     expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    expect(badge.textContent.trim()).toBe(t('console.common.auto'));
     const btn = el.shadowRoot.getElementById('alert-btn');
     expect(btn.disabled).toBe(true);
   });

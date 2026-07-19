@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Courier Tactical</title>
+  <title data-i18n="console.courier_tactical.doc_title">Project Phoenix — Courier Tactical</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }.frame { height: 100%; }
@@ -19,14 +19,14 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Courier Tactical">
+  <div class="frame" data-screen-label="Courier Tactical" data-i18n-attr="data-screen-label:console.courier_tactical.screen_label">
     <div class="panel"></div><div class="panel-inner">
-      <h1>TACTICAL<small>HELM · WEAPONS · SENSORS</small></h1>
+      <h1><span data-i18n="console.tactical.title">TACTICAL</span><small data-i18n="console.courier_tactical.subtitle">HELM · WEAPONS · SENSORS</small></h1>
       <div class="body">
-        <div class="col"><h2>Weapons</h2><ph-tactical-radar id="tactical-radar"></ph-tactical-radar><ph-blasters-controls id="blasters"></ph-blasters-controls><h2>Sensors</h2><ph-sensor-radar id="sensor-radar"></ph-sensor-radar><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
-        <div class="col"><h2>Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
+        <div class="col"><h2 data-i18n="console.tactical.weapons">Weapons</h2><ph-tactical-radar id="tactical-radar"></ph-tactical-radar><ph-blasters-controls id="blasters"></ph-blasters-controls><h2 data-i18n="console.tactical.sensors">Sensors</h2><ph-sensor-radar id="sensor-radar"></ph-sensor-radar><ph-sensor-panel id="sensor-panel"></ph-sensor-panel></div>
+        <div class="col"><h2 data-i18n="console.tactical.helm">Helm</h2><div class="sticks"><ph-helm-joystick id="helm"></ph-helm-joystick><ph-lateral-thrust-joystick id="lateral"></ph-lateral-thrust-joystick></div><div class="buttons"><ph-impulse-btn id="impulse"></ph-impulse-btn><ph-boost-btn id="boost"></ph-boost-btn></div></div>
       </div>
-      <footer><span class="dot"></span><span>TACTICAL STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
+      <footer><span class="dot"></span><span data-i18n="console.tactical.station_footer">TACTICAL STATION</span><span class="spacer"></span><ph-station-damage id="damage"></ph-station-damage></footer>
     </div>
   </div>
   <script type="module">
@@ -40,6 +40,7 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({ name: 'tactical', render(s) {
       const weapons = system(s, 'tactical-radar', 'blaster-fore');

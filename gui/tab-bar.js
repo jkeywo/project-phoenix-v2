@@ -14,32 +14,38 @@
 // Post issue #619 the `consoles` input list carries lowercase station ids
 // (matching `StationId`). Pre-#619 it carried PascalCase Console enum names.
 
+// strings-boot blocks module evaluation until the table is loaded, so the
+// frozen maps below can resolve t() at module scope. A no-op in Node tests,
+// where tests/client/setup-strings.js loads the table instead.
+import './strings-boot.js';
+import { t } from './strings.js';
+
 export const CONSOLE_LABEL = Object.freeze({
-  captain: "Captain's Chair",
-  helm: 'Helm',
-  tactical: 'Tactical',
-  repair: 'Repair',
-  sensors: 'Sensors',
-  science: 'Science',
-  shields: 'Shields',
-  navigation: 'Navigation',
-  power: 'Power',
-  comms: 'Comms',
-  engineering: 'Engineering',
+  captain: t('console_label.captain'),
+  helm: t('console_label.helm'),
+  tactical: t('console_label.tactical'),
+  repair: t('console_label.repair'),
+  sensors: t('console_label.sensors'),
+  science: t('console_label.science'),
+  shields: t('console_label.shields'),
+  navigation: t('console_label.navigation'),
+  power: t('console_label.power'),
+  comms: t('console_label.comms'),
+  engineering: t('console_label.engineering'),
 });
 
 export const CONSOLE_INITIAL = Object.freeze({
-  captain: 'CC',
-  helm: 'H',
-  tactical: 'T',
-  repair: 'R',
-  sensors: 'S',
-  science: 'SC',
-  shields: 'SH',
-  navigation: 'N',
-  power: 'P',
-  comms: 'C',
-  engineering: 'E',
+  captain: t('console_initial.captain'),
+  helm: t('console_initial.helm'),
+  tactical: t('console_initial.tactical'),
+  repair: t('console_initial.repair'),
+  sensors: t('console_initial.sensors'),
+  science: t('console_initial.science'),
+  shields: t('console_initial.shields'),
+  navigation: t('console_initial.navigation'),
+  power: t('console_initial.power'),
+  comms: t('console_initial.comms'),
+  engineering: t('console_initial.engineering'),
 });
 
 // Threshold at which the portrait bar collapses to initials. Matches the

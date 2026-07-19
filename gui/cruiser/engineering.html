@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Engineering Console</title>
+  <title data-i18n="console.engineering.doc_title">Project Phoenix — Engineering Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -26,21 +26,21 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Engineering Console">
+  <div class="frame" data-screen-label="Engineering Console" data-i18n-attr="data-screen-label:console.engineering.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>ENGINEERING<span class="sub">POWER &amp; REPAIR</span></h1>
-        <span class="auto-badge" id="engineering-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.engineering.title">ENGINEERING</span><span class="sub" data-i18n="console.engineering.subtitle">POWER &amp; REPAIR</span></h1>
+        <span class="auto-badge" id="engineering-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Power</h2>
+          <h2 data-i18n="console.engineering.power">Power</h2>
           <ph-power-controls id="power-controls"></ph-power-controls>
           <ph-battery-bar id="battery-bar"></ph-battery-bar>
         </div>
         <div class="col">
-          <h2>Repair</h2>
+          <h2 data-i18n="console.engineering.repair">Repair</h2>
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
           <ph-station-damage id="core-damage" label="Core"></ph-station-damage>
           <ph-repair-teams id="repair-teams"></ph-repair-teams>
@@ -48,7 +48,7 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">ENGINEERING STATION</span>
+        <span id="footer-status" data-i18n="console.engineering.station_footer">ENGINEERING STATION</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -62,6 +62,7 @@
     import '../components/ph-hull-integrity.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'engineering',

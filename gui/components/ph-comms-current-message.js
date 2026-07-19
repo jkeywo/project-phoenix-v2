@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhCommsCurrentMessage extends HTMLElement {
   #state = null;
   #respCache = new Map();
@@ -11,8 +18,8 @@ export class PhCommsCurrentMessage extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -29,14 +36,14 @@ export class PhCommsCurrentMessage extends HTMLElement {
     .resp-btn:disabled { opacity: 0.35; cursor: default; }
   </style>
   <div id="container">
-    <div class="placeholder" id="placeholder">NO ACTIVE HAIL</div>
+    <div class="placeholder" id="placeholder">${t('component.comms_message.no_active_hail')}</div>
     <div class="thread" id="thread" style="display:none">
       <div class="sender-label" id="sender-label"></div>
       <div class="messages" id="messages"><div class="msg"><span class="text"></span></div></div>
     </div>
   </div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {

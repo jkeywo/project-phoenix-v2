@@ -1,3 +1,4 @@
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
@@ -293,7 +294,7 @@ describe('setAutoState', () => {
 
   it('sets badge textContent to AUTO', () => {
     setAutoState(btn, badge, true);
-    expect(badge.textContent).toBe('AUTO');
+    expect(badge.textContent).toBe(t('console.common.auto'));
   });
 
   it('disables button when isAuto=true', () => {

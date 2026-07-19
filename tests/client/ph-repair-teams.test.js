@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-repair-teams.js';
 
@@ -39,13 +40,13 @@ describe('PhRepairTeams', () => {
   it('renders empty state with no repair teams', () => {
     const { el } = setup();
     el.state = {};
-    expect(el.shadowRoot.textContent).toContain('NO REPAIR TEAMS');
+    expect(el.shadowRoot.textContent).toContain(t('component.repair_teams.empty'));
   });
 
   it('renders empty state when teams is null', () => {
     const { el } = setup();
     el.state = { teams: null };
-    expect(el.shadowRoot.textContent).toContain('NO REPAIR TEAMS');
+    expect(el.shadowRoot.textContent).toContain(t('component.repair_teams.empty'));
   });
 
   it('renders an idle team with no targets as "No repair targets"', () => {

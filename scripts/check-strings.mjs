@@ -93,9 +93,9 @@ const codeFiles = [
   path.join(root, 'server.html'),
 ];
 
-// `t('some.id')` / `t("some.id")` — ignores template literals and computed ids,
-// which cannot be checked statically anyway.
-const T_CALL = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1/g;
+// `t('some.id')` / `t("some.id")` — the trailing [,)] excludes computed ids
+// like t('console.stance.' + stance), which cannot be checked statically.
+const T_CALL = /\bt\(\s*(['"])([A-Za-z0-9_.-]+)\1\s*[,)]/g;
 const DATA_I18N = /data-i18n\s*=\s*"([^"]+)"/g;
 const DATA_I18N_ATTR = /data-i18n-attr\s*=\s*"([^"]+)"/g;
 
@@ -155,6 +155,12 @@ for (const [dir, prefix] of [['entities', 'entity'], ['worlds', 'world'], ['fact
 
 // ── 4. Untranslated literals still in the client (report-only for now) ──────
 
+// Developer/operator-facing prose that deliberately stays English: crash
+// guidance pointing at DevTools, and the host debug panel. Not player text.
+const DEV_FACING = [
+  'WASM trap (RuntimeError)',
+];
+
 const LITERAL_ASSIGN = /\.textContent\s*=\s*(['"])([^'"]*[A-Za-z]{3}[^'"]*)\1/g;
 // Skip strings that are obviously not prose: css values, ids, single tokens
 // used as keys. A literal is interesting if it contains a space or is
@@ -165,7 +171,7 @@ for (const file of codeFiles) {
   let src;
   try { src = await readFile(file, 'utf8'); } catch { continue; }
   for (const m of src.matchAll(LITERAL_ASSIGN)) {
-    if (INTERESTING(m[2])) {
+    if (INTERESTING(m[2]) && !DEV_FACING.some((d) => m[2].includes(d))) {
       warnings.push(`${rel(file)}: hardcoded textContent "${m[2]}" — not localised`);
     }
   }

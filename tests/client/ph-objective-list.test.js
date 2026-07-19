@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-objective-list.js';
 
@@ -40,19 +41,19 @@ describe('PhObjectiveList', () => {
   it('renders NO OBJECTIVES placeholder when objectives is an empty array', () => {
     const { el } = setup();
     el.state = { objectives: [] };
-    expect(queryText(el, '.list')).toBe('NO OBJECTIVES');
+    expect(queryText(el, '.list')).toBe(t('component.objectives.empty'));
   });
 
   it('renders NO OBJECTIVES placeholder when state is null', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '.list')).toBe('NO OBJECTIVES');
+    expect(queryText(el, '.list')).toBe(t('component.objectives.empty'));
   });
 
   it('renders NO OBJECTIVES placeholder when objectives is null', () => {
     const { el } = setup();
     el.state = { objectives: null };
-    expect(queryText(el, '.list')).toBe('NO OBJECTIVES');
+    expect(queryText(el, '.list')).toBe(t('component.objectives.empty'));
   });
 
   it('renders a mix of done and pending objectives', () => {

@@ -1,3 +1,4 @@
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mountSettings } from '../../gui/settings-panel.js';
 
@@ -186,7 +187,7 @@ describe('settings content with a station that has ratings', () => {
     );
     expect(ratingSection).toBeDefined();
     const heading = ratingSection.children.find(c => c.className === 'settings-section-heading');
-    expect(heading.textContent).toBe('Rating');
+    expect(heading.textContent).toBe(t('settings.rating'));
     const row = ratingSection.children.find(c => c.className === 'settings-rating-row');
     expect(row.children).toHaveLength(3);
     // "Reduced" is active.
@@ -237,14 +238,14 @@ describe('settings content — leave station', () => {
     const popup = overlay.children[0];
     const leaveSection = popup.children.find(c =>
       c.className === 'settings-section' &&
-      c.children.some(ch => ch.textContent === 'Station')
+      c.children.some(ch => ch.textContent === t('settings.station'))
     );
     expect(leaveSection).toBeDefined();
     const leaveBtn = leaveSection.children.find(c =>
       c.className && c.className.includes('settings-leave-btn')
     );
     expect(leaveBtn).toBeDefined();
-    expect(leaveBtn.textContent).toBe('Leave Station');
+    expect(leaveBtn.textContent).toBe(t('settings.leave_station'));
   });
 
   it('sends ReleaseStation on leave button click', () => {
@@ -255,7 +256,7 @@ describe('settings content — leave station', () => {
     const popup = overlay.children[0];
     const leaveSection = popup.children.find(c =>
       c.className === 'settings-section' &&
-      c.children.some(ch => ch.textContent === 'Station')
+      c.children.some(ch => ch.textContent === t('settings.station'))
     );
     const leaveBtn = leaveSection.children.find(c =>
       c.className && c.className.includes('settings-leave-btn')
@@ -284,12 +285,12 @@ describe('settings content — QR toggle', () => {
     const popup = overlay.children[0];
     const qrSection = popup.children.find(c =>
       c.className === 'settings-section' &&
-      c.children.some(ch => ch.textContent === 'QR Code')
+      c.children.some(ch => ch.textContent === t('settings.qr_code'))
     );
     expect(qrSection).toBeDefined();
     const qrBtn = qrSection.children.find(c => c.className === 'settings-action-btn');
     expect(qrBtn).toBeDefined();
-    expect(qrBtn.textContent).toBe('Toggle QR on Screen');
+    expect(qrBtn.textContent).toBe(t('settings.toggle_qr'));
     qrBtn.click();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0].type).toBe('ToggleQrCode');
@@ -349,7 +350,7 @@ describe('settings content — no station', () => {
     );
     const hasLeave = popup.children.some(c =>
       c.className === 'settings-section' &&
-      c.children.some(ch => ch.textContent === 'Leave Station')
+      c.children.some(ch => ch.textContent === t('settings.leave_station'))
     );
     expect(hasRating).toBe(false);
     expect(hasLeave).toBe(false);

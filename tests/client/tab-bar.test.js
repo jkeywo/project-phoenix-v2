@@ -1,3 +1,4 @@
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, vi } from 'vitest';
 import {
   tabBarLayout,
@@ -75,15 +76,15 @@ describe('CONSOLE_LABEL / CONSOLE_INITIAL', () => {
   });
 
   it('label for captain is "Captain\'s Chair"', () => {
-    expect(CONSOLE_LABEL.captain).toBe("Captain's Chair");
+    expect(CONSOLE_LABEL.captain).toBe(t('console_label.captain'));
   });
 
   it('initial for shields is "SH"', () => {
-    expect(CONSOLE_INITIAL.shields).toBe('SH');
+    expect(CONSOLE_INITIAL.shields).toBe(t('console_initial.shields'));
   });
 
   it('initial for tactical is "T"', () => {
-    expect(CONSOLE_INITIAL.tactical).toBe('T');
+    expect(CONSOLE_INITIAL.tactical).toBe(t('console_initial.tactical'));
   });
 
   it('label and initial maps are frozen', () => {
@@ -173,7 +174,7 @@ describe('tabBarLayout — labels', () => {
   it('uses full names for 2 consoles in portrait', () => {
     const out = tabBarLayout(['captain', 'tactical'], 'captain', 'portrait', true);
     expect(out.useInitials).toBe(false);
-    expect(out.buttons.map((b) => b.label)).toEqual(["Captain's Chair", 'Tactical']);
+    expect(out.buttons.map((b) => b.label)).toEqual([t('console_label.captain'), t('console_label.tactical')]);
   });
 
   it('uses full names for 4 consoles in portrait (boundary just below threshold)', () => {
@@ -183,7 +184,7 @@ describe('tabBarLayout — labels', () => {
     );
     expect(out.useInitials).toBe(false);
     expect(out.buttons.map((b) => b.label)).toEqual([
-      "Captain's Chair", 'Tactical', 'Repair', 'Helm',
+      t('console_label.captain'), t('console_label.tactical'), t('console_label.repair'), t('console_label.helm'),
     ]);
   });
 
@@ -193,7 +194,7 @@ describe('tabBarLayout — labels', () => {
       'tactical', 'portrait', true,
     );
     expect(out.useInitials).toBe(true);
-    expect(out.buttons.map((b) => b.label)).toEqual(['CC', 'H', 'T', 'R', 'S']);
+    expect(out.buttons.map((b) => b.label)).toEqual(['captain', 'helm', 'tactical', 'repair', 'sensors'].map((c) => t('console_initial.' + c)));
   });
 
   it('uses full names for 9 consoles in landscape (horizontal bar has room)', () => {
@@ -201,8 +202,7 @@ describe('tabBarLayout — labels', () => {
     const out = tabBarLayout(all, 'comms', 'landscape', true);
     expect(out.useInitials).toBe(false);
     expect(out.buttons.map((b) => b.label)).toEqual([
-      "Captain's Chair", 'Helm', 'Tactical', 'Repair', 'Sensors',
-      'Shields', 'Navigation', 'Power', 'Comms',
+      ...['captain', 'helm', 'tactical', 'repair', 'sensors', 'shields', 'navigation', 'power', 'comms'].map((c) => t('console_label.' + c)),
     ]);
   });
 });
@@ -246,7 +246,7 @@ describe('tabBarLayout — compactActive mode', () => {
   it('shows only the active button with correct label in compact mode', () => {
     const out = tabBarLayout(['captain', 'helm', 'tactical'], 'captain', 'portrait', true, null, true);
     expect(out.buttons).toHaveLength(1);
-    expect(out.buttons[0].label).toBe("Captain's Chair");
+    expect(out.buttons[0].label).toBe(t('console_label.captain'));
     expect(out.buttons[0].active).toBe(true);
   });
 
@@ -279,7 +279,7 @@ describe('tabBarLayout — compactActive mode', () => {
     const out = tabBarLayout(all, 'tactical', 'portrait', true, null, true);
     expect(out.useInitials).toBe(true);
     expect(out.buttons).toHaveLength(1);
-    expect(out.buttons[0].label).toBe('T');
+    expect(out.buttons[0].label).toBe(t('console_initial.tactical'));
   });
 });
 
@@ -315,9 +315,9 @@ describe('renderTabBar — DOM mutations', () => {
     expect(root.dataset.orientation).toBe('portrait');
     expect(root.children.length).toBe(3);
     const btns = root.children;
-    expect(btns[0].textContent).toBe("Captain's Chair");
-    expect(btns[1].textContent).toBe('Tactical');
-    expect(btns[2].textContent).toBe('Repair');
+    expect(btns[0].textContent).toBe(t('console_label.captain'));
+    expect(btns[1].textContent).toBe(t('console_label.tactical'));
+    expect(btns[2].textContent).toBe(t('console_label.repair'));
   });
 
   it('marks the active button with the .active class, role=tab, and aria-selected=true', () => {

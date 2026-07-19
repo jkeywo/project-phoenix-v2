@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-impulse-btn.js';
 
@@ -97,7 +98,7 @@ describe('PhImpulseBtn', () => {
     const { el } = setup();
     el.state = { state: 'ready', charge_pct: 0, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('IMPULSE');
+    expect(btn.textContent.trim()).toBe(t('component.impulse.ready'));
     expect(btn.className).toContain('ready');
     expect(btn.disabled).toBe(false);
   });
@@ -108,7 +109,7 @@ describe('PhImpulseBtn', () => {
     const btn = el.shadowRoot.getElementById('btn');
     // Pressing IMPULSE again while charging cancels it, so the button stays
     // enabled and reads CANCEL rather than being an inert CHARGING label.
-    expect(btn.textContent.trim()).toBe('CANCEL 67%');
+    expect(btn.textContent.trim()).toBe(t('component.impulse.cancel', { pct: 67 }));
     expect(btn.className).toContain('charging');
     expect(btn.disabled).toBe(false);
   });
@@ -131,7 +132,7 @@ describe('PhImpulseBtn', () => {
     const { el } = setup();
     el.state = { state: 'cooldown', charge_pct: 0, system_id: 'helm-impulse', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe('COOLDOWN');
+    expect(btn.textContent.trim()).toBe(t('console.common.cooldown'));
     expect(btn.className).toContain('cooldown');
     expect(btn.disabled).toBe(true);
   });
@@ -141,7 +142,7 @@ describe('PhImpulseBtn', () => {
     el.state = { state: 'ready', charge_pct: 0, system_id: 'helm-impulse', auto: true };
     const badge = el.shadowRoot.getElementById('auto-badge');
     expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    expect(badge.textContent.trim()).toBe(t('console.common.auto'));
     const btn = el.shadowRoot.getElementById('btn');
     expect(btn.disabled).toBe(true);
   });

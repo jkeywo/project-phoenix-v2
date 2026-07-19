@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-torpedo-controls.js';
 
@@ -60,13 +61,13 @@ describe('PhTorpedoControls', () => {
   it('renders NO TORPEDO TUBES placeholder with empty tubes', () => {
     const { el } = setup();
     el.state = { tubes: [], magazine: { current: 0, max: 0 } };
-    expect(queryText(el, '#tubes')).toBe('NO TORPEDO TUBES');
+    expect(queryText(el, '#tubes')).toBe(t('component.torpedoes.empty'));
   });
 
   it('renders NO TORPEDO TUBES placeholder with null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '#tubes')).toBe('NO TORPEDO TUBES');
+    expect(queryText(el, '#tubes')).toBe(t('component.torpedoes.empty'));
   });
 
   it('displays magazine count', () => {

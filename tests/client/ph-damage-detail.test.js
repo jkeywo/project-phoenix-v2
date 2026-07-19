@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-damage-detail.js';
 
@@ -57,7 +58,7 @@ describe('PhDamageDetail', () => {
         { display_name: 'Torpedo Launcher', current: 0, max_hp: 150, tier: 2, debuff_magnitude: 0.5 },
       ],
     };
-    expect(el.shadowRoot.textContent).toContain('DESTROYED');
+    expect(el.shadowRoot.textContent).toContain(t('console.common.destroyed'));
     const row = el.shadowRoot.querySelector('.row');
     expect(row.className).toContain('destroyed');
   });
@@ -69,7 +70,7 @@ describe('PhDamageDetail', () => {
         { display_name: 'Phaser Bank A', current: 200, max_hp: 200, tier: 3, debuff_magnitude: 0.0 },
       ],
     };
-    expect(el.shadowRoot.textContent).not.toContain('DESTROYED');
+    expect(el.shadowRoot.textContent).not.toContain(t('console.common.destroyed'));
     const row = el.shadowRoot.querySelector('.row');
     expect(row.className).not.toContain('destroyed');
   });
@@ -143,6 +144,6 @@ describe('PhDamageDetail', () => {
       ],
     };
     expect(el.shadowRoot.querySelectorAll('.row').length).toBe(2);
-    expect(el.shadowRoot.textContent).toContain('DESTROYED');
+    expect(el.shadowRoot.textContent).toContain(t('console.common.destroyed'));
   });
 });

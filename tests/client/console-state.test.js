@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  entityX, entityZ, entityRadius,
+  entityX, entityZ, entityRadius, stationDisplayName,
   buildBlips,
   buildRadarRegions,
   buildWaypointBlip,
@@ -2257,7 +2257,7 @@ describe('repairCoreAndTargets', () => {
     const { targets } = repairCoreAndTargets(hull, stationSystems);
     const helm = targets.find(t => t.id === 'helm');
     expect(helm).toBeTruthy();
-    expect(helm.label).toBe('Helm');
+    expect(helm.label).toBe(stationDisplayName('helm'));
     expect(helm.damage_pct).toBeCloseTo(0.3, 5); // 6 of 20 hp lost
 
     // Healthy stations still get a dispatch target — repair teams can be

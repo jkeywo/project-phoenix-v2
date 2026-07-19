@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { ts } from './strings';
 
 const CONSOLE_URL = '/gui/battleship/navigation.html';
 
@@ -56,7 +57,7 @@ test('navigation console: selected entity name stays NONE until the operator tap
       radar_range: 5000,
     }));
   });
-  await expect(page.locator('#ent-name')).toHaveText('NONE');
+  await expect(page.locator('#ent-name')).toHaveText(ts('console.navigation.none'));
 });
 
 test('navigation console: tapping a visible entity sends source_uuid for that target', async ({ page }) => {

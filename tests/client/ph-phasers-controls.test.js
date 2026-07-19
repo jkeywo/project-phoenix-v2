@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-phasers-controls.js';
 
@@ -45,13 +46,13 @@ describe('PhPhasersControls', () => {
   it('renders NO PHASER BANKS placeholder with empty banks', () => {
     const { el } = setup();
     el.state = { banks: [] };
-    expect(queryText(el, '#banks')).toBe('NO PHASER BANKS');
+    expect(queryText(el, '#banks')).toBe(t('component.phasers.empty'));
   });
 
   it('renders NO PHASER BANKS placeholder with null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(queryText(el, '#banks')).toBe('NO PHASER BANKS');
+    expect(queryText(el, '#banks')).toBe(t('component.phasers.empty'));
   });
 
   it('renders a phaser bank with label text', () => {
@@ -133,9 +134,9 @@ describe('PhPhasersControls', () => {
   it('mode toggle shows AUTO in Auto mode and MANUAL in Manual mode', () => {
     const { el } = setup();
     el.state = { banks: [], mode: 'Auto' };
-    expect(queryText(el, '#mode-toggle')).toBe('AUTO');
+    expect(queryText(el, '#mode-toggle')).toBe(t('console.common.auto'));
     el.state = { banks: [], mode: 'Manual' };
-    expect(queryText(el, '#mode-toggle')).toBe('MANUAL');
+    expect(queryText(el, '#mode-toggle')).toBe(t('component.phasers.manual'));
   });
 
   it('clicking the mode toggle dispatches set_phaser_mode with the flipped mode', () => {

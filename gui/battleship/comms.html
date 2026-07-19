@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Comms Console</title>
+  <title data-i18n="console.comms.doc_title">Project Phoenix - Comms Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -25,36 +25,36 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Comms Console">
+  <div class="frame" data-screen-label="Comms Console" data-i18n-attr="data-screen-label:console.comms.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>COMMS<span class="sub">CONTACTS &amp; TRAFFIC</span></h1>
-        <span class="auto-badge" id="comms-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.comms.title">COMMS</span><span class="sub" data-i18n="console.comms.subtitle">CONTACTS &amp; TRAFFIC</span></h1>
+        <span class="auto-badge" id="comms-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="side-col">
           <div class="panel-col" style="flex:1">
-            <h2>Contacts</h2>
+            <h2 data-i18n="console.comms.contacts">Contacts</h2>
             <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
           </div>
         </div>
         <div class="main-col">
           <div class="panel-col">
-            <h2>Available Hails</h2>
+            <h2 data-i18n="console.comms.available_hails">Available Hails</h2>
             <ph-comms-hail-list id="comms-hail-list"></ph-comms-hail-list>
           </div>
           <div class="panel-col" style="flex:1">
-            <h2>Current Thread</h2>
+            <h2 data-i18n="console.comms.current_thread">Current Thread</h2>
             <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
           </div>
         </div>
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>COMMS STATION</span>
+        <span data-i18n="console.comms.station_footer">COMMS STATION</span>
         <span class="spacer"></span>
-        <span id="footer-target">NO ACTIVE HAIL</span>
+        <span id="footer-target" data-i18n="console.common.no_active_hail">NO ACTIVE HAIL</span>
         <ph-station-damage id="station-damage"></ph-station-damage>
       </footer>
     </div>
@@ -65,6 +65,7 @@
     import '../components/ph-comms-current-message.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'comms',
@@ -76,7 +77,7 @@
         document.getElementById('comms-hail-list').state = comms;
         document.getElementById('comms-current-message').state = { thread: threadMsg };
         document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = threadMsg ? (threadMsg.sender_name || 'ACTIVE HAIL') : 'NO ACTIVE HAIL';
+        document.getElementById('footer-target').textContent = threadMsg ? (threadMsg.sender_name || t('console.common.active_hail')) : t('console.common.no_active_hail');
         setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
       }
     });

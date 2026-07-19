@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import '../../gui/components/ph-hull-integrity.js';
 
@@ -30,7 +31,7 @@ describe('PhHullIntegrity', () => {
     const { el } = setup();
     const placeholder = el.shadowRoot.getElementById('placeholder');
     expect(placeholder.style.display).not.toBe('none');
-    expect(el.shadowRoot.textContent).toContain('NO HULL DATA');
+    expect(el.shadowRoot.textContent).toContain(t('component.hull_integrity.no_data'));
   });
 
   it('null state set via property renders without error', () => {
@@ -90,7 +91,7 @@ describe('PhHullIntegrity', () => {
     };
     const detail = el.shadowRoot.querySelector('ph-damage-detail');
     expect(detail.state.entries[0].current).toBe(0);
-    expect(detail.shadowRoot.textContent).toContain('DESTROYED');
+    expect(detail.shadowRoot.textContent).toContain(t('console.common.destroyed'));
   });
 
   it('updates when state changes', () => {

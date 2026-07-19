@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-power-controls.js';
 
@@ -39,13 +40,13 @@ describe('PhPowerControls', () => {
   it('renders empty state with no power groups', () => {
     const { el } = setup();
     el.state = {};
-    expect(el.shadowRoot.textContent).toContain('NO POWER GROUPS');
+    expect(el.shadowRoot.textContent).toContain(t('component.power.empty'));
   });
 
   it('renders empty state when groups is null', () => {
     const { el } = setup();
     el.state = { groups: null };
-    expect(el.shadowRoot.textContent).toContain('NO POWER GROUPS');
+    expect(el.shadowRoot.textContent).toContain(t('component.power.empty'));
   });
 
   it('renders groups with label and level text', () => {

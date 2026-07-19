@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { ts } from './strings';
 
 const CONSOLE_URL = '/gui/battleship/shields.html';
 
@@ -105,5 +106,5 @@ test('shields console: header shows focused facing display', async ({ page }) =>
 test('shields console: grid status shown in footer', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate((s) => (window as any).__updateConsole('shields', JSON.stringify(s)), NOMINAL_STATE);
-  await expect(page.locator('#footer-grid')).toHaveText('GRID NOMINAL');
+  await expect(page.locator('#footer-grid')).toHaveText(ts('component.shield_panel.grid_nominal'));
 });

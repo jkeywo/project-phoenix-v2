@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { ts } from './strings';
 
 const CONSOLE_URL = '/gui/battleship/captain.html';
 
@@ -28,7 +29,7 @@ test('captain console: __updateConsole renders objectives, target, and direction
   await expect(page.locator('.objective-data[data-id="obj-2"]')).toHaveAttribute('data-status', 'Completed');
   await expect(page.locator('#dir')).toHaveAttribute('data-direction', 'Port');
   await expect(page.locator('#alert')).toHaveAttribute('data-red-alert', 'true');
-  await expect(page.locator('#footer-target')).toContainText('3 CONTACTS');
+  await expect(page.locator('#footer-target')).toContainText(ts('console.common.contacts.other', { n: 3 }));
 
   const camBtns = page.locator('ph-camera-select').locator('.cam-btn');
   await expect(camBtns).toHaveCount(4);
@@ -37,7 +38,7 @@ test('captain console: __updateConsole renders objectives, target, and direction
 
   const redAlertBtn = page.locator('ph-red-alert').locator('#alert-btn');
   await expect(redAlertBtn).toHaveClass(/active/);
-  await expect(redAlertBtn).toHaveText('RED ALERT');
+  await expect(redAlertBtn).toHaveText(ts('component.red_alert.active'));
 });
 
 test('captain console: standard alert state renders correctly', async ({ page }) => {
@@ -53,9 +54,9 @@ test('captain console: standard alert state renders correctly', async ({ page })
 
   await page.evaluate((s) => (window as any).__updateConsole('captain', JSON.stringify(s)), state);
 
-  await expect(page.locator('ph-red-alert').locator('#alert-btn')).toHaveText('STAND DOWN');
-  await expect(page.locator('#footer-target')).toHaveText('NO TARGET');
-  await expect(page.locator('ph-objective-list .empty')).toHaveText('NO OBJECTIVES');
+  await expect(page.locator('ph-red-alert').locator('#alert-btn')).toHaveText(ts('component.red_alert.standby'));
+  await expect(page.locator('#footer-target')).toHaveText(ts('console.common.no_target'));
+  await expect(page.locator('ph-objective-list .empty')).toHaveText(ts('component.objectives.empty'));
 });
 
 test('captain console: camera-select and red alert call __sendAction with correct envelopes', async ({ page }) => {
@@ -107,5 +108,5 @@ test('captain console: AI-run Red Alert renders read-only with AUTO badge', asyn
 
   await expect(page.locator('ph-red-alert').locator('#alert-btn')).toBeDisabled();
   await expect(page.locator('ph-red-alert').locator('#auto-badge')).toBeVisible();
-  await expect(page.locator('ph-red-alert').locator('#auto-badge')).toHaveText('AUTO');
+  await expect(page.locator('ph-red-alert').locator('#auto-badge')).toHaveText(ts('console.common.auto'));
 });

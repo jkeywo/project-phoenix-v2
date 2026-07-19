@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { t } from '../../gui/strings.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../gui/components/ph-camera-select.js';
 
@@ -40,10 +41,10 @@ describe('PhCameraSelect', () => {
   it('renders NO CAMERA placeholder with empty/null state', () => {
     const { el } = setup();
     el.state = null;
-    expect(el.shadowRoot.textContent).toContain('NO CAMERA');
+    expect(el.shadowRoot.textContent).toContain(t('component.camera_select.empty'));
 
     el.state = {};
-    expect(el.shadowRoot.textContent).toContain('NO CAMERA');
+    expect(el.shadowRoot.textContent).toContain(t('component.camera_select.empty'));
   });
 
   it('renders 4 buttons when views array provided', () => {
@@ -87,7 +88,7 @@ describe('PhCameraSelect', () => {
     };
     const badge = el.shadowRoot.getElementById('auto-badge');
     expect(badge.style.display).not.toBe('none');
-    expect(badge.textContent.trim()).toBe('AUTO');
+    expect(badge.textContent.trim()).toBe(t('console.common.auto'));
 
     const buttons = el.shadowRoot.querySelectorAll('.cam-btn');
     buttons.forEach(btn => {

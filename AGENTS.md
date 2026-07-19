@@ -38,6 +38,12 @@ npx vitest run
 # Local dev — server page (WASM, Bevy, peer host)
 trunk serve                                    # → http://localhost:8080
 
+# Headless sim — no window, no renderer, player ship on AI backfill, fixed
+# timestep as fast as the CPU allows. Prints a JSON exit summary.
+cargo run --release --features headless --bin phoenix-headless -- \
+  --world assets/worlds/combat_test.toml --sim-seconds 60
+cargo run --features headless --bin phoenix-headless -- --help
+
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
@@ -133,11 +139,47 @@ docs/           — Draft design notes (numbered).
 
 ---
 
+## Logging
+
+Use the `plog!` family in `src/logging/`, never bare `println!` / `eprintln!` /
+`web_sys::console`. Two filter dimensions, configured identically on both
+targets by the same parser:
+
+```bash
+phoenix-headless --log info,ai=debug,admit=trace --log-entity Ironveil
+server.html?log=info,ai=debug,admit=trace&log_entity=Ironveil
+```
+
+Categories are the `LogCat` enum (`ai helm weapons shields damage power sensors
+comms repair nav captain lobby admit world regions physics broadcast assets
+config`); the entity filter matches `EntityName` — exactly first, then
+case-insensitive substring.
+
+```rust
+fn my_system(log: Option<Res<LogFilterConfig>>, q: Query<(Entity, &Hull)>) {
+    pdebug!(log, LogCat::Damage, entity = e, "hull now {}", hull.current);
+    pwarn!(log, LogCat::World, "scenario {path} missing");   // no entity
+}
+```
+
+Two rules that are easy to get wrong:
+
+1. **Take `Option<Res<LogFilterConfig>>`, never bare `Res<_>`.** A bare `Res`
+   fails Bevy parameter validation in any app that never inserted the resource
+   — which is every bare-`App` unit test in this crate. `None` falls back to
+   warn with no entity filtering.
+2. **Plain helper fns with no config in scope** keep a bare
+   `warn!(target: LogCat::Config.target(), ...)` rather than growing a
+   parameter for it.
+
+---
+
 ## Testing Strategy
 
 - **Rust unit tests (`cargo test`):** inline `#[cfg(test)] mod tests` covering the pure modules (session, stations, codec round-trips, lobby handler, physics, damage, repair teams, modifiers, power, ratings, system registry).
 - **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels).
 - **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC).
+- **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
 - **Not tested:** renderer visual output, bridge internals, CI pipeline.
 
 > Good tests: set up state → perform action → assert on observable output through the public interface. Do NOT assert on private fields, internal call counts, or implementation-specific details.

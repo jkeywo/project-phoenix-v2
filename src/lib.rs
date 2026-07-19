@@ -4,6 +4,15 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+// Declared early: the `plog!` family is `#[macro_export]`ed, and the helper
+// macros they expand to must be defined before any module that uses them.
+pub mod logging;
+
+// Headless runner. Native only: it drives the app with a manual fixed-timestep
+// loop, which has no meaning under requestAnimationFrame.
+#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+pub mod headless;
+
 pub mod ai;
 pub mod core;
 pub use ai::core as ai_core;

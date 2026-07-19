@@ -213,11 +213,38 @@ pub struct ShipSystemBlackboards(
 /// `.after(sim_processing_anchor)`) drains their `SimOutbox` writes.
 pub fn sim_processing_anchor() {}
 
-/// Compose all per-table simulation plugins onto `app`.
+/// Which optional slices of the simulation registration to include.
+///
+/// The simulation proper is renderer-agnostic, but a handful of plugins and
+/// systems registered alongside it (`StarRenderPlugin`, `PlanetRenderPlugin`,
+/// `render_spawned_entities` and friends, the viewscreen radar, the asset
+/// preloader) need meshes, materials and a `GameCamera`. Callers that run
+/// without a `RenderPlugin` — the headless binary, and eventually the WASM
+/// automation branch in `bridge.rs` — set `render: false` to skip them.
+#[derive(Clone, Copy, Debug)]
+pub struct SimPluginOptions {
+    /// Register the render-coupled plugins and systems. `true` for the browser
+    /// host; `false` for headless runs with no camera and no GPU.
+    pub render: bool,
+}
+
+impl Default for SimPluginOptions {
+    fn default() -> Self {
+        Self { render: true }
+    }
+}
+
+/// Compose all per-table simulation plugins onto `app`, including the
+/// render-coupled ones.
 ///
 /// This is the canonical registration point for the server simulation.
 /// Call this from `wasm_init()` (bridge) instead of using a `SimulationPlugin`.
 pub fn add_simulation_plugins(app: &mut App) {
+    add_simulation_plugins_with(app, SimPluginOptions::default());
+}
+
+/// [`add_simulation_plugins`] with explicit control over the optional slices.
+pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.configure_sets(
         Update,
         (
@@ -247,8 +274,6 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
-    .add_plugins(crate::entity_star::StarRenderPlugin)
-    .add_plugins(crate::entity_planet::PlanetRenderPlugin)
     .add_message::<AsteroidDestroyedVfx>()
     .init_resource::<CaptainPriorityBoost>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
@@ -264,6 +289,11 @@ pub fn add_simulation_plugins(app: &mut App) {
     .init_resource::<LastBroadcastShields>()
     .init_resource::<LastBroadcastBlackboards>()
     .init_resource::<crate::messages::InterSystemQueue>()
+    // `handle_collisions` (registered below, in SimSet::Damage) writes this,
+    // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
+    // — idempotent — but that plugin is absent headless, and the sim must not
+    // depend on the debug overlay being present.
+    .init_resource::<crate::debug_overlay::DamageLog>()
     .insert_resource(SimBroadcastTimer(Timer::from_seconds(
         0.1,
         TimerMode::Repeating,
@@ -282,10 +312,6 @@ pub fn add_simulation_plugins(app: &mut App) {
         )
             .chain(),
     )
-    .init_resource::<ProceduralMeshCache>()
-    .add_systems(Update, render_spawned_entities)
-    .add_systems(Update, update_mesh_lod.after(render_spawned_entities))
-    .add_systems(Update, face_player_lights.after(render_spawned_entities))
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
     .add_systems(
@@ -351,8 +377,17 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(modifier_events_broadcaster())
     .add_plugins(sim_outbox_broadcaster());
 
+    if opts.render {
+        app.add_plugins(crate::entity_star::StarRenderPlugin)
+            .add_plugins(crate::entity_planet::PlanetRenderPlugin)
+            .init_resource::<ProceduralMeshCache>()
+            .add_systems(Update, render_spawned_entities)
+            .add_systems(Update, update_mesh_lod.after(render_spawned_entities))
+            .add_systems(Update, face_player_lights.after(render_spawned_entities));
+    }
+
     #[cfg(feature = "server")]
-    {
+    if opts.render {
         use crate::server::asset_preload::{
             auto_transition_from_loading, begin_asset_preload, broadcast_loading_progress,
             broadcast_loading_start, poll_asset_preload,
@@ -864,6 +899,7 @@ fn handle_collisions(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
     mut damage_log: ResMut<DamageLog>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     mut world: ResMut<WorldResource>,
     mut commands: Commands,
@@ -981,6 +1017,22 @@ fn handle_collisions(
             total_hull += absorbed;
             None
         };
+
+        // Entity-scoped trace covering *every* ship. The `DamageLog` below is
+        // player-only and capped at 10 entries because it backs the F8 debug
+        // overlay; this is the channel that survives a headless run and can be
+        // narrowed to one ship with `--log-entity`.
+        crate::pdebug!(
+            log,
+            crate::logging::LogCat::Damage,
+            entity = ship_entity,
+            "collision: source={} amount={:.1} arc={:?} pierced={:.1} absorbed={:.1}",
+            source_label,
+            damage,
+            arc_label,
+            pierced,
+            absorbed
+        );
 
         // Debug damage log: player-only (single-player debug overlay).
         if is_local {
@@ -1278,7 +1330,9 @@ fn admit_system_commands(
     >,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
+    use crate::logging::LogCat;
     let Some((ship_entity, control_sources, mut admitted, ship_config)) =
         ship_query.iter_mut().next()
     else {
@@ -1295,8 +1349,11 @@ fn admit_system_commands(
         if ev.token.starts_with("ai:") {
             if let Some(entity) = ai_registry.bevy_entity_for_token(&ev.token) {
                 if entity != ship_entity {
-                    warn!(
-                        "[admit] rejected NPC ai: token {} → {:?}",
+                    crate::pwarn!(
+                        log,
+                        LogCat::Admit,
+                        entity = ship_entity,
+                        "rejected NPC ai: token {} → {:?}",
                         &ev.token[..ev.token.len().min(12)],
                         std::mem::discriminant(payload),
                     );
@@ -1312,14 +1369,26 @@ fn admit_system_commands(
             &sessions,
             &ship_config.0,
         ) {
+            crate::ptrace!(
+                log,
+                LogCat::Admit,
+                entity = ship_entity,
+                "admitted {:?} → {:?} from token={}",
+                target.0,
+                std::mem::discriminant(payload),
+                &ev.token[..ev.token.len().min(8)],
+            );
             admitted.0.push(crate::messages::AdmittedCommand {
                 target: target.clone(),
                 payload: payload.clone(),
                 response_token: Some(ev.token.clone()),
             });
         } else {
-            warn!(
-                "[admit] rejected {:?} → {:?} from token={}",
+            crate::pwarn!(
+                log,
+                LogCat::Admit,
+                entity = ship_entity,
+                "rejected {:?} → {:?} from token={}",
                 target.0,
                 std::mem::discriminant(payload),
                 &ev.token[..ev.token.len().min(8)],
@@ -1400,9 +1469,11 @@ fn is_command_authorized(
     match station_for_system(config, &effective_target) {
         Some(station) => sessions.0.holder_for_station(&station) == Some(token),
         None => {
+            // Plain fn, no `LogFilterConfig` in scope — a bare targeted `warn!`
+            // rather than growing a parameter for it. See `crate::logging`.
             warn!(
-                "[admit] unknown system id {:?} — denying",
-                effective_target.0
+                target: crate::logging::LogCat::Admit.target(),
+                "unknown system id {:?} — denying", effective_target.0
             );
             false
         }

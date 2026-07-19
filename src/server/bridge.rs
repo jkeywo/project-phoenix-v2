@@ -33,7 +33,7 @@ use {
     crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
     crate::world::WorldPlugin,
-    bevy::{prelude::*, DefaultPlugins},
+    bevy::{log::LogPlugin, prelude::*, DefaultPlugins},
     js_sys::{Array, Function, Object, Reflect},
     std::cell::RefCell,
     wasm_bindgen::prelude::*,
@@ -135,6 +135,16 @@ thread_local! {
     /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
     /// `wasm_set_debug_regions()` before `wasm_init()`.
     static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+
+    /// `?log=` — a category/level spec such as `info,ai=debug,admit=trace`.
+    /// Set by JS via `wasm_set_log_spec()` before `wasm_init()`. Parsed by
+    /// `crate::logging::parse_log_spec`, the same parser the headless runner's
+    /// `--log` flag uses, so the two front ends cannot drift.
+    static LOG_SPEC: RefCell<Option<String>> = const { RefCell::new(None) };
+
+    /// `?log_entity=` — comma-separated entity display names to restrict
+    /// logging to. Set by JS via `wasm_set_log_entity()` before `wasm_init()`.
+    static LOG_ENTITY: RefCell<Option<String>> = const { RefCell::new(None) };
 
     /// Pending debug-toggle requests queued by the six `wasm_toggle_*`
     /// exports. Drained by `drain_debug_toggles` each `PreUpdate` frame via
@@ -352,6 +362,16 @@ pub fn wasm_init() {
         })
         .unwrap_or(false);
 
+    // Read `?log=` / `?log_entity=` before any plugin is added: `LogPlugin`
+    // takes its filter at construction, and the resource must be in place
+    // before the first system that logs runs.
+    let (log_config, log_spec) = log_config_from_url();
+    let log_filter = if log_spec.is_empty() {
+        LogPlugin::default().filter
+    } else {
+        format!("{},{}", LogPlugin::default().filter, log_spec)
+    };
+
     let mut app = App::new();
     if is_automation {
         use bevy::{
@@ -369,7 +389,10 @@ pub fn wasm_init() {
         };
         app.add_plugins((
             PanicHandlerPlugin,
-            LogPlugin::default(),
+            LogPlugin {
+                filter: log_filter.clone(),
+                ..default()
+            },
             TaskPoolPlugin::default(),
             FrameCountPlugin,
             TimePlugin::default(),
@@ -406,15 +429,24 @@ pub fn wasm_init() {
             .add_message::<crate::console_bridge::LobbyStateChanged>()
             .add_message::<crate::console_bridge::AiChatterEvent>();
     } else {
-        app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
-            primary_window: Some(bevy::window::Window {
-                canvas: Some("#canvas".into()),
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
-            ..default()
-        }));
+        app.add_plugins(
+            DefaultPlugins
+                .set(bevy::window::WindowPlugin {
+                    primary_window: Some(bevy::window::Window {
+                        canvas: Some("#canvas".into()),
+                        fit_canvas_to_parent: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(LogPlugin {
+                    filter: log_filter.clone(),
+                    ..default()
+                }),
+        );
     }
+    app.insert_resource(log_config)
+        .add_plugins(crate::logging::LoggingPlugin);
     app.add_plugins(ConfigCachePlugin)
         .add_plugins(AsteroidLifecyclePlugin)
         .add_plugins(ModifierCoordinationPlugin);
@@ -671,6 +703,50 @@ pub fn wasm_set_debug_regions(enabled: bool) {
 #[wasm_bindgen]
 pub fn wasm_is_debug_regions_enabled() -> bool {
     DEBUG_REGIONS_ENABLED.with(|v| *v.borrow())
+}
+
+/// Called by JS to set the log category/level spec from `?log=` in the URL.
+/// Must be called before `wasm_init()` to take effect.
+///
+/// Same syntax as the headless runner's `--log`, e.g.
+/// `?log=info,ai=debug,admit=trace`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_log_spec(spec: &str) {
+    LOG_SPEC.with(|v| *v.borrow_mut() = Some(spec.to_string()));
+}
+
+/// Called by JS to restrict logging to named entities, from `?log_entity=`.
+/// Must be called before `wasm_init()` to take effect.
+///
+/// Comma-separated display names, matched exactly then case-insensitively as a
+/// substring — e.g. `?log_entity=Ironveil,Ashrender`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_log_entity(names: &str) {
+    LOG_ENTITY.with(|v| *v.borrow_mut() = Some(names.to_string()));
+}
+
+/// Build the [`LogFilterConfig`] for this page from the `?log=` / `?log_entity=`
+/// thread-locals. Also returns the raw spec so `wasm_init` can hand it to
+/// `LogPlugin`'s own `EnvFilter`.
+///
+/// A malformed spec warns and falls back to the default rather than aborting
+/// startup — a typo in a debug URL parameter should not stop the game booting.
+#[cfg(target_arch = "wasm32")]
+fn log_config_from_url() -> (crate::logging::LogFilterConfig, String) {
+    let spec = LOG_SPEC.with(|v| v.borrow().clone()).unwrap_or_default();
+    let mut config = match crate::logging::parse_log_spec(&spec) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            bevy::log::warn!("?log= is malformed ({e}); ignoring it");
+            crate::logging::LogFilterConfig::default()
+        }
+    };
+    if let Some(names) = LOG_ENTITY.with(|v| v.borrow().clone()) {
+        config.entity_filter = crate::logging::parse_log_entities(&names);
+    }
+    (config, spec)
 }
 
 /// Called by JS (e.g. F4 keydown) to toggle region wireframes at runtime.

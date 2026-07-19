@@ -204,17 +204,16 @@ pub(crate) fn tick_blaster_auto_fire(
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
-    let ship_count = ship_q.iter().len();
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
-        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
-        ship_count
-    )));
-    #[cfg(not(target_arch = "wasm32"))]
-    eprintln!(
-        "[DEBUG] tick_blaster_auto_fire: {} ship(s) in query",
-        ship_count
+    // Was an unconditional per-frame `eprintln!` / `console.log_1` on both
+    // targets, which drowned out everything else in a headless run. Now gated
+    // behind `--log weapons=trace` / `?log=weapons=trace`.
+    crate::ptrace!(
+        log,
+        crate::logging::LogCat::Weapons,
+        "blaster auto-fire: {} ship(s) in query",
+        ship_q.iter().len()
     );
 
     for (control_sources, ship_config_opt, physics, weapons_target_opt, mut blaster_res) in

@@ -533,17 +533,66 @@ pub fn wasm_is_preload_complete() -> bool {
     false
 }
 
+/// Native template cache.
+///
+/// The WASM side fills `CONFIG_CACHE` from a JS-driven preload. Native has no
+/// preload, and most callers of [`get_config_cache`] have no filesystem
+/// fallback of their own — `asteroids::lifecycle`, `server_app`'s spawn
+/// helpers and `world::server::setup_world` all just see whatever the cache
+/// holds. Leaving it permanently empty meant those paths silently did nothing
+/// off-browser.
+///
+/// So native gets a real cache too, populated up front by whoever is driving
+/// the app (the headless runner walks `assets/entities/`). A `RwLock` rather
+/// than the WASM side's `thread_local!` because Bevy systems run on worker
+/// threads. Unit tests that never populate it keep the previous behaviour: an
+/// empty cache, and the on-demand disk fallback in
+/// [`crate::entity_loader::WasmTemplateLoader`] does the work.
+///
+/// **This is process-global, so populating it in one test changes every other
+/// test in the same binary.** A populated cache makes
+/// `update_session_with_config` build a real `ShipClientConfigResource`, which
+/// changes values (radar range among them) that unrelated unit tests assert on.
+/// Anything that calls [`insert_native_config`] therefore belongs in an
+/// integration test with its own process — see `tests/headless_runner.rs`.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_config_cache() -> ConfigCache {
-    ConfigCache::new()
+static NATIVE_CONFIG_CACHE: std::sync::RwLock<
+    Option<std::collections::HashMap<String, crate::entity_config::EntityConfig>>,
+> = std::sync::RwLock::new(None);
+
+/// Insert a parsed template into the native cache under `path`.
+///
+/// Keyed by the same repo-relative path the world TOML uses
+/// (`assets/entities/foo.toml`), so lookups match the WASM cache exactly.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn insert_native_config(path: String, config: crate::entity_config::EntityConfig) {
+    let mut guard = NATIVE_CONFIG_CACHE
+        .write()
+        .expect("native config cache poisoned");
+    guard
+        .get_or_insert_with(Default::default)
+        .insert(path, config);
 }
 
-// Native twin of the WASM cache lookup. There is no preload cache on native —
-// templates are read from disk on demand — so the lookup always misses and the
-// caller is expected to fall back to the filesystem.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_cached_entity_config(_path: &str) -> Option<crate::entity_config::EntityConfig> {
-    None
+pub fn get_config_cache() -> ConfigCache {
+    NATIVE_CONFIG_CACHE
+        .read()
+        .expect("native config cache poisoned")
+        .clone()
+        .unwrap_or_default()
+}
+
+/// Native twin of the WASM cache lookup. Misses until something has called
+/// [`insert_native_config`], at which point callers with a filesystem fallback
+/// stop hitting the disk on every spawn.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::EntityConfig> {
+    NATIVE_CONFIG_CACHE
+        .read()
+        .expect("native config cache poisoned")
+        .as_ref()
+        .and_then(|m| m.get(path).cloned())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

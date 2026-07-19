@@ -7,6 +7,13 @@ license = "AGPL-3.0-or-later"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Headless simulation runner. Native only — it drives the app with a manual
+# fixed-timestep loop, which has no meaning under requestAnimationFrame.
+[[bin]]
+name = "phoenix-headless"
+path = "src/bin/phoenix_headless.rs"
+required-features = ["headless"]
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -23,6 +30,11 @@ server = []
 # Debug feature: enables Bevy's debug feature for local development.
 # Not included in release/deployed builds (opt in via `--features debug`).
 debug = ["bevy/debug"]
+# Headless feature: builds the `phoenix-headless` binary and the
+# `crate::headless` module it lives in. Additive alongside `server` — cargo
+# features are per-package, so bevy's render stack is still *compiled*; headless
+# only avoids instantiating `RenderPlugin`.
+headless = []
 
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }

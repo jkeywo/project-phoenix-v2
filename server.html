@@ -2189,6 +2189,8 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
+  window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
+  window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
   window.wasm_toggle_debug_pause = wasmBindings.wasm_toggle_debug_pause;
@@ -2375,6 +2377,15 @@ function startServer() {
   if (urlParams.get('debug_regions') === '1') {
     wasm_set_debug_regions(true);
   }
+
+  // Logging: ?log= sets category levels, ?log_entity= restricts to named
+  // entities. Same syntax as phoenix-headless --log / --log-entity, parsed by
+  // the same Rust parser. Both must be set before wasm_init().
+  //   ?log=info,ai=debug,admit=trace&log_entity=Ironveil
+  const logSpec = urlParams.get('log');
+  if (logSpec) wasm_set_log_spec(logSpec);
+  const logEntity = urlParams.get('log_entity');
+  if (logEntity) wasm_set_log_entity(logEntity);
 
   set_message_callback(routeOutbound);
 

@@ -297,9 +297,17 @@ pub struct WorldSnapshot {
     pub entities: Vec<crate::ai::AiWorldEntity>,
 }
 
-/// Build the [`WorldSnapshot`] from every entity with an `EntityUuid`. Runs in
-/// `SimSet::Physics` before `AiTickLabel` so per-system AI handlers see a
-/// consistent frame.
+/// Build the [`WorldSnapshot`] from every entity with an `EntityUuid`, plus
+/// every field asteroid. Runs in `SimSet::Physics` before `AiTickLabel` so
+/// per-system AI handlers see a consistent frame.
+///
+/// Asteroids need the separate pass because they are streamed by
+/// `src/asteroids/lifecycle.rs` rather than `spawn_entity`, so they carry an
+/// `AsteroidUuid` instead of an `EntityUuid` and never matched the query below.
+/// That is why AI collision avoidance flew straight through asteroid fields:
+/// not a tuning problem, the rocks simply were not in the world it steers from.
+/// Keying off `AsteroidUuid` rather than back-filling `EntityUuid` keeps them
+/// out of the radar, networking, and targeting paths that key on the latter.
 fn build_world_snapshot(
     mut snapshot: ResMut<WorldSnapshot>,
     query: Query<(
@@ -311,6 +319,14 @@ fn build_world_snapshot(
         Option<&crate::entity_spawner::ColliderSection>,
         Option<&crate::ship_state::ShipPhysics>,
     )>,
+    asteroids: Query<
+        (
+            &crate::simulation::AsteroidUuid,
+            &Transform,
+            &crate::entity_spawner::ColliderSection,
+        ),
+        With<crate::simulation::Asteroid>,
+    >,
 ) {
     snapshot.entities = query
         .iter()
@@ -346,6 +362,31 @@ fn build_world_snapshot(
             },
         )
         .collect();
+
+    // Asteroids are obstacles and nothing else: no faction to be hostile to, no
+    // hull fraction to retreat over, and they do not move. Only position and
+    // radius matter, which is exactly what `avoidance_steering` reads.
+    snapshot
+        .entities
+        .extend(
+            asteroids
+                .iter()
+                .map(|(uuid, transform, collider)| crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                    name: None,
+                    position: [
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ],
+                    faction: None,
+                    hull_fraction: None,
+                    yaw: Some(0.0),
+                    radius: collider.0.radius,
+                    forward_speed: 0.0,
+                    shields: None,
+                }),
+        );
 }
 
 /// Score each entity's doctrine and write `scored_objectives` into its
@@ -959,6 +1000,76 @@ mod tests {
     fn anchors_from_world_config_returns_empty_when_no_anchors() {
         let world = crate::world::config::WorldConfig::default();
         assert!(anchors_from_world_config(&world).is_empty());
+    }
+
+    // ── build_world_snapshot: asteroids as obstacles ───────────────────────
+
+    fn snapshot_test_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<WorldSnapshot>()
+            .add_systems(Update, build_world_snapshot);
+        app
+    }
+
+    /// Field asteroids carry `AsteroidUuid`, not `EntityUuid`, because they are
+    /// streamed rather than spawned through `spawn_entity`. They used to fall
+    /// out of the snapshot entirely, which left `avoidance_steering` blind to
+    /// every rock in the field.
+    #[test]
+    fn world_snapshot_includes_field_asteroids_with_their_radius() {
+        let mut app = snapshot_test_app();
+        app.world_mut().spawn((
+            crate::simulation::Asteroid,
+            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(30.0, 0.0, -12.0),
+            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: 4.0,
+                length: 0.0,
+            }),
+        ));
+
+        app.update();
+
+        let snapshot = app.world().resource::<WorldSnapshot>();
+        assert_eq!(
+            snapshot.entities.len(),
+            1,
+            "asteroid must reach the snapshot"
+        );
+        let rock = &snapshot.entities[0];
+        assert_eq!(rock.radius, 4.0, "avoidance sizes the obstacle off radius");
+        assert_eq!(rock.position, [30.0, 0.0, -12.0]);
+        assert_eq!(rock.faction, None, "a rock is hostile to nobody");
+        assert_eq!(rock.forward_speed, 0.0);
+    }
+
+    #[test]
+    fn world_snapshot_carries_both_entities_and_asteroids() {
+        let mut app = snapshot_test_app();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+        app.world_mut().spawn((
+            crate::simulation::Asteroid,
+            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: 2.5,
+                length: 0.0,
+            }),
+        ));
+
+        app.update();
+
+        let snapshot = app.world().resource::<WorldSnapshot>();
+        assert_eq!(snapshot.entities.len(), 2);
+        assert!(
+            snapshot.entities.iter().any(|e| e.radius == 2.5),
+            "the asteroid pass must not replace the entity pass"
+        );
     }
 
     // ── AiTokenRegistry unit tests ─────────────────────────────────────────

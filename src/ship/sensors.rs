@@ -235,6 +235,27 @@ pub fn tick_sensors_frequency_hint(
     }
 }
 
+/// This ship's own sensor horizon, in world units.
+///
+/// `ShipClientConfigResource` describes the **local player's** hull, but every
+/// sensors system here iterates all ships, NPCs included. Reading the player's
+/// `sensors_radar_range` for a Harrow destroyer gave it the player's reach —
+/// which is how AI ships came to lock targets from far outside their own range.
+/// An NPC carries its own `AiProfile.sensor_range` (`[ai_profile] sensor_range`
+/// in the entity TOML), so prefer that and fall back to the console config only
+/// for ships that have no AI profile at all.
+fn effective_sensor_range(
+    profile: Option<&crate::ai::server::AiProfile>,
+    console_range: f32,
+    modifiers: &crate::modifiers::ShipModifiers,
+) -> f32 {
+    let base = profile
+        .map(|p| p.sensor_range)
+        .filter(|r| r.is_finite() && *r > 0.0)
+        .unwrap_or(console_range);
+    base * modifiers.get(&ModifierSlot::SensorRadarRange)
+}
+
 /// Emit a channel-3 `ThreatBearing` coordination message to Shields whenever
 /// each ship's sensors detect an in-range closing hostile (or incoming torpedo).
 ///
@@ -269,6 +290,7 @@ pub fn tick_sensors_threat_warning(
             &mut SensorsThreatState,
             &crate::modifiers::ShipModifiers,
             Option<&crate::entity_spawner::FactionComponent>,
+            Option<&crate::ai::server::AiProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -298,11 +320,18 @@ pub fn tick_sensors_threat_warning(
         }
     }
 
-    for (entity, self_uuid, physics, control_sources, mut state, modifiers, self_faction) in
-        ships.iter_mut()
+    for (
+        entity,
+        self_uuid,
+        physics,
+        control_sources,
+        mut state,
+        modifiers,
+        self_faction,
+        ai_profile,
+    ) in ships.iter_mut()
     {
-        let radar_mult = modifiers.get(&ModifierSlot::SensorRadarRange);
-        let sensor_range = cfg.sensors_radar_range * radar_mult;
+        let sensor_range = effective_sensor_range(ai_profile, cfg.sensors_radar_range, modifiers);
         if sensor_range <= 0.0 {
             continue;
         }
@@ -437,6 +466,13 @@ pub fn publish_sensors_blackboard(
 ///   2. Objective entity — scan scored objectives for a `Destroy` directive
 ///      with a named target (not the `""` engage-any sentinel), resolve the
 ///      name to an entity UUID, and select it on the Sensors console.
+///
+/// Both tiers are gated on this ship's own sensor horizon
+/// ([`effective_sensor_range`]). Tier 1 inherited a range check from
+/// `ai_target_selection` upstream, but tier 2 had none at all: it resolved a
+/// name straight to a UUID and locked it at any distance, which is why AI ships
+/// tracked contacts far outside their range. Naming a target in an objective
+/// says who to engage, not that the ship can already see them.
 pub fn operate_sensors_ai(
     mut ships: Query<
         (
@@ -444,16 +480,34 @@ pub fn operate_sensors_ai(
             &crate::server_app::ShipSystemBlackboards,
             &mut SensorsTarget,
             &crate::simulation::WeaponsTarget,
+            &crate::ship_state::ShipPhysics,
+            &crate::modifiers::ShipModifiers,
+            Option<&crate::ai::server::AiProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
+    ship_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     entity_q: Query<(
         &crate::entity_spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
+        &Transform,
     )>,
 ) {
-    for (sources, blackboards, mut sensors_target, weapons_target) in &mut ships {
+    let console_range = ship_config
+        .as_ref()
+        .map(|c| c.0.sensors_radar_range)
+        .unwrap_or_else(crate::messages::default_sensors_radar_range);
+    for (
+        sources,
+        blackboards,
+        mut sensors_target,
+        weapons_target,
+        physics,
+        modifiers,
+        ai_profile,
+    ) in &mut ships
+    {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::sensors_system_id());
@@ -461,9 +515,20 @@ pub fn operate_sensors_ai(
             continue;
         }
 
+        let range = effective_sensor_range(ai_profile, console_range, modifiers);
+        let range_sq = range * range;
+        let in_range = |tf: &Transform| {
+            let dx = tf.translation.x - physics.x;
+            let dz = tf.translation.z - physics.z;
+            dx * dx + dz * dz <= range_sq
+        };
+
         // Priority 1: mirror the combat target.
         if let Some(target_uuid) = &weapons_target.0 {
-            if entity_q.iter().any(|(u, _)| u.0 == *target_uuid) {
+            if entity_q
+                .iter()
+                .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
+            {
                 sensors_target.0 = Some(target_uuid.clone());
                 continue;
             }
@@ -484,14 +549,23 @@ pub fn operate_sensors_ai(
                         .as_ref()
                         .and_then(|rt| rt.name_to_uuid.get(target).cloned())
                         .or_else(|| {
-                            entity_q.iter().find_map(|(u, name)| {
+                            entity_q.iter().find_map(|(u, name, _)| {
                                 (u.0 == *target || name.is_some_and(|n| n.0 == *target))
                                     .then(|| u.0.clone())
                             })
                         });
+                    // Resolving the name is not the same as seeing the ship.
+                    // A target that exists but sits beyond this hull's sensor
+                    // range stays unlocked, and we keep scanning lower-scored
+                    // objectives for something actually detectable.
                     if let Some(uuid) = uuid {
-                        selected = Some(uuid);
-                        break;
+                        let detectable = entity_q
+                            .iter()
+                            .any(|(u, _, tf)| u.0 == uuid && in_range(tf));
+                        if detectable {
+                            selected = Some(uuid);
+                            break;
+                        }
                     }
                 }
             }
@@ -1050,6 +1124,11 @@ mod tests {
             crate::server_app::ShipSystemBlackboards::default(),
             SensorsTarget::default(),
             crate::simulation::WeaponsTarget::default(),
+            // Sensors range-gate on the ship's own position and radar modifier,
+            // so both must be present or the query silently matches nothing and
+            // every assertion below passes vacuously.
+            crate::ship_state::ShipPhysics::default(),
+            crate::modifiers::ShipModifiers::default(),
         ));
 
         app
@@ -1092,6 +1171,15 @@ mod tests {
         );
     }
 
+    /// Spawn a bare targetable entity at a world position. `operate_sensors_ai`
+    /// range-gates on `Transform`, so a target without one is not detectable.
+    fn spawn_target_at(app: &mut App, uuid: &str, x: f32, z: f32) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            Transform::from_xyz(x, 0.0, z),
+        ));
+    }
+
     fn get_sensors_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
@@ -1110,8 +1198,7 @@ mod tests {
         let mut app = sensors_ai_test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
 
-        app.world_mut()
-            .spawn((crate::entity_spawner::EntityUuid(target_uuid.clone()),));
+        spawn_target_at(&mut app, &target_uuid, 20.0, 0.0);
         {
             let mut q = app
                 .world_mut()
@@ -1138,6 +1225,7 @@ mod tests {
             .name_to_uuid
             .insert("wave_1".into(), target_uuid.clone());
         insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+        spawn_target_at(&mut app, &target_uuid, 40.0, 0.0);
 
         tick_sensors_ai(&mut app);
 
@@ -1145,6 +1233,72 @@ mod tests {
             get_sensors_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
             "sensors AI should select named Destroy objective target"
+        );
+    }
+
+    /// Naming a target in an objective says who to engage, not that the ship can
+    /// see them. Before this gate the objective path resolved a name to a UUID
+    /// and locked it at any distance, so AI ships tracked contacts thousands of
+    /// units outside their own sensor range.
+    #[test]
+    fn ai_sensors_ignores_objective_target_beyond_sensor_range() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+
+        // Well beyond the default 500-unit console range the test ship uses.
+        spawn_target_at(&mut app, &target_uuid, 5000.0, 0.0);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "a named objective target outside sensor range must not be locked"
+        );
+    }
+
+    /// An NPC must range-gate on its own `[ai_profile] sensor_range`, not on the
+    /// local player's console config. Borrowing the player's reach is what let
+    /// short-ranged Harrow hulls (sensor_range 120) see as far as the flagship.
+    #[test]
+    fn ai_sensors_uses_the_ships_own_ai_profile_range() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            let ship = q.single(app.world()).unwrap();
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ai::server::AiProfile {
+                    aggression: 0.8,
+                    sensor_range: 120.0,
+                });
+        }
+
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .name_to_uuid
+            .insert("wave_1".into(), target_uuid.clone());
+        insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+
+        // Inside the player's 500 console range but outside this hull's 120.
+        spawn_target_at(&mut app, &target_uuid, 300.0, 0.0);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "NPC must use its own sensor_range, not the player's console range"
         );
     }
 
@@ -1208,8 +1362,7 @@ mod tests {
             .insert("wave_1".into(), objective_uuid.clone());
         insert_viewscreen_objective(&mut app, "wave_1", 80.0);
 
-        app.world_mut()
-            .spawn((crate::entity_spawner::EntityUuid(combat_uuid.clone()),));
+        spawn_target_at(&mut app, &combat_uuid, 20.0, 0.0);
         {
             let mut q = app
                 .world_mut()
@@ -1236,6 +1389,7 @@ mod tests {
             .name_to_uuid
             .insert("wave_1".into(), target_uuid.clone());
         insert_viewscreen_objective(&mut app, "wave_1", 80.0);
+        spawn_target_at(&mut app, &target_uuid, 30.0, 0.0);
 
         // WeaponsTarget names a UUID that no entity carries → existence check fails
         let dead_uuid = uuid::Uuid::new_v4().to_string();

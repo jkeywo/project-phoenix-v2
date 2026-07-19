@@ -457,6 +457,32 @@ pub fn operate_helm(
                     target_speed,
                     maintain_range,
                 )
+                // Tactical has locked nothing this Helm can see — the target is
+                // over the horizon, or (as with a factionless starbase) never
+                // auto-acquired at all. That is exactly the case Navigation's
+                // waypoint exists to cover, so close on it *here*, at this
+                // objective's priority, rather than falling through.
+                //
+                // Without this the Helm dropped to the next directive down and
+                // a raider ordered to assault the starbase flew its patrol
+                // route instead: Patrol resolved and returned before the
+                // waypoint fallback at the end of this function was ever
+                // reached. Navigation is only consulted when it has actually
+                // issued a cleared waypoint, so a Destroy that resolves neither
+                // a target nor a waypoint still yields to Patrol.
+                .or_else(|| {
+                    nav_waypoint.and_then(|[nx, nz]| {
+                        helm_navigate_to(
+                            world_view,
+                            [nx, 0.0, nz],
+                            waypoint_arrival_radius,
+                            avoidance_buffer,
+                            avoidance_look_ahead_secs,
+                            forward_speed,
+                            target_speed,
+                        )
+                    })
+                })
             }
             AiDirective::Patrol {
                 anchors: waypoints,
@@ -1629,6 +1655,68 @@ mod tests {
         assert!(
             steering > 0.0,
             "with no Tactical lock the Destroy directive resolves to nobody and              must fall through to Patrol (to starboard → positive steering); a              ~0 steering means the helm acquired the visible hostile itself,              which is the divergence #702 removed; got steering={steering}"
+        );
+    }
+
+    /// The starbase-assault bug. Tactical holds no lock — the target is over the
+    /// horizon, or factionless and never auto-acquired — but Navigation *has*
+    /// cleared a waypoint to it. The Destroy directive must consume that
+    /// waypoint at its own priority, not fall through to the lower-scored
+    /// Patrol. Previously Patrol resolved and returned first, so a raider
+    /// ordered to assault the starbase flew its patrol circuit instead and the
+    /// waypoint fallback at the end of `operate_helm` was never reached.
+    #[test]
+    fn operate_helm_destroy_without_a_weapons_target_flies_the_nav_waypoint() {
+        let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
+
+        // Patrol anchor alpha is at [100, 0, 0] — to starboard. Put Navigation's
+        // waypoint to *port* so the two are unambiguously distinguishable.
+        let (thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            None,                // Tactical has locked nothing
+            Some([-100.0, 0.0]), // but Navigation has cleared a waypoint
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+
+        assert!(thrust > 0.0, "should be under way toward the waypoint");
+        assert!(
+            steering < 0.0,
+            "must steer to port toward Navigation's waypoint; positive steering              means it fell through to the starboard Patrol anchor, which is the              bug — got steering={steering}"
+        );
+    }
+
+    /// The fallback is conditional, not a takeover: a Destroy that resolves
+    /// neither a target nor a waypoint still yields to Patrol.
+    #[test]
+    fn operate_helm_destroy_still_yields_to_patrol_without_a_nav_waypoint() {
+        let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
+
+        let (_thrust, steering) = operate_helm(
+            &world,
+            &pool,
+            &[],
+            &anchors,
+            NO_CURSORS,
+            None,
+            None, // no lock and no waypoint
+            WAYPOINT_ARRIVAL_RADIUS,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            0.0,
+            0.6,
+        );
+
+        assert!(
+            steering > 0.0,
+            "with nothing to close on, Destroy must still fall through to the              starboard Patrol anchor; got steering={steering}"
         );
     }
 

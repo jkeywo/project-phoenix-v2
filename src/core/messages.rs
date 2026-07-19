@@ -674,7 +674,7 @@ fn default_helm_radar_range() -> f32 {
     500.0
 }
 
-fn default_sensors_radar_range() -> f32 {
+pub fn default_sensors_radar_range() -> f32 {
     500.0
 }
 

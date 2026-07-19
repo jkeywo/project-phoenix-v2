@@ -678,12 +678,30 @@ fn try_spawn_cell(
         max_hp,
     )]));
 
+    // `ColliderSection` alongside the Rapier collider, because two consumers
+    // read the radius off the *component* rather than the physics body and got
+    // 0.0 from a rock that only had the latter: `handle_collisions`, whose
+    // de-overlap then left the ship sitting inside the asteroid, and the AI
+    // `WorldSnapshot`, which is how collision *avoidance* learns an obstacle's
+    // size. Field asteroids bypass `spawn_entity` (which inserts this for every
+    // other entity), so it has to be added by hand here.
+    let collider_section = crate::entity_spawner::ColliderSection(
+        entity_config.and_then(|c| c.collider.clone()).unwrap_or(
+            crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: collider_radius,
+                length: 0.0,
+            },
+        ),
+    );
+
     let mut entity_cmd = commands.spawn((
         Asteroid,
         AsteroidUuid(uuid.clone()),
         AsteroidShieldPierce(shield_pierce),
         FieldOwner(field_entity),
         asteroid_hull,
+        collider_section,
         Transform::from_xyz(world_x, spawn.y, world_z).with_rotation(rotation),
         Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
@@ -790,6 +808,13 @@ fn clear_slot(
 
 /// Spawn a single cosmetic asteroid entity (no hull, no UUID tracking).
 /// Returns the spawned `Entity` so the caller can store it in a cosmetic slot.
+///
+/// Deliberately **not** physical. These rocks are set dressing: they carry no
+/// UUID, so they can never reach the AI `WorldSnapshot` and collision avoidance
+/// is structurally blind to them. Giving them a Rapier body meant ships took
+/// real collision damage from an obstacle no pilot — human or AI — was given
+/// any way to see coming. Field asteroids (`spawn_asteroid_entity`) remain
+/// solid; those are the ones you are meant to hit.
 fn spawn_cosmetic_entity(
     commands: &mut Commands,
     spawn: &crate::asteroid_spawner::AsteroidSpawn,
@@ -798,16 +823,10 @@ fn spawn_cosmetic_entity(
 ) -> Entity {
     let config_cache = crate::config_cache::get_config_cache();
     let entity_config = config_cache.get(&spawn.config_path);
-    let collider_radius = entity_config
-        .and_then(|c| c.collider.as_ref())
-        .map(|c| c.radius)
-        .unwrap_or(1.0);
 
     let mut entity_cmd = commands.spawn((
         Transform::from_xyz(spawn.x + anchor_offset[0], y, spawn.z + anchor_offset[2]),
         Visibility::default(),
-        bevy_rapier3d::prelude::Collider::ball(collider_radius),
-        bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
 
     if let Some(cfg) = entity_config {

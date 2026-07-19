@@ -432,15 +432,20 @@ pub fn operate_navigation_ai(
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&crate::ai_plugin::ObjectiveCursors>,
     )>,
-    entities: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
-    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
+    entities: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&crate::entities::spawner::EntityName>,
+    )>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
-    let all_entities: Vec<(String, [f32; 3])> = entities
+    let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
         .iter()
-        .map(|(uuid, transform)| {
+        .map(|(uuid, transform, name)| {
             (
                 uuid.0.clone(),
+                name.map(|n| n.0.clone()),
                 [
                     transform.translation.x,
                     transform.translation.y,
@@ -450,12 +455,7 @@ pub fn operate_navigation_ai(
         })
         .collect();
 
-    let nav_range = ship_client_config
-        .as_ref()
-        .map(|c| c.0.nav_chart_range)
-        .unwrap_or(0.0);
-
-    for (_entity, sources, blackboards, mut waypoint, ship_physics, _self_uuid_opt, cursors) in
+    for (_entity, sources, blackboards, mut waypoint, _ship_physics, _self_uuid_opt, cursors) in
         ships.iter_mut()
     {
         let policy = sources
@@ -489,29 +489,31 @@ pub fn operate_navigation_ai(
             continue;
         };
 
-        let ship_pos = [ship_physics.x, 0.0, ship_physics.z];
-        let nav_filtered: Vec<(String, [f32; 3])> = if nav_range > 0.0 && nav_range.is_finite() {
-            all_entities
-                .iter()
-                .filter(|(_, pos)| {
-                    let dx = pos[0] - ship_pos[0];
-                    let dz = pos[2] - ship_pos[2];
-                    (dx * dx + dz * dz).sqrt() <= nav_range
-                })
-                .cloned()
-                .collect()
-        } else {
-            all_entities.clone()
-        };
-
         // Resolve the directive to the waypoint Navigation wants the Helm to
         // travel to, or `None` when it names nowhere reachable.
         let resolved: Option<WaypointMode> = match &top_obj.directive {
+            // A `Destroy` target may be authored as a UUID *or* an entity name —
+            // `combat_test.toml` names "Starbase Alpha" — so resolve both, the
+            // way every other objective consumer does (`ai_target_selection`,
+            // `operate_helm`, `operate_sensors_ai`). Matching on UUID alone made
+            // every name-authored assault silently unresolvable, which cleared
+            // the waypoint and dropped the ship back to its patrol doctrine.
+            //
+            // There is deliberately no range filter here. Navigation is the
+            // ship's *chart*, not a radar: it shows the whole system, and the
+            // entire point of the Channel-3 handoff is to steer a short-ranged
+            // Helm toward something it cannot yet see for itself. This used to
+            // cull candidates by `nav_chart_range` read from the local player's
+            // ship config — a display extent, applied to NPCs that never owned
+            // it.
             crate::messages::AiDirective::Destroy { target } => (!target.is_empty())
-                .then(|| nav_filtered.iter().find(|(uuid, _)| uuid == target))
+                .then(|| resolve_destroy_target(&all_entities, runtime.as_deref(), target))
                 .flatten()
-                .map(|(_, pos)| WaypointMode::Anchored {
-                    source_uuid: target.clone(),
+                .map(|(uuid, pos)| WaypointMode::Anchored {
+                    // The resolved UUID, not the authored target: `Anchored`
+                    // tracks its parent by UUID, so storing a name here would
+                    // leave the waypoint unable to follow a moving target.
+                    source_uuid: uuid,
                     last_x: pos[0],
                     last_z: pos[2],
                 }),
@@ -570,6 +572,26 @@ pub fn operate_navigation_ai(
         // Helm already following it.
         waypoint.set(mode);
     }
+}
+
+/// Resolve a `Destroy` directive's target to `(uuid, position)`.
+///
+/// `target` may be an entity UUID or an entity name. The world runtime's
+/// `name_to_uuid` map is the authoritative name index; the scan over spawned
+/// entities covers names that were assigned at spawn time without going through
+/// the runtime (and doubles as the UUID path).
+fn resolve_destroy_target(
+    entities: &[(String, Option<String>, [f32; 3])],
+    runtime: Option<&crate::world::server::WorldContentRuntime>,
+    target: &str,
+) -> Option<(String, [f32; 3])> {
+    let mapped = runtime.and_then(|rt| rt.name_to_uuid.get(target));
+    entities
+        .iter()
+        .find(|(uuid, name, _)| {
+            Some(uuid) == mapped || uuid == target || name.as_deref().is_some_and(|n| n == target)
+        })
+        .map(|(uuid, _, pos)| (uuid.clone(), *pos))
 }
 
 /// World position of a named anchor, if the world config declares one.
@@ -1723,22 +1745,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn operate_navigation_ai_target_out_of_nav_range_skips_waypoint() {
-        let mut app = test_app();
-        start_game_with_navigation(&mut app);
-        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
-
-        // Spawn target beyond default nav_chart_range (500).
-        spawn_test_entity(&mut app, "far-entity", 1000.0, 0.0);
-
+    /// Helper: a single Helm-relevant `Destroy` objective naming `target`.
+    fn inject_destroy_objective(app: &mut App, target: &str) {
         inject_viewscreen_objective(
-            &mut app,
+            app,
             vec![crate::messages::ScoredObjective {
                 id: "destroy-far".into(),
                 score: 80.0,
                 directive: crate::messages::AiDirective::Destroy {
-                    target: "far-entity".into(),
+                    target: target.into(),
                 },
                 source: crate::messages::ObjectiveSource::Mission,
                 relevance: vec![crate::messages::SystemAffinity::Helm],
@@ -1747,18 +1762,89 @@ mod tests {
                     text: "Destroy far target".into(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec!["far-entity".into()],
+                    targets: vec![target.into()],
                     source: crate::messages::ObjectiveSource::Mission,
                 },
             }],
         );
+    }
+
+    /// Navigation is the ship's chart, not a radar: it plots the whole system.
+    /// It used to cull candidates by `nav_chart_range` — a *display* extent read
+    /// off the local player's ship config and applied to NPCs — which defeated
+    /// the entire point of the Channel-3 handoff, whose job is to steer a
+    /// short-ranged Helm toward something it cannot see for itself.
+    #[test]
+    fn operate_navigation_ai_sets_waypoint_for_distant_target() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        // Far beyond any chart range a hull declares (the largest authored is 800).
+        spawn_test_entity(&mut app, "far-entity", 5000.0, 0.0);
+        inject_destroy_objective(&mut app, "far-entity");
 
         tick(&mut app);
 
-        // The target is beyond nav range, so waypoint should be cleared.
+        let wp = get_nav_waypoint(&mut app).expect("distant target must still get a waypoint");
+        let WaypointMode::Anchored { last_x, last_z, .. } = wp else {
+            panic!("a Destroy target anchors to the entity, got {wp:?}");
+        };
+        assert_eq!(last_x, 5000.0);
+        assert_eq!(last_z, 0.0);
+    }
+
+    /// `combat_test.toml` authors its assault doctrine as
+    /// `directive_target = "Starbase Alpha"` — a name, not a UUID. Matching on
+    /// UUID alone left it unresolvable, so Navigation cleared the waypoint and
+    /// the raider fell back to patrolling.
+    #[test]
+    fn operate_navigation_ai_resolves_destroy_target_by_entity_name() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.clone()),
+            crate::entities::spawner::EntityName("Starbase Alpha".into()),
+            Transform::from_xyz(500.0, 0.0, 100.0),
+        ));
+        inject_destroy_objective(&mut app, "Starbase Alpha");
+
+        tick(&mut app);
+
+        let wp = get_nav_waypoint(&mut app).expect("a name-authored Destroy must resolve");
+        let WaypointMode::Anchored {
+            source_uuid,
+            last_x,
+            last_z,
+        } = wp
+        else {
+            panic!("a Destroy target anchors to the entity, got {wp:?}");
+        };
+        assert_eq!(last_x, 500.0);
+        assert_eq!(last_z, 100.0);
+        assert_eq!(
+            source_uuid, uuid,
+            "an Anchored waypoint tracks its parent by UUID, so it must store the \
+             resolved UUID rather than the authored name"
+        );
+    }
+
+    #[test]
+    fn operate_navigation_ai_clears_waypoint_for_unknown_destroy_target() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        inject_destroy_objective(&mut app, "no-such-entity");
+
+        tick(&mut app);
+
         assert!(
             get_nav_waypoint(&mut app).is_none(),
-            "waypoint must be None when target is beyond nav range"
+            "a Destroy naming nothing in the world resolves nowhere"
         );
     }
 

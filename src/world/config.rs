@@ -145,10 +145,12 @@ pub struct DustLayerConfig {
     /// Emissive multiplier. Values above ~1.0 feed bloom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<[f32; 2]>,
-    /// Mote width as a fraction of screen height, **not** world units — the
-    /// renderer scales it by the mote's spawn depth so a layer's apparent size
-    /// doesn't depend on how far out its `depth_band` sits. Constant with
-    /// speed; apparent growth comes from `length` (spec §7).
+    /// Mote width as a fraction of the viewport's **smaller** dimension, **not**
+    /// world units — the renderer scales it by the mote's spawn depth so a
+    /// layer's apparent size doesn't depend on how far out its `depth_band`
+    /// sits, and sizes off `min(width, height)` so it doesn't depend on the
+    /// viewport's aspect either. Constant with speed; apparent growth comes
+    /// from `length` (spec §7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f32>,
     /// Streak length as a multiple of `width`. `1.0` renders as a point.
@@ -193,7 +195,8 @@ pub struct DustWarpConfig {
     pub texture: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motes: Option<u32>,
-    /// Fraction of screen height, as per [`DustLayerConfig::width`].
+    /// Fraction of the viewport's smaller dimension, as per
+    /// [`DustLayerConfig::width`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f32>,
     /// Streak length multiplier at full warp, relative to mote width.

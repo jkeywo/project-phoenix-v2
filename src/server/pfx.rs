@@ -159,8 +159,8 @@ const DUST_BEHIND_CAMERA_MARGIN: f32 = 5.0;
 
 // Built-in near/mid/far layers, used when the world TOML declares no
 // `[[dust.layer]]`. Ranged fields are [at_rest, at_full_speed]; figures follow
-// the spec §13 emitter tables. `width` is a fraction of screen height, scaled
-// by spawn depth at runtime — see `dust_view_height_at`.
+// the spec §13 emitter tables. `width` is a fraction of the viewport's smaller
+// dimension, scaled by spawn depth at runtime — see `dust_view_min_extent_at`.
 const DUST_DEFAULT_LAYERS: [DustLayerDefaults; 3] = [
     DustLayerDefaults {
         texture: "pfx/space_mote_streak_head.png",
@@ -3261,15 +3261,23 @@ fn dust_lifetime(depth: f32, mote_speed: f32, max_secs: f32, jitter: f32) -> f32
     (transit * jitter).min(max_secs).max(0.05)
 }
 
-/// World height spanned by the viewport at `depth` from the camera.
+/// World extent spanned by the viewport's **smaller** dimension at `depth` from
+/// the camera.
 ///
-/// Mote widths are authored as a fraction of screen height, not in world units
+/// Mote widths are authored as a fraction of the screen, not in world units
 /// (spec §13's "screen-relative units"). Converting through this keeps a mote's
 /// apparent size independent of the depth band it spawned in — otherwise the
 /// far layer, sitting 40–150 units out, is sub-pixel and invisible while the
 /// near layer is whatever its band happens to make it.
-fn dust_view_height_at(depth: f32, fov: f32) -> f32 {
-    2.0 * depth * (fov * 0.5).tan()
+///
+/// The basis is the smaller of width and height, not height alone. Bevy's
+/// perspective `fov` is *vertical*, so scaling off it directly meant a wide,
+/// short viewport shrank every mote even though the screen had got bigger —
+/// the field thinned out precisely when there was more room for it. Folding in
+/// `aspect.min(1.0)` pins motes to whichever dimension is actually the tighter
+/// constraint, so apparent size holds across letterbox and portrait alike.
+fn dust_view_min_extent_at(depth: f32, fov: f32, aspect: f32) -> f32 {
+    2.0 * depth * (fov * 0.5).tan() * aspect.min(1.0)
 }
 
 /// Normalised speed for the local ship, already through the speed curve.
@@ -3510,8 +3518,9 @@ fn spawn_dust_motes(
                     layer.max_lifetime_secs,
                     rng.random_range(0.8..1.2),
                 );
-                let mote_width =
-                    layer.width * dust_view_height_at(depth, fov) * rng.random_range(0.7..1.3);
+                let mote_width = layer.width
+                    * dust_view_min_extent_at(depth, fov, aspect)
+                    * rng.random_range(0.7..1.3);
                 let mote_length_scale = rng.random_range(0.75..1.25);
                 let initial_length =
                     mote_width * dust_ramp(layer.length, state.streak_s) * mote_length_scale;
@@ -3558,8 +3567,9 @@ fn spawn_dust_motes(
                 0.35,
                 &mut rng,
             );
-            let mote_width =
-                cfg.warp.width * dust_view_height_at(depth, fov) * rng.random_range(0.6..1.4);
+            let mote_width = cfg.warp.width
+                * dust_view_min_extent_at(depth, fov, aspect)
+                * rng.random_range(0.6..1.4);
             let mote_length_scale = rng.random_range(0.6..1.4);
             let initial_length = mote_width
                 * dust_ramp([1.0, cfg.warp.length_multiplier], state.warp_ramp)
@@ -4080,33 +4090,64 @@ mod dust_tests {
 
     // --- screen-relative sizing --------------------------------------------
 
-    /// Layer widths are fractions of screen height, not world units. Treating
+    /// Layer widths are fractions of the screen, not world units. Treating
     /// them as world units makes the far layer (40–150 units out, width 0.006)
     /// sub-pixel and invisible, which is exactly what happened first time.
     #[test]
-    fn view_height_grows_with_depth() {
+    fn view_extent_grows_with_depth() {
         let fov = std::f32::consts::FRAC_PI_4;
-        let near = dust_view_height_at(10.0, fov);
-        let far = dust_view_height_at(100.0, fov);
+        let near = dust_view_min_extent_at(10.0, fov, 16.0 / 9.0);
+        let far = dust_view_min_extent_at(100.0, fov, 16.0 / 9.0);
         assert!(
             (far / near - 10.0).abs() < 1e-3,
             "should scale linearly with depth"
         );
     }
 
+    /// The bug: `fov` is Bevy's *vertical* FOV, so sizing off it alone shrank
+    /// motes on a wide, short viewport even though the screen had grown. Motes
+    /// must track whichever screen dimension is the tighter constraint.
+    #[test]
+    fn view_extent_tracks_the_smaller_screen_dimension() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let depth = 30.0;
+        let square = dust_view_min_extent_at(depth, fov, 1.0);
+
+        // Landscape: height is the smaller dimension, so widening the viewport
+        // must not change mote size at all.
+        assert!(
+            (dust_view_min_extent_at(depth, fov, 16.0 / 9.0) - square).abs() < 1e-4,
+            "a wider-than-tall viewport is still height-constrained"
+        );
+        assert!(
+            (dust_view_min_extent_at(depth, fov, 4.0) - square).abs() < 1e-4,
+            "an extremely wide viewport is still height-constrained"
+        );
+
+        // Portrait: width is now the smaller dimension, so motes shrink with it
+        // rather than bloating to the taller height.
+        let portrait = dust_view_min_extent_at(depth, fov, 0.5);
+        assert!(
+            portrait < square,
+            "a taller-than-wide viewport must size off its width, got {portrait} vs {square}"
+        );
+        assert!((portrait / square - 0.5).abs() < 1e-4, "and do so linearly");
+    }
+
     #[test]
     fn screen_relative_width_holds_apparent_size_across_depth_bands() {
         let fov = std::f32::consts::FRAC_PI_4;
+        let aspect = 16.0 / 9.0;
         let frac = 0.02;
         // Two motes of the same authored width at very different depths must
         // subtend the same fraction of the view.
-        let near_world = frac * dust_view_height_at(10.0, fov);
-        let far_world = frac * dust_view_height_at(120.0, fov);
+        let near_world = frac * dust_view_min_extent_at(10.0, fov, aspect);
+        let far_world = frac * dust_view_min_extent_at(120.0, fov, aspect);
         assert!(
             far_world > near_world,
             "a deeper mote needs more world width"
         );
-        let apparent = |w: f32, d: f32| w / dust_view_height_at(d, fov);
+        let apparent = |w: f32, d: f32| w / dust_view_min_extent_at(d, fov, aspect);
         assert!(
             (apparent(near_world, 10.0) - apparent(far_world, 120.0)).abs() < 1e-6,
             "apparent size must not depend on depth"

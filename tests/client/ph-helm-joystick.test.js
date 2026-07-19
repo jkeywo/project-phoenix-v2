@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import '../../gui/components/ph-helm-joystick.js';
+import { softenAxis, GAMEPAD_DEADZONE } from '../../gui/components/ph-helm-joystick.js';
 
 /** Helper: mock rAF so tests can step through frame callbacks synchronously. */
 let rafCb = null;
@@ -190,5 +190,38 @@ describe('PhHelmJoystick', () => {
 
     expect(nub.style.marginLeft).toBe('0px');
     expect(nub.style.marginTop).toBe('0px');
+  });
+});
+
+describe('softenAxis', () => {
+  it('holds zero through the deadzone, on both signs', () => {
+    expect(softenAxis(0)).toBe(0);
+    expect(softenAxis(GAMEPAD_DEADZONE)).toBe(0);
+    expect(softenAxis(-GAMEPAD_DEADZONE)).toBe(0);
+    expect(softenAxis(0.05)).toBe(0);
+    expect(softenAxis(-0.09)).toBe(0);
+  });
+
+  it('reaches full deflection at the rails', () => {
+    expect(softenAxis(1)).toBeCloseTo(1, 10);
+    expect(softenAxis(-1)).toBeCloseTo(-1, 10);
+  });
+
+  it('leaves the deadzone continuously rather than stepping', () => {
+    // The bug this replaced: a bare threshold gate jumped straight from 0 to
+    // ±0.1 here, which is what made thrust and yaw feel jerky.
+    expect(softenAxis(0.101)).toBeCloseTo(0.00111, 5);
+    expect(softenAxis(-0.101)).toBeCloseTo(-0.00111, 5);
+  });
+
+  it('is monotonic and sign-preserving across the live band', () => {
+    let prev = -Infinity;
+    for (let v = 0; v <= 1.0001; v += 0.01) {
+      const out = softenAxis(v);
+      expect(out).toBeGreaterThanOrEqual(prev);
+      expect(out).toBeGreaterThanOrEqual(0);
+      expect(softenAxis(-v)).toBeCloseTo(-out, 10);
+      prev = out;
+    }
   });
 });

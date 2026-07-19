@@ -1,10 +1,10 @@
-name = "Research Outpost"
+name = "entity.station_research_outpost.name"
 tags = ["station", "comms_contact", "science_facility"]
 
 [target]
 tags = ["station"]
 threat_level = "none"
-description = "Research Outpost"
+description = "entity.station_research_outpost.target.description"
 
 [hull]
 hull_integrity = 60.0

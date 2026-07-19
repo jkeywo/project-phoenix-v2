@@ -17,6 +17,10 @@
   <script src="gui/bg-raf-keepalive.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Loads assets/strings/strings.csv before anything renders. Its top-level
+       await blocks every module that imports gui/strings.js, so t() is ready
+       by the time the lobby paints. Keep this first. -->
+  <script type="module" src="gui/strings-boot.js"></script>
   <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440, #441). -->
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>

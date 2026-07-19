@@ -1,0 +1,342 @@
+id,context,en
+entity.alliance_battleship.name,assets/entities/alliance_battleship.toml → name (top level),[Alliance Battleship]
+entity.alliance_battleship.hull.system_hull.power_reactor.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Power Reactor]
+entity.alliance_battleship.hull.system_hull.power_battery.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Power Battery]
+entity.alliance_battleship.hull.system_hull.core.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Core]
+entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Engine (Port)]
+entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Engine (Starboard)]
+entity.alliance_battleship.hull.system_hull.helm_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Helm Radar]
+entity.alliance_battleship.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Tactical Radar]
+entity.alliance_battleship.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Sensor Radar]
+entity.alliance_battleship.hull.system_hull.phaser_fore.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Phaser Bank (Fore)]
+entity.alliance_battleship.hull.system_hull.blaster_heavy_fore.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Heavy Blaster Bank (Fore)]
+entity.alliance_battleship.hull.system_hull.phaser_aft.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Phaser Bank (Aft)]
+entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Port)]
+entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Starboard)]
+entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_centre.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Centre)]
+entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft Port)]
+entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft Starboard)]
+entity.alliance_battleship.shield_arc.fore.label,assets/entities/alliance_battleship.toml → [shield_arc] label,[Fore]
+entity.alliance_battleship.shield_arc.starboard.label,assets/entities/alliance_battleship.toml → [shield_arc] label,[Starboard]
+entity.alliance_battleship.shield_arc.aft.label,assets/entities/alliance_battleship.toml → [shield_arc] label,[Aft]
+entity.alliance_battleship.shield_arc.port.label,assets/entities/alliance_battleship.toml → [shield_arc] label,[Port]
+entity.alliance_battleship.shield_arc.omni.label,assets/entities/alliance_battleship.toml → [shield_arc] label,[Omni]
+entity.alliance_battleship.power_groups.ops.label,assets/entities/alliance_battleship.toml → [power_groups.ops] label,[Operations]
+entity.alliance_battleship.power_groups.helm.label,assets/entities/alliance_battleship.toml → [power_groups.helm] label,[Propulsion]
+entity.alliance_battleship.power_groups.weapons.label,assets/entities/alliance_battleship.toml → [power_groups.weapons] label,[Weapons]
+entity.alliance_battleship.power_groups.sensors.label,assets/entities/alliance_battleship.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_battleship.station.captain.description,assets/entities/alliance_battleship.toml → [station] description,[Command the bridge.]
+entity.alliance_battleship.station.helm.description,assets/entities/alliance_battleship.toml → [station] description,[Pilot the ship.]
+entity.alliance_battleship.station.tactical.description,assets/entities/alliance_battleship.toml → [station] description,[Manage weapons systems.]
+entity.alliance_battleship.station.repair.description,assets/entities/alliance_battleship.toml → [station] description,[Maintain and repair ship systems.]
+entity.alliance_battleship.station.sensors.description,assets/entities/alliance_battleship.toml → [station] description,[Monitor long-range sensors.]
+entity.alliance_battleship.station.shields.description,assets/entities/alliance_battleship.toml → [station] description,[Manage shield systems.]
+entity.alliance_battleship.station.navigation.description,assets/entities/alliance_battleship.toml → [station] description,[Plot course and navigate.]
+entity.alliance_battleship.station.power.description,assets/entities/alliance_battleship.toml → [station] description,[Manage ship power systems.]
+entity.alliance_battleship.station.comms.description,assets/entities/alliance_battleship.toml → [station] description,[Hail stations and relay intelligence.]
+entity.alliance_courier.name,assets/entities/alliance_courier.toml → name (top level),[Alliance Courier]
+entity.alliance_courier.hull.system_hull.core.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Core]
+entity.alliance_courier.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Port Engine]
+entity.alliance_courier.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Starboard Engine]
+entity.alliance_courier.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Lateral Thrusters]
+entity.alliance_courier.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Tactical Radar]
+entity.alliance_courier.hull.system_hull.blaster_fore.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Blaster]
+entity.alliance_courier.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Sensor Radar]
+entity.alliance_courier.hull.system_hull.power_reactor.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Reactor]
+entity.alliance_courier.hull.system_hull.power_battery.display_name,assets/entities/alliance_courier.toml → [hull.system_hull] display_name,[Battery]
+entity.alliance_courier.shield_arc.fore.label,assets/entities/alliance_courier.toml → [shield_arc] label,[Fore]
+entity.alliance_courier.shield_arc.aft.label,assets/entities/alliance_courier.toml → [shield_arc] label,[Aft]
+entity.alliance_courier.power_groups.ops.label,assets/entities/alliance_courier.toml → [power_groups.ops] label,[Operations]
+entity.alliance_courier.power_groups.helm.label,assets/entities/alliance_courier.toml → [power_groups.helm] label,[Propulsion]
+entity.alliance_courier.power_groups.weapons.label,assets/entities/alliance_courier.toml → [power_groups.weapons] label,[Weapons]
+entity.alliance_courier.power_groups.sensors.label,assets/entities/alliance_courier.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_courier.station.captain.description,assets/entities/alliance_courier.toml → [station] description,"[Command the ship, coordinate the mission and manage its support systems.]"
+entity.alliance_courier.station.tactical.description,assets/entities/alliance_courier.toml → [station] description,"[Fly the Courier, track contacts and operate its blaster.]"
+entity.alliance_cruiser.name,assets/entities/alliance_cruiser.toml → name (top level),[Alliance Cruiser]
+entity.alliance_cruiser.hull.system_hull.science.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Science]
+entity.alliance_cruiser.hull.system_hull.power_reactor.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Power Reactor]
+entity.alliance_cruiser.hull.system_hull.power_battery.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Power Battery]
+entity.alliance_cruiser.hull.system_hull.core.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Core]
+entity.alliance_cruiser.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Engine (Port)]
+entity.alliance_cruiser.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Engine (Starboard)]
+entity.alliance_cruiser.hull.system_hull.helm_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Helm Radar]
+entity.alliance_cruiser.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Lateral Thrusters]
+entity.alliance_cruiser.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Tactical Radar]
+entity.alliance_cruiser.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Sensor Radar]
+entity.alliance_cruiser.hull.system_hull.phaser_fore.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Phaser Bank (Fore)]
+entity.alliance_cruiser.hull.system_hull.phaser_aft.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Phaser Bank (Aft)]
+entity.alliance_cruiser.hull.system_hull.torpedo_tube_fore_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Port)]
+entity.alliance_cruiser.hull.system_hull.torpedo_tube_fore_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore Starboard)]
+entity.alliance_cruiser.hull.system_hull.torpedo_tube_aft.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft)]
+entity.alliance_cruiser.shield_arc.fore.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,[Fore]
+entity.alliance_cruiser.shield_arc.port.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,[Port]
+entity.alliance_cruiser.shield_arc.aft.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,[Aft]
+entity.alliance_cruiser.shield_arc.starboard.label,assets/entities/alliance_cruiser.toml → [shield_arc] label,[Starboard]
+entity.alliance_cruiser.power_groups.ops.label,assets/entities/alliance_cruiser.toml → [power_groups.ops] label,[Operations]
+entity.alliance_cruiser.power_groups.helm.label,assets/entities/alliance_cruiser.toml → [power_groups.helm] label,[Propulsion]
+entity.alliance_cruiser.power_groups.weapons.label,assets/entities/alliance_cruiser.toml → [power_groups.weapons] label,[Weapons]
+entity.alliance_cruiser.power_groups.sensors.label,assets/entities/alliance_cruiser.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_cruiser.station.captain.description,assets/entities/alliance_cruiser.toml → [station] description,[Command the bridge.]
+entity.alliance_cruiser.station.helm.description,assets/entities/alliance_cruiser.toml → [station] description,[Pilot the ship.]
+entity.alliance_cruiser.station.tactical.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage weapons systems.]
+entity.alliance_cruiser.station.science.description,assets/entities/alliance_cruiser.toml → [station] description,[Monitor sensors and manage shields.]
+entity.alliance_cruiser.station.engineering.description,assets/entities/alliance_cruiser.toml → [station] description,[Manage power and repairs.]
+entity.alliance_cruiser.station.comms.description,assets/entities/alliance_cruiser.toml → [station] description,"[Hail stations, plot course and navigate.]"
+entity.alliance_destroyer.name,assets/entities/alliance_destroyer.toml → name (top level),[Alliance Destroyer]
+entity.alliance_destroyer.hull.system_hull.power_reactor.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Power Reactor]
+entity.alliance_destroyer.hull.system_hull.power_battery.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Power Battery]
+entity.alliance_destroyer.hull.system_hull.core.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Core]
+entity.alliance_destroyer.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Engine (Port)]
+entity.alliance_destroyer.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Engine (Starboard)]
+entity.alliance_destroyer.hull.system_hull.helm_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Helm Radar]
+entity.alliance_destroyer.hull.system_hull.helm_lateral_thrust.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Lateral Thrusters]
+entity.alliance_destroyer.hull.system_hull.tactical_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Tactical Radar]
+entity.alliance_destroyer.hull.system_hull.sensor_radar.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Sensor Radar]
+entity.alliance_destroyer.hull.system_hull.phaser_omni.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Phaser Bank (Omni)]
+entity.alliance_destroyer.hull.system_hull.blaster_port.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Blaster Bank (Port)]
+entity.alliance_destroyer.hull.system_hull.blaster_starboard.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Blaster Bank (Starboard)]
+entity.alliance_destroyer.hull.system_hull.torpedo_tube_fore.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Torpedo Tube (Fore)]
+entity.alliance_destroyer.hull.system_hull.torpedo_tube_aft.display_name,assets/entities/alliance_destroyer.toml → [hull.system_hull] display_name,[Torpedo Tube (Aft)]
+entity.alliance_destroyer.shield_arc.fore.label,assets/entities/alliance_destroyer.toml → [shield_arc] label,[Fore]
+entity.alliance_destroyer.shield_arc.aft.label,assets/entities/alliance_destroyer.toml → [shield_arc] label,[Aft]
+entity.alliance_destroyer.power_groups.ops.label,assets/entities/alliance_destroyer.toml → [power_groups.ops] label,[Operations]
+entity.alliance_destroyer.power_groups.helm.label,assets/entities/alliance_destroyer.toml → [power_groups.helm] label,[Propulsion]
+entity.alliance_destroyer.power_groups.weapons.label,assets/entities/alliance_destroyer.toml → [power_groups.weapons] label,[Weapons]
+entity.alliance_destroyer.power_groups.sensors.label,assets/entities/alliance_destroyer.toml → [power_groups.sensors] label,[Sensors]
+entity.alliance_destroyer.station.captain.description,assets/entities/alliance_destroyer.toml → [station] description,[Command the bridge and monitor sensors.]
+entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,[Pilot the ship.]
+entity.alliance_destroyer.station.tactical.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage weapons, navigation and comms.]"
+entity.alliance_destroyer.station.engineering.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage shields, power and repairs.]"
+entity.asteroid_common_1_cosmetic.name,assets/entities/asteroid_common_1_cosmetic.toml → name (top level),[Cosmetic Asteroid 1]
+entity.asteroid_common_1_large.name,assets/entities/asteroid_common_1_large.toml → name (top level),[Large Asteroid 1]
+entity.asteroid_common_1_small.name,assets/entities/asteroid_common_1_small.toml → name (top level),[Small Asteroid 1]
+entity.asteroid_common_2_cosmetic.name,assets/entities/asteroid_common_2_cosmetic.toml → name (top level),[Cosmetic Asteroid 2]
+entity.asteroid_common_2_large.name,assets/entities/asteroid_common_2_large.toml → name (top level),[Large Asteroid 2]
+entity.asteroid_common_2_small.name,assets/entities/asteroid_common_2_small.toml → name (top level),[Small Asteroid 2]
+entity.asteroid_common_3_cosmetic.name,assets/entities/asteroid_common_3_cosmetic.toml → name (top level),[Cosmetic Asteroid 3]
+entity.asteroid_common_3_large.name,assets/entities/asteroid_common_3_large.toml → name (top level),[Large Asteroid 3]
+entity.asteroid_common_3_small.name,assets/entities/asteroid_common_3_small.toml → name (top level),[Small Asteroid 3]
+entity.asteroid_common_4_cosmetic.name,assets/entities/asteroid_common_4_cosmetic.toml → name (top level),[Cosmetic Asteroid 4]
+entity.asteroid_common_4_large.name,assets/entities/asteroid_common_4_large.toml → name (top level),[Large Asteroid 4]
+entity.asteroid_common_4_small.name,assets/entities/asteroid_common_4_small.toml → name (top level),[Small Asteroid 4]
+entity.moon_ice.name,assets/entities/moon_ice.toml → name (top level),[Ice Moon]
+entity.moon_ice.target.description,assets/entities/moon_ice.toml → [target] description,[A frozen cryovolcanic moon]
+entity.moon_luna.name,assets/entities/moon_luna.toml → name (top level),[Luna]
+entity.moon_luna.target.description,assets/entities/moon_luna.toml → [target] description,[A cratered rocky moon]
+entity.pirate_raider.name,assets/entities/pirate_raider.toml → name (top level),[Harrow Destroyer]
+entity.pirate_raider.target.description,assets/entities/pirate_raider.toml → [target] description,[Harrow Destroyer]
+entity.pirate_raider.shield_arc.all.label,assets/entities/pirate_raider.toml → [shield_arc] label,[All]
+entity.pirate_raider.behaviour.doctrine.patrol_sector.text,assets/entities/pirate_raider.toml → [behaviour.doctrine] text,[Patrol the sector]
+entity.pirate_raider.behaviour.doctrine.destroy_hostiles.text,assets/entities/pirate_raider.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
+entity.pirate_raider.behaviour.doctrine.retreat_when_hurt.text,assets/entities/pirate_raider.toml → [behaviour.doctrine] text,[Hull critical — break off and run for the haven]
+entity.pirate_raider_reinforcement.name,assets/entities/pirate_raider_reinforcement.toml → name (top level),[Harrow Destroyer]
+entity.pirate_raider_reinforcement.target.description,assets/entities/pirate_raider_reinforcement.toml → [target] description,[Harrow Destroyer]
+entity.pirate_raider_reinforcement.shield_arc.all.label,assets/entities/pirate_raider_reinforcement.toml → [shield_arc] label,[All]
+entity.pirate_raider_reinforcement.behaviour.doctrine.patrol_sector.text,assets/entities/pirate_raider_reinforcement.toml → [behaviour.doctrine] text,[Patrol the sector]
+entity.pirate_raider_reinforcement.behaviour.doctrine.destroy_hostiles.text,assets/entities/pirate_raider_reinforcement.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
+entity.planet_earth.name,assets/entities/planet_earth.toml → name (top level),[Earth]
+entity.planet_earth.target.description,assets/entities/planet_earth.toml → [target] description,[Earth]
+entity.planet_ecumenopolis.name,assets/entities/planet_ecumenopolis.toml → name (top level),[Ecumenopolis]
+entity.planet_ecumenopolis.target.description,assets/entities/planet_ecumenopolis.toml → [target] description,[A world-spanning city]
+entity.planet_gas_giant.name,assets/entities/planet_gas_giant.toml → name (top level),[Gas Giant]
+entity.planet_gas_giant.target.description,assets/entities/planet_gas_giant.toml → [target] description,[A banded gas giant]
+entity.planet_lava.name,assets/entities/planet_lava.toml → name (top level),[Lava Planet]
+entity.planet_lava.target.description,assets/entities/planet_lava.toml → [target] description,[A volcanic hellscape]
+entity.region_nebula.name,assets/entities/region_nebula.toml → name (top level),[Nebula]
+entity.region_nebula.target.description,assets/entities/region_nebula.toml → [target] description,[Nebula region]
+entity.ship_harrow_patrol.name,assets/entities/ship_harrow_patrol.toml → name (top level),[Harrow Cruiser]
+entity.ship_harrow_patrol.target.description,assets/entities/ship_harrow_patrol.toml → [target] description,[Harrow Cruiser]
+entity.ship_harrow_patrol.shield_arc.all.label,assets/entities/ship_harrow_patrol.toml → [shield_arc] label,[All]
+entity.ship_harrow_patrol.behaviour.doctrine.patrol_ironveil.text,assets/entities/ship_harrow_patrol.toml → [behaviour.doctrine] text,[Patrol the Ironveil sector]
+entity.ship_harrow_patrol.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_patrol.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
+entity.ship_harrow_warhawk.name,assets/entities/ship_harrow_warhawk.toml → name (top level),[Harrow Battleship]
+entity.ship_harrow_warhawk.target.description,assets/entities/ship_harrow_warhawk.toml → [target] description,[Harrow Battleship]
+entity.ship_harrow_warhawk.shield_arc.all.label,assets/entities/ship_harrow_warhawk.toml → [shield_arc] label,[All]
+entity.ship_harrow_warhawk.behaviour.doctrine.patrol_warhawk.text,assets/entities/ship_harrow_warhawk.toml → [behaviour.doctrine] text,[Patrol the sector]
+entity.ship_harrow_warhawk.behaviour.doctrine.destroy_hostiles.text,assets/entities/ship_harrow_warhawk.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
+entity.ship_requiem_courier.name,assets/entities/ship_requiem_courier.toml → name (top level),[Requiem Courier]
+entity.ship_requiem_courier.target.description,assets/entities/ship_requiem_courier.toml → [target] description,[Requiem Courier]
+entity.ship_requiem_courier.behaviour.doctrine.reach_destination.text,assets/entities/ship_requiem_courier.toml → [behaviour.doctrine] text,[Proceed to destination]
+entity.star_sun.name,assets/entities/star_sun.toml → name (top level),[Sun]
+entity.star_sun.target.description,assets/entities/star_sun.toml → [target] description,[Sun]
+entity.station_axiom.name,assets/entities/station_axiom.toml → name (top level),[Axiom Station]
+entity.station_axiom.target.description,assets/entities/station_axiom.toml → [target] description,[Axiom Station]
+entity.station_outpost.name,assets/entities/station_outpost.toml → name (top level),[Outpost Alpha]
+entity.station_outpost.target.description,assets/entities/station_outpost.toml → [target] description,[Outpost Alpha]
+entity.station_research_outpost.name,assets/entities/station_research_outpost.toml → name (top level),[Research Outpost]
+entity.station_research_outpost.target.description,assets/entities/station_research_outpost.toml → [target] description,[Research Outpost]
+world.before_the_fire.global.title,assets/worlds/before_the_fire.toml → [global] title,[Before the Fire]
+world.before_the_fire.global.description,assets/worlds/before_the_fire.toml → [global] description,[Investigate a distress signal deep in the Axiom System.]
+world.entity.axiom_station.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Axiom Station]
+world.entity.axiom_station_dock.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Axiom Station Dock]
+world.entity.research_outpost.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Research Outpost]
+world.entity.requiem_courier.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Requiem Courier]
+world.entity.ironveil.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ironveil]
+world.entity.ashrender.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ashrender]
+world.entity.kaleth_nebula.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Kaleth Nebula]
+world.entity.ironveil_patrol_zone_a.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ironveil Patrol Zone A]
+world.entity.ironveil_patrol_zone_b.name,assets/worlds/before_the_fire.toml → [entity] name (entity display name; also the cross-reference key),[Ironveil Patrol Zone B]
+world.before_the_fire.trigger.action.obj_investigate.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Investigate the situation in the Axiom System.]
+world.before_the_fire.trigger.action.obj_hail_briefing.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Hail Axiom Station or Research Outpost for a briefing.]
+world.before_the_fire.comms.starcorp_command.from,assets/worlds/before_the_fire.toml → [comms] from,[Starcorp Command]
+world.before_the_fire.comms.starcorp_command.message,assets/worlds/before_the_fire.toml → [comms] message,"[A.E.V. Ardent, this is Starcorp Command. You are ordered to proceed to the Axiom System immediately. Harrow vessels have been observed acting outside normal patrol parameters. Investigate and report. Do not engage unless fired upon. Command out.]"
+world.before_the_fire.comms.0.message,assets/worlds/before_the_fire.toml → [comms] message,"[This is Axiom Station to any Alliance vessel — we have a situation. Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed position puts them near the Harrow patrol operating area. The peace talks cannot continue without them. Please respond.]"
+world.before_the_fire.comms.response.0.text,assets/worlds/before_the_fire.toml → [comms.response] text,"[Understood, Axiom Station. We are proceeding to your location.]"
+world.before_the_fire.comms.response.follow_up.message,assets/worlds/before_the_fire.toml → [comms.response.follow_up] message,"[Ardent, we have you on the dock approach. Welcome to Axiom. Administrator Chen is preparing the full briefing now — stand by.]"
+world.before_the_fire.comms.response.1.text,assets/worlds/before_the_fire.toml → [comms.response] text,"[Axiom Station, do you know where the Harrow patrol is operating?]"
+world.before_the_fire.comms.response.follow_up.message_2,assets/worlds/before_the_fire.toml → [comms.response.follow_up] message,"[The Harrow patrol — I.V. Ironveil — was last observed near the inner asteroid belt, between our position and the outer system. They have not responded to our hails. I don't know what they're waiting for, but Dr. Varen is somewhere near their patrol route.]"
+world.before_the_fire.comms.research_scholar.message,assets/worlds/before_the_fire.toml → [comms] message,"[A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now.]"
+world.before_the_fire.comms.follow_up.speaker,assets/worlds/before_the_fire.toml → [comms.follow_up] speaker,[Dr. Myst]
+world.before_the_fire.comms.follow_up.message,assets/worlds/before_the_fire.toml → [comms.follow_up] message,"[Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging.]"
+world.before_the_fire.comms.follow_up.response.0.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response] text,[What happens if it fires?]
+world.before_the_fire.comms.follow_up.response.follow_up.speaker,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] speaker,[Dr. Myst]
+world.before_the_fire.comms.follow_up.response.follow_up.message,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] message,[If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong.]
+world.before_the_fire.comms.follow_up.response.follow_up.response.0.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response] text,[Can you pinpoint the source?]
+world.before_the_fire.comms.follow_up.response.follow_up.response.action.obj_locate_ashrender.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response.action] text,[Locate the weapon source beyond the Kaleth Nebula.]
+world.before_the_fire.comms.follow_up.response.1.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response] text,[Is there anything unusual about the signal?]
+world.before_the_fire.comms.follow_up.response.follow_up.speaker_2,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] speaker,[Dr. Myst]
+world.before_the_fire.comms.follow_up.response.follow_up.message_2,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up] message,[Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs.]
+world.before_the_fire.comms.follow_up.response.follow_up.response.1.text,assets/worlds/before_the_fire.toml → [comms.follow_up.response.follow_up.response] text,[Understood. Keep monitoring.]
+world.before_the_fire.comms.requiem_override.message,assets/worlds/before_the_fire.toml → [comms] message,"[This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by.]"
+world.before_the_fire.trigger.action.obj_ironveil_destroyed.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[I.V. Ironveil destroyed. Ashrender executing contingency — Aphelion Protocol armed.]
+world.before_the_fire.trigger.action.obj_protocol_timer.text,assets/worlds/before_the_fire.toml → [trigger.action] text,[Aphelion Protocol armed on schedule — Ashrender is charging the weapon.]
+world.entity.radiation_zone.name,assets/worlds/btf_aphelion_protocol.toml → [entity] name (entity display name; also the cross-reference key),[Radiation Zone]
+world.btf_aphelion_protocol.trigger.action.obj_finale.text,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] text,"[Aphelion Protocol armed. Choose your response: Fight, Evacuate, Contain, or Override.]"
+world.btf_aphelion_protocol.trigger.action.0.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[PARTIAL DETONATION — The Aphelion weapon discharged on Ashrender's destruction, triggering a partial resonance cascade. Axiom Station sustained heavy structural damage. The quantum interference zone has formed — smaller than planned, but permanent. It will grow over decades. In 35 years it will be called the Neutral Zone.
+
+Harrow High Command issued a communiqué within hours: an Alliance warship destroyed an Imperium vessel in the Axiom System during peace negotiations. The A.E.V. Ardent is named. The war begins not with a declaration but with a press release.
+
+The Neutral Zone exists because you fought.
+
+END: FIGHT]"
+world.btf_aphelion_protocol.trigger.action.obj_containment.text,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] text,[Containment position held. Survive 30 seconds in the radiation discharge zone.]
+world.btf_aphelion_protocol.trigger.action.2.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[CONTAINMENT HELD — Ardent absorbed the weapon's discharge. Hull integrity critical; multiple console failures. The quantum resonance was partially contained — the interference zone formed but smaller than projected.
+
+Axiom Station survived. Kaleth Prime sustained atmospheric disturbance but no population loss. The A.E.V. Ardent limped to Axiom Station under emergency power. Three crew were lost to hull breach. The rest received commendations they never spoke about.
+
+The Neutral Zone exists because you stood in the way.
+
+END: CONTAINMENT]"
+world.btf_aphelion_protocol.trigger.action.3.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[EVACUATION COMPLETE — The weapon fired. Axiom Station and the Kaleth Prime orbital platforms were destroyed. But 70% of the civilian population reached safety. The quantum interference zone formed as predicted.
+
+Starcorp Command's official account credits the A.E.V. Ardent with saving an estimated 28 million lives. Your name appears in the historical record not as the crew that stopped the war, but as the crew that made it survivable.
+
+The Neutral Zone exists because you chose people over victory.
+
+END: EVACUATE]"
+world.btf_aphelion_protocol.trigger.action.4.message,assets/worlds/btf_aphelion_protocol.toml → [trigger.action] message,"[PARTIAL EVACUATION — The weapon fired. Casualties were reduced but not minimised. The quantum interference zone formed.
+
+You saved some of them. The records note the partial evacuation effort.
+
+The Neutral Zone exists.
+
+END: EVACUATE (PARTIAL)]"
+world.btf_aphelion_protocol.comms.0.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,[This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is armed and charging. You cannot stop this. What you choose to do in the next ten minutes will determine which side history blames. Stand clear.]
+world.btf_aphelion_protocol.comms.starcorp_command.from,assets/worlds/btf_aphelion_protocol.toml → [comms] from,[Starcorp Command]
+world.btf_aphelion_protocol.comms.starcorp_command.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Ardent, this is Starcorp Command — FLASH priority. Aphelion Protocol confirmed active. You are hereby ordered to stand down and withdraw immediately. Do NOT engage Harrow forces. We cannot afford an incident. Command out.]"
+world.btf_aphelion_protocol.comms.requiem_override.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[This is the channel you were told to stand by for. We have the weapon's abort code. One accepted exchange and Ashrender cannot fire. There will be consequences for us — but the weapon will not fire. Your move, Ardent.]"
+world.btf_aphelion_protocol.comms.1.message,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Ardent, we've received the evacuation order. We're beginning to load the shuttles but we need navigation vectors — Helm, plot us an escape route away from the weapon's axis of fire. Science, we need atmospheric dispersal models for Kaleth Prime's eastern continent evacuation. Acknowledge.]"
+world.btf_aphelion_protocol.comms.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[Vectors confirmed. Initiating evacuation coordination — round one.]
+world.btf_aphelion_protocol.comms.response.action.obj_evacuate_r1.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.action] text,[Evacuation round 1 complete. Hail Axiom Station for the next vector.]
+world.btf_aphelion_protocol.comms.response.follow_up.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up] message,"[First vector confirmed. We have 40% of the civilian population moving. We need two more vectors before the weapon fires. Round two — deep colony vectors and sub-orbital trajectories for the northern settlements. Helm, compensate for the interference zone forming on the starboard approach.]"
+world.btf_aphelion_protocol.comms.response.follow_up.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response] text,[Round two vectors transmitted.]
+world.btf_aphelion_protocol.comms.response.follow_up.response.action.obj_evacuate_r2.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.action] text,[Evacuation round 2 complete. One more vector needed.]
+world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up] message,"[Second vector confirmed. We're at 70% evacuation capacity. Final vector — the weapon is nearly charged. Whatever happens in the next few minutes, Ardent, you've saved most of them. Transmit the final trajectory and we'll execute.]"
+world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.response.0.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up.response] text,[Final vector transmitted. Evacuation complete.]
+world.btf_aphelion_protocol.comms.response.follow_up.response.follow_up.response.action.obj_evacuate_r3.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response.follow_up.response.follow_up.response.action] text,[Evacuation complete. Casualties minimised.]
+world.btf_aphelion_protocol.comms.requiem_override.message_2,assets/worlds/btf_aphelion_protocol.toml → [comms] message,"[Confirm: you are accepting the override channel. Once you acknowledge, we transmit the abort code and Ashrender cannot fire. But Harrow will know we helped you. They will come for us. This is the price of doing the right thing at the wrong time. Confirm acceptance.]"
+world.btf_aphelion_protocol.comms.response.1.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[Confirmed. Transmit the abort code.]
+world.btf_aphelion_protocol.comms.response.action.3.message,assets/worlds/btf_aphelion_protocol.toml → [comms.response.action] message,"[REQUIEM OVERRIDE — The abort code was transmitted. Ashrender's weapon discharge sequence terminated. I.V. Ashrender stands down.
+
+Within minutes, Harrow warships arrived in the Axiom System. The Requiem courier was destroyed. House Requiem was denounced as traitors to the Imperium. High Executor Veth Harrow had the casus belli he needed — not a weapon discharge, but an act of treachery.
+
+The war began differently. It began the same.
+
+The quantum resonance from Ashrender's aborted charge left a sub-harmonic scar in the system's spatial fabric. Smaller than the full discharge would have created. But permanent. In 35 years, navigators will notice something strange about this region of space.
+
+The Neutral Zone exists because a deal was made.
+
+END: REQUIEM OVERRIDE]"
+world.btf_aphelion_protocol.comms.response.2.text,assets/worlds/btf_aphelion_protocol.toml → [comms.response] text,[We need more time. Stand by.]
+world.btf_path_a.trigger.action.obj_rescue_varen.text,assets/worlds/btf_path_a.toml → [trigger.action] text,[Rescue Dr. Varen's escape pod from the inner asteroid belt.]
+world.btf_path_a.trigger.action.obj_rescue_varen.text_2,assets/worlds/btf_path_a.toml → [trigger.action] text,[Rescue Dr. Varen's escape pod from the inner asteroid belt.]
+world.btf_path_a.comms.axiom_diplomat.message,assets/worlds/btf_path_a.toml → [comms] message,"[Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Varen — the Alliance's lead negotiator — disappeared three hours ago. They were due to transmit the final accord terms. The Harrow patrol, I.V. Ironveil, has been operating in restricted space near their last known position. I cannot reach Varen and I suspect Ironveil knows why.]"
+world.btf_path_a.comms.response.0.text,assets/worlds/btf_path_a.toml → [comms.response] text,[We will investigate Ironveil's patrol route.]
+world.btf_path_a.comms.response.action.obj_investigate_ironveil.text,assets/worlds/btf_path_a.toml → [comms.response.action] text,[Investigate I.V. Ironveil's patrol route near the inner asteroid belt.]
+world.btf_path_a.comms.response.1.text,assets/worlds/btf_path_a.toml → [comms.response] text,[Is Ironveil actively hostile?]
+world.btf_path_a.comms.response.follow_up.message,assets/worlds/btf_path_a.toml → [comms.response.follow_up] message,"[Their transponder data shows them holding position near the inner belt, running active sensors. They haven't fired on anything yet, but they're not patrolling normally — they're watching for something. Or someone. If Varen is alive out there, Ironveil knows exactly where they are.]"
+world.btf_path_a.comms.response.follow_up.response.0.text,assets/worlds/btf_path_a.toml → [comms.response.follow_up.response] text,[Understood. We'll deal with Ironveil.]
+world.btf_path_a.comms.response.follow_up.response.action.obj_investigate_ironveil.text,assets/worlds/btf_path_a.toml → [comms.response.follow_up.response.action] text,[Investigate I.V. Ironveil's patrol route near the inner asteroid belt.]
+world.btf_path_a.comms.axiom_diplomat.message_2,assets/worlds/btf_path_a.toml → [comms] message,[Ardent — we're picking up an escape pod distress signal from the inner asteroid belt. Life signs confirmed. That has to be Varen. Get to them before the debris closes in.]
+world.btf_path_a.comms.response.2.text,assets/worlds/btf_path_a.toml → [comms.response] text,[On our way.]
+world.btf_path_c.trigger.action.obj_harrow_orders.text,assets/worlds/btf_path_c.toml → [trigger.action] text,[Decrypted Harrow orders recovered: Ashrender is the weapon platform.]
+world.btf_path_c.comms.path_c_internal.from,assets/worlds/btf_path_c.toml → [comms] from,[_self]
+world.btf_path_c.comms.path_c_internal.message,assets/worlds/btf_path_c.toml → [comms] message,[TACTICAL ALERT — I.V. Ironveil has opened fire. Science is tracking hull frequencies. Recommend Tactical tune shield harmonics to counter gamma-frequency phaser banks.]
+world.btf_path_c.comms.path_c_internal.from_2,assets/worlds/btf_path_c.toml → [comms] from,[_self]
+world.btf_path_c.comms.path_c_internal.message_2,assets/worlds/btf_path_c.toml → [comms] message,"[INTERNAL REPORT — DECRYPTED SIGNAL INTERCEPT from I.V. Ironveil wreckage: HARROW OPERATIONAL ORDER HK-7 CONFIRMED. CODENAME: APHELION PROTOCOL. Authorised by High Executor Veth Harrow, countersigned Archivist Kallas. PRIMARY TARGET: Axiom Station (coordinates attached). SECONDARY TARGET: Kaleth Prime — atmospheric saturation required as territorial demonstration. ASHRENDER CONFIRMED ON STATION. WEAPON CHARGE: PROCEEDING ON SCHEDULE. NOTE: negotiator extraction complete. Varen is aboard Ashrender. — END INTERCEPT.]"
+world.combat_test.global.title,assets/worlds/combat_test.toml → [global] title,[Combat Test: Defend Starbase Alpha]
+world.combat_test.global.description,assets/worlds/combat_test.toml → [global] description,[Eight waves of Harrow attackers. Hold the line.]
+world.entity.earth.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[earth]
+world.entity.gas_giant.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[gas-giant]
+world.entity.ice_moon.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[ice-moon]
+world.combat_test.available_ships.0.label,assets/worlds/combat_test.toml → [available_ships] label,[Alliance Destroyer]
+world.combat_test.available_ships.1.label,assets/worlds/combat_test.toml → [available_ships] label,[Alliance Cruiser]
+world.combat_test.available_ships.2.label,assets/worlds/combat_test.toml → [available_ships] label,[Alliance Battleship]
+world.combat_test.available_ships.3.label,assets/worlds/combat_test.toml → [available_ships] label,[Alliance Courier]
+world.entity.starbase_alpha.name,assets/worlds/combat_test.toml → [entity] name (entity display name; also the cross-reference key),[Starbase Alpha]
+world.combat_test.trigger.action.obj_destroy_wave_1.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 1: Harrow destroyer.]
+world.combat_test.trigger.action.obj_destroy_wave_2.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 2: Harrow destroyer.]
+world.combat_test.trigger.action.obj_destroy_wave_3.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 3: Harrow destroyer.]
+world.combat_test.trigger.action.obj_destroy_wave_4.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 4: Harrow cruiser.]
+world.combat_test.trigger.action.obj_destroy_wave_5.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 5: Harrow destroyer.]
+world.combat_test.trigger.action.obj_destroy_wave_6.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 6: Harrow cruiser.]
+world.combat_test.trigger.action.obj_destroy_wave_7.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 7: Harrow destroyer.]
+world.combat_test.trigger.action.obj_destroy_wave_8.text,assets/worlds/combat_test.toml → [trigger.action] text,[Destroy wave 8: Harrow battleship.]
+world.combat_test.trigger.action.18.message,assets/worlds/combat_test.toml → [trigger.action] message,[VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds.]
+world.combat_test.trigger.action.19.message,assets/worlds/combat_test.toml → [trigger.action] message,[VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds.]
+world.combat_test.trigger.action.20.message,assets/worlds/combat_test.toml → [trigger.action] message,[VICTORY: Harrow strike fleet eliminated. Starbase Alpha holds.]
+world.combat_test.trigger.action.21.message,assets/worlds/combat_test.toml → [trigger.action] message,[DEFEAT: Starbase Alpha lost. The Harrow strike fleet has secured the system.]
+world.combat_test.trigger.action.obj_defend.text,assets/worlds/combat_test.toml → [trigger.action] text,[Defend Starbase Alpha against the incoming Harrow fleet.]
+world.combat_test.comms.0.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.0.message,assets/worlds/combat_test.toml → [comms] message,"[USS Phoenix, intelligence reports a Harrow strike fleet inbound on Starbase Alpha. Eight contacts, mixed class. Hold the line. Command out.]"
+world.combat_test.comms.1.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.1.message,assets/worlds/combat_test.toml → [comms] message,"[Contact, bearing north-northwest: Harrow destroyer closing on Starbase Alpha.]"
+world.combat_test.comms.2.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.2.message,assets/worlds/combat_test.toml → [comms] message,"[Second contact, bearing southeast: Harrow destroyer inbound.]"
+world.combat_test.comms.3.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.3.message,assets/worlds/combat_test.toml → [comms] message,"[Third destroyer detected, due east. They are coordinating.]"
+world.combat_test.comms.4.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.4.message,assets/worlds/combat_test.toml → [comms] message,"[Heavy contact, bearing northeast: Harrow cruiser. Repeat — cruiser inbound. All hands brace.]"
+world.combat_test.comms.5.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.5.message,assets/worlds/combat_test.toml → [comms] message,"[New destroyer, bearing east-southeast. They keep coming.]"
+world.combat_test.comms.6.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.6.message,assets/worlds/combat_test.toml → [comms] message,"[Second cruiser, east-northeast. Phoenix, prioritise the cruiser — Starbase Alpha is taking sustained fire.]"
+world.combat_test.comms.7.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.7.message,assets/worlds/combat_test.toml → [comms] message,"[Destroyer, south. Final wave inbound shortly.]"
+world.combat_test.comms.8.from,assets/worlds/combat_test.toml → [comms] from,[Federation Command]
+world.combat_test.comms.8.message,assets/worlds/combat_test.toml → [comms] message,[FLASH: Harrow battleship inbound from due east. This is the last of them. Take it down.]
+world.default.global.title,assets/worlds/default.toml → [global] title,[Starbase Alpha]
+world.default.global.description,assets/worlds/default.toml → [global] description,[Defend the Federation outpost against an incoming raider patrol.]
+world.entity.earth.name_2,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[earth]
+world.entity.luna.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[luna]
+world.entity.lava_planet.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[lava-planet]
+world.entity.starbase_alpha.name_2,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[Starbase Alpha]
+world.entity.raider_alpha.name,assets/worlds/default.toml → [entity] name (entity display name; also the cross-reference key),[raider_alpha]
+world.default.trigger.action.obj_raider_destroyed.text,assets/worlds/default.toml → [trigger.action] text,[Pirate raider eliminated.]
+world.default.available_ships.0.label,assets/worlds/default.toml → [available_ships] label,[Alliance Cruiser]
+world.default.available_ships.1.label,assets/worlds/default.toml → [available_ships] label,[Alliance Destroyer]
+world.default.comms.0.message,assets/worlds/default.toml → [comms] message,[MAYDAY MAYDAY — Pirate raider calling for backup. USS Phoenix has engaged. All units converge on our position!]
+world.default.comms.1.message,assets/worlds/default.toml → [comms] message,[Starbase Alpha to all vessels — we are under attack! Requesting immediate assistance!]
+world.default.comms.2.message,assets/worlds/default.toml → [comms] message,"[USS Phoenix, this is Starbase Alpha. Please state your business.]"
+world.default.comms.response.0.text,assets/worlds/default.toml → [comms.response] text,[We are on a survey mission.]
+world.default.comms.response.action.obj_survey.text,assets/worlds/default.toml → [comms.response.action] text,[Complete the survey in this sector.]
+world.default.comms.response.1.text,assets/worlds/default.toml → [comms.response] text,[We require docking clearance.]
+world.default.comms.response.action.obj_dock.text,assets/worlds/default.toml → [comms.response.action] text,[Dock at Starbase Alpha.]
+world.patrol.global.title,assets/worlds/patrol.toml → [global] title,[Patrol]
+world.patrol.global.description,assets/worlds/patrol.toml → [global] description,[Hunt down a pirate raider on patrol through the sector.]
+world.entity.raider_alpha.name_2,assets/worlds/patrol.toml → [entity] name (entity display name; also the cross-reference key),[raider_alpha]
+world.patrol.trigger.action.obj_patrol_sector.text,assets/worlds/patrol.toml → [trigger.action] text,[Patrol the sector and neutralize threats.]
+world.patrol.trigger.action.obj_raider_destroyed.text,assets/worlds/patrol.toml → [trigger.action] text,[Pirate raider eliminated.]
+world.reinforcements.global.title,assets/worlds/reinforcements.toml → [global] title,[Reinforcements]
+world.reinforcements.global.description,assets/worlds/reinforcements.toml → [global] description,[A second pirate raider drops out of warp to assist its wing-mate.]
+world.entity.raider_beta.name,assets/worlds/reinforcements.toml → [entity] name (entity display name; also the cross-reference key),[raider_beta]

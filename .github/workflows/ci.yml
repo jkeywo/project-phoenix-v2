@@ -158,6 +158,13 @@ jobs:
       - name: Run editor tests
         run: npx vitest run
 
+      # Guards the string table: every t()/data-i18n id resolves to a CSV row,
+      # no duplicate ids, and every localisable TOML key holds an id rather
+      # than prose. Without this a renamed id silently leaves a console
+      # rendering ⟨some.id⟩, which no other job would catch.
+      - name: Check string table
+        run: node scripts/check-strings.mjs
+
   # ── Smoke tests ───────────────────────────────────────────────────────────────
   smoke:
     needs: build

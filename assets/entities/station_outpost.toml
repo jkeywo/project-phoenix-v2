@@ -1,10 +1,10 @@
-name = "Outpost Alpha"
+name = "entity.station_outpost.name"
 tags = ["station", "destructible"]
 
 [target]
 tags = ["station"]
 threat_level = "none"
-description = "Outpost Alpha"
+description = "entity.station_outpost.target.description"
 
 [hull]
 hull_integrity = 200.0

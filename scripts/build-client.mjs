@@ -23,6 +23,7 @@ const out = path.join(root, 'dist', 'client');
 // Asset directories the client consoles load at runtime. Mirrors the
 // `rel="copy-dir"` links that used to live in client.html.
 const ASSET_DIRS = [
+  'strings',
   'phone_border',
   'fonts',
   'shaders',

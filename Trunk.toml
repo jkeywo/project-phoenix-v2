@@ -5,7 +5,9 @@ public_url = "./"
 
 [watch]
 watch_path = ["assets/", "gui/"]
-include = "*.toml"
+# assets/strings/strings.csv is the string table — without .csv here a text
+# edit would not trigger a dev-server rebuild.
+include = ["*.toml", "*.csv"]
 
 [[hooks]]
 stage = "post_build"

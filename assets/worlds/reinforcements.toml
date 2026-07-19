@@ -14,8 +14,8 @@
 
 [global]
 seed = 43
-title = "Reinforcements"
-description = "A second pirate raider drops out of warp to assist its wing-mate."
+title = "world.reinforcements.global.title"
+description = "world.reinforcements.global.description"
 
 [anchors]
 # Spawn anchor: patrol_beta position from default.toml.
@@ -28,5 +28,5 @@ patrol_beta = [500.0, 0.0, -300.0]
 
 [[entity]]
 template_path = "assets/entities/pirate_raider_reinforcement.toml"
-name          = "raider_beta"
+name          = "world.entity.raider_beta.name"
 transform     = { anchor = "patrol_beta" }

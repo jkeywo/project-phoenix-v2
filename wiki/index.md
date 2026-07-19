@@ -16,7 +16,7 @@ Current implementation orientation only. For intended design use [`pasm/spec/`](
 - [Player](./entities/player.md), [Station](./entities/station.md), [System](./entities/system.md), [Ship](./entities/ship.md)
 - [Editor](./entities/editor.md), [World Data](./entities/world-data.md), [Navigation Console](./entities/navigation-console.md)
 - [Repair Runtime](./concepts/damage-and-repair-intent.md), [Helm Runtime](./concepts/helm-control-intent.md), [AI Helm Decomposition](./concepts/ai-helm-decomposition.md), [Weapons Runtime](./concepts/weapons-intent.md), [Shields Runtime](./concepts/shields-intent.md)
-- [Comms Panel](./concepts/comms-panel.md), [View Modes](./concepts/view-modes.md), [Game Phases](./concepts/game-phases.md), [Networking](./concepts/networking.md)
+- [Comms Panel](./concepts/comms-panel.md), [View Modes](./concepts/view-modes.md), [Game Phases](./concepts/game-phases.md), [Networking](./concepts/networking.md), [Localisation](./concepts/localisation.md)
 
 ## Tooling
 

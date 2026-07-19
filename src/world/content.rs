@@ -1367,7 +1367,7 @@ mod tests {
         let world = crate::world::config::parse_world(toml).expect("default.toml must parse");
         let mut states = comms_template_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
+        name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-r".into(),
             attacker_uuid: "uuid-p".into(),
@@ -1377,7 +1377,9 @@ mod tests {
             !fired.is_empty(),
             "raider_alpha on_attacked comms must fire"
         );
-        assert!(fired.iter().any(|f| f.from == "raider_alpha"));
+        assert!(fired
+            .iter()
+            .any(|f| f.from == "world.entity.raider_alpha.name"));
     }
 
     #[test]
@@ -1386,7 +1388,7 @@ mod tests {
         let world = crate::world::config::parse_world(toml).expect("patrol.toml must parse");
         let mut states = trigger_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
+        name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());
         let events = vec![WorldEvent::Destroyed {
             uuid: "uuid-r".into(),
         }];

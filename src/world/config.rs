@@ -3590,7 +3590,7 @@ entity    = "raider"
         let defeat = cfg.triggers.iter().any(|t| {
             matches!(
                 &t.condition,
-                TriggerCondition::OnDestroyed { entity_name } if entity_name == "Starbase Alpha"
+                TriggerCondition::OnDestroyed { entity_name } if entity_name == "world.entity.starbase_alpha.name"
             )
         });
         assert!(
@@ -3769,14 +3769,17 @@ entity    = "raider"
             .iter()
             .find(|c| c.thread_id.as_deref() == Some("research-scholar"))
             .expect("Research Outpost handoff comms must exist");
-        assert_eq!(handoff.from, "Research Outpost");
+        // `from` names an entity in this world, so it carries that entity's
+        // string id — which keeps the name→uuid reference resolving and makes
+        // the client render the station's own name as the sender.
+        assert_eq!(handoff.from, "world.entity.research_outpost.name");
         assert_eq!(handoff.node.speaker, None);
-        assert!(
-            handoff
-                .node
-                .body
-                .contains("patching you through to Dr. Myst"),
-            "handoff should tell the crew Dr. Myst is being patched through"
+        // The body is a string id now, so assert on the id rather than the
+        // prose. The English behind it lives in assets/strings/strings.csv and
+        // is covered by scripts/check-strings.mjs.
+        assert_eq!(
+            handoff.node.body, "world.before_the_fire.comms.research_scholar.message",
+            "handoff should carry the Dr. Myst patch-through message"
         );
         assert!(
             handoff.urgent,
@@ -3791,7 +3794,12 @@ entity    = "raider"
             .root_follow_up
             .as_ref()
             .expect("Dr. Myst chained follow-up must be present");
-        assert_eq!(myst.speaker.as_deref(), Some("Dr. Myst"));
+        // Dr. Myst is a speaker with no entity behind them, so the speaker
+        // label gets its own string id rather than an entity reference.
+        assert_eq!(
+            myst.speaker.as_deref(),
+            Some("world.before_the_fire.comms.follow_up.speaker")
+        );
         assert_eq!(
             myst.trigger,
             Some(TriggerCondition::OnTimer { after_secs: 3.0 })

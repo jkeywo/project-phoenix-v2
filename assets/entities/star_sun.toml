@@ -1,10 +1,10 @@
-name = "Sun"
+name = "entity.star_sun.name"
 tags = ["star", "center"]
 
 [target]
 tags = ["star"]
 threat_level = "none"
-description = "Sun"
+description = "entity.star_sun.target.description"
 
 [collider]
 shape = "Ball"

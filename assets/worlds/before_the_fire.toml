@@ -6,8 +6,8 @@
 
 [global]
 seed = 399
-title = "Before the Fire"
-description = "Investigate a distress signal deep in the Axiom System."
+title = "world.before_the_fire.global.title"
+description = "world.before_the_fire.global.description"
 
 [ambient_light]
 color      = [0.55, 0.55, 0.65]
@@ -57,37 +57,37 @@ spawn_on = "game_start"
 
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"
-name = "Axiom Station"
+name = "world.entity.axiom_station.name"
 transform = { anchor = "axiom_station" }
 
 [[entity]]
 template_path = "assets/entities/region_axiom_station_dock.toml"
-name          = "Axiom Station Dock"
+name          = "world.entity.axiom_station_dock.name"
 transform     = { anchor = "axiom_station" }
 
 [[entity]]
 template_path = "assets/entities/station_research_outpost.toml"
-name = "Research Outpost"
+name = "world.entity.research_outpost.name"
 transform = { anchor = "research_outpost" }
 
 [[entity]]
 template_path = "assets/entities/ship_requiem_courier.toml"
-name = "Requiem Courier"
+name = "world.entity.requiem_courier.name"
 transform = { anchor = "requiem_courier" }
 
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
-name = "Ironveil"
+name = "world.entity.ironveil.name"
 transform = { anchor = "ironveil_patrol_a" }
 
 [[entity]]
 template_path = "assets/entities/ship_harrow_warhawk.toml"
-name = "Ashrender"
+name = "world.entity.ashrender.name"
 transform = { anchor = "ashrender_start" }
 
 [[entity]]
 template_path = "assets/entities/region_kaleth_nebula.toml"
-name = "Kaleth Nebula"
+name = "world.entity.kaleth_nebula.name"
 transform = { anchor = "nebula_center" }
 
 # Invisible nav beacons — mark the two waypoints of Ironveil's patrol route.
@@ -95,12 +95,12 @@ transform = { anchor = "nebula_center" }
 
 [[entity]]
 template_path = "assets/entities/nav_beacon.toml"
-name = "Ironveil Patrol Zone A"
+name = "world.entity.ironveil_patrol_zone_a.name"
 transform = { anchor = "ironveil_patrol_a" }
 
 [[entity]]
 template_path = "assets/entities/nav_beacon.toml"
-name = "Ironveil Patrol Zone B"
+name = "world.entity.ironveil_patrol_zone_b.name"
 transform = { anchor = "ironveil_patrol_b" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
@@ -111,9 +111,9 @@ condition = "on_world_loaded"
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-investigate"
-  text      = "Investigate the situation in the Axiom System."
+  text      = "world.before_the_fire.trigger.action.obj_investigate.text"
   mandatory = true
-  targets   = ["Axiom Station"]
+  targets   = ["world.entity.axiom_station.name"]
 
 [[trigger]]
 condition = "on_world_loaded"
@@ -121,33 +121,27 @@ condition = "on_world_loaded"
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-hail-briefing"
-  text      = "Hail Axiom Station or Research Outpost for a briefing."
+  text      = "world.before_the_fire.trigger.action.obj_hail_briefing.text"
   mandatory = false
-  targets   = ["Axiom Station", "Research Outpost"]
+  targets   = ["world.entity.axiom_station.name", "world.entity.research_outpost.name"]
 
 # ── Opening twin comms (on_world_loaded) ─────────────────────────────────────
 
 [[comms]]
 thread_id = "starcorp-command"
-from = "Starcorp Command"
+from = "world.before_the_fire.comms.starcorp_command.from"
 trigger = "on_world_loaded"
-message = """A.E.V. Ardent, this is Starcorp Command. You are ordered to \
-proceed to the Axiom System immediately. Harrow vessels have been observed \
-acting outside normal patrol parameters. Investigate and report. \
-Do not engage unless fired upon. Command out."""
+message = "world.before_the_fire.comms.starcorp_command.message"
 
 [[comms]]
-from = "Axiom Station"
+from = "world.entity.axiom_station.name"
 trigger = "on_world_loaded"
-entity = "Axiom Station"
+entity = "world.entity.axiom_station.name"
 urgent = true
-message = """This is Axiom Station to any Alliance vessel — we have a situation. \
-Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed \
-position puts them near the Harrow patrol operating area. The peace talks \
-cannot continue without them. Please respond."""
+message = "world.before_the_fire.comms.0.message"
 
   [[comms.response]]
-  text = "Understood, Axiom Station. We are proceeding to your location."
+  text = "world.before_the_fire.comms.response.0.text"
 
     # Follow-up gated on entering the docking region — fires immediately if
     # the ship is already inside. Lets Axiom Station acknowledge the rendezvous
@@ -155,23 +149,23 @@ cannot continue without them. Please respond."""
     # boundary crossing also loads the Diplomat branch (`btf_path_a.toml`).
     [comms.response.follow_up]
     trigger = "on_entered_region"
-    entity  = "Axiom Station Dock"
-    message = "Ardent, we have you on the dock approach. Welcome to Axiom. Administrator Chen is preparing the full briefing now — stand by."
+    entity  = "world.entity.axiom_station_dock.name"
+    message = "world.before_the_fire.comms.response.follow_up.message"
 
   [[comms.response]]
-  text = "Axiom Station, do you know where the Harrow patrol is operating?"
+  text = "world.before_the_fire.comms.response.1.text"
     [comms.response.follow_up]
-    message = "The Harrow patrol — I.V. Ironveil — was last observed near the inner asteroid belt, between our position and the outer system. They have not responded to our hails. I don't know what they're waiting for, but Dr. Varen is somewhere near their patrol route."
+    message = "world.before_the_fire.comms.response.follow_up.message_2"
 
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 [[comms]]
 thread_id = "research-scholar"
-from    = "Research Outpost"
+from    = "world.entity.research_outpost.name"
 trigger = "on_hailed"
-entity  = "Research Outpost"
+entity  = "world.entity.research_outpost.name"
 urgent  = true
-message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now."
+message = "world.before_the_fire.comms.research_scholar.message"
 
   # Auto-chained follow-up: 3 seconds after the operator hails, Dr. Myst
   # comes on the line. The chained node carries its own response tree, so
@@ -179,54 +173,54 @@ message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by �
   # sub-world boundary. Inherits `thread_id = "research-scholar"` and
   # `urgent = true` from the parent template.
   [comms.follow_up]
-  speaker    = "Dr. Myst"
+  speaker    = "world.before_the_fire.comms.follow_up.speaker"
   trigger    = "on_timer"
   after_secs = 3.0
-  message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
+  message    = "world.before_the_fire.comms.follow_up.message"
 
     [[comms.follow_up.response]]
-    text = "What happens if it fires?"
+    text = "world.before_the_fire.comms.follow_up.response.0.text"
 
       [comms.follow_up.response.follow_up]
-      speaker    = "Dr. Myst"
+      speaker    = "world.before_the_fire.comms.follow_up.response.follow_up.speaker"
       trigger    = "on_timer"
       after_secs = 2.0
-      message    = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
+      message    = "world.before_the_fire.comms.follow_up.response.follow_up.message"
 
         [[comms.follow_up.response.follow_up.response]]
-        text = "Can you pinpoint the source?"
+        text = "world.before_the_fire.comms.follow_up.response.follow_up.response.0.text"
 
           [[comms.follow_up.response.follow_up.response.action]]
           type      = "add_objective"
           id        = "obj-locate-ashrender"
-          text      = "Locate the weapon source beyond the Kaleth Nebula."
+          text      = "world.before_the_fire.comms.follow_up.response.follow_up.response.action.obj_locate_ashrender.text"
           mandatory = false
 
     [[comms.follow_up.response]]
-    text = "Is there anything unusual about the signal?"
+    text = "world.before_the_fire.comms.follow_up.response.1.text"
 
       [comms.follow_up.response.follow_up]
-      speaker    = "Dr. Myst"
+      speaker    = "world.before_the_fire.comms.follow_up.response.follow_up.speaker_2"
       trigger    = "on_timer"
       after_secs = 2.0
-      message    = "Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
+      message    = "world.before_the_fire.comms.follow_up.response.follow_up.message_2"
 
         [[comms.follow_up.response.follow_up.response]]
-        text = "Understood. Keep monitoring."
+        text = "world.before_the_fire.comms.follow_up.response.follow_up.response.1.text"
 
 [[comms]]
 thread_id = "requiem-override"
-from    = "Requiem Courier"
+from    = "world.entity.requiem_courier.name"
 trigger = "on_hailed"
-entity  = "Requiem Courier"
-message = "This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by."
+entity  = "world.entity.requiem_courier.name"
+message = "world.before_the_fire.comms.requiem_override.message"
 
 # ── Branch loading triggers (single-shot, fired on first hail or arrival) ─────
 
 # Fires when the player hails Axiom Station from range.
 [[trigger]]
 condition = "on_hailed"
-entity    = "Axiom Station"
+entity    = "world.entity.axiom_station.name"
 
   [[trigger.action]]
   type      = "complete_objective"
@@ -240,7 +234,7 @@ entity    = "Axiom Station"
 # Matches the "proceeding to your location" dialogue response.
 [[trigger]]
 condition = "on_entered_region"
-entity    = "Axiom Station Dock"
+entity    = "world.entity.axiom_station_dock.name"
 
   [[trigger.action]]
   type = "load_world"
@@ -248,7 +242,7 @@ entity    = "Axiom Station Dock"
 
 [[trigger]]
 condition = "on_hailed"
-entity = "Research Outpost"
+entity = "world.entity.research_outpost.name"
 
   [[trigger.action]]
   type      = "complete_objective"
@@ -260,7 +254,7 @@ entity = "Research Outpost"
 
 [[trigger]]
 condition = "on_attacked"
-entity = "Ironveil"
+entity = "world.entity.ironveil.name"
 
   [[trigger.action]]
   type = "load_world"
@@ -279,7 +273,7 @@ entity = "Ironveil"
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "Ironveil"
+entity    = "world.entity.ironveil.name"
 
   [[trigger.action]]
   type = "set_flag"
@@ -292,7 +286,7 @@ entity    = "Ironveil"
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-ironveil-destroyed"
-  text      = "I.V. Ironveil destroyed. Ashrender executing contingency — Aphelion Protocol armed."
+  text      = "world.before_the_fire.trigger.action.obj_ironveil_destroyed.text"
   mandatory = false
 
 # 600-second fallback: only fires if Ironveil was not already destroyed.
@@ -308,7 +302,7 @@ when       = "not flag(aphelion_armed)"
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-protocol-timer"
-  text      = "Aphelion Protocol armed on schedule — Ashrender is charging the weapon."
+  text      = "world.before_the_fire.trigger.action.obj_protocol_timer.text"
   mandatory = false
 
 # React to aphelion_armed being set (from either path above).
@@ -318,7 +312,7 @@ name      = "aphelion_armed"
 
   [[trigger.action]]
   type  = "set_ai_state"
-  entity = "Ashrender"
+  entity = "world.entity.ashrender.name"
   state = "attacking"
 
   [[trigger.action]]

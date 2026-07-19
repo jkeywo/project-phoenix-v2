@@ -1,4 +1,4 @@
-name = "Cosmetic Asteroid 3"
+name = "entity.asteroid_common_3_cosmetic.name"
 tags = ["asteroid", "cosmetic"]
 
 [collider]

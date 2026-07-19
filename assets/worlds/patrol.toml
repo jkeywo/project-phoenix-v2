@@ -8,8 +8,8 @@
 
 [global]
 seed = 42
-title = "Patrol"
-description = "Hunt down a pirate raider on patrol through the sector."
+title = "world.patrol.global.title"
+description = "world.patrol.global.description"
 
 [anchors]
 patrol_alpha = [600.0, 0.0, -600.0]
@@ -47,7 +47,7 @@ spawn_on = "game_start"
 
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
-name          = "raider_alpha"
+name          = "world.entity.raider_alpha.name"
 transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ condition = "on_world_loaded"
   [[trigger.action]]
   type              = "add_objective"
   id                = "obj-patrol-sector"
-  text              = "Patrol the sector and neutralize threats."
+  text              = "world.patrol.trigger.action.obj_patrol_sector.text"
   mandatory         = true
   source            = "mission"
   base_priority     = 40.0
@@ -71,10 +71,10 @@ condition = "on_world_loaded"
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "raider_alpha"
+entity    = "world.entity.raider_alpha.name"
 
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-raider-destroyed"
-  text      = "Pirate raider eliminated."
+  text      = "world.patrol.trigger.action.obj_raider_destroyed.text"
   mandatory = false

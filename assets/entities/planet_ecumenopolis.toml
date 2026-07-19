@@ -1,10 +1,10 @@
-name = "Ecumenopolis"
+name = "entity.planet_ecumenopolis.name"
 tags = ["planet", "habitable"]
 
 [target]
 tags = ["planet"]
 threat_level = "none"
-description = "A world-spanning city"
+description = "entity.planet_ecumenopolis.target.description"
 
 [collider]
 shape = "Ball"

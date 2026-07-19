@@ -1,4 +1,4 @@
-name = "Alliance Battleship"
+name = "entity.alliance_battleship.name"
 class = "battleship"
 hull_id = "NCC-2001"
 power_rating = 120
@@ -20,7 +20,7 @@ length = 4
 
 [[hull.system_hull]]
 system_id = "power-reactor"
-display_name = "Power Reactor"
+display_name = "entity.alliance_battleship.hull.system_hull.power_reactor.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -28,7 +28,7 @@ debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "power-battery"
-display_name = "Power Battery"
+display_name = "entity.alliance_battleship.hull.system_hull.power_battery.display_name"
 max_hp = 14
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -36,7 +36,7 @@ debuff_magnitude = 0.15
 
 [[hull.system_hull]]
 system_id = "core"
-display_name = "Core"
+display_name = "entity.alliance_battleship.hull.system_hull.core.display_name"
 max_hp = 28
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -44,7 +44,7 @@ debuff_magnitude = 0.10
 
 [[hull.system_hull]]
 system_id = "helm-engine-port"
-display_name = "Engine (Port)"
+display_name = "entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -52,7 +52,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-engine-starboard"
-display_name = "Engine (Starboard)"
+display_name = "entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -60,7 +60,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "helm-radar"
-display_name = "Helm Radar"
+display_name = "entity.alliance_battleship.hull.system_hull.helm_radar.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -68,7 +68,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "tactical-radar"
-display_name = "Tactical Radar"
+display_name = "entity.alliance_battleship.hull.system_hull.tactical_radar.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -76,7 +76,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "sensor-radar"
-display_name = "Sensor Radar"
+display_name = "entity.alliance_battleship.hull.system_hull.sensor_radar.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -84,7 +84,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-fore"
-display_name = "Phaser Bank (Fore)"
+display_name = "entity.alliance_battleship.hull.system_hull.phaser_fore.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -92,7 +92,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "blaster-heavy-fore"
-display_name = "Heavy Blaster Bank (Fore)"
+display_name = "entity.alliance_battleship.hull.system_hull.blaster_heavy_fore.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -100,7 +100,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "phaser-aft"
-display_name = "Phaser Bank (Aft)"
+display_name = "entity.alliance_battleship.hull.system_hull.phaser_aft.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -108,7 +108,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-port"
-display_name = "Torpedo Tube (Fore Port)"
+display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_port.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -116,7 +116,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-starboard"
-display_name = "Torpedo Tube (Fore Starboard)"
+display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_starboard.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -124,7 +124,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-fore-centre"
-display_name = "Torpedo Tube (Fore Centre)"
+display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_fore_centre.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -132,7 +132,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-port"
-display_name = "Torpedo Tube (Aft Port)"
+display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_port.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -140,7 +140,7 @@ debuff_magnitude = 0.20
 
 [[hull.system_hull]]
 system_id = "torpedo-tube-aft-starboard"
-display_name = "Torpedo Tube (Aft Starboard)"
+display_name = "entity.alliance_battleship.hull.system_hull.torpedo_tube_aft_starboard.display_name"
 max_hp = 21
 damaged_threshold_pct = 0.75
 disabled_threshold_pct = 0.25
@@ -320,35 +320,35 @@ offline_duration = 10
 # the relevant directional arc is offline.
 [[shield_arc]]
 id = "fore"
-label = "Fore"
+label = "entity.alliance_battleship.shield_arc.fore.label"
 center_deg = 0
 width_deg = 90
 hull_max_hp = 10
 
 [[shield_arc]]
 id = "starboard"
-label = "Starboard"
+label = "entity.alliance_battleship.shield_arc.starboard.label"
 center_deg = 90
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "aft"
-label = "Aft"
+label = "entity.alliance_battleship.shield_arc.aft.label"
 center_deg = 180
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "port"
-label = "Port"
+label = "entity.alliance_battleship.shield_arc.port.label"
 center_deg = 270
 width_deg = 90
 hull_max_hp = 9
 
 [[shield_arc]]
 id = "omni"
-label = "Omni"
+label = "entity.alliance_battleship.shield_arc.omni.label"
 center_deg = 0
 width_deg = 360
 priority = 2
@@ -378,25 +378,25 @@ size = 5
 icon = "playerShip"
 
 [power_groups.ops]
-label = "Operations"
+label = "entity.alliance_battleship.power_groups.ops.label"
 default_level = 2
 min_level = 1
 max_level = 4
 
 [power_groups.helm]
-label = "Propulsion"
+label = "entity.alliance_battleship.power_groups.helm.label"
 default_level = 2
 min_level = 1
 max_level = 4
 
 [power_groups.weapons]
-label = "Weapons"
+label = "entity.alliance_battleship.power_groups.weapons.label"
 default_level = 2
 min_level = 1
 max_level = 4
 
 [power_groups.sensors]
-label = "Sensors"
+label = "entity.alliance_battleship.power_groups.sensors.label"
 default_level = 2
 min_level = 1
 max_level = 4
@@ -406,7 +406,7 @@ max_level = 4
 [[station]]
 id = "captain"
 name = "Captain"
-description = "Command the bridge."
+description = "entity.alliance_battleship.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/battleship/captain.html"
@@ -422,7 +422,7 @@ automated_systems = ["red-alert"]
 [[station]]
 id = "helm"
 name = "Helm"
-description = "Pilot the ship."
+description = "entity.alliance_battleship.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/battleship/helm.html"
@@ -434,7 +434,7 @@ automated_systems = []
 [[station]]
 id = "tactical"
 name = "Tactical"
-description = "Manage weapons systems."
+description = "entity.alliance_battleship.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/battleship/tactical.html"
@@ -450,7 +450,7 @@ automated_systems = ["phaser-fore", "phaser-aft"]
 [[station]]
 id = "repair"
 name = "Repair"
-description = "Maintain and repair ship systems."
+description = "entity.alliance_battleship.station.repair.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/battleship/repair.html"
@@ -462,7 +462,7 @@ automated_systems = []
 [[station]]
 id = "sensors"
 name = "Sensors"
-description = "Monitor long-range sensors."
+description = "entity.alliance_battleship.station.sensors.description"
 rank = "Ens."
 short_code = "SCI"
 console = "gui/battleship/sensors.html"
@@ -474,7 +474,7 @@ automated_systems = []
 [[station]]
 id = "shields"
 name = "Shields"
-description = "Manage shield systems."
+description = "entity.alliance_battleship.station.shields.description"
 rank = "Ens."
 short_code = "SHD"
 console = "gui/battleship/shields.html"
@@ -486,7 +486,7 @@ automated_systems = []
 [[station]]
 id = "navigation"
 name = "Navigation"
-description = "Plot course and navigate."
+description = "entity.alliance_battleship.station.navigation.description"
 rank = "Ens."
 short_code = "NAV"
 console = "gui/battleship/navigation.html"
@@ -498,7 +498,7 @@ automated_systems = []
 [[station]]
 id = "power"
 name = "Power"
-description = "Manage ship power systems."
+description = "entity.alliance_battleship.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
 console = "gui/battleship/power.html"
@@ -510,7 +510,7 @@ automated_systems = []
 [[station]]
 id = "comms"
 name = "Comms"
-description = "Hail stations and relay intelligence."
+description = "entity.alliance_battleship.station.comms.description"
 rank = "Ens."
 short_code = "COM"
 console = "gui/battleship/comms.html"

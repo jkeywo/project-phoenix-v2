@@ -3184,7 +3184,9 @@ surfase_colour = [1.0, 0.7, 0.1]
     fn star_sun_template_parses_with_star_and_lights() {
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
-        assert_eq!(config.name.as_deref(), Some("Sun"));
+        // Display text lives in assets/strings/strings.csv; the TOML holds the
+        // string id, which is what Rust passes through to the client.
+        assert_eq!(config.name.as_deref(), Some("entity.star_sun.name"));
         let star = config
             .star
             .as_ref()
@@ -3208,7 +3210,7 @@ surfase_colour = [1.0, 0.7, 0.1]
     fn planet_earth_template_parses_with_mesh_and_collider() {
         let toml_str = include_str!("../../assets/entities/planet_earth.toml");
         let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
-        assert_eq!(config.name.as_deref(), Some("Earth"));
+        assert_eq!(config.name.as_deref(), Some("entity.planet_earth.name"));
         assert!(config.mesh.is_some(), "planet_earth.toml must have [mesh]");
         let collider = config
             .collider

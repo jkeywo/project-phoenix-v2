@@ -1,10 +1,10 @@
-name = "Earth"
+name = "entity.planet_earth.name"
 tags = ["planet", "habitable"]
 
 [target]
 tags = ["planet"]
 threat_level = "none"
-description = "Earth"
+description = "entity.planet_earth.target.description"
 
 [collider]
 shape = "Ball"

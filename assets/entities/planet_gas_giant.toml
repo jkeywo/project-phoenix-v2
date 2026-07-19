@@ -1,10 +1,10 @@
-name = "Gas Giant"
+name = "entity.planet_gas_giant.name"
 tags = ["planet"]
 
 [target]
 tags = ["planet"]
 threat_level = "none"
-description = "A banded gas giant"
+description = "entity.planet_gas_giant.target.description"
 
 [collider]
 shape = "Ball"

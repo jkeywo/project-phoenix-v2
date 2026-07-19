@@ -1,3 +1,22 @@
+/** Half-width of the gamepad stick's centre deadzone, in axis units. */
+export const GAMEPAD_DEADZONE = 0.1;
+
+/**
+ * Map a raw gamepad axis onto command output through the deadzone.
+ *
+ * A bare threshold gate (`|v| > dead ? v : 0`) makes the stick jerk: output
+ * steps straight from 0 to ±0.1 the instant the pilot crosses the gate, so
+ * there is no fine control at low deflection. Rescaling the live band back
+ * over the full [0, 1] range instead means output *leaves* zero smoothly
+ * while the deadzone still swallows stick drift, and the rails still reach
+ * ±1.0.
+ */
+export function softenAxis(v) {
+  const a = Math.abs(v);
+  if (a <= GAMEPAD_DEADZONE) return 0;
+  return Math.sign(v) * ((a - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE));
+}
+
 export class PhHelmJoystick extends HTMLElement {
   #state = null;
   #px = 0;
@@ -269,14 +288,15 @@ export class PhHelmJoystick extends HTMLElement {
   #getGamepadInput() {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return { x: 0, y: 0 };
     const pads = navigator.getGamepads();
+    // Take the first pad that is actually being pushed. A plain `return` on the
+    // first pad with 2+ axes lets a connected-but-idle controller mask a second
+    // one the pilot is really flying with.
     for (let i = 0; i < pads.length; i++) {
       const gp = pads[i];
       if (!gp || gp.axes.length < 2) continue;
-      const dead = 0.1;
-      return {
-        x: Math.abs(gp.axes[0]) > dead ? gp.axes[0] : 0,
-        y: Math.abs(gp.axes[1]) > dead ? gp.axes[1] : 0,
-      };
+      const x = softenAxis(gp.axes[0]);
+      const y = softenAxis(gp.axes[1]);
+      if (x !== 0 || y !== 0) return { x, y };
     }
     return { x: 0, y: 0 };
   }

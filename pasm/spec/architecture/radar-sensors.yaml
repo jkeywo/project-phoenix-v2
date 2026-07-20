@@ -36,7 +36,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensors Target Controller
-      summary: Stores a ship's selected Sensors contact and emits a channel-3 target designation for Tactical.
+      summary: Applies admitted SetScienceTarget/ClearScienceTarget commands for human and AI origins alike, storing each ship's selected Sensors contact and emitting a channel-3 target designation for Tactical on every set (never on a clear).
+      rationale:
+        - "Issue #828: the single applier for both origins — the Sensors AI (operate_sensors_ai) emits admitted payloads through validate_and_admit, so no direct AI write into sensors-target-state exists. The handler (handle_sensors_messages) runs in SimSet::Physics (moved from Input) ordered after the AI emit: admission clears AdmittedCommands before Input each tick, so the applier must consume same-tick after the emit or AI commands would be silently lost."
     architecture:
       kind: control-handler
       authority: authoritative
@@ -44,6 +46,7 @@ entities:
       reads: [system-control-source-state, radar-contact-projection-state]
       writes: [sensors-target-state]
       sends: [sensors-target-designation]
+      depends_on: [host-command-admission]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
@@ -55,7 +58,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensors Target State
-      summary: Per-ship selected science target UUID, replicated in the Sensors blackboard so radar surfaces can show the advisory marker.
+      summary: Per-ship selected science target UUID, written only through Admission (issue #828) and replicated in every ship's own Sensors blackboard so radar surfaces can show the advisory marker.
     architecture:
       classification: authoritative
       owner: sensors-target-controller
@@ -125,7 +128,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensors Radar Publisher
-      summary: Publishes the damage-scaled Sensors radar range, authored show/select filters, and selected target into the local ship blackboard.
+      summary: Publishes every Ship entity's own Sensors blackboard (player and NPC alike) — its own damage-scaled radar range and selected target — with the player-only authored show/select filters gated on the local ship.
+      rationale:
+        - "Issue #828 (per-Ship publish, following the #824 helm / #826 shields precedent): split on Has<LocalShip>. The local ship's base range stays the console config; an NPC's base follows effective_sensor_range's preference order (its own AiProfile.sensor_range, console config only as fallback), each scaled by that ship's own SensorRadarRange modifier. radar_shows/radar_selects come from ShipClientConfigResource, which describes the local player's hull only, so NPCs get empty filters — they don't render a radar."
     architecture:
       kind: blackboard-publisher
       authority: authoritative
@@ -138,30 +143,41 @@ entities:
 
   - component: sensors-ai-operator
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Sensors AI Operator
-      summary: Applies per-ship AI control gating and reads the live damage-scaled sensor horizon, but currently makes no scan or target-selection decision.
+      summary: Per-ship decide-and-emit Sensors AI that mirrors the ship's combat lock or resolves a named Destroy objective within the ship's own damage-scaled sensor horizon, and emits the decision as an admitted SetScienceTarget/ClearScienceTarget command on change only.
+      rationale:
+        - "Issue #828 (admission symmetry, following the #824 helm / #826 shields precedent): operate_sensors_ai keeps its selection logic (WeaponsTarget mirror tier, scored Destroy-objective tier, both range-gated via effective_sensor_range) but no longer writes sensors-target-state directly. It emits through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold); sensors-target-controller applies it later the same tick. Emit-on-change means an AI selection now produces exactly one channel-3 target designation per change — previously the AI bypassed the applier and produced none."
+        - "This entity absorbs the formerly separate sensors-target-selection-ai proposal: gating, horizon, selection, and emission are all one system (operate_sensors_ai)."
     architecture:
       kind: ai-operator
       authority: authoritative
-      reads: [system-control-source-state, ship-system-blackboards-state]
+      reads: [system-control-source-state, ship-system-blackboards-state, weapons-target-state, sensors-target-state]
+      depends_on: [host-command-admission]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/ship/sensors.rs]
+      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range]
       tests: [cargo test]
 
   - component: sensors-target-selection-ai
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Sensors Target Selection AI
-      summary: Future per-ship AI selection policy that chooses an appropriate hostile within the Sensors system's own damage-scaled horizon, writes Sensors target state, and lets existing advisory paths inform Tactical.
+      summary: Per-ship AI selection policy that chooses an appropriate hostile within the Sensors system's own damage-scaled horizon and lets the existing advisory paths inform Tactical; realized by the same operate_sensors_ai system as sensors-ai-operator.
+      rationale:
+        - "Issue #828 folded this proposal into sensors-ai-operator: one system (operate_sensors_ai) carries the gating, the horizon, and the selection, and it emits admitted commands through host-command-admission rather than writing sensors-target-state directly — sensors-target-controller performs the write and sends the target designation when the admitted set applies. Kept as a named entity because design-slice links (sensors.yaml roles/decisions) reference it."
     architecture:
       kind: ai-operator
       authority: authoritative
       reads: [system-control-source-state, radar-contact-projection-state, ship-system-blackboards-state]
-      writes: [sensors-target-state]
-      sends: [sensors-target-designation]
+      depends_on: [host-command-admission]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs]
+      symbols: [operate_sensors_ai]
+      tests: [cargo test]

@@ -75,8 +75,21 @@ impl Plugin for ShipSensorsPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Input),
-                    operate_sensors_ai.in_set(crate::sim_sets::SimSet::Input),
+                    // In `SimSet::Physics`, not Input (issue #828, the #826
+                    // shields shape): `admit_system_commands` clears every
+                    // ship's `AdmittedCommands` before Input each tick, and
+                    // the AI decide system (`operate_sensors_ai`, Input)
+                    // refills it same-tick via `validate_and_admit` — so the
+                    // applier must consume *after* the AI emit or AI commands
+                    // would be silently lost. The `.before` edge on the decide
+                    // system below is the one explicit ordering between them.
+                    handle_sensors_messages.in_set(crate::sim_sets::SimSet::Physics),
+                    // Decide only (issue #828): emits admitted
+                    // SetScienceTarget / ClearScienceTarget payloads; the
+                    // single applier is `handle_sensors_messages` above.
+                    operate_sensors_ai
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .before(handle_sensors_messages),
                     tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
                     tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
                     publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -87,14 +100,18 @@ impl Plugin for ShipSensorsPlugin {
 
 // ── Systems ────────────────────────────────────────────────────────────────────
 
-/// Handle `SetScienceTarget` messages from the Sensors console.
+/// Handle admitted `SetScienceTarget` / `ClearScienceTarget` commands — the
+/// single applier for human and AI Sensors commands alike (issue #828).
 ///
-/// Validates: sender holds the Sensors station and `accept_human_input` is
-/// true. Stores the target in [`SensorsTarget`] for blackboard broadcast, and
-/// emits a `CoordinationPayload::TargetDesignation` on the channel-3 bus for
-/// Tactical (issue #676 — replaces the old direct `SensorsTargetSuggestion`).
-/// Enqueued unconditionally for every ship (player + NPC), matching how
-/// `tick_sensors_frequency_hint` already handles both.
+/// Admission already validated the sender (station tenure for humans,
+/// `operate_ai` for `ai:` tokens), so nothing here branches on origin. Stores
+/// the target in [`SensorsTarget`] for blackboard broadcast, and — for a set,
+/// never a clear — emits a `CoordinationPayload::TargetDesignation` on the
+/// channel-3 bus for Tactical (issue #676 — replaces the old direct
+/// `SensorsTargetSuggestion`; it advises Tactical, it does not replace
+/// Tactical target authority). Enqueued unconditionally for every ship
+/// (player + NPC), matching how `tick_sensors_frequency_hint` already
+/// handles both.
 pub fn handle_sensors_messages(
     mut ship_query: Query<
         (
@@ -116,8 +133,15 @@ pub fn handle_sensors_messages(
         ship_query.iter_mut()
     {
         for cmd in admitted.for_target(crate::system_registry::SENSORS_SYSTEM_ID) {
-            let SystemControlPayload::SetScienceTarget { uuid } = &cmd.payload else {
-                continue;
+            let uuid = match &cmd.payload {
+                SystemControlPayload::SetScienceTarget { uuid } => uuid,
+                SystemControlPayload::ClearScienceTarget => {
+                    // A clear deselects — there is no contact to designate,
+                    // so no channel-3 advisory is emitted.
+                    entity_target.0 = None;
+                    continue;
+                }
+                _ => continue,
             };
 
             // Write to this ship's own SensorsTarget component (player or NPC).
@@ -423,32 +447,67 @@ pub fn tick_sensors_threat_warning(
 
 // ── Blackboard publish ────────────────────────────────────────────────────────
 
+/// Publish every ship's own Sensors blackboard into that ship's
+/// `ShipSystemBlackboards` (issue #828 — was LocalShip-only; per-Ship
+/// following the #824 helm / #826 shields precedent), split on
+/// `Has<LocalShip>`:
+///
+/// - `science_target_uuid` — each ship's own [`SensorsTarget`], player and
+///   NPC alike.
+/// - `radar_range` — live sensor radar range: the ship's own base range
+///   scaled by its own `SensorRadarRange` modifier, which
+///   `apply_radar_damage_modifiers` keeps in sync with the `sensor-radar`
+///   system's damage tier each tick. The local ship's base is the console
+///   config (`cfg.sensors_radar_range`, as before); an NPC's base follows
+///   [`effective_sensor_range`]'s preference order — its own
+///   `AiProfile.sensor_range`, falling back to the console config only for
+///   hulls with no AI profile at all.
+/// - `radar_shows` / `radar_selects` — authored presentation filters from
+///   `ShipClientConfigResource`, which describes the **local player's** hull
+///   only, so they are gated on `is_local`; NPCs don't render a radar and
+///   get empty filters.
 pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    sensors_target_q: Query<&SensorsTarget, With<crate::server_app::LocalShip>>,
-    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
+    mut ships_q: Query<
+        (
+            Option<&SensorsTarget>,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::ai::server::AiProfile>,
+            &mut crate::server_app::ShipSystemBlackboards,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
     >,
 ) {
     let cfg = &ship_config.0;
-    let science_target_uuid = sensors_target_q.single().ok().and_then(|st| st.0.clone());
-    // Live sensor radar range: base config range scaled by the dedicated
-    // `SensorRadarRange` modifier, which `apply_radar_damage_modifiers` keeps
-    // in sync with the `sensor-radar` system's damage tier each tick.
-    let radar_mult = modifiers_q
-        .single()
-        .map(|m| m.get(&ModifierSlot::SensorRadarRange))
-        .unwrap_or(1.0);
-    let bb = SensorsBlackboard {
-        radar_range: cfg.sensors_radar_range * radar_mult,
-        radar_shows: cfg.sensors_radar_shows.clone(),
-        radar_selects: cfg.sensors_radar_selects.clone(),
-        science_target_uuid,
-    };
-
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
+    for (sensors_target, modifiers, ai_profile, mut bbs, is_local) in ships_q.iter_mut() {
+        let radar_mult = modifiers
+            .map(|m| m.get(&ModifierSlot::SensorRadarRange))
+            .unwrap_or(1.0);
+        // The local ship keeps the console-config base; NPCs use the same
+        // per-entity preference order as `effective_sensor_range`.
+        let base_range = if is_local {
+            cfg.sensors_radar_range
+        } else {
+            ai_profile
+                .map(|p| p.sensor_range)
+                .filter(|r| r.is_finite() && *r > 0.0)
+                .unwrap_or(cfg.sensors_radar_range)
+        };
+        let (radar_shows, radar_selects) = if is_local {
+            (
+                cfg.sensors_radar_shows.clone(),
+                cfg.sensors_radar_selects.clone(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let bb = SensorsBlackboard {
+            radar_range: base_range * radar_mult,
+            radar_shows,
+            radar_selects,
+            science_target_uuid: sensors_target.and_then(|st| st.0.clone()),
+        };
         bbs.0.insert(
             SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
             SystemBlackboard::Sensors(bb),
@@ -456,10 +515,53 @@ pub fn publish_sensors_blackboard(
     }
 }
 
-/// Per-entity AI loop for the Sensors system. Loops over all ship entities
-/// where the Sensors system is `ControlSource::Ai`.
+/// Validate-and-enqueue one Sensors AI decision into this ship's own
+/// `AdmittedCommands` (issue #828, mirroring `console_ai::server::
+/// emit_shield_ai_command` from #826 / `ship::helm_ai::emit_helm_ai_command`
+/// from #824): the AI's `ai:` token flows through the same
+/// `validate_and_admit` seam network commands do, checked against this
+/// entity's own `ControlSourceResolver` (`operate_ai` must hold). The write
+/// happens in the same tick — `handle_sensors_messages` applies it later
+/// this frame — so there is no one-tick queue lag on the AI sensors path.
+fn emit_sensors_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    payload: crate::messages::SystemControlPayload,
+    sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token,
+        crate::system_registry::sensors_system_id(),
+        payload,
+        sources,
+        sessions,
+        config,
+        admitted,
+    )
+}
+
+/// Per-entity AI decide loop for the Sensors system. Loops over all ship
+/// entities where the Sensors system is `ControlSource::Ai`.
 ///
-/// Selection priority:
+/// Selection priority (decision logic unchanged since #700/#703):
 ///   1. Combat target — mirror the ship's `WeaponsTarget` (set by
 ///      `ai_target_selection`) so the Sensors console shows what Tactical is
 ///      engaging.
@@ -473,20 +575,39 @@ pub fn publish_sensors_blackboard(
 /// name straight to a UUID and locked it at any distance, which is why AI ships
 /// tracked contacts far outside their range. Naming a target in an objective
 /// says who to engage, not that the ship can already see them.
+///
+/// Decide-and-emit (issue #828): instead of writing [`SensorsTarget`]
+/// directly, the decision is emitted as an admitted `SetScienceTarget` /
+/// `ClearScienceTarget` through [`emit_sensors_ai_command`], for
+/// `handle_sensors_messages` to apply later this tick. Emission happens only
+/// when the decided value differs from the current [`SensorsTarget`]: the old
+/// direct writes were idempotent assignments, so no-change ticks produce no
+/// admitted command (and therefore no channel-3 `TargetDesignation` spam) —
+/// an AI selection now designates its target to Tactical exactly once, on
+/// change, the same as a human selection through the applier.
 pub fn operate_sensors_ai(
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
-            &mut SensorsTarget,
+            &SensorsTarget,
             &crate::simulation::WeaponsTarget,
             &crate::ship_state::ShipPhysics,
             &crate::modifiers::ShipModifiers,
             Option<&crate::ai::server::AiProfile>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
-    ship_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
+    // Plain `Res` (issue #828): `LobbyPlugin` always inserts
+    // `ShipClientConfigResource` and `tick_sensors_threat_warning` already
+    // requires it, so the old `Option<Res<..>>` arm was dead optionality.
+    // It remains the *fallback* of the per-entity preference order inside
+    // `effective_sensor_range` — the legitimate local-player/profile-less arm.
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     entity_q: Query<(
         &crate::entity_spawner::EntityUuid,
@@ -494,18 +615,18 @@ pub fn operate_sensors_ai(
         &Transform,
     )>,
 ) {
-    let console_range = ship_config
-        .as_ref()
-        .map(|c| c.0.sensors_radar_range)
-        .unwrap_or_else(crate::messages::default_sensors_radar_range);
+    let console_range = ship_config.0.sensors_radar_range;
     for (
+        entity_uuid,
         sources,
         blackboards,
-        mut sensors_target,
+        sensors_target,
         weapons_target,
         physics,
         modifiers,
         ai_profile,
+        ship_config_comp,
+        mut admitted,
     ) in &mut ships
     {
         let policy = sources
@@ -523,22 +644,25 @@ pub fn operate_sensors_ai(
             dx * dx + dz * dz <= range_sq
         };
 
-        // Priority 1: mirror the combat target.
-        if let Some(target_uuid) = &weapons_target.0 {
-            if entity_q
-                .iter()
-                .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
-            {
-                sensors_target.0 = Some(target_uuid.clone());
-                continue;
+        // ── Decide (byte-equivalent to the pre-#828 direct-write logic) ────
+        let decided: Option<String> = 'decide: {
+            // Priority 1: mirror the combat target.
+            if let Some(target_uuid) = &weapons_target.0 {
+                if entity_q
+                    .iter()
+                    .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
+                {
+                    break 'decide Some(target_uuid.clone());
+                }
             }
-        }
 
-        // Priority 2: scan scored objectives for a named Destroy target.
-        let viewscreen_bb = blackboards
-            .0
-            .get(&crate::system_registry::viewscreen_system_id());
-        if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+            // Priority 2: scan scored objectives for a named Destroy target.
+            let viewscreen_bb = blackboards
+                .0
+                .get(&crate::system_registry::viewscreen_system_id());
+            let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb else {
+                break 'decide None;
+            };
             let mut selected: Option<String> = None;
             for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
                 if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
@@ -569,10 +693,25 @@ pub fn operate_sensors_ai(
                     }
                 }
             }
-            sensors_target.0 = selected;
-        } else {
-            sensors_target.0 = None;
+            selected
+        };
+
+        // ── Emit on change only ────────────────────────────────────────────
+        if decided == sensors_target.0 {
+            continue;
         }
+        let payload = match decided {
+            Some(uuid) => crate::messages::SystemControlPayload::SetScienceTarget { uuid },
+            None => crate::messages::SystemControlPayload::ClearScienceTarget,
+        };
+        emit_sensors_ai_command(
+            entity_uuid,
+            payload,
+            sources,
+            &sessions,
+            ship_config_comp,
+            &mut admitted,
+        );
     }
 }
 
@@ -609,6 +748,22 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        // The applier (`handle_sensors_messages`) moved to SimSet::Physics
+        // (issue #828), so the harness needs the production set chain for
+        // AdmissionSet → Input → Physics ordering to hold.
+        app.configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        );
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)
@@ -1110,7 +1265,26 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(bevy::time::Time::<()>::default())
             .init_resource::<crate::world::server::WorldContentRuntime>()
-            .add_systems(Update, operate_sensors_ai);
+            // Always present in production (LobbyPlugin inserts it); the
+            // default carries the same default_sensors_radar_range() base the
+            // old Option fallback supplied, so test ranges are unchanged.
+            .init_resource::<crate::lobby::server::ShipClientConfigResource>()
+            // `emit_sensors_ai_command` validates through the shared
+            // admission seam, which consults Sessions for human tokens; the
+            // `ai:` path only needs the resource present.
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            // The applier emits the channel-3 TargetDesignation advisory.
+            .add_message::<CoordinationEnqueue>()
+            // Decide-and-emit (issue #828): the decision lands in
+            // `AdmittedCommands` and `handle_sensors_messages` applies it —
+            // chained so the same-tick emit→apply shape of production
+            // (Input → Physics) holds in the harness.
+            .add_systems(
+                Update,
+                (operate_sensors_ai, handle_sensors_messages).chain(),
+            );
 
         let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
         control_sources.0.set(
@@ -1129,9 +1303,25 @@ mod tests {
             // every assertion below passes vacuously.
             crate::ship_state::ShipPhysics::default(),
             crate::modifiers::ShipModifiers::default(),
+            // Issue #828: the AI decision flows through this ship's own
+            // AdmittedCommands, applied by handle_sensors_messages.
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
         ));
 
         app
+    }
+
+    /// Admitted sensors commands currently queued on the single test ship.
+    fn admitted_sensors_payloads(app: &mut App) -> Vec<SystemControlPayload> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::Ship>>();
+        q.single(app.world())
+            .unwrap()
+            .for_target(crate::system_registry::SENSORS_SYSTEM_ID)
+            .map(|c| c.payload.clone())
+            .collect()
     }
 
     fn insert_viewscreen_objective(app: &mut App, target_name: &str, score: f32) {
@@ -1406,6 +1596,261 @@ mod tests {
             get_sensors_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
             "sensors AI should fall through to objective when WeaponsTarget entity is gone"
+        );
+    }
+
+    // ── Issue #828 tests: decide-and-emit through Admission ─────────────────
+
+    /// The AI decision must land as an admitted `SetScienceTarget` in the
+    /// ship's own `AdmittedCommands` (not a direct `SensorsTarget` write),
+    /// and only on change — an unchanged decision emits nothing.
+    #[test]
+    fn ai_sensors_emits_admitted_set_science_target_on_change_only() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        spawn_target_at(&mut app, &target_uuid, 20.0, 0.0);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
+        }
+
+        tick_sensors_ai(&mut app);
+
+        let payloads = admitted_sensors_payloads(&mut app);
+        assert_eq!(
+            payloads,
+            vec![SystemControlPayload::SetScienceTarget {
+                uuid: target_uuid.clone()
+            }],
+            "the AI decision must flow through AdmittedCommands"
+        );
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target_uuid.as_str()),
+            "the applier must have applied the admitted command same-tick"
+        );
+
+        // Second tick, same decision: emit-on-change means no new command.
+        // (This harness has no AdmissionPlugin, so AdmittedCommands is never
+        // cleared — a re-emission would grow the queue.)
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            admitted_sensors_payloads(&mut app).len(),
+            1,
+            "an unchanged decision must not re-emit an admitted command"
+        );
+    }
+
+    /// When the decision changes from Some to None (target moved out of
+    /// range, no objective fallback), the AI emits an admitted
+    /// `ClearScienceTarget` and the applier clears the selection — matching
+    /// the old direct `sensors_target.0 = None` write.
+    #[test]
+    fn ai_sensors_clears_selection_via_admitted_clear() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        spawn_target_at(&mut app, &target_uuid, 20.0, 0.0);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
+        }
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target_uuid.as_str())
+        );
+
+        // Move the target far beyond sensor range; the weapons mirror tier
+        // fails its range gate and there is no objective fallback → None.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut Transform, With<crate::entity_spawner::EntityUuid>>();
+            for mut tf in q.iter_mut(app.world_mut()) {
+                tf.translation.x = 50_000.0;
+            }
+        }
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "the admitted ClearScienceTarget must clear the selection"
+        );
+        assert!(
+            admitted_sensors_payloads(&mut app)
+                .iter()
+                .any(|p| matches!(p, SystemControlPayload::ClearScienceTarget)),
+            "the clear must flow through AdmittedCommands too"
+        );
+    }
+
+    /// Human-held Sensors refuses the `ai:` emission at admission: the
+    /// operate gate skips the ship, and even a direct emission attempt is
+    /// rejected by `validate_and_admit` (operate_ai does not hold).
+    #[test]
+    fn human_held_sensors_refuses_the_ai_emission() {
+        let mut app = sensors_ai_test_app();
+        let target_uuid = uuid::Uuid::new_v4().to_string();
+
+        // Flip Sensors to Human on the test ship.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0.set(
+                crate::system_registry::sensors_system_id(),
+                ControlSource::Human,
+            );
+        }
+        spawn_target_at(&mut app, &target_uuid, 20.0, 0.0);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert!(
+            admitted_sensors_payloads(&mut app).is_empty(),
+            "no ai: command may be admitted while a human holds Sensors"
+        );
+        assert_eq!(get_sensors_target(&mut app), None);
+
+        // Belt and braces: the emit helper itself must be refused by the
+        // admission predicate under Human control.
+        let mut human_sources = crate::ship_plugin::ShipSystemControlSources::default();
+        human_sources.0.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Human,
+        );
+        let sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
+        let mut admitted = crate::messages::AdmittedCommands::default();
+        assert!(
+            !emit_sensors_ai_command(
+                None,
+                SystemControlPayload::SetScienceTarget {
+                    uuid: target_uuid.clone()
+                },
+                &human_sources,
+                &sessions,
+                None,
+                &mut admitted,
+            ),
+            "validate_and_admit must reject the ai: token when Sensors is Human"
+        );
+        assert!(admitted.0.is_empty());
+    }
+
+    // ── Issue #828 tests: per-Ship publish ──────────────────────────────────
+
+    /// Fetch a ship's published Sensors blackboard.
+    fn sensors_bb_of(app: &App, entity: Entity) -> SensorsBlackboard {
+        let bbs = app
+            .world()
+            .entity(entity)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .expect("ShipSystemBlackboards");
+        let key = SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string());
+        match bbs.0.get(&key).expect("Sensors blackboard") {
+            SystemBlackboard::Sensors(bb) => bb.clone(),
+            other => panic!("expected Sensors blackboard, got {other:?}"),
+        }
+    }
+
+    /// Per-Ship publish (issue #828): an NPC gets its own Sensors blackboard —
+    /// its own science target, its own AiProfile-derived radar range — while
+    /// the player-only authored show/select filters stay gated on LocalShip.
+    #[test]
+    fn publish_writes_sensors_blackboards_for_every_ship_not_just_local() {
+        let mut app = test_app();
+        // Give the local config distinctive filters so the gating is visible.
+        {
+            let mut cfg = app
+                .world_mut()
+                .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+            cfg.0.sensors_radar_shows = vec!["ship".into()];
+            cfg.0.sensors_radar_selects = vec!["hostile".into()];
+        }
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::server_app::ShipSystemBlackboards::default(),
+                SensorsTarget(Some("npc-science-target".into())),
+                crate::ai::server::AiProfile {
+                    aggression: 0.5,
+                    sensor_range: 120.0,
+                },
+            ))
+            .id();
+        app.update();
+
+        let npc_bb = sensors_bb_of(&app, npc);
+        assert_eq!(
+            npc_bb.science_target_uuid.as_deref(),
+            Some("npc-science-target"),
+            "NPC blackboard must carry the NPC's own SensorsTarget"
+        );
+        assert!(
+            (npc_bb.radar_range - 120.0).abs() < f32::EPSILON,
+            "NPC radar_range must come from its own AiProfile.sensor_range, got {}",
+            npc_bb.radar_range
+        );
+        assert!(
+            npc_bb.radar_shows.is_empty() && npc_bb.radar_selects.is_empty(),
+            "player-only authored filters must not leak onto NPC blackboards"
+        );
+
+        let local = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+            q.single(app.world()).unwrap()
+        };
+        let local_bb = sensors_bb_of(&app, local);
+        assert_eq!(local_bb.radar_shows, vec!["ship".to_string()]);
+        assert_eq!(local_bb.radar_selects, vec!["hostile".to_string()]);
+        assert_eq!(
+            local_bb.radar_range,
+            crate::messages::default_sensors_radar_range(),
+            "local ship keeps the console-config range"
+        );
+        assert_eq!(local_bb.science_target_uuid, None);
+    }
+
+    /// An NPC with no AiProfile falls back to the console-config base range
+    /// (the same preference order as `effective_sensor_range`), scaled by its
+    /// own SensorRadarRange modifier when present.
+    #[test]
+    fn publish_npc_without_profile_falls_back_to_console_range() {
+        let mut app = test_app();
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+        app.update();
+
+        let npc_bb = sensors_bb_of(&app, npc);
+        assert_eq!(
+            npc_bb.radar_range,
+            crate::messages::default_sensors_radar_range(),
+            "profile-less NPC falls back to the console config base range"
+        );
+        assert_eq!(
+            npc_bb.science_target_uuid, None,
+            "missing SensorsTarget publishes as no selection"
         );
     }
 }

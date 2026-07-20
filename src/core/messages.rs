@@ -1081,6 +1081,11 @@ pub enum SystemControlPayload {
     SetScienceTarget {
         uuid: String,
     },
+    /// Deselect the Sensors science target (issue #828). Today only the
+    /// Sensors AI emits this (its decide loop clears the selection when no
+    /// in-range contact remains); the console UI has no deselect control yet,
+    /// but the payload is origin-agnostic like every admitted command.
+    ClearScienceTarget,
     /// Captain boosts (or toggles off) the priority of a doctrine objective.
     /// Sending the same `id` twice toggles the boost off.
     SetObjectivePriority {

@@ -631,7 +631,6 @@ mod tests {
             ShipModifiers::new(),
             ShipBoost::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
-            crate::ship::shields::ShieldArcIntents::default(),
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
             crate::ship::power::PowerReactorIntents::default(),
             crate::ship::power::ShipPowerAiState::default(),

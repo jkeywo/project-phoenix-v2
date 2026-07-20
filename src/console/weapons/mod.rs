@@ -610,8 +610,8 @@ fn tick_weapons_arc_request(
 // same system.
 //
 // It began (#697) as a decide/integrate pair — `ai_target_selection` →
-// `operate_tactical_ai` — mirroring the shape the other console AIs use
-// (`ai_shield_focus` → `integrate_shield_state`). #700 folded the integrator
+// `operate_tactical_ai` — mirroring the decide/apply shape the other console
+// AIs used at the time (e.g. the pre-#826 shields pair). #700 folded the integrator
 // back in, because unlike those pairs the two halves could not be separated by
 // a sim set: every `WeaponsTarget` reader runs in `SimSet::Input`, so the write
 // had to stay in `Input` too, which left the "pair" as two systems in the same

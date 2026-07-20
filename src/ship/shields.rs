@@ -15,29 +15,11 @@ use crate::ship_plugin::CoordinationEnqueue;
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingShieldsThreatBearing(pub Option<f32>);
 
-/// A single shield-focus command emitted by the AI decision system
-/// (`console_ai::server::ai_shield_focus`) for `console_ai::server::
-/// integrate_shield_state` to apply the same tick. Bevy-facing reflection of
-/// `console_ai::ShieldFocusAiOutput` (issue #692).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ShieldArcCmd {
-    /// Focus the facing at this index.
-    Focus(usize),
-    /// Clear the current focus.
-    ClearFocus,
-}
-
-/// Per-ship queue of pending shield-focus intents. Written by
-/// `ai_shield_focus`, drained and applied by `integrate_shield_state` in the
-/// same tick.
-///
-/// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site (see `lod_ai_ships` and the
-/// `AiHighFidelity` spawn sites in `server_app.rs` / `ship_plugin.rs` /
-/// `ai/server.rs`) so it stays scoped to high-fidelity AI ships, matching the
-/// "AI intent component" category from the station/system redesign.
-#[derive(Component, Default, Clone, Debug)]
-pub struct ShieldArcIntents(pub Vec<ShieldArcCmd>);
+// `ShieldArcCmd` / `ShieldArcIntents` (issue #692's decide/apply transport)
+// were retired by issue #826: `console_ai::server::ai_shield_focus` now emits
+// admitted `SetShieldArcFocus` payloads through
+// `command_admission::validate_and_admit`, and `handle_shields_messages`
+// below is the single applier for human and AI commands alike.
 
 // ── Components ─────────────────────────────────────────────────────────────────
 
@@ -208,7 +190,18 @@ impl Plugin for ShipShieldsPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_shields_messages.in_set(crate::sim_sets::SimSet::Input),
+                    // In `SimSet::Physics`, not Input (issue #826):
+                    // `admit_system_commands` clears every ship's
+                    // `AdmittedCommands` before Input each tick, and the AI
+                    // decide system (`console_ai::server::ai_shield_focus`,
+                    // Physics) refills it same-tick via `validate_and_admit`
+                    // — so the applier must consume in Physics *after* the AI
+                    // emit or AI commands would be silently lost.
+                    // `ConsoleAiPlugin` declares the explicit
+                    // `ai_shield_focus.before(handle_shields_messages)` edge;
+                    // set ordering keeps this before `tick_shields`
+                    // (Modifiers) and `publish_shields_blackboard` (Publish).
+                    handle_shields_messages.in_set(crate::sim_sets::SimSet::Physics),
                     emit_shields_coordination.in_set(crate::sim_sets::SimSet::Input),
                     tick_shields.in_set(crate::sim_sets::SimSet::Modifiers),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -275,8 +268,8 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
 /// Handle `SetShieldArcFocus` messages from every ship's Shields console.
 ///
 /// Iterates every ship (player + NPC) so both the player's Shields console
-/// commands and the future NPC `operate_shields_ai` writes into
-/// `AdmittedCommands` flip each ship's own shield focus.
+/// commands and the AI's admitted `ai_shield_focus` emissions (issue #826)
+/// flip each ship's own shield focus — one applier, no origin branching.
 ///
 /// Per-arc dispatch (#514): each `[[shield_arc]]` synthesises a
 /// `SystemId("shield-arc-<id>")`; the JS panel sends
@@ -440,17 +433,26 @@ pub fn emit_shields_coordination(
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
+/// Publish every ship's own `Shields` aggregate + per-arc `ShieldArc`
+/// blackboards into that ship's `ShipSystemBlackboards` (issue #826 — was
+/// LocalShip-only; per-Ship following the #824 helm precedent).
+///
+/// No field here is player-only: hull integrity, control sources, physics,
+/// and `WeaponsTarget` are all read from the same entity being published, so
+/// there is no `Has<LocalShip>` split — every ship gets the identical
+/// derivation. `target_bearing` in particular uses each ship's OWN
+/// `WeaponsTarget` (the shared per-ship targeting surface), not a global.
 fn publish_shields_blackboard(
-    shields_q: Query<&ShipShields, With<crate::server_app::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
-    control_sources_q: Query<
-        &crate::ship_plugin::ShipSystemControlSources,
-        With<crate::server_app::LocalShip>,
-    >,
-    physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>,
-    weapons_target_q: Query<
-        &crate::weapons_plugin::WeaponsTarget,
-        With<crate::server_app::LocalShip>,
+    mut ships_q: Query<
+        (
+            &ShipShields,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Option<&crate::ship_state::ShipPhysics>,
+            Option<&crate::weapons_plugin::WeaponsTarget>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<
         (&crate::simulation::AsteroidUuid, &Transform),
@@ -460,120 +462,111 @@ fn publish_shields_blackboard(
         (&crate::entity_spawner::EntityUuid, &Transform),
         Without<crate::simulation::AsteroidUuid>,
     >,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
-    >,
 ) {
-    let Some(shields) = shields_q.iter().next() else {
-        return;
-    };
-    let physics = physics_q.single().ok().copied().unwrap_or_default();
-    let control_sources = control_sources_q.single().ok();
+    for (shields, hull, control_sources, physics, weapons_target, mut bbs) in ships_q.iter_mut() {
+        let physics = physics.copied().unwrap_or_default();
 
-    // Snapshot facings once so we can reuse them for both the aggregate
-    // and per-arc blackboards.
-    let snapshots = shields.0.snapshot();
-    let facings: Vec<ShieldFacingStatus> = snapshots
-        .iter()
-        .map(|s| ShieldFacingStatus {
-            label: s.label.clone(),
-            hp: s.hp,
-            max_hp: s.max_hp,
-            online: s.online,
-            offline_remaining: s.offline_remaining,
-            is_focused: s.is_focused,
-            center_deg: s.center_deg,
-            width_deg: s.width_deg,
-            arc_id: s.id.clone(),
-            priority: s.priority,
-        })
-        .collect();
-
-    let (total_hp, total_current) = hull_q
-        .single()
-        .map(|h| (h.0.total_max(), h.0.total_current()))
-        .unwrap_or((100.0, 100.0));
-    let hull_integrity_pct = if total_hp > 0.0 {
-        ((total_current / total_hp) * 100.0).clamp(0.0, 100.0)
-    } else {
-        100.0
-    };
-
-    let focused_facing = facings
-        .iter()
-        .find(|f| f.is_focused)
-        .map(|f| f.label.clone());
-
-    let any_offline = facings.iter().any(|f| !f.online);
-    let grid_status = if any_offline {
-        "EMITTER OFFLINE"
-    } else {
-        "GRID NOMINAL"
-    }
-    .to_string();
-
-    let target_bearing = weapons_target_q.single().ok().and_then(|wt| {
-        let uuid = wt.0.as_ref()?;
-        let live = asteroid_q
+        // Snapshot facings once so we can reuse them for both the aggregate
+        // and per-arc blackboards.
+        let snapshots = shields.0.snapshot();
+        let facings: Vec<ShieldFacingStatus> = snapshots
             .iter()
-            .find(|(u, _)| u.0 == *uuid)
-            .map(|(_, t)| (t.translation.x, t.translation.z))
-            .or_else(|| {
-                entity_q
-                    .iter()
-                    .find(|(u, _)| u.0 == *uuid)
-                    .map(|(_, t)| (t.translation.x, t.translation.z))
-            })?;
-        let dx = live.0 - physics.x;
-        let dz = live.1 - physics.z;
-        let bearing_rad =
-            (dz.atan2(dx) - physics.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
-        Some(bearing_rad.to_degrees())
-    });
+            .map(|s| ShieldFacingStatus {
+                label: s.label.clone(),
+                hp: s.hp,
+                max_hp: s.max_hp,
+                online: s.online,
+                offline_remaining: s.offline_remaining,
+                is_focused: s.is_focused,
+                center_deg: s.center_deg,
+                width_deg: s.width_deg,
+                arc_id: s.id.clone(),
+                priority: s.priority,
+            })
+            .collect();
 
-    let bb = ShieldsBlackboard {
-        facings: facings.clone(),
-        hull_integrity_pct,
-        focused_facing,
-        target_bearing,
-        grid_status,
-        frequency: shields.frequency(),
-    };
+        let (total_hp, total_current) = hull
+            .map(|h| (h.0.total_max(), h.0.total_current()))
+            .unwrap_or((100.0, 100.0));
+        let hull_integrity_pct = if total_hp > 0.0 {
+            ((total_current / total_hp) * 100.0).clamp(0.0, 100.0)
+        } else {
+            100.0
+        };
 
-    // Per-arc fine blackboards (issue #514). One entry per arc under
-    // `SystemId("shield-arc-<id>")`. `is_online` combines hull-based
-    // offline (from `offline_systems`) with shield-timer offline
-    // (`snap.online`) — matches the pattern used by
-    // `PowerReactorBlackboard.is_online` derivation.
-    let per_arc: Vec<(SystemId, ShieldArcBlackboard)> = snapshots
-        .iter()
-        .filter_map(|snap| {
-            if snap.id.is_empty() {
-                return None;
-            }
-            let sid = crate::system_registry::shield_arc_system_id(&snap.id)?;
-            let hull_offline = control_sources
-                .map(|cs| cs.0.is_offline(&sid))
-                .unwrap_or(false);
-            let is_online = snap.online && !hull_offline;
-            Some((
-                sid,
-                ShieldArcBlackboard {
-                    label: snap.label.clone(),
-                    hp: snap.hp,
-                    max_hp: snap.max_hp,
-                    is_online,
-                    is_focused: snap.is_focused,
-                    offline_remaining: snap.offline_remaining,
-                    center_deg: snap.center_deg,
-                    width_deg: snap.width_deg,
-                },
-            ))
-        })
-        .collect();
+        let focused_facing = facings
+            .iter()
+            .find(|f| f.is_focused)
+            .map(|f| f.label.clone());
 
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
+        let any_offline = facings.iter().any(|f| !f.online);
+        let grid_status = if any_offline {
+            "EMITTER OFFLINE"
+        } else {
+            "GRID NOMINAL"
+        }
+        .to_string();
+
+        let target_bearing = weapons_target.and_then(|wt| {
+            let uuid = wt.0.as_ref()?;
+            let live = asteroid_q
+                .iter()
+                .find(|(u, _)| u.0 == *uuid)
+                .map(|(_, t)| (t.translation.x, t.translation.z))
+                .or_else(|| {
+                    entity_q
+                        .iter()
+                        .find(|(u, _)| u.0 == *uuid)
+                        .map(|(_, t)| (t.translation.x, t.translation.z))
+                })?;
+            let dx = live.0 - physics.x;
+            let dz = live.1 - physics.z;
+            let bearing_rad =
+                (dz.atan2(dx) - physics.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+            Some(bearing_rad.to_degrees())
+        });
+
+        let bb = ShieldsBlackboard {
+            facings: facings.clone(),
+            hull_integrity_pct,
+            focused_facing,
+            target_bearing,
+            grid_status,
+            frequency: shields.frequency(),
+        };
+
+        // Per-arc fine blackboards (issue #514). One entry per arc under
+        // `SystemId("shield-arc-<id>")`. `is_online` combines hull-based
+        // offline (from `offline_systems`) with shield-timer offline
+        // (`snap.online`) — matches the pattern used by
+        // `PowerReactorBlackboard.is_online` derivation.
+        let per_arc: Vec<(SystemId, ShieldArcBlackboard)> = snapshots
+            .iter()
+            .filter_map(|snap| {
+                if snap.id.is_empty() {
+                    return None;
+                }
+                let sid = crate::system_registry::shield_arc_system_id(&snap.id)?;
+                let hull_offline = control_sources
+                    .map(|cs| cs.0.is_offline(&sid))
+                    .unwrap_or(false);
+                let is_online = snap.online && !hull_offline;
+                Some((
+                    sid,
+                    ShieldArcBlackboard {
+                        label: snap.label.clone(),
+                        hp: snap.hp,
+                        max_hp: snap.max_hp,
+                        is_online,
+                        is_focused: snap.is_focused,
+                        offline_remaining: snap.offline_remaining,
+                        center_deg: snap.center_deg,
+                        width_deg: snap.width_deg,
+                    },
+                ))
+            })
+            .collect();
+
         bbs.0.insert(
             SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
             SystemBlackboard::Shields(bb),
@@ -590,13 +583,15 @@ fn publish_shields_blackboard(
 //
 // The fused decide+mutate `operate_shields_ai` system (damage tracking,
 // health monitoring, focus decision, threat-bearing override) was split in
-// issue #692 into `console_ai::server::ai_shield_focus` (decision, writes
-// `ShieldArcIntents`) and `console_ai::server::integrate_shield_state`
-// (adapter — applies intents via `set_focused_facing`, the same mutation
-// primitive `handle_shields_messages` above uses for the human path).
+// issue #692 into a decide system + apply adapter. Issue #826 retired the
+// adapter and its `ShieldArcIntents` transport: `console_ai::server::
+// ai_shield_focus` (decision, unchanged) now emits admitted
+// `SetShieldArcFocus` payloads through `command_admission::validate_and_admit`
+// with the ship's own `ai:<uuid>` token, and `handle_shields_messages` above
+// applies them — the single truth-integration point for human and AI alike.
 // `ShieldsDamageHistory`, `ShieldsAiConfigResource`, and
 // `PendingShieldsThreatBearing` remain here since they're shield-domain state
-// read/written by the new systems.
+// read/written by the decide system.
 
 /// Angular distance (degrees) between two angles on a circle, always in [0, 180].
 pub(crate) fn angular_distance_deg(a: f32, b: f32) -> f32 {
@@ -1366,5 +1361,99 @@ mod tests {
             }
             other => panic!("expected ShieldArc variant, got {other:?}"),
         }
+    }
+
+    // ── Issue #826 tests: per-Ship publish ───────────────────────────────────
+
+    /// Spawn a bare NPC (Ship, no LocalShip) alongside `test_app`'s player.
+    fn spawn_npc(app: &mut App, frequency: f32) -> Entity {
+        let config = crate::shield::ShieldConfig {
+            num_facings: 2,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        app.world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                ShipShields(crate::shield::ShieldSystem::new(&config), frequency),
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id()
+    }
+
+    #[test]
+    fn publish_writes_blackboards_for_every_ship_not_just_local() {
+        // Per-Ship publish (issue #826): an NPC gets its own aggregate
+        // Shields blackboard AND its own per-arc ShieldArc entries in its
+        // own ShipSystemBlackboards, alongside the LocalShip's.
+        let mut app = test_app();
+        let npc = spawn_npc(&mut app, 0.25);
+        app.update();
+
+        let bbs = app
+            .world()
+            .entity(npc)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .expect("NPC ShipSystemBlackboards");
+        let key = SystemId(SHIELDS_SYSTEM_ID.to_string());
+        let SystemBlackboard::Shields(bb) = bbs.0.get(&key).expect("NPC Shields blackboard") else {
+            panic!("expected Shields blackboard variant on the NPC");
+        };
+        assert!(
+            (bb.frequency - 0.25).abs() < f32::EPSILON,
+            "NPC blackboard must reflect the NPC's own shields, not the player's"
+        );
+        for arc_id in &["fore", "aft"] {
+            let sid = crate::system_registry::shield_arc_system_id(arc_id).expect("arc id");
+            assert!(
+                matches!(bbs.0.get(&sid), Some(SystemBlackboard::ShieldArc(_))),
+                "NPC must publish its own ShieldArc blackboard for {arc_id}"
+            );
+        }
+        // The LocalShip still publishes its own aggregate too.
+        assert!((shields_bb(&mut app).frequency - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn publish_npc_target_bearing_uses_its_own_weapons_target() {
+        // target_bearing derives from each ship's OWN WeaponsTarget +
+        // ShipPhysics: an NPC at the origin (yaw 0) targeting an entity at
+        // +X reads a bearing of 180° (atan2 convention preserved from the
+        // LocalShip-only publish); the LocalShip, with no WeaponsTarget,
+        // stays None.
+        let mut app = test_app();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("npc-target".into()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+        ));
+        let npc = spawn_npc(&mut app, 0.25);
+        app.world_mut().entity_mut(npc).insert((
+            crate::ship_state::ShipPhysics::default(),
+            crate::weapons_plugin::WeaponsTarget(Some("npc-target".into())),
+        ));
+        app.update();
+
+        let bbs = app
+            .world()
+            .entity(npc)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .expect("NPC ShipSystemBlackboards");
+        let key = SystemId(SHIELDS_SYSTEM_ID.to_string());
+        let SystemBlackboard::Shields(bb) = bbs.0.get(&key).expect("NPC Shields blackboard") else {
+            panic!("expected Shields blackboard variant on the NPC");
+        };
+        let bearing = bb
+            .target_bearing
+            .expect("NPC target_bearing must derive from its own WeaponsTarget");
+        assert!(
+            (bearing - 180.0).abs() < 0.01,
+            "expected bearing ~180° for a target dead ahead on +X (got {bearing})"
+        );
+        assert_eq!(
+            shields_bb(&mut app).target_bearing,
+            None,
+            "the LocalShip holds no WeaponsTarget, so its bearing stays None"
+        );
     }
 }

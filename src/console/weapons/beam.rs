@@ -546,9 +546,9 @@ pub(crate) fn handle_fire_phaser(
 /// The decide half of the phaser auto-fire pair split out of the pre-#698
 /// `tick_phaser_auto_fire`, which fused this decision with the `ActiveBeam`
 /// mutation. [`integrate_weapons_state`] now owns the mutation; this system is
-/// read-only apart from its own intent buffer, mirroring the shape every other
-/// console AI already uses (`ai_shield_focus` → `integrate_shield_state`,
-/// `ai_torpedo_auto_fire` → `integrate_weapons_state`).
+/// read-only apart from its own intent buffer, mirroring
+/// `ai_torpedo_auto_fire` → `integrate_weapons_state` (the shields pair
+/// retired its intent transport for admitted emissions in issue #826).
 ///
 /// Iterates every ship (`With<Ship>`) — player + NPC — and auto-fires when
 /// either:

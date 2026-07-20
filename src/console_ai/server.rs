@@ -6,10 +6,13 @@
 //!
 //! Issue #692 wires the previously-orphaned pure decision functions from
 //! `console_ai::core` into Bevy systems here:
-//! - `ai_shield_focus` / `integrate_shield_state` — replace the old fused
-//!   `operate_shields_ai` (formerly in `ship::shields`) with a
-//!   decide/`ShieldArcIntents`-write system + a mutate-only adapter, mirroring
-//!   the human path's `handle_shields_messages` -> `set_focused_facing` shape.
+//! - `ai_shield_focus` — replaces the old fused `operate_shields_ai`
+//!   (formerly in `ship::shields`). Originally paired with an
+//!   `integrate_shield_state` adapter draining a `ShieldArcIntents`
+//!   component; issue #826 retired that pair — the decide system now emits
+//!   admitted `SetShieldArcFocus` payloads via
+//!   `command_admission::validate_and_admit` and the human path's
+//!   `ship::shields::handle_shields_messages` applies them same-tick.
 //! - `ai_frequency_hint` — wires `console_ai::tick_frequency_hint`, which had
 //!   no caller anywhere prior to this issue.
 //!
@@ -49,7 +52,7 @@ pub const AI_RULE_RED_ALERT_RULE: &str = "red_alert_rule";
 /// Bevy-facing wrapper around `console_ai::FrequencyHintState`.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site (mirrors `ShieldArcIntents`'s
+/// that marker at every spawn/promote site (mirrors `PowerReactorIntents`'s
 /// scoping; see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn
 /// sites in `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
 #[derive(Component, Default, Clone, Debug)]
@@ -63,12 +66,17 @@ impl Plugin for ConsoleAiPlugin {
         app.add_systems(
             Update,
             (
+                // Decide only (issue #826): emits admitted SetShieldArcFocus
+                // payloads; the single applier is `ship::shields::
+                // handle_shields_messages` (registered by ShipShieldsPlugin
+                // in this same Physics set). The `.before` edge is the one
+                // explicit ordering between them — admission clears
+                // AdmittedCommands before Input each tick, so the applier
+                // must consume same-tick after this emit.
                 ai_shield_focus
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel),
-                integrate_shield_state
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(ai_shield_focus),
+                    .after(crate::sim_sets::AiTickLabel)
+                    .before(crate::ship::shields::handle_shields_messages),
                 ai_power_allocation
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel),
@@ -92,12 +100,60 @@ impl Plugin for ConsoleAiPlugin {
 
 // ── Shields AI ───────────────────────────────────────────────────────────────
 
+/// Validate-and-enqueue one shield-focus AI decision into this ship's own
+/// `AdmittedCommands` (issue #826, mirroring `ship::helm_ai::
+/// emit_helm_ai_command` from #824): the AI's `ai:` token flows through the
+/// same `validate_and_admit` seam network commands do, checked against this
+/// entity's own `ControlSourceResolver` (`operate_ai` must hold on the
+/// targeted arc). The write happens in the same tick —
+/// `ship::shields::handle_shields_messages` applies it later this frame — so
+/// there is no one-tick queue lag on the AI shields path.
+fn emit_shield_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    target: crate::messages::SystemId,
+    payload: crate::messages::SystemControlPayload,
+    sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token, target, payload, sources, sessions, config, admitted,
+    )
+}
+
 /// AI shield-focus decision system (issue #692).
 ///
 /// Replaces the old fused `ship::shields::operate_shields_ai`: reads each
-/// AI-controlled ship's shield facings + damage history and writes the
-/// decision into `ShieldArcIntents` for `integrate_shield_state` to apply,
+/// AI-controlled ship's shield facings + damage history and emits the
+/// decision as an admitted `SetShieldArcFocus` payload into the ship's own
+/// `AdmittedCommands` (issue #826 — previously a `ShieldArcIntents` write
+/// drained by a paired `integrate_shield_state` adapter), for
+/// `ship::shields::handle_shields_messages` to apply later this tick,
 /// rather than mutating `ShipShields` directly.
+///
+/// # Emission shape
+/// `Focus(idx)` → `SetShieldArcFocus { focused: true }` targeted at that
+/// arc's `shield-arc-<id>` SystemId; `ClearFocus` →
+/// `SetShieldArcFocus { focused: false }` targeted at the CURRENTLY focused
+/// arc's SystemId (matching `handle_shields_messages`' clear-only-if-target-
+/// matches-current semantics; no focus held means nothing to emit).
 ///
 /// # Gating
 /// - `ShipSystemControlSources.policy_for(shields_system_id()).operate_ai`
@@ -128,10 +184,11 @@ impl Plugin for ConsoleAiPlugin {
 /// broadcast catches up), the decision is skipped. `AiWorldEntity.shields`
 /// remains the unpopulated placeholder `build_world_snapshot` always writes
 /// (`None`) — not used here, since the live component is fresher anyway.
-fn ai_shield_focus(
+pub(crate) fn ai_shield_focus(
     time: Res<Time>,
     global_ai_config: Res<crate::ship::shields::ShieldsAiConfigResource>,
     world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
@@ -140,7 +197,8 @@ fn ai_shield_focus(
             &mut crate::ship::shields::ShieldsDamageHistory,
             Option<&crate::ship::shields::ShieldsAiConfigResource>,
             &mut crate::ship::shields::PendingShieldsThreatBearing,
-            &mut crate::ship::shields::ShieldArcIntents,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -157,12 +215,35 @@ fn ai_shield_focus(
         mut damage_history,
         ai_config_comp,
         mut pending_threat,
-        mut intents,
+        ship_config,
+        mut admitted,
     ) in ships.iter_mut()
     {
-        // Clear last tick's intents unconditionally — a stale intent must
-        // never survive into a tick where the decision didn't run.
-        intents.0.clear();
+        // Emit `Focus(idx)`: admitted `focused: true` at that arc's SystemId.
+        // Arcs with an empty authored id have no fine SystemId and cannot be
+        // addressed (they never occur in authored content — `ShieldSystem`
+        // defaults every arc id).
+        let emit_focus = |idx: usize,
+                          admitted: &mut crate::messages::AdmittedCommands,
+                          shields: &crate::ship::shields::ShipShields| {
+            let Some(sid) = shields
+                .0
+                .facings
+                .get(idx)
+                .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
+            else {
+                return;
+            };
+            emit_shield_ai_command(
+                entity_uuid,
+                sid,
+                crate::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
+                control_sources,
+                &sessions,
+                ship_config,
+                admitted,
+            );
+        };
 
         let policy = control_sources
             .0
@@ -200,9 +281,7 @@ fn ai_shield_focus(
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             });
             if let Some(idx) = closest_idx {
-                intents
-                    .0
-                    .push(crate::ship::shields::ShieldArcCmd::Focus(idx));
+                emit_focus(idx, &mut admitted, shields);
             }
             continue; // Threat bearing takes priority over damage analysis
         }
@@ -257,47 +336,42 @@ fn ai_shield_focus(
         match decision {
             crate::console_ai::ShieldFocusAiOutput::Focus { facing_index } => {
                 if facing_index < facings.len() {
-                    intents
-                        .0
-                        .push(crate::ship::shields::ShieldArcCmd::Focus(facing_index));
+                    emit_focus(facing_index, &mut admitted, shields);
                 }
             }
             crate::console_ai::ShieldFocusAiOutput::ClearFocus => {
-                intents
-                    .0
-                    .push(crate::ship::shields::ShieldArcCmd::ClearFocus);
+                // Target the CURRENTLY focused arc: `handle_shields_messages`
+                // only clears when `focused: false` names the arc that holds
+                // the focus. No focus held → nothing to clear (the old
+                // `set_focused_facing(None)` was a no-op there too).
+                let current_sid = shields.0.focused_facing.and_then(|i| {
+                    shields
+                        .0
+                        .facings
+                        .get(i)
+                        .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
+                });
+                if let Some(sid) = current_sid {
+                    emit_shield_ai_command(
+                        entity_uuid,
+                        sid,
+                        crate::messages::SystemControlPayload::SetShieldArcFocus { focused: false },
+                        control_sources,
+                        &sessions,
+                        ship_config,
+                        &mut admitted,
+                    );
+                }
             }
             crate::console_ai::ShieldFocusAiOutput::None => {}
         }
     }
 }
 
-/// Adapter: applies `ShieldArcIntents` written by `ai_shield_focus` to
-/// `ShipShields::set_focused_facing` — the same mutation primitive
-/// `ship::shields::handle_shields_messages` (the human path) uses. Runs
-/// immediately after `ai_shield_focus` in the same tick so the focus change
-/// is visible to `tick_shields` / `publish_shields_blackboard` this frame.
-fn integrate_shield_state(
-    mut ships: Query<(
-        &mut crate::ship::shields::ShipShields,
-        &mut crate::ship::shields::ShieldArcIntents,
-    )>,
-) {
-    for (mut shields, mut intents) in ships.iter_mut() {
-        for cmd in intents.0.drain(..) {
-            match cmd {
-                crate::ship::shields::ShieldArcCmd::Focus(idx) => {
-                    if idx < shields.0.facings.len() {
-                        shields.0.set_focused_facing(Some(idx));
-                    }
-                }
-                crate::ship::shields::ShieldArcCmd::ClearFocus => {
-                    shields.0.set_focused_facing(None);
-                }
-            }
-        }
-    }
-}
+// `integrate_shield_state` (issue #692's mutate-only adapter) was deleted by
+// issue #826: truth-integration for shields lives in
+// `ship::shields::handle_shields_messages`, the single admitted-command
+// applier for human and AI commands alike.
 
 // ── Power AI ─────────────────────────────────────────────────────────────────
 
@@ -896,8 +970,7 @@ mod tests {
     use crate::messages::{AdmittedCommands, CoordinationPayload};
     use crate::ship::control_source::ControlSource;
     use crate::ship::shields::{
-        PendingShieldsThreatBearing, ShieldArcIntents, ShieldsAiConfigResource,
-        ShieldsDamageHistory, ShipShields,
+        PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory, ShipShields,
     };
     use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
     use crate::weapons_plugin::WeaponsTarget;
@@ -911,6 +984,11 @@ mod tests {
         }
     }
 
+    /// Registers `ai_shield_focus` (decide + admitted emit) chained before
+    /// the shields module's `handle_shields_messages` (the single applier for
+    /// human and AI commands, issue #826) — the production pipeline minus
+    /// `AdmissionPlugin`'s per-tick clear, which these single-shot scenarios
+    /// don't need.
     fn shield_test_app() -> App {
         let config = crate::shield::ShieldConfig {
             num_facings: 4,
@@ -926,34 +1004,50 @@ mod tests {
             .init_resource::<crate::ai_plugin::WorldSnapshot>()
             .init_resource::<ShieldsAiConfigResource>()
             .init_resource::<CoordBox>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
             .add_message::<CoordinationEnqueue>()
             .add_systems(
                 Update,
                 (
-                    ai_shield_focus.before(integrate_shield_state),
-                    integrate_shield_state,
+                    ai_shield_focus.before(crate::ship::shields::handle_shields_messages),
+                    crate::ship::shields::handle_shields_messages,
                 ),
             )
             .add_systems(PostUpdate, collect_coord);
-
-        let mut control_sources = ShipSystemControlSources::default();
-        control_sources.0.set(
-            crate::system_registry::shields_system_id(),
-            ControlSource::Ai,
-        );
 
         app.world_mut().spawn((
             crate::server_app::Ship,
             ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
             ShieldsDamageHistory::default(),
             PendingShieldsThreatBearing::default(),
-            ShieldArcIntents::default(),
-            control_sources,
+            ai_shield_control_sources(),
             AdmittedCommands::default(),
             AiHighFidelity,
         ));
 
         app
+    }
+
+    /// Coarse shields system (the decide gate) + every synthesised
+    /// `shield-arc-<id>` fine system (the admission gate) set to Ai —
+    /// matching how the entity spawner rosters an NPC's systems (arcs are
+    /// synthesised into `ShipConfig.systems`, so the all-Ai loop covers
+    /// them in production).
+    fn ai_shield_control_sources() -> ShipSystemControlSources {
+        let mut control_sources = ShipSystemControlSources::default();
+        control_sources.0.set(
+            crate::system_registry::shields_system_id(),
+            ControlSource::Ai,
+        );
+        for arc_id in ["fore", "port", "aft", "starboard"] {
+            control_sources.0.set(
+                crate::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
+                ControlSource::Ai,
+            );
+        }
+        control_sources
     }
 
     fn focused_facing(app: &App, e: Entity) -> Option<usize> {
@@ -973,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_shield_focus_writes_intents_and_integrate_applies_focus_toward_damaged_facing() {
+    fn ai_shield_focus_emits_admitted_focus_toward_damaged_facing() {
         // Simulates an attacker's hit landing on facing 0 (a real attack
         // always lands on one specific facing — "toward the attacker" from
         // the acceptance criteria). `tick_shield_focus_ai`'s health-imbalance
@@ -981,7 +1075,8 @@ mod tests {
         // history clears the damage-concentration threshold, which is what
         // fires here since facing 0 (20/100 HP) is far below the others
         // (100/100 HP). This exercises the full ai_shield_focus ->
-        // ShieldArcIntents -> integrate_shield_state pipeline end to end.
+        // validate_and_admit -> handle_shields_messages pipeline end to end
+        // (issue #826).
         let mut app = shield_test_app();
         let e = ship_entity(&mut app);
 
@@ -996,7 +1091,99 @@ mod tests {
             focused_facing(&app, e),
             Some(0),
             "shield focus should follow the facing that took the attacker's damage \
-             (ai_shield_focus decided, integrate_shield_state applied it via ShieldArcIntents)"
+             (ai_shield_focus decided, handle_shields_messages applied the admitted command)"
+        );
+    }
+
+    #[test]
+    fn ai_emitted_focus_applies_to_npc_own_ship_shields_only() {
+        // Two NPC ships, both AI-operated. Only ship A takes damage; the
+        // admitted `SetShieldArcFocus` lands in A's own `AdmittedCommands`,
+        // so only A's `ShipShields` gains a focus — B is untouched (the
+        // per-entity admission routing from issue #824, applied to shields
+        // by #826).
+        let mut app = shield_test_app();
+        let a = ship_entity(&mut app);
+
+        let config = crate::shield::ShieldConfig {
+            num_facings: 4,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let b = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShieldsDamageHistory::default(),
+                PendingShieldsThreatBearing::default(),
+                ai_shield_control_sources(),
+                AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+
+        {
+            let mut entity_mut = app.world_mut().entity_mut(a);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 20;
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, a),
+            Some(0),
+            "the damaged NPC's own shields must gain the AI focus"
+        );
+        assert_eq!(
+            focused_facing(&app, b),
+            None,
+            "the undamaged NPC must not be contaminated by another ship's AI command"
+        );
+    }
+
+    #[test]
+    fn human_held_shield_arc_rejects_ai_emission() {
+        // The decide gate (coarse shields system) still says AI, but the
+        // targeted arc's control source is Human — `validate_and_admit`
+        // refuses the `ai:` token (`operate_ai` does not hold on the arc), so
+        // no admitted command exists and the focus never flips. This is the
+        // admission-refusal path the retired `integrate_shield_state` adapter
+        // could not express (it applied intents unconditionally).
+        let mut app = shield_test_app();
+        let e = ship_entity(&mut app);
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut cs = entity_mut.get_mut::<ShipSystemControlSources>().unwrap();
+            for arc_id in ["fore", "port", "aft", "starboard"] {
+                cs.0.set(
+                    crate::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
+                    ControlSource::Human,
+                );
+            }
+        }
+
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 20;
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "an ai: emission targeting a human-held shield arc must be refused at admission"
+        );
+        assert!(
+            app.world()
+                .entity(e)
+                .get::<AdmittedCommands>()
+                .unwrap()
+                .0
+                .is_empty(),
+            "the refused command must never reach AdmittedCommands"
         );
     }
 
@@ -1079,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_shield_focus_threat_bearing_override_focuses_closest_facing_via_intents() {
+    fn ai_shield_focus_threat_bearing_override_focuses_closest_facing_via_admission() {
         let mut app = shield_test_app();
         let e = ship_entity(&mut app);
         app.world_mut()
@@ -1093,7 +1280,7 @@ mod tests {
         let focused = focused_facing(&app, e);
         assert!(
             focused.is_some(),
-            "threat-bearing override must focus a facing via ShieldArcIntents"
+            "threat-bearing override must focus a facing via the admitted-command path"
         );
 
         // The override takes priority over damage analysis and must consume

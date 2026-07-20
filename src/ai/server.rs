@@ -673,9 +673,6 @@ fn lod_ai_ships(
                     // decision systems.
                     commands
                         .entity(entity)
-                        .insert(crate::ship::shields::ShieldArcIntents::default());
-                    commands
-                        .entity(entity)
                         .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
                     commands
                         .entity(entity)
@@ -697,9 +694,6 @@ fn lod_ai_ships(
                 }
                 LodState::Low => {
                     commands.entity(entity).remove::<AiHighFidelity>();
-                    commands
-                        .entity(entity)
-                        .remove::<crate::ship::shields::ShieldArcIntents>();
                     commands
                         .entity(entity)
                         .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
@@ -1924,7 +1918,6 @@ mod tests {
                 Transform::from_xyz(x, 0.0, z),
                 ShipPhysics::default(),
                 AiHighFidelity,
-                crate::ship::shields::ShieldArcIntents::default(),
                 crate::console_ai_plugin::ShipFrequencyHintState::default(),
                 crate::ship::power::PowerReactorIntents::default(),
                 crate::ship::power::ShipPowerAiState::default(),

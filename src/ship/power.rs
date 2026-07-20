@@ -124,9 +124,9 @@ pub struct PowerReactorCommand {
 /// the same tick.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site, mirroring `ShieldArcIntents`
-/// (see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn sites in
-/// `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
+/// that marker at every spawn/promote site (see `ai::server::lod_ai_ships`
+/// and the `AiHighFidelity` spawn sites in `server_app.rs` /
+/// `ship_plugin.rs` / `ai/server.rs`).
 #[derive(Component, Default, Clone, Debug)]
 pub struct PowerReactorIntents(pub Vec<PowerReactorCommand>);
 

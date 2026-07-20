@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
 use super::beam::{
-    ActiveBeam, CurrentPhaserMode, PhaserCombatConfigResource, PhaserCooldown, WeaponsTarget,
+    ActiveBeam, CurrentPhaserMode, PhaserCombatConfigResource, PhaserCooldown,
+    TacticalRadarSelection,
 };
 use super::blaster::BlasterSystemResource;
 use super::shared::live_entity_xz;
@@ -73,7 +74,8 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .unwrap_or((0.0, 0.0, 0.0))
     };
     let target_uuid: Option<String> = {
-        let mut q = world.query_filtered::<&WeaponsTarget, With<crate::server_app::LocalShip>>();
+        let mut q =
+            world.query_filtered::<&TacticalRadarSelection, With<crate::server_app::LocalShip>>();
         q.single(world).ok().and_then(|wt| wt.0.clone())
     };
     let (beam_active, active_beam_bank) = {
@@ -497,7 +499,7 @@ fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeStat
 pub(crate) fn publish_weapons_core_blackboard(
     mut ship_q: Query<
         (
-            Option<&WeaponsTarget>,
+            Option<&TacticalRadarSelection>,
             Option<&ActiveBeam>,
             Option<&PhaserCooldown>,
             Option<&PhaserCombatConfigResource>,
@@ -512,7 +514,6 @@ pub(crate) fn publish_weapons_core_blackboard(
     >,
     phaser_mode: Res<CurrentPhaserMode>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    world_res: Res<WorldResource>,
     entity_name_q: Query<(
         &crate::entity_spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
@@ -586,11 +587,11 @@ pub(crate) fn publish_weapons_core_blackboard(
         //
         // Re-check liveness rather than carrying blindly: the Input pair decided
         // on this target, but `tick_beams` (`Damage`) and `tick_torpedo_lifecycle`
-        // (`Physics`) both clear `WeaponsTarget` after a kill, later in the same
+        // (`Physics`) both clear `TacticalRadarSelection` after a kill, later in the same
         // tick. Carrying the dead value forward would publish `locked_target !=
         // target_uuid` for one tick, contradicting the field's own contract (see
         // `WeaponsBlackboard::locked_target` in `core::messages`) that the two
-        // agree once a tick has settled. Selection re-derives from `WeaponsTarget`
+        // agree once a tick has settled. Selection re-derives from `TacticalRadarSelection`
         // and never from `locked_target`, so a dead value cannot resurrect a
         // target — but it can be read, and #698 / #700 will read it.
         let locked_target = entity_bbs
@@ -630,13 +631,11 @@ pub(crate) fn publish_weapons_core_blackboard(
         let tubes: Vec<TorpedoTubeState> = build_tube_states(torpedo_sys);
 
         // ── Client render data (LocalShip only) ──────────────────────────────
-        // Everything below this point is drawn by the browser Tactical console
-        // and is sourced from the two player-only resources. An NPC has no
-        // client, so it gets empty vectors and the default phaser mode — see the
-        // function doc. `blips` is the expensive one: skipping it for NPCs keeps
-        // this system O(entities), not O(ships × entities).
-        let mut blips: Vec<RadarBlip> = Vec::new();
-        let mut regions: Vec<RadarRegion> = Vec::new();
+        // Phaser mode + arc geometry are drawn by the browser Tactical console
+        // and are sourced from the two player-only resources. An NPC has no
+        // client, so it gets empty vectors and the default phaser mode. Radar
+        // blips + region overlays moved to `publish_tactical_radar_blackboard`
+        // (issue #829) — they belong to the tactical-radar system now.
         let mut phaser_arcs: Vec<PhaserBankClientConfig> = Vec::new();
         let mut torpedo_arcs: Vec<TorpedoTubeClientConfig> = Vec::new();
         let mut mode = crate::messages::PhaserMode::default();
@@ -645,7 +644,75 @@ pub(crate) fn publish_weapons_core_blackboard(
             mode = phaser_mode.0;
             phaser_arcs = ship_config.0.phaser_banks.clone();
             torpedo_arcs = ship_config.0.torpedo_tubes.clone();
+        }
 
+        // Blaster bank states from this ship's own BlasterSystemResource.
+        let blasters: Vec<BlasterBankState> = blaster_res
+            .map(|r| r.0.iter().map(|b| b.bank_state()).collect())
+            .unwrap_or_default();
+
+        let bb = WeaponsBlackboard {
+            target_uuid,
+            locked_target,
+            target_name,
+            banks,
+            tubes,
+            torpedo_count: torpedo_sys.0.torpedoes_remaining,
+            phaser_mode: mode,
+            phaser_arcs,
+            torpedo_arcs,
+            blasters,
+        };
+
+        // Console-level blackboard: keyed by the Tactical STATION id (issue
+        // #801). The wire string is unchanged — the client still reads
+        // `blackboards['tactical']` — but the key names the console, not a
+        // system. Per-bank entries below keep their system-id keys.
+        entity_bbs.0.insert(
+            crate::system_registry::tactical_station_key(),
+            SystemBlackboard::Weapons(bb),
+        );
+    }
+}
+
+/// Publish each ship's Tactical Radar blackboard (issue #829). Runs in
+/// `SimSet::Publish` alongside the other publishers — writes only the
+/// `tactical-radar` key, so no ordering against them.
+///
+/// The tactical radar owns the **Combat Lock**: `selected_target` mirrors this
+/// ship's `TacticalRadarSelection` component (its authoritative selection) for every
+/// ship, so the viewscreen aggregator can lift it. `blips`/`regions` are the
+/// expensive O(entities) client render data — computed for the `LocalShip`
+/// only, exactly as they were in `publish_weapons_core_blackboard` before this
+/// system took ownership. Reading the ship's own selection here is not a
+/// cross-system read: this system *is* the tactical radar authority (spec §3).
+pub(crate) fn publish_tactical_radar_blackboard(
+    mut ship_q: Query<
+        (
+            Option<&TacticalRadarSelection>,
+            Option<&ShipPhysics>,
+            Option<&crate::modifiers::ShipModifiers>,
+            &mut crate::server_app::ShipSystemBlackboards,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    world_res: Res<WorldResource>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+) {
+    for (weapons_target, ship_physics, modifiers, mut entity_bbs, is_local) in ship_q.iter_mut() {
+        let physics = ship_physics.copied().unwrap_or_default();
+        let radar_range_mult = modifiers
+            .map(|m| m.get(&ModifierSlot::RadarRange))
+            .unwrap_or(1.0);
+        let selected_target = weapons_target.and_then(|wt| wt.0.clone());
+
+        let mut blips: Vec<RadarBlip> = Vec::new();
+        let mut regions: Vec<RadarRegion> = Vec::new();
+
+        if is_local {
             // ── Radar blips ──────────────────────────────────────────────────
             let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
             let shows: Vec<crate::entity_tags::EntityTag> = ship_config
@@ -730,33 +797,13 @@ pub(crate) fn publish_weapons_core_blackboard(
                 .collect();
         }
 
-        // Blaster bank states from this ship's own BlasterSystemResource.
-        let blasters: Vec<BlasterBankState> = blaster_res
-            .map(|r| r.0.iter().map(|b| b.bank_state()).collect())
-            .unwrap_or_default();
-
-        let bb = WeaponsBlackboard {
-            target_uuid,
-            locked_target,
-            target_name,
-            banks,
-            tubes,
-            torpedo_count: torpedo_sys.0.torpedoes_remaining,
-            phaser_mode: mode,
-            phaser_arcs,
-            torpedo_arcs,
-            blasters,
-            blips,
-            regions,
-        };
-
-        // Console-level blackboard: keyed by the Tactical STATION id (issue
-        // #801). The wire string is unchanged — the client still reads
-        // `blackboards['tactical']` — but the key names the console, not a
-        // system. Per-bank entries below keep their system-id keys.
         entity_bbs.0.insert(
-            crate::system_registry::tactical_station_key(),
-            SystemBlackboard::Weapons(bb),
+            crate::system_registry::tactical_radar_system_id(),
+            SystemBlackboard::TacticalRadar(crate::messages::TacticalRadarBlackboard {
+                selected_target,
+                blips,
+                regions,
+            }),
         );
     }
 }
@@ -781,7 +828,7 @@ pub(crate) fn publish_weapons_core_blackboard(
 pub(crate) fn publish_phaser_bank_blackboards(
     mut ship_q: Query<
         (
-            Option<&WeaponsTarget>,
+            Option<&TacticalRadarSelection>,
             Option<&ActiveBeam>,
             Option<&PhaserCooldown>,
             Option<&PhaserCombatConfigResource>,

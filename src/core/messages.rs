@@ -1699,6 +1699,43 @@ pub struct RadarRegion {
     pub name: Option<String>,
 }
 
+/// Raw sim truth for the Tactical Radar system, published each tick into the
+/// ship blackboard (issue #829).
+///
+/// The tactical radar owns the ship's **Combat Lock** — its `selected_target`
+/// is the authoritative target selection that used to live on the retired
+/// `TacticalRadarSelection` component. Blips and region overlays moved here out of
+/// `WeaponsBlackboard`. The viewscreen aggregator lifts `selected_target` into
+/// `ViewscreenBlackboard::combat_lock`, and every cross-system consumer reads
+/// that frozen viewscreen fact rather than this live selection (spec §1/§3).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TacticalRadarBlackboard {
+    /// The Combat Lock: the tactical radar's currently selected target UUID,
+    /// or `None`. Mirrors this ship's `TacticalRadarSelection` component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target: Option<String>,
+    /// Radar blips projected into normalised ship-relative coordinates.
+    /// Populated for the local ship only (NPCs render no radar).
+    #[serde(default)]
+    pub blips: Vec<RadarBlip>,
+    /// World region overlays (static shapes drawn on the radar canvas).
+    #[serde(default)]
+    pub regions: Vec<RadarRegion>,
+}
+
+/// Raw sim truth for the Sensor Radar system, published each tick into the ship
+/// blackboard (issue #829).
+///
+/// The sensor radar owns the ship's **Science Target** — its `selected_target`
+/// mirrors the retired `SensorRadarSelection` component. The viewscreen aggregator
+/// lifts it into `ViewscreenBlackboard::science_target`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SensorRadarBlackboard {
+    /// The Science Target: the sensor radar's currently selected target UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target: Option<String>,
+}
+
 /// Raw sim truth for the Captain system, published each tick into the ship
 /// blackboard (issue #563).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1969,12 +2006,12 @@ pub struct WeaponsBlackboard {
     /// `ai_target_selection` (issues #697, #700).
     ///
     /// Distinct from `target_uuid`, which mirrors the authoritative
-    /// `WeaponsTarget` ECS component (the ship's actual lock, set by whoever
+    /// `TacticalRadarSelection` ECS component (the ship's actual lock, set by whoever
     /// last wrote it — human `SetTarget`, the Tactical AI, or the beam /
     /// torpedo paths). `locked_target` is *intent*, `target_uuid` is *truth*:
     ///
     /// - Tactical AI-operated: `ai_target_selection` publishes `locked_target`
-    ///   and applies the same choice to `WeaponsTarget`, so after a tick the
+    ///   and applies the same choice to `TacticalRadarSelection`, so after a tick the
     ///   two agree.
     /// - Tactical human-operated: the AI selects nothing, so `locked_target`
     ///   is `None` while `target_uuid` may be set by the human's lock.
@@ -2005,12 +2042,6 @@ pub struct WeaponsBlackboard {
     /// Blaster bank state (issue #631). Empty when the ship has no blaster banks.
     #[serde(default)]
     pub blasters: Vec<BlasterBankState>,
-    /// Radar blips projected into normalised ship-relative coordinates.
-    #[serde(default)]
-    pub blips: Vec<RadarBlip>,
-    /// World region overlays (static shapes drawn on the radar canvas).
-    #[serde(default)]
-    pub regions: Vec<RadarRegion>,
 }
 
 /// Per-system blackboard published each tick. One typed variant per system
@@ -2047,6 +2078,12 @@ pub enum SystemBlackboard {
     ShieldArc(ShieldArcBlackboard),
     /// Helm Lateral Thrust fine-system blackboard.
     HelmLateralThrust(HelmLateralThrustBlackboard),
+    /// Tactical radar blackboard (issue #829). One per ship carrying the
+    /// Combat Lock + tactical blips/regions, keyed by `tactical_radar_system_id`.
+    TacticalRadar(TacticalRadarBlackboard),
+    /// Sensor radar blackboard (issue #829). Carries the Science Target,
+    /// keyed by `sensor_radar_system_id`.
+    SensorRadar(SensorRadarBlackboard),
 }
 
 /// Raw sim truth for the Power system, published each tick into the ship
@@ -2283,6 +2320,18 @@ pub struct ViewscreenBlackboard {
     /// Per-system AI reads this to select the top directive it can serve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scored_objectives: Vec<ScoredObjective>,
+    /// **Combat Lock** — the tactical radar's selected target, lifted from this
+    /// ship's `TacticalRadarBlackboard::selected_target` (issue #829). This is
+    /// the ship-wide targeting fact every cross-system consumer reads (weapons
+    /// firing, helm pursuit, shields bearing, sensors mirror). Frozen: written
+    /// in `SimSet::PublishAggregate`, read by consumers next tick's Input/Physics
+    /// (one-tick lag at 30Hz accepted, including firing — spec §1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combat_lock: Option<String>,
+    /// **Science Target** — the sensor radar's selected target, lifted from this
+    /// ship's `SensorRadarBlackboard::selected_target` (issue #829).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub science_target: Option<String>,
 }
 
 /// Raw sim truth for the Sensors system, published each tick into the ship

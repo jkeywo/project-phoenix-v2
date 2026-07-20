@@ -563,7 +563,11 @@ export function torpSlotStates(tube) {
  */
 export function buildWeaponsConsoleState(state) {
   const bb = (state.blackboards && state.blackboards['tactical']) || {};
-  const targetUuid   = bb.target_uuid   ?? state.weaponsTarget       ?? null;
+  // Combat Lock + radar blips/regions moved to the tactical-radar blackboard
+  // (issue #829). `selected_target` is the authoritative lock; fall back to the
+  // Weapons blackboard's `target_uuid` (still published for reconnect resync).
+  const tacRadarBb = (state.blackboards && state.blackboards['tactical-radar']) || {};
+  const targetUuid   = tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
   const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
   const banks        = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
@@ -571,7 +575,7 @@ export function buildWeaponsConsoleState(state) {
   const torpedoMagBb = (state.blackboards && state.blackboards['torpedo-magazine']) || {};
   const torpedoMax   = torpedoMagBb.capacity ?? torpedoCount;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
-  const regions      = bb.regions       ?? [];
+  const regions      = tacRadarBb.regions ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
   const blasters     = bb.blasters      ?? state.blasterBanks        ?? [];
@@ -591,8 +595,10 @@ export function buildWeaponsConsoleState(state) {
     range_frac: a.beam_range != null ? a.beam_range / range : null,
   }));
 
-  // Blips: authoritative server blips if provided, otherwise build from asteroids.
-  let blips = bb.blips;
+  // Blips: authoritative server blips from the tactical-radar blackboard
+  // (issue #829 — moved off the Weapons blackboard), otherwise build from
+  // asteroids.
+  let blips = tacRadarBb.blips;
   if (!blips || blips.length === 0) {
     blips = state.weaponsBlips || [];
   }
@@ -769,9 +775,12 @@ export function buildHelmConsoleState(state) {
   // Shared target markers (every radar shows tactical + science targets)
   const entities = state.asteroids || [];
   const tacBb = state.blackboards?.['tactical'];
+  // Combat Lock now lives on the tactical-radar blackboard (issue #829); every
+  // radar renders the other consoles' targets from these aggregated facts.
+  const tacRadarBb = state.blackboards?.['tactical-radar'];
   const sensBb = state.blackboards?.['sensors'];
   const tacMarker = buildTargetBlip(
-    tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
+    tacRadarBb?.selected_target ?? tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
   );
   if (tacMarker) blips.push(tacMarker);

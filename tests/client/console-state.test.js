@@ -414,6 +414,28 @@ describe('buildWeaponsConsoleState', () => {
     expect(s.blips).toEqual(serverBlips);
   });
 
+  it('sources blips, regions and the combat lock from the tactical-radar blackboard (issue #829)', () => {
+    const radarBlips = [
+      { uuid: 'lock-1', radar_x: 0.1, radar_y: 0.2, scaled_radius: 0.02, kind: 'ship', selectable: true, name: 'KSV Vega' },
+    ];
+    const radarRegions = [
+      { uuid: 'neb-1', x: 0, z: 0, shape: 'sphere', radius: 50, color: [0.5, 0.5, 0.5] },
+    ];
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: {
+        'tactical': { target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto' },
+        'tactical-radar': { selected_target: 'lock-1', blips: radarBlips, regions: radarRegions },
+      },
+    }));
+    // Combat Lock comes from the tactical-radar blackboard's selected_target.
+    expect(s.target_uuid).toBe('lock-1');
+    // Blips + regions moved off the Weapons blackboard onto tactical-radar.
+    expect(s.blips.map(b => b.uuid)).toContain('lock-1');
+    expect(s.regions).toEqual(radarRegions);
+    // Locked target name resolves from the tactical-radar blip.
+    expect(s.target_name).toBe('KSV Vega');
+  });
+
   it('surfaces volley fields from tubes (issue #632)', () => {
     const tubeWithVolley = {
       id: 'fore_port',

@@ -113,6 +113,42 @@ fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>)
     }
 }
 
+/// Test-only glue (issue #829): production lifts each ship's radar-selection
+/// into `ViewscreenBlackboard::combat_lock` / `.science_target` via the radar
+/// publishers + viewscreen aggregators (not present in these focused harnesses).
+/// This mirror runs before `SimSet::Input` each tick, seeding the frozen
+/// viewscreen fact from the ship's own `TacticalRadarSelection` /
+/// `SensorRadarSelection` components so the converted consumers (firing, arc
+/// request, freq match) see last-tick's selection exactly as they do in the
+/// full app. Merges into any existing viewscreen entry (preserves scored
+/// objectives).
+fn seed_viewscreen_from_selection(
+    mut q: Query<
+        (
+            Option<&TacticalRadarSelection>,
+            Option<&crate::sensors_plugin::SensorRadarSelection>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+    for (tac, sci, mut bbs) in q.iter_mut() {
+        let combat_lock = tac.and_then(|t| t.0.clone());
+        let science_target = sci.and_then(|s| s.0.clone());
+        let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+            Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+            _ => ViewscreenBlackboard::default(),
+        };
+        vbb.combat_lock = combat_lock;
+        vbb.science_target = science_target;
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vbb),
+        );
+    }
+}
+
 fn test_app() -> App {
     let mut app = App::new();
     app.configure_sets(
@@ -202,6 +238,10 @@ fn test_app() -> App {
             (build_torpedo_target_snapshot, tick_torpedo_lifecycle).chain(),
         ),
     )
+    .add_systems(
+        Update,
+        seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
+    )
     .add_plugins(weapons_update_broadcaster())
     // PR-7 (issue #597) — `tick_shields` (formerly `tick_npc_shield_regen`)
     // now lives on `ShipShieldsPlugin`. Include it so tests that spawn NPCs
@@ -282,7 +322,7 @@ fn test_app() -> App {
         }),
         PhaserRenderConfig::default(),
         // PR 7 (issue #597) — per-entity beam / target / cooldown components.
-        WeaponsTarget::default(),
+        TacticalRadarSelection::default(),
         ActiveBeam::default(),
         PhaserCooldown::default(),
         // PR 10 (PRD #597) — per-entity combat activity trackers.
@@ -305,14 +345,14 @@ fn test_app() -> App {
 fn get_weapons_target(app: &mut App) -> Option<String> {
     let mut q = app
         .world_mut()
-        .query_filtered::<&WeaponsTarget, With<crate::server_app::LocalShip>>();
+        .query_filtered::<&TacticalRadarSelection, With<crate::server_app::LocalShip>>();
     q.single(app.world()).ok().and_then(|wt| wt.0.clone())
 }
 
 fn set_weapons_target(app: &mut App, uuid: Option<String>) {
     let mut q = app
         .world_mut()
-        .query_filtered::<&mut WeaponsTarget, With<crate::server_app::LocalShip>>();
+        .query_filtered::<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>();
     if let Ok(mut wt) = q.single_mut(app.world_mut()) {
         wt.0 = uuid;
     }
@@ -1225,7 +1265,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(npc_ai_sources),
             ShipPhysics::default(),
-            WeaponsTarget::default(),
+            TacticalRadarSelection::default(),
             TorpedoSystemResource(npc_torpedo_sys),
             crate::server_app::WeaponFiredThisTick::default(),
             bevy::prelude::Transform::default(),
@@ -2670,8 +2710,8 @@ fn setup_npc_shooter(
     //
     // Also mirrors production by inserting `ShipSystemControlSources` with
     // the Tactical system set to `Ai`, and the NPC's target lock in
-    // `WeaponsTarget` — both required by the unified `handle_fire_phaser`
-    // per-ship query. `WeaponsTarget` is the ship's authoritative lock
+    // `TacticalRadarSelection` — both required by the unified `handle_fire_phaser`
+    // per-ship query. `TacticalRadarSelection` is the ship's authoritative lock
     // whether a human or `ai_target_selection` set it, so an AI shooter
     // seeds it exactly as a human one would.
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
@@ -2692,7 +2732,8 @@ fn setup_npc_shooter(
             EntityUuid(npc_uuid.to_string()),
             AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -3120,8 +3161,8 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
                 crate::ai_plugin::AiControllerComponent,
                 // The NPC's Tactical lock. Was seeded on the private
                 // `ShipAiMemory.target` mirror until #702 deleted it;
-                // `WeaponsTarget` is the surface every firing path reads.
-                WeaponsTarget(Some(player_uuid_parsed.to_string())),
+                // `TacticalRadarSelection` is the surface every firing path reads.
+                TacticalRadarSelection(Some(player_uuid_parsed.to_string())),
                 ActiveBeam::default(),
                 PhaserCooldown::default(),
                 ShipPhysics::default(),
@@ -3300,7 +3341,7 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     // Spawn NPC at origin, facing -Z (yaw = 0 → forward = -Z).
     // Include ActiveBeam/PhaserCooldown/ShipPhysics for the unified fire path,
     // plus the components the unified `handle_fire_phaser` requires:
-    // `Ship`, `ShipSystemControlSources` (Tactical = Ai), `WeaponsTarget`.
+    // `Ship`, `ShipSystemControlSources` (Tactical = Ai), `TacticalRadarSelection`.
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the phaser bank's fine system (no coarse tactical).
     sources.set(
@@ -3314,7 +3355,8 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
             crate::entity_spawner::BehaviourSection(behaviour),
             EntityUuid(npc_uuid_str.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection::default(),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -3371,14 +3413,14 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     }
 
     // Set the NPC's target lock so handle_fire_phaser can look up the
-    // target. `WeaponsTarget` is the authoritative lock for every ship —
+    // target. `TacticalRadarSelection` is the authoritative lock for every ship —
     // in production `ai_target_selection` writes it for AI-operated
     // tactical systems; here we seed it directly.
     {
         let mut target = app
             .world_mut()
-            .get_mut::<WeaponsTarget>(npc_entity)
-            .expect("NPC must have WeaponsTarget");
+            .get_mut::<TacticalRadarSelection>(npc_entity)
+            .expect("NPC must have TacticalRadarSelection");
         target.0 = Some(target_uuid_parsed.to_string());
     }
 
@@ -3507,7 +3549,8 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
             EntityUuid(npc_uuid.to_string()),
             crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -3582,7 +3625,8 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -3631,6 +3675,11 @@ fn ai_phaser_auto_fire_writes_intent_without_touching_the_beam() {
         "bb000000-0000-0000-0000-000000000002",
     );
 
+    // Seed the frozen viewscreen combat_lock from the NPC's selection (issue
+    // #829) — the isolated run below bypasses the harness's per-tick lift.
+    app.world_mut()
+        .run_system_once(seed_viewscreen_from_selection)
+        .expect("seed viewscreen");
     app.world_mut()
         .run_system_once(ai_phaser_auto_fire)
         .expect("ai_phaser_auto_fire should run");
@@ -3764,7 +3813,8 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
             crate::server_app::Ship,
             ShipSystemControlSources::default(),
             ShipPhysics::default(),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
             PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
                 banks: vec![crate::entity_config::PhaserBankConfig {
@@ -3826,7 +3876,8 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
         crate::server_app::Ship,
         ShipSystemControlSources::default(),
         ShipPhysics::default(),
-        WeaponsTarget(Some(target_uuid.to_string())),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
         PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
             banks: vec![crate::entity_config::PhaserBankConfig {
@@ -3879,7 +3930,8 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
         crate::server_app::Ship,
         ShipSystemControlSources::default(),
         ShipPhysics::default(),
-        WeaponsTarget(Some(target_uuid.to_string())),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
         PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
             banks: vec![crate::entity_config::PhaserBankConfig {
@@ -3973,7 +4025,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
             EntityUuid(npc_uuid.to_string()),
             crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid_parsed.to_string())),
+            TacticalRadarSelection(Some(target_uuid_parsed.to_string())),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -4021,11 +4073,31 @@ fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
         .world_mut()
         .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
     match q.single(app.world()) {
-        Ok(bbs) => match bbs.0.get(&crate::system_registry::tactical_station_key()) {
-            Some(SystemBlackboard::Weapons(bb)) => bb.blips.clone(),
+        Ok(bbs) => match bbs
+            .0
+            .get(&crate::system_registry::tactical_radar_system_id())
+        {
+            Some(SystemBlackboard::TacticalRadar(bb)) => bb.blips.clone(),
             _ => Vec::new(),
         },
         Err(_) => Vec::new(),
+    }
+}
+
+/// This ship's Tactical Radar blackboard (issue #829), if present.
+fn tactical_radar_bb_of(
+    app: &mut App,
+    entity: Entity,
+) -> Option<crate::messages::TacticalRadarBlackboard> {
+    use crate::messages::SystemBlackboard;
+    use crate::server_app::ShipSystemBlackboards;
+    let bbs = app.world().get::<ShipSystemBlackboards>(entity)?;
+    match bbs
+        .0
+        .get(&crate::system_registry::tactical_radar_system_id())
+    {
+        Some(SystemBlackboard::TacticalRadar(bb)) => Some(bb.clone()),
+        _ => None,
     }
 }
 
@@ -4483,7 +4555,7 @@ fn last_attacker_takes_precedence_over_a_nearer_hostile() {
 // The nearest-hostile tier decides "who is closest *now*". Left ungated it
 // re-decides that every tick, so a lock follows whoever happens to be
 // nearest at this instant — beams retargeting, and (because the helm pursues
-// `WeaponsTarget`) the ship slewing between bearings with it. These pin the
+// `TacticalRadarSelection`) the ship slewing between bearings with it. These pin the
 // retention tier that keeps an engaged ship committed.
 
 /// The headline retention case: engaged with A, B closes inside it, and the
@@ -4518,7 +4590,7 @@ fn an_established_lock_is_retained_when_a_nearer_hostile_appears() {
         get_weapons_target(&mut app).as_deref(),
         Some(engaged_uuid.as_str()),
         "an established lock on a live, in-range hostile must be retained when a nearer \
-         hostile appears — the helm keeps closing on A (the helm reads the retained WeaponsTarget, which prefers its \
+         hostile appears — the helm keeps closing on A (the helm reads the retained TacticalRadarSelection, which prefers its \
          current target), so weapons flipping to B would have the ship shooting one ship \
          while flying at another"
     );
@@ -4821,7 +4893,7 @@ fn tactical_ai_clears_stale_weapons_target_when_objective_target_dead() {
 
     assert!(
         get_weapons_target(&mut app).is_none(),
-        "Tactical AI must clear WeaponsTarget when the objective target is \
+        "Tactical AI must clear TacticalRadarSelection when the objective target is \
          dead and no last attacker is available, fixing the stale-target bug \
          that caused AI to sit idle after killing its last target"
     );
@@ -4878,7 +4950,7 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
                 z,
                 ..Default::default()
             },
-            WeaponsTarget::default(),
+            TacticalRadarSelection::default(),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
@@ -4929,7 +5001,7 @@ fn ai_target_selection_publishes_locked_target_and_applies_it() {
     assert_eq!(
         get_weapons_target(&mut app).as_deref(),
         Some(target_uuid.as_str()),
-        "ai_target_selection must apply its choice to the authoritative WeaponsTarget"
+        "ai_target_selection must apply its choice to the authoritative TacticalRadarSelection"
     );
     assert_eq!(
         bb.target_uuid, bb.locked_target,
@@ -4953,7 +5025,7 @@ fn ai_target_selection_clears_locked_target_when_target_dies() {
     );
     assert!(
         get_weapons_target(&mut app).is_none(),
-        "and it must clear the authoritative WeaponsTarget to match"
+        "and it must clear the authoritative TacticalRadarSelection to match"
     );
 }
 
@@ -4984,7 +5056,7 @@ fn human_tactical_leaves_locked_target_empty_and_keeps_the_human_lock() {
     assert_eq!(
         bb.target_uuid.as_deref(),
         Some(target_uuid.as_str()),
-        "target_uuid mirrors the authoritative WeaponsTarget, which the human still owns"
+        "target_uuid mirrors the authoritative TacticalRadarSelection, which the human still owns"
     );
 }
 
@@ -5075,7 +5147,7 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
 
     // And it must still be there next tick — a lock clobbered on tick N is
     // not recovered on tick N+1, because selection re-seeds from the
-    // (clobbered) WeaponsTarget.
+    // (clobbered) TacticalRadarSelection.
     tick(&mut app);
     assert_eq!(
         get_weapons_target(&mut app).as_deref(),
@@ -5121,7 +5193,7 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
             // ship, its stale-target guard would clear the lock and the
             // assertion below would fail. That is the point: the AI must not
             // run at all.
-            WeaponsTarget(Some("standing-lock".into())),
+            TacticalRadarSelection(Some("standing-lock".into())),
             crate::server_app::ShipSystemBlackboards::default(),
         ))
         .id();
@@ -5129,7 +5201,11 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
     app.update();
 
     assert_eq!(
-        app.world().entity(ship).get::<WeaponsTarget>().unwrap().0,
+        app.world()
+            .entity(ship)
+            .get::<TacticalRadarSelection>()
+            .unwrap()
+            .0,
         Some("standing-lock".into()),
         "a ship whose Tactical is human-operated is skipped by the selector — \
          it must keep the human's lock, not have it re-decided or cleared"
@@ -5150,14 +5226,14 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
 struct KillTargetOnDamage(String);
 
 /// Stands in for `tick_beams` / `tick_torpedo_lifecycle`: both destroy the
-/// locked target and clear `WeaponsTarget` *after* `SimSet::Input`, which is
+/// locked target and clear `TacticalRadarSelection` *after* `SimSet::Input`, which is
 /// what leaves a dead `locked_target` for `publish_weapons_core_blackboard` to
 /// carry forward.
 fn kill_target_after_input(
     mut commands: Commands,
     kill: Res<KillTargetOnDamage>,
     target_q: Query<(Entity, &crate::entity_spawner::EntityUuid)>,
-    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
 ) {
     for (entity, uuid) in target_q.iter() {
         if uuid.0 == kill.0 {
@@ -5207,7 +5283,7 @@ fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
     let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
     assert_eq!(
         bb.target_uuid, None,
-        "precondition: the kill must have cleared the authoritative WeaponsTarget"
+        "precondition: the kill must have cleared the authoritative TacticalRadarSelection"
     );
     assert_eq!(
         bb.locked_target, None,
@@ -5252,7 +5328,7 @@ fn npc_ship_publishes_its_own_weapons_blackboard_with_ship_state_only() {
     assert_eq!(
         bb.target_uuid.as_deref(),
         Some(attacker_uuid.as_str()),
-        "and the NPC's authoritative WeaponsTarget must follow its own intent"
+        "and the NPC's authoritative TacticalRadarSelection must follow its own intent"
     );
     assert_eq!(
         bb.banks.len(),
@@ -5266,14 +5342,21 @@ fn npc_ship_publishes_its_own_weapons_blackboard_with_ship_state_only() {
         "torpedo_count comes from the NPC's own TorpedoSystemResource"
     );
 
-    // Client render data — player-only, and left empty for NPCs.
+    // Client render data — player-only, and left empty for NPCs. Blips +
+    // regions moved to the tactical-radar blackboard (issue #829); phaser /
+    // torpedo arcs remain on the Weapons blackboard.
+    let npc_radar = tactical_radar_bb_of(&mut app, npc)
+        .expect("an NPC carrying ShipSystemBlackboards must get a TacticalRadar blackboard too");
     assert!(
-        bb.blips.is_empty(),
+        npc_radar.blips.is_empty(),
         "blips are client render data sourced from the player-only \
          ShipClientConfigResource, and are O(all entities) to compute — an NPC \
          with no browser client must not pay for them"
     );
-    assert!(bb.regions.is_empty(), "regions are client render data");
+    assert!(
+        npc_radar.regions.is_empty(),
+        "regions are client render data"
+    );
     assert!(
         bb.phaser_arcs.is_empty(),
         "phaser_arcs are client render data"
@@ -5286,9 +5369,9 @@ fn npc_ship_publishes_its_own_weapons_blackboard_with_ship_state_only() {
     // The contrast: the LocalShip *does* get its render data, so the
     // assertions above are about the NPC tier and not a dead radar config.
     let local = local_ship_entity(&mut app);
-    let local_bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+    let local_radar = tactical_radar_bb_of(&mut app, local).expect("tactical-radar blackboard");
     assert_eq!(
-        local_bb.blips.len(),
+        local_radar.blips.len(),
         1,
         "the LocalShip still gets its in-range asteroid blip"
     );
@@ -5401,6 +5484,11 @@ fn ai_torpedo_auto_fire_writes_intent_without_launching() {
     load_tube_now(&mut app, "fore_port");
     spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
 
+    // Seed the frozen viewscreen combat_lock from the ship's selection (issue
+    // #829) — the isolated run below bypasses the harness's per-tick lift.
+    app.world_mut()
+        .run_system_once(seed_viewscreen_from_selection)
+        .expect("seed viewscreen");
     app.world_mut()
         .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
         .expect("ai_torpedo_auto_fire should run");
@@ -6203,7 +6291,8 @@ ai_only = true
             crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             npc_ship_config,
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -6259,7 +6348,7 @@ ai_only = true
 /// `any_tactical_system_operates_ai` which iterates the ship config's
 /// phaser_bank / torpedo_tube / torpedo_magazine fine systems. This
 /// test seeds AI on `torpedo-magazine` alone (no coarse tactical) and
-/// asserts the AI's WeaponsTarget sync path fires.
+/// asserts the AI's TacticalRadarSelection sync path fires.
 #[test]
 fn ai_target_selection_runs_when_any_tactical_system_operates_ai() {
     let mut app = test_app();
@@ -7144,7 +7233,8 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             npc_physics,
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
                 crate::blaster::BlasterBankConfig {
@@ -7235,7 +7325,8 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             EntityUuid(npc_uuid.to_string()),
             crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
-            WeaponsTarget(Some(target_uuid.to_string())),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
                 crate::blaster::BlasterBankConfig {
@@ -7312,7 +7403,7 @@ fn handle_fire_blaster_accepts_ai_token() {
             // `ShipAiMemory.target` and rely on `tick_blaster_auto_fire`'s
             // legacy fallback to read it; #702 deleted that fallback, so the
             // lock goes where every other consumer looks for it.
-            WeaponsTarget(Some(target_uuid_parsed.to_string())),
+            TacticalRadarSelection(Some(target_uuid_parsed.to_string())),
             crate::ship_plugin::ShipSystemControlSources(sources),
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(

@@ -121,16 +121,19 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Weapons Target State
-      summary: Authoritative locked target used by player weapons and current Tactical projections.
+      title: Tactical Radar Selection State
+      summary: Authoritative Combat Lock owned by the tactical radar. Written only by handle_set_target and ai_target_selection (and cleared by beam/torpedo kill-clears + faction-change revalidation); read only by the tactical-radar publisher (issue #829) — no other module imports the component.
+      rationale:
+        - "Issue #829 renamed WeaponsTarget to TacticalRadarSelection and made target authority radar-owned. Cross-system consumers — including the firing paths (handle_fire_phaser, ai_phaser_auto_fire, ai_torpedo_auto_fire, blaster fire, tick_npc_auto_match_frequency, tick_weapons_arc_request) — read the FROZEN viewscreen combat_lock (viewscreen-target-facts-state), never this live selection (spec §1/§3). One-tick lag at 30Hz is accepted, including for firing."
     architecture:
       classification: authoritative
       owner: tactical-weapons-controls
       writers: [tactical-weapons-controls]
+      replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs]
-      symbols: [WeaponsTarget]
+      paths: [src/console/weapons/beam.rs]
+      symbols: [TacticalRadarSelection]
       tests: [cargo test]
 
   - component: phaser-beam-system
@@ -143,7 +146,7 @@ entities:
       kind: weapon-system
       authority: authoritative
       owns: [phaser-beam-state]
-      reads: [weapons-target-state]
+      reads: [viewscreen-target-facts-state]
       produces: [phaser-beam-state]
       runs_in: [host-browser-runtime]
     implementation:

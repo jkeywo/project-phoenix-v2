@@ -638,7 +638,8 @@ mod tests {
     /// takes the "reconnecting client holds Tactical" branch.
     fn resync_test_app_with_tactical_holder(token: &str) -> App {
         use crate::console::weapons::{
-            CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource, WeaponsTarget,
+            CurrentPhaserMode, PhaserCombatConfigResource, TacticalRadarSelection,
+            TorpedoSystemResource,
         };
         use crate::lobby::Sessions;
         use crate::messages::StationId;
@@ -660,7 +661,7 @@ mod tests {
         let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
         let ship = q.single(app.world()).expect("LocalShip must exist");
         app.world_mut().entity_mut(ship).insert((
-            WeaponsTarget(Some("target-uuid".into())),
+            TacticalRadarSelection(Some("target-uuid".into())),
             TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
         ));
         app

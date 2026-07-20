@@ -619,7 +619,7 @@ fn integrate_power_state(
 /// AI torpedo auto-fire decision system (issue #694; promoted to full in #698).
 ///
 /// Wires the previously-orphaned `console_ai::auto_fire_torpedo`: for ships
-/// whose Tactical target is already locked (`WeaponsTarget`, written by
+/// whose Tactical target is already locked (`TacticalRadarSelection`, written by
 /// `console::weapons::ai_target_selection`), decides which loaded,
 /// in-arc torpedo tubes to fire and writes the
 /// decision into `TorpedoIntents` for
@@ -637,7 +637,7 @@ fn integrate_power_state(
 /// so both now come from real state:
 ///
 /// - `target_locked` — the locked target actually resolves to a live entity in
-///   the world this tick. A `WeaponsTarget` naming a destroyed entity is not a
+///   the world this tick. A `TacticalRadarSelection` naming a destroyed entity is not a
 ///   lock. (Pre-#698 this position lookup happened anyway, purely to compute
 ///   bearing; the difference is that failing it is now expressed as
 ///   `target_locked = false` rather than an early `continue`.)
@@ -675,7 +675,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship_plugin::ActiveStationRatings,
             &crate::ship_state::ShipPhysics,
-            &crate::weapons_plugin::WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             Option<&crate::weapons_plugin::TorpedoSystemResource>,
             &mut crate::weapons_plugin::TorpedoIntents,
         ),
@@ -705,7 +705,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         control_sources,
         active_ratings,
         physics,
-        weapons_target,
+        blackboards,
         torpedo_sys_comp,
         mut intents,
     ) in ships.iter_mut()
@@ -741,7 +741,15 @@ pub(crate) fn ai_torpedo_auto_fire(
             continue;
         }
 
-        let Some(target_uuid) = weapons_target.0.clone() else {
+        // Combat Lock from this ship's frozen viewscreen blackboard (issue
+        // #829, spec §1/§3). One-tick lag accepted, including for firing.
+        let Some(target_uuid) = (match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        }) else {
             continue;
         };
 
@@ -800,7 +808,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         let magazine = torpedo_sys.torpedoes_remaining;
 
         let input = crate::console_ai::TorpedoAiInput {
-            // Reaching here means `WeaponsTarget` named an entity that
+            // Reaching here means `TacticalRadarSelection` named an entity that
             // resolved to a live world position above — a real lock.
             target_locked: true,
             target_shields,
@@ -858,7 +866,7 @@ fn ai_frequency_hint(
         (
             Entity,
             &crate::ship_plugin::ShipSystemControlSources,
-            &crate::weapons_plugin::WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             &mut ShipFrequencyHintState,
             Option<&crate::ship::sensors::SensorsAiConfigResource>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
@@ -881,7 +889,7 @@ fn ai_frequency_hint(
     for (
         entity,
         control_sources,
-        weapons_target,
+        blackboards,
         mut hint_state,
         ai_config_comp,
         ship_config_comp,
@@ -922,7 +930,16 @@ fn ai_frequency_hint(
             continue;
         }
 
-        let locked_target = weapons_target.0.clone();
+        // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
+        // identical to how the human twin `tick_sensors_frequency_hint` and the
+        // firing paths now read it — never the tactical radar's live selection.
+        let locked_target = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
 
         // Look up the target entity's shield frequency; fall back to 0.5,
         // mirroring `tick_sensors_frequency_hint`'s own fallback.
@@ -973,7 +990,7 @@ mod tests {
         PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory, ShipShields,
     };
     use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
-    use crate::weapons_plugin::WeaponsTarget;
+    use crate::weapons_plugin::TacticalRadarSelection;
 
     #[derive(Resource, Default)]
     struct CoordBox(Vec<CoordinationEnqueue>);
@@ -1298,6 +1315,33 @@ mod tests {
 
     // ── ai_frequency_hint ─────────────────────────────────────────────────
 
+    /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock from
+    /// its `TacticalRadarSelection` before `ai_frequency_hint` reads the frozen
+    /// fact — standing in for the radar publisher + viewscreen aggregator the
+    /// full app runs, exactly like the other frequency/firing test harnesses.
+    fn seed_viewscreen_from_selection(
+        mut q: Query<
+            (
+                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                &mut crate::server_app::ShipSystemBlackboards,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+    ) {
+        for (tac, mut bbs) in q.iter_mut() {
+            let combat_lock = tac.and_then(|t| t.0.clone());
+            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => crate::messages::ViewscreenBlackboard::default(),
+            };
+            vbb.combat_lock = combat_lock;
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                crate::messages::SystemBlackboard::Viewscreen(vbb),
+            );
+        }
+    }
+
     fn freq_hint_test_app() -> App {
         let mut app = App::new();
         // Manual `Time::advance_by` (mirroring `ai::server`'s LOD tests)
@@ -1308,7 +1352,10 @@ mod tests {
             .init_resource::<crate::ship::sensors::SensorsAiConfigResource>()
             .init_resource::<CoordBox>()
             .add_message::<CoordinationEnqueue>()
-            .add_systems(Update, ai_frequency_hint)
+            .add_systems(
+                Update,
+                (seed_viewscreen_from_selection, ai_frequency_hint).chain(),
+            )
             .add_systems(PostUpdate, collect_coord);
 
         let mut control_sources = ShipSystemControlSources::default();
@@ -1330,7 +1377,8 @@ mod tests {
             .spawn((
                 crate::server_app::Ship,
                 control_sources,
-                WeaponsTarget(Some("target-1".into())),
+                crate::server_app::ShipSystemBlackboards::default(),
+                TacticalRadarSelection(Some("target-1".into())),
                 ShipFrequencyHintState::default(),
                 AiHighFidelity,
             ))

@@ -7,7 +7,9 @@
 use bevy::prelude::*;
 
 use super::shared::{system_is_registered, tactical_authorized, TorpedoTargetSnapshot};
-use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS};
+use super::{
+    AsteroidDestroyedVfx, ShipDestroyedVfx, TacticalRadarSelection, DEFAULT_SHIP_EXPLOSION_RADIUS,
+};
 use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
@@ -228,7 +230,7 @@ pub(crate) fn handle_fire_torpedo(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            Option<&WeaponsTarget>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&mut TorpedoSystemResource>,
             Option<&mut crate::server_app::WeaponFiredThisTick>,
@@ -269,7 +271,7 @@ pub(crate) fn handle_fire_torpedo(
             _entity,
             control_sources,
             physics,
-            weapons_target_opt,
+            blackboards_opt,
             source_uuid_opt,
             torpedo_sys_comp,
             weapon_fired_comp,
@@ -336,9 +338,16 @@ pub(crate) fn handle_fire_torpedo(
             .unwrap_or(0.0);
         let launch_heading = physics.yaw + tube_facing_rad;
         let source_uuid = source_uuid_opt.map(|u| u.0.clone());
-        let homing_uuid = weapons_target_opt
-            .and_then(|wt| wt.0.clone())
-            .or_else(|| target_uuid.clone());
+        // Homing target: the ship's frozen Combat Lock (issue #829), else the
+        // explicit target carried on the FireTorpedo message. In-flight
+        // torpedoes keep their own `TorpedoTargetSnapshot` latch (spec §1).
+        let combat_lock = match blackboards_opt
+            .and_then(|bbs| bbs.0.get(&crate::system_registry::viewscreen_system_id()))
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
+        let homing_uuid = combat_lock.or_else(|| target_uuid.clone());
         use crate::torpedo::LaunchResult;
         let result = torpedo_sys.launch(
             tube.as_str(),
@@ -608,7 +617,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
     snapshot: Res<TorpedoTargetSnapshot>,
 ) {
     let dt = time.delta_secs();

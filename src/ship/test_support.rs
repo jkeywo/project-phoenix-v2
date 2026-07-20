@@ -73,7 +73,7 @@ pub fn test_app() -> App {
         // The console-owned surfaces the AI helm derives its goals from
         // (issue #702). Production spawns all four on every ship; see
         // `HelmAiSurfaces`.
-        crate::weapons_plugin::WeaponsTarget::default(),
+        crate::weapons_plugin::TacticalRadarSelection::default(),
         crate::navigation_plugin::NavigationWaypoint::default(),
         HelmWaypointClearance::default(),
         crate::ai_plugin::ObjectiveCursors::default(),
@@ -473,7 +473,7 @@ pub fn test_app_with_engine_hull() -> App {
         crate::ship::helm::BoostCommand::default(),
         // The console-owned surfaces the AI helm derives its goals from
         // (issue #702) — see `HelmAiSurfaces`.
-        crate::weapons_plugin::WeaponsTarget::default(),
+        crate::weapons_plugin::TacticalRadarSelection::default(),
         crate::navigation_plugin::NavigationWaypoint::default(),
         HelmWaypointClearance::default(),
         crate::ai_plugin::ObjectiveCursors::default(),

@@ -57,8 +57,10 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Sensors Target State
-      summary: Per-ship selected science target UUID, written only through Admission (issue #828) and replicated in every ship's own Sensors blackboard so radar surfaces can show the advisory marker.
+      title: Sensor Radar Selection State
+      summary: Per-ship Science Target UUID owned by the sensor radar, written only through Admission (issue #828) and read only by the sensor-radar publisher (issue #829) — no other module imports the component. The sensor-radar blackboard replicates it as selected_target, and the viewscreen aggregator lifts it to science_target.
+      rationale:
+        - "Issue #829 renamed SensorsTarget to SensorRadarSelection and made it radar-owned: cross-system consumers read the viewscreen Science Target fact, never this live selection (spec §3)."
     architecture:
       classification: authoritative
       owner: sensors-target-controller
@@ -67,6 +69,40 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/sensors.rs, src/core/messages.rs]
+      symbols: [SensorRadarSelection]
+
+  - state: tactical-radar-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Tactical Radar Blackboard State
+      summary: Per-ship tactical-radar blackboard carrying the Combat Lock (selected_target) plus the tactical radar blips and region overlays, which moved off the Weapons blackboard (issue #829).
+      rationale:
+        - "Issue #829: publish_tactical_radar_blackboard (SimSet::Publish) writes selected_target for every ship from that ship's TacticalRadarSelection component; blips/regions are computed for the LocalShip only. This system is the tactical radar authority and is the only reader of the live selection besides its writers (handle_set_target, ai_target_selection, kill-clears, revalidation)."
+    architecture:
+      classification: derived
+      owner: tactical-weapons-controls
+      derived_from: [weapons-target-state, radar-contact-projection-state]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/blackboard.rs, src/core/messages.rs, gui/console-state.js]
+      symbols: [TacticalRadarBlackboard]
+      tests: [cargo test, npx vitest run]
+
+  - state: sensor-radar-blackboard-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Sensor Radar Blackboard State
+      summary: Per-ship sensor-radar blackboard carrying the Science Target (selected_target), mirrored from SensorRadarSelection and lifted by the viewscreen aggregator into science_target (issue #829).
+    architecture:
+      classification: derived
+      owner: sensors-target-controller
+      derived_from: [sensors-target-state]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/core/messages.rs, gui/console-state.js]
+      symbols: [SensorRadarBlackboard]
 
   - message: sensors-target-designation
     core:

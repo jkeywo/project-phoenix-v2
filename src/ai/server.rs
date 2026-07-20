@@ -157,7 +157,7 @@ impl AiTokenRegistry {
 // `ShipAiMemory(AiMemory)` lived here until issue #702 deleted it. There is no
 // private per-entity AI memory any more: every goal the AI serves is read from
 // a surface some console owns and a human could equally drive —
-// `WeaponsTarget` (Tactical), `NavigationWaypoint` (Navigation),
+// `TacticalRadarSelection` (Tactical), `NavigationWaypoint` (Navigation),
 // `ObjectiveCursors` (the objective), `LastShipAttacker` (the world). Adding a
 // private mirror of any of them back re-creates the split brain — and the
 // helm/weapons targeting divergence — that removing it fixed.
@@ -451,6 +451,25 @@ fn aggregate_doctrine_blackboards(
         // `hull_fraction` below is what `hull_below` gates on, so the trigger
         // is unchanged — only now it is tunable per hull without a recompile.
         let scored = crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &conditions);
+        // Lift Combat Lock + Science Target from this ship's own radar
+        // blackboards (issue #829). They were published this tick in
+        // `SimSet::Publish`, which runs before this `PublishAggregate` system.
+        let combat_lock = match blackboards
+            .0
+            .get(&crate::ship::system_registry::tactical_radar_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::TacticalRadar(bb)) => {
+                bb.selected_target.clone()
+            }
+            _ => None,
+        };
+        let science_target = match blackboards
+            .0
+            .get(&crate::ship::system_registry::sensor_radar_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::SensorRadar(bb)) => bb.selected_target.clone(),
+            _ => None,
+        };
         let viewscreen_bb = crate::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,
@@ -458,6 +477,8 @@ fn aggregate_doctrine_blackboards(
             last_weapon_fired_secs: activity_opt.and_then(|a| a.last_weapon_fired),
             last_attacker_uuid: last_attacker_opt.and_then(|la| la.0.clone()),
             scored_objectives: scored,
+            combat_lock,
+            science_target,
         };
         blackboards.0.insert(
             crate::messages::SystemId(

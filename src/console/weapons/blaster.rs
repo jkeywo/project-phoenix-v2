@@ -9,10 +9,27 @@ use bevy::prelude::*;
 use super::shared::{
     any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
 };
-use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponsTarget, DEFAULT_SHIP_EXPLOSION_RADIUS};
+use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
 use crate::ai_plugin::AiTokenRegistry;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
-use crate::messages::{ClientMessage, GamePhase, ServerMessage, SystemControlPayload};
+use crate::messages::{
+    ClientMessage, GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload,
+};
+
+/// This ship's **Combat Lock** from its frozen viewscreen blackboard (issue
+/// #829): the ship-wide target every weapons firing path reads, in place of the
+/// retired `TacticalRadarSelection` component. One-tick lag at 30Hz accepted (spec §1).
+fn blaster_combat_lock(
+    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
+) -> Option<String> {
+    match blackboards?
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())
+    {
+        Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+        _ => None,
+    }
+}
 use crate::model_rig::ModelMarkers;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -51,7 +68,7 @@ pub(crate) fn handle_fire_blaster(
         (
             &ShipSystemControlSources,
             &ShipPhysics,
-            Option<&WeaponsTarget>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
         ),
         With<crate::server_app::Ship>,
@@ -100,7 +117,7 @@ pub(crate) fn handle_fire_blaster(
             }
         };
 
-        let Ok((control_sources, physics, weapons_target_opt, mut blaster_res)) =
+        let Ok((control_sources, physics, blackboards_opt, mut blaster_res)) =
             ship_q.get_mut(shooter_entity)
         else {
             continue;
@@ -131,11 +148,11 @@ pub(crate) fn handle_fire_blaster(
 
         // Arc check: resolve the player's locked target and verify it's within the
         // bank's fire arc. Target selection mirrors tick_blaster_auto_fire:
-        // the ship's authoritative `WeaponsTarget` lock.
+        // the ship's authoritative `TacticalRadarSelection` lock.
         // AI tokens skip this check — arc enforcement for AI fire is handled by
         // tick_blaster_auto_fire instead.
         if is_charge_start && !is_ai_token {
-            let Some(target_uuid) = weapons_target_opt.and_then(|wt| wt.0.clone()) else {
+            let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
                 continue;
             };
             let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -187,7 +204,7 @@ pub(crate) fn handle_fire_blaster(
 /// within the bank's fire arc. Ships whose config declares no `blaster_bank`
 /// fine systems fall back to the coarse `tactical.operate_ai` policy.
 ///
-/// Target selection: the ship's [`WeaponsTarget`] lock — the one authoritative
+/// Target selection: the ship's [`TacticalRadarSelection`] lock — the one authoritative
 /// surface, whoever set it. (A legacy `ShipAiMemory::target` fallback sat here
 /// until #702; it had been redundant for production NPCs since #703.) Range and
 /// arc checks use each bank's config values.
@@ -197,7 +214,7 @@ pub(crate) fn tick_blaster_auto_fire(
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
-            Option<&WeaponsTarget>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
         ),
         With<crate::server_app::Ship>,
@@ -216,7 +233,7 @@ pub(crate) fn tick_blaster_auto_fire(
         ship_q.iter().len()
     );
 
-    for (control_sources, ship_config_opt, physics, weapons_target_opt, mut blaster_res) in
+    for (control_sources, ship_config_opt, physics, blackboards_opt, mut blaster_res) in
         ship_q.iter_mut()
     {
         // Gate: only run when at least one blaster bank is AI-controlled.
@@ -246,10 +263,9 @@ pub(crate) fn tick_blaster_auto_fire(
         #[cfg(not(target_arch = "wasm32"))]
         eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
-        // Target selection: the ship's one authoritative `WeaponsTarget` lock
-        // (see `ai_target_selection`). The legacy `ShipAiMemory` fallback is
-        // gone with #702.
-        let target_uuid: Option<String> = weapons_target_opt.and_then(|wt| wt.0.clone());
+        // Target selection: the **Combat Lock** from this ship's frozen
+        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted.
+        let target_uuid: Option<String> = blaster_combat_lock(blackboards_opt);
         let Some(target_uuid) = target_uuid else {
             #[cfg(target_arch = "wasm32")]
             web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
@@ -377,7 +393,7 @@ pub(crate) fn tick_blaster_system(
             &Transform,
             Option<&ModelMarkers>,
             &mut ShipPhysics,
-            Option<&WeaponsTarget>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
         ),
         With<crate::server_app::Ship>,
@@ -408,24 +424,18 @@ pub(crate) fn tick_blaster_system(
         map
     };
 
-    for (
-        source_uuid_opt,
-        transform,
-        markers_opt,
-        mut physics,
-        weapons_target_opt,
-        mut blaster_res,
-    ) in ship_q.iter_mut()
+    for (source_uuid_opt, transform, markers_opt, mut physics, blackboards_opt, mut blaster_res) in
+        ship_q.iter_mut()
     {
         let source_uuid = source_uuid_opt
             .map(|u| u.0.as_str())
             .unwrap_or("")
             .to_string();
 
-        // Resolve target position and velocity.
-        // Ships supply world-space velocity from ShipPhysics; asteroids/objects
-        // are stationary (velocity = 0).
-        let target_uuid = weapons_target_opt.and_then(|wt| wt.0.clone());
+        // Resolve target position and velocity from the frozen Combat Lock
+        // (issue #829). Ships supply world-space velocity from ShipPhysics;
+        // asteroids/objects are stationary (velocity = 0).
+        let target_uuid = blaster_combat_lock(blackboards_opt);
         let (target_x, target_z, target_vx, target_vz) = if let Some(ref uuid) = target_uuid {
             let pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
             let vel = ship_velocities.get(uuid);

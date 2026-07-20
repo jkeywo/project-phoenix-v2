@@ -404,7 +404,7 @@ fn parse_doctrine_directive(
 /// - `cursors` — this ship's `ObjectiveCursors`, read-only. `cursor_target()`
 ///   resolves the active waypoint; `advance_objective_cursors`
 ///   (`SimSet::Modifiers`) is the sole writer.
-/// - `weapons_target` — the ship's `WeaponsTarget`, i.e. whoever Tactical
+/// - `weapons_target` — the ship's `TacticalRadarSelection`, i.e. whoever Tactical
 ///   (human or AI) has locked.
 /// - `nav_waypoint` — Navigation's waypoint, `Some` only once the caller has
 ///   confirmed the Channel-3 clearance matches its generation.
@@ -447,7 +447,7 @@ pub fn operate_helm(
                 // The directive's own `target` is deliberately ignored here: it
                 // is Tactical's input, not the Helm's. `ai_target_selection`
                 // resolves it (tier 1) and publishes the result as
-                // `WeaponsTarget`, which is what we pursue — see `helm_destroy`.
+                // `TacticalRadarSelection`, which is what we pursue — see `helm_destroy`.
                 helm_destroy(
                     world_view,
                     avoidance_buffer,
@@ -594,7 +594,7 @@ pub fn operate_helm(
 ///
 /// # The Helm does not acquire (issue #702)
 ///
-/// `weapons_target` is the ship's `WeaponsTarget` — the one authoritative lock,
+/// `weapons_target` is the ship's `TacticalRadarSelection` — the one authoritative lock,
 /// written by whoever operates Tactical: a human via `SetTarget`, or
 /// `ai_target_selection`. The Helm reads that selection and closes on it; it
 /// never picks a target of its own.
@@ -713,7 +713,7 @@ pub fn resolve_objective_target(target: &str, world_view: &WorldView) -> Option<
 /// tier (issue #703).
 ///
 /// The helm path was the second caller until #702 deleted its acquisition
-/// outright: the Helm now reads the `WeaponsTarget` that `ai_target_selection`
+/// outright: the Helm now reads the `TacticalRadarSelection` that `ai_target_selection`
 /// writes instead of running its own tiers over its own radar horizon. That
 /// closed the divergence this function's "both must agree" note used to warn
 /// about — there is now one selector rather than two obliged to agree. Nothing
@@ -1584,7 +1584,7 @@ mod tests {
         );
     }
 
-    /// The Helm pursues the ship's `WeaponsTarget` and does not fall through to
+    /// The Helm pursues the ship's `TacticalRadarSelection` and does not fall through to
     /// Patrol (issue #702).
     ///
     /// This is the `target` migration in one test. `operate_helm` used to
@@ -1620,7 +1620,7 @@ mod tests {
         assert!(thrust > 0.0, "should close on the target");
         assert!(
             steering.abs() < PATROL_DEADBAND_RAD,
-            "the helm must pursue the WeaponsTarget (dead ahead → ~0 steering),              not fall through to Patrol (to starboard → positive steering);              got steering={steering}"
+            "the helm must pursue the TacticalRadarSelection (dead ahead → ~0 steering),              not fall through to Patrol (to starboard → positive steering);              got steering={steering}"
         );
     }
 

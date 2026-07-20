@@ -12,7 +12,8 @@ use crate::entity_spawner::{EntitySystemHull, FactionComponent};
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AdmittedCommands, ClientMessage, GamePhase, InterSystemMsg, InterSystemPayload,
-    InterSystemQueue, ModifierSlot, PhaserBank, PhaserMode, ServerMessage, SystemControlPayload,
+    InterSystemQueue, ModifierSlot, PhaserBank, PhaserMode, ServerMessage, SystemBlackboard,
+    SystemControlPayload,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -44,7 +45,7 @@ pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own weapons target.
 #[derive(Component, Default, Clone, Debug)]
-pub struct WeaponsTarget(pub Option<String>);
+pub struct TacticalRadarSelection(pub Option<String>);
 
 /// A single phaser-fire command decided by [`ai_phaser_auto_fire`] (issue
 /// #698) for [`integrate_weapons_state`] to apply the same tick.
@@ -249,7 +250,7 @@ pub(crate) fn handle_set_target(
         ),
         With<crate::server_app::LocalShip>,
     >,
-    mut weapons_target_q: Query<&mut WeaponsTarget, With<crate::server_app::LocalShip>>,
+    mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
     modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
@@ -324,7 +325,7 @@ pub(crate) fn handle_set_target(
 ///   local operator).
 ///
 /// After resolution the same per-ship code path runs for both: read the
-/// shooter's [`WeaponsTarget`], verify the requested bank is in-arc using the
+/// shooter's [`TacticalRadarSelection`], verify the requested bank is in-arc using the
 /// shooter's own [`PhaserCombatConfigResource`], and activate its
 /// [`ActiveBeam`] + trigger [`BeamStartedEvent`].
 ///
@@ -347,7 +348,7 @@ pub(crate) fn handle_fire_phaser(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            &WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             &mut ActiveBeam,
             &PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
@@ -393,7 +394,7 @@ pub(crate) fn handle_fire_phaser(
             _entity,
             control_sources,
             physics,
-            weapons_target,
+            blackboards,
             mut beam,
             cooldown,
             combat_config_opt,
@@ -435,14 +436,19 @@ pub(crate) fn handle_fire_phaser(
             continue;
         }
 
-        // Target selection: `WeaponsTarget` is the authoritative, same-tick
-        // lock for every ship — humans set it via `handle_set_target`, AI via
-        // `ai_target_selection` (issue #697), which runs for any ship whose
-        // tactical systems are AI-operated. No AI-only fallback: reading a
-        // private AI target here would fire at a target the ship's own
-        // tactical radar never acquired, and would branch on human-vs-AI
-        // below admission.
-        let Some(target_uuid) = weapons_target.0.clone() else {
+        // Target selection: the **Combat Lock** from this ship's frozen
+        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag at 30Hz
+        // is accepted for firing. The tactical radar owns the live selection;
+        // firing — a cross-system consumer — reads the aggregated viewscreen
+        // fact, never the radar's live component. No AI-only fallback and no
+        // human-vs-AI branch below admission.
+        let Some(target_uuid) = (match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        }) else {
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -568,7 +574,7 @@ pub(crate) fn handle_fire_phaser(
 /// to a fight. `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity`
 /// pins this.
 ///
-/// Target selection: reads the ship's [`WeaponsTarget`] — the one authoritative
+/// Target selection: reads the ship's [`TacticalRadarSelection`] — the one authoritative
 /// lock, written by `handle_set_target` for humans and by
 /// [`ai_target_selection`] (issue #697) for AI-operated tactical systems, so
 /// one surface serves both. The legacy `ShipAiMemory::target` fallback was
@@ -590,7 +596,7 @@ pub(crate) fn ai_phaser_auto_fire(
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
-            &WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             &ActiveBeam,
             &mut PhaserIntents,
             &PhaserCooldown,
@@ -609,7 +615,7 @@ pub(crate) fn ai_phaser_auto_fire(
         control_sources,
         ship_config_opt,
         physics,
-        weapons_target,
+        blackboards,
         beam,
         mut intents,
         cooldown,
@@ -653,12 +659,17 @@ pub(crate) fn ai_phaser_auto_fire(
             continue;
         }
 
-        // Target selection: `WeaponsTarget` is the ship's one authoritative lock,
-        // whether a human set it via `SetTarget` or `ai_target_selection` did
-        // (see that system). The legacy `ShipAiMemory.target` fallback that sat
-        // here is gone with #702 — it had already been dead for production NPCs
-        // since #703 gave `ai_target_selection` its own nearest-hostile tier.
-        let Some(target_uuid) = weapons_target.0.clone() else {
+        // Target selection: the **Combat Lock** from this ship's frozen
+        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted
+        // for firing. The tactical radar owns the live selection; auto-fire
+        // reads the aggregated viewscreen fact.
+        let Some(target_uuid) = (match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        }) else {
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
@@ -783,12 +794,12 @@ pub(crate) fn tick_beams_prepare(
             &mut PhaserCooldown,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
-            // Every production ship carries WeaponsTarget (`Option` only for
+            // Every production ship carries TacticalRadarSelection (`Option` only for
             // minimal test spawns). We clear it here on the LocalShip alone,
             // because that lock is also the player's UI selection and nothing
             // else would drop it. NPC locks are left to `ai_target_selection`,
             // whose staleness guard clears a dead target on the next tick.
-            Option<&mut WeaponsTarget>,
+            Option<&mut TacticalRadarSelection>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             // Shooter's faction for LOS friendly-fire check.
             Option<&FactionComponent>,
@@ -1072,7 +1083,7 @@ pub(crate) fn tick_beams_prepare(
 /// [`tick_beams_prepare`] earlier this tick), find its target in `hull_q`,
 /// route damage through shields, apply hull damage, and record whether the
 /// target was destroyed — `end_beam_early`, read by
-/// [`tick_beams_tick_lifetimes`] to end the beam and clear `WeaponsTarget`.
+/// [`tick_beams_tick_lifetimes`] to end the beam and clear `TacticalRadarSelection`.
 ///
 /// Damage routing rules:
 /// - Asteroid target → emits `AsteroidDestroyed` + `AsteroidDestroyedVfx`.
@@ -1169,7 +1180,7 @@ pub(crate) fn tick_beams_apply_damage(
                         // so sustained fire from one shooter must touch the
                         // component exactly once, on the tick the shooter
                         // changes. `Mut::set_if_neq` is the same pattern
-                        // `ai_target_selection` uses for `WeaponsTarget`.
+                        // `ai_target_selection` uses for `TacticalRadarSelection`.
                         if let Some(mut last) = last_attacker_opt {
                             last.set_if_neq(LastShipAttacker(Some(state.shooter_uuid.clone())));
                         }
@@ -1391,23 +1402,23 @@ pub(crate) fn tick_beams_apply_damage(
 ///
 /// Reads the shooter snapshots from [`BeamContext`] (`end_beam_early` set by
 /// [`tick_beams_apply_damage`]) and borrows the ship query mutably to update
-/// per-shooter beam state (target cleared, cooldown started, `WeaponsTarget`
+/// per-shooter beam state (target cleared, cooldown started, `TacticalRadarSelection`
 /// cleared for LocalShip).
 ///
 /// Weapons-target clearing: when the player kills its locked target, its
-/// `WeaponsTarget.0` is set to `None`. NPC locks are re-evaluated by
+/// `TacticalRadarSelection.0` is set to `None`. NPC locks are re-evaluated by
 /// `ai_target_selection`, whose staleness guard clears a dead target.
 pub(crate) fn tick_beams_tick_lifetimes(
     time: Res<Time>,
     mut commands: Commands,
     // Narrowed shooter query: phase 3 only mutates the shooter's beam,
     // cooldown, and (LocalShip only) weapons-target lock. Every production
-    // ship carries WeaponsTarget (`Option` only for minimal test spawns).
+    // ship carries TacticalRadarSelection (`Option` only for minimal test spawns).
     mut ship_q: Query<
         (
             &mut ActiveBeam,
             &mut PhaserCooldown,
-            Option<&mut WeaponsTarget>,
+            Option<&mut TacticalRadarSelection>,
         ),
         With<crate::server_app::Ship>,
     >,

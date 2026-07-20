@@ -761,7 +761,7 @@ pub(crate) fn tick_trigger_pipeline(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -1116,7 +1116,7 @@ pub(crate) fn apply_dispatch_result(
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -1471,7 +1471,7 @@ fn tick_delayed_actions(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -1644,7 +1644,7 @@ pub struct FactionDispatchParams<'w, 's> {
 }
 
 /// After a faction relationship is mutated, walk every AI controller and clear
-/// its `WeaponsTarget` if the locked target's faction is no longer hostile to
+/// its `TacticalRadarSelection` if the locked target's faction is no longer hostile to
 /// the controller's own faction.
 ///
 /// Required because `ai_target_selection`'s retention tier deliberately keeps an
@@ -1656,7 +1656,7 @@ pub struct FactionDispatchParams<'w, 's> {
 /// target forever. Clearing the lock here drops it back to the tiers below,
 /// which do consult the registry.
 ///
-/// Post-#702 this clears `WeaponsTarget` — the ship's one authoritative lock —
+/// Post-#702 this clears `TacticalRadarSelection` — the ship's one authoritative lock —
 /// rather than the private `ShipAiMemory.target` mirror it used to clear. That
 /// mirror had already stopped being the firing path's input, so demoting a
 /// faction stopped the ship *pursuing* its old enemy while it carried on
@@ -1669,7 +1669,7 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<AiControllerComponent>,
@@ -3660,7 +3660,7 @@ pub(crate) mod tests {
                 // surface `revalidate_ai_targets_after_faction_change` clears;
                 // it used to clear the private `ShipAiMemory.target` mirror,
                 // which by then was no longer what the firing path read.
-                crate::weapons_plugin::WeaponsTarget::default(),
+                crate::weapons_plugin::TacticalRadarSelection::default(),
             ))
             .id();
 
@@ -3671,8 +3671,8 @@ pub(crate) mod tests {
         {
             let mut lock = app
                 .world_mut()
-                .get_mut::<crate::weapons_plugin::WeaponsTarget>(npc_entity)
-                .expect("WeaponsTarget must be attached");
+                .get_mut::<crate::weapons_plugin::TacticalRadarSelection>(npc_entity)
+                .expect("TacticalRadarSelection must be attached");
             lock.0 = Some(player_uuid.to_string());
         }
 
@@ -3736,11 +3736,11 @@ pub(crate) mod tests {
         // and in radar range, never that it is still an enemy.
         let lock = app
             .world()
-            .get::<crate::weapons_plugin::WeaponsTarget>(npc_entity)
+            .get::<crate::weapons_plugin::TacticalRadarSelection>(npc_entity)
             .unwrap();
         assert_eq!(
             lock.0, None,
-            "remove_faction_enemy must clear WeaponsTarget when the target is no longer hostile"
+            "remove_faction_enemy must clear TacticalRadarSelection when the target is no longer hostile"
         );
     }
 

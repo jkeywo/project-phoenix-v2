@@ -117,7 +117,7 @@ pub(crate) fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
 ///
 /// | Surface | Owner | Answers |
 /// |---|---|---|
-/// | [`WeaponsTarget`] | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
+/// | [`TacticalRadarSelection`] | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
 /// | [`NavigationWaypoint`] + [`HelmWaypointClearance`] | Navigation (+ the Channel-3 lag) | where to travel |
 /// | [`ObjectiveCursors`] | `advance_objective_cursors` | where on the route |
 ///
@@ -128,12 +128,15 @@ pub(crate) fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
 /// identical set, and because their per-system queries are close to Bevy's
 /// tuple cap.
 ///
-/// [`WeaponsTarget`]: crate::weapons_plugin::WeaponsTarget
 /// [`NavigationWaypoint`]: crate::navigation_plugin::NavigationWaypoint
 /// [`ObjectiveCursors`]: crate::ai_plugin::ObjectiveCursors
+///
+/// The Combat Lock (who to pursue) is no longer read from a targeting component
+/// here — it comes from this ship's frozen viewscreen blackboard
+/// (`ViewscreenBlackboard::combat_lock`, issue #829), read in
+/// `build_helm_ai_surfaces_frame`.
 #[derive(bevy::ecs::query::QueryData)]
 pub struct HelmAiSurfaces {
-    weapons_target: Option<&'static crate::weapons_plugin::WeaponsTarget>,
     waypoint: Option<&'static crate::navigation_plugin::NavigationWaypoint>,
     clearance: Option<&'static HelmWaypointClearance>,
     cursors: Option<&'static crate::ai_plugin::ObjectiveCursors>,
@@ -298,7 +301,6 @@ fn helm_shared_target_view(
     mut world_view: crate::ai::WorldView,
     snapshot_entities: &[crate::ai::AiWorldEntity],
     blackboards: &crate::server_app::ShipSystemBlackboards,
-    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
     waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
 ) -> (crate::ai::WorldView, Vec<uuid::Uuid>) {
     let mut ids = Vec::new();
@@ -309,19 +311,15 @@ fn helm_shared_target_view(
             }
         }
     };
-    push(weapons_target.and_then(|t| t.0.clone()));
-    if let Some(crate::messages::SystemBlackboard::Weapons(bb)) = blackboards
+    // Combat Lock + Science Target come from the frozen viewscreen blackboard
+    // (issue #829, spec §3): cross-system target reads must not reach the
+    // tactical / sensor radar's live selection synchronously.
+    if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = blackboards
         .0
-        .get(&crate::system_registry::tactical_station_key())
+        .get(&crate::system_registry::viewscreen_system_id())
     {
-        push(bb.target_uuid.clone());
-        push(bb.locked_target.clone());
-    }
-    if let Some(crate::messages::SystemBlackboard::Sensors(bb)) = blackboards
-        .0
-        .get(&crate::system_registry::sensors_system_id())
-    {
-        push(bb.science_target_uuid.clone());
+        push(bb.combat_lock.clone());
+        push(bb.science_target.clone());
     }
     if let Some(crate::navigation_plugin::WaypointMode::Anchored { source_uuid, .. }) =
         waypoint.and_then(|w| w.mode())
@@ -406,18 +404,13 @@ fn cleared_nav_waypoint(
     Some([snapshot.x, snapshot.z])
 }
 
-/// This ship's Tactical lock as a UUID, for the Helm to pursue (issue #702).
+/// This ship's Combat Lock as a UUID, for the Helm to pursue (issue #702/#829).
 ///
-/// `WeaponsTarget` is a `String` because it may name an asteroid as well as an
-/// entity; the Helm only pursues things with a canonical UUID, and an
-/// unparseable id names nobody.
-fn helm_weapons_target(
-    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
-) -> Option<uuid::Uuid> {
-    weapons_target?
-        .0
-        .as_deref()
-        .and_then(|t| uuid::Uuid::parse_str(t).ok())
+/// The lock is a `String` because it may name an asteroid as well as an entity;
+/// the Helm only pursues things with a canonical UUID, and an unparseable id
+/// names nobody. Sourced from the frozen viewscreen `combat_lock` (spec §3).
+fn helm_weapons_target(combat_lock: Option<&str>) -> Option<uuid::Uuid> {
+    combat_lock.and_then(|t| uuid::Uuid::parse_str(t).ok())
 }
 
 // ── The helm decision-surface frame (issue #824) ─────────────────────────────
@@ -594,10 +587,18 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             visible_view.clone(),
             &snapshot_entities,
             blackboards,
-            surfaces.weapons_target,
             surfaces.waypoint,
         );
         let destroy_target = helm_destroy_target(&scored, &merged_view, &shared_targets, registry);
+
+        // Combat Lock from the frozen viewscreen (issue #829).
+        let combat_lock = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
 
         frame.ships.insert(
             entity,
@@ -607,7 +608,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 visible_view,
                 merged_view,
                 destroy_target,
-                weapons_target: helm_weapons_target(surfaces.weapons_target),
+                weapons_target: helm_weapons_target(combat_lock.as_deref()),
                 nav_waypoint: cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
                 forward_speed: physics.forward_speed,
             },
@@ -778,7 +779,7 @@ fn apply_arc_bearing_request(
 /// the two agreeing.
 ///
 /// Reads exactly the surfaces `operate_helm` reads (issue #702) — the ship's
-/// `WeaponsTarget` for `Destroy`, the objective's cursor for `Patrol`, the named
+/// `TacticalRadarSelection` for `Destroy`, the objective's cursor for `Patrol`, the named
 /// anchor for `Reach`/`Retreat`. Two answers to "where is the Helm going?" must
 /// not diverge, or the ship charges its impulse drive at a point it is not
 /// steering toward.
@@ -801,7 +802,7 @@ fn resolve_helm_target_position(
             anchors.get(anchor.as_str()).copied()
         }
         // The directive's own `target` is Tactical's input, not the Helm's.
-        // `helm_destroy` pursues the `WeaponsTarget` that `ai_target_selection`
+        // `helm_destroy` pursues the `TacticalRadarSelection` that `ai_target_selection`
         // resolved from it, so this must read the same lock or the impulse
         // could aim at the authored target while the helm closes on whoever
         // Tactical actually locked.
@@ -974,7 +975,7 @@ pub(crate) fn detect_reached_objective_completion(
 // `all_four_axes_observe_the_same_frame` pins it.
 //
 // **No shared mutable state** (issue #702). `operate_helm` is a pure function:
-// it reads the frame (built from `WeaponsTarget`, `NavigationWaypoint` +
+// it reads the frame (built from `TacticalRadarSelection`, `NavigationWaypoint` +
 // `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
 // `(thrust, steering)`. The axis systems consume the frame via `Res<_>` —
 // immutable by construction — so "did some axis mutate the surface between
@@ -1411,7 +1412,7 @@ mod tests {
 
     /// Lock this ship's Tactical surface onto `uuid` (issue #702).
     ///
-    /// The helm pursues `WeaponsTarget`; it no longer resolves a `Destroy`
+    /// The helm pursues `TacticalRadarSelection`; it no longer resolves a `Destroy`
     /// directive's authored name itself. In production `ai_target_selection`
     /// does that resolution (tier 1) and publishes the result here, so a test
     /// that poses a Destroy objective and expects pursuit must supply the lock
@@ -1420,8 +1421,8 @@ mod tests {
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut target = entity
-            .get_mut::<crate::weapons_plugin::WeaponsTarget>()
-            .expect("ship must carry WeaponsTarget");
+            .get_mut::<crate::weapons_plugin::TacticalRadarSelection>()
+            .expect("ship must carry TacticalRadarSelection");
         target.0 = Some(uuid.to_string());
     }
 

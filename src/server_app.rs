@@ -31,8 +31,8 @@ use std::collections::HashMap;
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
     weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
-    LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource,
-    WeaponsTarget,
+    LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig,
+    TacticalRadarSelection, TorpedoSystemResource,
 };
 
 pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
@@ -779,6 +779,26 @@ fn publish_viewscreen_blackboard(
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
     let entity_state = ship_blackboards_q.single().ok();
+    // Lift Combat Lock + Science Target from the local ship's own radar
+    // blackboards (issue #829), published this tick in `SimSet::Publish`.
+    let combat_lock = entity_state.as_ref().and_then(|(bbs, _, _, _)| {
+        match bbs
+            .0
+            .get(&crate::ship::system_registry::tactical_radar_system_id())
+        {
+            Some(SystemBlackboard::TacticalRadar(bb)) => bb.selected_target.clone(),
+            _ => None,
+        }
+    });
+    let science_target = entity_state.as_ref().and_then(|(bbs, _, _, _)| {
+        match bbs
+            .0
+            .get(&crate::ship::system_registry::sensor_radar_system_id())
+        {
+            Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target.clone(),
+            _ => None,
+        }
+    });
     let red_alert = entity_state
         .as_ref()
         .and_then(|(_, ra, _, _)| ra.map(|r| r.0))
@@ -828,6 +848,8 @@ fn publish_viewscreen_blackboard(
         last_weapon_fired_secs,
         last_attacker_uuid,
         scored_objectives,
+        combat_lock,
+        science_target,
     };
 
     // Write directly to the per-entity component.
@@ -2082,11 +2104,11 @@ fn spawn_game_start_entities(
                 // steer from and `advance_objective_cursors` had nothing to
                 // advance (issue #702).
                 .insert(crate::ai_plugin::ObjectiveCursors::default())
-                .insert(crate::weapons_plugin::WeaponsTarget::default())
+                .insert(crate::weapons_plugin::TacticalRadarSelection::default())
                 .insert(crate::weapons_plugin::ActiveBeam::default())
                 .insert(crate::weapons_plugin::PhaserCooldown::default())
                 .insert(crate::weapons_plugin::WeaponsArcRequestState::default())
-                .insert(crate::sensors_plugin::SensorsTarget::default())
+                .insert(crate::sensors_plugin::SensorRadarSelection::default())
                 .insert(crate::ship_state::ShipRedAlert::default())
                 .insert(crate::ship_state::ShipViewMode::default())
                 .insert(crate::ship_state::ShipPhaserFrequency::default())
@@ -3193,6 +3215,41 @@ station = "pilot"
         }
     }
 
+    /// Test-only glue (issue #829): seed each ship's `ViewscreenBlackboard`
+    /// combat_lock / science_target from its `TacticalRadarSelection` /
+    /// `SensorRadarSelection` components before `SimSet::Input`, standing in for
+    /// the radar publishers + viewscreen aggregators the full app runs. Merges
+    /// into any existing viewscreen entry.
+    fn seed_viewscreen_from_selection(
+        mut q: Query<
+            (
+                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                Option<&crate::sensors_plugin::SensorRadarSelection>,
+                &mut ShipSystemBlackboards,
+            ),
+            With<Ship>,
+        >,
+    ) {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        for (tac, sci, mut bbs) in q.iter_mut() {
+            let combat_lock = tac.and_then(|t| t.0.clone());
+            let science_target = sci.and_then(|s| s.0.clone());
+            let mut vbb = match bbs
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => ViewscreenBlackboard::default(),
+            };
+            vbb.combat_lock = combat_lock;
+            vbb.science_target = science_target;
+            bbs.0.insert(
+                crate::ship::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(vbb),
+            );
+        }
+    }
+
     fn test_app() -> App {
         let mut app = App::new();
         app.configure_sets(
@@ -3207,6 +3264,12 @@ station = "pilot"
                 crate::sim_sets::SimSet::Broadcast,
             )
                 .chain(),
+        )
+        .add_systems(
+            Update,
+            seed_viewscreen_from_selection
+                .after(crate::lobby::LobbySystemSet)
+                .before(crate::sim_sets::SimSet::Input),
         )
         .add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
@@ -3325,10 +3388,10 @@ station = "pilot"
             crate::weapons_plugin::PhaserCombatConfigResource::default(),
             PhaserRenderConfig::default(),
             // PR 7 (issue #597) — per-entity beam / target / cooldown / sensors / waypoint.
-            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::weapons_plugin::TacticalRadarSelection::default(),
             crate::weapons_plugin::ActiveBeam::default(),
             crate::weapons_plugin::PhaserCooldown::default(),
-            crate::sensors_plugin::SensorsTarget::default(),
+            crate::sensors_plugin::SensorRadarSelection::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
             crate::ship::power::PowerBrownoutState::default(),
         ));
@@ -3339,12 +3402,12 @@ station = "pilot"
     // ── PR 7 (issue #597) test helpers ──────────────────────────────────────
     // These wrap the `Query<&X, With<LocalShip>>` pattern that replaces
     // direct Resource access after PR 7 removed the Resource derive from
-    // WeaponsTarget / ActiveBeam / PhaserCooldown / SensorsTarget / NavigationWaypoint.
+    // TacticalRadarSelection / ActiveBeam / PhaserCooldown / SensorRadarSelection / NavigationWaypoint.
 
     fn get_weapons_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::weapons_plugin::WeaponsTarget, With<LocalShip>>();
+            .query_filtered::<&crate::weapons_plugin::TacticalRadarSelection, With<LocalShip>>();
         q.single(app.world()).ok().and_then(|wt| wt.0.clone())
     }
 
@@ -6586,7 +6649,7 @@ station = "pilot"
                 crate::ship_plugin::ShipConfigComponent::default(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 ShipSystemBlackboards::default(),
-                crate::weapons_plugin::WeaponsTarget(Some("npc-only-target".into())),
+                crate::weapons_plugin::TacticalRadarSelection(Some("npc-only-target".into())),
                 crate::weapons_plugin::ActiveBeam::default(),
                 crate::weapons_plugin::PhaserCooldown::default(),
                 crate::weapons_plugin::LastShipAttacker::default(),

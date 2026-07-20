@@ -437,11 +437,11 @@ pub fn emit_shields_coordination(
 /// blackboards into that ship's `ShipSystemBlackboards` (issue #826 — was
 /// LocalShip-only; per-Ship following the #824 helm precedent).
 ///
-/// No field here is player-only: hull integrity, control sources, physics,
-/// and `WeaponsTarget` are all read from the same entity being published, so
-/// there is no `Has<LocalShip>` split — every ship gets the identical
-/// derivation. `target_bearing` in particular uses each ship's OWN
-/// `WeaponsTarget` (the shared per-ship targeting surface), not a global.
+/// No field here is player-only: hull integrity, control sources, and physics
+/// are all read from the same entity being published, so there is no
+/// `Has<LocalShip>` split — every ship gets the identical derivation.
+/// `target_bearing` reads this ship's OWN frozen viewscreen `combat_lock`
+/// (issue #829, spec §3), not a live targeting component.
 fn publish_shields_blackboard(
     mut ships_q: Query<
         (
@@ -449,7 +449,6 @@ fn publish_shields_blackboard(
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             Option<&crate::ship_state::ShipPhysics>,
-            Option<&crate::weapons_plugin::WeaponsTarget>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -463,8 +462,15 @@ fn publish_shields_blackboard(
         Without<crate::simulation::AsteroidUuid>,
     >,
 ) {
-    for (shields, hull, control_sources, physics, weapons_target, mut bbs) in ships_q.iter_mut() {
+    for (shields, hull, control_sources, physics, mut bbs) in ships_q.iter_mut() {
         let physics = physics.copied().unwrap_or_default();
+        // Frozen Combat Lock from this ship's viewscreen blackboard (written in
+        // the previous tick's PublishAggregate — this system runs in Publish).
+        let combat_lock: Option<String> =
+            match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(crate::messages::SystemBlackboard::Viewscreen(vbb)) => vbb.combat_lock.clone(),
+                _ => None,
+            };
 
         // Snapshot facings once so we can reuse them for both the aggregate
         // and per-arc blackboards.
@@ -507,8 +513,7 @@ fn publish_shields_blackboard(
         }
         .to_string();
 
-        let target_bearing = weapons_target.and_then(|wt| {
-            let uuid = wt.0.as_ref()?;
+        let target_bearing = combat_lock.as_ref().and_then(|uuid| {
             let live = asteroid_q
                 .iter()
                 .find(|(u, _)| u.0 == *uuid)
@@ -637,6 +642,33 @@ mod tests {
         }
     }
 
+    /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock
+    /// from its `TacticalRadarSelection` component before
+    /// `publish_shields_blackboard` reads it, standing in for the radar
+    /// publisher + viewscreen aggregator the full app runs.
+    fn seed_viewscreen_from_selection(
+        mut q: Query<
+            (
+                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                &mut crate::server_app::ShipSystemBlackboards,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+    ) {
+        for (tac, mut bbs) in q.iter_mut() {
+            let combat_lock = tac.and_then(|t| t.0.clone());
+            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => crate::messages::ViewscreenBlackboard::default(),
+            };
+            vbb.combat_lock = combat_lock;
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(vbb),
+            );
+        }
+    }
+
     fn test_app() -> App {
         let config = crate::shield::ShieldConfig {
             num_facings: 2,
@@ -687,6 +719,10 @@ mod tests {
             .init_resource::<Outbox>()
             .init_resource::<CoordEnqueueBox>()
             .add_plugins(ShipShieldsPlugin)
+            .add_systems(
+                Update,
+                seed_viewscreen_from_selection.before(publish_shields_blackboard),
+            )
             .add_systems(PostUpdate, collect)
             .add_systems(PostUpdate, collect_coord);
         app
@@ -1417,10 +1453,10 @@ mod tests {
 
     #[test]
     fn publish_npc_target_bearing_uses_its_own_weapons_target() {
-        // target_bearing derives from each ship's OWN WeaponsTarget +
+        // target_bearing derives from each ship's OWN TacticalRadarSelection +
         // ShipPhysics: an NPC at the origin (yaw 0) targeting an entity at
         // +X reads a bearing of 180° (atan2 convention preserved from the
-        // LocalShip-only publish); the LocalShip, with no WeaponsTarget,
+        // LocalShip-only publish); the LocalShip, with no TacticalRadarSelection,
         // stays None.
         let mut app = test_app();
         app.world_mut().spawn((
@@ -1430,7 +1466,7 @@ mod tests {
         let npc = spawn_npc(&mut app, 0.25);
         app.world_mut().entity_mut(npc).insert((
             crate::ship_state::ShipPhysics::default(),
-            crate::weapons_plugin::WeaponsTarget(Some("npc-target".into())),
+            crate::weapons_plugin::TacticalRadarSelection(Some("npc-target".into())),
         ));
         app.update();
 
@@ -1445,7 +1481,7 @@ mod tests {
         };
         let bearing = bb
             .target_bearing
-            .expect("NPC target_bearing must derive from its own WeaponsTarget");
+            .expect("NPC target_bearing must derive from its own TacticalRadarSelection");
         assert!(
             (bearing - 180.0).abs() < 0.01,
             "expected bearing ~180° for a target dead ahead on +X (got {bearing})"
@@ -1453,7 +1489,7 @@ mod tests {
         assert_eq!(
             shields_bb(&mut app).target_bearing,
             None,
-            "the LocalShip holds no WeaponsTarget, so its bearing stays None"
+            "the LocalShip holds no TacticalRadarSelection, so its bearing stays None"
         );
     }
 }

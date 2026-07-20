@@ -15,7 +15,7 @@ use crate::ship_plugin::CoordinationEnqueue;
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own sensors target.
 #[derive(Component, Default, Clone, Debug)]
-pub struct SensorsTarget(pub Option<String>);
+pub struct SensorRadarSelection(pub Option<String>);
 
 /// Tracks the last frequency value sent for a given target so we avoid
 /// re-emitting when nothing has changed.
@@ -93,6 +93,7 @@ impl Plugin for ShipSensorsPlugin {
                     tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
                     tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
                     publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+                    publish_sensor_radar_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             );
     }
@@ -105,7 +106,7 @@ impl Plugin for ShipSensorsPlugin {
 ///
 /// Admission already validated the sender (station tenure for humans,
 /// `operate_ai` for `ai:` tokens), so nothing here branches on origin. Stores
-/// the target in [`SensorsTarget`] for blackboard broadcast, and — for a set,
+/// the target in [`SensorRadarSelection`] for blackboard broadcast, and — for a set,
 /// never a clear — emits a `CoordinationPayload::TargetDesignation` on the
 /// channel-3 bus for Tactical (issue #676 — replaces the old direct
 /// `SensorsTargetSuggestion`; it advises Tactical, it does not replace
@@ -118,7 +119,7 @@ pub fn handle_sensors_messages(
             Entity,
             &crate::messages::AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
-            &mut SensorsTarget,
+            &mut SensorRadarSelection,
             &crate::ship_plugin::ShipSystemControlSources,
         ),
         With<crate::server_app::Ship>,
@@ -144,7 +145,7 @@ pub fn handle_sensors_messages(
                 _ => continue,
             };
 
-            // Write to this ship's own SensorsTarget component (player or NPC).
+            // Write to this ship's own SensorRadarSelection component (player or NPC).
             entity_target.0 = Some(uuid.clone());
 
             // Resolve a human-readable label for the target, falling back to
@@ -190,7 +191,7 @@ pub fn tick_sensors_frequency_hint(
     mut ship_q: Query<
         (
             Entity,
-            &crate::simulation::WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut SensorsFrequencyState,
             Has<crate::ai_plugin::AiHighFidelity>,
@@ -203,8 +204,7 @@ pub fn tick_sensors_frequency_hint(
         &crate::ship::shields::ShipShields,
     )>,
 ) {
-    for (entity, weapons_target, control_sources, mut state, is_high_fidelity) in ship_q.iter_mut()
-    {
+    for (entity, blackboards, control_sources, mut state, is_high_fidelity) in ship_q.iter_mut() {
         if is_high_fidelity
             && control_sources
                 .0
@@ -214,7 +214,15 @@ pub fn tick_sensors_frequency_hint(
             continue;
         }
 
-        let current_target = match weapons_target.0.clone() {
+        // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
+        let combat_lock = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
+        let current_target = match combat_lock {
             Some(uuid) => uuid,
             None => {
                 state.last_sent_target = None;
@@ -452,7 +460,7 @@ pub fn tick_sensors_threat_warning(
 /// following the #824 helm / #826 shields precedent), split on
 /// `Has<LocalShip>`:
 ///
-/// - `science_target_uuid` — each ship's own [`SensorsTarget`], player and
+/// - `science_target_uuid` — each ship's own [`SensorRadarSelection`], player and
 ///   NPC alike.
 /// - `radar_range` — live sensor radar range: the ship's own base range
 ///   scaled by its own `SensorRadarRange` modifier, which
@@ -470,7 +478,7 @@ pub fn publish_sensors_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     mut ships_q: Query<
         (
-            Option<&SensorsTarget>,
+            Option<&SensorRadarSelection>,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::ai::server::AiProfile>,
             &mut crate::server_app::ShipSystemBlackboards,
@@ -511,6 +519,31 @@ pub fn publish_sensors_blackboard(
         bbs.0.insert(
             SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
             SystemBlackboard::Sensors(bb),
+        );
+    }
+}
+
+/// Publish each ship's Sensor Radar blackboard (issue #829). Runs in
+/// `SimSet::Publish`. The sensor radar owns the **Science Target**:
+/// `selected_target` mirrors this ship's `SensorRadarSelection` component so the
+/// viewscreen aggregator can lift it into `ViewscreenBlackboard::science_target`.
+/// Reading the ship's own selection here is the sensor-radar authority, not a
+/// cross-system read (spec §3).
+pub fn publish_sensor_radar_blackboard(
+    mut ships_q: Query<
+        (
+            Option<&SensorRadarSelection>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (sensors_target, mut bbs) in ships_q.iter_mut() {
+        bbs.0.insert(
+            crate::system_registry::sensor_radar_system_id(),
+            SystemBlackboard::SensorRadar(crate::messages::SensorRadarBlackboard {
+                selected_target: sensors_target.and_then(|st| st.0.clone()),
+            }),
         );
     }
 }
@@ -562,7 +595,7 @@ fn emit_sensors_ai_command(
 /// entities where the Sensors system is `ControlSource::Ai`.
 ///
 /// Selection priority (decision logic unchanged since #700/#703):
-///   1. Combat target — mirror the ship's `WeaponsTarget` (set by
+///   1. Combat target — mirror the ship's `TacticalRadarSelection` (set by
 ///      `ai_target_selection`) so the Sensors console shows what Tactical is
 ///      engaging.
 ///   2. Objective entity — scan scored objectives for a `Destroy` directive
@@ -576,11 +609,11 @@ fn emit_sensors_ai_command(
 /// tracked contacts far outside their range. Naming a target in an objective
 /// says who to engage, not that the ship can already see them.
 ///
-/// Decide-and-emit (issue #828): instead of writing [`SensorsTarget`]
+/// Decide-and-emit (issue #828): instead of writing [`SensorRadarSelection`]
 /// directly, the decision is emitted as an admitted `SetScienceTarget` /
 /// `ClearScienceTarget` through [`emit_sensors_ai_command`], for
 /// `handle_sensors_messages` to apply later this tick. Emission happens only
-/// when the decided value differs from the current [`SensorsTarget`]: the old
+/// when the decided value differs from the current [`SensorRadarSelection`]: the old
 /// direct writes were idempotent assignments, so no-change ticks produce no
 /// admitted command (and therefore no channel-3 `TargetDesignation` spam) —
 /// an AI selection now designates its target to Tactical exactly once, on
@@ -592,8 +625,7 @@ pub fn operate_sensors_ai(
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
-            &SensorsTarget,
-            &crate::simulation::WeaponsTarget,
+            &SensorRadarSelection,
             &crate::ship_state::ShipPhysics,
             &crate::modifiers::ShipModifiers,
             Option<&crate::ai::server::AiProfile>,
@@ -621,7 +653,6 @@ pub fn operate_sensors_ai(
         sources,
         blackboards,
         sensors_target,
-        weapons_target,
         physics,
         modifiers,
         ai_profile,
@@ -644,22 +675,29 @@ pub fn operate_sensors_ai(
             dx * dx + dz * dz <= range_sq
         };
 
-        // ── Decide (byte-equivalent to the pre-#828 direct-write logic) ────
+        // ── Decide (logic unchanged; Combat Lock now read from the frozen
+        // viewscreen blackboard rather than the retired TacticalRadarSelection — #829) ──
+        let viewscreen_bb = blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id());
         let decided: Option<String> = 'decide: {
-            // Priority 1: mirror the combat target.
-            if let Some(target_uuid) = &weapons_target.0 {
+            // Priority 1: mirror the combat target (frozen Combat Lock).
+            let combat_lock = match viewscreen_bb {
+                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                    bb.combat_lock.as_deref()
+                }
+                _ => None,
+            };
+            if let Some(target_uuid) = combat_lock {
                 if entity_q
                     .iter()
                     .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
                 {
-                    break 'decide Some(target_uuid.clone());
+                    break 'decide Some(target_uuid.to_string());
                 }
             }
 
             // Priority 2: scan scored objectives for a named Destroy target.
-            let viewscreen_bb = blackboards
-                .0
-                .get(&crate::system_registry::viewscreen_system_id());
             let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb else {
                 break 'decide None;
             };
@@ -746,6 +784,36 @@ mod tests {
         }
     }
 
+    /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock /
+    /// science_target from its `TacticalRadarSelection` / `SensorRadarSelection`
+    /// components before the consumers run, standing in for the radar publishers
+    /// + viewscreen aggregators the full app runs.
+    fn seed_viewscreen_from_selection(
+        mut q: Query<
+            (
+                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                Option<&SensorRadarSelection>,
+                &mut crate::server_app::ShipSystemBlackboards,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+    ) {
+        for (tac, sci, mut bbs) in q.iter_mut() {
+            let combat_lock = tac.and_then(|t| t.0.clone());
+            let science_target = sci.and_then(|s| s.0.clone());
+            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+                Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => crate::messages::ViewscreenBlackboard::default(),
+            };
+            vbb.combat_lock = combat_lock;
+            vbb.science_target = science_target;
+            bbs.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(vbb),
+            );
+        }
+    }
+
     fn test_app() -> App {
         let mut app = App::new();
         // The applier (`handle_sensors_messages`) moved to SimSet::Physics
@@ -775,6 +843,10 @@ mod tests {
             .init_resource::<EnqueueLog>()
             .init_resource::<crate::lobby::server::ShipClientConfigResource>()
             .add_plugins(ShipSensorsPlugin)
+            .add_systems(
+                Update,
+                seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
+            )
             .add_systems(PostUpdate, (collect, collect_enqueues));
         app.world_mut().spawn((
             crate::simulation::Ship,
@@ -785,9 +857,9 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            SensorsTarget::default(),
-            // PR 7 (issue #597) — WeaponsTarget is now per-entity Component.
-            crate::simulation::WeaponsTarget::default(),
+            SensorRadarSelection::default(),
+            // PR 7 (issue #597) — TacticalRadarSelection is now per-entity Component.
+            crate::simulation::TacticalRadarSelection::default(),
             SensorsFrequencyState::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
         ));
@@ -946,11 +1018,11 @@ mod tests {
         );
     }
 
-    /// Set the LocalShip's per-entity `WeaponsTarget` for tests.
+    /// Set the LocalShip's per-entity `TacticalRadarSelection` for tests.
     fn set_local_weapons_target(app: &mut App, uuid: Option<String>) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::LocalShip>>();
         if let Ok(mut wt) = q.single_mut(app.world_mut()) {
             wt.0 = uuid;
         }
@@ -1283,7 +1355,12 @@ mod tests {
             // (Input → Physics) holds in the harness.
             .add_systems(
                 Update,
-                (operate_sensors_ai, handle_sensors_messages).chain(),
+                (
+                    seed_viewscreen_from_selection,
+                    operate_sensors_ai,
+                    handle_sensors_messages,
+                )
+                    .chain(),
             );
 
         let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
@@ -1296,8 +1373,8 @@ mod tests {
             crate::server_app::Ship,
             control_sources,
             crate::server_app::ShipSystemBlackboards::default(),
-            SensorsTarget::default(),
-            crate::simulation::WeaponsTarget::default(),
+            SensorRadarSelection::default(),
+            crate::simulation::TacticalRadarSelection::default(),
             // Sensors range-gate on the ship's own position and radar modifier,
             // so both must be present or the query silently matches nothing and
             // every assertion below passes vacuously.
@@ -1373,7 +1450,7 @@ mod tests {
     fn get_sensors_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&SensorsTarget, With<crate::server_app::Ship>>();
+            .query_filtered::<&SensorRadarSelection, With<crate::server_app::Ship>>();
         q.single(app.world()).unwrap().0.clone()
     }
 
@@ -1392,7 +1469,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -1401,7 +1478,7 @@ mod tests {
         assert_eq!(
             get_sensors_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
-            "sensors AI should mirror WeaponsTarget"
+            "sensors AI should mirror TacticalRadarSelection"
         );
     }
 
@@ -1556,7 +1633,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(combat_uuid.clone());
         }
 
@@ -1565,7 +1642,7 @@ mod tests {
         assert_eq!(
             get_sensors_target(&mut app).as_deref(),
             Some(combat_uuid.as_str()),
-            "sensors AI should prefer WeaponsTarget over objective target"
+            "sensors AI should prefer TacticalRadarSelection over objective target"
         );
     }
 
@@ -1581,12 +1658,12 @@ mod tests {
         insert_viewscreen_objective(&mut app, "wave_1", 80.0);
         spawn_target_at(&mut app, &target_uuid, 30.0, 0.0);
 
-        // WeaponsTarget names a UUID that no entity carries → existence check fails
+        // TacticalRadarSelection names a UUID that no entity carries → existence check fails
         let dead_uuid = uuid::Uuid::new_v4().to_string();
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(dead_uuid);
         }
 
@@ -1595,14 +1672,14 @@ mod tests {
         assert_eq!(
             get_sensors_target(&mut app).as_deref(),
             Some(target_uuid.as_str()),
-            "sensors AI should fall through to objective when WeaponsTarget entity is gone"
+            "sensors AI should fall through to objective when TacticalRadarSelection entity is gone"
         );
     }
 
     // ── Issue #828 tests: decide-and-emit through Admission ─────────────────
 
     /// The AI decision must land as an admitted `SetScienceTarget` in the
-    /// ship's own `AdmittedCommands` (not a direct `SensorsTarget` write),
+    /// ship's own `AdmittedCommands` (not a direct `SensorRadarSelection` write),
     /// and only on change — an unchanged decision emits nothing.
     #[test]
     fn ai_sensors_emits_admitted_set_science_target_on_change_only() {
@@ -1613,7 +1690,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -1657,7 +1734,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
         tick_sensors_ai(&mut app);
@@ -1713,7 +1790,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::WeaponsTarget, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -1785,7 +1862,7 @@ mod tests {
             .spawn((
                 crate::simulation::Ship,
                 crate::server_app::ShipSystemBlackboards::default(),
-                SensorsTarget(Some("npc-science-target".into())),
+                SensorRadarSelection(Some("npc-science-target".into())),
                 crate::ai::server::AiProfile {
                     aggression: 0.5,
                     sensor_range: 120.0,
@@ -1798,7 +1875,7 @@ mod tests {
         assert_eq!(
             npc_bb.science_target_uuid.as_deref(),
             Some("npc-science-target"),
-            "NPC blackboard must carry the NPC's own SensorsTarget"
+            "NPC blackboard must carry the NPC's own SensorRadarSelection"
         );
         assert!(
             (npc_bb.radar_range - 120.0).abs() < f32::EPSILON,
@@ -1850,7 +1927,7 @@ mod tests {
         );
         assert_eq!(
             npc_bb.science_target_uuid, None,
-            "missing SensorsTarget publishes as no selection"
+            "missing SensorRadarSelection publishes as no selection"
         );
     }
 }

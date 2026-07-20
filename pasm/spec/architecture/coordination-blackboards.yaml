@@ -51,6 +51,24 @@ entities:
       status: declared
       paths: [src/ship/viewscreen.rs, src/sim_sets.rs]
 
+  - state: viewscreen-target-facts-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen Combat Lock & Science Target Facts
+      summary: Ship-wide target facts the viewscreen aggregator lifts from the radar blackboards — Combat Lock (from the tactical radar's selection) and Science Target (from the sensor radar's selection).
+      rationale:
+        - "Issue #829: ViewscreenBlackboard gains combat_lock and science_target. Both viewscreen aggregators (NPC aggregate_doctrine_blackboards and the LocalShip publish_viewscreen_blackboard) read this ship's own tactical-radar / sensor-radar blackboard selected_target in SimSet::PublishAggregate, right after the radar publishers ran in SimSet::Publish."
+        - "These are the only target facts cross-system consumers may read (spec §3): weapons firing paths, helm pursuit, shields target_bearing, sensors AI mirror + frequency hint, and the arc-bearing request all read the FROZEN viewscreen combat_lock rather than reaching a radar's live selection. One-tick lag at 30Hz is accepted, including for firing. In-flight torpedoes keep their TorpedoTargetSnapshot latch."
+    architecture:
+      classification: derived
+      owner: system-blackboard-publisher
+      derived_from: [tactical-radar-blackboard-state, sensor-radar-blackboard-state]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/ai/server.rs, src/server_app.rs]
+      symbols: [ViewscreenBlackboard]
+
   - component: inter-system-message-router
     core:
       status: implemented

@@ -117,20 +117,25 @@ impl Plugin for WeaponsPlugin {
                 Update,
                 (
                     // `handle_set_target` is the other `SimSet::Input` writer of
-                    // `WeaponsTarget`, and is ordered against `ai_target_selection`
+                    // `TacticalRadarSelection`, and is ordered against `ai_target_selection`
                     // below.
                     //
-                    // `ai_target_selection` reads `WeaponsTarget` (as the seed for
+                    // `ai_target_selection` reads `TacticalRadarSelection` (as the seed for
                     // its selection) and writes it back in the same system, so only
                     // two interleavings exist and both keep a human's lock: either
                     // the handler runs first and selection seeds from the fresh
                     // lock, or it runs second and its write lands last.
                     //
                     // The edge is kept anyway, and is worth keeping: it pins the
-                    // better of the two, in which admitted human input is visible to
-                    // selection — and to every other `Input` reader of
-                    // `WeaponsTarget` — in the tick it was admitted, rather than a
-                    // tick later. Both gates hold at once on any mixed-rating ship
+                    // better of the two, in which admitted human input seeds
+                    // selection in the tick it was admitted rather than a tick
+                    // later, so a human's fresh lock survives the AI's
+                    // read-modify-write. Post-#829 no *other* `Input` system reads
+                    // `TacticalRadarSelection` — cross-system consumers read the
+                    // frozen viewscreen `combat_lock` — so this edge exists purely
+                    // for that human-lock-survives-the-tick atomicity between the
+                    // two writers, not to make any same-tick consumer read fresher.
+                    // Both gates hold at once on any mixed-rating ship
                     // (`any_bank_accepts_human_input` for a Human phaser bank,
                     // `any_tactical_system_operates_ai` for, say, an Ai torpedo tube
                     // or magazine), so this is an ordinary configuration, not a
@@ -159,11 +164,17 @@ impl Plugin for WeaponsPlugin {
                     // Stays in `SimSet::Input` — where the pre-split
                     // `operate_tactical_ai` lived — rather than moving to the
                     // `Physics` + `AiTickLabel` set that ConsoleAiPlugin's
-                    // decide/integrate pairs use. The `WeaponsTarget` write has to
-                    // land in `Input`: `ai_phaser_auto_fire`, `handle_fire_phaser`
-                    // and `tick_npc_auto_match_frequency` all read it from `Input`,
-                    // so writing it from `Physics` would push the write past them
-                    // and make them read last tick's lock.
+                    // decide/integrate pairs use. It must run in `Input` to stay
+                    // ordered against `handle_set_target` (the `.before` edge above
+                    // that keeps a human's lock): both are the only writers of
+                    // `TacticalRadarSelection`, and that atomicity is the reason for
+                    // the shared set. Post-#829 the consumers (`ai_phaser_auto_fire`,
+                    // `handle_fire_phaser`, `tick_npc_auto_match_frequency`) no longer
+                    // read this component at all — they read the frozen viewscreen
+                    // `combat_lock`, which the radar publisher + viewscreen
+                    // aggregator derive from this write one tick later — so the set
+                    // choice is about writer/writer atomicity, not about feeding
+                    // any same-tick reader.
                     ai_target_selection.in_set(crate::sim_sets::SimSet::Input),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
                     tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
@@ -237,6 +248,7 @@ impl Plugin for WeaponsPlugin {
                 // ordering dependency between them — bare tuple, no chain().
                 (
                     publish_weapons_core_blackboard,
+                    publish_tactical_radar_blackboard,
                     publish_phaser_bank_blackboards,
                     publish_torpedo_tube_blackboards,
                     publish_torpedo_magazine_blackboard,
@@ -276,7 +288,7 @@ pub(crate) use beam::{
 pub use beam::{
     drain_power_for_active_beam, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
     LastShipAttacker, PhaserCmd, PhaserCombatConfigResource, PhaserCooldown, PhaserIntents,
-    WeaponsTarget, BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
+    TacticalRadarSelection, BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -301,8 +313,9 @@ pub use blackboard::{
     compute_current_weapons_update, weapons_update_broadcaster, LastWeaponsUpdate,
 };
 pub(crate) use blackboard::{
-    publish_phaser_bank_blackboards, publish_torpedo_magazine_blackboard,
-    publish_torpedo_tube_blackboards, publish_weapons_core_blackboard, WeaponsUpdateFirstTick,
+    publish_phaser_bank_blackboards, publish_tactical_radar_blackboard,
+    publish_torpedo_magazine_blackboard, publish_torpedo_tube_blackboards,
+    publish_weapons_core_blackboard, WeaponsUpdateFirstTick,
 };
 
 /// Adapter: applies the weapons AI's decisions to authoritative weapons state
@@ -487,7 +500,7 @@ fn tick_weapons_arc_request(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            &crate::simulation::WeaponsTarget,
+            &crate::server_app::ShipSystemBlackboards,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
             &mut WeaponsArcRequestState,
@@ -508,13 +521,21 @@ fn tick_weapons_arc_request(
         ship_entity,
         control_sources,
         physics,
-        weapons_target,
+        blackboards,
         combat_config_opt,
         modifiers_opt,
         mut state,
     ) in ship_q.iter_mut()
     {
-        let Some(target_uuid) = weapons_target.0.clone() else {
+        // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
+        let combat_lock = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
+        let Some(target_uuid) = combat_lock else {
             state.last_notified_target = None;
             continue;
         };
@@ -606,20 +627,24 @@ fn tick_weapons_arc_request(
 // (issues #697, #700). It reads the world, the ship's own objective
 // blackboard, and its last attacker; it publishes the chosen target to
 // `WeaponsBlackboard.locked_target` as observable intent, and applies that
-// same choice to the authoritative `WeaponsTarget` component (truth) in the
+// same choice to the authoritative `TacticalRadarSelection` component (truth) in the
 // same system.
 //
 // It began (#697) as a decide/integrate pair — `ai_target_selection` →
 // `operate_tactical_ai` — mirroring the decide/apply shape the other console
 // AIs used at the time (e.g. the pre-#826 shields pair). #700 folded the integrator
 // back in, because unlike those pairs the two halves could not be separated by
-// a sim set: every `WeaponsTarget` reader runs in `SimSet::Input`, so the write
-// had to stay in `Input` too, which left the "pair" as two systems in the same
+// a sim set: at the time every `WeaponsTarget` reader ran in `SimSet::Input`, so the
+// write had to stay in `Input` too, which left the "pair" as two systems in the same
 // set held together by an explicit `.before` edge and an `Option<Option<_>>`
 // to distinguish "the decider never ran" from "the decider chose nothing".
+// (Post-#829 the only `Input` readers of the selection component are its two
+// writers — `handle_set_target` and `ai_target_selection`; cross-system consumers
+// read the frozen viewscreen `combat_lock` — but the writer/writer `.before` edge
+// still keeps a human lock atomic against the AI decider within the tick.)
 //
 // Folding them back makes read-seed-decide-write atomic with respect to the
-// other `Input` writer of `WeaponsTarget` (`handle_set_target`), which is what
+// other `Input` writer of `TacticalRadarSelection` (`handle_set_target`), which is what
 // the `.before` edge existed to enforce. See `WeaponsPlugin::build`.
 //
 // This system does not fire weapons. Issue #698 split firing itself into a
@@ -633,7 +658,7 @@ fn tick_weapons_arc_request(
 ///
 /// This is observability, not a control channel: nothing reads `locked_target`
 /// back to drive behaviour — `ai_target_selection` applies its own decision to
-/// `WeaponsTarget` directly. The field is what lets a client (or a human
+/// `TacticalRadarSelection` directly. The field is what lets a client (or a human
 /// watching a backfilled console) see *why* the ship's lock is what it is, and
 /// it is what distinguishes AI intent from a human's lock on the wire.
 ///
@@ -698,7 +723,7 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// ## This is the only selector (issue #702)
 ///
 /// There is exactly one place a ship's target is chosen by AI, and this is it.
-/// The Helm does not acquire: `ai::core::helm_destroy` reads `WeaponsTarget` and
+/// The Helm does not acquire: `ai::core::helm_destroy` reads `TacticalRadarSelection` and
 /// closes on whatever it names, ignoring even the `Destroy` directive's own
 /// `target` (tier 1 resolves that, here). So "helm and weapons pick the same
 /// ship" is not an invariant two paths have to maintain in step — it is
@@ -711,7 +736,7 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// its own separately-authored radar horizon (187.5 helm vs 75 weapons on the
 /// alliance hulls). Two selectors kept in step by documentation is the bug.
 /// **Do not reintroduce a second one.** If acquisition should change, it changes
-/// here, and every consumer follows because every consumer reads `WeaponsTarget`.
+/// here, and every consumer follows because every consumer reads `TacticalRadarSelection`.
 ///
 /// ## Why this order, and not a different one
 ///
@@ -753,17 +778,17 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// than flying at a bearing it cannot confirm. It shoots at the locked ship
 /// without closing on it, which is a coherent outcome, not a split brain.
 ///
-/// The decision is applied to `WeaponsTarget` here, in the same system that
-/// makes it. `WeaponsTarget` is the single source of truth every consumer reads
+/// The decision is applied to `TacticalRadarSelection` here, in the same system that
+/// makes it. `TacticalRadarSelection` is the single source of truth every consumer reads
 /// (`handle_fire_phaser`, `ai_phaser_auto_fire`, `ai_torpedo_auto_fire`,
 /// `tick_npc_auto_match_frequency`, …), and this is the only path by which the
 /// AI reaches it — a human-operated Tactical's lock is never overwritten,
 /// because the `operate_ai` gate below skips the ship entirely.
 ///
-/// Seeding the selection from `WeaponsTarget` and writing it back within one
+/// Seeding the selection from `TacticalRadarSelection` and writing it back within one
 /// system is deliberate: it makes the AI's read-modify-write atomic with
 /// respect to `handle_set_target`, the only other `SimSet::Input` writer of
-/// `WeaponsTarget`. `Input` has no intra-set ordering by default, so a
+/// `TacticalRadarSelection`. `Input` has no intra-set ordering by default, so a
 /// separate integrator system could be scheduled between the two and write back
 /// a decision made before the human's `SetTarget` landed, silently dropping the
 /// human's lock on any mixed-rating ship. Do not re-split this without
@@ -776,7 +801,7 @@ fn ai_target_selection(
             &ShipSystemControlSources,
             &LastShipAttacker,
             &ShipPhysics,
-            &mut WeaponsTarget,
+            &mut TacticalRadarSelection,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
@@ -859,7 +884,7 @@ fn ai_target_selection(
         // `tactical.operate_ai` policy.
         //
         // The player ship's Tactical fine systems may be human — select nothing
-        // in that case; the human operator drives `WeaponsTarget` directly via
+        // in that case; the human operator drives `TacticalRadarSelection` directly via
         // `handle_set_target`. Clearing the intent here stops a ship that flips
         // from AI to human control leaving a stale selection on its blackboard.
         if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
@@ -1053,7 +1078,7 @@ fn tick_npc_auto_match_frequency(
         Entity,
         &ShipSystemControlSources,
         &crate::ship_plugin::ShipConfigComponent,
-        &WeaponsTarget,
+        &crate::server_app::ShipSystemBlackboards,
         &mut crate::ship_state::ShipPhaserFrequency,
         Has<crate::ai_plugin::AiHighFidelity>,
     )>,
@@ -1072,7 +1097,7 @@ fn tick_npc_auto_match_frequency(
     // forever — a state leak. `Has<>` + in-loop gate keeps the cleanup path
     // alive so demoted ships' state is pruned. Do not "simplify" this into a
     // query filter.
-    for (entity, control_sources, ship_config, target, mut phaser_freq, has_high_fidelity) in
+    for (entity, control_sources, ship_config, blackboards, mut phaser_freq, has_high_fidelity) in
         ship_q.iter_mut()
     {
         if !has_high_fidelity || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
@@ -1080,7 +1105,14 @@ fn tick_npc_auto_match_frequency(
             continue;
         }
 
-        let locked_target = target.0.clone();
+        // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
+        let locked_target = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            _ => None,
+        };
         let target_frequency = locked_target
             .as_ref()
             .and_then(|uuid| {

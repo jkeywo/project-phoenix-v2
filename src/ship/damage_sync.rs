@@ -645,7 +645,7 @@ mod tests {
             crate::ship::helm::BoostCommand::default(),
             // The console-owned surfaces the AI helm derives its goals from
             // (issue #702) — see `HelmAiSurfaces`.
-            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::weapons_plugin::TacticalRadarSelection::default(),
             crate::navigation_plugin::NavigationWaypoint::default(),
             HelmWaypointClearance::default(),
             crate::ai_plugin::ObjectiveCursors::default(),

@@ -225,7 +225,7 @@ pub(crate) fn handle_respond_to_message(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::WeaponsTarget>,
+            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<crate::ai_plugin::AiControllerComponent>,
@@ -1477,7 +1477,7 @@ mod tests {
         use crate::entities::spawner::FactionComponent;
         use crate::entity_config::BehaviourConfig;
         use crate::entity_spawner::BehaviourSection;
-        use crate::weapons_plugin::WeaponsTarget;
+        use crate::weapons_plugin::TacticalRadarSelection;
 
         // Bundled TOML faction UUIDs (see `world::server::tests::{fed,harrow}_faction_uuid`).
         let federation_uuid =
@@ -1538,7 +1538,7 @@ mod tests {
         ));
 
         // Harrow-factioned NPC with an AI behaviour and its authoritative
-        // Tactical lock (post-#702, WeaponsTarget — not a ShipAiMemory
+        // Tactical lock (post-#702, TacticalRadarSelection — not a ShipAiMemory
         // mirror — is what revalidate_ai_targets_after_faction_change clears).
         let npc_uuid_str = "22222222-2222-2222-2222-222222222222";
         let npc_entity = app
@@ -1548,19 +1548,19 @@ mod tests {
                 EntityUuid(npc_uuid_str.to_string()),
                 BehaviourSection(BehaviourConfig::default()),
                 FactionComponent(harrow_uuid),
-                WeaponsTarget::default(),
+                TacticalRadarSelection::default(),
             ))
             .id();
 
         // Let `AiPlugin` attach the `AiControllerComponent` marker.
         app.update();
 
-        // Seed the engagement: NPC's WeaponsTarget locks the player.
+        // Seed the engagement: NPC's TacticalRadarSelection locks the player.
         {
             let mut lock = app
                 .world_mut()
-                .get_mut::<WeaponsTarget>(npc_entity)
-                .expect("WeaponsTarget must be attached");
+                .get_mut::<TacticalRadarSelection>(npc_entity)
+                .expect("TacticalRadarSelection must be attached");
             lock.0 = Some(player_uuid_str.to_string());
         }
 
@@ -1650,12 +1650,15 @@ mod tests {
         );
         let _ = tick(&mut app);
 
-        // The NPC's WeaponsTarget lock must be cleared: Harrow no longer
+        // The NPC's TacticalRadarSelection lock must be cleared: Harrow no longer
         // considers Federation hostile after the response's third action.
-        let lock = app.world().get::<WeaponsTarget>(npc_entity).unwrap();
+        let lock = app
+            .world()
+            .get::<TacticalRadarSelection>(npc_entity)
+            .unwrap();
         assert_eq!(
             lock.0, None,
-            "comms RemoveFactionEnemy must clear WeaponsTarget when the target is no longer hostile"
+            "comms RemoveFactionEnemy must clear TacticalRadarSelection when the target is no longer hostile"
         );
     }
 

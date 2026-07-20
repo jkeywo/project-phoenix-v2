@@ -197,7 +197,7 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::weapons_plugin::WeaponsTarget>,
+        Option<&crate::weapons_plugin::TacticalRadarSelection>,
     )>,
 ) {
     let count = entities.iter().count();
@@ -232,7 +232,7 @@ fn write_entity_debug_state(
         &crate::ai::server::AiControllerComponent,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::weapons_plugin::WeaponsTarget>,
+        Option<&crate::weapons_plugin::TacticalRadarSelection>,
     )>,
 ) {
 }
@@ -253,7 +253,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::weapons_plugin::WeaponsTarget>,
+            Option<&crate::weapons_plugin::TacticalRadarSelection>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
@@ -421,7 +421,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::weapons_plugin::WeaponsTarget>,
+            Option<&crate::weapons_plugin::TacticalRadarSelection>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,

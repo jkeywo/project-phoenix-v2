@@ -31,7 +31,7 @@ pub struct DoctrineObjective {
     #[serde(default)]
     pub directive_loop: bool,
     /// Named target for `Destroy` directives. Resolved by `ai_target_selection`
-    /// (tier 1) onto the ship's `WeaponsTarget`, which is what the Helm and the
+    /// (tier 1) onto the ship's `TacticalRadarSelection`, which is what the Helm and the
     /// firing systems then read.
     #[serde(default)]
     pub directive_target: Option<String>,

@@ -127,4 +127,4 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/settings-panel.js, gui, assets/sounds]
+      paths: [gui/settings-panel.js, assets/sounds]

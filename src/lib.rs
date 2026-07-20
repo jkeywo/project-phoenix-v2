@@ -67,6 +67,7 @@ pub use modifiers::power_system;
 pub use ship::physics as ship_physics;
 pub use ship::state as ship_state;
 pub use ship::system_registry;
+pub mod command_admission;
 pub mod server_app;
 // Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
 pub use server_app as simulation;

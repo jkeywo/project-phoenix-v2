@@ -12,7 +12,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/console-registry.js, gui/console-state.js, gui]
+      paths: [gui/console-registry.js, gui/console-state.js, gui/console-resolver.js, gui/single-station.js]
       tests: [npx vitest run]
 
   - component: client-simulation-state-store

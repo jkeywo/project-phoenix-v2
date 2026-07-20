@@ -103,14 +103,25 @@ entities:
       sends:
         - dispatch-repair-team-command
     implementation:
-      status: declared
+      status: observed
       paths:
         - client.html
         - gui/connection-manager.js
+        - gui/command-gateway.js
       symbols:
         - ConnectionManager
+        - sendControlSystem
+        - controlSystemEnvelope
       tests:
         - tests/client/connection-manager.test.js
+        - tests/client/command-gateway.test.js
+    evidence:
+      - kind: test
+        reference: tests/client/command-gateway.test.js
+        summary: >-
+          gui/command-gateway.js is the explicit client command gateway: it
+          builds every ControlSystem envelope and resolves the transport, either
+          an injected send or the live ConnectionManager singleton.
 
   - component: repair-console-interface
     core:
@@ -143,18 +154,30 @@ entities:
       runs_in:
         - phone-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - gui/battleship/repair.html
         - gui/cruiser/engineering.html
         - gui/destroyer/engineering.html
         - gui/console-state.js
+        - gui/repair-dispatch.js
+        - gui/repair-button.js
       symbols:
         - buildRepairConsoleState
         - repairCoreAndTargets
+        - dispatchRepairTeam
       tests:
         - tests/client/console-state.test.js
         - tests/client/repair-button.test.js
+        - tests/client/repair-dispatch.test.js
+    evidence:
+      - kind: test
+        reference: tests/client/repair-dispatch.test.js
+        summary: >-
+          gui/repair-dispatch.js imports gui/command-gateway.js at module scope,
+          so the console's dependency on the client network interface is an
+          observed code edge; the dispatch_repair_team console action is routed
+          through it.
 
   - state: repair-ui-state
     core:
@@ -238,16 +261,29 @@ entities:
         - dispatch-repair-team-command
       consumes:
         - dispatch-repair-team-command
+      depends_on:
+        - system-command-admission-policy
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
-        - src/server_app.rs
+        - src/command_admission/mod.rs
       symbols:
         - AdmissionPlugin
+        - AdmissionSet
+        - admit_system_commands
+      messages:
+        - ControlSystem
       tests:
         - cargo test
+    evidence:
+      - kind: test
+        reference: dispatch_to_an_ai_controlled_system_rejects_humans_and_admits_ai
+        summary: >-
+          The admission seam is its own module. Unauthorised tokens, offline
+          ratings, damage-driven offline systems, and AI-controlled systems are
+          all rejected by is_command_authorized before any router runs.
 
   - component: host-repair-router
     core:
@@ -271,15 +307,24 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
-        - src/console/repair/server.rs
+        - src/console/repair/dispatch.rs
       symbols:
         - handle_dispatch_repair_team
+        - register_repair_dispatch
       messages:
         - DispatchRepairTeam
       tests:
         - cargo test
+    evidence:
+      - kind: test
+        reference: non_repair_sender_is_ignored
+        summary: >-
+          src/console/repair/dispatch.rs names the admission seam with a
+          top-level `use crate::command_admission::AdmissionSet;` and pins the
+          router `.after(AdmissionSet)`, so it can only ever read commands that
+          admission already validated.
 
   - component: repair-visibility-publisher
     core:
@@ -481,12 +526,10 @@ entities:
         - src/core/messages.rs
         - src/core/codec.rs
         - gui/action-map.js
-        - gui/repair-button.js
       messages:
         - DispatchRepairTeam
       tests:
         - tests/client/action-map.test.js
-        - tests/client/repair-button.test.js
 
   - message: onsite-repair-priority-command
     core:

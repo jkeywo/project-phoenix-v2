@@ -2,10 +2,9 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::lobby::{InboundMessage, LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, DeliveryClass, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
-    StationId, SystemControlPayload,
+    DeliveryClass, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, StationId,
 };
 use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
@@ -323,7 +322,11 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     )
     .add_systems(
         Update,
-        (admit_system_commands, clear_inter_system_queue)
+        (
+            admit_system_commands,
+            crate::command_admission::clear_inter_system_queue,
+        )
+            .in_set(crate::command_admission::AdmissionSet)
             .after(crate::lobby::LobbySystemSet)
             .before(crate::sim_sets::SimSet::Input)
             .run_if(in_state(GamePhase::InProgress)),
@@ -1277,208 +1280,13 @@ pub fn broadcast_blackboard_updates(
     }
 }
 
-/// System set that `admit_system_commands` belongs to. Handlers that run in
-/// `Update` but outside `SimSet::Input` can use `.after(AdmissionSet)` to
-/// guarantee they see a fully-populated `AdmittedCommands`.
-#[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AdmissionSet;
-
-/// Plugin that registers the admission gate and `AdmittedCommands` resource.
-/// Include this in plugin-level test apps so handlers have a populated
-/// `AdmittedCommands` to read from.
-pub struct AdmissionPlugin;
-
-impl Plugin for AdmissionPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::InterSystemQueue>()
-            .init_resource::<crate::ai::server::AiTokenRegistry>()
-            .configure_sets(
-                Update,
-                AdmissionSet
-                    .after(crate::lobby::LobbySystemSet)
-                    .before(crate::sim_sets::SimSet::Input),
-            )
-            .add_systems(
-                Update,
-                (admit_system_commands, clear_inter_system_queue).in_set(AdmissionSet),
-            );
-    }
-}
-
-fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterSystemQueue>) {
-    queue.0.clear();
-}
-
-/// Authority gate for intra-system commands. Runs once per tick before
-/// `SimSet::Input`, clearing and refilling `AdmittedCommands`.
-///
-/// A network `ControlSystem` message is admitted iff its token is the live
-/// controller of the target system: AI tokens require `operate_ai`; human
-/// tokens require `accept_human_input` AND holding the console for that system.
-/// Once admitted the command carries no source identity — handlers must not
-/// branch on the origin.
-fn admit_system_commands(
-    mut reader: MessageReader<InboundMessage>,
-    mut ship_query: Query<
-        (
-            Entity,
-            &crate::ship_plugin::ShipSystemControlSources,
-            &mut crate::messages::AdmittedCommands,
-            &crate::ship_plugin::ShipConfigComponent,
-        ),
-        With<LocalShip>,
-    >,
-    sessions: Res<Sessions>,
-    ai_registry: Res<crate::ai::server::AiTokenRegistry>,
-    log: Option<Res<crate::logging::LogFilterConfig>>,
-) {
-    use crate::logging::LogCat;
-    let Some((ship_entity, control_sources, mut admitted, ship_config)) =
-        ship_query.iter_mut().next()
-    else {
-        return;
-    };
-    admitted.0.clear();
-    for ev in reader.read() {
-        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
-        };
-        // Reject registered NPC ai: tokens that don't belong to the player ship.
-        // Only tokens present in AiTokenRegistry are NPC-owned; unregistered ai:
-        // tokens (player Backfill AI or synthetic test tokens) pass through.
-        if ev.token.starts_with("ai:") {
-            if let Some(entity) = ai_registry.bevy_entity_for_token(&ev.token) {
-                if entity != ship_entity {
-                    crate::pwarn!(
-                        log,
-                        LogCat::Admit,
-                        entity = ship_entity,
-                        "rejected NPC ai: token {} → {:?}",
-                        &ev.token[..ev.token.len().min(12)],
-                        std::mem::discriminant(payload),
-                    );
-                    continue;
-                }
-            }
-        }
-        if is_command_authorized(
-            &ev.token,
-            target,
-            payload,
-            control_sources,
-            &sessions,
-            &ship_config.0,
-        ) {
-            crate::ptrace!(
-                log,
-                LogCat::Admit,
-                entity = ship_entity,
-                "admitted {:?} → {:?} from token={}",
-                target.0,
-                std::mem::discriminant(payload),
-                &ev.token[..ev.token.len().min(8)],
-            );
-            admitted.0.push(crate::messages::AdmittedCommand {
-                target: target.clone(),
-                payload: payload.clone(),
-                response_token: Some(ev.token.clone()),
-            });
-        } else {
-            crate::pwarn!(
-                log,
-                LogCat::Admit,
-                entity = ship_entity,
-                "rejected {:?} → {:?} from token={}",
-                target.0,
-                std::mem::discriminant(payload),
-                &ev.token[..ev.token.len().min(8)],
-            );
-        }
-    }
-}
-
-/// Maps a `SystemId` to the `StationId` whose holder is authoritative for
-/// that system's admission. Returns `None` for systems with no owning
-/// station (either ship-wide or unknown), signalling a deny at the
-/// caller.
-///
-/// Lookup order:
-///   1. Shield-arc prefix match — arcs are not auto-generated into
-///      `ShipConfig.systems` (they're synthesised at the entity-config layer),
-///      so they must be matched by prefix.
-///   2. Direct system→station from the config's `[[system]]` blocks
-///      (handles fine-grained systems and modern coarse systems).
-///   3. Station-name fallback: if the target string matches a known station
-///      id, treat it as the owning station (backward compatibility with
-///      deprecated coarse systems like `"power"` whose `[[system]]` entry
-///      was removed during fine-grained refactoring).
-///   4. `None` — truly unknown system id, caller will deny.
-fn station_for_system(
-    config: &crate::ship::config::ShipConfig,
-    target: &crate::messages::SystemId,
-) -> Option<StationId> {
-    // Step 1: shield-arc prefix (arcs are not in `config.systems`).
-    if target.0.starts_with("shield-arc-") {
-        return Some(StationId("shields".into()));
-    }
-    // Step 2: direct system lookup.
-    if let Some(system) = config.system(target) {
-        return system.station.clone();
-    }
-    // Step 3: station-name fallback — does the target match a known station?
-    let candidate = StationId(target.0.clone());
-    if config.station(&candidate).is_some() {
-        return Some(candidate);
-    }
-    // Step 4: unknown.
-    None
-}
-
-fn is_command_authorized(
-    token: &str,
-    target: &crate::messages::SystemId,
-    payload: &SystemControlPayload,
-    control_sources: &crate::ship_plugin::ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    config: &crate::ship::config::ShipConfig,
-) -> bool {
-    // Viewscreen SetView: authority derives from the view mode's source system.
-    let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
-        if let SystemControlPayload::SetView { mode } = payload {
-            crate::ship::viewscreen::source_system_for_view_mode(mode)
-        } else {
-            target.clone()
-        }
-    } else {
-        target.clone()
-    };
-
-    let policy = control_sources.0.policy_for(&effective_target);
-
-    if token.starts_with("ai:") {
-        return policy.operate_ai;
-    }
-    if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN {
-        return policy.accept_human_input;
-    }
-    if !policy.accept_human_input {
-        return false;
-    }
-
-    // Human network token: must hold the station for the target system.
-    match station_for_system(config, &effective_target) {
-        Some(station) => sessions.0.holder_for_station(&station) == Some(token),
-        None => {
-            // Plain fn, no `LogFilterConfig` in scope — a bare targeted `warn!`
-            // rather than growing a parameter for it. See `crate::logging`.
-            warn!(
-                target: crate::logging::LogCat::Admit.target(),
-                "unknown system id {:?} — denying", effective_target.0
-            );
-            false
-        }
-    }
-}
+// The command-admission seam lives in its own module (issue #736) so that
+// dependants can name it with an explicit `use crate::command_admission::…;`.
+// Re-exported here so the existing `crate::server_app::Admission*` call sites
+// keep resolving unchanged.
+pub use crate::command_admission::{
+    admit_system_commands, is_command_authorized, station_for_system, AdmissionPlugin, AdmissionSet,
+};
 
 /// When a player reconnects mid-game (Identify during InProgress),
 /// `handle_identify_system` (in `LobbySystemSet`) queues a `Welcome { .. }` into
@@ -3394,7 +3202,10 @@ station = "pilot"
         )
         .add_systems(
             Update,
-            (admit_system_commands, clear_inter_system_queue)
+            (
+                admit_system_commands,
+                crate::command_admission::clear_inter_system_queue,
+            )
                 .after(crate::lobby::LobbySystemSet)
                 .before(crate::sim_sets::SimSet::Input),
         )

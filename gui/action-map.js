@@ -16,6 +16,8 @@
  *   window.ACTION_MAP  (for inspection / extension)
  */
 
+import { dispatchRepairTeam } from './repair-dispatch.js';
+
 export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank. */
   fire_phaser: (a, send) => {
@@ -230,16 +232,7 @@ export const ACTION_MAP = Object.freeze({
    * `RepairTarget::Core` and is sent as `{ type: 'Core' }`.
    */
   dispatch_repair_team: (a, send) => {
-    const target = a.target === 'core'
-      ? { type: 'Core' }
-      : { type: 'Station', data: a.target };
-    send('ControlSystem', {
-      target: 'repair',
-      payload: {
-        type: 'DispatchRepairTeam',
-        data: { team_idx: a.team_idx, target },
-      },
-    });
+    dispatchRepairTeam(a.team_idx, a.target, send);
   },
 
   /**

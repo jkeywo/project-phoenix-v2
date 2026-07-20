@@ -158,10 +158,17 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/ship_plugin.rs]
-      symbols: [AdmissionPlugin, admit_system_commands]
-      messages: [ControlSystem]
+      paths: [src/command_admission/policy.rs]
+      symbols: [is_command_authorized, station_for_system]
       tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: dispatch_to_an_ai_controlled_system_rejects_humans_and_admits_ai
+        summary: >-
+          The policy predicate is its own module: it resolves the owning
+          station from the ship config and consults the control-source policy,
+          so unauthorised, offline, damaged, and AI-controlled targets are all
+          denied before any handler runs.
 
   - message: system-control-command
     core:

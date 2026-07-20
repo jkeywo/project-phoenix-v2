@@ -64,6 +64,9 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    // Generic system-id-keyed payload (issue #825): resolve each panel's view
+    // from the fine system ids this station owns.
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'engineering',
       render: function(s) {
@@ -71,24 +74,24 @@
         var bat = document.getElementById('battery-bar');
         var rep = document.getElementById('repair-teams');
         var hul = document.getElementById('hull-integrity');
-        if (s.power) {
-          var p = s.power;
-          pwr.state = { groups: p.consoles || [], auto: !!p.power_auto };
-          bat.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
-        }
-        if (s.repair) {
-          var r = s.repair;
-          // Overall ship-wide hull (every damageable system), not just this
-          // station's own systems.
-          var oh = r.overall_hull || {};
-          hul.state = { total_pct: oh.pct != null ? oh.pct : 1 };
-          // Ownerless "core" systems get their own click-to-expand bar that
-          // hides itself entirely when there are none (issue #12).
-          document.getElementById('core-damage').state = { entries: r.core_systems || [] };
-          rep.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
-        }
+        var p = system(s, 'power-reactor', 'power-battery');
+        var r = system(s, 'repair');
+        pwr.state = { groups: p.consoles || [], auto: !!p.power_auto };
+        bat.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
+        // Overall ship-wide hull (every damageable system), not just this
+        // station's own systems.
+        var oh = r.overall_hull || {};
+        hul.state = { total_pct: oh.pct != null ? oh.pct : 1 };
+        // Ownerless "core" systems get their own click-to-expand bar that
+        // hides itself entirely when there are none (issue #12).
+        document.getElementById('core-damage').state = { entries: r.core_systems || [] };
+        rep.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
-        setAutoState(null, document.getElementById('engineering-auto-badge'), !!s.engineering_auto);
+        // Station badge: the retired composite's engineering_auto meant
+        // "station is Backfill-rated". The per-system equivalent is every
+        // owned system AI-run — the conjunction of the resolved views' *_auto
+        // flags (controlSources can lag a rating change by one tick).
+        setAutoState(null, document.getElementById('engineering-auto-badge'), !!(p.power_auto && r.repair_auto));
       }
     });
   </script>

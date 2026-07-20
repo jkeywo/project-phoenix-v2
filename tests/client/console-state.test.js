@@ -19,14 +19,7 @@ import {
   buildSensorsConsoleState,
   buildCommsConsoleState,
   buildNavigationConsoleState,
-  buildScienceConsoleState,
-  buildEngineeringConsoleState,
-  buildCourierConsoleState,
   buildSystemStationConsoleState,
-  buildCruiserCommsConsoleState,
-  buildDestroyerCaptainConsoleState,
-  buildDestroyerTacticalConsoleState,
-  buildDestroyerEngineeringConsoleState,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { t, getTable } from '../../gui/strings.js';
@@ -849,24 +842,16 @@ describe('buildPowerConsoleState', () => {
     expect(() => parse(buildPowerConsoleState(EMPTY))).not.toThrow();
   });
 
-  it('all allocations default to 0', () => {
+  it('renders empty blackboard-shaped defaults before the first power blackboard', () => {
+    // The legacy PowerState fallback (state.powerHelm etc.) was removed in
+    // issue #825 — no writer existed. Missing blackboard now yields defaults.
     const s = parse(buildPowerConsoleState(EMPTY));
-    expect(s.helm).toBe(0);
-    expect(s.weapons).toBe(0);
-    expect(s.sensors).toBe(0);
+    expect(s.consoles).toEqual([]);
+    expect(s.total).toBe(0);
     expect(s.battery_charge).toBe(0);
     expect(s.locked).toBe(false);
-  });
-
-  it('passes power values through', () => {
-    const s = parse(buildPowerConsoleState({
-      powerHelm: 2, powerWeapons: 3, powerSensors: 1, powerBattery: 50, powerLocked: true,
-    }));
-    expect(s.helm).toBe(2);
-    expect(s.weapons).toBe(3);
-    expect(s.sensors).toBe(1);
-    expect(s.battery_charge).toBe(50);
-    expect(s.locked).toBe(true);
+    expect(s.reactor_online).toBe(true);
+    expect(s.battery_online).toBe(true);
   });
 
   it('reads blackboard groups (PowerGroupId-keyed)', () => {
@@ -1137,48 +1122,57 @@ describe('buildSensorsConsoleState', () => {
   });
 });
 
-describe('buildScienceConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildScienceConsoleState(EMPTY))).not.toThrow();
+// ── science station (generic system-id-keyed payload, issue #825) ─────────────
+
+describe('science station via buildSystemStationConsoleState', () => {
+  // Cruiser science station as declared in assets/entities/alliance_cruiser.toml.
+  const SCIENCE_SYSTEMS = { science: ['sensors', 'sensor-radar', 'shields-system'] };
+
+  it('returns valid JSON with the generic shape', () => {
+    const s = parse(buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS }));
+    expect(s.station_id).toBe('science');
+    expect(s.system_ids).toEqual(SCIENCE_SYSTEMS.science);
+    expect(s).toHaveProperty('systems');
   });
 
-  it('contains sensors and shields sub-objects', () => {
-    const s = parse(buildScienceConsoleState(EMPTY));
-    expect(s).toHaveProperty('sensors');
-    expect(s).toHaveProperty('shields');
-    expect(s.sensors).toHaveProperty('blips');
-    expect(s.shields).toHaveProperty('grid_status');
+  it('exposes the sensors view under both owned sensors ids and shields under shields-system', () => {
+    const s = parse(buildSystemStationConsoleState('science', { stationSystems: SCIENCE_SYSTEMS }));
+    expect(s.systems['sensors']).toHaveProperty('blips');
+    expect(s.systems['sensor-radar']).toHaveProperty('blips');
+    expect(s.systems['shields-system']).toHaveProperty('grid_status');
+    expect(s.systems).not.toHaveProperty('repair');
   });
 
-  it('science_auto is true when stationRatings.science === Backfill', () => {
-    expect(parse(buildScienceConsoleState({ stationRatings: { science: 'Backfill' } })).science_auto).toBe(true);
+  it('per-system auto flags come from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('science', {
+      stationSystems: SCIENCE_SYSTEMS,
+      controlSources: { 'sensors': 'Ai', 'sensor-radar': 'Ai', 'shields-system': 'Human' },
+    }));
+    expect(s.systems['sensors'].sensors_auto).toBe(true);
+    expect(s.systems['shields-system'].shields_auto).toBe(false);
   });
 
-  it('science_auto is false when stationRatings.science is a different rating', () => {
-    expect(parse(buildScienceConsoleState({ stationRatings: { science: 'Full' } })).science_auto).toBe(false);
-  });
-
-  it('science_auto is false when stationRatings is absent', () => {
-    expect(parse(buildScienceConsoleState(EMPTY)).science_auto).toBe(false);
-  });
-
-  it('passes sensors target state through the nested sensors sub-object', () => {
+  it('passes sensors target state through the sensors view', () => {
     const state = {
+      stationSystems: SCIENCE_SYSTEMS,
       shipX: 0, shipZ: 0, shipYaw: 0,
       sensorsTarget: 'tgt-1',
       asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate' }],
     };
-    const s = parse(buildScienceConsoleState(state));
-    expect(s.sensors.target_uuid).toBe('tgt-1');
-    expect(s.sensors.target_name).toBe('Raider');
-    expect(s.sensors.target_stance).toBe('hostile');
-    expect(s.sensors.target_faction).toBe('pirate');
+    const s = parse(buildSystemStationConsoleState('science', state));
+    expect(s.systems['sensors'].target_uuid).toBe('tgt-1');
+    expect(s.systems['sensors'].target_name).toBe('Raider');
+    expect(s.systems['sensors'].target_stance).toBe('hostile');
+    expect(s.systems['sensors'].target_faction).toBe('pirate');
   });
 
-  it('passes shields facings through the nested shields sub-object', () => {
-    const s = parse(buildScienceConsoleState({ shieldFacings: ['fore', 'port', 'aft', 'starboard'] }));
-    expect(s.shields.grid_status).toBe('GRID NOMINAL');
-    expect(s.shields.facings).toEqual(['fore', 'port', 'aft', 'starboard']);
+  it('passes shields facings through the shields view', () => {
+    const s = parse(buildSystemStationConsoleState('science', {
+      stationSystems: SCIENCE_SYSTEMS,
+      shieldFacings: ['fore', 'port', 'aft', 'starboard'],
+    }));
+    expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
+    expect(s.systems['shields-system'].facings).toEqual(['fore', 'port', 'aft', 'starboard']);
   });
 });
 
@@ -1644,47 +1638,36 @@ describe('auto fields', () => {
   });
 });
 
-// ── buildEngineeringConsoleState (issue #627) ─────────────────────────────────
+// ── cruiser engineering station (generic payload, issue #825) ─────────────────
 
-describe('buildEngineeringConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildEngineeringConsoleState(EMPTY))).not.toThrow();
+describe('cruiser engineering station via buildSystemStationConsoleState', () => {
+  // Cruiser engineering station (power + repair, no shields) as declared in
+  // assets/entities/alliance_cruiser.toml.
+  const ENG_SYSTEMS = { engineering: ['power-reactor', 'power-battery', 'repair'] };
+
+  it('returns the generic shape with power views under both power ids and a repair view', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    expect(s.station_id).toBe('engineering');
+    expect(s.system_ids).toEqual(ENG_SYSTEMS.engineering);
+    expect(s.systems['power-reactor']).toBeDefined();
+    expect(s.systems['power-battery']).toBeDefined();
+    expect(s.systems['repair']).toHaveProperty('teams');
+    expect(Array.isArray(s.systems['repair'].teams)).toBe(true);
+    expect(s.systems).not.toHaveProperty('shields-system');
   });
 
-  it('contains power and repair sub-objects', () => {
-    const s = parse(buildEngineeringConsoleState(EMPTY));
-    expect(s).toHaveProperty('power');
-    expect(s).toHaveProperty('repair');
+  it('per-system auto flags come from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      controlSources: { 'power-reactor': 'Ai', repair: 'Human' },
+    }));
+    expect(s.systems['power-reactor'].power_auto).toBe(true);
+    expect(s.systems['repair'].repair_auto).toBe(false);
   });
 
-  it('power sub-object has expected fields', () => {
-    const s = parse(buildEngineeringConsoleState(EMPTY));
-    // buildPowerConsoleState returns either consoles+total or helm+weapons+sensors depending on state
-    expect(s.power).toBeDefined();
-  });
-
-  it('repair sub-object has teams field', () => {
-    const s = parse(buildEngineeringConsoleState(EMPTY));
-    expect(s.repair).toHaveProperty('teams');
-    expect(Array.isArray(s.repair.teams)).toBe(true);
-  });
-
-  it('engineering_auto is true when stationRatings.engineering === Backfill', () => {
-    const s = parse(buildEngineeringConsoleState({ stationRatings: { engineering: 'Backfill' } }));
-    expect(s.engineering_auto).toBe(true);
-  });
-
-  it('engineering_auto is false when stationRatings.engineering is a different rating', () => {
-    const s = parse(buildEngineeringConsoleState({ stationRatings: { engineering: 'Full' } }));
-    expect(s.engineering_auto).toBe(false);
-  });
-
-  it('engineering_auto is false when stationRatings is absent', () => {
-    expect(parse(buildEngineeringConsoleState(EMPTY)).engineering_auto).toBe(false);
-  });
-
-  it('passes power blackboard state through the nested power sub-object', () => {
+  it('passes power blackboard state through the power view', () => {
     const state = {
+      stationSystems: ENG_SYSTEMS,
       blackboards: {
         power: {
           groups: [{ id: 'helm', label: 'HELM', level: 3, max_level: 4 }],
@@ -1696,14 +1679,15 @@ describe('buildEngineeringConsoleState', () => {
         },
       },
     };
-    const s = parse(buildEngineeringConsoleState(state));
-    expect(s.power.consoles).toHaveLength(1);
-    expect(s.power.consoles[0].id).toBe('helm');
-    expect(s.power.battery_charge).toBe(75);
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['power-reactor'].consoles).toHaveLength(1);
+    expect(s.systems['power-reactor'].consoles[0].id).toBe('helm');
+    expect(s.systems['power-battery'].battery_charge).toBe(75);
   });
 
-  it('passes repair blackboard state through the nested repair sub-object', () => {
+  it('passes repair blackboard state through the repair view', () => {
     const state = {
+      stationSystems: ENG_SYSTEMS,
       blackboards: {
         repair: {
           teams: ['Idle', 'Idle'],
@@ -1713,53 +1697,61 @@ describe('buildEngineeringConsoleState', () => {
         },
       },
     };
-    const s = parse(buildEngineeringConsoleState(state));
-    expect(s.repair.teams).toHaveLength(2);
-    expect(s.repair.system_hull[0].system_id).toBe('helm');
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['repair'].teams).toHaveLength(2);
+    expect(s.systems['repair'].system_hull[0].system_id).toBe('helm');
   });
 });
 
-// ── buildCruiserCommsConsoleState (issue #627) ────────────────────────────────
+// ── cruiser comms station (generic payload, issue #825) ───────────────────────
 
-describe('buildCruiserCommsConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildCruiserCommsConsoleState(EMPTY))).not.toThrow();
+describe('cruiser comms station via buildSystemStationConsoleState', () => {
+  // Cruiser comms station (navigation + comms) as declared in
+  // assets/entities/alliance_cruiser.toml.
+  const COMMS_SYSTEMS = { comms: ['navigation', 'comms'] };
+
+  it('returns the generic shape with navigation and comms views', () => {
+    const s = parse(buildSystemStationConsoleState('comms', { stationSystems: COMMS_SYSTEMS }));
+    expect(s.station_id).toBe('comms');
+    expect(s.system_ids).toEqual(COMMS_SYSTEMS.comms);
+    expect(s.systems['navigation']).toHaveProperty('blips');
+    expect(s.systems['navigation']).toHaveProperty('waypoint');
+    expect(s.systems['comms']).toHaveProperty('messages');
+    expect(s.systems['comms']).toHaveProperty('contacts');
+    expect(Array.isArray(s.systems['comms'].messages)).toBe(true);
+    expect(Array.isArray(s.systems['comms'].contacts)).toBe(true);
   });
 
-  it('contains navigation and comms sub-objects', () => {
-    const s = parse(buildCruiserCommsConsoleState(EMPTY));
-    expect(s).toHaveProperty('navigation');
-    expect(s).toHaveProperty('comms');
+  it('navigation_auto comes from the navigation system control source on the composed path (issue #825)', () => {
+    // The plain buildNavigationConsoleState keeps its rating-derived flag for
+    // the battleship's dedicated navigation station; the generic composed
+    // path overrides it from controlSources like every other family — no
+    // cruiser/destroyer hull declares a station named 'navigation', so the
+    // rating-derived flag could never light on a composed console.
+    const auto = parse(buildSystemStationConsoleState('comms', {
+      stationSystems: COMMS_SYSTEMS, controlSources: { navigation: 'Ai' },
+    }));
+    expect(auto.systems['navigation'].navigation_auto).toBe(true);
+    const manual = parse(buildSystemStationConsoleState('comms', {
+      stationSystems: COMMS_SYSTEMS, controlSources: { navigation: 'Human' },
+    }));
+    expect(manual.systems['navigation'].navigation_auto).toBe(false);
   });
 
-  it('navigation sub-object has blips and waypoint fields', () => {
-    const s = parse(buildCruiserCommsConsoleState(EMPTY));
-    expect(s.navigation).toHaveProperty('blips');
-    expect(s.navigation).toHaveProperty('waypoint');
+  it('comms_auto comes from the comms system control source', () => {
+    const auto = parse(buildSystemStationConsoleState('comms', {
+      stationSystems: COMMS_SYSTEMS, controlSources: { comms: 'Ai' },
+    }));
+    expect(auto.systems['comms'].comms_auto).toBe(true);
+    const manual = parse(buildSystemStationConsoleState('comms', {
+      stationSystems: COMMS_SYSTEMS, controlSources: { comms: 'Human' },
+    }));
+    expect(manual.systems['comms'].comms_auto).toBe(false);
   });
 
-  it('comms sub-object has messages and contacts fields', () => {
-    const s = parse(buildCruiserCommsConsoleState(EMPTY));
-    expect(s.comms).toHaveProperty('messages');
-    expect(s.comms).toHaveProperty('contacts');
-    expect(Array.isArray(s.comms.messages)).toBe(true);
-    expect(Array.isArray(s.comms.contacts)).toBe(true);
-  });
-
-  it('comms_auto is true when stationRatings.comms === Backfill', () => {
-    expect(parse(buildCruiserCommsConsoleState({ stationRatings: { comms: 'Backfill' } })).comms_auto).toBe(true);
-  });
-
-  it('comms_auto is false when stationRatings.comms is a different rating', () => {
-    expect(parse(buildCruiserCommsConsoleState({ stationRatings: { comms: 'Full' } })).comms_auto).toBe(false);
-  });
-
-  it('comms_auto is false when stationRatings is absent', () => {
-    expect(parse(buildCruiserCommsConsoleState(EMPTY)).comms_auto).toBe(false);
-  });
-
-  it('passes navigation blackboard through the nested navigation sub-object', () => {
+  it('passes navigation blackboard through the navigation view', () => {
     const state = {
+      stationSystems: COMMS_SYSTEMS,
       blackboards: {
         navigation: {
           nav_chart_range: 1000,
@@ -1770,22 +1762,23 @@ describe('buildCruiserCommsConsoleState', () => {
       shipX: 10,
       shipZ: 20,
     };
-    const s = parse(buildCruiserCommsConsoleState(state));
-    expect(s.navigation.ship_x).toBe(10);
-    expect(s.navigation.ship_z).toBe(20);
-    expect(s.navigation.radar_range).toBe(1000);
+    const s = parse(buildSystemStationConsoleState('comms', state));
+    expect(s.systems['navigation'].ship_x).toBe(10);
+    expect(s.systems['navigation'].ship_z).toBe(20);
+    expect(s.systems['navigation'].radar_range).toBe(1000);
   });
 
-  it('passes comms blackboard messages through the nested comms sub-object', () => {
+  it('passes comms blackboard messages through the comms view', () => {
     const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
     const state = {
+      stationSystems: COMMS_SYSTEMS,
       blackboards: {
         comms: { messages: msgs, contacts: [], objectives: [] },
       },
     };
-    const s = parse(buildCruiserCommsConsoleState(state));
-    expect(s.comms.messages).toHaveLength(1);
-    expect(s.comms.messages[0].id).toBe('msg-1');
+    const s = parse(buildSystemStationConsoleState('comms', state));
+    expect(s.systems['comms'].messages).toHaveLength(1);
+    expect(s.systems['comms'].messages[0].id).toBe('msg-1');
   });
 });
 
@@ -1866,109 +1859,113 @@ describe('aggregateStationHull', () => {
   });
 });
 
-// ── buildDestroyerCaptainConsoleState (issue #628) ────────────────────────────
+// ── destroyer captain station (generic payload, issue #825) ───────────────────
 
-describe('buildDestroyerCaptainConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildDestroyerCaptainConsoleState(EMPTY))).not.toThrow();
+describe('destroyer captain station via buildSystemStationConsoleState', () => {
+  // Destroyer captain station (command + sensors) as declared in
+  // assets/entities/alliance_destroyer.toml.
+  const CAPTAIN_SYSTEMS = { captain: ['captain', 'red-alert', 'viewscreen', 'sensors', 'sensor-radar'] };
+
+  it('returns the generic shape with captain and sensors views', () => {
+    const s = parse(buildSystemStationConsoleState('captain', { stationSystems: CAPTAIN_SYSTEMS }));
+    expect(s.station_id).toBe('captain');
+    expect(s.system_ids).toEqual(CAPTAIN_SYSTEMS.captain);
+    expect(s.systems['captain']).toHaveProperty('red_alert');
+    expect(s.systems['captain'].red_alert).toBe(false);
+    expect(s.systems['red-alert']).toHaveProperty('red_alert');
+    expect(s.systems['viewscreen']).toHaveProperty('view_direction');
+    expect(s.systems['sensors']).toHaveProperty('blips');
+    expect(Array.isArray(s.systems['sensor-radar'].blips)).toBe(true);
   });
 
-  it('contains captain and sensors sub-objects', () => {
-    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
-    expect(s).toHaveProperty('captain');
-    expect(s).toHaveProperty('sensors');
+  it('per-system auto flags come from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('captain', {
+      stationSystems: CAPTAIN_SYSTEMS,
+      controlSources: { 'red-alert': 'Ai', viewscreen: 'Human', sensors: 'Ai', 'sensor-radar': 'Ai' },
+    }));
+    expect(s.systems['captain'].red_alert_auto).toBe(true);
+    expect(s.systems['captain'].viewscreen_auto).toBe(false);
+    expect(s.systems['sensors'].sensors_auto).toBe(true);
   });
 
-  it('captain sub-object has red_alert field', () => {
-    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
-    expect(s.captain).toHaveProperty('red_alert');
-    expect(s.captain.red_alert).toBe(false);
+  it('passes captain state through the captain view', () => {
+    const s = parse(buildSystemStationConsoleState('captain', {
+      stationSystems: CAPTAIN_SYSTEMS, redAlert: true,
+    }));
+    expect(s.systems['captain'].red_alert).toBe(true);
+    expect(s.systems['captain'].game_status).toMatch(/RED ALERT/);
   });
 
-  it('sensors sub-object has blips field', () => {
-    const s = parse(buildDestroyerCaptainConsoleState(EMPTY));
-    expect(s.sensors).toHaveProperty('blips');
-    expect(Array.isArray(s.sensors.blips)).toBe(true);
-  });
-
-  it('captain_auto is true when stationRatings.captain === Backfill', () => {
-    const s = parse(buildDestroyerCaptainConsoleState({ stationRatings: { captain: 'Backfill' } }));
-    expect(s.captain_auto).toBe(true);
-  });
-
-  it('captain_auto is false when stationRatings.captain is a different rating', () => {
-    const s = parse(buildDestroyerCaptainConsoleState({ stationRatings: { captain: 'Full' } }));
-    expect(s.captain_auto).toBe(false);
-  });
-
-  it('captain_auto is false when stationRatings is absent', () => {
-    expect(parse(buildDestroyerCaptainConsoleState(EMPTY)).captain_auto).toBe(false);
-  });
-
-  it('passes captain state through the nested captain sub-object', () => {
-    const s = parse(buildDestroyerCaptainConsoleState({ redAlert: true }));
-    expect(s.captain.red_alert).toBe(true);
-    expect(s.captain.game_status).toMatch(/RED ALERT/);
-  });
-
-  it('passes sensors target state through the nested sensors sub-object', () => {
+  it('passes sensors target state through the sensors view', () => {
     const state = {
+      stationSystems: CAPTAIN_SYSTEMS,
       shipX: 0, shipZ: 0, shipYaw: 0,
       sensorsTarget: 'tgt-1',
       asteroids: [{ uuid: 'tgt-1', x: 0, z: -100, tags: ['ship'], name: 'Raider', stance: 'hostile', faction: 'pirate', radar_icon: 'ship' }],
     };
-    const s = parse(buildDestroyerCaptainConsoleState(state));
-    expect(s.sensors.target_uuid).toBe('tgt-1');
-    expect(s.sensors.target_name).toBe('Raider');
+    const s = parse(buildSystemStationConsoleState('captain', state));
+    expect(s.systems['sensors'].target_uuid).toBe('tgt-1');
+    expect(s.systems['sensors'].target_name).toBe('Raider');
   });
 });
 
-// ── buildCourierConsoleState (single-station Courier) ─────────────────────────
+// ── courier pilot station (generic payload, issue #825) ───────────────────────
+// No shipped TOML declares a 'pilot' station any more; this is a hand-built
+// fixture pinning the dormant single-pilot Courier layout so the generic
+// builder keeps narrowing correctly (power/shields/repair not owned → absent).
 
-describe('buildCourierConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildCourierConsoleState(EMPTY))).not.toThrow();
-  });
+describe('courier pilot station via buildSystemStationConsoleState', () => {
+  const PILOT_SYSTEMS = {
+    pilot: [
+      'captain', 'viewscreen', 'red-alert',
+      'helm-thrust', 'helm-steering', 'helm-joystick',
+      'tactical-radar', 'blaster-fore',
+      'sensors', 'sensor-radar',
+      'navigation', 'comms',
+    ],
+  };
 
-  it('contains every sub-object the pilot console reads', () => {
-    const s = parse(buildCourierConsoleState(EMPTY));
-    for (const key of ['weapons', 'sensors', 'navigation', 'comms', 'captain', 'helm']) {
-      expect(s).toHaveProperty(key);
+  it('contains a view for every family the pilot page renders', () => {
+    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    expect(s.station_id).toBe('pilot');
+    for (const id of ['tactical-radar', 'blaster-fore', 'sensors', 'navigation', 'comms', 'captain', 'helm-thrust']) {
+      expect(s.systems).toHaveProperty(id);
     }
   });
 
-  it('omits power, shields and repair — those are AI-run with no pilot panel', () => {
-    const s = parse(buildCourierConsoleState(EMPTY));
-    expect(s).not.toHaveProperty('power');
-    expect(s).not.toHaveProperty('shields');
-    expect(s).not.toHaveProperty('repair');
+  it('omits power, shields and repair — the pilot owns none of those systems', () => {
+    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    expect(s.systems).not.toHaveProperty('power-reactor');
+    expect(s.systems).not.toHaveProperty('shields-system');
+    expect(s.systems).not.toHaveProperty('repair');
   });
 
-  it('weapons sub-object carries the blips and ship position the one radar needs', () => {
-    const s = parse(buildCourierConsoleState(EMPTY));
-    expect(s.weapons).toHaveProperty('blips');
-    expect(s.weapons).toHaveProperty('blasters');
-    expect(s.weapons).toHaveProperty('ship_x');
-    expect(s.weapons).toHaveProperty('ship_z');
-    expect(s.weapons).toHaveProperty('ship_heading');
+  it('weapons view carries the blips and ship position the one radar needs', () => {
+    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
+    const w = s.systems['tactical-radar'];
+    expect(w).toHaveProperty('blips');
+    expect(w).toHaveProperty('blasters');
+    expect(w).toHaveProperty('ship_x');
+    expect(w).toHaveProperty('ship_z');
+    expect(w).toHaveProperty('ship_heading');
   });
 
-  it('helm sub-object carries the flight-control fields', () => {
-    const s = parse(buildCourierConsoleState(EMPTY));
+  it('helm view carries the flight-control fields', () => {
+    const s = parse(buildSystemStationConsoleState('pilot', { stationSystems: PILOT_SYSTEMS }));
     for (const key of ['helm_auto', 'lateral_auto', 'boost_enabled', 'boost_active', 'impulse_charge_progress']) {
-      expect(s.helm).toHaveProperty(key);
+      expect(s.systems['helm-thrust']).toHaveProperty(key);
     }
   });
 
-  it('captain sub-object carries objectives and the camera view for the Fore/Cinematic buttons', () => {
-    const s = parse(buildCourierConsoleState({
+  it('captain view carries objectives and the camera view for the Fore/Cinematic buttons', () => {
+    const s = parse(buildSystemStationConsoleState('pilot', {
+      stationSystems: PILOT_SYSTEMS,
       blackboards: { captain: { red_alert: true, view_direction: 'cinematic', objectives: [] } },
     }));
-    expect(s.captain.red_alert).toBe(true);
-    expect(s.captain.view_direction).toBe('cinematic');
-    expect(s.captain).toHaveProperty('objectives');
+    expect(s.systems['captain'].red_alert).toBe(true);
+    expect(s.systems['captain'].view_direction).toBe('cinematic');
+    expect(s.systems['captain']).toHaveProperty('objectives');
   });
-
 });
 
 describe('buildSystemStationConsoleState', () => {
@@ -1986,67 +1983,75 @@ describe('buildSystemStationConsoleState', () => {
     expect(s.systems).toHaveProperty('repair');
     expect(s.systems).not.toHaveProperty('sensors');
   });
+
+  // Acceptance criterion (issue #825): TOML can move a system between stations
+  // without any console-state.js change — the view simply follows the id.
+  it('a system moved between stations in TOML follows its id with no code change', () => {
+    const before = {
+      stationSystems: {
+        comms: ['navigation', 'comms'],
+        tactical: ['tactical-radar', 'phaser-control'],
+      },
+    };
+    const after = {
+      stationSystems: {
+        comms: ['comms'],
+        tactical: ['tactical-radar', 'phaser-control', 'navigation'],
+      },
+    };
+    const commsBefore = parse(buildSystemStationConsoleState('comms', before));
+    const tacticalBefore = parse(buildSystemStationConsoleState('tactical', before));
+    expect(commsBefore.systems).toHaveProperty('navigation');
+    expect(tacticalBefore.systems).not.toHaveProperty('navigation');
+
+    const commsAfter = parse(buildSystemStationConsoleState('comms', after));
+    const tacticalAfter = parse(buildSystemStationConsoleState('tactical', after));
+    expect(commsAfter.systems).not.toHaveProperty('navigation');
+    expect(tacticalAfter.systems).toHaveProperty('navigation');
+    expect(tacticalAfter.systems['navigation']).toHaveProperty('blips');
+    expect(tacticalAfter.systems['navigation']).toHaveProperty('waypoint');
+  });
 });
 // The 'pilot' dispatch and own_hull routing need window.buildConsoleState,
 // which only exists under jsdom — see tests/client/console-state-resolver.test.js.
 
-// ── buildDestroyerTacticalConsoleState (issue #628) ───────────────────────────
+// ── destroyer tactical station (generic payload, issue #825) ──────────────────
 
-describe('buildDestroyerTacticalConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildDestroyerTacticalConsoleState(EMPTY))).not.toThrow();
+describe('destroyer tactical station via buildSystemStationConsoleState', () => {
+  // Destroyer tactical station (weapons + navigation + comms) as declared in
+  // assets/entities/alliance_destroyer.toml (weapon ids abridged).
+  const TACTICAL_SYSTEMS = {
+    tactical: ['tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard', 'navigation', 'comms'],
+  };
+
+  it('returns the generic shape with weapons, navigation and comms views', () => {
+    const s = parse(buildSystemStationConsoleState('tactical', { stationSystems: TACTICAL_SYSTEMS }));
+    expect(s.station_id).toBe('tactical');
+    expect(s.systems['tactical-radar']).toHaveProperty('banks');
+    expect(s.systems['tactical-radar']).toHaveProperty('tubes');
+    expect(s.systems['phaser-omni']).toHaveProperty('blips');
+    expect(s.systems['navigation']).toHaveProperty('blips');
+    expect(s.systems['navigation']).toHaveProperty('waypoint');
+    expect(s.systems['comms']).toHaveProperty('messages');
+    expect(s.systems['comms']).toHaveProperty('contacts');
   });
 
-  it('contains weapons, navigation, and comms sub-objects', () => {
-    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
-    expect(s).toHaveProperty('weapons');
-    expect(s).toHaveProperty('navigation');
-    expect(s).toHaveProperty('comms');
-  });
-
-  it('weapons sub-object has banks, tubes, and blips fields', () => {
-    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
-    expect(s.weapons).toHaveProperty('banks');
-    expect(s.weapons).toHaveProperty('tubes');
-    expect(s.weapons).toHaveProperty('blips');
-  });
-
-  it('navigation sub-object has blips and waypoint fields', () => {
-    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
-    expect(s.navigation).toHaveProperty('blips');
-    expect(s.navigation).toHaveProperty('waypoint');
-  });
-
-  it('comms sub-object has messages and contacts fields', () => {
-    const s = parse(buildDestroyerTacticalConsoleState(EMPTY));
-    expect(s.comms).toHaveProperty('messages');
-    expect(s.comms).toHaveProperty('contacts');
-    expect(Array.isArray(s.comms.messages)).toBe(true);
-    expect(Array.isArray(s.comms.contacts)).toBe(true);
-  });
-
-  it('tactical_auto is true when the phaser system is Ai-controlled', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({
-      stationSystems: { tactical: ['phaser-omni'] },
-      controlSources: { 'phaser-omni': 'Ai' },
+  it('tactical_auto is true only when every owned weapon system is Ai-controlled', () => {
+    const allAi = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: { tactical: ['phaser-omni', 'blaster-port'] },
+      controlSources: { 'phaser-omni': 'Ai', 'blaster-port': 'Ai' },
     }));
-    expect(s.tactical_auto).toBe(true);
-  });
-
-  it('tactical_auto is false when the phaser system is not Ai-controlled', () => {
-    const s = parse(buildDestroyerTacticalConsoleState({
-      stationSystems: { tactical: ['phaser-omni'] },
-      controlSources: { 'phaser-omni': 'Human' },
+    expect(allAi.systems['phaser-omni'].tactical_auto).toBe(true);
+    const mixed = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: { tactical: ['phaser-omni', 'blaster-port'] },
+      controlSources: { 'phaser-omni': 'Ai', 'blaster-port': 'Human' },
     }));
-    expect(s.tactical_auto).toBe(false);
+    expect(mixed.systems['phaser-omni'].tactical_auto).toBe(false);
   });
 
-  it('tactical_auto is false when stationRatings is absent', () => {
-    expect(parse(buildDestroyerTacticalConsoleState(EMPTY)).tactical_auto).toBe(false);
-  });
-
-  it('passes weapons blackboard through the nested weapons sub-object', () => {
+  it('passes weapons blackboard through the weapons view', () => {
     const state = {
+      stationSystems: TACTICAL_SYSTEMS,
       blackboards: {
         tactical: {
           banks: [{ id: 'fore', ready: true }],
@@ -2062,27 +2067,29 @@ describe('buildDestroyerTacticalConsoleState', () => {
         },
       },
     };
-    const s = parse(buildDestroyerTacticalConsoleState(state));
-    expect(s.weapons.banks).toHaveLength(1);
-    expect(s.weapons.banks[0].id).toBe('fore');
-    expect(s.weapons.torpedo_count).toBe(4);
-    expect(s.weapons.phaser_mode).toBe('Manual');
+    const s = parse(buildSystemStationConsoleState('tactical', state));
+    expect(s.systems['tactical-radar'].banks).toHaveLength(1);
+    expect(s.systems['tactical-radar'].banks[0].id).toBe('fore');
+    expect(s.systems['tactical-radar'].torpedo_count).toBe(4);
+    expect(s.systems['tactical-radar'].phaser_mode).toBe('Manual');
   });
 
-  it('passes comms messages through the nested comms sub-object', () => {
+  it('passes comms messages through the comms view', () => {
     const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
     const state = {
+      stationSystems: TACTICAL_SYSTEMS,
       blackboards: {
         comms: { messages: msgs, contacts: [], objectives: [] },
       },
     };
-    const s = parse(buildDestroyerTacticalConsoleState(state));
-    expect(s.comms.messages).toHaveLength(1);
-    expect(s.comms.messages[0].id).toBe('msg-1');
+    const s = parse(buildSystemStationConsoleState('tactical', state));
+    expect(s.systems['comms'].messages).toHaveLength(1);
+    expect(s.systems['comms'].messages[0].id).toBe('msg-1');
   });
 
-  it('passes navigation blackboard through the nested navigation sub-object', () => {
+  it('passes navigation blackboard through the navigation view', () => {
     const state = {
+      stationSystems: TACTICAL_SYSTEMS,
       blackboards: {
         navigation: {
           nav_chart_range: 800,
@@ -2093,59 +2100,43 @@ describe('buildDestroyerTacticalConsoleState', () => {
       shipX: 10,
       shipZ: 20,
     };
-    const s = parse(buildDestroyerTacticalConsoleState(state));
-    expect(s.navigation.ship_x).toBe(10);
-    expect(s.navigation.ship_z).toBe(20);
-    expect(s.navigation.radar_range).toBe(800);
+    const s = parse(buildSystemStationConsoleState('tactical', state));
+    expect(s.systems['navigation'].ship_x).toBe(10);
+    expect(s.systems['navigation'].ship_z).toBe(20);
+    expect(s.systems['navigation'].radar_range).toBe(800);
   });
 });
 
-// ── buildDestroyerEngineeringConsoleState (issue #628) ────────────────────────
+// ── destroyer engineering station (generic payload, issue #825) ───────────────
 
-describe('buildDestroyerEngineeringConsoleState', () => {
-  it('returns valid JSON', () => {
-    expect(() => parse(buildDestroyerEngineeringConsoleState(EMPTY))).not.toThrow();
+describe('destroyer engineering station via buildSystemStationConsoleState', () => {
+  // Destroyer engineering station (shields + power + repair) as declared in
+  // assets/entities/alliance_destroyer.toml.
+  const ENG_SYSTEMS = { engineering: ['shields-system', 'power-reactor', 'power-battery', 'repair'] };
+
+  it('returns the generic shape with shields, power and repair views', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    expect(s.station_id).toBe('engineering');
+    expect(s.systems['shields-system']).toHaveProperty('grid_status');
+    expect(s.systems['power-reactor']).toBeDefined();
+    expect(s.systems['power-battery']).toBeDefined();
+    expect(s.systems['repair']).toHaveProperty('teams');
+    expect(Array.isArray(s.systems['repair'].teams)).toBe(true);
   });
 
-  it('contains shields, power, and repair sub-objects', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
-    expect(s).toHaveProperty('shields');
-    expect(s).toHaveProperty('power');
-    expect(s).toHaveProperty('repair');
+  it('per-system auto flags come from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      controlSources: { 'shields-system': 'Ai', 'power-reactor': 'Ai', repair: 'Ai' },
+    }));
+    expect(s.systems['shields-system'].shields_auto).toBe(true);
+    expect(s.systems['power-reactor'].power_auto).toBe(true);
+    expect(s.systems['repair'].repair_auto).toBe(true);
   });
 
-  it('shields sub-object has grid_status field', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
-    expect(s.shields).toHaveProperty('grid_status');
-  });
-
-  it('power sub-object is defined', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
-    expect(s.power).toBeDefined();
-  });
-
-  it('repair sub-object has teams field', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
-    expect(s.repair).toHaveProperty('teams');
-    expect(Array.isArray(s.repair.teams)).toBe(true);
-  });
-
-  it('engineering_auto is true when stationRatings.engineering === Backfill', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState({ stationRatings: { engineering: 'Backfill' } }));
-    expect(s.engineering_auto).toBe(true);
-  });
-
-  it('engineering_auto is false when stationRatings.engineering is a different rating', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState({ stationRatings: { engineering: 'Full' } }));
-    expect(s.engineering_auto).toBe(false);
-  });
-
-  it('engineering_auto is false when stationRatings is absent', () => {
-    expect(parse(buildDestroyerEngineeringConsoleState(EMPTY)).engineering_auto).toBe(false);
-  });
-
-  it('passes shields blackboard state through the nested shields sub-object', () => {
+  it('passes shields blackboard state through the shields view', () => {
     const state = {
+      stationSystems: ENG_SYSTEMS,
       blackboards: {
         shields: {
           facings: [
@@ -2159,14 +2150,15 @@ describe('buildDestroyerEngineeringConsoleState', () => {
         },
       },
     };
-    const s = parse(buildDestroyerEngineeringConsoleState(state));
-    expect(s.shields.grid_status).toBe('GRID NOMINAL');
-    expect(s.shields.facings).toHaveLength(2);
-    expect(s.shields.hull_integrity_pct).toBe(75);
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
+    expect(s.systems['shields-system'].facings).toHaveLength(2);
+    expect(s.systems['shields-system'].hull_integrity_pct).toBe(75);
   });
 
-  it('passes power blackboard state through the nested power sub-object', () => {
+  it('passes power blackboard state through the power view', () => {
     const state = {
+      stationSystems: ENG_SYSTEMS,
       blackboards: {
         power: {
           groups: [{ id: 'helm', label: 'HELM', level: 3, max_level: 4 }],
@@ -2178,13 +2170,14 @@ describe('buildDestroyerEngineeringConsoleState', () => {
         },
       },
     };
-    const s = parse(buildDestroyerEngineeringConsoleState(state));
-    expect(s.power.consoles).toHaveLength(1);
-    expect(s.power.battery_charge).toBe(75);
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['power-reactor'].consoles).toHaveLength(1);
+    expect(s.systems['power-battery'].battery_charge).toBe(75);
   });
 
-  it('passes repair blackboard state through the nested repair sub-object', () => {
+  it('passes repair blackboard state through the repair view', () => {
     const state = {
+      stationSystems: ENG_SYSTEMS,
       blackboards: {
         repair: {
           teams: ['Idle', 'Idle'],
@@ -2194,19 +2187,21 @@ describe('buildDestroyerEngineeringConsoleState', () => {
         },
       },
     };
-    const s = parse(buildDestroyerEngineeringConsoleState(state));
-    expect(s.repair.teams).toHaveLength(2);
-    expect(s.repair.system_hull[0].system_id).toBe('helm');
+    const s = parse(buildSystemStationConsoleState('engineering', state));
+    expect(s.systems['repair'].teams).toHaveLength(2);
+    expect(s.systems['repair'].system_hull[0].system_id).toBe('helm');
   });
 
-  it('shields sub-object has GRID OFFLINE when no facings', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState(EMPTY));
-    expect(s.shields.grid_status).toBe('GRID OFFLINE');
+  it('shields view has GRID OFFLINE when no facings', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', { stationSystems: ENG_SYSTEMS }));
+    expect(s.systems['shields-system'].grid_status).toBe('GRID OFFLINE');
   });
 
-  it('shields sub-object has GRID NOMINAL when facings present', () => {
-    const s = parse(buildDestroyerEngineeringConsoleState({ shieldFacings: ['fore', 'aft'] }));
-    expect(s.shields.grid_status).toBe('GRID NOMINAL');
+  it('shields view has GRID NOMINAL when facings present', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS, shieldFacings: ['fore', 'aft'],
+    }));
+    expect(s.systems['shields-system'].grid_status).toBe('GRID NOMINAL');
   });
 });
 

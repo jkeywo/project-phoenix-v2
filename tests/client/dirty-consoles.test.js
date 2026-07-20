@@ -53,8 +53,8 @@ describe('STATIC_MESSAGE_CONSOLES', () => {
     AsteroidSpawned: ['tactical', 'helm', 'sensors', 'navigation'],
     TargetLock: ['tactical'],
     WeaponsUpdate: ['tactical'],
-    BeamStarted: ['tactical'],
-    BeamEnded: ['tactical'],
+    // BeamStarted/BeamEnded removed in #825: sim-state no longer mutates on
+    // them, so there is nothing to re-push.
     SystemHullUpdate: ['repair'],
     RepairState: ['repair'],
     PowerState: ['power'],
@@ -71,6 +71,11 @@ describe('STATIC_MESSAGE_CONSOLES', () => {
         .toEqual(new Set(consoles));
     });
   }
+
+  it('BeamStarted / BeamEnded dirty nothing (removed in #825)', () => {
+    expect(dirtyConsolesFor({ type: 'BeamStarted' }, BATTLESHIP_STATIONS)).toEqual(new Set());
+    expect(dirtyConsolesFor({ type: 'BeamEnded' }, BATTLESHIP_STATIONS)).toEqual(new Set());
+  });
 
   it('the table itself holds exactly the expected static entries', () => {
     expect(Object.keys(STATIC_MESSAGE_CONSOLES).sort())

@@ -49,8 +49,9 @@ export const STATIC_MESSAGE_CONSOLES = Object.freeze({
   AsteroidSpawned: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
   TargetLock: Object.freeze(['tactical']),
   WeaponsUpdate: Object.freeze(['tactical']),
-  BeamStarted: Object.freeze(['tactical']),
-  BeamEnded: Object.freeze(['tactical']),
+  // BeamStarted/BeamEnded entries removed in #825: sim-state no longer
+  // mutates on those messages (the weaponsFiring flag they fed is gone),
+  // so a push would rebuild an unchanged payload.
   SystemHullUpdate: Object.freeze(['repair']),
   RepairState: Object.freeze(['repair']),
   PowerState: Object.freeze(['power']),

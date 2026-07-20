@@ -530,21 +530,22 @@ describe('view helpers', () => {
 // deleted; the console builders now read window.simState directly. These
 // tests pin the fields/getters that migration relies on.
 
-describe('weapons UI flags derived in apply (#819)', () => {
-  const banks = [
-    { id: 'port', fire_ready: false, on_cooldown: true },
-    { id: 'star', fire_ready: true,  on_cooldown: false },
-  ];
+describe('weapons state derived in apply (#819)', () => {
+  // The derived weaponsFireReady / weaponsOnCooldown / weaponsReadyBankId /
+  // weaponsFiring flags were deleted in issue #825 — no console read them.
 
-  it('WeaponsUpdate derives fireReady / onCooldown / readyBankId and stores blips', () => {
+  it('WeaponsUpdate stores bank state and blips', () => {
+    const banks = [
+      { id: 'port', fire_ready: false, on_cooldown: true },
+      { id: 'star', fire_ready: true,  on_cooldown: false },
+    ];
     const s = new ClientSimState();
     s.apply({ type: 'WeaponsUpdate', data: {
       target_uuid: 't1', banks, tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
       blips: [{ uuid: 'b1' }],
     } });
-    expect(s.weaponsFireReady).toBe(true);
-    expect(s.weaponsOnCooldown).toBe(false);
-    expect(s.weaponsReadyBankId).toBe('star');
+    expect(s.currentTargetUuid).toBe('t1');
+    expect(s.bankStates).toEqual(banks);
     expect(s.weaponsBlips).toEqual([{ uuid: 'b1' }]);
   });
 
@@ -555,36 +556,13 @@ describe('weapons UI flags derived in apply (#819)', () => {
     expect(s.weaponsBlips).toEqual([{ uuid: 'old' }]);
   });
 
-  it('WeaponsUpdate with no target forces fireReady false; all-cooldown sets onCooldown', () => {
-    const s = new ClientSimState();
-    s.apply({ type: 'WeaponsUpdate', data: {
-      target_uuid: null,
-      banks: [{ id: 'port', fire_ready: true, on_cooldown: true }],
-      tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
-    } });
-    expect(s.weaponsFireReady).toBe(false);
-    expect(s.weaponsOnCooldown).toBe(true);
-    expect(s.weaponsReadyBankId).toBe('port');
-  });
-
-  it('TargetLock locked sets the target; unlocked clears target + fireReady', () => {
+  it('TargetLock locked sets the target; unlocked clears it', () => {
     const s = new ClientSimState();
     s.apply({ type: 'TargetLock', data: { uuid: 'tgt-9', locked: true } });
     expect(s.currentTargetUuid).toBe('tgt-9');
-    s.weaponsFireReady = true;
     s.apply({ type: 'TargetLock', data: { uuid: 'tgt-9', locked: false } });
     expect(s.currentTargetUuid).toBeNull();
     expect(s.currentTargetName).toBeNull();
-    expect(s.weaponsFireReady).toBe(false);
-  });
-
-  it('BeamStarted / BeamEnded toggle weaponsFiring', () => {
-    const s = new ClientSimState();
-    expect(s.weaponsFiring).toBe(false);
-    s.apply({ type: 'BeamStarted', data: {} });
-    expect(s.weaponsFiring).toBe(true);
-    s.apply({ type: 'BeamEnded', data: {} });
-    expect(s.weaponsFiring).toBe(false);
   });
 });
 
@@ -607,12 +585,10 @@ describe('shield focus + target clearing (#819)', () => {
     s.world.entities = [asteroid('e1', 1, 1)];
     s.currentTargetUuid = 'e1';
     s.currentTargetName = 'Rock';
-    s.weaponsFireReady = true;
     s.sensorsTarget = 'e1';
     s.apply({ type: 'EntityDespawned', data: { uuid: 'e1' } });
     expect(s.currentTargetUuid).toBeNull();
     expect(s.currentTargetName).toBeNull();
-    expect(s.weaponsFireReady).toBe(false);
     expect(s.sensorsTarget).toBeNull();
   });
 

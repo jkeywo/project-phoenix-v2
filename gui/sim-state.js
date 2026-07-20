@@ -148,14 +148,6 @@ export class ClientSimState {
     /** Sensors console target uuid. Set locally by set_sensors_target (the
      *  action-map mutate patch lands here), cleared when the entity despawns. */
     this.sensorsTarget = null;
-    /** Any bank reports fire_ready (false whenever no target is locked). */
-    this.weaponsFireReady = false;
-    /** Every bank is on cooldown. */
-    this.weaponsOnCooldown = false;
-    /** Id of the first fire-ready bank (or first bank), for UI affordances. */
-    this.weaponsReadyBankId = null;
-    /** A phaser beam is currently firing (BeamStarted…BeamEnded). */
-    this.weaponsFiring = false;
     /** Authoritative server blips from the latest WeaponsUpdate, when sent. */
     this.weaponsBlips = [];
     /** Label of the currently-focused shield facing, derived from ShieldStatus. */
@@ -249,12 +241,6 @@ export class ClientSimState {
         this.phaserMode = d.phaser_mode || 'Auto';
         if (typeof d.phaser_frequency === 'number') this.phaserFrequency = d.phaser_frequency;
         if (d.blasters != null) this.blasterBanks = d.blasters;
-        // Derived weapons UI flags (formerly computed in client.html, #819).
-        const bankList = this.bankStates;
-        const readyBank = bankList.find(b => b.fire_ready) || bankList[0] || null;
-        this.weaponsReadyBankId = readyBank ? readyBank.id : null;
-        this.weaponsFireReady = d.target_uuid != null && bankList.some(b => b.fire_ready);
-        this.weaponsOnCooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
         if (Array.isArray(d.blips)) this.weaponsBlips = d.blips;
         break;
       }
@@ -265,14 +251,7 @@ export class ClientSimState {
         } else {
           this.currentTargetUuid = null;
           this.currentTargetName = null;
-          this.weaponsFireReady = false;
         }
-        break;
-      case 'BeamStarted':
-        this.weaponsFiring = true;
-        break;
-      case 'BeamEnded':
-        this.weaponsFiring = false;
         break;
       case 'ShieldStatus': {
         this.shieldFacings = d.facings || [];
@@ -384,7 +363,6 @@ export class ClientSimState {
     if (this.currentTargetUuid === uuid) {
       this.currentTargetUuid = null;
       this.currentTargetName = null;
-      this.weaponsFireReady = false;
     }
     if (this.sensorsTarget === uuid) this.sensorsTarget = null;
   }

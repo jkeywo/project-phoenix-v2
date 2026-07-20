@@ -84,6 +84,10 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    // Generic system-id-keyed payload (issue #825): resolve each panel's view
+    // from the fine system ids this station owns, falling back through the
+    // ids each hull may declare for the same console family.
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'captain',
       render: function(s) {
@@ -92,20 +96,21 @@
         var objectiveEl = document.getElementById('objective-list');
         var sensorRadarEl = document.getElementById('sensor-radar');
         var sensorEl = document.getElementById('sensor-panel');
-        if (s.captain) {
-          var cap = s.captain;
-          cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
-          redAlertEl.state = { active: !!cap.red_alert, auto: cap.red_alert_auto || false };
-          objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
-        }
-        if (s.sensors) {
-          sensorRadarEl.state = s.sensors;
-          sensorEl.state = s.sensors;
-        }
-        var targetName = (s.sensors && s.sensors.target_name) || null;
+        var cap = system(s, 'captain', 'red-alert', 'viewscreen');
+        var sensors = system(s, 'sensors', 'sensor-radar');
+        cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
+        redAlertEl.state = { active: !!cap.red_alert, auto: cap.red_alert_auto || false };
+        objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
+        sensorRadarEl.state = sensors;
+        sensorEl.state = sensors;
+        var targetName = sensors.target_name || null;
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : 'NO TARGET';
         document.getElementById('footer-target').style.color = targetName ? 'var(--tactical)' : 'var(--ink-faint)';
-        setAutoState(null, document.getElementById('captain-auto-badge'), !!s.captain_auto);
+        // Station badge: the retired composite's captain_auto meant "station
+        // is Backfill-rated". The per-system equivalent is every owned system
+        // AI-run \u2014 the conjunction of the resolved views' *_auto flags
+        // (controlSources can lag a rating change by one tick).
+        setAutoState(null, document.getElementById('captain-auto-badge'), !!(cap.red_alert_auto && cap.viewscreen_auto && sensors.sensors_auto));
         document.getElementById('station-damage').state = s.own_hull || null;
       }
     });

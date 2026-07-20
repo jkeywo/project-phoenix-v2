@@ -105,6 +105,9 @@
       }
     }
 
+    // Generic system-id-keyed payload (issue #825): resolve each panel's view
+    // from the fine system ids this station owns.
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'comms',
       render: function(s) {
@@ -113,8 +116,8 @@
         var cm = document.getElementById('comms-current-message');
         var nm = document.getElementById('navigation-map');
         var nmOv = document.getElementById('nav-overlay-map');
-        var comms = s.comms || {};
-        var nav = s.navigation || {};
+        var comms = system(s, 'comms');
+        var nav = system(s, 'navigation');
         cl.state = { contacts: comms.contacts || [] };
         hl.state = comms;
         var msgs = comms.messages || [];
@@ -127,7 +130,13 @@
         document.getElementById('footer-target').textContent = wp ? wp.name || t('console.common.waypoint') : t('console.common.no_waypoint');
         var msgCount = msgs.length;
         document.getElementById('footer-right').textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
-        setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
+        // Station badge: the retired composite's comms_auto meant "station is
+        // Backfill-rated". The per-system equivalent is every owned system
+        // AI-run — the conjunction of the resolved views' *_auto flags. Both
+        // flags come from controlSources on the generic composed path
+        // (navigation_auto included, issue #825), which can lag a rating
+        // change by one tick.
+        setAutoState(null, document.getElementById('comms-auto-badge'), !!(comms.comms_auto && nav.navigation_auto));
         document.getElementById('station-damage').state = s.own_hull || null;
       }
     });

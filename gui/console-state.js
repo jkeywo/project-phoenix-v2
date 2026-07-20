@@ -873,44 +873,29 @@ export function buildRepairConsoleState(state) {
  * Reads raw sim truth from `state.blackboards['power']` (aggregate
  * PowerBlackboard) plus the two fine blackboards (issue #513) at
  * `state.blackboards['power-reactor']` and `state.blackboards['power-battery']`
- * for per-instance online flags. Falls back to legacy camelCase properties
- * from PowerState messages when no blackboards are present.
+ * for per-instance online flags. Before the first blackboard update the
+ * payload renders empty defaults (there is no legacy PowerState wire path
+ * any more — issue #825 removed the dead fallback).
  *
- * @param {{ blackboards?, powerHelm?, powerWeapons?, powerSensors?,
- *           powerBattery?, powerLocked? }} state
+ * @param {{ blackboards? }} state
  */
 export function buildPowerConsoleState(state) {
-  const bb = (state.blackboards && state.blackboards['power']) || null;
+  const bb = (state.blackboards && state.blackboards['power']) || {};
   const reactorBb = (state.blackboards && state.blackboards['power-reactor']) || null;
   const batteryBb = (state.blackboards && state.blackboards['power-battery']) || null;
   // Default to online when the fine blackboard is missing (legacy safety).
   const reactorOnline = reactorBb ? !!reactorBb.is_online : true;
   const batteryOnline = batteryBb ? !!batteryBb.is_online : true;
-  if (bb) {
-    return JSON.stringify({
-      // Reads the PowerGroupId-keyed `groups` field from the publisher (the
-      // legacy `consoles` mirror was removed from the wire when the parent
-      // issue #516 cleanup closed out).
-      consoles:       bb.groups        || [],
-      total:          bb.total          ?? 0,
-      total_max:      bb.total_max      ?? 8,
-      battery_charge: bb.battery_charge ?? 0,
-      battery_max:    bb.battery_max    ?? 100,
-      locked:         bb.locked         || false,
-      reactor_online: reactorOnline,
-      battery_online: batteryOnline,
-      own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
-      power_auto:     state.stationRatings?.['power'] === 'Backfill',
-      station_rating: state.stationRatings?.['power'] || 'Std',
-    });
-  }
-  // Legacy fallback: PowerState message fields.
   return JSON.stringify({
-    helm:           state.powerHelm    || 0,
-    weapons:        state.powerWeapons || 0,
-    sensors:        state.powerSensors || 0,
-    battery_charge: state.powerBattery || 0,
-    locked:         state.powerLocked  || false,
+    // Reads the PowerGroupId-keyed `groups` field from the publisher (the
+    // legacy `consoles` mirror was removed from the wire when the parent
+    // issue #516 cleanup closed out).
+    consoles:       bb.groups        || [],
+    total:          bb.total          ?? 0,
+    total_max:      bb.total_max      ?? 8,
+    battery_charge: bb.battery_charge ?? 0,
+    battery_max:    bb.battery_max    ?? 100,
+    locked:         bb.locked         || false,
     reactor_online: reactorOnline,
     battery_online: batteryOnline,
     own_hull:       aggregateStationHull('power', state.consoleHull, state.stationSystems),
@@ -1188,151 +1173,6 @@ export function buildNavigationConsoleState(state) {
 }
 
 /**
- * Science console — combined Sensors + Shields view.
- *
- * Delegates to buildSensorsConsoleState and buildShieldsConsoleState,
- * then nests their payloads under `sensors` and `shields` keys so the
- * per-console iframe receives both panels' data without key collision.
- *
- * @param {{ blackboards?, asteroids?, shipX?, shipZ?, shipYaw?,
- *           sensorsTarget?, regions?, shieldFacings?, hullIntegrity?,
- *           shieldFocusedFacing? }} state
- */
-export function buildScienceConsoleState(state) {
-  const sensors = JSON.parse(buildSensorsConsoleState(state));
-  const shields = JSON.parse(buildShieldsConsoleState(state));
-  return JSON.stringify({
-    sensors,
-    shields,
-    science_auto: state.stationRatings?.['science'] === 'Backfill',
-  });
-}
-
-/**
- * Engineering console — combined Power + Repair view (Cruiser).
- *
- * Delegates to buildPowerConsoleState and buildRepairConsoleState,
- * nesting payloads under `power` and `repair` keys so the per-console
- * iframe receives both panels' data without key collision.
- *
- * @param {object} state
- */
-export function buildEngineeringConsoleState(state) {
-  const power = JSON.parse(buildPowerConsoleState(state));
-  const repair = JSON.parse(buildRepairConsoleState(state));
-  return JSON.stringify({
-    power,
-    repair,
-    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
-  });
-}
-
-/**
- * Cruiser Comms console — combined Navigation + Comms view (Cruiser).
- *
- * Delegates to buildNavigationConsoleState and buildCommsConsoleState,
- * nesting payloads under `navigation` and `comms` keys so the per-console
- * iframe receives both panels' data without key collision.
- *
- * Used when the state has a navigation blackboard present (cruiser comms
- * station merges navigation + comms). The `comms_auto` field reflects
- * the comms station rating, consistent with the existing comms dispatch.
- *
- * @param {object} state
- */
-export function buildCruiserCommsConsoleState(state) {
-  const navigation = JSON.parse(buildNavigationConsoleState(state));
-  const comms = JSON.parse(buildCommsConsoleState(state));
-  return JSON.stringify({
-    navigation,
-    comms,
-    comms_auto: state.stationRatings?.['comms'] === 'Backfill',
-  });
-}
-
-/**
- * Destroyer Captain console — combined CaptainChair + Sensors view.
- *
- * Delegates to buildCaptainConsoleState and buildSensorsConsoleState,
- * nesting payloads under `captain` and `sensors` keys.
- *
- * Used when the state has a sensors blackboard present and the station is
- * captain — indicating a Destroyer captain who also owns the sensors system.
- *
- * @param {object} state
- */
-export function buildDestroyerCaptainConsoleState(state) {
-  const captain = JSON.parse(buildCaptainConsoleState(state));
-  const sensors = JSON.parse(buildSensorsConsoleState(state));
-  return JSON.stringify({
-    captain,
-    sensors,
-    captain_auto: state.stationRatings?.['captain'] === 'Backfill',
-  });
-}
-
-/**
- * Destroyer Tactical console — combined Weapons + Navigation + Comms view.
- *
- * Delegates to buildWeaponsConsoleState, buildNavigationConsoleState, and
- * buildCommsConsoleState, nesting payloads under `weapons`, `navigation`,
- * and `comms` keys so the per-console iframe receives all three panels'
- * data without key collision.
- *
- * Used when the state has both a navigation blackboard and a comms
- * blackboard present on the tactical station — indicating a Destroyer
- * tactical officer who also owns navigation and comms.
- *
- * @param {object} state
- */
-export function buildDestroyerTacticalConsoleState(state) {
-  const weapons = JSON.parse(buildWeaponsConsoleState(state));
-  const navigation = JSON.parse(buildNavigationConsoleState(state));
-  const comms = JSON.parse(buildCommsConsoleState(state));
-  return JSON.stringify({
-    weapons,
-    navigation,
-    comms,
-    tactical_auto: weapons.tactical_auto,
-  });
-}
-
-/**
- * Courier Pilot console — the whole ship on one console.
- *
- * Composes weapons + sensors + navigation + comms + captain + helm, nesting
- * each under its own key so the single iframe gets every panel's data without
- * key collision (same approach as buildDestroyerTacticalConsoleState).
- *
- * The one radar is the weapons radar: its blips come from
- * `[weapons_console.radar]`, authored as the union of the helm/sensors/tactical
- * `shows` lists. A single tap drives both the blaster target and the sensor
- * readout because ph-courier-radar fans it out to `set_target` and
- * `set_sensors_target`, which is why both `weapons` and `sensors` are here.
- *
- * No power / shields / repair sub-objects: those systems are AI-run on this
- * hull and the pilot has no panel for them.
- *
- * Note the sub-builders hardcode the 'tactical' / 'sensors' / 'comms' station
- * ids internally. That is harmless here — their nested `own_hull` values are
- * ignored (the console reads the top-level one that `withStationDamage`
- * computes for 'pilot'), and their `*_auto` flags resolve to false, which is
- * correct for a hull where nothing on the pilot station is backfilled while
- * it's held.
- *
- * @param {object} state
- */
-export function buildCourierConsoleState(state) {
-  const weapons = JSON.parse(buildWeaponsConsoleState(state));
-  const sensors = JSON.parse(buildSensorsConsoleState(state));
-  const navigation = JSON.parse(buildNavigationConsoleState(state));
-  const comms = JSON.parse(buildCommsConsoleState(state));
-  const captain = JSON.parse(buildCaptainConsoleState(state));
-  const helm = JSON.parse(buildHelmConsoleState(state));
-  return JSON.stringify({ weapons, sensors, navigation, comms, captain, helm });
-}
-
-/**
  * Map a fine (TOML) system id to the console family that renders it, or null
  * for ids no console view covers.
  *
@@ -1399,7 +1239,8 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view, owned) => { view.tactical_auto = allAi(owned); });
   add('sensors', buildSensorsConsoleState,
     (view, owned) => { view.sensors_auto = allAi(owned); });
-  add('navigation', buildNavigationConsoleState);
+  add('navigation', buildNavigationConsoleState,
+    (view) => { view.navigation_auto = controlSources['navigation'] === 'Ai'; });
   add('comms', buildCommsConsoleState,
     (view) => { view.comms_auto = controlSources['comms'] === 'Ai'; });
   add('shields', buildShieldsConsoleState,
@@ -1410,32 +1251,6 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
 
   return JSON.stringify({ station_id: stationId, system_ids: ids, systems });
-}
-
-/**
- * Destroyer Engineering console — combined Shields + Power + Repair view.
- *
- * Delegates to buildShieldsConsoleState, buildPowerConsoleState, and
- * buildRepairConsoleState, nesting payloads under `shields`, `power`, and
- * `repair` keys so the per-console iframe receives all three panels' data
- * without key collision.
- *
- * Used when the state has a shields blackboard present on the engineering
- * station — indicating a Destroyer engineer who owns shields, power, and
- * repair (unlike the Cruiser engineer who owns only power and repair).
- *
- * @param {object} state
- */
-export function buildDestroyerEngineeringConsoleState(state) {
-  const shields = JSON.parse(buildShieldsConsoleState(state));
-  const power = JSON.parse(buildPowerConsoleState(state));
-  const repair = JSON.parse(buildRepairConsoleState(state));
-  return JSON.stringify({
-    shields,
-    power,
-    repair,
-    engineering_auto: state.stationRatings?.['engineering'] === 'Backfill',
-  });
 }
 
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
@@ -1465,55 +1280,34 @@ if (typeof window !== 'undefined') {
     // per-console iframe's `initConsole({ name: '...' })` and from
     // `__updateConsole('...', ...)`). Pre-#618 these were PascalCase
     // Console enum names.
+    //
+    // Family-span rule (issue #825): a station whose TOML-owned fine systems
+    // span more than one console family is a system-composed console and gets
+    // the generic system-id-keyed payload. This is what lets a TOML move a
+    // system between stations without any change here — no per-hull composite
+    // builders remain. Single-family stations (every battleship station) keep
+    // their flat plain-builder payloads.
+    const owned = state.stationSystems?.[consoleName];
+    if (owned) {
+      const families = new Set(owned.map(consoleForSystemId).filter(f => f !== null));
+      if (families.size > 1) {
+        return buildSystemStationConsoleState(consoleName, state);
+      }
+    }
+    // Single-family stations, plus the boot race before Welcome delivers
+    // stationSystems: fall back to the plain builder matching the station
+    // name ('{}' for names with no single-family builder, e.g. 'science',
+    // 'engineering' or 'pilot' pre-Welcome — they render on the next update).
     switch (consoleName) {
-      case 'tactical':
-        // A TOML station which owns helm fine systems is a system-composed
-        // console. Its iframe receives only the views for those owned systems.
-        if (state.stationSystems?.tactical?.some(id => id.startsWith('helm-'))) {
-          return buildSystemStationConsoleState('tactical', state);
-        }
-        // Destroyer tactical = weapons + navigation + comms (determined by
-        // ship_config.station_systems, not runtime blackboard presence).
-        if (state.stationSystems?.tactical?.includes('navigation')) {
-          return buildDestroyerTacticalConsoleState(state);
-        }
-        return buildWeaponsConsoleState(state);
-      case 'captain':
-        // Likewise, a Captain station which owns repair is system-composed
-        // rather than a named-role special case (the two-player Courier).
-        if (state.stationSystems?.captain?.includes('repair')) {
-          return buildSystemStationConsoleState('captain', state);
-        }
-        // Destroyer captain = captain + sensors.
-        if (state.stationSystems?.captain?.includes('sensors')) {
-          return buildDestroyerCaptainConsoleState(state);
-        }
-        return buildCaptainConsoleState(state);
-      // Courier pilot = the whole ship on one console. No stationSystems
-      // sub-branch needed: only the Courier declares a 'pilot' station, unlike
-      // 'tactical'/'captain'/'comms' which several hulls define differently.
-      case 'pilot':       return buildCourierConsoleState(state);
+      case 'tactical':    return buildWeaponsConsoleState(state);
+      case 'captain':     return buildCaptainConsoleState(state);
       case 'helm':        return buildHelmConsoleState(state);
       case 'repair':      return buildRepairConsoleState(state);
       case 'power':       return buildPowerConsoleState(state);
       case 'shields':     return buildShieldsConsoleState(state);
       case 'sensors':     return buildSensorsConsoleState(state);
-      case 'comms':
-        // Cruiser comms = navigation + comms.
-        if (state.stationSystems?.comms?.includes('navigation')) {
-          return buildCruiserCommsConsoleState(state);
-        }
-        return buildCommsConsoleState(state);
+      case 'comms':       return buildCommsConsoleState(state);
       case 'navigation':  return buildNavigationConsoleState(state);
-      case 'science':     return buildScienceConsoleState(state);
-      case 'engineering':
-        // Destroyer engineering = shields + power + repair. The shields
-        // system's TOML id is "shields-system" (its `kind` is "shields"),
-        // not "shields" — station_systems lists are built from system ids.
-        if (state.stationSystems?.engineering?.includes('shields-system')) {
-          return buildDestroyerEngineeringConsoleState(state);
-        }
-        return buildEngineeringConsoleState(state);
       default:            return '{}';
     }
   };

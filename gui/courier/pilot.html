@@ -156,13 +156,21 @@
       }
     }
 
+    // Generic system-id-keyed payload (issue #825): resolve each panel's view
+    // from the fine system ids this station owns. NOTE: no shipped TOML
+    // declares a 'pilot' station any more (the two-station Courier replaced
+    // the single-pilot layout) — this page is dormant, migrated mechanically
+    // so it works again the moment a TOML re-declares 'pilot'.
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'pilot',
       render: function(s) {
-        var w = s.weapons || {};
-        var n = s.navigation || {};
-        var cap = s.captain || {};
-        var h = s.helm || {};
+        var w = system(s, 'tactical-radar', 'blaster-fore');
+        var sensors = system(s, 'sensors', 'sensor-radar');
+        var n = system(s, 'navigation');
+        var c = system(s, 'comms');
+        var cap = system(s, 'captain', 'viewscreen', 'red-alert');
+        var h = system(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
 
         // One radar, fed the weapons blips — its `shows` list is the authored
         // union of helm/sensors/tactical. No `range`: ph-radar ignores it,
@@ -181,7 +189,7 @@
         };
         // Same tap fills the sensor panel — ph-courier-radar sends both
         // set_target and set_sensors_target.
-        document.getElementById('sensor-panel').state = s.sensors || null;
+        document.getElementById('sensor-panel').state = sensors;
 
         document.getElementById('helm-joystick').state = { auto: !!h.helm_auto };
         document.getElementById('lateral-thrust-joystick').state = { auto: !!h.lateral_auto };
@@ -198,17 +206,14 @@
         };
         document.getElementById('blasters-controls').state = { banks: w.blasters || [] };
 
-        if (s.comms) {
-          var c = s.comms;
-          document.getElementById('comms-contact-list').state = { contacts: c.contacts || [] };
-          var messages = c.messages || [];
-          document.getElementById('comms-unread').classList.toggle(
-            'show', messages.some(function(m) { return !m.is_read; })
-          );
-          var threadMsg = messages.find(function(m) { return !m.is_read; })
-            || messages[messages.length - 1] || null;
-          document.getElementById('comms-current-message').state = { thread: threadMsg };
-        }
+        document.getElementById('comms-contact-list').state = { contacts: c.contacts || [] };
+        var messages = c.messages || [];
+        document.getElementById('comms-unread').classList.toggle(
+          'show', messages.some(function(m) { return !m.is_read; })
+        );
+        var threadMsg = messages.find(function(m) { return !m.is_read; })
+          || messages[messages.length - 1] || null;
+        document.getElementById('comms-current-message').state = { thread: threadMsg };
 
         document.getElementById('navigation-map').state = {
           blips: n.blips || [],

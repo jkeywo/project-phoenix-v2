@@ -1,17 +1,27 @@
 pub mod boost;
 pub mod combat_activity;
+pub mod components;
 pub mod config;
 pub mod control_source;
 pub mod coordination;
+pub mod coordination_systems;
 pub mod damage;
+pub mod damage_sync;
 pub mod helm;
+pub mod helm_admission;
+pub mod helm_ai;
 pub mod impulse;
+pub mod impulse_boost_systems;
 pub mod lateral_thrust;
 pub mod physics;
+pub mod physics_systems;
 pub mod power;
 pub mod rating;
+pub mod rating_systems;
 pub mod sensors;
 pub mod shields;
 pub mod state;
 pub mod system_registry;
+#[cfg(test)]
+pub mod test_support;
 pub mod viewscreen;

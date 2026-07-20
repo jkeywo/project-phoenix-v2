@@ -2,7 +2,7 @@
 title: Ship
 type: entity
 tags: [ship, physics, collision, viewscreen]
-sources: [src/ship/state.rs, src/ship/physics.rs, src/ship_plugin.rs, src/entities/spawner.rs]
+sources: [src/ship/state.rs, src/ship/physics.rs, src/ship/components.rs, src/ship/physics_systems.rs, src/entities/spawner.rs]
 updated: 2026-07-14
 ---
 

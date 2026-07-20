@@ -2,7 +2,7 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost]
-sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship_plugin.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
+sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
 updated: 2026-06-20
 ---
 
@@ -25,7 +25,7 @@ The pilot's seat. The **only** console that can move the ship.
 When the impulse drive enters `ImpulsePhase::Charging` (`ShipView.impulse_charge_progress > 0.0`):
 
 - Client side: `refresh_helm_impulse_state` in `src/console/helm/client.rs` flips `HelmJoystickPad`/`HelmImpulseOverlay` visibility (compare-then-write), updates the progress fill width, writes the status text via the pure `format_impulse_status` helper, and pauses the joystick resend timer (`JoystickResendTimer.paused`). On the rising edge Idle→Charging it calls `reset_joystick_drag` so stale `last_dx`/`last_dy` cannot leak past the gate.
-- Server side: `process_helm_inputs` in `src/ship_plugin.rs` detects the same Idle→Charging edge with a `Local<Option<ImpulsePhase>>` and zeroes `LastHelmInput`. While `ImpulseState::is_active()` it overrides input to `thrust = 1.0, steering = 0.0` and builds a per-tick `ShipPhysicsConfig` copy whose `acceleration` is multiplied by `ImpulseConfigResource.acceleration_multiplier` (falling back to the `IMPULSE_ACCELERATION_MULTIPLIER` const if the configured value is `≤ 0.0`).
+- Server side: `process_helm_inputs` in `src/ship/helm_admission.rs` detects the same Idle→Charging edge with a `Local<Option<ImpulsePhase>>` and zeroes `LastHelmInput`. While `ImpulseState::is_active()` it overrides input to `thrust = 1.0, steering = 0.0` and builds a per-tick `ShipPhysicsConfig` copy whose `acceleration` is multiplied by `ImpulseConfigResource.acceleration_multiplier` (falling back to the `IMPULSE_ACCELERATION_MULTIPLIER` const if the configured value is `≤ 0.0`).
 - The speed cap during Active is driven by `ImpulseConfigResource.speed_multiplier` flowing through `translate_impulse_modifiers` → `ModifierSlot::MaxSpeed` (under `ModifierSource::ImpulseDrive`).
 
 Cancel buttons live on Helm, Sensors (`ScienceCancelImpulseButton`) and Navigation (`NavCancelImpulseButton`); all three emit `ClientMessage::CancelImpulse`.

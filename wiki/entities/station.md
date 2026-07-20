@@ -2,7 +2,7 @@
 title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai]
-sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship_plugin.rs, assets/entities/alliance_battleship.toml]
+sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_battleship.toml]
 updated: 2026-07-16
 ---
 
@@ -64,7 +64,7 @@ Parsed into `StationConfig` by `src/ship/config.rs`, validated and loaded into
 ## Ratings
 
 Each station has one or more named ratings (e.g. `Std`, `Assisted`). The active
-rating for each station is tracked in `ActiveStationRatings` (`src/ship_plugin.rs`)
+rating for each station is tracked in `ActiveStationRatings` (`src/ship/components.rs`)
 and drives `ShipSystemControlSources` — the per-system Human/AI gate that every
 handler checks before processing input or running AI controllers.
 

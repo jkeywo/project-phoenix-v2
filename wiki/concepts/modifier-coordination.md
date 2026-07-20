@@ -183,7 +183,7 @@ impulse drive is active (`is_active()`), writes a `MaxSpeed` modifier with
 bonus `speed_multiplier - 1.0` under `ModifierSource::ImpulseDrive`. When
 idle or charging, removes that modifier so the cache returns to the
 identity multiplier. Note: the per-tick **acceleration** boost is applied
-separately inside `process_helm_inputs` (`src/ship_plugin.rs:309`) by multiplying
+separately inside `process_helm_inputs` (`src/ship/helm_admission.rs`) by multiplying
 `ShipPhysicsConfig.acceleration` by `ImpulseConfigResource.acceleration_multiplier`;
 it does not flow through `ShipModifiers`. `ImpulseConfigResource` is a
 `Component` only (its `Resource` derive was removed in issue #606, same as
@@ -220,7 +220,7 @@ post-#606):
 | Location | What it reads |
 |---|---|
 | `src/console/weapons/mod.rs` — `handle_set_target` | `ModifierSlot::RadarRange` for target-lock range gate |
-| `src/ship_plugin.rs:309` — `process_helm_inputs` | `ModifierSlot::MaxSpeed` for acceleration/reverse-speed caps |
+| `src/ship/helm_admission.rs` — `process_helm_inputs` | `ModifierSlot::MaxSpeed` for acceleration/reverse-speed caps |
 | `src/server_app.rs:798` — `handle_collisions` | `ModifierSlot::HullDamageTaken` to scale collision damage |
 | `src/console/weapons/mod.rs` — `handle_fire_phaser` | `ModifierSlot::RadarRange` to scale effective phaser range |
 | `src/console/repair/server.rs:176` — `tick_repair_teams` | `ModifierSlot::RepairRate` to scale repair speed |

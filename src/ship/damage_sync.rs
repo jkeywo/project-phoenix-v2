@@ -1,0 +1,742 @@
+use bevy::prelude::*;
+
+use crate::damage::DamageTier;
+use crate::messages::CoordinationPayload;
+use crate::ship::components::{
+    CoordinationEnqueue, LastSystemTiers, RepairHumanAlerted, ShipConfigComponent,
+    ShipSystemControlSources,
+};
+
+// ── Damage-tier → control gate sync ──────────────────────────────────────────
+
+/// Bevy system that synchronises `ControlSourceResolver.offline_systems` with
+/// the current damage tiers of each system in the ship hull.
+///
+/// Runs in `SimSet::Damage` (after hull damage is applied). For every ship that
+/// carries both an [`EntitySystemHull`](crate::entity_spawner::EntitySystemHull)
+/// (wrapping [`SystemHull`]) and `ShipSystemControlSources`:
+///
+/// - Systems in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
+///   is added to `offline_systems`.
+/// - Systems in `Operational` or `Damaged` tier: their corresponding
+///   `SystemId` is removed from `offline_systems` (restoring normal gating).
+///
+/// The `SystemId` for each entry is the key of the [`SystemHull`] map
+/// directly — no `Console` → `SystemId` translation is needed.
+///
+/// Post-#514: also iterates the ship's `ShipArcHull` (when present) and flips
+/// each arc's fine `SystemId("shield-arc-<id>")` in/out of `offline_systems`
+/// using the same tier-derivation policy. Ships without a `ShipArcHull` (NPCs,
+/// legacy fixtures) are unaffected.
+///
+/// Fix to issue #617: earlier this system iterated BOTH `EntityConsoleHull`
+/// AND `EntitySystemHull` in parallel. In production only one of the two was
+/// mutated by damage code, so the second (unmodified) iteration silently
+/// cleared `offline_systems` entries that the first iteration correctly
+/// inserted. The reviewer caught this and the fix drops the duplicate
+/// iteration and picks `EntitySystemHull` as the single source of truth.
+pub fn sync_console_damage_tiers(
+    mut ships: Query<(
+        &crate::entity_spawner::EntitySystemHull,
+        Option<&crate::entity_spawner::EntityShipArcHull>,
+        &mut ShipSystemControlSources,
+    )>,
+) {
+    for (system_hull_component, arc_hull_opt, mut control_sources) in ships.iter_mut() {
+        let hull = &system_hull_component.0;
+        for (sid, _cur, _max) in hull.entries() {
+            let tier = hull.tier_for(sid);
+            match tier {
+                DamageTier::Disabled | DamageTier::Destroyed => {
+                    control_sources.0.set_offline(sid.clone(), true);
+                }
+                DamageTier::Operational | DamageTier::Damaged => {
+                    control_sources.0.set_offline(sid.clone(), false);
+                }
+            }
+        }
+        // Per-arc hull tier sync (issue #514).
+        if let Some(arc_hull_component) = arc_hull_opt {
+            let arc_hull = &arc_hull_component.0;
+            for (arc_id, _entry) in arc_hull.iter() {
+                let Some(sid) = crate::system_registry::shield_arc_system_id(arc_id) else {
+                    continue;
+                };
+                let tier = arc_hull.tier_for(arc_id);
+                match tier {
+                    DamageTier::Disabled | DamageTier::Destroyed => {
+                        control_sources.0.set_offline(sid, true);
+                    }
+                    DamageTier::Operational | DamageTier::Damaged => {
+                        control_sources.0.set_offline(sid, false);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Detect damage-tier crossings and emit `CoordinationEnqueue::RepairRequest`
+/// when a system drops to a worse tier (issue #682).
+///
+/// Runs in `SimSet::Damage` (after hull damage is applied). For each ship
+/// with both `EntitySystemHull` and `LastSystemTiers`, compares the current
+/// tier (via `tier_for`) against the last-seen tier.  On a crossing to a
+/// *worse* tier, enqueues a `RepairRequest` for the system's owning station
+/// (or `"core"` for ownerless systems).  Destroyed systems are skipped —
+/// they are unrepairable.
+pub fn detect_damage_tier_crossings(
+    mut ships: Query<(
+        Entity,
+        &crate::entity_spawner::EntitySystemHull,
+        &mut LastSystemTiers,
+        &ShipConfigComponent,
+        &ShipSystemControlSources,
+        Option<&mut RepairHumanAlerted>,
+    )>,
+    mut coord_writer: MessageWriter<CoordinationEnqueue>,
+) {
+    for (entity, hull_comp, mut last_tiers, config, sources, mut alerted) in &mut ships {
+        let hull = &hull_comp.0;
+        for (system_id, _cur, _max) in hull.entries() {
+            let current_tier = hull.tier_for(system_id);
+            let prev_tier = last_tiers
+                .0
+                .get(system_id)
+                .copied()
+                .unwrap_or(DamageTier::Operational);
+
+            if current_tier > prev_tier {
+                if current_tier == DamageTier::Destroyed {
+                    let sender_origin = sources.0.source_for(system_id);
+                    coord_writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin,
+                        target: crate::ship::system_registry::captain_system_id(),
+                        payload: CoordinationPayload::Alert {
+                            title: format!("System Destroyed: {}", system_id.0),
+                            body: format!("{} destroyed.", system_id.0),
+                        },
+                        sender_label: system_id.0.clone(),
+                    });
+                    continue;
+                }
+
+                let system_config = config.0.system(system_id);
+                let station_id = system_config
+                    .and_then(|s| s.station.as_ref())
+                    .map(|s| s.0.clone())
+                    .unwrap_or_else(|| {
+                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
+                    });
+                let station_label = station_id.clone();
+                let entry = hull.get(system_id).expect("just iterated entry");
+                let deficit = entry.max - entry.current;
+                let sender_origin = sources.0.source_for(system_id);
+
+                coord_writer.write(CoordinationEnqueue {
+                    source_entity: entity,
+                    sender_origin,
+                    target: crate::ship::system_registry::repair_system_id(),
+                    payload: CoordinationPayload::RepairRequest {
+                        system_id: system_id.clone(),
+                        station_id,
+                        station_label,
+                        tier: current_tier,
+                        // Exact on the host-internal enqueue — the AI repair
+                        // queue sorts by it. Coarsened to `None` on the way out
+                        // to a human console unless the recipient is entitled
+                        // to exact detail for this system (issue #737).
+                        deficit: Some(deficit),
+                    },
+                    sender_label: system_id.0.clone(),
+                });
+            } else if current_tier == DamageTier::Operational && prev_tier > DamageTier::Operational
+            {
+                let system_config = config.0.system(system_id);
+                let station_id = system_config
+                    .and_then(|s| s.station.as_ref())
+                    .map(|s| s.0.clone())
+                    .unwrap_or_else(|| {
+                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
+                    });
+                if let Some(ref mut a) = alerted {
+                    if crate::console::repair::server::all_systems_in_station_are_operational(
+                        &station_id,
+                        hull,
+                        &config.0,
+                    ) {
+                        a.0.remove(&station_id);
+                    }
+                }
+            }
+        }
+        for (system_id, _cur, _max) in hull.entries() {
+            last_tiers
+                .0
+                .insert(system_id.clone(), hull.tier_for(system_id));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control_source::ControlTickPolicy;
+    use crate::lobby::LobbyPlugin;
+    use crate::modifiers::ShipModifiers;
+    use crate::ship::components::{
+        ActiveStationRatings, CoordinationQueue, HelmWaypointClearance, LastHelmInput,
+    };
+    use crate::ship::test_support::*;
+    use crate::ship_plugin::ShipPlugin;
+    use crate::ship_state::ShipPhysics;
+    use crate::simulation::{LocalShip, Ship, ShipBoost, ShipImpulse};
+
+    // ── sync_console_damage_tiers integration tests ───────────────────────────
+
+    /// Helper: get the policy for a system from the ship's ControlSourceResolver.
+    fn get_policy(app: &mut App, system_id: &str) -> ControlTickPolicy {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipSystemControlSources, With<Ship>>();
+        let sources = q
+            .single(app.world())
+            .expect("Ship with ShipSystemControlSources");
+        sources
+            .0
+            .policy_for(&crate::messages::SystemId(system_id.into()))
+    }
+
+    fn set_hp(app: &mut App, system_id: crate::messages::SystemId, hp: f32) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let mut binding = app.world_mut().entity_mut(ship);
+        let mut hull_component = binding
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .unwrap();
+        // Wipe then restore to exact HP.
+        hull_component.0.apply_damage(1_000_000.0, &mut rand::rng());
+        hull_component.0.restore(&system_id, hp);
+    }
+
+    #[test]
+    fn disabled_console_gates_human_and_ai_input() {
+        let mut app = test_app();
+        // Helm console max_hp = 25. Disabled threshold = 25 % = 6.25 HP.
+        // Set Helm to 5 HP (below disabled threshold) → Disabled tier.
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            !policy.accept_human_input,
+            "Disabled console must not accept human input"
+        );
+        assert!(!policy.operate_ai, "Disabled console must not operate AI");
+    }
+
+    #[test]
+    fn destroyed_console_gates_human_and_ai_input() {
+        let mut app = test_app();
+        // Wipe helm to 0 HP → Destroyed tier.
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 0.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            !policy.accept_human_input,
+            "Destroyed console must not accept human input"
+        );
+        assert!(!policy.operate_ai, "Destroyed console must not operate AI");
+    }
+
+    #[test]
+    fn restored_console_re_enables_input() {
+        let mut app = test_app();
+        // First disable helm.
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
+        tick(&mut app);
+        // Verify it is gated.
+        assert!(!get_policy(&mut app, "helm").accept_human_input);
+
+        // Now restore to operational HP.
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 25.0);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            policy.accept_human_input,
+            "Restored console must accept human input again"
+        );
+    }
+
+    #[test]
+    fn damaged_tier_does_not_gate_input() {
+        let mut app = test_app();
+        // Helm at 50% = 12.5 HP → Damaged tier (25 % < 50 % < 75 %).
+        // Damaged tier must NOT block input — only Disabled and Destroyed do.
+        set_hp(&mut app, crate::messages::SystemId("helm".into()), 12.5);
+        tick(&mut app);
+
+        let policy = get_policy(&mut app, "helm");
+        assert!(
+            policy.accept_human_input,
+            "Damaged (but not Disabled) console must still accept human input"
+        );
+    }
+
+    #[test]
+    fn engine_port_hull_damage_gates_engine_offline() {
+        let mut app = test_app_with_engine_hull();
+
+        // Zero out the port engine HP (destroyed tier).
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("helm-engine-port".into()),
+            0.0,
+        );
+        tick(&mut app);
+
+        // After sync_console_damage_tiers, offline_systems should contain helm-engine-port.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let port_id = crate::system_registry::helm_engine_port_system_id();
+        assert!(
+            control_sources.0.is_offline(&port_id),
+            "helm-engine-port should be in offline_systems when HP = 0"
+        );
+    }
+
+    /// Regression test for the reviewer's finding on issue #617.
+    ///
+    /// Before the fix, `sync_console_damage_tiers` iterated BOTH
+    /// `EntityConsoleHull` AND `EntitySystemHull`. In production only the
+    /// former was mutated by damage code, so the second (unmodified)
+    /// iteration silently cleared every `offline_systems` entry that the
+    /// first correctly inserted — meaning a hull-destroyed system would be
+    /// re-marked online on the very next tick.
+    ///
+    /// This test spawns a ship carrying only `EntitySystemHull`, damages the
+    /// helm system to 0 HP, runs the sync system TWICE, and asserts the
+    /// SystemId stays in `offline_systems` across both ticks. Under the old
+    /// buggy behaviour the second tick would have cleared the entry.
+    #[test]
+    fn sync_damage_tiers_keeps_disabled_system_offline_across_ticks() {
+        let mut app = test_app();
+        let helm_sid = crate::messages::SystemId("helm".into());
+
+        // Damage the helm system to 0 HP (Destroyed tier).
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .unwrap();
+            hull.0.set_hp(&helm_sid, 0.0);
+        }
+
+        // Tick 1: sync_console_damage_tiers runs, must insert helm into
+        // offline_systems.
+        tick(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let control_sources = app
+                .world()
+                .entity(ship)
+                .get::<ShipSystemControlSources>()
+                .unwrap();
+            assert!(
+                control_sources.0.is_offline(&helm_sid),
+                "after tick 1, helm should be in offline_systems (HP = 0)"
+            );
+        }
+
+        // Tick 2: no damage change. Under the pre-fix bug the second loop
+        // (over the unmutated sibling component) would have re-marked helm
+        // as Operational and cleared it from offline_systems. After the fix
+        // there is only one iteration, so the entry must persist.
+        tick(&mut app);
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let control_sources = app
+                .world()
+                .entity(ship)
+                .get::<ShipSystemControlSources>()
+                .unwrap();
+            assert!(
+                control_sources.0.is_offline(&helm_sid),
+                "after tick 2, helm MUST still be in offline_systems (regression \
+                 for issue #617 dual-iteration clobber bug)"
+            );
+        }
+    }
+
+    #[test]
+    fn engine_port_offline_reduces_thrust_compared_to_both_online() {
+        // With both engines online, terminal velocity = max_speed (25 m/s by default).
+        // With one engine offline, effective thrust = 0.5, so terminal = 0.5 * max_speed = 12.5.
+        // We run enough ticks to approach terminal velocity at the 50%-thrust case,
+        // then verify the one-engine-offline ship is slower than the both-online ship.
+        const TICK_MS: u64 = 34; // slightly above 1/30s so timer fires once per tick
+        const TICKS: usize = 120; // 120 ticks × 34ms ≈ 4s, enough to reach ~12.5 m/s terminal
+
+        let make_app = || {
+            let mut app = test_app_with_engine_hull();
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(TICK_MS),
+            ));
+            app
+        };
+
+        // ── Both engines online ────────────────────────────────────────────
+        let mut app_both = make_app();
+        set_last_helm_input(
+            &mut app_both,
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+                lateral: 0.0,
+            },
+        );
+        for _ in 0..TICKS {
+            tick(&mut app_both);
+        }
+        let speed_both = app_both
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>()
+            .single(app_both.world())
+            .unwrap()
+            .forward_speed;
+
+        // ── Port engine disabled ───────────────────────────────────────────
+        // Zero the port engine HP, tick once so sync_console_damage_tiers runs
+        // (populating offline_systems), then drive at full thrust for TICKS more.
+        let mut app_one = make_app();
+        set_console_hp_direct(
+            &mut app_one,
+            crate::messages::SystemId("helm-engine-port".into()),
+            0.0,
+        );
+        tick(&mut app_one); // let Damage tier propagate
+        set_last_helm_input(
+            &mut app_one,
+            LastHelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+                lateral: 0.0,
+            },
+        );
+        for _ in 0..TICKS {
+            tick(&mut app_one);
+        }
+        let speed_one = app_one
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>()
+            .single(app_one.world())
+            .unwrap()
+            .forward_speed;
+
+        // With enough ticks, app_both should be near 25 m/s and app_one near 12.5 m/s.
+        assert!(
+            speed_one < speed_both,
+            "forward_speed with one engine offline ({speed_one:.4}) should be less than \
+             with both engines online ({speed_both:.4})"
+        );
+    }
+
+    // ── Fine Power system → offline_systems tests (issue #513) ────────────────
+
+    /// Build an app whose ship carries PowerReactor + PowerBattery hull
+    /// entries. Used to exercise the hull → offline_systems chain for the
+    /// fine power kinds.
+    fn test_app_with_power_hull() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .add_plugins(ShipPlugin);
+        let hull_config = &[
+            (crate::messages::SystemId("helm".into()), 25.0_f32),
+            (crate::messages::SystemId("tactical".into()), 25.0),
+            (crate::messages::SystemId("power-reactor".into()), 15.0),
+            (crate::messages::SystemId("power-battery".into()), 10.0),
+            (crate::messages::SystemId("shields".into()), 25.0),
+        ];
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
+                ShipImpulse(crate::impulse::ImpulseState::new()),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert((ShipModifiers::new(), ShipBoost::default()));
+        app
+    }
+
+    #[test]
+    fn damaging_power_reactor_hull_to_disabled_puts_power_reactor_in_offline_systems() {
+        let mut app = test_app_with_power_hull();
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("power-reactor".into()),
+            0.0,
+        );
+        tick(&mut app);
+
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let reactor_id = crate::system_registry::power_reactor_system_id();
+        assert!(
+            control_sources.0.is_offline(&reactor_id),
+            "power-reactor should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
+        );
+    }
+
+    #[test]
+    fn damaging_power_battery_hull_to_disabled_puts_power_battery_in_offline_systems() {
+        let mut app = test_app_with_power_hull();
+        set_console_hp_direct(
+            &mut app,
+            crate::messages::SystemId("power-battery".into()),
+            0.0,
+        );
+        tick(&mut app);
+
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let control_sources = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let battery_id = crate::system_registry::power_battery_system_id();
+        assert!(
+            control_sources.0.is_offline(&battery_id),
+            "power-battery should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
+        );
+    }
+
+    // ── Issue #514 shield-arc hull tier sync tests ────────────────────────────
+
+    /// Build a test app with a shield-arc-hull equipped ship. Uses a
+    /// small hull budget so `set_arc_hp` is trivial for tests.
+    fn test_app_with_shield_arc_hull() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::server_app::AdmissionPlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .add_plugins(ShipPlugin);
+
+        let tc = crate::damage::ConsoleTierConfig::default();
+        let arc_hull = crate::damage::ShipArcHull::from_entries(vec![
+            (
+                "fore".into(),
+                crate::damage::ArcHullEntry {
+                    current: 10.0,
+                    max: 10.0,
+                    tier_config: tc,
+                },
+            ),
+            (
+                "aft".into(),
+                crate::damage::ArcHullEntry {
+                    current: 10.0,
+                    max: 10.0,
+                    tier_config: tc,
+                },
+            ),
+        ]);
+        let hull_config = &[(crate::messages::SystemId("helm".into()), 25.0_f32)];
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                LocalShip,
+                Transform::default(),
+                ShipPhysics::default(),
+                ShipConfigComponent::default(),
+                ShipSystemControlSources::default(),
+                ActiveStationRatings::default(),
+                CoordinationQueue::default(),
+                crate::messages::AdmittedCommands::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                crate::ai_plugin::AiHighFidelity,
+                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
+                    hull_config,
+                )),
+                LastHelmInput::default(),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
+            ))
+            .id();
+        app.world_mut().entity_mut(ship).insert((
+            ShipModifiers::new(),
+            ShipBoost::default(),
+            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::ship::shields::ShieldArcIntents::default(),
+            crate::console_ai_plugin::ShipFrequencyHintState::default(),
+            crate::ship::power::PowerReactorIntents::default(),
+            crate::ship::power::ShipPowerAiState::default(),
+            crate::weapons_plugin::TorpedoIntents::default(),
+            crate::entity_spawner::EntityShipArcHull(arc_hull),
+        ));
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship::helm::ThrustInput::default(),
+            crate::ship::helm::SteeringInput::default(),
+            crate::ship::helm::LateralThrustInput::default(),
+            crate::ship::helm::ImpulseCommand::default(),
+            crate::ship::helm::BoostCommand::default(),
+            // The console-owned surfaces the AI helm derives its goals from
+            // (issue #702) — see `HelmAiSurfaces`.
+            crate::weapons_plugin::WeaponsTarget::default(),
+            crate::navigation_plugin::NavigationWaypoint::default(),
+            HelmWaypointClearance::default(),
+            crate::ai_plugin::ObjectiveCursors::default(),
+        ));
+        app
+    }
+
+    #[test]
+    fn sync_console_damage_tiers_flips_shield_arc_offline_on_disabled_hp() {
+        let mut app = test_app_with_shield_arc_hull();
+        // Zero the fore arc hull HP.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 0.0);
+        }
+        tick(&mut app);
+        // After sync, offline_systems must contain shield-arc-fore.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let cs = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        assert!(
+            cs.0.is_offline(&fore_sid),
+            "shield-arc-fore must be in offline_systems when its arc HP is 0"
+        );
+        let aft_sid = crate::system_registry::shield_arc_system_id("aft").expect("aft");
+        assert!(
+            !cs.0.is_offline(&aft_sid),
+            "shield-arc-aft must NOT be in offline_systems (still at full HP)"
+        );
+    }
+
+    #[test]
+    fn sync_console_damage_tiers_removes_shield_arc_from_offline_on_repair() {
+        let mut app = test_app_with_shield_arc_hull();
+        // Zero fore, tick to insert into offline_systems.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 0.0);
+        }
+        tick(&mut app);
+        // Restore fore to full.
+        {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            let mut entity_mut = app.world_mut().entity_mut(ship);
+            let mut arc_hull = entity_mut
+                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .unwrap();
+            arc_hull.0.set_hp("fore", 10.0);
+        }
+        tick(&mut app);
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let cs = app
+            .world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .unwrap();
+        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        assert!(
+            !cs.0.is_offline(&fore_sid),
+            "shield-arc-fore must be removed from offline_systems after repair"
+        );
+    }
+}

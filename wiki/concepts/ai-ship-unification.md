@@ -70,7 +70,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 | System | File | Status |
 |--------|------|--------|
-| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship_plugin.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
+| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship/helm_ai.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
 | `ai_target_selection` | `src/console/weapons/mod.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
 | `ai_power_allocation` | `src/console_ai/server.rs` | ✅ (replaced the `operate_power_ai` stub) |
@@ -100,7 +100,7 @@ Since issue #803 the four per-axis AI helm systems run on a shared fixed-rate si
 
 ### Arc-bearing steering bias
 
-When a `PendingArcBearingRequest` is set (by `process_coordination_lag` in `src/ship_plugin.rs` consuming a `CoordinationPayload::ArcBearingRequest` from the coordination queue), `ai_helm_steering` (via `apply_arc_bearing_request`) reads the pending entity's position and biases steering toward it using `steer_toward(physics.yaw, [dx/dist, dz/dist], PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD)` from `src/ai/mod.rs` (`PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`). The pending request is cleared when some phaser bank's arc already bears on the target or the target is no longer visible.
+When a `PendingArcBearingRequest` is set (by `process_coordination_lag` in `src/ship/coordination_systems.rs` consuming a `CoordinationPayload::ArcBearingRequest` from the coordination queue), `ai_helm_steering` (via `apply_arc_bearing_request`) reads the pending entity's position and biases steering toward it using `steer_toward(physics.yaw, [dx/dist, dz/dist], PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD)` from `src/ai/mod.rs` (`PATROL_DEADBAND_RAD = 0.05`, `PATROL_FULL_STEER_RAD = π/4`). The pending request is cleared when some phaser bank's arc already bears on the target or the target is no longer visible.
 
 ## NPC ship spawn
 

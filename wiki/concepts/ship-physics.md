@@ -2,7 +2,7 @@
 title: Ship Physics
 type: concept
 tags: [ship, physics, rapier, controller, pure-function]
-sources: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app.rs]
+sources: [src/ship/physics.rs, src/ship/physics_systems.rs, src/server_app.rs]
 updated: 2026-07-03
 ---
 

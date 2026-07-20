@@ -2,7 +2,7 @@
 title: AI Helm Decomposition
 type: concept
 tags: [ai, helm, per-axis, intent, lod, control-source, tick]
-sources: [src/ship_plugin.rs, src/ai/core.rs, src/ai/lod.rs, src/ai/server.rs, src/ship/helm.rs, src/world/config.rs, src/server_app.rs, src/entities/config.rs]
+sources: [src/ship/helm_ai.rs, src/ship_plugin.rs, src/ai/core.rs, src/ai/lod.rs, src/ai/server.rs, src/ship/helm.rs, src/world/config.rs, src/server_app.rs, src/entities/config.rs]
 updated: 2026-07-16
 ---
 
@@ -12,7 +12,7 @@ The `operate_helm_ai` monolith is gone (#704). AI helm control is four per-axis 
 
 ## Per-axis AI systems
 
-All four live in `src/ship_plugin.rs`:
+All four live in `src/ship/helm_ai.rs`:
 
 | System | Intent component written | Gate (own axis only) |
 |---|---|---|
@@ -27,7 +27,7 @@ Decisions come from the pure `operate_helm` in `src/ai/core.rs` (thrust + steeri
 
 ### Console-owned goal surfaces
 
-The helm AI owns no goals; it reads shared surfaces a human could equally drive (`HelmAiSurfaces` in `src/ship_plugin.rs`):
+The helm AI owns no goals; it reads shared surfaces a human could equally drive (`HelmAiSurfaces` in `src/ship/helm_ai.rs`):
 
 | Surface | Owner | Answers |
 |---|---|---|

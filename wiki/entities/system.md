@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship_plugin.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/alliance_battleship.toml]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/ship/damage_sync.rs, src/ship/damage.rs, src/ship/control_source.rs, assets/entities/alliance_battleship.toml]
 updated: 2026-07-03
 ---
 
@@ -80,7 +80,7 @@ damage-driven gating to override the station rating without mutating the
 rating itself.
 
 The `sync_console_damage_tiers` Bevy system (runs in `SimSet::Damage`,
-`src/ship_plugin.rs`) updates `offline_systems` every tick:
+`src/ship/damage_sync.rs`) updates `offline_systems` every tick:
 
 - `Disabled` or `Destroyed` console → `SystemId` added to `offline_systems`
 - `Operational` or `Damaged` console → `SystemId` removed

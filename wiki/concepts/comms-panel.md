@@ -115,7 +115,7 @@ message   = "...Stand by — patching you through to Dr. Myst now."
 ```
 
 Implementation: scheduled in `handle_hail` (`src/console/comms/server.rs:113`)
-and `inject_comms_templates` (`src/world/server.rs:1345`, the trigger-pipeline
+and `inject_comms_templates` (`src/comms/server.rs`, the trigger-pipeline
 system that fires `[[comms]]` templates) by pushing a `PendingFollowUp` onto
 `runtime.pending_follow_ups` whose `placeholder_id = None`. The `tick_pending_follow_ups` system evaluates each pending
 follow-up's `trigger` each tick against current world state (region
@@ -176,7 +176,7 @@ text = "Understood, Axiom Station. We are proceeding to your location."
 ```
 
 Implementation: the pure evaluator `follow_up_trigger_holds` in
-`src/world/server.rs` returns true when the condition is met (or
+`src/comms/content.rs` (relocated in #816) returns true when the condition is met (or
 already-true at queue time). `tick_pending_follow_ups` runs first in the
 chained `SimSet::Physics` trigger pipeline (`tick_pending_follow_ups` →
 `collect_world_events` → `inject_comms_templates` → `tick_trigger_pipeline`),
@@ -315,6 +315,7 @@ Comms conversation handlers were relocated from `src/world/server.rs` into `src/
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
 - `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias, root-level `[comms.follow_up]` parsing + mutual-exclusion validation)
-- `src/world/server.rs` (world-module helpers called by relocated handlers)
-- `src/world/content.rs` (ActiveDialogue.thread_id; `FiredCommsTemplate.root_follow_up`)
+- `src/comms/server.rs` (CommsRuntime, inject/broadcast/range systems — consolidated in #816)
+- `src/comms/content.rs` (pure evaluators; ActiveDialogue.thread_id; `FiredCommsTemplate.root_follow_up`)
+- `src/world/server.rs` (dispatch appliers called by `handle_respond_to_message`)
 - `assets/worlds/before_the_fire.toml` (Research Outpost handoff → Dr. Myst chain via `[comms.follow_up]`)

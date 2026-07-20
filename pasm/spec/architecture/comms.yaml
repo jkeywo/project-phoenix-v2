@@ -14,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/console/comms/inbox.rs, src/world/content.rs]
+      paths: [src/console/comms/server.rs, src/console/comms/inbox.rs, src/comms/content.rs, src/comms/server.rs]
       tests: [cargo test]
 
   - state: comms-inbox-state
@@ -30,7 +30,7 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/core/messages.rs]
+      paths: [src/console/comms/inbox.rs, src/console/comms/server.rs, src/comms/server.rs, src/core/messages.rs]
 
   - state: comms-dialogue-state
     core:
@@ -44,7 +44,7 @@ entities:
       writers: [comms-dialogue-controller]
     implementation:
       status: declared
-      paths: [src/world/content.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [src/comms/content.rs, src/comms/server.rs, src/console/comms/server.rs]
 
   - component: comms-range-enforcer
     core:
@@ -62,7 +62,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/comms/range.rs, src/comms/component.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [src/comms/range.rs, src/comms/component.rs, src/comms/server.rs, src/console/comms/server.rs]
       tests: [cargo test]
 
   - state: comms-range-state
@@ -77,7 +77,7 @@ entities:
       writers: [comms-range-enforcer]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/console/comms/server.rs]
+      paths: [src/comms/server.rs, src/console/comms/server.rs]
 
   - component: comms-blackboard-publisher
     core:

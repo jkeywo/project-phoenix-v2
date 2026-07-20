@@ -148,7 +148,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs, src/console/comms/inbox.rs]
+      paths: [src/comms/server.rs, src/world/config.rs, src/console/comms/inbox.rs]
       symbols: [CommsInboxRes, mark_comms_dirty_on_game_start]
       tests: [cargo test]
 

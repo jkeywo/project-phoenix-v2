@@ -88,7 +88,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs]
+      paths: [src/comms/server.rs]
       symbols: [inject_comms_templates]
       tests: [cargo test]
 

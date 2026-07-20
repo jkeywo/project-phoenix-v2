@@ -31,7 +31,7 @@ Parsed by `CommsConfig { range: f32 }` in `src/entities/config.rs:1523`. Optiona
 
 ## Server flow
 
-`update_comms_range_flags` (`src/world/server.rs:1064`) runs every tick in `SimSet::Broadcast` immediately before `broadcast_comms_state`:
+`update_comms_range_flags` (`src/comms/server.rs`, relocated from `src/world/server.rs` in #816) runs every tick in `SimSet::Broadcast` immediately before `broadcast_comms_state`:
 
 1. Reads the player `Ship` Transform + its `CommsRange`.
 2. Walks `Query<(&EntityUuid, &Transform, &CommsRange)>`, computing per-entity `in_range`.
@@ -39,7 +39,7 @@ Parsed by `CommsConfig { range: f32 }` in `src/entities/config.rs:1523`. Optiona
 4. Prunes flags for despawned entities; prunes contacts whose entity lost (or never had) a `CommsRange` component (this is what excludes `[[comms]]`-template entries without a `[comms]` block).
 5. Sets `needs_broadcast = true` on any flip so `CommsState` re-broadcasts even when the inbox is clean.
 
-`broadcast_comms_state` (`src/world/server.rs:1164`) then stamps `m.sender_in_range` per message from `range_flags`; missing UUIDs default to `false` when `range_active == true`.
+`broadcast_comms_state` (`src/comms/server.rs`) then stamps `m.sender_in_range` per message from `range_flags`; missing UUIDs default to `false` when `range_active == true`.
 
 New `CommsMessage` instances are stamped at injection time via `current_sender_in_range(&runtime, &sender_uuid)` (`src/console/comms/server.rs:97`) — belt-and-braces so the field is correct from the moment the message lands, not only after the next broadcast.
 
@@ -76,14 +76,14 @@ Default world has ship at `(150, 0, 0)`, Starbase at `(500, 0, 0)` → distance 
 - Pure: `src/comms/range.rs` — equal/less/greater/zero/negative/NaN distance and range.
 - Codec round-trip + missing-field defaults: `src/core/codec.rs` (`comms_state_payload_with_no_range_flags_defaults_both_to_true` and per-type tests).
 - Entity spawning: `src/entities/spawner.rs` — `CommsRange` inserted iff `[comms]` block present.
-- Server: `src/world/server.rs` integration tests cover broadcast stamping, contact pruning, server-side Hail/Respond rejection, entity-despawn-flips-sender-in-range, multi-entity independent flags, range-flip-triggers-broadcast, and ship-despawn-keeps-gates-closed.
+- Server: `src/comms/server.rs` integration tests cover broadcast stamping, contact pruning, server-side Hail/Respond rejection, entity-despawn-flips-sender-in-range, multi-entity independent flags, range-flip-triggers-broadcast, and ship-despawn-keeps-gates-closed.
 
 ## Sources
 
 - `src/comms/{mod.rs,range.rs,component.rs}`
 - `src/core/messages.rs`, `src/core/codec.rs`
 - `src/entities/config.rs`, `src/entities/spawner.rs`
-- `src/world/server.rs`
+- `src/comms/server.rs` (CommsRuntime, range systems — relocated in #816)
 - `src/console/comms/server.rs` (handle_hail / handle_respond_to_message / current_sender_in_range)
 - `src/console/comms/client.rs`, `src/client_comms.rs`
 - `assets/entities/player_ship.toml`, `station_outpost.toml`, `pirate_raider.toml`

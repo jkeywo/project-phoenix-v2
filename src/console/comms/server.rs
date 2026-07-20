@@ -9,17 +9,16 @@ use crate::ship_plugin::ShipSystemControlSources;
 use bevy::prelude::*;
 
 use crate::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
-use crate::world::server::ObjectiveManagerRes;
-use crate::world::server::{CommsInboxRes, WorldContentRuntime};
+use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
+use crate::comms::content::{evaluate_comms_templates, ActiveDialogue, PendingFollowUp};
+use crate::comms::server::{
+    current_sender_in_range, CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage,
+};
 use crate::entity_spawner::EntityUuid;
 use crate::messages::{CommsMessage, GamePhase};
-use crate::world::content::{
-    evaluate_comms_templates, ActiveDialogue, PendingFollowUp, WorldEvent,
-};
-use crate::world::server::{
-    CommsChannel2Event, OnScreenMessage, ShipModifiersParams, WorldLayerParams,
-};
+use crate::world::content::WorldEvent;
+use crate::world::server::{ShipModifiersParams, WorldLayerParams};
 
 pub struct CommsConsolePlugin;
 
@@ -39,7 +38,7 @@ impl Plugin for CommsConsolePlugin {
 
 fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
-    runtime: Option<Res<WorldContentRuntime>>,
+    runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     mut ship_bbs_q: Query<
         &mut crate::server_app::ShipSystemBlackboards,
@@ -89,23 +88,6 @@ fn publish_comms_blackboard(
 
 // ── Comms conversation handlers (issue #608, moved from world/server.rs) ──────
 
-/// Resolve the current `sender_in_range` flag for an injection-time message,
-/// matching the stamp logic in `broadcast_comms_state`. Used by every site
-/// that inserts a new `CommsMessage` so the field is correct from the moment
-/// the message lands in the inbox (belt-and-braces against future refactors
-/// that bypass the broadcast stamp pass).
-pub(crate) fn current_sender_in_range(runtime: &WorldContentRuntime, sender_uuid: &str) -> bool {
-    // Synthetic senders (not a real UUID4 — e.g. "_self", "Starcorp Command") are
-    // always readable: they have no physical entity to range-check against.
-    if uuid::Uuid::parse_str(sender_uuid).is_err() {
-        return true;
-    }
-    match runtime.range_flags.get(sender_uuid).copied() {
-        Some(flag) => flag,
-        None => !runtime.range_active,
-    }
-}
-
 /// Handle `Hail { target_uuid }` messages from Comms console holders.
 ///
 /// Evaluates matching `on_hailed` comms templates for the target entity,
@@ -113,6 +95,7 @@ pub(crate) fn current_sender_in_range(runtime: &WorldContentRuntime, sender_uuid
 pub(crate) fn handle_hail(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
+    mut comms: ResMut<CommsRuntime>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
@@ -128,8 +111,8 @@ pub(crate) fn handle_hail(
         // must be a known, in-range entity. Out-of-range hails are silently
         // dropped (clients enforce the same gate UX-side; this defends
         // against stale or malicious clients).
-        if runtime.range_active {
-            match runtime.range_flags.get(target_uuid).copied() {
+        if comms.range_active {
+            match comms.range_flags.get(target_uuid).copied() {
                 Some(true) => {}
                 _ => continue,
             }
@@ -140,12 +123,11 @@ pub(crate) fn handle_hail(
             target_uuid: target_uuid.clone(),
         }];
 
-        let WorldContentRuntime {
-            name_to_uuid,
-            comms_template_states,
-            ..
-        } = &mut *runtime;
-        let fired = evaluate_comms_templates(comms_template_states, &world_events, name_to_uuid);
+        let fired = evaluate_comms_templates(
+            &mut comms.comms_template_states,
+            &world_events,
+            &runtime.name_to_uuid,
+        );
 
         // Route the Hailed event into the trigger system so that
         // on_hailed triggers (e.g. complete_objective, load_world)
@@ -164,7 +146,7 @@ pub(crate) fn handle_hail(
             let sender_uuid = target_uuid.clone();
             // Resolve channel display name from contacts (best effort), then
             // let the dialogue node override the visible speaker.
-            let channel_name = runtime
+            let channel_name = comms
                 .contacts
                 .iter()
                 .find(|c| c.uuid == *target_uuid)
@@ -188,12 +170,12 @@ pub(crate) fn handle_hail(
                 selected_response: None,
                 is_read: false,
                 is_orphaned: false,
-                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                sender_in_range: current_sender_in_range(&comms, &sender_uuid),
                 thread_id: thread_id.clone(),
                 is_urgent: f.urgent,
             };
             channel2_writer.write(CommsChannel2Event { message: msg });
-            runtime.active_dialogues.insert(
+            comms.active_dialogues.insert(
                 msg_id,
                 ActiveDialogue {
                     current_node: f.node.clone(),
@@ -214,7 +196,7 @@ pub(crate) fn handle_hail(
             // delayed-root behaviour.
             if let Some(ref fu) = f.root_follow_up {
                 let fu_sender_name = fu.speaker.clone().unwrap_or(sender_name.clone());
-                runtime.pending_follow_ups.push(PendingFollowUp {
+                comms.pending_follow_ups.push(PendingFollowUp {
                     node: fu.clone(),
                     sender_uuid: sender_uuid.clone(),
                     sender_name: fu_sender_name,
@@ -235,6 +217,7 @@ pub(crate) fn handle_hail(
 pub(crate) fn handle_respond_to_message(
     ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
+    mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut channel2_writer: MessageWriter<CommsChannel2Event>,
     mut objectives: ResMut<ObjectiveManagerRes>,
@@ -267,7 +250,7 @@ pub(crate) fn handle_respond_to_message(
         };
 
         // Look up active dialogue for this message.
-        let dialogue = match runtime.active_dialogues.get(message_id) {
+        let dialogue = match comms.active_dialogues.get(message_id) {
             Some(d) => d.clone(),
             None => continue,
         };
@@ -276,9 +259,9 @@ pub(crate) fn handle_respond_to_message(
         // of this message must currently be in range. Out-of-range responses
         // are silently dropped so stale clients can't fire actions on a
         // hidden response button.
-        if runtime.range_active {
+        if comms.range_active {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
-            match runtime.range_flags.get(&sender_uuid).copied() {
+            match comms.range_flags.get(&sender_uuid).copied() {
                 Some(true) => {}
                 _ => continue,
             }
@@ -416,14 +399,14 @@ pub(crate) fn handle_respond_to_message(
                     selected_response: None,
                     is_read: false,
                     is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    sender_in_range: current_sender_in_range(&comms, &sender_uuid),
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
                 channel2_writer.write(CommsChannel2Event {
                     message: placeholder,
                 });
-                runtime.pending_follow_ups.push(PendingFollowUp {
+                comms.pending_follow_ups.push(PendingFollowUp {
                     node: follow_up.clone(),
                     sender_uuid,
                     sender_name,
@@ -447,12 +430,12 @@ pub(crate) fn handle_respond_to_message(
                     selected_response: None,
                     is_read: false,
                     is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    sender_in_range: current_sender_in_range(&comms, &sender_uuid),
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
                 channel2_writer.write(CommsChannel2Event { message: new_msg });
-                runtime.active_dialogues.insert(
+                comms.active_dialogues.insert(
                     new_msg_id,
                     ActiveDialogue {
                         current_node: follow_up.clone(),
@@ -582,9 +565,9 @@ pub fn operate_comms_ai(ships: Query<&ShipSystemControlSources>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::comms::server::CommsInboxRes;
     use crate::messages::CommsMessage;
     use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::world::server::CommsInboxRes;
 
     fn msg(id: &str) -> CommsMessage {
         CommsMessage {
@@ -606,7 +589,7 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
-            .insert_resource(WorldContentRuntime::default())
+            .insert_resource(CommsRuntime::default())
             .add_systems(Update, publish_comms_blackboard);
         // Spawn a LocalShip entity so the query in publish_comms_blackboard resolves.
         app.world_mut()
@@ -680,16 +663,13 @@ mod tests {
     // `write_spawn_template_fixture`) with the rest of the world-module test
     // suite, so that harness stays in `world::server::tests` (now
     // `pub(crate)`) and is imported here rather than duplicated.
+    use crate::comms::content::{CommsDialogueNode, CommsResponse, CommsTemplateState};
+    use crate::comms::server::tests::{comms_test_app, push_msg, setup_game_with_comms, tick};
+    use crate::comms::server::tick_pending_follow_ups;
     use crate::messages::{ClientMessage, CommsContact, ServerMessage};
-    use crate::world::content::{
-        CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerAction, TriggerCondition,
-    };
-    use crate::world::server::{
-        tests::{
-            comms_test_app, push_msg, setup_game_with_comms, tick, write_spawn_template_fixture,
-        },
-        tick_pending_follow_ups, PendingWorldLayerChanges, WorldLayerChange, WorldLayerMap,
-    };
+    use crate::world::content::{TriggerAction, TriggerCondition};
+    use crate::world::server::tests::write_spawn_template_fixture;
+    use crate::world::server::{PendingWorldLayerChanges, WorldLayerChange, WorldLayerMap};
 
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
     //
@@ -789,7 +769,7 @@ mod tests {
             // Also registers the name→UUID mapping in
             // `WorldContentRuntime.name_to_uuid`.
             let _ = spawn_modifier_target(&mut app, "starbase_alpha", station_uuid);
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
             runtime.contacts.push(CommsContact {
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
@@ -797,7 +777,7 @@ mod tests {
                 is_urgent: false,
             });
             runtime.comms_template_states.push(CommsTemplateState {
-                template: crate::world::content::CommsTemplate {
+                template: crate::comms::content::CommsTemplate {
                     from: "starbase_alpha".into(),
                     trigger: TriggerCondition::OnHailed {
                         entity_name: "starbase_alpha".into(),
@@ -1247,14 +1227,17 @@ mod tests {
             runtime
                 .name_to_uuid
                 .insert("doomed".into(), target_uuid.into());
-            runtime.contacts.push(CommsContact {
+        }
+        {
+            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+            comms.contacts.push(CommsContact {
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
                 in_range: true,
                 is_urgent: false,
             });
-            runtime.comms_template_states.push(CommsTemplateState {
-                template: crate::world::content::CommsTemplate {
+            comms.comms_template_states.push(CommsTemplateState {
+                template: crate::comms::content::CommsTemplate {
                     from: "starbase_alpha".into(),
                     trigger: TriggerCondition::OnHailed {
                         entity_name: "starbase_alpha".into(),
@@ -1277,7 +1260,7 @@ mod tests {
                 },
                 fired: false,
             });
-            runtime.needs_broadcast = true;
+            comms.needs_broadcast = true;
         }
         let _ = tick(&mut app);
 
@@ -1586,7 +1569,7 @@ mod tests {
         // tear it back down, all from a single `RespondToMessage`.
         {
             let _ = spawn_modifier_target(&mut app, "starbase_alpha", station_uuid);
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
             runtime.contacts.push(CommsContact {
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
@@ -1594,7 +1577,7 @@ mod tests {
                 is_urgent: false,
             });
             runtime.comms_template_states.push(CommsTemplateState {
-                template: crate::world::content::CommsTemplate {
+                template: crate::comms::content::CommsTemplate {
                     from: "starbase_alpha".into(),
                     trigger: TriggerCondition::OnHailed {
                         entity_name: "starbase_alpha".into(),
@@ -2149,6 +2132,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .init_resource::<WorldContentRuntime>()
+            .init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .add_message::<CommsChannel2Event>()
             .add_systems(
@@ -2175,7 +2159,7 @@ mod tests {
             .0
             .inject(placeholder);
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
+            .resource_mut::<CommsRuntime>()
             .pending_follow_ups
             .push(PendingFollowUp {
                 node: CommsDialogueNode {
@@ -2239,7 +2223,7 @@ mod tests {
                 "only the root message visible during wait"
             );
             assert_eq!(messages[0].body, "Stand by â€” patching you through.");
-            let runtime = app.world().resource::<WorldContentRuntime>();
+            let runtime = app.world().resource::<CommsRuntime>();
             assert_eq!(
                 runtime.pending_follow_ups.len(),
                 1,
@@ -2254,7 +2238,7 @@ mod tests {
         // Force the queue-relative timer past the `after_secs` threshold
         // and tick again.
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
+            .resource_mut::<CommsRuntime>()
             .pending_follow_ups[0]
             .elapsed_secs = 5.0;
         let _ = tick(&mut app);
@@ -2284,7 +2268,7 @@ mod tests {
 
         // Stamp the template with an explicit thread_id.
         {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
             runtime.comms_template_states[0].template.thread_id =
                 Some("research-scholar".to_string());
         }
@@ -2303,7 +2287,7 @@ mod tests {
         let _ = tick(&mut app);
         // Trip the queue-relative timer.
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
+            .resource_mut::<CommsRuntime>()
             .pending_follow_ups[0]
             .elapsed_secs = 5.0;
         let _ = tick(&mut app);
@@ -2328,7 +2312,7 @@ mod tests {
         // Drop the trigger on the chained node â€” now it's triggerless and
         // should fire on the very next tick.
         {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
             if let Some(ref mut fu) = runtime.comms_template_states[0].template.root_follow_up {
                 fu.trigger = None;
             }
@@ -2363,7 +2347,7 @@ mod tests {
         );
         assert_eq!(messages[1].body, "Captain. Dr. Myst speaking.");
         // The pending queue must be drained.
-        let runtime = app.world().resource::<WorldContentRuntime>();
+        let runtime = app.world().resource::<CommsRuntime>();
         assert!(runtime.pending_follow_ups.is_empty());
     }
 
@@ -2374,69 +2358,65 @@ mod tests {
     /// and `trigger = on_timer 2s` to verify queue-relative delays.
     fn setup_game_with_root_follow_up(app: &mut App, station_uuid: &str) {
         setup_game_with_comms(app, station_uuid);
-        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
         runtime.comms_template_states.clear();
-        runtime
-            .comms_template_states
-            .push(crate::world::content::CommsTemplateState {
-                template: crate::world::content::CommsTemplate {
-                    from: "starbase_alpha".into(),
-                    trigger: TriggerCondition::OnHailed {
-                        entity_name: "starbase_alpha".into(),
-                    },
-                    node: CommsDialogueNode {
-                        body: "Stand by â€” patching you through.".into(),
-                        responses: vec![], // no [[response]] â€” chained monologue
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: Some(CommsDialogueNode {
-                        body: "Captain. Dr. Myst speaking.".into(),
-                        responses: vec![],
-                        speaker: Some("Dr. Myst".into()),
-                        trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
-                    }),
+        runtime.comms_template_states.push(CommsTemplateState {
+            template: crate::comms::content::CommsTemplate {
+                from: "starbase_alpha".into(),
+                trigger: TriggerCondition::OnHailed {
+                    entity_name: "starbase_alpha".into(),
                 },
-                fired: false,
-            });
+                node: CommsDialogueNode {
+                    body: "Stand by â€” patching you through.".into(),
+                    responses: vec![], // no [[response]] â€” chained monologue
+                    speaker: None,
+                    trigger: None,
+                },
+                thread_id: None,
+                urgent: false,
+                root_follow_up: Some(CommsDialogueNode {
+                    body: "Captain. Dr. Myst speaking.".into(),
+                    responses: vec![],
+                    speaker: Some("Dr. Myst".into()),
+                    trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
+                }),
+            },
+            fired: false,
+        });
     }
 
     fn setup_game_with_comms_and_followup(app: &mut App, station_uuid: &str) {
         setup_game_with_comms(app, station_uuid);
         // Replace the single template with one that has a follow-up node.
-        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        let mut runtime = app.world_mut().resource_mut::<CommsRuntime>();
         runtime.comms_template_states.clear();
-        runtime
-            .comms_template_states
-            .push(crate::world::content::CommsTemplateState {
-                template: crate::world::content::CommsTemplate {
-                    from: "starbase_alpha".into(),
-                    trigger: TriggerCondition::OnHailed {
-                        entity_name: "starbase_alpha".into(),
-                    },
-                    node: CommsDialogueNode {
-                        body: "Identify yourself.".into(),
-                        responses: vec![CommsResponse {
-                            text: "We are the Phoenix.".into(),
-                            actions: vec![],
-                            follow_up: Some(CommsDialogueNode {
-                                body: "Welcome, Phoenix.".into(),
-                                responses: vec![],
-                                speaker: Some("Dockmaster Kade".into()),
-                                trigger: None,
-                            }),
-                        }],
-                        speaker: None,
-                        trigger: None,
-                    },
-                    thread_id: None,
-                    urgent: false,
-                    root_follow_up: None,
+        runtime.comms_template_states.push(CommsTemplateState {
+            template: crate::comms::content::CommsTemplate {
+                from: "starbase_alpha".into(),
+                trigger: TriggerCondition::OnHailed {
+                    entity_name: "starbase_alpha".into(),
                 },
-                fired: false,
-            });
+                node: CommsDialogueNode {
+                    body: "Identify yourself.".into(),
+                    responses: vec![CommsResponse {
+                        text: "We are the Phoenix.".into(),
+                        actions: vec![],
+                        follow_up: Some(CommsDialogueNode {
+                            body: "Welcome, Phoenix.".into(),
+                            responses: vec![],
+                            speaker: Some("Dockmaster Kade".into()),
+                            trigger: None,
+                        }),
+                    }],
+                    speaker: None,
+                    trigger: None,
+                },
+                thread_id: None,
+                urgent: false,
+                root_follow_up: None,
+            },
+            fired: false,
+        });
     }
 
     /// A Hail targeting an out-of-range entity must NOT inject any message

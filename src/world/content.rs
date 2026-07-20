@@ -1,16 +1,20 @@
 // Runtime state and event evaluators for world content.
 //
 // Pure Rust module — no Bevy. Pure config types (`TriggerCondition`,
-// `TriggerAction`, `Trigger`, `CommsTemplate`, `CommsDialogueNode`,
-// `CommsResponse`) live in `world::config` and are re-exported here so
-// existing imports continue to resolve. This module owns:
+// `TriggerAction`, `Trigger`) live in `world::config` and are re-exported
+// here so existing imports continue to resolve. This module owns:
 //
 //   * `WorldEvent` — events triggers / comms templates react to.
-//   * `TriggerState` / `CommsTemplateState` — per-trigger fired flag.
-//   * `evaluate_triggers` / `evaluate_comms_templates` — single-shot evaluators.
-//   * `ActiveDialogue` — dialogue state machine.
-//   * `trigger_states_from_world` / `comms_template_states_from_world` —
-//     factories that derive runtime states from a parsed `WorldConfig`.
+//   * `TriggerState` — per-trigger fired flag.
+//   * `evaluate_triggers` — single-shot trigger evaluator.
+//   * `condition_matches` — the shared trigger-condition vocabulary
+//     matcher (also consumed by the comms evaluators in `comms::content`).
+//   * `trigger_states_from_world` — factory that derives runtime states
+//     from a parsed `WorldConfig`.
+//
+// The comms half (`CommsTemplateState`, `evaluate_comms_templates`,
+// `ActiveDialogue`, `PendingFollowUp`, `FiredCommsTemplate`,
+// `follow_up_trigger_holds`) lives in `comms::content` (issue #816).
 //
 // PRD #342: the legacy multi-world layering machinery was deleted in slice 5.
 // One world is loaded per session; runtime state is flat.
@@ -18,9 +22,7 @@
 use std::collections::{HashMap, HashSet};
 
 // Re-export pure config types so legacy import paths continue to resolve.
-pub use crate::world::config::{
-    CommsDialogueNode, CommsResponse, CommsTemplate, Trigger, TriggerAction, TriggerCondition,
-};
+pub use crate::world::config::{Trigger, TriggerAction, TriggerCondition};
 use crate::world::flags::FlagStore;
 
 // ── World events ──────────────────────────────────────────────────────────
@@ -90,13 +92,6 @@ pub struct TriggerState {
     pub seen_destroyed: HashSet<String>,
 }
 
-/// Runtime state for one comms template — tracks whether it has already fired.
-#[derive(Clone, Debug)]
-pub struct CommsTemplateState {
-    pub template: CommsTemplate,
-    pub fired: bool,
-}
-
 /// Result of evaluating triggers against a batch of world events.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
@@ -112,74 +107,6 @@ pub struct FiredTrigger {
     /// `OnEnteredRegion`, `OnExitedRegion`). Propagated to `AddObjective`
     /// actions so the objective can be linked to an entity on radar.
     pub entity_name: Option<String>,
-}
-
-/// A comms template that fired in response to world events.
-#[derive(Clone, Debug, PartialEq)]
-pub struct FiredCommsTemplate {
-    /// The sender entity name from the template.
-    pub from: String,
-    /// The root dialogue node to inject into the inbox.
-    pub node: CommsDialogueNode,
-    /// Thread_id from the template, if set. When absent a UUID is generated
-    /// at injection time.
-    pub thread_id: Option<String>,
-    /// When true, the injected `CommsMessage` should be flagged as urgent.
-    pub urgent: bool,
-    /// Optional chained follow-up node that should be scheduled at inject
-    /// time. The server queues this onto `pending_follow_ups` so the
-    /// chained message arrives without any player response click required
-    /// (one-way "Stand by..." broadcasts). If the chained node carries a
-    /// `trigger`, the follow-up waits for that trigger to fire; otherwise
-    /// it fires on the next tick.
-    pub root_follow_up: Option<CommsDialogueNode>,
-}
-
-/// Runtime state for one active dialogue conversation.
-#[derive(Clone, Debug)]
-pub struct ActiveDialogue {
-    /// The current dialogue node being presented.
-    pub current_node: CommsDialogueNode,
-    /// Thread identifier shared by all messages in this dialogue tree.
-    /// Set when the first message is injected; follow-ups inherit the same id.
-    pub thread_id: String,
-}
-
-/// A comms message that has been queued and is waiting to be injected into
-/// the inbox.
-///
-/// A follow-up sits in the queue until its trigger condition is met. If the
-/// follow-up has no trigger, it fires on the next tick. If the follow-up
-/// has a trigger, it fires when:
-///   - the trigger condition is observed in a `WorldEvent` after queueing, OR
-///   - the trigger condition is "already-true" at evaluation time (e.g.
-///     the ship is currently inside the named region for `OnEnteredRegion`;
-///     the flag is already set for `OnFlagSet`; the world has already
-///     loaded for `OnWorldLoaded`), OR
-///   - for `OnTimer`, the `elapsed_secs` field reaches `after_secs`. The
-///     `elapsed_secs` clock is queue-relative, NOT world-relative, so a
-///     3-second response follow-up fires three seconds after the player
-///     picks the response.
-#[derive(Clone, Debug)]
-pub struct PendingFollowUp {
-    /// The dialogue node to inject once the trigger condition is met.
-    pub node: CommsDialogueNode,
-    /// UUID of the entity sending this message.
-    pub sender_uuid: String,
-    /// Display name of the sender (already resolved to the per-node override
-    /// or the parent template's `from`).
-    pub sender_name: String,
-    /// Shared thread identifier for this conversation.
-    pub thread_id: String,
-    /// Seconds elapsed since this follow-up was queued. Used for
-    /// `OnTimer` trigger evaluation (queue-relative, not world-relative).
-    pub elapsed_secs: f32,
-    /// The id of the `...` placeholder message currently shown in the inbox,
-    /// if the follow-up is an in-thread response follow-up. Chained roots
-    /// stay silent until the real message is ready.
-    pub placeholder_id: Option<String>,
-    /// Whether the real message should be flagged as urgent.
-    pub urgent: bool,
 }
 
 // ── Evaluators ────────────────────────────────────────────────────────────
@@ -393,41 +320,6 @@ pub fn resolve_layer_prefix(
     Some((rest.to_string(), layer_chain[depth].clone()))
 }
 
-/// Evaluate all comms templates in `states` against the given `events`.
-///
-/// Each template fires at most once (single-shot).
-#[allow(clippy::ptr_arg)]
-pub fn evaluate_comms_templates(
-    states: &mut Vec<CommsTemplateState>,
-    events: &[WorldEvent],
-    name_to_uuid: &HashMap<String, String>,
-) -> Vec<FiredCommsTemplate> {
-    let mut results = Vec::new();
-    for state in states.iter_mut() {
-        if state.fired {
-            continue;
-        }
-        let fires = events.iter().any(|event| {
-            // Comms templates don't currently support `parent:` flag
-            // conditions; pass a single-element base-only chain so any
-            // `parent:` prefix in an OnFlagSet condition resolves past
-            // root and never matches (back-compat).
-            condition_matches(&state.template.trigger, event, name_to_uuid, &[None])
-        });
-        if fires {
-            state.fired = true;
-            results.push(FiredCommsTemplate {
-                from: state.template.from.clone(),
-                node: state.template.node.clone(),
-                thread_id: state.template.thread_id.clone(),
-                urgent: state.template.urgent,
-                root_follow_up: state.template.root_follow_up.clone(),
-            });
-        }
-    }
-    results
-}
-
 /// Decide whether a single trigger fires for the given batch of events.
 ///
 /// Most conditions delegate to the stateless `condition_matches` once per
@@ -489,7 +381,7 @@ fn trigger_fires_for_events(
 /// Stateless and read-only — does not handle `OnAllDestroyed` (which is
 /// stateful). `OnAllDestroyed` is fast-pathed in `trigger_fires_for_events`
 /// before this matcher runs and never reaches the match block.
-fn condition_matches(
+pub(crate) fn condition_matches(
     condition: &TriggerCondition,
     event: &WorldEvent,
     name_to_uuid: &HashMap<String, String>,
@@ -586,20 +478,6 @@ pub fn trigger_states_from_world(world: &crate::world::config::WorldConfig) -> V
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
-        })
-        .collect()
-}
-
-/// Create a `Vec<CommsTemplateState>` from a parsed `WorldConfig` (PRD #341).
-pub fn comms_template_states_from_world(
-    world: &crate::world::config::WorldConfig,
-) -> Vec<CommsTemplateState> {
-    world
-        .comms
-        .iter()
-        .map(|t| CommsTemplateState {
-            template: t.clone(),
-            fired: false,
         })
         .collect()
 }
@@ -1240,147 +1118,7 @@ mod tests {
         assert!(states.iter().all(|s| !s.fired));
     }
 
-    #[test]
-    fn comms_template_states_from_world_creates_unfired_states_for_every_template() {
-        let mut world = WorldConfig::default();
-        world.comms.push(CommsTemplate {
-            from: "starbase".into(),
-            trigger: TriggerCondition::OnHailed {
-                entity_name: "starbase".into(),
-            },
-            node: CommsDialogueNode {
-                body: "hello".into(),
-                responses: vec![],
-                speaker: None,
-                trigger: None,
-            },
-            thread_id: None,
-            urgent: false,
-            root_follow_up: None,
-        });
-        let states = comms_template_states_from_world(&world);
-        assert_eq!(states.len(), 1);
-        assert!(!states[0].fired);
-    }
-
-    // ── evaluate_comms_templates ──────────────────────────────────────────
-
-    #[test]
-    fn evaluate_comms_templates_fires_on_attacked() {
-        let mut states = vec![CommsTemplateState {
-            template: CommsTemplate {
-                from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked {
-                    entity_name: "raider".into(),
-                },
-                node: CommsDialogueNode {
-                    body: "MAYDAY".into(),
-                    responses: vec![],
-                    speaker: None,
-                    trigger: None,
-                },
-                thread_id: None,
-                urgent: false,
-                root_follow_up: None,
-            },
-            fired: false,
-        }];
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Attacked {
-            uuid: "uuid-r".into(),
-            attacker_uuid: "uuid-p".into(),
-        }];
-        let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        assert_eq!(fired.len(), 1);
-        assert_eq!(fired[0].from, "raider");
-    }
-
-    #[test]
-    fn evaluate_comms_templates_fires_at_most_once() {
-        let mut states = vec![CommsTemplateState {
-            template: CommsTemplate {
-                from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked {
-                    entity_name: "raider".into(),
-                },
-                node: CommsDialogueNode {
-                    body: "MAYDAY".into(),
-                    responses: vec![],
-                    speaker: None,
-                    trigger: None,
-                },
-                thread_id: None,
-                urgent: false,
-                root_follow_up: None,
-            },
-            fired: false,
-        }];
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Attacked {
-            uuid: "uuid-r".into(),
-            attacker_uuid: "uuid-p".into(),
-        }];
-        let first = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        let second = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        assert_eq!(first.len(), 1);
-        assert!(second.is_empty());
-    }
-
-    #[test]
-    fn evaluate_comms_templates_does_not_fire_for_unrelated_entity() {
-        let mut states = vec![CommsTemplateState {
-            template: CommsTemplate {
-                from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked {
-                    entity_name: "raider".into(),
-                },
-                node: CommsDialogueNode {
-                    body: "MAYDAY".into(),
-                    responses: vec![],
-                    speaker: None,
-                    trigger: None,
-                },
-                thread_id: None,
-                urgent: false,
-                root_follow_up: None,
-            },
-            fired: false,
-        }];
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("raider".into(), "uuid-r".into());
-        name_to_uuid.insert("station".into(), "uuid-s".into());
-        let events = vec![WorldEvent::Attacked {
-            uuid: "uuid-s".into(),
-            attacker_uuid: "uuid-p".into(),
-        }];
-        let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        assert!(fired.is_empty());
-    }
-
     // ── Shipped-world integration ─────────────────────────────────────────
-
-    #[test]
-    fn default_world_on_attacked_fires_comms_template() {
-        let toml = include_str!("../../assets/worlds/default.toml");
-        let world = crate::world::config::parse_world(toml).expect("default.toml must parse");
-        let mut states = comms_template_states_from_world(&world);
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("world.entity.raider_alpha.name".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Attacked {
-            uuid: "uuid-r".into(),
-            attacker_uuid: "uuid-p".into(),
-        }];
-        let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        assert!(
-            !fired.is_empty(),
-            "raider_alpha on_attacked comms must fire"
-        );
-        assert!(fired
-            .iter()
-            .any(|f| f.from == "world.entity.raider_alpha.name"));
-    }
 
     #[test]
     fn patrol_world_on_destroyed_trigger_fires_add_objective() {

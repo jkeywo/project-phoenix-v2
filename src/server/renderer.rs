@@ -9,6 +9,7 @@ use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
 use crate::ai_plugin::WarpOutMarker;
+use crate::comms::server::OnScreenMessage;
 use crate::config_cache::FactionRegistryResource;
 use crate::entity_spawner::{
     CinematicCameraSection, EntityUuid, FactionComponent, RegionEffectsSection, RegionShapeSection,
@@ -26,7 +27,6 @@ use crate::render_setup::{
 use crate::server::pfx::PfxPlugin;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::AsteroidDestroyedVfx;
-use crate::world::server::OnScreenMessage;
 
 // ── VFX Components ────────────────────────────────────────────────
 

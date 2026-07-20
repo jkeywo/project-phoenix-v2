@@ -10,7 +10,7 @@ import {
   nearestEntityToPoint,
   isFireButtonEnabled, isTubeLoaded, tubeReloadSecs, phaserModeLabel,
   shieldStatusView, powerTotal, canIncreasePower, canDecreasePower,
-  batteryPercentage, isPowerLocked, isSciencePhaserPanelVisible,
+  isSciencePhaserPanelVisible,
 } from '../../gui/sim-state.js';
 
 function asteroid(uuid, x, z, radius = 1) {
@@ -323,11 +323,6 @@ describe('apply torpedoes / modifiers / power', () => {
       .not.toBe(modifierKey('ImpulseDrive', 'MaxYawRate'));
   });
 
-  it('PowerState stores the latest payload', () => {
-    const s = new ClientSimState();
-    s.apply({ type: 'PowerState', data: { helm: 3, weapons: 2, sensors: 1, battery_charge: 42.5, locked: true } });
-    expect(s.powerStatePayload).toEqual({ helm: 3, weapons: 2, sensors: 1, battery_charge: 42.5, locked: true });
-  });
 });
 
 describe('apply entity lifecycle', () => {
@@ -508,18 +503,197 @@ describe('view helpers', () => {
     expect(canDecreasePower([2, 2, 2], 'Sensors', true)).toBe(false);  // locked
   });
 
-  it('batteryPercentage / isPowerLocked read the payload with defaults', () => {
-    expect(batteryPercentage(null)).toBe(0);
-    expect(isPowerLocked(null)).toBe(false);
-    const payload = { helm: 2, weapons: 2, sensors: 2, battery_charge: 73.5, locked: true };
-    expect(batteryPercentage(payload)).toBe(73.5);
-    expect(isPowerLocked(payload)).toBe(true);
-  });
-
   it('isSciencePhaserPanelVisible only when Tactical is Low', () => {
     expect(isSciencePhaserPanelVisible({ Tactical: 'Low' })).toBe(true);
     expect(isSciencePhaserPanelVisible({ Tactical: 'Std' })).toBe(false);
     expect(isSciencePhaserPanelVisible({})).toBe(false);
     expect(isSciencePhaserPanelVisible(undefined)).toBe(false);
+  });
+});
+
+// ── Single-store fields moved from client.html (issue #819) ─────────────────
+// client.html's hand-maintained mirror and flat blackboard scalars were
+// deleted; the console builders now read window.simState directly. These
+// tests pin the fields/getters that migration relies on.
+
+describe('weapons UI flags derived in apply (#819)', () => {
+  const banks = [
+    { id: 'port', fire_ready: false, on_cooldown: true },
+    { id: 'star', fire_ready: true,  on_cooldown: false },
+  ];
+
+  it('WeaponsUpdate derives fireReady / onCooldown / readyBankId and stores blips', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: 't1', banks, tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+      blips: [{ uuid: 'b1' }],
+    } });
+    expect(s.weaponsFireReady).toBe(true);
+    expect(s.weaponsOnCooldown).toBe(false);
+    expect(s.weaponsReadyBankId).toBe('star');
+    expect(s.weaponsBlips).toEqual([{ uuid: 'b1' }]);
+  });
+
+  it('WeaponsUpdate keeps previous blips when the payload omits them', () => {
+    const s = new ClientSimState();
+    s.weaponsBlips = [{ uuid: 'old' }];
+    s.apply({ type: 'WeaponsUpdate', data: { target_uuid: 't1', banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto' } });
+    expect(s.weaponsBlips).toEqual([{ uuid: 'old' }]);
+  });
+
+  it('WeaponsUpdate with no target forces fireReady false; all-cooldown sets onCooldown', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: null,
+      banks: [{ id: 'port', fire_ready: true, on_cooldown: true }],
+      tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+    } });
+    expect(s.weaponsFireReady).toBe(false);
+    expect(s.weaponsOnCooldown).toBe(true);
+    expect(s.weaponsReadyBankId).toBe('port');
+  });
+
+  it('TargetLock locked sets the target; unlocked clears target + fireReady', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'TargetLock', data: { uuid: 'tgt-9', locked: true } });
+    expect(s.currentTargetUuid).toBe('tgt-9');
+    s.weaponsFireReady = true;
+    s.apply({ type: 'TargetLock', data: { uuid: 'tgt-9', locked: false } });
+    expect(s.currentTargetUuid).toBeNull();
+    expect(s.currentTargetName).toBeNull();
+    expect(s.weaponsFireReady).toBe(false);
+  });
+
+  it('BeamStarted / BeamEnded toggle weaponsFiring', () => {
+    const s = new ClientSimState();
+    expect(s.weaponsFiring).toBe(false);
+    s.apply({ type: 'BeamStarted', data: {} });
+    expect(s.weaponsFiring).toBe(true);
+    s.apply({ type: 'BeamEnded', data: {} });
+    expect(s.weaponsFiring).toBe(false);
+  });
+});
+
+describe('shield focus + target clearing (#819)', () => {
+  it('ShieldStatus derives shieldFocusedFacing from is_focused', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'ShieldStatus', data: { facings: [
+      { label: 'Fore', hp: 1, max_hp: 1, online: true },
+      { label: 'Aft', hp: 1, max_hp: 1, online: true, is_focused: true },
+    ] } });
+    expect(s.shieldFocusedFacing).toBe('Aft');
+    s.apply({ type: 'ShieldStatus', data: { facings: [
+      { label: 'Fore', hp: 1, max_hp: 1, online: true },
+    ] } });
+    expect(s.shieldFocusedFacing).toBeNull();
+  });
+
+  it('EntityDespawned clears a matching weapons target and sensors target', () => {
+    const s = new ClientSimState();
+    s.world.entities = [asteroid('e1', 1, 1)];
+    s.currentTargetUuid = 'e1';
+    s.currentTargetName = 'Rock';
+    s.weaponsFireReady = true;
+    s.sensorsTarget = 'e1';
+    s.apply({ type: 'EntityDespawned', data: { uuid: 'e1' } });
+    expect(s.currentTargetUuid).toBeNull();
+    expect(s.currentTargetName).toBeNull();
+    expect(s.weaponsFireReady).toBe(false);
+    expect(s.sensorsTarget).toBeNull();
+  });
+
+  it('AsteroidDestroyed leaves unrelated targets alone', () => {
+    const s = new ClientSimState();
+    s.world.entities = [asteroid('a1', 1, 1)];
+    s.currentTargetUuid = 'other';
+    s.sensorsTarget = 'another';
+    s.apply({ type: 'AsteroidDestroyed', data: { uuid: 'a1' } });
+    expect(s.currentTargetUuid).toBe('other');
+    expect(s.sensorsTarget).toBe('another');
+  });
+});
+
+describe('console-state view aliases (#819)', () => {
+  it('asteroids getter is the live world entity array (same reference)', () => {
+    const s = new ClientSimState();
+    expect(s.asteroids).toBe(s.world.entities);
+    s.apply({ type: 'EntitySpawned', data: { snapshot: asteroid('e1', 1, 1) } });
+    expect(s.asteroids.map(e => e.uuid)).toEqual(['e1']);
+  });
+
+  it('helm blackboard drives shipX/shipZ/shipYaw/forwardSpeed/impulseChargeProgress', () => {
+    const s = new ClientSimState();
+    expect(s.shipX).toBe(0);
+    expect(s.shipYaw).toBe(0);
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['helm', { kind: 'Helm', data: { x: 10, z: -20, yaw: 1.5, forward_speed: 42, impulse_charge: 0.3 } }],
+    ] } });
+    expect(s.shipX).toBe(10);
+    expect(s.shipZ).toBe(-20);
+    expect(s.shipYaw).toBeCloseTo(1.5);
+    expect(s.forwardSpeed).toBe(42);
+    expect(s.impulseChargeProgress).toBeCloseTo(0.3);
+  });
+
+  it('captain blackboard drives currentView (Camera data / Cinematic / kind) and redAlert', () => {
+    const s = new ClientSimState();
+    expect(s.currentView).toBe('Fore');
+    expect(s.redAlert).toBe(false);
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['captain', { kind: 'Captain', data: { view_mode: { kind: 'Camera', data: 'Aft' }, red_alert: true } }],
+    ] } });
+    expect(s.currentView).toBe('Aft');
+    expect(s.redAlert).toBe(true);
+    s.blackboards['captain'].view_mode = { kind: 'Cinematic' };
+    expect(s.currentView).toBe('cinematic');
+    s.blackboards['captain'].view_mode = { kind: 'Radar' };
+    expect(s.currentView).toBe('Radar');
+  });
+
+  it('navigation blackboard mirrors the shared waypoint', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['navigation', { kind: 'Navigation', data: { navigation_waypoint: { x: 5, z: 6 } } }],
+    ] } });
+    expect(s.navigationWaypoint).toEqual({ x: 5, z: 6 });
+    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+      ['navigation', { kind: 'Navigation', data: { navigation_waypoint: null } }],
+    ] } });
+    expect(s.navigationWaypoint).toBeNull();
+  });
+
+  it('weapons aliases mirror the underlying fields; weaponsTarget setter writes through', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: 't1', target_name: 'Rock',
+      banks: [{ id: 'port', fire_ready: true, on_cooldown: false }],
+      tubes: [{ id: 'fore', loaded: true, reload_secs: 0 }],
+      torpedo_count: 7, phaser_mode: 'Manual',
+    } });
+    expect(s.weaponsTarget).toBe('t1');
+    expect(s.weaponsTargetName).toBe('Rock');
+    expect(s.weaponsBanks).toBe(s.bankStates);
+    expect(s.weaponsTubes).toBe(s.tubeStates);
+    expect(s.weaponsTorpedoCount).toBe(7);
+    expect(s.weaponsPhaserMode).toBe('Manual');
+    // The action-map's optimistic mutate patch assigns weaponsTarget directly.
+    Object.assign(s, { weaponsTarget: 'patched' });
+    expect(s.currentTargetUuid).toBe('patched');
+  });
+
+  it('commsMessages / commsContacts delegate to window.commsState, empty when absent', () => {
+    const s = new ClientSimState();
+    expect(s.commsMessages).toEqual([]);
+    expect(s.commsContacts).toEqual([]);
+    const hadWindow = typeof globalThis.window !== 'undefined';
+    const prev = hadWindow ? globalThis.window : undefined;
+    try {
+      globalThis.window = { commsState: { messages: [{ id: 'm1' }], contacts: [{ uuid: 'c1' }] } };
+      expect(s.commsMessages).toEqual([{ id: 'm1' }]);
+      expect(s.commsContacts).toEqual([{ uuid: 'c1' }]);
+    } finally {
+      if (hadWindow) globalThis.window = prev;
+      else delete globalThis.window;
+    }
   });
 });

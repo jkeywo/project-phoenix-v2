@@ -1480,23 +1480,20 @@ describe('buildNavigationConsoleState', () => {
     });
   });
 
-  // ── Production-path regression: Welcome → client.html mirror → builder ───
+  // ── Production-path regression: Welcome → window.simState → builder ──────
   //
   // The Navigation builder has a two-stage filter (outer entity filter on
-  // `navChartShows`, then the inner `buildBlips` filter). If `client.html`'s
-  // Welcome-handler mirror block forgets to copy `navChartShows` /
-  // `navChartSelects` / `navChartRange` from `window.simState` onto the
-  // plain `state` object passed into the builder, the outer filter sees
-  // `navChartShows === undefined` and silently drops every non-objective
-  // entity — leaving the navigation chart blank.
+  // `navChartShows`, then the inner `buildBlips` filter): an undefined /
+  // empty `navChartShows` silently drops every non-objective entity,
+  // leaving the navigation chart blank.
   //
-  // This test exercises that exact pipeline end-to-end (sans the iframe
-  // transport): it applies a real Welcome payload via `ClientSimState`,
-  // then mirrors only the keys `client.html` actually copies, and asserts
-  // that asteroids / stations / planets land in the blip list. Setting
-  // `state.navChartShows` directly (as every other test in this file does)
-  // would hide the very gap this test exists to catch.
-  it('blips arrive when state is built via the client.html Welcome mirror path', () => {
+  // Post issue #819 client.html passes `window.simState` straight into the
+  // builders — the hand-maintained mirror that used to re-copy these keys
+  // (and could forget one) is gone. This test exercises the direct
+  // pipeline end-to-end (sans the iframe transport): apply a real Welcome
+  // payload via `ClientSimState`, hand the instance itself to the builder,
+  // and assert that stations / planets land in the blip list.
+  it('blips arrive when the builder reads a ClientSimState directly (#819)', () => {
     const sim = new ClientSimState();
     const shipConfig = {
       nav_chart_range: 800,
@@ -1520,29 +1517,10 @@ describe('buildNavigationConsoleState', () => {
       },
     });
 
-    // Mirror EXACTLY what client.html's Welcome handler copies onto `state`.
-    // Keep this in lock-step with the mirror block in client.html — if a new
-    // ShipClientConfig field is added there, mirror it here too.
-    const state = {
-      asteroids:           sim.world.entities,
-      repairTeams:         sim.repairTeams,
-      weaponsRadarRange:   sim.weaponsRadarRange,
-      helmRadarRange:      sim.helmRadarRange,
-      sensorsRadarRange:   sim.sensorsRadarRange,
-      tacticalRadarShows:  sim.tacticalRadarShows,
-      tacticalRadarSelects: sim.tacticalRadarSelects,
-      sensorsRadarShows:   sim.sensorsRadarShows,
-      sensorsRadarSelects: sim.sensorsRadarSelects,
-      navChartShows:       sim.navChartShows,
-      navChartSelects:     sim.navChartSelects,
-      navChartRange:       sim.navChartRange,
-      phaserArcConfigs:    sim.phaserArcConfigs,
-      torpedoArcConfigs:   sim.torpedoArcConfigs,
-      navigationWaypoint:  sim.navigationWaypoint,
-      shipX: 0, shipZ: 0,
-    };
-
-    const out = parse(buildNavigationConsoleState(state));
+    // No mirror step: the builder consumes the ClientSimState instance
+    // directly, exactly as client.html does post-#819 (the `asteroids` /
+    // `shipX` / `shipZ` reads resolve through the class getters).
+    const out = parse(buildNavigationConsoleState(sim));
     expect(out.blips.length).toBeGreaterThan(0);
     expect(out.blips.map(b => b.uuid).sort()).toEqual(['pl1', 'st1']);
     expect(out.radar_range).toBe(800);

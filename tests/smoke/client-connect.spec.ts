@@ -29,12 +29,13 @@ test('client receives Welcome containing its player token', async ({ context }) 
   const myToken = await clientPage.evaluate(() => sessionStorage.getItem('session-token'));
   expect(myToken).toBeTruthy();
 
-  // The Welcome message populates the global `state.players` array in client.html.
-  // `state` is a top-level const in a non-module script so it is accessible
-  // in the page's global scope (though NOT as window.state).
+  // The Welcome message populates the `uiState.players` array in client.html
+  // (the lobby/lifecycle mirror — issue #819 renamed the old `state` object).
+  // `uiState` is a top-level const in a non-module script so it is accessible
+  // in the page's global scope (though NOT as window.uiState).
   const players = await clientPage.evaluate(() => {
     // eslint-disable-next-line no-eval
-    try { return (0, eval)('state.players'); } catch { return []; }
+    try { return (0, eval)('uiState.players'); } catch { return []; }
   });
   const me = Array.isArray(players)
     ? players.find((p: any) => p.token === myToken)

@@ -85,8 +85,6 @@ export class ClientSimState {
     this.torpedoesInFlight = [];
     /** Map of modifierKey(source, slot) → bonus. */
     this.modifiers = new Map();
-    /** Latest PowerState payload { helm, weapons, sensors, battery_charge, locked } or null. */
-    this.powerStatePayload = null;
     /** Current repair team slots ('Idle' or tagged-variant objects). */
     this.repairTeams = [];
     this.phaserFrequency = 0.5;
@@ -146,6 +144,22 @@ export class ClientSimState {
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
     this.torpedoArcConfigs = [];
+    // ── Mirror-only UI fields formerly hand-maintained by client.html (#819) ──
+    /** Sensors console target uuid. Set locally by set_sensors_target (the
+     *  action-map mutate patch lands here), cleared when the entity despawns. */
+    this.sensorsTarget = null;
+    /** Any bank reports fire_ready (false whenever no target is locked). */
+    this.weaponsFireReady = false;
+    /** Every bank is on cooldown. */
+    this.weaponsOnCooldown = false;
+    /** Id of the first fire-ready bank (or first bank), for UI affordances. */
+    this.weaponsReadyBankId = null;
+    /** A phaser beam is currently firing (BeamStarted…BeamEnded). */
+    this.weaponsFiring = false;
+    /** Authoritative server blips from the latest WeaponsUpdate, when sent. */
+    this.weaponsBlips = [];
+    /** Label of the currently-focused shield facing, derived from ShieldStatus. */
+    this.shieldFocusedFacing = null;
   }
 
   /**
@@ -223,7 +237,7 @@ export class ClientSimState {
       case 'PhaserFired':
         this.lastPhaserTarget = d.target_uuid != null ? d.target_uuid : null;
         break;
-      case 'WeaponsUpdate':
+      case 'WeaponsUpdate': {
         const previousTargetUuid = this.currentTargetUuid;
         this.currentTargetUuid = d.target_uuid != null ? d.target_uuid : null;
         this.currentTargetName = d.target_uuid != null
@@ -235,10 +249,37 @@ export class ClientSimState {
         this.phaserMode = d.phaser_mode || 'Auto';
         if (typeof d.phaser_frequency === 'number') this.phaserFrequency = d.phaser_frequency;
         if (d.blasters != null) this.blasterBanks = d.blasters;
+        // Derived weapons UI flags (formerly computed in client.html, #819).
+        const bankList = this.bankStates;
+        const readyBank = bankList.find(b => b.fire_ready) || bankList[0] || null;
+        this.weaponsReadyBankId = readyBank ? readyBank.id : null;
+        this.weaponsFireReady = d.target_uuid != null && bankList.some(b => b.fire_ready);
+        this.weaponsOnCooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
+        if (Array.isArray(d.blips)) this.weaponsBlips = d.blips;
         break;
-      case 'ShieldStatus':
+      }
+      case 'TargetLock':
+        // Immediate lock feedback ahead of the next WeaponsUpdate (#819).
+        if (d.locked) {
+          this.currentTargetUuid = d.uuid != null ? d.uuid : null;
+        } else {
+          this.currentTargetUuid = null;
+          this.currentTargetName = null;
+          this.weaponsFireReady = false;
+        }
+        break;
+      case 'BeamStarted':
+        this.weaponsFiring = true;
+        break;
+      case 'BeamEnded':
+        this.weaponsFiring = false;
+        break;
+      case 'ShieldStatus': {
         this.shieldFacings = d.facings || [];
+        const focused = this.shieldFacings.find(f => f.is_focused);
+        this.shieldFocusedFacing = focused ? focused.label : null;
         break;
+      }
       case 'TorpedoLaunched':
         this.torpedoesInFlight.push({
           uuid: d.uuid, x: d.x, z: d.z, heading: d.heading, tube: d.tube,
@@ -253,15 +294,6 @@ export class ClientSimState {
       case 'ModifierRemoved':
         this.modifiers.delete(modifierKey(d.source, d.slot));
         break;
-      case 'PowerState':
-        this.powerStatePayload = {
-          helm: d.helm,
-          weapons: d.weapons,
-          sensors: d.sensors,
-          battery_charge: d.battery_charge,
-          locked: !!d.locked,
-        };
-        break;
       case 'EntitySpawned': {
         const snap = d.snapshot;
         if (snap && !this.world.entities.some(e => e.uuid === snap.uuid)) {
@@ -271,6 +303,7 @@ export class ClientSimState {
       }
       case 'EntityDespawned':
         this.removeEntity(d.uuid);
+        this._clearTargetsFor(d.uuid);
         break;
       case 'AsteroidSpawned':
         if (!this.world.entities.some(e => e.uuid === d.uuid)) {
@@ -285,6 +318,7 @@ export class ClientSimState {
         break;
       case 'AsteroidDestroyed':
         this.removeEntity(d.uuid);
+        this._clearTargetsFor(d.uuid);
         break;
       case 'CoordinationPopup':
         this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
@@ -309,6 +343,12 @@ export class ClientSimState {
           // bb is { kind: "Helm", data: { yaw, forward_speed, ... } }
           if (bb && bb.kind && bb.data) {
             this.blackboards[systemId] = bb.data;
+            // The navigation blackboard is the freshest source for the shared
+            // waypoint (SimState only carries it at 10 Hz) — mirror it, as
+            // client.html's deleted BlackboardUpdate handler used to (#819).
+            if (systemId === 'navigation') {
+              this.navigationWaypoint = bb.data.navigation_waypoint || null;
+            }
           }
         }
         break;
@@ -319,7 +359,7 @@ export class ClientSimState {
 
   /**
    * Remove an entity by uuid IN PLACE so external references to
-   * `world.entities` (e.g. client.html's `state.asteroids`) stay live.
+   * `world.entities` (e.g. via the `asteroids` getter) stay live.
    */
   removeEntity(uuid) {
     const entities = this.world.entities;
@@ -332,6 +372,81 @@ export class ClientSimState {
   modifierBonus(source, slot) {
     const v = this.modifiers.get(modifierKey(source, slot));
     return v === undefined ? null : v;
+  }
+
+  /**
+   * Clear any weapons / sensors target pointing at a despawned entity, so
+   * the consoles never render a lock on something that no longer exists.
+   * Formerly done by client.html's EntityDespawned/AsteroidDestroyed mirror.
+   */
+  _clearTargetsFor(uuid) {
+    if (uuid == null) return;
+    if (this.currentTargetUuid === uuid) {
+      this.currentTargetUuid = null;
+      this.currentTargetName = null;
+      this.weaponsFireReady = false;
+    }
+    if (this.sensorsTarget === uuid) this.sensorsTarget = null;
+  }
+
+  // ── Console-state view aliases (#819) ─────────────────────────────────────
+  // gui/console-state.js builders read these key names; with client.html's
+  // hand-maintained mirror deleted, the aliases live here so the builders
+  // can take a ClientSimState directly without renaming their inputs.
+
+  /** The live entity array (the builders' historical `state.asteroids`). */
+  get asteroids() { return this.world.entities; }
+
+  /** Ship world X from the helm blackboard (0 until the first update). */
+  get shipX() { return this.blackboards['helm']?.x ?? 0; }
+  /** Ship world Z from the helm blackboard. */
+  get shipZ() { return this.blackboards['helm']?.z ?? 0; }
+  /** Ship yaw (radians) from the helm blackboard. */
+  get shipYaw() { return this.blackboards['helm']?.yaw ?? 0; }
+  /** Forward speed from the helm blackboard. */
+  get forwardSpeed() { return this.blackboards['helm']?.forward_speed ?? 0; }
+  /** Impulse charge progress (0..1) from the helm blackboard. */
+  get impulseChargeProgress() { return this.blackboards['helm']?.impulse_charge ?? 0; }
+
+  /**
+   * Current viewscreen view derived from the captain blackboard's view_mode
+   * (`{kind:'Camera',data:name}` → the camera name, `{kind:'Cinematic'}` →
+   * 'cinematic', other kinds → the kind). 'Fore' until the first update —
+   * the same default the deleted client.html mirror initialised with.
+   */
+  get currentView() {
+    const vm = this.blackboards['captain']?.view_mode;
+    const vd = vm && vm.kind === 'Camera' ? vm.data : null;
+    const kind = vm && vm.kind === 'Cinematic' ? 'cinematic' : (vm && vm.kind);
+    return vd || kind || 'Fore';
+  }
+
+  /** Red-alert flag from the captain blackboard. */
+  get redAlert() { return !!this.blackboards['captain']?.red_alert; }
+
+  /** Tactical target uuid alias. The setter exists so the action-map's
+   *  optimistic `mutate({ weaponsTarget })` patch lands on the one store. */
+  get weaponsTarget() { return this.currentTargetUuid; }
+  set weaponsTarget(uuid) { this.currentTargetUuid = uuid != null ? uuid : null; }
+  get weaponsTargetName() { return this.currentTargetName; }
+  get weaponsBanks() { return this.bankStates; }
+  get weaponsTubes() { return this.tubeStates; }
+  get weaponsTorpedoCount() { return this.torpedoCount; }
+  get weaponsPhaserMode() { return this.phaserMode; }
+
+  /**
+   * Comms inbox / contacts delegated to the comms store (gui/comms-state.js).
+   * The comms data deliberately lives in its own module; these getters keep
+   * `simState` as the single object the console builders read from without
+   * duplicating that state. Empty when the comms module isn't loaded.
+   */
+  get commsMessages() {
+    const cs = typeof window !== 'undefined' ? window.commsState : undefined;
+    return (cs && cs.messages) || [];
+  }
+  get commsContacts() {
+    const cs = typeof window !== 'undefined' ? window.commsState : undefined;
+    return (cs && cs.contacts) || [];
   }
 }
 
@@ -485,16 +600,6 @@ export function canDecreasePower(levels, console, locked) {
   if (locked) return false;
   const idx = POWER_INDEX[console];
   return idx !== undefined && levels[idx] > 1;
-}
-
-/** Battery charge from the PowerState payload, or 0 when none received yet. */
-export function batteryPercentage(payload) {
-  return payload ? payload.battery_charge : 0.0;
-}
-
-/** True when the power system is locked (battery exhausted). */
-export function isPowerLocked(payload) {
-  return payload ? !!payload.locked : false;
 }
 
 /**

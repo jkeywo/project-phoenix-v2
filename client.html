@@ -999,24 +999,15 @@
 
     // -- State ---------------------------------------------------
 
-    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', cameraViews: [], hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, boostEnabled: false, boostBattery: 0, boostActive: false, asteroids: [], weaponsTarget: null, weaponsTargetName: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
-      repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
+    // Lobby / lifecycle mirror ONLY (players, phase, station roster, game-over
+    // flags). All SIM state lives exclusively in window.simState
+    // (gui/sim-state.js) — the console builders read it directly, so do NOT
+    // add sim-derived fields here (issue #819 deleted the old hand-maintained
+    // mirror and the flat blackboard scalars).
+    const uiState = { players: [], phase: 'Lobby',
+      shipStations: { stations: [] },
       stations: [], maxPlayers: 0, allFilled: false, allReady: false, countdownSecs: 0,
-      shipDestroyed: false, gameOverReason: null,
-      // Weapons console iframe state (issue #422)
-      weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
-      // Repair console iframe state (issue #425)
-      repairTeams: [], consoleHull: [],
-      // Power console iframe state (issue #425)
-      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false,
-      // Shields console iframe state (issue #423)
-      shieldFacings: [], shieldFocusedFacing: null,
-      // Sensors console iframe state
-      sensorsTarget: null,
-      // Shared Navigation waypoint from SimState
-      navigationWaypoint: null,
-      objectives: [] };
+      shipDestroyed: false, gameOverReason: null };
 
     // DIAGNOSTIC: log every click at document level (capture phase) with target info
     document.addEventListener('pointerdown', (e) => {
@@ -1028,6 +1019,11 @@
 
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
+
+    /// Last red-alert value applied to the phone bezel, so the class toggle
+    /// only runs when the captain blackboard's flag actually changes.
+    /// (The flag itself lives in window.simState.redAlert — issue #819.)
+    let bezelAlertOn = false;
 
     /// Console selected in the lobby detail panel. Null until the player picks one.
     /// Resets when the player releases their station.
@@ -1123,7 +1119,7 @@
       if (_renderFrame !== null) return;
       _renderFrame = requestAnimationFrame(() => {
         _renderFrame = null;
-        render(state);
+        render(uiState);
       });
     }
     // Expose so gui/device-orientation.js can coalesce its resize-driven
@@ -1206,7 +1202,8 @@
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
         const compactActive = inGame && activeConsole !== null;
-        const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame, state.consoleHull, compactActive);
+        const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame,
+          (window.simState ? window.simState.consoleHull : []), compactActive);
         // Capture title ref before renderTabBar clears the bar's children.
         const titleEl = _consoleTitleEl;
         // Only show title in the tab bar when the bar itself is visible
@@ -1346,7 +1343,7 @@
           btn.className = 'claim-btn';
           btn.textContent = t('client.claim');
           btn.addEventListener('click', () => {
-            if (state.phase === 'InProgress') pendingMidGameClaim = true;
+            if (uiState.phase === 'InProgress') pendingMidGameClaim = true;
             send('SelectStation', { station: st.name });
             scheduleRender();
           });
@@ -1400,7 +1397,9 @@
           const ratingsArea = detail.querySelector('.detail-ratings');
           ratingsArea.innerHTML = '';
           if (myStation.ratings && myStation.ratings.length > 1) {
-            const activeRating = (s.stationRatings && s.stationRatings[myStation.id]) || myStation.ratings[0];
+            // Active rating lives in the sim store (Welcome / RatingChanged).
+            const simRatings = window.simState ? window.simState.stationRatings : null;
+            const activeRating = (simRatings && simRatings[myStation.id]) || myStation.ratings[0];
             for (const r of myStation.ratings) {
               const btn = document.createElement('button');
               btn.className = 'rating-btn' + (r === activeRating ? ' active' : '');
@@ -1481,11 +1480,11 @@
     }
 
     function rebuildStations() {
-      const defs = (state.shipStations && state.shipStations.stations) || [];
-      state.maxPlayers = defs.length;
-      state.stations = defs.map(def => {
+      const defs = (uiState.shipStations && uiState.shipStations.stations) || [];
+      uiState.maxPlayers = defs.length;
+      uiState.stations = defs.map(def => {
         // Post issue #619 a player holds a lowercase station id directly.
-        const holder = state.players.find(p => {
+        const holder = uiState.players.find(p => {
           if (!p.connected) return false;
           const held = typeof p.station === 'string' ? p.station
             : (p.station && typeof p.station.id === 'string' ? p.station.id : null);
@@ -1501,10 +1500,10 @@
           ratings: def.ratings || [],
         };
       });
-      state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);
-      state.allReady = state.players.length > 0 && state.players.every(p => p.ready)
-        || state.players.length === 0;
-      state.countdownSecs = window.lobbyState ? window.lobbyState.countdownSecs : 0;
+      uiState.allFilled = uiState.stations.length > 0 && uiState.stations.every(st => st.holder_name);
+      uiState.allReady = uiState.players.length > 0 && uiState.players.every(p => p.ready)
+        || uiState.players.length === 0;
+      uiState.countdownSecs = window.lobbyState ? window.lobbyState.countdownSecs : 0;
       scheduleRender();
     }
 
@@ -1529,7 +1528,7 @@
     // -- Generic console state push (ship-agnostic) --------------------------
     // Every station id (including the aggregate cruiser/destroyer consoles like
     // `engineering` = power+repair and `science` = sensors+shields) is handled
-    // generically by window.buildConsoleState(name, state), which nests the
+    // generically by window.buildConsoleState(name, window.simState), which nests the
     // sub-panel payloads. The per-console push*ConsoleState helpers below only
     // cover the legacy standalone iframes, so aggregate consoles (engineering,
     // science, …) would otherwise never receive state. Route by the console
@@ -1539,8 +1538,8 @@
       const registry = window.CONSOLE_REGISTRY || {};
       const entry = registry[name];
       const iframeId = entry ? entry.iframeId : (name + '-iframe');
-      const json = (typeof window.buildConsoleState === 'function')
-        ? window.buildConsoleState(name, state)
+      const json = (typeof window.buildConsoleState === 'function' && window.simState)
+        ? window.buildConsoleState(name, window.simState)
         : '{}';
       _pushIframe($(iframeId), name, json);
     }
@@ -1577,7 +1576,7 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildWeaponsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('tactical', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('tactical', window.simState);
       return JSON.stringify({ target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
@@ -1614,7 +1613,7 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildCaptainConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('captain', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('captain', window.simState);
       return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
     }
 
@@ -1626,7 +1625,7 @@
     // State builder extracted to gui/console-state.js (issue #454).
 
     function buildHelmConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('helm', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('helm', window.simState);
       return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
@@ -1638,7 +1637,7 @@
     // -- Repair console iframe bridge (issue #425) ----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('repair', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('repair', window.simState);
       return JSON.stringify({ teams: [], system_hull: [], damageable_systems: [], travel_duration_secs: 5.0 });
     }
 
@@ -1650,7 +1649,7 @@
     // -- Power console iframe bridge (issue #425) -----------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildPowerConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('power', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('power', window.simState);
       return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
     }
 
@@ -1662,7 +1661,7 @@
     // -- Shields console iframe bridge (issue #423) ---------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('shields', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('shields', window.simState);
       return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
     }
 
@@ -1674,7 +1673,7 @@
     // -- Sensors console iframe bridge -----------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildSensorsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('sensors', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('sensors', window.simState);
       return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
     }
 
@@ -1685,7 +1684,7 @@
 
     // -- Science console iframe bridge --------------------------------------------
     function buildScienceConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('science', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('science', window.simState);
       return JSON.stringify({ sensors: { scan_range: 2000, blips: [], target_uuid: null }, shields: { facings: [], hull_integrity_pct: 100, grid_status: 'GRID OFFLINE' }, science_auto: false });
     }
 
@@ -1697,7 +1696,7 @@
     // -- Comms console iframe bridge --------------------------------------------
     // State builder extracted to gui/console-state.js (issue #454).
     function buildCommsConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('comms', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('comms', window.simState);
       return JSON.stringify({ messages: [], contacts: [] });
     }
 
@@ -1774,7 +1773,7 @@
     // -- Navigation console iframe bridge (issue #458) -------------------------
     // State builder extracted to gui/console-state.js.
     function buildNavigationConsoleState() {
-      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('navigation', state);
+      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('navigation', window.simState);
       return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
     }
 
@@ -1784,7 +1783,7 @@
     }
 
     // -- Dynamic console mounting (Module H / issue #621) ----------------------
-    // Called after a Welcome message updates state.shipStations.
+    // Called after a Welcome message updates uiState.shipStations.
     // Creates <section id="{sectionId}" class="console-section"> +
     // <iframe id="{iframeId}"> for each station the ship has, using
     // resolveConsoleUrl() to determine the iframe src.
@@ -1844,14 +1843,18 @@
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
       if (typeof window.dispatchConsoleAction === 'function') {
-        window.dispatchConsoleAction(action, send, (patch) => Object.assign(state, patch));
+        // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
+        // one sim store; simState.weaponsTarget has a setter for this path.
+        window.dispatchConsoleAction(action, send, (patch) => {
+          if (window.simState) Object.assign(window.simState, patch);
+        });
         return;
       }
       // Fallback for the rare race window before module scripts load.
       // Only covers set_sensors_target (mutates local state); other actions
       // are silently deferred (non-critical � they arrive after module load).
       if (action.action === 'set_sensors_target' && action.uuid) {
-        state.sensorsTarget = action.uuid;
+        if (window.simState) window.simState.sensorsTarget = action.uuid;
         send('SetScienceTarget', { uuid: action.uuid });
       } else if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
@@ -1930,8 +1933,8 @@
         if (dt > 600) return;
         if (Math.abs(dx) < 60) return;
         if (Math.abs(dy) > Math.abs(dx) * 0.6) return;
-        const mine = myConsoles(state);
-        if (mine.length < 2 || state.phase !== 'InProgress') return;
+        const mine = myConsoles(uiState);
+        if (mine.length < 2 || uiState.phase !== 'InProgress') return;
         const idx = Math.max(0, mine.indexOf(activeConsole));
         const next = (dx < 0)
           ? (idx - 1 + mine.length) % mine.length
@@ -1983,8 +1986,8 @@
     // Handle SwipeConsole messages posted by the injected relay.
     window.addEventListener('message', e => {
       if (!e.data || e.data.type !== 'SwipeConsole') return;
-      const mine = myConsoles(state);
-      if (mine.length < 2 || state.phase !== 'InProgress') return;
+      const mine = myConsoles(uiState);
+      if (mine.length < 2 || uiState.phase !== 'InProgress') return;
       const idx = Math.max(0, mine.indexOf(activeConsole));
       const next = (e.data.direction === 'left')
         ? (idx - 1 + mine.length) % mine.length
@@ -1997,66 +2000,36 @@
 
     function handleMessage(msg) {
       // JS state modules (issue #460) � every inbound ServerMessage is applied
-      // to the pure state modules first; they are the source of truth that the
-      // inline `state` object mirrors below. Guards cover the brief window
-      // before the module scripts have executed.
+      // to the pure state modules first. window.simState is the ONLY sim
+      // store (issue #819): the console builders read it directly, so the
+      // cases below never mirror sim data � they only fan out iframe pushes
+      // and update the lobby/lifecycle `uiState`. Guards cover the brief
+      // window before the module scripts have executed.
       if (window.lobbyState)      window.lobbyState.apply(msg);
       if (window.simState)        window.simState.apply(msg);
       if (window.commsState)      window.commsState.apply(msg);
-      // Mirror objectives from simState (handles ObjectiveSummary / CommsState internally).
-      if (window.simState) state.objectives = window.simState.objectives || [];
       switch (msg.type) {
         case 'Welcome':
           if (window.lobbyState) {
-            state.phase      = window.lobbyState.phase;
-            state.players    = window.lobbyState.players;
-            state.shipStations = window.lobbyState.shipStations;
+            uiState.phase      = window.lobbyState.phase;
+            uiState.players    = window.lobbyState.players;
+            uiState.shipStations = window.lobbyState.shipStations;
           } else {
-            state.phase   = msg.data.state.phase;
-            state.shipStations = msg.data.ship_stations || { stations: [] };
-            state.players = msg.data.state.players.map(p => ({ ...p }));
+            uiState.phase   = msg.data.state.phase;
+            uiState.shipStations = msg.data.ship_stations || { stations: [] };
+            uiState.players = msg.data.state.players.map(p => ({ ...p }));
           }
           // Mount console sections dynamically from ship_stations (Module H).
           // mountConsoles() creates <section>+<iframe> for each station the
           // ship carries and attaches load listeners — replacing the old static
           // HTML sections that were hardcoded for every possible console.
-          mountConsoles(state.shipStations);
-          if (window.simState) {
-            // Share the module's entity array so in-place SimState position
-            // updates and Entity/AsteroidSpawned appends flow through, and
-            // pick up the Welcome repair-team pre-seed.
-            state.asteroids   = window.simState.world.entities;
-            state.repairTeams = window.simState.repairTeams;
-            state.consoleHull = window.simState.consoleHull;
-            // Radar ranges + arc configs from server ship_config (data-driven).
-            state.weaponsRadarRange = window.simState.weaponsRadarRange;
-            state.helmRadarRange    = window.simState.helmRadarRange;
-            state.sensorsRadarRange = window.simState.sensorsRadarRange;
-            state.tacticalRadarShows   = window.simState.tacticalRadarShows;
-            state.tacticalRadarSelects = window.simState.tacticalRadarSelects;
-            state.sensorsRadarShows    = window.simState.sensorsRadarShows;
-            state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
-            // Navigation chart filter inputs � the Navigation builder has a
-            // two-stage filter (outer entity filter on `navChartShows`, then
-            // the inner `buildBlips` filter), so omitting these silently
-            // drops every non-objective entity from the nav chart.
-            state.navChartShows        = window.simState.navChartShows;
-            state.navChartSelects      = window.simState.navChartSelects;
-            state.navChartRange        = window.simState.navChartRange;
-            state.phaserArcConfigs  = window.simState.phaserArcConfigs;
-            state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
-            state.navigationWaypoint = window.simState.navigationWaypoint;
-            state.controlSources = window.simState.controlSources || {};
-            state.stationRatings = window.simState.stationRatings || {};
-            state.stationSystems = window.simState.stationSystems || {};
-            // Live blackboard reference � simState.blackboards is mutated in-place
-            // each tick so this reference assignment keeps state.blackboards current.
-            state.blackboards = window.simState.blackboards;
-            // Push the pre-seeded repair teams so the Repair console renders its
-            // rows immediately on (re)connect, before the first RepairState
-            // broadcast (no-op unless Repair is the active console).
-            pushRepairConsoleState();
-          }
+          mountConsoles(uiState.shipStations);
+          // Sim data (world, radar/chart config, blackboards, …) was applied
+          // to window.simState above — there is no client-side mirror to
+          // refresh. Push the pre-seeded repair teams so the Repair console
+          // renders its rows immediately on (re)connect, before the first
+          // RepairState broadcast (no-op unless Repair is the active console).
+          pushRepairConsoleState();
 
           // Inject ship theme CSS from Welcome ship_css (Fix: Module F).
           const shipCss = (msg.data.ship_config || {}).ship_css;
@@ -2082,21 +2055,21 @@
           break;
         case 'PlayerJoined': {
           if (window.lobbyState) {
-            state.players = window.lobbyState.players;
+            uiState.players = window.lobbyState.players;
           } else {
             const p = msg.data.player;
-            const existing = state.players.findIndex(x => x.token === p.token);
-            if (existing >= 0) state.players[existing] = { ...p };
-            else state.players.push({ ...p });
+            const existing = uiState.players.findIndex(x => x.token === p.token);
+            if (existing >= 0) uiState.players[existing] = { ...p };
+            else uiState.players.push({ ...p });
           }
           rebuildStations();
           break;
         }
         case 'PlayerLeft':
           if (window.lobbyState) {
-            state.players = window.lobbyState.players;
+            uiState.players = window.lobbyState.players;
           } else {
-            state.players = state.players.filter(p => p.token !== msg.data.token);
+            uiState.players = uiState.players.filter(p => p.token !== msg.data.token);
           }
           rebuildStations();
           break;
@@ -2108,18 +2081,18 @@
             pendingMidGameClaim = false;
           }
           if (window.lobbyState) {
-            state.players = window.lobbyState.players;
+            uiState.players = window.lobbyState.players;
           } else {
             const { token, station } = msg.data;
             // A station is held by at most one player — clear any other holder first.
             if (stationId) {
-              for (const p of state.players) {
+              for (const p of uiState.players) {
                 if (p.token !== token && (typeof p.station === 'string' ? p.station : (p.station && p.station.id)) === stationId) {
                   p.station = null;
                 }
               }
             }
-            const target = state.players.find(p => p.token === token);
+            const target = uiState.players.find(p => p.token === token);
             if (target) {
               target.station = stationId || station || null;
             }
@@ -2129,9 +2102,9 @@
         }
         case 'NameChanged': {
           if (window.lobbyState) {
-            state.players = window.lobbyState.players;
+            uiState.players = window.lobbyState.players;
           } else {
-            const p = state.players.find(p => p.token === msg.data.token);
+            const p = uiState.players.find(p => p.token === msg.data.token);
             if (p) p.name = msg.data.name;
           }
           if (msg.data.token === myToken) myName = msg.data.name;
@@ -2139,12 +2112,12 @@
           break;
         }
         case 'GameStartCountdown':
-          state.countdownSecs = (msg.data && msg.data.remaining_secs) || 0;
+          uiState.countdownSecs = (msg.data && msg.data.remaining_secs) || 0;
           rebuildStations();
           break;
         case 'GameStarted':
-          state.phase = 'InProgress';
-          state.countdownSecs = 0;
+          uiState.phase = 'InProgress';
+          uiState.countdownSecs = 0;
           const loadingEl = document.getElementById('asset-loading');
           if (loadingEl) loadingEl.style.display = 'none';
           break;
@@ -2158,18 +2131,9 @@
           break;
         }
         case 'SimState': {
-          const snap = msg.data.snapshot;
-          // SimSnapshot now carries only entity_states. Per-system fields
-          // (ship position, view_mode, red_alert, etc.) are now delivered
-          // via BlackboardUpdate; see the 'BlackboardUpdate' case below.
-          if (!window.simState && snap.entity_states) {
-            for (const es of snap.entity_states) {
-              const match = state.asteroids.find(a => a.uuid === es.uuid);
-              if (match && es.position) {
-                match.position = es.position;
-              }
-            }
-          }
+          // SimSnapshot carries only entity_states, applied in place by
+          // simState above. Per-system fields (ship position, view_mode,
+          // red_alert, etc.) are delivered via BlackboardUpdate below.
           // Refresh every radar-bearing console each tick. The tactical radar
           // blips are built client-side from ship_x/z/yaw + the entity array
           // (same as sensors), so the weapons console must be pushed here too �
@@ -2184,29 +2148,16 @@
           // mid-game station claim is still pending Ready � it destroys CSS
           // hover state and tears down the Ready/Leave button listeners.
           // The push calls are no-ops when no game console is active.
-          if (showingLobbyDuringGame(state)) return;
+          if (showingLobbyDuringGame(uiState)) return;
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state.
           break;
         }
-        case 'WorldSetup': {
-          // Share the sim-state module's entity array (in-place updates and
-          // spawn/despawn flow through automatically).
-          state.asteroids = window.simState
-            ? window.simState.world.entities
-            : ((msg.data.world && msg.data.world.entities) || []);
-          pushWeaponsConsoleState();
-          pushHelmConsoleState();
-          pushSensorsConsoleState();
-          pushNavigationConsoleState();
-          return;
-        }
+        case 'WorldSetup':
         case 'EntitySpawned':
         case 'AsteroidSpawned': {
-          // Handled by the sim-state module (idempotent append); re-mirror the
-          // entity array and refresh the radar-bearing consoles.
-          if (!window.simState) return;
-          state.asteroids = window.simState.world.entities;
+          // World / entity list handled by the sim-state module (idempotent
+          // append, in-place updates); refresh the radar-bearing consoles.
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
@@ -2214,71 +2165,36 @@
           return;
         }
         case 'TargetLock': {
-          const { uuid, locked } = msg.data;
-          if (locked) {
-            state.weaponsTarget = uuid;
-            state.weaponsLocked = true;
-          } else {
-            state.weaponsTarget = null;
-            state.weaponsTargetName = null;
-            state.weaponsLocked = false;
-            state.weaponsFireReady = false;
-          }
+          // Lock state (currentTargetUuid / weaponsFireReady) applied by
+          // simState; just refresh the console.
           pushWeaponsConsoleState();
           break;
         }
         case 'BlackboardUpdate': {
-          // simState.apply() already wrote blackboards[systemId] = bb.data above.
-          // state.blackboards is the same object reference, so it's already current.
+          // simState.apply() already wrote blackboards[systemId] = bb.data
+          // above (and derived navigationWaypoint / currentView / redAlert);
+          // here we only fan pushes out to the affected consoles.
           const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
-          // Mirror per-system blackboard data into flat state fields used by
-          // non-module fallback builders and by radar blip calculations that
-          // need ship_x/z/yaw on every SimState tick.
-          if (updatedSystems.has('helm')) {
-            const bb = state.blackboards['helm'];
-            if (bb) {
-              state.shipX                = bb.x             ?? state.shipX;
-              state.shipZ                = bb.z             ?? state.shipZ;
-              state.shipYaw              = bb.yaw           ?? state.shipYaw;
-              state.forwardSpeed         = bb.forward_speed ?? state.forwardSpeed;
-              state.impulseChargeProgress = bb.impulse_charge ?? state.impulseChargeProgress;
-              state.boostBattery         = bb.boost_battery ?? state.boostBattery;
-              state.boostActive          = !!bb.boost_active;
-              state.boostEnabled         = !!bb.boost_enabled;
-            }
-            pushHelmConsoleState();
-          }
+          if (updatedSystems.has('helm')) pushHelmConsoleState();
           if (updatedSystems.has('captain') || updatedSystems.has('viewscreen')) {
-            const bb = state.blackboards['captain'];
-            if (bb) {
-              const vm = bb.view_mode;
-              const vd = vm && vm.kind === 'Camera' ? vm.data : null;
-              // Map the Cinematic enum tag to the camera-button label "cinematic".
-              const kind = vm && vm.kind === 'Cinematic' ? 'cinematic' : (vm && vm.kind);
-              state.currentView = vd || kind || state.currentView;
-              if (bb.camera_views) state.cameraViews = bb.camera_views;
-              const nextAlert = !!bb.red_alert;
-              if (state.redAlert !== nextAlert) {
-                state.redAlert = nextAlert;
-                applyBezelAlert(nextAlert);
-              }
+            // Phone-bezel red-alert glow: toggle only on change.
+            const nextAlert = !!(window.simState && window.simState.redAlert);
+            if (bezelAlertOn !== nextAlert) {
+              bezelAlertOn = nextAlert;
+              applyBezelAlert(nextAlert);
             }
             pushCaptainConsoleState();
             // Helm/Sensors/Comms/Navigation each derive their own "on screen"
-            // button state from state.currentView, so a view-mode change must
-            // refresh all of them too, not just the captain console � otherwise
-            // the button that requested the view change never reflects the
-            // toggle (see #on-screen-btn on Helm).
+            // button state from simState.currentView, so a view-mode change
+            // must refresh all of them too, not just the captain console �
+            // otherwise the button that requested the view change never
+            // reflects the toggle (see #on-screen-btn on Helm).
             pushHelmConsoleState();
             pushSensorsConsoleState();
             pushCommsConsoleState();
             pushNavigationConsoleState();
           }
-          if (updatedSystems.has('navigation')) {
-            const bb = state.blackboards['navigation'];
-            if (bb) state.navigationWaypoint = bb.navigation_waypoint || null;
-            pushNavigationConsoleState();
-          }
+          if (updatedSystems.has('navigation')) pushNavigationConsoleState();
           if (updatedSystems.has('tactical'))   pushWeaponsConsoleState();
           if (updatedSystems.has('power'))      pushPowerConsoleState();
           if (updatedSystems.has('shields'))    pushShieldsConsoleState();
@@ -2289,118 +2205,42 @@
           // spectating or mid-game-claim-pending � it rebuilds the station
           // list every frame, destroying button listeners before a click can
           // register.
-          if (showingLobbyDuringGame(state)) return;
+          if (showingLobbyDuringGame(uiState)) return;
           break;
         }
         case 'WeaponsUpdate': {
-          // Save full bank/tube/torpedo/mode state for the iframe console.
-          const { target_uuid, target_name, banks, tubes, torpedo_count, phaser_mode, blips } = msg.data;
-          const previousTarget = state.weaponsTarget;
-          const bankList = Array.isArray(banks) ? banks : [];
-          const fire_ready  = bankList.some(b => b.fire_ready);
-          const on_cooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
-          const readyBank   = bankList.find(b => b.fire_ready) || bankList[0] || null;
-          state.weaponsReadyBankId   = readyBank ? readyBank.id : null;
-          state.weaponsFireReady     = fire_ready;
-          state.weaponsOnCooldown    = on_cooldown;
-          state.weaponsBanks         = bankList;
-          state.weaponsTubes         = Array.isArray(tubes) ? tubes : [];
-          state.weaponsTorpedoCount  = typeof torpedo_count === 'number' ? torpedo_count : 0;
-          state.weaponsPhaserMode    = phaser_mode || 'Auto';
-          state.weaponsBlips         = Array.isArray(blips) ? blips : state.weaponsBlips;
-          if (target_uuid) {
-            state.weaponsTarget = target_uuid;
-            state.weaponsTargetName = target_name || (previousTarget === target_uuid ? state.weaponsTargetName : null);
-            state.weaponsLocked = true;
-          } else {
-            state.weaponsTarget = null;
-            state.weaponsTargetName = null;
-            state.weaponsLocked = false;
-            state.weaponsFireReady = false;
-          }
+          // Bank/tube/torpedo/mode state + derived UI flags applied by
+          // simState; just refresh the console.
           pushWeaponsConsoleState();
           break;
         }
-        case 'BeamStarted': {
-          state.weaponsFiring = true;
-          pushWeaponsConsoleState();
-          break;
-        }
+        case 'BeamStarted':
         case 'BeamEnded': {
-          state.weaponsFiring = false;
+          // weaponsFiring toggled by simState.
           pushWeaponsConsoleState();
           break;
         }
         case 'SystemHullUpdate': {
-          state.consoleHull = window.simState
-            ? window.simState.consoleHull
-            : (msg.data.entries || []);
           pushRepairConsoleState();
           break;
         }
         case 'RepairState': {
-          state.repairTeams = window.simState
-            ? window.simState.repairTeams
-            : (msg.data.teams || []);
           pushRepairConsoleState();
           break;
         }
         case 'PowerState': {
-          const { helm, weapons, sensors, battery_charge, locked } = msg.data;
-          if (typeof helm           === 'number') state.powerHelm    = helm;
-          if (typeof weapons        === 'number') state.powerWeapons = weapons;
-          if (typeof sensors        === 'number') state.powerSensors = sensors;
-          if (typeof battery_charge === 'number') state.powerBattery = battery_charge;
-          state.powerLocked = !!locked;
           pushPowerConsoleState();
           break;
         }
         case 'ShieldStatus': {
-          state.shieldFacings = (msg.data.facings || []).map(f => ({
-            label: f.label,
-            hp: f.hp,
-            max_hp: f.max_hp,
-            online: f.online,
-            offline_remaining: f.offline_remaining || 0,
-            is_focused: !!f.is_focused,
-          }));
-          // Derive focused facing from facings list.
-          const focused = state.shieldFacings.find(f => f.is_focused);
-          state.shieldFocusedFacing = focused ? focused.label : null;
+          // Facings + focused-facing derivation applied by simState.
           pushShieldsConsoleState();
           break;
         }
-        case 'AsteroidDestroyed': {
-          const { uuid } = msg.data;
-          // Removal already done in place by the sim-state module when loaded.
-          state.asteroids = window.simState
-            ? window.simState.world.entities
-            : state.asteroids.filter(a => a.uuid !== uuid);
-          if (state.weaponsTarget === uuid) {
-            state.weaponsTarget = null;
-            state.weaponsTargetName = null;
-            state.weaponsLocked = false;
-            state.weaponsFireReady = false;
-          }
-          if (state.sensorsTarget === uuid) state.sensorsTarget = null;
-          pushWeaponsConsoleState();
-          pushHelmConsoleState();
-          pushSensorsConsoleState();
-          break;
-        }
+        case 'AsteroidDestroyed':
         case 'EntityDespawned': {
-          const { uuid } = msg.data;
-          // Removal already done in place by the sim-state module when loaded.
-          state.asteroids = window.simState
-            ? window.simState.world.entities
-            : state.asteroids.filter(a => a.uuid !== uuid);
-          if (state.weaponsTarget === uuid) {
-            state.weaponsTarget = null;
-            state.weaponsTargetName = null;
-            state.weaponsLocked = false;
-            state.weaponsFireReady = false;
-          }
-          if (state.sensorsTarget === uuid) state.sensorsTarget = null;
+          // In-place entity removal and weapons/sensors target clearing
+          // applied by simState; refresh the radar-bearing consoles.
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
@@ -2421,43 +2261,34 @@
           return;
         }
         case 'CommsState': {
-          // Handled by the comms-state module (gui/comms-state.js); mirror its
-          // messages/contacts for buildCommsConsoleState. Previously only the
-          // (now deleted) Bevy drain consumed this message.
-          if (window.commsState) {
-            state.commsMessages = window.commsState.messages;
-            state.commsContacts = window.commsState.contacts;
-          } else {
-            state.commsMessages = msg.data.messages || [];
-            state.commsContacts = msg.data.contacts || [];
-          }
+          // Handled by the comms-state module (gui/comms-state.js); simState
+          // exposes commsMessages/commsContacts as delegating getters, so
+          // buildCommsConsoleState reads it live — just refresh the console.
           pushCommsConsoleState();
           break;
         }
         case 'ShipDestroyed':
-          state.shipDestroyed = true;
+          uiState.shipDestroyed = true;
           break;
         case 'GameOver':
-          state.phase = 'GameOver';
-          state.gameOverReason = msg.data.reason || null;
+          uiState.phase = 'GameOver';
+          uiState.gameOverReason = msg.data.reason || null;
           break;
         case 'RatingChanged': {
-          // sim-state.js already updated window.simState.stationRatings with the
-          // new rating before this handler fires. Mirror it immediately so the
-          // badge re-renders from the fresh data rather than stale controlSources
-          // that will only update on the next SimState tick (up to 100 ms later).
-          if (window.simState) state.stationRatings = window.simState.stationRatings || {};
-          // Always push the captain console state immediately; the captain badge
-          // reads controlSources which lags, but stationRatings is already fresh.
+          // sim-state.js already updated window.simState.stationRatings with
+          // the new rating before this handler fires; the builders read it
+          // live. Push the captain console state immediately — the captain
+          // badge reads controlSources which lags (next SimState tick, up to
+          // 100 ms later), but stationRatings is already fresh.
           pushCaptainConsoleState();
           break;
         }
         case 'ReadyChanged':
           if (msg.data.token === myToken && msg.data.ready) pendingMidGameClaim = false;
           if (window.lobbyState) {
-            state.players = window.lobbyState.players;
+            uiState.players = window.lobbyState.players;
           } else {
-            const p = state.players.find(p => p.token === msg.data.token);
+            const p = uiState.players.find(p => p.token === msg.data.token);
             if (p) p.ready = msg.data.ready;
           }
           rebuildStations();
@@ -2476,7 +2307,7 @@
       // Lobby-mutating handlers (StationAssigned, ReadyChanged, etc.) all
       // call rebuildStations() which calls scheduleRender() internally, so
       // this guard is safe for them too.
-      if (!showingLobbyDuringGame(state)) { scheduleRender(); }
+      if (!showingLobbyDuringGame(uiState)) { scheduleRender(); }
     }
 
     // -- PeerJS connection (extracted to gui/connection-manager.js, issue #603) --
@@ -2519,7 +2350,12 @@
         if (typeof window.mountSettings === 'function') {
           window.mountSettings({
             send: (type, data) => send(type, data),
-            getState: () => state,
+            // Station roster from the lobby mirror; the active rating lives in
+            // the sim store, composed here so the panel sees one object.
+            getState: () => ({
+              ...uiState,
+              stationRatings: window.simState ? window.simState.stationRatings : {},
+            }),
             audioEl: document.getElementById('ui-click'),
             myToken: myToken,
           });

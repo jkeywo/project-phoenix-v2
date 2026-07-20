@@ -60,65 +60,110 @@ pub(crate) fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterS
     queue.0.clear();
 }
 
+/// The one validate+enqueue seam every admitted command passes through
+/// (issue #824). Both callers use it:
+///
+/// - [`admit_system_commands`] for network `ControlSystem` messages (human
+///   tokens and `ai:` tokens alike), and
+/// - the console/system AI decide systems (e.g. the per-axis helm AI in
+///   `ship::helm_ai`), which emit their decisions as admitted
+///   `SystemControlPayload`s into their own ship's `AdmittedCommands` in the
+///   same tick rather than round-tripping through the inbound queue.
+///
+/// Validation is the target ship's own `ControlSourceResolver` via
+/// [`is_command_authorized`]: an `ai:` token requires `operate_ai` on the
+/// target system; a human token requires `accept_human_input` plus station
+/// tenure. On success the command is pushed with its source identity reduced
+/// to `response_token` (reply routing only — never behavioural).
+pub fn validate_and_admit(
+    token: &str,
+    target: crate::messages::SystemId,
+    payload: crate::messages::SystemControlPayload,
+    control_sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &Sessions,
+    config: &crate::ship::config::ShipConfig,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    if !is_command_authorized(token, &target, &payload, control_sources, sessions, config) {
+        return false;
+    }
+    admitted.0.push(crate::messages::AdmittedCommand {
+        target,
+        payload,
+        response_token: Some(token.to_string()),
+    });
+    true
+}
+
 /// Authority gate for intra-system commands. Runs once per tick before
-/// `SimSet::Input`, clearing and refilling `AdmittedCommands`.
+/// `SimSet::Input`, clearing and refilling every ship's per-entity
+/// `AdmittedCommands`.
+///
+/// Ship-aware (issue #824, per
+/// `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §2): human tokens
+/// route to the LocalShip's `AdmittedCommands` as before; a registered
+/// `ai:` token resolves through `AiTokenRegistry` to the owning entity and
+/// is admitted into THAT entity's `AdmittedCommands`, validated by that
+/// entity's own `ControlSourceResolver` (`operate_ai` must hold). An
+/// unregistered `ai:` token (player Backfill AI, synthetic test tokens)
+/// still routes to the LocalShip.
 ///
 /// A network `ControlSystem` message is admitted iff its token is the live
-/// controller of the target system: AI tokens require `operate_ai`; human
-/// tokens require `accept_human_input` AND holding the console for that system.
-/// Once admitted the command carries no source identity — handlers must not
-/// branch on the origin.
+/// controller of the target system on the routed ship: AI tokens require
+/// `operate_ai`; human tokens require `accept_human_input` AND holding the
+/// console for that system. Once admitted the command carries no source
+/// identity — handlers must not branch on the origin.
 pub fn admit_system_commands(
     mut reader: MessageReader<InboundMessage>,
-    mut ship_query: Query<
-        (
-            Entity,
-            &crate::ship_plugin::ShipSystemControlSources,
-            &mut crate::messages::AdmittedCommands,
-            &crate::ship_plugin::ShipConfigComponent,
-        ),
-        With<LocalShip>,
-    >,
+    mut ship_query: Query<(
+        Entity,
+        &crate::ship_plugin::ShipSystemControlSources,
+        &mut crate::messages::AdmittedCommands,
+        &crate::ship_plugin::ShipConfigComponent,
+        Has<LocalShip>,
+    )>,
     sessions: Res<Sessions>,
     ai_registry: Res<crate::ai::server::AiTokenRegistry>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     use crate::logging::LogCat;
-    let Some((ship_entity, control_sources, mut admitted, ship_config)) =
-        ship_query.iter_mut().next()
-    else {
-        return;
-    };
-    admitted.0.clear();
+    // Clear every ship's admitted commands: the AI decide systems refill
+    // their own ship's queue later in the same tick via `validate_and_admit`.
+    let mut local_ship: Option<Entity> = None;
+    for (entity, _, mut admitted, _, is_local) in ship_query.iter_mut() {
+        admitted.0.clear();
+        if is_local {
+            local_ship = Some(entity);
+        }
+    }
     for ev in reader.read() {
         let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
             continue;
         };
-        // Reject registered NPC ai: tokens that don't belong to the player ship.
-        // Only tokens present in AiTokenRegistry are NPC-owned; unregistered ai:
-        // tokens (player Backfill AI or synthetic test tokens) pass through.
-        if ev.token.starts_with("ai:") {
-            if let Some(entity) = ai_registry.bevy_entity_for_token(&ev.token) {
-                if entity != ship_entity {
-                    crate::pwarn!(
-                        log,
-                        LogCat::Admit,
-                        entity = ship_entity,
-                        "rejected NPC ai: token {} → {:?}",
-                        &ev.token[..ev.token.len().min(12)],
-                        std::mem::discriminant(payload),
-                    );
-                    continue;
-                }
-            }
-        }
-        if is_command_authorized(
+        // Route: a registered NPC `ai:` token belongs to its own entity's
+        // AdmittedCommands; everything else (humans, host page, unregistered
+        // `ai:` backfill tokens) belongs to the LocalShip.
+        let route = if ev.token.starts_with("ai:") {
+            ai_registry.bevy_entity_for_token(&ev.token).or(local_ship)
+        } else {
+            local_ship
+        };
+        let Some(route) = route else {
+            continue;
+        };
+        let Ok((ship_entity, control_sources, mut admitted, ship_config, _)) =
+            ship_query.get_mut(route)
+        else {
+            continue;
+        };
+        if validate_and_admit(
             &ev.token,
-            target,
-            payload,
+            target.clone(),
+            payload.clone(),
             control_sources,
             &sessions,
             &ship_config.0,
+            &mut admitted,
         ) {
             crate::ptrace!(
                 log,
@@ -129,11 +174,6 @@ pub fn admit_system_commands(
                 std::mem::discriminant(payload),
                 &ev.token[..ev.token.len().min(8)],
             );
-            admitted.0.push(crate::messages::AdmittedCommand {
-                target: target.clone(),
-                payload: payload.clone(),
-                response_token: Some(ev.token.clone()),
-            });
         } else {
             crate::pwarn!(
                 log,

@@ -14,7 +14,7 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 
 | System | Responsibility |
 |---|---|
-| `process_helm_inputs` | Turns admitted per-axis `ControlSystem` commands (`SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, #801) into the shared helm intent components, skipping AI-held axes |
+| `process_helm_inputs` | Turns admitted per-axis `ControlSystem` commands (`SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, #801) into the shared helm intent components for every ship, human- and AI-admitted alike (authority is checked once at admission, #824) |
 | `sync_ship_position` | Syncs `ShipState` → Rapier `Transform` for the ship entity |
 | `handle_impulse_messages` | Handles `StartImpulseCharge` / `CancelImpulse`, auto-cancels on hull damage |
 | `process_coordination_lag` | Delivers channel-3 `CoordinationEnqueue` messages from each ship's `CoordinationQueue`; sets `PendingArcBearingRequest` for AI Helm on `ArcBearingRequest` delivery; emits popup for human Helm |
@@ -31,7 +31,6 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 
 | Resource | Defined In | Purpose |
 |---|---|---|
-| `HelmInputTimer` | `src/ship/components.rs` | 30 Hz throttle for human helm-input processing |
 | `AiHelmTickTimer` / `AiHelmTickReady` | `src/ship/helm_ai.rs` | Shared fixed-rate AI-helm sim tick (issue #803): one `run_if(ai_helm_tick_ready)` gate on all four per-axis AI helm systems (`ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm decision cadence from frame rate. Rate is TOML-authored via `[global] ai_helm_tick_hz` (default 30 Hz) |
 | `LastHelmInput` (pub) | `src/ship/components.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
 | `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |

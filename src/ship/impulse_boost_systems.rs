@@ -1,10 +1,7 @@
 use bevy::prelude::*;
 
-use crate::entity_spawner::RegionEffectsSection;
 use crate::lobby::Sessions;
 use crate::messages::{AdmittedCommands, SystemControlPayload};
-use crate::region_effects::RegionEffectKind;
-use crate::region_plugin::RegionMembership;
 use crate::server_app::{LocalShip, Ship};
 use crate::ship::components::{
     BoostConfigResource, ImpulseConfigResource, LastHelmInput, ShipConfigComponent,
@@ -14,31 +11,25 @@ use crate::ship::helm::{BoostCommand, ImpulseCommand};
 use crate::ship::helm_ai::helm_axes_operate_ai;
 use crate::simulation::{ShipBoost, ShipImpulse};
 
-/// Admission-only (issue #695): turns hull-damage auto-cancel and admitted
-/// `StartImpulseCharge`/`CancelImpulse` messages into an `ImpulseCommand`
-/// intent, rather than mutating `ShipImpulse` directly. The shared
-/// `integrate_ship_physics` system applies the actual `start_charge`/
-/// `cancel_charge` transition. Only writes the intent when something
-/// actually happened this tick (hull damage or an admitted command) —
-/// otherwise leaves the persisted intent alone, mirroring the old
-/// direct-mutation code which likewise only called `start_charge`/
-/// `cancel_charge` on those same triggers. Hull-damage cancellation is
-/// evaluated before the admitted-command loop, then the loop can still
-/// override it within the same tick — matching the old sequential
-/// direct-mutation order exactly.
+/// Hull-damage impulse auto-cancel (issue #695, reshaped by #824): writes an
+/// `Idle` `ImpulseCommand` intent when the LocalShip's hull took damage this
+/// tick, rather than mutating `ShipImpulse` directly. The shared
+/// `apply_helm_commands` system applies the actual `cancel_charge`
+/// transition.
+///
+/// The admitted `StartImpulseCharge`/`CancelImpulse` loop this system used to
+/// carry moved to `ship::helm_admission::process_helm_inputs` (issue #824),
+/// which applies impulse commands for every ship — human-admitted and
+/// AI-emitted alike — with the same `BlocksImpulse` region gate. This system
+/// runs in `SimSet::Input`, before `process_helm_inputs` (`SimSet::Physics`),
+/// so an admitted command can still override the hull-damage cancel within
+/// the same tick — matching the old sequential direct-mutation order exactly.
 pub fn handle_impulse_messages(
-    ship_ac_query: Query<&AdmittedCommands, With<LocalShip>>,
     impulse_q: Query<&ShipImpulse, With<LocalShip>>,
     mut impulse_cmd_q: Query<&mut ImpulseCommand, With<LocalShip>>,
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
-    membership: Option<Res<RegionMembership>>,
-    region_query: Query<&RegionEffectsSection>,
-    ship_query: Query<Entity, With<LocalShip>>,
 ) {
-    let Some(admitted) = ship_ac_query.iter().next() else {
-        return;
-    };
     // Guard: only proceed when the LocalShip actually carries `ShipImpulse`
     // (matches the old direct-mutation code's implicit guard).
     if impulse_q.iter().next().is_none() {
@@ -58,20 +49,6 @@ pub fn handle_impulse_messages(
         desired = Some(crate::impulse::ImpulsePhase::Idle);
     }
     *last_hull_hp = current_hp;
-
-    for cmd in admitted.for_target(crate::system_registry::HELM_IMPULSE_SYSTEM_ID) {
-        match &cmd.payload {
-            SystemControlPayload::StartImpulseCharge
-                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) =>
-            {
-                desired = Some(crate::impulse::ImpulsePhase::Charging);
-            }
-            SystemControlPayload::CancelImpulse => {
-                desired = Some(crate::impulse::ImpulsePhase::Idle);
-            }
-            _ => {}
-        }
-    }
 
     if let Some(phase) = desired {
         if let Some(mut cmd_comp) = impulse_cmd_q.iter_mut().next() {
@@ -182,30 +159,6 @@ pub(crate) fn tick_boost(
         config.recharge_duration,
         drain_factor,
     );
-}
-
-fn is_inside_blocks_impulse(
-    membership: &Option<Res<RegionMembership>>,
-    region_query: &Query<&RegionEffectsSection>,
-    ship_query: &Query<Entity, With<LocalShip>>,
-) -> bool {
-    let Some(membership) = membership else {
-        return false;
-    };
-    let Some(ship_entity) = ship_query.iter().next() else {
-        return false;
-    };
-    let Some(inside) = membership.inside.get(&ship_entity) else {
-        return false;
-    };
-    for &region_entity in inside {
-        if let Ok(effects) = region_query.get(region_entity) {
-            if effects.0.contains(&RegionEffectKind::BlocksImpulse) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 #[cfg(test)]

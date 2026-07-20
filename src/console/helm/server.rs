@@ -24,89 +24,126 @@ impl Plugin for HelmPlugin {
     }
 }
 
-/// Publish the Helm system's blackboard from current sim state.
+/// Publish every ship's Helm blackboard from current sim state.
 /// Runs in `SimSet::Publish` (phase 1a) so downstream Broadcast systems
 /// see fully-updated values. The component-change dirty-tracking is done
 /// globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
 ///
 /// Also publishes per-engine `HelmEngine` blackboard entries (issue #511).
+///
+/// Per-entity for every `Ship` carrying `ShipSystemBlackboards` (issue #824),
+/// following the `publish_weapons_core_blackboard` pattern (issue #697):
+/// NPC helm AI reads `radar_range` from its own ship's Helm entry
+/// (`ship::helm_ai::helm_ai_radar_range`), so NPCs need a live,
+/// damage-scaled value rather than the static `HelmConsoleSection` fallback.
+///
+/// Two tiers of field, split by `Has<LocalShip>` in the loop:
+///
+/// - **Ship state** — position/yaw/speeds, impulse charge, boost state,
+///   `radar_range` (base range × the `HelmRadarRange` modifier, which
+///   `apply_radar_damage_modifiers` keeps in sync with the `helm-radar`
+///   damage tier for every ship), engine and lateral entries. Computed for
+///   every ship with the weapons missing-component default idiom.
+/// - **Player-resource-derived data** — the base radar range for the
+///   LocalShip comes from the player-only `ShipClientConfigResource`
+///   (unchanged), and the engine entries' joystick fan-out is read from the
+///   `InterSystemQueue` only for the LocalShip (the queue carries the player
+///   joystick's channel-1 messages; an NPC has no joystick). An NPC's base
+///   radar range comes from its own `HelmConsoleSection`.
+///
+/// None of this reaches the wire for NPCs: `broadcast_blackboard_updates`
+/// is `With<LocalShip>`-filtered, so NPC blackboards add zero bandwidth.
 fn publish_helm_blackboard(
-    physics_q: Query<
-        (&ShipPhysics, Option<&BoostConfigResource>),
-        With<crate::simulation::LocalShip>,
-    >,
-    impulse_q: Query<&ShipImpulse, With<crate::simulation::LocalShip>>,
-    boost_q: Query<&ShipBoost, With<crate::simulation::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
-    last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
-    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>,
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     queue: Res<InterSystemQueue>,
     mut ship_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::simulation::LocalShip>,
-    >,
-    sources_q: Query<
-        &crate::ship_plugin::ShipSystemControlSources,
-        With<crate::simulation::LocalShip>,
+        (
+            Option<&ShipPhysics>,
+            Option<&BoostConfigResource>,
+            Option<&ShipImpulse>,
+            Option<&ShipBoost>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship_plugin::LastHelmInput>,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::entities::spawner::HelmConsoleSection>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+            &mut crate::server_app::ShipSystemBlackboards,
+            Has<crate::simulation::LocalShip>,
+        ),
+        With<crate::simulation::Ship>,
     >,
 ) {
-    let (physics, entity_boost_cfg) = physics_q
-        .single()
-        .ok()
-        .map(|(p, c)| (*p, c.cloned()))
-        .unwrap_or_default();
-    let boost_config = entity_boost_cfg;
-    let boost_enabled = boost_config.as_ref().map(|c| c.enabled).unwrap_or(false);
-    let impulse_charge = impulse_q
-        .single()
-        .ok()
-        .map(|i| i.0.charge_progress)
-        .unwrap_or(0.0);
-    let boost_state = boost_q.single().ok().map(|b| b.0);
-    let boost_battery = boost_state.as_ref().map(|b| b.battery).unwrap_or(0.0);
-    let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
-    // view_mode is not raw sim truth; helm blackboard omits it
+    for (
+        physics,
+        boost_config,
+        impulse,
+        boost,
+        hull,
+        last_input,
+        modifiers,
+        helm_section,
+        sources,
+        mut bbs,
+        is_local,
+    ) in ship_q.iter_mut()
+    {
+        // Per-entity component path. Each fallback mirrors the pre-#824
+        // `.single()` error arm, so a ship (or test fixture) missing a
+        // component publishes exactly what it published before.
+        let physics = physics.copied().unwrap_or_default();
+        let boost_enabled = boost_config.map(|c| c.enabled).unwrap_or(false);
+        let impulse_charge = impulse.map(|i| i.0.charge_progress).unwrap_or(0.0);
+        let boost_state = boost.map(|b| b.0);
+        let boost_battery = boost_state.as_ref().map(|b| b.battery).unwrap_or(0.0);
+        let boost_active = boost_state.as_ref().map(|b| b.is_active()).unwrap_or(false);
+        // view_mode is not raw sim truth; helm blackboard omits it
 
-    // Live helm radar range: base config range scaled by the dedicated
-    // `HelmRadarRange` modifier, which `apply_radar_damage_modifiers` keeps
-    // in sync with the `helm-radar` system's damage tier each tick.
-    let radar_mult = modifiers_q
-        .single()
-        .map(|m| m.get(&ModifierSlot::HelmRadarRange))
-        .unwrap_or(1.0);
-    let radar_range = ship_client_config.0.helm_radar_range * radar_mult;
+        // Live helm radar range: base config range scaled by the dedicated
+        // `HelmRadarRange` modifier, which `apply_radar_damage_modifiers`
+        // keeps in sync with the `helm-radar` system's damage tier each tick
+        // — for every ship, not just the player. The base range is the
+        // player-only client config for the LocalShip (unchanged) and the
+        // ship's own authored `[helm_console.radar] range` for an NPC.
+        let radar_mult = modifiers
+            .map(|m| m.get(&ModifierSlot::HelmRadarRange))
+            .unwrap_or(1.0);
+        let base_radar_range = if is_local {
+            ship_client_config.0.helm_radar_range
+        } else {
+            helm_section
+                .map(|hc| hc.0.effective_radar_range())
+                .unwrap_or(0.0)
+        };
+        let radar_range = base_radar_range * radar_mult;
 
-    let bb = HelmBlackboard {
-        yaw: physics.yaw,
-        forward_speed: physics.forward_speed,
-        x: physics.x,
-        z: physics.z,
-        impulse_charge,
-        boost_battery,
-        boost_active,
-        boost_enabled,
-        radar_range,
-        lateral_speed: physics.lateral_speed,
-    };
+        let bb = HelmBlackboard {
+            yaw: physics.yaw,
+            forward_speed: physics.forward_speed,
+            x: physics.x,
+            z: physics.z,
+            impulse_charge,
+            boost_battery,
+            boost_active,
+            boost_enabled,
+            radar_range,
+            lateral_speed: physics.lateral_speed,
+        };
 
-    // Read last helm input for engine thrust fraction.
-    let last_input = last_input_q.iter().next().copied().unwrap_or_default();
+        // Read last helm input for engine thrust fraction.
+        let last_input = last_input.copied().unwrap_or_default();
 
-    // Per-engine blackboard (issue #511): one entry per fine engine system.
-    let hull = hull_q.single().ok();
-    let engine_entries = [
-        (
-            helm_engine_port_system_id(),
-            SystemId("helm-engine-port".into()),
-        ),
-        (
-            helm_engine_starboard_system_id(),
-            SystemId("helm-engine-starboard".into()),
-        ),
-    ];
+        // Per-engine blackboard (issue #511): one entry per fine engine system.
+        let engine_entries = [
+            (
+                helm_engine_port_system_id(),
+                SystemId("helm-engine-port".into()),
+            ),
+            (
+                helm_engine_starboard_system_id(),
+                SystemId("helm-engine-starboard".into()),
+            ),
+        ];
 
-    if let Some(mut bbs) = ship_q.iter_mut().next() {
         // Console-level blackboard: keyed by the Helm STATION id (issue #801).
         // The wire string is unchanged — the client still reads
         // `blackboards['helm']` — but the key names the console, not a system.
@@ -115,28 +152,33 @@ fn publish_helm_blackboard(
         // Publish per-engine entries.
         for (system_id, engine_sid) in engine_entries {
             let tier = hull
-                .as_ref()
                 .map(|h| h.0.tier_for(&engine_sid))
                 .unwrap_or(DamageTier::Operational);
             let is_online = !matches!(tier, DamageTier::Disabled | DamageTier::Destroyed);
             // Prefer the JoystickState from the InterSystemQueue (written by
             // `publish_joystick_to_engines` in SimSet::Physics, which runs
-            // before SimSet::Publish). Fall back to LastHelmInput if no
-            // channel-1 message targeted this engine this tick.
+            // before SimSet::Publish). LocalShip only: the queue's engine
+            // messages are the player joystick's fan-out, keyed by target
+            // system id, and must not bleed into NPC entries. Fall back to
+            // this ship's LastHelmInput otherwise.
             let last_input_thrust = last_input.thrust;
-            let joystick_thrust = queue
-                .0
-                .iter()
-                .filter(|m| m.target == system_id)
-                .filter_map(|m| {
-                    if let InterSystemPayload::JoystickState { thrust, .. } = &m.payload {
-                        Some(*thrust)
-                    } else {
-                        None
-                    }
-                })
-                .next_back()
-                .unwrap_or(last_input_thrust);
+            let joystick_thrust = if is_local {
+                queue
+                    .0
+                    .iter()
+                    .filter(|m| m.target == system_id)
+                    .filter_map(|m| {
+                        if let InterSystemPayload::JoystickState { thrust, .. } = &m.payload {
+                            Some(*thrust)
+                        } else {
+                            None
+                        }
+                    })
+                    .next_back()
+                    .unwrap_or(last_input_thrust)
+            } else {
+                last_input_thrust
+            };
             let thrust_fraction = if is_online {
                 joystick_thrust.abs()
             } else {
@@ -154,13 +196,10 @@ fn publish_helm_blackboard(
         // ── Lateral thrust blackboard ───────────────────────────────────────
         let lt_sid = lateral_thrust_system_id();
         let lt_tier = hull
-            .as_ref()
             .map(|h| h.0.tier_for(&SystemId(lt_sid.0.clone())))
             .unwrap_or(DamageTier::Operational);
         let lt_is_online = !matches!(lt_tier, DamageTier::Disabled | DamageTier::Destroyed);
-        let lt_auto = sources_q
-            .iter()
-            .next()
+        let lt_auto = sources
             .map(|s| s.0.policy_for(&lt_sid).operate_ai)
             .unwrap_or(false);
         bbs.0.insert(
@@ -189,6 +228,7 @@ mod tests {
         app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
         // Spawn a LocalShip entity with components so the system can query it.
         app.world_mut().spawn((
+            crate::simulation::Ship,
             crate::simulation::LocalShip,
             ShipPhysics::default(),
             ShipSystemBlackboards::default(),
@@ -198,6 +238,32 @@ mod tests {
             crate::ship_plugin::LastHelmInput::default(),
         ));
         app
+    }
+
+    /// Spawn an NPC ship (no `LocalShip`) carrying the components the
+    /// entity spawner gives every behaviour-bearing NPC, plus an authored
+    /// helm radar range. Returns its entity id.
+    fn spawn_npc_ship(app: &mut App, radar_range: f32) -> Entity {
+        let toml_str = format!(
+            "[helm_console]\nmax_speed = 30.0\n\n[helm_console.radar]\nrange = {radar_range}\nshows = [\"ship\"]\n"
+        );
+        let helm_config = crate::entity_config::EntityConfig::from_toml(&toml_str)
+            .expect("helm_console TOML must parse")
+            .helm_console
+            .expect("helm_console section must be present");
+        app.world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                ShipPhysics {
+                    x: 42.0,
+                    z: -17.0,
+                    ..Default::default()
+                },
+                ShipSystemBlackboards::default(),
+                crate::modifiers::ShipModifiers::new(),
+                crate::entities::spawner::HelmConsoleSection(helm_config),
+            ))
+            .id()
     }
 
     /// Helper: read the helm blackboard from the LocalShip entity's ShipSystemBlackboards component.
@@ -418,6 +484,150 @@ mod tests {
         assert!(
             (engine_bb.thrust_fraction - 0.8).abs() < 0.001,
             "thrust_fraction should match last helm input"
+        );
+    }
+
+    // ── Per-entity publish tests (issue #824) ──────────────────────────────
+
+    fn helm_bb_of(app: &mut App, entity: Entity) -> crate::messages::HelmBlackboard {
+        let bbs = app
+            .world()
+            .entity(entity)
+            .get::<ShipSystemBlackboards>()
+            .expect("ship must carry ShipSystemBlackboards");
+        let SystemBlackboard::Helm(bb) = bbs
+            .0
+            .get(&helm_station_key())
+            .expect("expected helm entry in blackboards")
+            .clone()
+        else {
+            panic!("expected Helm blackboard")
+        };
+        bb
+    }
+
+    /// AC (issue #824): an NPC ship gets a Helm blackboard entry of its own,
+    /// with ship-state fields derived from its own components.
+    #[test]
+    fn publish_writes_helm_entry_for_npc_ship() {
+        let mut app = base_app();
+        let npc = spawn_npc_ship(&mut app, 750.0);
+        app.update();
+
+        let bb = helm_bb_of(&mut app, npc);
+        assert!((bb.x - 42.0).abs() < 0.001, "NPC x must be its own physics");
+        assert!(
+            (bb.z - (-17.0)).abs() < 0.001,
+            "NPC z must be its own physics"
+        );
+        assert!(
+            (bb.radar_range - 750.0).abs() < 0.001,
+            "NPC radar_range must come from its own HelmConsoleSection, got {}",
+            bb.radar_range
+        );
+    }
+
+    /// AC (issue #824): the NPC's `radar_range` is live — scaled by the
+    /// `HelmRadarRange` modifier `apply_radar_damage_modifiers` maintains —
+    /// not the static config fallback.
+    #[test]
+    fn npc_radar_range_is_scaled_by_the_damage_modifier() {
+        let mut app = base_app();
+        let npc = spawn_npc_ship(&mut app, 800.0);
+        {
+            let mut entity = app.world_mut().entity_mut(npc);
+            let mut modifiers = entity.get_mut::<crate::modifiers::ShipModifiers>().unwrap();
+            // The same shape `apply_radar_damage_modifiers` writes for a
+            // damaged helm-radar: a -0.5 bonus is a 0.5 multiplier.
+            modifiers.add_or_update(crate::modifiers::Modifier {
+                source: crate::modifiers::cache::ModifierSource::SystemDamage(
+                    crate::system_registry::helm_radar_system_id(),
+                ),
+                slot: ModifierSlot::HelmRadarRange,
+                bonus: -0.5,
+            });
+        }
+        app.update();
+
+        // Whatever multiplier the cache computes for a -0.5 bonus, the
+        // published range must be the base range scaled by it — and it must
+        // actually be a reduction, or the modifier did nothing.
+        let mult = app
+            .world()
+            .entity(npc)
+            .get::<crate::modifiers::ShipModifiers>()
+            .unwrap()
+            .get(&ModifierSlot::HelmRadarRange);
+        assert!(
+            mult < 0.999,
+            "precondition: the damage modifier must reduce the multiplier, got {mult}"
+        );
+        let bb = helm_bb_of(&mut app, npc);
+        assert!(
+            (bb.radar_range - 800.0 * mult).abs() < 0.01,
+            "NPC radar_range must be damage-scaled (800 * {mult}), got {}",
+            bb.radar_range
+        );
+    }
+
+    /// The is_local gating: the LocalShip's base radar range still comes from
+    /// the player-only `ShipClientConfigResource`, never from a
+    /// `HelmConsoleSection`, and both tiers publish in the same tick.
+    #[test]
+    fn local_ship_radar_range_still_comes_from_client_config() {
+        let mut app = base_app();
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 123.0,
+                ..Default::default()
+            },
+        ));
+        let npc = spawn_npc_ship(&mut app, 750.0);
+        app.update();
+
+        let local = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        let local_bb = helm_bb_of(&mut app, local);
+        assert!(
+            (local_bb.radar_range - 123.0).abs() < 0.001,
+            "LocalShip radar_range must come from ShipClientConfigResource, got {}",
+            local_bb.radar_range
+        );
+        let npc_bb = helm_bb_of(&mut app, npc);
+        assert!(
+            (npc_bb.radar_range - 750.0).abs() < 0.001,
+            "NPC radar_range must ignore the player-only client config, got {}",
+            npc_bb.radar_range
+        );
+    }
+
+    /// NPC ships get engine + lateral entries too (ship-state tier), derived
+    /// from their own components rather than the player's joystick queue.
+    #[test]
+    fn publish_writes_engine_and_lateral_entries_for_npc_ship() {
+        let mut app = base_app();
+        let npc = spawn_npc_ship(&mut app, 750.0);
+        app.update();
+
+        let bbs = app
+            .world()
+            .entity(npc)
+            .get::<ShipSystemBlackboards>()
+            .unwrap();
+        assert!(
+            bbs.0.contains_key(&helm_engine_port_system_id()),
+            "expected NPC helm-engine-port entry"
+        );
+        assert!(
+            bbs.0.contains_key(&helm_engine_starboard_system_id()),
+            "expected NPC helm-engine-starboard entry"
+        );
+        assert!(
+            bbs.0.contains_key(&lateral_thrust_system_id()),
+            "expected NPC helm-lateral-thrust entry"
         );
     }
 }

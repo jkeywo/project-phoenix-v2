@@ -54,7 +54,7 @@ All four systems share one `run_if(ai_helm_tick_ready)` gate. `AiHelmTickTimer` 
 
 ### Ordering
 
-`ai_helm_thrust`/`ai_helm_steering` run after `process_helm_inputs` (so the AI is deterministically the authoritative writer of an AI-held axis); `ai_helm_lateral_thrust` runs before it (an AI-operated lateral axis admits no human command, so there is nothing to clobber); `ai_helm_impulse` runs before `apply_helm_commands`, which consumes `ImpulseCommand`. The registration comments in `src/ship_plugin.rs` state the full contract, including the `LastHelmInput` torn-pair rule.
+Since #824 the AI systems emit admitted commands rather than writing intents: `build_helm_ai_surfaces_frame` runs after `AiTickLabel` and before all four per-axis systems; the four emit `SetThrust`/`SetSteering`/lateral/impulse payloads through `command_admission::validate_and_admit` into their own ship's `AdmittedCommands`, all **before** `process_helm_inputs`, which applies every admitted helm payload per-entity (human- and AI-sourced alike) and is the single writer of `LastHelmInput` (LocalShip only). `apply_helm_commands` runs after it, consuming `ImpulseCommand`. The registration comments in `src/ship_plugin.rs` state the full contract.
 
 ## Intent-component surface
 
@@ -68,10 +68,10 @@ All four systems share one `run_if(ai_helm_tick_ready)` gate. `AiHelmTickTimer` 
 | `ImpulseCommand(ImpulsePhase)` | Desired impulse phase transition (only `Idle`/`Charging` ever commanded; idempotent) |
 | `BoostCommand(bool)` | Desired boost engagement |
 
-Writer contract — one writer per axis per tick:
+Writer contract — one writer per axis per tick (#824):
 
-- **Human path**: `process_helm_inputs` turns `AdmittedCommands` (per-axis wire: `SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, since #801) into intent components and the `LastHelmInput` mirror, skipping any AI-held axis.
-- **AI path**: the four per-axis systems above, one component each.
+- `process_helm_inputs` is the sole intent-component writer for every ship: it applies each ship's `AdmittedCommands` (per-axis wire: `SetThrust` → `helm-thrust`, `SetSteering` → `helm-steering`, since #801) regardless of whether the command was admitted from a human token or an `ai:` token — authority is checked once at admission.
+- The four per-axis AI systems decide and **emit admitted commands**; they no longer write intent components directly.
 
 Sole consumer: `integrate_ship_physics`, the single helm-path writer of `ShipPhysics` for the player ship and every AI-promoted NPC. A debug-only tripwire (`HelmPhysicsWriteGuard` + `HelmPhysicsFrame`, issue #699) panics if two helm-path writers stamp the same ship in one frame; the four sanctioned out-of-band `ShipPhysics` writers (collision, recoil, slow-zone clamp, low-LOD dead reckoning) are documented on `ShipPhysics` in `src/ship/state.rs` and do not opt in.
 

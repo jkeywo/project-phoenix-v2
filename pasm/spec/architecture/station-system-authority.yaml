@@ -146,10 +146,11 @@ entities:
       status: partially-implemented
       confidence: confirmed
       title: System Command Admission Policy
-      summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command.
+      summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command, and routes every command into the target ship's own per-entity AdmittedCommands.
       rationale:
         - A client must not gain authority by naming another station's system or by bypassing a damaged, offline, or AI-controlled system.
         - "Every wire target names a declared system since #801 — there is no coarse helm or tactical target — so admission is inherently per-axis for helm commands and per-bank for tactical commands."
+        - "Ship-aware since #824 (pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md section 2): every ship's AdmittedCommands is cleared each tick; human tokens route to the LocalShip as before, while a registered ai: token resolves through AiTokenRegistry to the owning entity and is admitted into that entity's own AdmittedCommands, validated by that entity's ControlSourceResolver. The validate+enqueue step is one shared seam (command_admission::validate_and_admit) also used by the console/system AI decide systems to emit their decisions as admitted commands in the same tick — so human and AI, player and NPC, all flow through one gate and nothing downstream branches on source."
     architecture:
       kind: command-validator
       authority: authoritative
@@ -158,8 +159,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/policy.rs]
-      symbols: [is_command_authorized, station_for_system]
+      paths: [src/command_admission/policy.rs, src/command_admission/mod.rs]
+      symbols: [is_command_authorized, station_for_system, validate_and_admit, admit_system_commands]
       tests: [cargo test]
     evidence:
       - kind: test

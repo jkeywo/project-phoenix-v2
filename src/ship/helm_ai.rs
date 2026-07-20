@@ -1,9 +1,12 @@
 use bevy::prelude::*;
 
+#[cfg(test)]
+use crate::ship::components::LastHelmInput;
 use crate::ship::components::{
-    HelmWaypointClearance, ImpulseConfigResource, LastHelmInput, PendingArcBearingRequest,
+    HelmWaypointClearance, ImpulseConfigResource, PendingArcBearingRequest,
     ShipSystemControlSources,
 };
+#[cfg(test)]
 use crate::ship::helm::{ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::ShipImpulse;
@@ -216,9 +219,12 @@ fn has_helm_objective(scored: &[crate::messages::ScoredObjective]) -> bool {
 
 /// This ship's damage-scaled helm radar range (issue #674).
 ///
-/// Prefers the live value from the ship's own Helm blackboard entry; falls
-/// back to static config for NPC ships (no Helm blackboard entry) and for the
-/// player before the blackboard is first published.
+/// Prefers the live value from the ship's own Helm blackboard entry — which
+/// `publish_helm_blackboard` publishes per-entity since #824, so NPCs get the
+/// live damage-scaled value too. The static-config fallback remains for ships
+/// whose entry has not been published yet (low-LOD ships, and any ship before
+/// its first publish); `helm_ai_radar_range_prefers_the_npc_blackboard_entry`
+/// pins both sides.
 fn helm_ai_radar_range(
     blackboards: &crate::server_app::ShipSystemBlackboards,
     helm_section: Option<&crate::entities::spawner::HelmConsoleSection>,
@@ -414,6 +420,237 @@ fn helm_weapons_target(
         .and_then(|t| uuid::Uuid::parse_str(t).ok())
 }
 
+// ── The helm decision-surface frame (issue #824) ─────────────────────────────
+//
+// `HelmAiSurfacesFrame` is the single helm decision seam named by issue #824
+// and `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §2. It is a
+// **derived, read-only** structure rebuilt from scratch on every shared
+// AI-helm sim tick by `build_helm_ai_surfaces_frame`, which runs
+// `.after(AiTickLabel)` and `.before` all four per-axis systems. The per-axis
+// systems consume it via `Res<_>` (immutable by construction), each still
+// making its own pure per-axis decision (`operate_helm` /
+// `operate_lateral_thrust` / `decide_impulse`) — so per-axis decision
+// ownership is preserved and the seam never becomes a coarse helm controller
+// (#801 constraint).
+//
+// Why this does not violate the module's recorded owner ruling ("no shared
+// cached `HelmDecision`", see the per-axis module note below): the frame
+// carries decision *inputs* — the merged world view, the scored-objective
+// slice, the resolved destroy target, the cleared nav waypoint — never a
+// decision. No axis's output is stored anywhere another axis could read it,
+// and nothing persists across ticks (the map is rebuilt wholesale each AI
+// tick). What it removes is the 3-4× duplicated `WorldView` rebuild the old
+// per-axis systems each performed, and with it the *unenforced*
+// identical-inputs invariant: all four axes now observe the same frame
+// because there is only one frame.
+
+/// One ship's helm decision surface for this AI tick. See the module note
+/// above for what may (inputs) and may not (decisions) live here.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HelmAiShipFrame {
+    /// This ship's scored objectives from its viewscreen blackboard.
+    pub(crate) scored: Vec<crate::messages::ScoredObjective>,
+    /// `has_helm_objective(&scored)`, precomputed once.
+    pub(crate) has_objective: bool,
+    /// Radar-gated world view of what the Helm itself can see — no
+    /// shared-target merge. Consumed by the lateral-thrust dodge and the
+    /// impulse target resolution, exactly the view those axes built for
+    /// themselves before #824.
+    pub(crate) visible_view: crate::ai::WorldView,
+    /// `visible_view` plus explicit console selections
+    /// (`helm_shared_target_view`): Tactical's lock, Sensors' science target,
+    /// the anchored waypoint source. Consumed by the thrust and steering
+    /// decisions.
+    pub(crate) merged_view: crate::ai::WorldView,
+    /// Helm's resolved target for an active Destroy directive
+    /// (`helm_destroy_target` over the merged view).
+    pub(crate) destroy_target: Option<uuid::Uuid>,
+    /// This ship's Tactical lock as a UUID (`helm_weapons_target`).
+    pub(crate) weapons_target: Option<uuid::Uuid>,
+    /// The Navigation waypoint this ship is cleared to fly
+    /// (`cleared_nav_waypoint`), if any.
+    pub(crate) nav_waypoint: Option<[f32; 2]>,
+    /// `ShipPhysics.forward_speed` at frame-build time.
+    pub(crate) forward_speed: f32,
+}
+
+/// The per-tick helm decision surface, keyed by ship entity. Rebuilt in
+/// place (cleared + refilled) by `build_helm_ai_surfaces_frame` on every
+/// shared AI-helm sim tick; consumed read-only by the four per-axis systems.
+#[derive(Resource, Default)]
+pub(crate) struct HelmAiSurfacesFrame {
+    /// World anchors, captured once per tick rather than cloned per ship.
+    pub(crate) anchors: std::collections::HashMap<String, [f32; 3]>,
+    /// Per-ship frames for every `AiHighFidelity` ship with at least one
+    /// AI-operated helm axis.
+    pub(crate) ships: std::collections::HashMap<Entity, HelmAiShipFrame>,
+}
+
+/// Assemble the helm decision surface once per shared AI-helm sim tick
+/// (issue #824). Runs `.after(AiTickLabel)` (the scored objectives and
+/// `WorldSnapshot` it reads are written there) and `.before` all four
+/// per-axis systems, under the same `run_if(ai_helm_tick_ready)` gate — so
+/// whenever an axis system runs, the frame it reads was built this tick.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_helm_ai_surfaces_frame(
+    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
+    entity_fallback_q: HelmAiFallbackQuery,
+    ships: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            &crate::server_app::ShipSystemBlackboards,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::entities::spawner::ColliderSection>,
+            Option<&crate::entities::spawner::HelmConsoleSection>,
+            Has<crate::server_app::LocalShip>,
+            HelmAiSurfaces,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+    mut frame: ResMut<HelmAiSurfacesFrame>,
+) {
+    frame.anchors = world_config
+        .as_ref()
+        .map(|wc| wc.anchors.clone())
+        .unwrap_or_default();
+    frame.ships.clear();
+
+    let snapshot_entities = helm_ai_snapshot_entities(
+        world_snapshot.as_deref(),
+        runtime.as_deref(),
+        &entity_fallback_q,
+    );
+    let default_registry = crate::faction::FactionRegistry::default();
+    let registry = faction_registry
+        .as_deref()
+        .map(|r| &r.0)
+        .unwrap_or(&default_registry);
+
+    for (
+        entity,
+        sources,
+        physics,
+        blackboards,
+        entity_uuid,
+        faction,
+        collider,
+        helm_section,
+        is_local,
+        surfaces,
+    ) in ships.iter()
+    {
+        // Build only for ships some helm axis is actually flying: the frame
+        // is a decision surface, and a fully human-held helm makes none.
+        let any_axis_ai = [
+            crate::system_registry::helm_thrust_system_id(),
+            crate::system_registry::helm_steering_system_id(),
+            crate::system_registry::lateral_thrust_system_id(),
+            crate::system_registry::helm_impulse_system_id(),
+        ]
+        .iter()
+        .any(|id| sources.0.policy_for(id).operate_ai);
+        if !any_axis_ai {
+            continue;
+        }
+
+        let scored = helm_ai_scored_objectives(blackboards);
+        let has_objective = has_helm_objective(&scored);
+        if !has_objective {
+            // The axis systems still need the entry (to zero their axis /
+            // stand impulse down correctly), but none of them reads a view
+            // without a live objective — skip the expensive build.
+            frame.ships.insert(
+                entity,
+                HelmAiShipFrame {
+                    scored,
+                    has_objective,
+                    forward_speed: physics.forward_speed,
+                    ..Default::default()
+                },
+            );
+            continue;
+        }
+
+        let visible_view = helm_ai_world_view(
+            physics,
+            entity_uuid,
+            faction,
+            collider,
+            helm_section,
+            blackboards,
+            ship_client_config.as_deref(),
+            is_local,
+            &frame.anchors,
+            &snapshot_entities,
+        );
+        let (merged_view, shared_targets) = helm_shared_target_view(
+            visible_view.clone(),
+            &snapshot_entities,
+            blackboards,
+            surfaces.weapons_target,
+            surfaces.waypoint,
+        );
+        let destroy_target = helm_destroy_target(&scored, &merged_view, &shared_targets, registry);
+
+        frame.ships.insert(
+            entity,
+            HelmAiShipFrame {
+                scored,
+                has_objective,
+                visible_view,
+                merged_view,
+                destroy_target,
+                weapons_target: helm_weapons_target(surfaces.weapons_target),
+                nav_waypoint: cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
+                forward_speed: physics.forward_speed,
+            },
+        );
+    }
+}
+
+/// Validate-and-enqueue one per-axis helm AI decision into this ship's own
+/// `AdmittedCommands` (issue #824): the AI's `ai:` token flows through the
+/// same `validate_and_admit` seam network commands do, checked against this
+/// entity's own `ControlSourceResolver` (`operate_ai` must hold). The write
+/// happens in the same tick — `process_helm_inputs` applies it later this
+/// frame — so there is no one-tick queue lag on the AI helm path.
+fn emit_helm_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    target: crate::messages::SystemId,
+    payload: crate::messages::SystemControlPayload,
+    sources: &ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship::components::ShipConfigComponent>,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token, target, payload, sources, sessions, config, admitted,
+    )
+}
+
 /// Call the pure `crate::ai::operate_helm` with this ship's TOML-authored
 /// behaviour tuning, returning `(thrust, steering)`.
 ///
@@ -436,7 +673,7 @@ fn helm_ai_decision(
     behaviour_section: Option<&crate::entities::spawner::BehaviourSection>,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
     cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
-    weapons_target: Option<&crate::weapons_plugin::WeaponsTarget>,
+    weapons_target: Option<uuid::Uuid>,
     destroy_target: Option<uuid::Uuid>,
     nav_waypoint: Option<[f32; 2]>,
     forward_speed: f32,
@@ -450,7 +687,7 @@ fn helm_ai_decision(
             .unwrap_or(&[]),
         anchors,
         cursors.map(|c| c.0.as_slice()).unwrap_or(NO_CURSORS),
-        destroy_target.or_else(|| helm_weapons_target(weapons_target)),
+        destroy_target.or(weapons_target),
         nav_waypoint,
         // Authored per entity template in TOML (`[behaviour]
         // waypoint_arrival_radius`), same as the cursor evaluator reads —
@@ -661,12 +898,12 @@ pub(crate) fn detect_reached_objective_completion(
     }
 }
 
-// ── Per-axis helm AI (issues #701, #703) ──────────────────────────────────────
+// ── Per-axis helm AI (issues #701, #703, #824) ────────────────────────────────
 //
 // `ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust` and
-// `ai_helm_impulse` are the per-axis helm AI: one owns `ThrustInput`, one
-// `SteeringInput`, one `LateralThrustInput`, one `ImpulseCommand`. Each gates on
-// its own axis alone:
+// `ai_helm_impulse` are the per-axis helm AI: one decides the throttle, one
+// the yaw, one the dodge, one the impulse drive. Each gates on its own axis
+// alone:
 //
 //     if !<own axis>.operate_ai { continue; }
 //
@@ -674,18 +911,30 @@ pub(crate) fn detect_reached_objective_completion(
 // after #800/#703 declared every axis on every shipped hull and removed the
 // coarse half of each gate).
 //
-// **Each intent component has exactly one writer, and it is the component's own
-// system:**
+// **Since #824 no per-axis system writes an intent component.** Each one
+// emits its decision as an admitted `SystemControlPayload` — `SetThrust`,
+// `SetSteering`, `LateralThrustInput`, `StartImpulseCharge`/`CancelImpulse` —
+// into its own ship's per-entity `AdmittedCommands`, through the same
+// `validate_and_admit` seam every network command passes (admission symmetry,
+// `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §2). The write into
+// `AdmittedCommands` is direct and same-tick — deliberately NOT a round-trip
+// through the `InboundMessage` queue, which would add a one-tick lag and move
+// every NPC trajectory. `process_helm_inputs` then applies the admitted
+// payloads to the intent components later in the same tick, for AI and human
+// commands alike, with no branching on source downstream of admission.
 //
-//   ThrustInput        ← `ai_helm_thrust`         iff T
-//   SteeringInput      ← `ai_helm_steering`       iff S
-//   LateralThrustInput ← `ai_helm_lateral_thrust` iff L
-//   ImpulseCommand     ← `ai_helm_impulse`        iff I
+// **Each axis has exactly one decider, and the applier is shared:**
+//
+//   SetThrust            ← `ai_helm_thrust`         iff T
+//   SetSteering          ← `ai_helm_steering`       iff S
+//   LateralThrustInput   ← `ai_helm_lateral_thrust` iff L
+//   Start/CancelImpulse  ← `ai_helm_impulse`        iff I
 //
 // (T/S/L/I = the helm-thrust / helm-steering / helm-lateral-thrust /
-// helm-impulse `operate_ai` policies.) One writer per component means Bevy's
+// helm-impulse `operate_ai` policies.) One decider per axis means Bevy's
 // arbitrary intra-set ordering cannot decide the outcome (the #697 failure
-// mode) because there is nothing to decide between.
+// mode) because there is nothing to decide between; the shared applier
+// (`process_helm_inputs`) applies whatever admission let through.
 //
 // **The coarse `helm` policy C is no longer an input to any of this.** It gated
 // the monolith and nothing else; with the monolith gone, no helm-AI system reads
@@ -709,108 +958,67 @@ pub(crate) fn detect_reached_objective_completion(
 // declarations themselves against the real TOMLs. Adding a hull means declaring
 // four axes, not one.
 //
-// Per the owner's ruling each of these systems calls the pure
-// `crate::ai::operate_helm` and keeps only its own output, duplicating the
-// `WorldView` build per ship per tick. There is deliberately no shared cached
-// `HelmDecision` component; that would re-create the mini-monolith this split
-// exists to remove. (`ai_helm_lateral_thrust` does not need `operate_helm` at
-// all — `operate_lateral_thrust` is a separate pure function — so it only
-// duplicates the `WorldView`.)
+// **The decision surface is assembled once, by `build_helm_ai_surfaces_frame`**
+// (issue #824 — see the `HelmAiSurfacesFrame` note above). The owner's ruling
+// recorded here through #823 said each per-axis system should call the pure
+// `operate_helm` itself and keep only its own output, duplicating the
+// `WorldView` build per ship per tick, because a shared cached `HelmDecision`
+// would re-create the mini-monolith this split exists to remove. #824 keeps
+// the load-bearing half of that ruling and retires the duplication: there is
+// still **no shared decision** — the frame carries only derived, read-only
+// decision *inputs*, rebuilt every AI tick, and each axis still calls its own
+// pure decision function (`operate_helm` per axis is pure and cheap; the
+// expensive part was always the view build). The identical-inputs invariant
+// the old shape left unenforced — both `operate_helm` callers must see the
+// same view or the axes disagree — is now true by construction, and
+// `all_four_axes_observe_the_same_frame` pins it.
 //
 // **No shared mutable state** (issue #702). `operate_helm` is a pure function:
-// it reads the ship's surfaces (`WeaponsTarget`, `NavigationWaypoint` +
+// it reads the frame (built from `WeaponsTarget`, `NavigationWaypoint` +
 // `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
-// `(thrust, steering)`. Both systems can call it, in either order, and each
-// keeps only its own axis. Each goal lives with the console that owns it —
-// Tactical selects the target, Navigation sets the waypoint, the objective's
-// cursor tracks the route — so "how many times did `operate_helm` run?" is
-// not a question anyone has to answer.
+// `(thrust, steering)`. The axis systems consume the frame via `Res<_>` —
+// immutable by construction — so "did some axis mutate the surface between
+// systems?" is not a question anyone has to answer.
 //
-// The **`LastHelmInput` ordering** remains load-bearing. Both systems write
-// `LastHelmInput` for the player ship, one field each (`.thrust` /
-// `.steering`), and they are the only writers of those fields. Any reader of
-// that *pair* in
-// `SimSet::Physics` must therefore be ordered after BOTH, or it can observe a
-// torn pair — this tick's AI throttle beside last tick's stale human steering.
-// The pair readers are `publish_joystick_to_engines`, `operate_helm_engine_ai`
-// and `tick_boost`; `helm_ai_last_input_pair_is_not_torn` pins the result.
-//
-// (`ai_helm_lateral_thrust` also writes `LastHelmInput`, but only the disjoint
-// `.lateral` field, and it is already `.before(process_helm_inputs)` — hence
-// already before these two. `ai_power_allocation` reads `.thrust` alone, so it
-// cannot see a torn pair and needs no edge.)
-//
-// Because `operate_helm` is a pure function of (world_view, scored, surfaces,
-// tuning), both systems reach an identical decision from identical inputs — so
-// the axes never disagree, and the per-axis result stays bit-identical to what
-// the monolith produced before #800.
+// **`LastHelmInput` has one writer now.** The per-axis systems no longer
+// mirror their fields; `process_helm_inputs` mirrors every applied helm
+// payload into the LocalShip's `LastHelmInput` as it applies the intent. The
+// pair readers in `SimSet::Physics` (`publish_joystick_to_engines`,
+// `operate_helm_engine_ai`, `tick_boost`) are ordered
+// `.after(process_helm_inputs)`, so a torn pair — this tick's AI throttle
+// beside last tick's stale human steering — cannot be observed;
+// `helm_ai_last_input_pair_is_not_torn` pins the result.
 
-/// Per-axis helm AI: throttle. Writes `ThrustInput` for ships whose
-/// helm-thrust system is AI-operated, whatever the coarse helm is doing — since
-/// #704 deleted `operate_helm_ai` this is the axis's only AI writer (issues
-/// #800, #704).
+/// Per-axis helm AI: throttle. Decides the throttle for ships whose
+/// helm-thrust system is AI-operated and emits it as an admitted `SetThrust`
+/// into the ship's own `AdmittedCommands` (issues #800, #704, #824) —
+/// `process_helm_inputs` applies it to `ThrustInput` later this tick.
 ///
-/// `AiHighFidelity`-scoped: `ThrustInput` only exists on ships carrying that
-/// marker (`lod_ai_ships` inserts/removes it with the intent bundle), so this
-/// system can take `&mut ThrustInput` directly rather than `Option<&mut _>`.
-/// (Every per-axis helm system is scoped this way since #703 brought
-/// `ai_helm_lateral_thrust` into line.)
+/// `AiHighFidelity`-scoped: the frame is only built for ships carrying that
+/// marker, and the intent components the admitted command lands on only
+/// exist there (`lod_ai_ships` inserts/removes them with the marker).
 ///
-/// Mutates nothing but its own axis: `operate_helm` is pure since #702, so
-/// there is no `AiMemory` commit to own and no ordering against
-/// `ai_helm_steering` to arbitrate — see the module note.
-///
-/// Takes `&ShipPhysics` read-only and never advances physics itself;
-/// `integrate_ship_physics` is the sole helm-path writer (issues #695, #699).
-#[allow(clippy::too_many_arguments)]
+/// Consumes the shared `HelmAiSurfacesFrame` (built this tick, see the
+/// module note) and keeps only its own axis of the pure `operate_helm`
+/// decision.
 pub(crate) fn ai_helm_thrust(
-    mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
-    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
-    entity_fallback_q: HelmAiFallbackQuery,
+    frame: Res<HelmAiSurfacesFrame>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Entity,
             &ShipSystemControlSources,
-            &ShipPhysics,
-            &crate::server_app::ShipSystemBlackboards,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::ColliderSection>,
-            Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&crate::entities::spawner::BehaviourSection>,
-            Has<crate::server_app::LocalShip>,
-            HelmAiSurfaces,
-            &mut ThrustInput,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ai_plugin::ObjectiveCursors>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    let anchors = world_config
-        .as_ref()
-        .map(|wc| wc.anchors.clone())
-        .unwrap_or_default();
-    let snapshot_entities = helm_ai_snapshot_entities(
-        world_snapshot.as_deref(),
-        runtime.as_deref(),
-        &entity_fallback_q,
-    );
-
-    for (
-        sources,
-        physics,
-        blackboards,
-        entity_uuid,
-        faction,
-        collider,
-        helm_section,
-        behaviour_section,
-        is_local,
-        surfaces,
-        mut thrust_in,
-    ) in ships.iter_mut()
+    for (entity, sources, behaviour_section, entity_uuid, ship_config, cursors, mut admitted) in
+        ships.iter_mut()
     {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
@@ -820,80 +1028,48 @@ pub(crate) fn ai_helm_thrust(
         {
             continue;
         }
+        let Some(sf) = frame.ships.get(&entity) else {
+            continue;
+        };
 
-        let scored = helm_ai_scored_objectives(blackboards);
-        if !has_helm_objective(&scored) {
+        let thrust = if !sf.has_objective {
             // No objectives → zero throttle (decelerate to stop) via the
             // shared physics curve rather than coasting on a stale intent.
-            thrust_in.0 = 0.0;
-            if is_local {
-                if let Some(mut li) = local_ship_input.iter_mut().next() {
-                    li.thrust = 0.0;
-                }
-            }
-            continue;
-        }
+            0.0
+        } else {
+            // No commit rule, and no scratch clone to dodge one:
+            // `operate_helm` is pure, so we simply ask it and keep our axis
+            // (issue #702).
+            helm_ai_decision(
+                &sf.merged_view,
+                &sf.scored,
+                behaviour_section,
+                &frame.anchors,
+                cursors,
+                sf.weapons_target,
+                sf.destroy_target,
+                sf.nav_waypoint,
+                sf.forward_speed,
+            )
+            .0
+        };
 
-        let world_view = helm_ai_world_view(
-            physics,
+        emit_helm_ai_command(
             entity_uuid,
-            faction,
-            collider,
-            helm_section,
-            blackboards,
-            ship_client_config.as_deref(),
-            is_local,
-            &anchors,
-            &snapshot_entities,
+            crate::system_registry::helm_thrust_system_id(),
+            crate::messages::SystemControlPayload::SetThrust { value: thrust },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
         );
-        let (world_view, shared_targets) = helm_shared_target_view(
-            world_view,
-            &snapshot_entities,
-            blackboards,
-            surfaces.weapons_target,
-            surfaces.waypoint,
-        );
-        let default_registry = crate::faction::FactionRegistry::default();
-        let registry = faction_registry
-            .as_deref()
-            .map(|r| &r.0)
-            .unwrap_or(&default_registry);
-        let destroy_target = helm_destroy_target(&scored, &world_view, &shared_targets, registry);
-
-        // No commit rule, and no scratch clone to dodge one: `operate_helm` is
-        // pure, so we simply ask it and keep our axis (issue #702).
-        let (thrust, _steering) = helm_ai_decision(
-            &world_view,
-            &scored,
-            behaviour_section,
-            &anchors,
-            surfaces.cursors,
-            surfaces.weapons_target,
-            destroy_target,
-            cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
-            physics.forward_speed,
-        );
-
-        thrust_in.0 = thrust;
-
-        // Mirror to LastHelmInput for the player ship so broadcast /
-        // fine-engine bookkeeping consumers see the AI's throttle. Since #704
-        // this system is the sole writer of the `.thrust` field on the AI path
-        // (`operate_helm_ai` mirrored it field-wise for the coarse path). The
-        // ordering that stops a reader seeing this beside a stale `.steering`
-        // survives #702 — see the module note.
-        if is_local {
-            if let Some(mut li) = local_ship_input.iter_mut().next() {
-                li.thrust = thrust;
-            }
-        }
     }
 }
 
-/// Per-axis helm AI: steering. Writes `SteeringInput` for ships whose
-/// helm-steering system is AI-operated, whatever the coarse helm is doing —
-/// since #704 deleted `operate_helm_ai` this is the axis's only AI writer, and
-/// it owns the arc-bearing step outright (issues #800, #704).
+/// Per-axis helm AI: steering. Decides the yaw for ships whose helm-steering
+/// system is AI-operated and emits it as an admitted `SetSteering` into the
+/// ship's own `AdmittedCommands` (issues #800, #704, #824); it owns the
+/// arc-bearing step outright.
 ///
 /// Steers toward the selected waypoint/target chosen by the pure
 /// `crate::ai::operate_helm`, which resolves the top-scored Helm-relevant
@@ -903,68 +1079,36 @@ pub(crate) fn ai_helm_thrust(
 /// `ai_helm_steering_retreats_toward_anchor` pins that behaviour through this
 /// system, and `ai_helm_steering_retreat_with_unknown_anchor_falls_through`
 /// pins the other side of it.
-///
-/// Retreat reached this system via a *synthetic* objective injected by
-/// `aggregate_doctrine_blackboards` below a `[behaviour] retreat_hull_threshold`
-/// until #702; it is now ordinary authored doctrine, and the empty-anchor /
-/// `home_position` fallback that the synthetic one depended on is gone.
-///
-/// Mutates nothing but its own axis — `operate_helm` is pure since #702, so
-/// there is no `AiMemory` commit and no ordering against `ai_helm_thrust` (see
-/// the module note). Takes `&ShipPhysics` read-only; `integrate_ship_physics`
-/// is the sole helm-path physics writer (issues #695, #699).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_steering(
-    mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
-    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
-    entity_fallback_q: HelmAiFallbackQuery,
+    frame: Res<HelmAiSurfacesFrame>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            &crate::server_app::ShipSystemBlackboards,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::ColliderSection>,
-            Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&crate::entities::spawner::BehaviourSection>,
-            Has<crate::server_app::LocalShip>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ai_plugin::ObjectiveCursors>,
             Option<&mut PendingArcBearingRequest>,
             Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-            HelmAiSurfaces,
-            &mut SteeringInput,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    let anchors = world_config
-        .as_ref()
-        .map(|wc| wc.anchors.clone())
-        .unwrap_or_default();
-    let snapshot_entities = helm_ai_snapshot_entities(
-        world_snapshot.as_deref(),
-        runtime.as_deref(),
-        &entity_fallback_q,
-    );
-
     for (
+        entity,
         sources,
         physics,
-        blackboards,
-        entity_uuid,
-        faction,
-        collider,
-        helm_section,
         behaviour_section,
-        is_local,
+        entity_uuid,
+        ship_config,
+        cursors,
         mut pending_bearing,
         combat_config_opt,
-        surfaces,
-        mut steering_in,
+        mut admitted,
     ) in ships.iter_mut()
     {
         // Gate on our own axis alone (issue #800) — see the module note above.
@@ -975,145 +1119,97 @@ pub(crate) fn ai_helm_steering(
         {
             continue;
         }
-
-        let scored = helm_ai_scored_objectives(blackboards);
-        if !has_helm_objective(&scored) {
-            steering_in.0 = 0.0;
-            if is_local {
-                if let Some(mut li) = local_ship_input.iter_mut().next() {
-                    li.steering = 0.0;
-                }
-            }
+        let Some(sf) = frame.ships.get(&entity) else {
             continue;
-        }
+        };
 
-        let world_view = helm_ai_world_view(
-            physics,
+        let steering = if !sf.has_objective {
+            0.0
+        } else {
+            // Pure call, no commit — see the module note (issue #702).
+            let (_thrust, mut steering) = helm_ai_decision(
+                &sf.merged_view,
+                &sf.scored,
+                behaviour_section,
+                &frame.anchors,
+                cursors,
+                sf.weapons_target,
+                sf.destroy_target,
+                sf.nav_waypoint,
+                sf.forward_speed,
+            );
+
+            // ── Weapons->Helm arc-bearing request (issue #677) ───────────────
+            apply_arc_bearing_request(
+                &mut steering,
+                pending_bearing.as_deref_mut(),
+                &sf.merged_view,
+                physics,
+                combat_config_opt,
+            );
+            steering
+        };
+
+        emit_helm_ai_command(
             entity_uuid,
-            faction,
-            collider,
-            helm_section,
-            blackboards,
-            ship_client_config.as_deref(),
-            is_local,
-            &anchors,
-            &snapshot_entities,
+            crate::system_registry::helm_steering_system_id(),
+            crate::messages::SystemControlPayload::SetSteering { value: steering },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
         );
-        let (world_view, shared_targets) = helm_shared_target_view(
-            world_view,
-            &snapshot_entities,
-            blackboards,
-            surfaces.weapons_target,
-            surfaces.waypoint,
-        );
-        let default_registry = crate::faction::FactionRegistry::default();
-        let registry = faction_registry
-            .as_deref()
-            .map(|r| &r.0)
-            .unwrap_or(&default_registry);
-        let destroy_target = helm_destroy_target(&scored, &world_view, &shared_targets, registry);
-
-        // Pure call, no commit — see the module note (issue #702).
-        let (_thrust, mut steering) = helm_ai_decision(
-            &world_view,
-            &scored,
-            behaviour_section,
-            &anchors,
-            surfaces.cursors,
-            surfaces.weapons_target,
-            destroy_target,
-            cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
-            physics.forward_speed,
-        );
-
-        // ── Weapons->Helm arc-bearing request (issue #677) ────────────────────
-        apply_arc_bearing_request(
-            &mut steering,
-            pending_bearing.as_deref_mut(),
-            &world_view,
-            physics,
-            combat_config_opt,
-        );
-
-        steering_in.0 = steering;
-
-        // Mirror to LastHelmInput for the player ship — see `ai_helm_thrust`.
-        if is_local {
-            if let Some(mut li) = local_ship_input.iter_mut().next() {
-                li.steering = steering;
-            }
-        }
     }
 }
 
-/// Per-axis helm AI: impulse drive. Writes `ImpulseCommand` for ships whose
-/// helm-impulse system is AI-operated, whatever the coarse helm is doing —
-/// since #704 deleted `operate_helm_ai` this is the impulse decision's only AI
-/// writer (issues #703, #704).
-///
-/// `AiHighFidelity`-scoped (AC3): `ImpulseCommand` only exists on ships
-/// carrying that marker (`lod_ai_ships` inserts/removes it with the intent
-/// bundle), so the query can take `&mut ImpulseCommand` directly.
+/// Per-axis helm AI: impulse drive. Decides engage/cancel for ships whose
+/// helm-impulse system is AI-operated and emits it as an admitted
+/// `StartImpulseCharge`/`CancelImpulse` into the ship's own
+/// `AdmittedCommands` (issues #703, #704, #824); `process_helm_inputs`
+/// applies it to `ImpulseCommand` later this tick, before
+/// `apply_helm_commands` consumes the transition.
 ///
 /// **Reads the shared helm surfaces; mutates none of them.** It resolves where
-/// the Helm is going via `resolve_helm_target_position`, over the same
-/// `WeaponsTarget` / `ObjectiveCursors` the steering decision uses, so the drive
-/// charges toward the point the ship is actually steering at.
+/// the Helm is going via `resolve_helm_target_position`, over the frame's
+/// radar-gated `visible_view` — deliberately NOT the merged view, preserving
+/// the pre-#824 shape where the impulse decision never saw an out-of-radar
+/// shared target — so the drive charges toward a point the Helm can actually
+/// see.
 ///
-/// Writes only on an `Engage`/`Cancel` decision, never on `NoChange`:
+/// Emits only on an `Engage`/`Cancel` decision, never on `NoChange`:
 /// `apply_helm_commands` transitions on `ImpulseCommand` change detection, so
-/// an unconditional write would re-issue `start_charge`/`cancel_charge` every
-/// tick.
-#[allow(clippy::too_many_arguments)]
+/// an unconditional emission would re-issue `start_charge`/`cancel_charge`
+/// every tick.
 pub(crate) fn ai_helm_impulse(
-    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
-    entity_fallback_q: HelmAiFallbackQuery,
+    frame: Res<HelmAiSurfacesFrame>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            &crate::server_app::ShipSystemBlackboards,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::ColliderSection>,
-            Option<&crate::entities::spawner::HelmConsoleSection>,
-            Option<&crate::entities::spawner::BehaviourSection>,
-            Has<crate::server_app::LocalShip>,
             Option<&ShipImpulse>,
             Option<&ImpulseConfigResource>,
-            HelmAiSurfaces,
-            &mut ImpulseCommand,
+            Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ai_plugin::ObjectiveCursors>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    let anchors = world_config
-        .as_ref()
-        .map(|wc| wc.anchors.clone())
-        .unwrap_or_default();
-    let snapshot_entities = helm_ai_snapshot_entities(
-        world_snapshot.as_deref(),
-        runtime.as_deref(),
-        &entity_fallback_q,
-    );
-
     for (
+        entity,
         sources,
         physics,
-        blackboards,
-        entity_uuid,
-        faction,
-        collider,
-        helm_section,
-        behaviour_section,
-        is_local,
         impulse_comp,
         impulse_cfg,
-        surfaces,
-        mut impulse_cmd,
+        behaviour_section,
+        entity_uuid,
+        ship_config,
+        cursors,
+        mut admitted,
     ) in ships.iter_mut()
     {
         // Gate on our own system alone — see the module note above.
@@ -1131,54 +1227,28 @@ pub(crate) fn ai_helm_impulse(
             continue;
         };
 
-        let scored = helm_ai_scored_objectives(blackboards);
-        // No Helm objective → leave `ImpulseCommand` alone. The monolith's
-        // no-objective branch `continue`s before its impulse block for exactly
-        // the same reason: an in-progress charge is not something a lull in
-        // objectives should cancel.
-        //
-        // Behaviourally this is a *redundant* early-out rather than a
-        // load-bearing gate. Two more `score > 0.0 && Helm`-relevant filters
-        // downstream reach the same `continue` on their own:
-        // `resolve_helm_target_position`'s top-objective selection, and the
-        // `top_obj` lookup that resolves `use_impulse` below. Mutation-testing
-        // confirms it: this line and either one of those can be deleted
-        // individually with every test still green; only removing all three
-        // turns `ai_helm_impulse_leaves_the_drive_alone_without_a_helm_objective`
-        // red.
-        //
-        // It is kept because it short-circuits the `WorldView` build and the
-        // `operate_helm` replay below — real work, per ship per tick — and
-        // because it keeps the shape legible against the monolith it replaces.
-        if !has_helm_objective(&scored) {
+        let Some(sf) = frame.ships.get(&entity) else {
+            continue;
+        };
+        // No Helm objective → emit nothing. The monolith's no-objective
+        // branch `continue`s before its impulse block for exactly the same
+        // reason: an in-progress charge is not something a lull in objectives
+        // should cancel. (Behaviourally a redundant early-out — the
+        // top-objective filters below reach the same `continue` — kept
+        // because it short-circuits the target resolution and keeps the shape
+        // legible against the monolith it replaces.)
+        if !sf.has_objective {
             continue;
         }
 
-        let world_view = helm_ai_world_view(
-            physics,
-            entity_uuid,
-            faction,
-            collider,
-            helm_section,
-            blackboards,
-            ship_client_config.as_deref(),
-            is_local,
-            &anchors,
-            &snapshot_entities,
-        );
-
         // Resolve where the Helm is going, from the same surfaces `operate_helm`
-        // reads. There is no `helm_ai_decision` replay here any more: it existed
-        // only to advance a scratch `AiMemory` so that this lookup would see the
-        // post-advance `waypoint_index`. The cursor is read-only and lives
-        // outside the decision now, so the replay computed an answer nobody
-        // used (issue #702).
+        // reads, over the radar-gated visible view (see the doc comment).
         let Some(target_pos) = resolve_helm_target_position(
-            &scored,
-            &world_view,
-            &anchors,
-            surfaces.cursors,
-            helm_weapons_target(surfaces.weapons_target),
+            &sf.scored,
+            &sf.visible_view,
+            &frame.anchors,
+            cursors,
+            sf.weapons_target,
         ) else {
             continue;
         };
@@ -1187,7 +1257,7 @@ pub(crate) fn ai_helm_impulse(
         // objective is TOML-authored per doctrine entry
         // (`[[behaviour.doctrine]] use_impulse`); an objective with no matching
         // doctrine entry never engages.
-        let top_obj = scored.iter().find(|o| {
+        let top_obj = sf.scored.iter().find(|o| {
             o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
         });
         let use_impulse = top_obj
@@ -1209,168 +1279,76 @@ pub(crate) fn ai_helm_impulse(
             cancel_distance: cfg.cancel_distance,
             angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
         });
-        match decision {
+        let payload = match decision {
             crate::ai::ImpulseDecision::Engage => {
-                impulse_cmd.0 = crate::impulse::ImpulsePhase::Charging;
+                crate::messages::SystemControlPayload::StartImpulseCharge
             }
             crate::ai::ImpulseDecision::Cancel => {
-                impulse_cmd.0 = crate::impulse::ImpulsePhase::Idle;
+                crate::messages::SystemControlPayload::CancelImpulse
             }
-            crate::ai::ImpulseDecision::NoChange => {}
-        }
+            crate::ai::ImpulseDecision::NoChange => continue,
+        };
+        emit_helm_ai_command(
+            entity_uuid,
+            crate::system_registry::helm_impulse_system_id(),
+            payload,
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
     }
 }
 
-// ── Per-axis helm AI: lateral thrust (issues #697, #703) ──────────────────────
+// ── Per-axis helm AI: lateral thrust (issues #697, #703, #824) ────────────────
 //
-// Born in #697 as `operate_lateral_thrust_ai`, a *partial-automation* system:
-// its gate was `L && !C`, so it ran only when the lateral-thrust system was AI
-// and the coarse helm was human. That second half existed because
-// `operate_helm_ai` owned `LateralThrustInput` outright whenever the coarse
-// helm was AI, and two writers would have raced.
+// Born in #697 as `operate_lateral_thrust_ai`, a partial-automation system
+// gated `L && !C`; #703 collapsed the gate to `L` alone and closed three
+// behaviour divergences against the monolith (radar gating, snapshot
+// fallback, no-objective zeroing); #704 deleted the monolith, leaving `L`
+// the whole story. #824 moved the transport: the dodge is now emitted as an
+// admitted `LateralThrustInput` command rather than a direct
+// `LateralThrustInput` component write — see the per-axis module note above.
 //
-// #703 gave lateral thrust the same treatment #800 gave thrust and steering:
-// the monolith stood down from `LateralThrustInput` iff helm-lateral-thrust was
-// AI, so the coarse half of the gate became redundant and came off. `L && !C`
-// and `C && !L` were disjoint by construction; `L` and `C && !L` still were.
-// #704 then deleted the monolith outright, so the `C && !L` writer is gone and
-// `L` alone decides — there is no longer a second writer to be disjoint from.
-//
-// **This changes when the system runs.** The issue's acceptance criterion says
-// "lateral thrust AI works under partial automation only", which described the
-// #697 gate. That wording cannot survive the collapse it asks for in the same
-// breath: dropping `!C` is precisely what makes the system run under full
-// automation too. Under full automation this system now produces the dodge the
-// monolith used to. Partial automation is no longer the only case it serves; it
-// is the only case in which it is the sole helm AI running.
-//
-// **Partial automation is not left untouched, though**, and it would be wrong to
-// file the whole of #703 under "behaviour-preserving": the divergence fixes
-// below apply to the `L && !C` path too, where #697's system — not the monolith
-// — was the writer. Radar gating is the one that bites. #697 ran with unlimited
-// range, so a Simplified-rating cruiser whose helm radar is shot up **will now
-// dodge less** than it did before this change: it stops reacting to obstacles it
-// cannot actually see. That is the intended outcome — it is what the monolith
-// has always done, and aligning the two is the point of the exercise — but it is
-// a real behaviour change on that path, not a preservation of it.
-//
-// Behaviour parity with the monolith is not automatic, and #697's version did
-// not have it. Three divergences had to be closed before the coarse half could
-// come off, or shipped hulls (`alliance_cruiser`/`_destroyer`/`_courier` all
-// declare helm-lateral-thrust and flip to this system the moment their helm
-// station goes unmanned) would have silently changed behaviour under full
-// automation:
-//
-//   * **Radar gating.** #697 built its own `WorldView` with
-//     `visible_entities(pos, 0.0, ..)` — range 0 means *unlimited*. The monolith
-//     gates by the ship's damage-scaled helm radar range. A cruiser with a
-//     shot-up radar would have started dodging rocks it cannot see. Now shares
-//     `helm_ai_world_view`.
-//   * **Snapshot fallback.** #697 early-returned when `WorldSnapshot` was
-//     absent; the monolith falls back to a direct ECS query. Now shares
-//     `helm_ai_snapshot_entities`.
-//   * **No-objective zeroing.** #697 `continue`d, leaving a stale dodge latched;
-//     the monolith zeroes the axis so `integrate_ship_physics` decelerates it
-//     off through the normal physics curve. Now zeroes.
-//
-// The ~30 Hz throttle on this system predates the split (it was the private
+// The ~30 Hz cadence predates the split (it was the private
 // `AiLateralThrustTimer` until #803) and is load-bearing: production `Update`
-// is rAF-driven (`server/bridge.rs` installs `WinitSettings` with
-// `UpdateMode::Continuous`), i.e. ~16.7 ms at 60 Hz, so a 33.3 ms period fires
-// roughly every *other* frame — a real throttle, and the only one on this
-// path, since `build_world_snapshot` runs every frame. Coupling the dodge
-// cadence to the host's display refresh rate is precisely the nondeterminism
-// PRD #620 (P2P deterministic lockstep) exists to remove.
-//
-// #803 generalised the gate: the private timer became the shared
-// `AiHelmTickTimer` / `AiHelmTickReady` sim tick (see the resource note at the
-// top of this file), and **all four** per-axis systems — this one,
-// `ai_helm_thrust`, `ai_helm_steering` and `ai_helm_impulse` — now attach the
-// same `run_if(ai_helm_tick_ready)` condition, so the whole helm AI decides on
-// one fixed-rate cadence instead of the lateral axis alone being throttled
-// while its siblings ran per rendered frame. The rate is TOML-authored
-// (`[global] ai_helm_tick_hz`, default 30 Hz — the old timer's period, so the
-// lateral cadence is unchanged). A skipped frame runs none of the four, so an
-// axis simply holds its last intent through the gap and
-// `integrate_ship_physics` keeps integrating it.
+// is rAF-driven, so without the shared `run_if(ai_helm_tick_ready)` gate the
+// dodge cadence would follow the host's display refresh rate — precisely the
+// nondeterminism PRD #620 (P2P deterministic lockstep) exists to remove.
+// A skipped frame runs none of the four axis systems, so an axis simply
+// holds its last applied intent through the gap and `integrate_ship_physics`
+// keeps integrating it.
 // `*_runs_on_the_shared_sim_tick_not_per_frame` pins the cadence for each of
 // the four systems.
 
-/// Per-axis helm AI: lateral thrust. Writes `LateralThrustInput` for ships
-/// whose helm-lateral-thrust system is AI-operated, whatever the coarse helm is
-/// doing — since #704 deleted `operate_helm_ai` this is the axis's only AI
-/// writer (issues #703, #704).
+/// Per-axis helm AI: lateral thrust. Decides the dodge for ships whose
+/// helm-lateral-thrust system is AI-operated and emits it as an admitted
+/// `LateralThrustInput` into the ship's own `AdmittedCommands` (issues #703,
+/// #704, #824).
 ///
-/// `AiHighFidelity`-scoped (AC3). #697 deliberately was not, taking
-/// `Option<&mut LateralThrustInput>` so it could match a demoted NPC that had
-/// lost the component and skip the write. That rationale only ever bought the
-/// right to iterate ships it could do nothing for: the intent component and the
-/// marker are inserted and removed together by `lod_ai_ships`, so "demoted" and
-/// "no `LateralThrustInput`" are the same set, and the guarded write always
-/// skipped. The one thing the loop body could still have done for such a ship —
-/// mirror to `LastHelmInput` — is reachable only for `LocalShip`, which never
-/// demotes. So the scoping is behaviour-preserving, and the query takes
-/// `&mut LateralThrustInput` directly like its two siblings.
-///
-/// Does not touch `AiMemory`: `crate::ai::operate_lateral_thrust` is a pure
-/// function of the world view, the scored objectives and the hull's avoidance
-/// tuning. It is therefore outside the commit ordering in the module note above.
-#[allow(clippy::too_many_arguments)]
+/// Consumes the frame's radar-gated `visible_view` — the same view #703
+/// aligned this axis to (a cruiser with a shot-up helm radar must not dodge
+/// rocks it cannot see) — via the pure `crate::ai::operate_lateral_thrust`.
 pub(crate) fn ai_helm_lateral_thrust(
-    mut local_ship_input: Query<&mut LastHelmInput, With<crate::server_app::LocalShip>>,
-    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
-    entity_fallback_q: HelmAiFallbackQuery,
+    frame: Res<HelmAiSurfacesFrame>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Entity,
             &ShipSystemControlSources,
-            &crate::server_app::ShipSystemBlackboards,
-            &ShipPhysics,
-            Option<&crate::entities::spawner::ColliderSection>,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::entities::spawner::HelmConsoleSection>,
             // Optional, so it does not filter the iteration set: a ship without
             // a `[behaviour]` section still runs AI lateral thrust, on the
             // `crate::ai::*` fallbacks that match the serde defaults.
             Option<&crate::entities::spawner::BehaviourSection>,
-            Has<crate::server_app::LocalShip>,
-            &mut LateralThrustInput,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // The ~30 Hz throttle that used to live here as a private timer is now
-    // the shared `run_if(ai_helm_tick_ready)` sim-tick gate on the
-    // registration (issue #803), common to all four per-axis systems. A
-    // skipped frame runs nothing at all rather than writing a stale value —
-    // including the no-objective zeroing below — so the axis simply holds its
-    // last value through the gap and `integrate_ship_physics` keeps
-    // integrating it.
-    let anchors = world_config
-        .as_ref()
-        .map(|wc| wc.anchors.clone())
-        .unwrap_or_default();
-    let snapshot_entities = helm_ai_snapshot_entities(
-        world_snapshot.as_deref(),
-        runtime.as_deref(),
-        &entity_fallback_q,
-    );
-
-    for (
-        sources,
-        blackboards,
-        physics,
-        collider,
-        entity_uuid,
-        faction,
-        helm_section,
-        behaviour_section,
-        is_local,
-        mut lateral_in,
-    ) in ships.iter_mut()
+    for (entity, sources, behaviour_section, entity_uuid, ship_config, mut admitted) in
+        ships.iter_mut()
     {
         // Gate on our own system alone (issue #703) — see the module note above.
         if !sources
@@ -1380,59 +1358,43 @@ pub(crate) fn ai_helm_lateral_thrust(
         {
             continue;
         }
-
-        let scored = helm_ai_scored_objectives(blackboards);
-        if !has_helm_objective(&scored) {
-            // No objectives → zero the dodge rather than latch the last one,
-            // matching what the monolith does for the axis.
-            lateral_in.0 = 0.0;
-            if is_local {
-                if let Some(mut li) = local_ship_input.iter_mut().next() {
-                    li.lateral = 0.0;
-                }
-            }
+        let Some(sf) = frame.ships.get(&entity) else {
             continue;
-        }
+        };
 
-        let world_view = helm_ai_world_view(
-            physics,
+        let lateral = if !sf.has_objective {
+            // No objectives → zero the dodge rather than latch the last one,
+            // matching what the monolith did for the axis.
+            0.0
+        } else {
+            // TOML-authored avoidance tuning, same as `helm_ai_decision` uses: how
+            // much clearance this hull wants is a property of the hull, not of which
+            // system happens to be automated. The dodge and the yaw must agree, or
+            // the ship sidesteps an obstacle its steering has already dismissed.
+            // `full_ai_helm_honours_toml_authored_avoidance_buffer` /
+            // `..._look_ahead` pin this site against the constants (commit 7f4e2661).
+            crate::ai::operate_lateral_thrust(
+                &sf.visible_view,
+                &sf.scored,
+                behaviour_section
+                    .map(|b| b.0.avoidance_buffer)
+                    .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
+                behaviour_section
+                    .map(|b| b.0.avoidance_look_ahead_secs)
+                    .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
+                sf.forward_speed,
+            )
+        };
+
+        emit_helm_ai_command(
             entity_uuid,
-            faction,
-            collider,
-            helm_section,
-            blackboards,
-            ship_client_config.as_deref(),
-            is_local,
-            &anchors,
-            &snapshot_entities,
+            crate::system_registry::lateral_thrust_system_id(),
+            crate::messages::SystemControlPayload::LateralThrustInput { lateral },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
         );
-
-        // TOML-authored avoidance tuning, same as `helm_ai_decision` uses: how
-        // much clearance this hull wants is a property of the hull, not of which
-        // system happens to be automated. The dodge and the yaw must agree, or
-        // the ship sidesteps an obstacle its steering has already dismissed.
-        // `full_ai_helm_honours_toml_authored_avoidance_buffer` /
-        // `..._look_ahead` pin this site against the constants (commit 7f4e2661).
-        let lateral = crate::ai::operate_lateral_thrust(
-            &world_view,
-            &scored,
-            behaviour_section
-                .map(|b| b.0.avoidance_buffer)
-                .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
-            behaviour_section
-                .map(|b| b.0.avoidance_look_ahead_secs)
-                .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
-            physics.forward_speed,
-        );
-
-        lateral_in.0 = lateral;
-
-        // Mirror to LastHelmInput for the player ship — see `ai_helm_thrust`.
-        if is_local {
-            if let Some(mut li) = local_ship_input.iter_mut().next() {
-                li.lateral = lateral;
-            }
-        }
     }
 }
 
@@ -2612,15 +2574,12 @@ mod tests {
             .0 = value;
     }
 
-    /// The coarse helm is set to **AI** purely to isolate the writer, and that
-    /// is load-bearing: `process_helm_inputs` also writes `LateralThrustInput`
-    /// (from `LastHelmInput`), on its own 30 Hz `HelmInputTimer`, and it only
-    /// stands down when the *coarse* helm is AI-operated — the lateral policy
-    /// does not stop it. Left Human (as `lateral_thrust_ai_app` leaves it) it
-    /// would clear the sentinel on its own cadence and this test would pass
-    /// even with `ai_helm_lateral_thrust` disabled outright. With the coarse
-    /// helm on AI, `process_helm_inputs` early-returns, leaving this system
-    /// the sole writer.
+    /// Since #824 `process_helm_inputs` writes `LateralThrustInput` only when
+    /// an admitted `LateralThrustInput` command exists for the ship — and the
+    /// only emitter here is `ai_helm_lateral_thrust` itself — so a frame that
+    /// clears the sentinel is a frame the AI decided on. (`HelmInputTimer`
+    /// and the coarse-AI stand-down this comment used to describe are gone;
+    /// the coarse-AI setup is kept purely as the historical fixture shape.)
     #[test]
     fn ai_helm_lateral_thrust_runs_on_the_shared_sim_tick_not_per_frame() {
         let mut app = lateral_dodge_app();
@@ -4571,6 +4530,127 @@ mod tests {
             yaw_delta <= max_step + 0.0001,
             "AI helm must not consume a long frame as one oversized yaw step; \
              yaw_delta={yaw_delta}, max_step={max_step}"
+        );
+    }
+
+    // ── The shared decision-surface frame (issue #824) ─────────────────────
+
+    /// Probe scratch for `all_four_axes_observe_the_same_frame`: snapshots of
+    /// the frame taken immediately after it is built and again after every
+    /// per-axis system has run.
+    #[derive(Resource, Default)]
+    struct FrameProbe {
+        before: Option<String>,
+        after: Option<String>,
+    }
+
+    fn probe_frame_before(frame: Res<HelmAiSurfacesFrame>, mut probe: ResMut<FrameProbe>) {
+        probe.before = Some(format!("{:?}|{:?}", frame.anchors, frame.ships));
+    }
+
+    fn probe_frame_after(frame: Res<HelmAiSurfacesFrame>, mut probe: ResMut<FrameProbe>) {
+        probe.after = Some(format!("{:?}|{:?}", frame.anchors, frame.ships));
+    }
+
+    /// AC (issue #824): all four per-axis systems observe the *same* frame —
+    /// the identical-inputs invariant is true by construction. The axis
+    /// systems take `Res<HelmAiSurfacesFrame>` (immutable), so the compiler
+    /// already forbids them mutating it; this pins the runtime half — nothing
+    /// else rebuilds or edits the frame between the builder and the last
+    /// axis system within a tick.
+    #[test]
+    fn all_four_axes_observe_the_same_frame() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        app.init_resource::<FrameProbe>();
+        app.add_systems(
+            Update,
+            (
+                probe_frame_before
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(build_helm_ai_surfaces_frame)
+                    .before(ai_helm_thrust)
+                    .before(ai_helm_steering)
+                    .before(ai_helm_lateral_thrust)
+                    .before(ai_helm_impulse)
+                    .run_if(ai_helm_tick_ready),
+                probe_frame_after
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(ai_helm_thrust)
+                    .after(ai_helm_steering)
+                    .after(ai_helm_lateral_thrust)
+                    .after(ai_helm_impulse)
+                    .before(tick_ai_helm_timer)
+                    .run_if(ai_helm_tick_ready),
+            ),
+        );
+
+        tick(&mut app);
+
+        let probe = app.world().resource::<FrameProbe>();
+        let before = probe
+            .before
+            .as_ref()
+            .expect("probe must run on the first (always-ready) AI tick");
+        let after = probe
+            .after
+            .as_ref()
+            .expect("probe must run after the four axis systems");
+        assert!(
+            before.contains("station-alpha") && before.contains("HelmAiShipFrame"),
+            "precondition: the frame must actually carry a ship entry and the anchor, \
+             else this equality is vacuous; got {before}"
+        );
+        assert_eq!(
+            before, after,
+            "the frame every axis observes must be identical before the first \
+             and after the last per-axis system — a difference means something \
+             mutated the shared decision surface mid-tick"
+        );
+    }
+
+    /// AC (issue #824, work item 1): with per-entity Helm publishing, an NPC
+    /// ship's `helm_ai_radar_range` reads the live (damage-scaled) value from
+    /// its own Helm blackboard entry instead of the static
+    /// `HelmConsoleSection` fallback — which remains in place for ships whose
+    /// entry has not been published (low-LOD / missing-entry).
+    #[test]
+    fn helm_ai_radar_range_prefers_the_npc_blackboard_entry() {
+        let helm_config = crate::entity_config::EntityConfig::from_toml(
+            "[helm_console]\nmax_speed = 30.0\n\n[helm_console.radar]\nrange = 800.0\nshows = [\"ship\"]\n",
+        )
+        .unwrap()
+        .helm_console
+        .unwrap();
+        let helm_section = crate::entities::spawner::HelmConsoleSection(helm_config);
+
+        // With a published Helm entry (as per-entity publish now provides for
+        // NPCs): the live, damage-scaled value wins.
+        let mut bbs = crate::server_app::ShipSystemBlackboards::default();
+        bbs.0.insert(
+            crate::system_registry::helm_station_key(),
+            crate::messages::SystemBlackboard::Helm(crate::messages::HelmBlackboard {
+                radar_range: 400.0,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            helm_ai_radar_range(&bbs, Some(&helm_section), None, false),
+            400.0,
+            "an NPC with a published Helm entry must read the live radar_range"
+        );
+
+        // Without an entry (low-LOD ship / pre-first-publish): the static
+        // config fallback is preserved.
+        let empty_bbs = crate::server_app::ShipSystemBlackboards::default();
+        assert_eq!(
+            helm_ai_radar_range(&empty_bbs, Some(&helm_section), None, false),
+            800.0,
+            "a ship with no Helm entry must fall back to its authored radar range"
         );
     }
 }

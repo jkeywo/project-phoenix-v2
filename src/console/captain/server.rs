@@ -1605,20 +1605,28 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        // Spawn an NPC ship without LocalShip; push a ToggleRedAlert
-        // directly into its AdmittedCommands (bypassing the AI to isolate
-        // the input-handler's per-entity dispatch).
+        // Spawn an NPC ship without LocalShip whose red-alert system is
+        // AI-held, register its `ai:` token, and send a `ToggleRedAlert`
+        // through the inbound queue. Since #824 admission is ship-aware —
+        // `AdmittedCommands` is cleared per-entity every tick and a
+        // registered `ai:` token routes to its own ship's queue — so a
+        // pre-seeded component would be wiped before the handler ran; the
+        // wire path is the honest way in, and it exercises the routing too.
+        let npc_control_sources = {
+            let mut cs = ShipSystemControlSources::default();
+            cs.0.set(
+                crate::system_registry::red_alert_system_id(),
+                ControlSource::Ai,
+            );
+            cs
+        };
         let npc = app
             .world_mut()
             .spawn((
                 Ship,
                 ShipConfigComponent::default(),
-                ShipSystemControlSources::default(),
-                crate::messages::AdmittedCommands(vec![crate::messages::AdmittedCommand {
-                    target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
-                    payload: SystemControlPayload::ToggleRedAlert,
-                    response_token: None,
-                }]),
+                npc_control_sources,
+                crate::messages::AdmittedCommands::default(),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
                 crate::ship_state::ShipRedAlert::default(),
@@ -1632,7 +1640,19 @@ mod tests {
                 ])),
             ))
             .id();
+        let npc_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(&npc_uuid, npc);
 
+        push(
+            &mut app,
+            &format!("ai:{npc_uuid}"),
+            ClientMessage::ControlSystem {
+                target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
+                payload: SystemControlPayload::ToggleRedAlert,
+            },
+        );
         tick(&mut app);
 
         let npc_red_alert = app

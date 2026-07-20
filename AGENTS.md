@@ -141,7 +141,7 @@ docs/           — Draft design notes (numbered).
 4. **Captain authority.** Only the player at `CaptainChair` can `ToggleRedAlert`. Game start is collective `SetReady` auto-start, not a captain-only command.
 5. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console access derives from the station + `ShipConfig`. On disconnect the station keeps its holder and flips to the `Backfill` rating (AI operates its systems) until reconnect or a new claim.
 6. **Humans and AI are symmetric.** Both issue `ControlSystem { target: SystemId, payload }`; admission strips source identity. Never branch on human-vs-AI downstream of admission.
-7. **Helm runs on fixed ticks, not frames.** Simulation reads helm inputs at 30Hz (`HelmInputTimer`); AI helm decisions run on the shared sim tick (`[global] ai_helm_tick_hz` in the world TOML, default 30Hz) — never once per rendered frame.
+7. **Helm decisions run on fixed ticks, not frames.** Helm commands apply the tick they are admitted (`AdmittedCommands` is cleared and refilled at admission each tick); AI helm decisions run on the shared sim tick (`[global] ai_helm_tick_hz` in the world TOML, default 30Hz) — never once per rendered frame.
 8. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`. Destroyed asteroids respawn fresh when the player leaves the cell and returns.
 9. **WebGL2 rendering; PeerJS cloud broker** (not self-hosted, deferred post-PoC).
 10. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/{damage,physics,rating,control_source,coordination}`, `modifiers/repair_teams`, `world/{content,flags,dispatch}`, and friends have no Bevy imports — fully unit-testable on native.

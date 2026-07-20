@@ -412,16 +412,25 @@ mod tests {
             app
         };
 
+        // Full-ahead helm intent, seeded directly on the intent component
+        // (issue #824): `process_helm_inputs` applies admitted commands to
+        // the intents rather than replaying `LastHelmInput` every tick, so a
+        // test that wants sustained thrust seeds the intent the integrator
+        // actually reads.
+        let set_full_thrust = |app: &mut App| {
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ship::helm::ThrustInput(1.0));
+        };
+
         // ── Both engines online ────────────────────────────────────────────
         let mut app_both = make_app();
-        set_last_helm_input(
-            &mut app_both,
-            LastHelmInput {
-                thrust: 1.0,
-                steering: 0.0,
-                lateral: 0.0,
-            },
-        );
+        set_full_thrust(&mut app_both);
         for _ in 0..TICKS {
             tick(&mut app_both);
         }
@@ -442,14 +451,7 @@ mod tests {
             0.0,
         );
         tick(&mut app_one); // let Damage tier propagate
-        set_last_helm_input(
-            &mut app_one,
-            LastHelmInput {
-                thrust: 1.0,
-                steering: 0.0,
-                lateral: 0.0,
-            },
-        );
+        set_full_thrust(&mut app_one);
         for _ in 0..TICKS {
             tick(&mut app_one);
         }

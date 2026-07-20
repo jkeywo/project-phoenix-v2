@@ -3,114 +3,172 @@ use bevy::prelude::*;
 use crate::messages::{
     AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, SystemControlPayload,
 };
+use crate::region_plugin::RegionMembership;
 use crate::server_app::LocalShip;
-use crate::ship::components::{HelmInputTimer, LastHelmInput, ShipSystemControlSources};
-use crate::ship::helm::{LateralThrustInput, SteeringInput, ThrustInput};
-use crate::simulation::ShipImpulse;
+use crate::ship::components::{LastHelmInput, ShipSystemControlSources};
+use crate::ship::helm::{ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-/// Human-admission path (issue #695): turns `AdmittedCommands` into
-/// `LastHelmInput` (kept for broadcast/back-compat consumers) and the
-/// shared `ThrustInput`/`SteeringInput`/`LateralThrustInput` intent
-/// components. Physics integration itself now lives in
-/// `integrate_ship_physics`, which reads those intent components for both
-/// the player ship and any AI-promoted NPC.
+/// True when `entity` is inside a region whose authored effects include
+/// `BlocksImpulse`. Per-entity generalisation of the LocalShip-only helper
+/// in `impulse_boost_systems` (issue #824): the check is a property of the
+/// ship's position, not of who commanded the charge.
+fn entity_inside_blocks_impulse(
+    entity: Entity,
+    membership: &Option<Res<RegionMembership>>,
+    region_query: &Query<&crate::entity_spawner::RegionEffectsSection>,
+) -> bool {
+    let Some(membership) = membership else {
+        return false;
+    };
+    let Some(inside) = membership.inside.get(&entity) else {
+        return false;
+    };
+    for &region_entity in inside {
+        if let Ok(effects) = region_query.get(region_entity) {
+            if effects
+                .0
+                .contains(&crate::region_effects::RegionEffectKind::BlocksImpulse)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Per-entity admitted-command applier for the Helm path (issue #824): turns
+/// every ship's own `AdmittedCommands` into that ship's
+/// `ThrustInput`/`SteeringInput`/`LateralThrustInput`/`ImpulseCommand` intent
+/// components. Physics integration itself lives in `integrate_ship_physics`,
+/// which reads those intent components for both the player ship and any
+/// AI-promoted NPC.
+///
+/// **An admitted command applies regardless of source** (the spec's anonymity
+/// rule, `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §3): authority
+/// was checked once at admission — `admit_system_commands` for network
+/// messages, `validate_and_admit` for the per-axis helm AI's same-tick
+/// emissions — so the per-axis `!operate_ai` gates this system used to carry
+/// are gone. A human command for an AI-held axis never reaches this system
+/// (refused at the gate), and the AI's own commands arrive through the same
+/// gate as everyone else's.
+///
+/// `LastHelmInput` is mirrored for the LocalShip only, exactly as the old
+/// AI-side mirrors did: the viewscreen HUD (`recompute_hud_state`) and
+/// `tick_boost`/`publish_joystick_to_engines` read it for the player ship,
+/// while NPC `LastHelmInput` deliberately stays at its spawn default so
+/// `ai_power_allocation`'s movement rule observes exactly what it observed
+/// before this migration.
+///
+/// Impulse `StartImpulseCharge`/`CancelImpulse` are applied here for every
+/// ship (they were split between `handle_impulse_messages` for the human path
+/// and a direct `ImpulseCommand` write in `ai_helm_impulse` before #824),
+/// gated by the same `BlocksImpulse` region check the human path has always
+/// had. Hull-damage auto-cancel stays in `handle_impulse_messages`, which
+/// runs earlier (`SimSet::Input`) so an admitted command can still override
+/// it within the same tick — matching the old sequential order.
 pub(crate) fn process_helm_inputs(
-    time: Res<Time>,
-    mut timer: ResMut<HelmInputTimer>,
-    ship_query: Query<(&AdmittedCommands, &ShipSystemControlSources), With<LocalShip>>,
-    mut last_input_q: Query<&mut LastHelmInput, With<LocalShip>>,
-    mut intent_q: Query<
-        (
-            Option<&mut ThrustInput>,
-            Option<&mut SteeringInput>,
-            Option<&mut LateralThrustInput>,
-        ),
-        With<LocalShip>,
-    >,
-    impulse_q: Query<&ShipImpulse, With<LocalShip>>,
-    mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
+    membership: Option<Res<RegionMembership>>,
+    region_query: Query<&crate::entity_spawner::RegionEffectsSection>,
+    mut ships: Query<(
+        Entity,
+        &AdmittedCommands,
+        Option<&mut LastHelmInput>,
+        Option<&mut ThrustInput>,
+        Option<&mut SteeringInput>,
+        Option<&mut LateralThrustInput>,
+        Option<&mut ImpulseCommand>,
+        Has<LocalShip>,
+    )>,
 ) {
-    let Some(mut last_input) = last_input_q.iter_mut().next() else {
-        return;
-    };
-    // Edge-detect Idle → Charging (or any → Charging) and zero out the
-    // last cached helm input so a stale steering/thrust value can't
-    // resurface the moment impulse cancels or the autopilot disengages.
-    let current_phase = impulse_q
-        .iter()
-        .next()
-        .map(|i| i.0.phase)
-        .unwrap_or(crate::impulse::ImpulsePhase::Idle);
-    if Some(current_phase) != *prev_phase {
-        if current_phase == crate::impulse::ImpulsePhase::Charging {
-            last_input.thrust = 0.0;
-            last_input.steering = 0.0;
+    for (
+        entity,
+        admitted,
+        last_input,
+        mut thrust_in,
+        mut steering_in,
+        mut lateral_in,
+        mut impulse_cmd,
+        is_local,
+    ) in ships.iter_mut()
+    {
+        let mut last_input = if is_local { last_input } else { None };
+
+        if admitted.0.is_empty() {
+            continue;
         }
-        *prev_phase = Some(current_phase);
-    }
 
-    let Some((admitted, sources)) = ship_query.iter().next() else {
-        return;
-    };
-
-    if !timer.0.tick(time.delta()).just_finished() {
-        return;
-    }
-
-    // Per-axis admission (issue #801). Each axis is applied only when its own
-    // declared system is NOT AI-operated: admission already refuses human
-    // commands for an AI-held axis (`accept_human_input == false`), and the
-    // per-axis AI (`ai_helm_thrust` / `ai_helm_steering`) is the authoritative
-    // writer of that axis's intent this tick. Skipping per axis — instead of
-    // the old ship-wide coarse-`helm` gate — is what fixes the #701 mismatch:
-    // with `helm-thrust = Ai` and `helm-steering = Human`, the human's
-    // steering is admitted and applied while the thrust axis stays with the AI.
-    let thrust_ai = sources
-        .0
-        .policy_for(&crate::system_registry::helm_thrust_system_id())
-        .operate_ai;
-    let steering_ai = sources
-        .0
-        .policy_for(&crate::system_registry::helm_steering_system_id())
-        .operate_ai;
-
-    if !thrust_ai {
-        for cmd in admitted.for_target(crate::system_registry::HELM_THRUST_SYSTEM_ID) {
-            if let SystemControlPayload::SetThrust { value } = &cmd.payload {
-                last_input.thrust = *value;
+        for cmd in admitted.0.iter() {
+            match (&cmd.target.0, &cmd.payload) {
+                (t, SystemControlPayload::SetThrust { value })
+                    if t.as_str() == crate::system_registry::HELM_THRUST_SYSTEM_ID =>
+                {
+                    if let Some(ti) = thrust_in.as_deref_mut() {
+                        ti.0 = *value;
+                    }
+                    if let Some(li) = last_input.as_deref_mut() {
+                        li.thrust = *value;
+                    }
+                }
+                (t, SystemControlPayload::SetSteering { value })
+                    if t.as_str() == crate::system_registry::HELM_STEERING_SYSTEM_ID =>
+                {
+                    if let Some(si) = steering_in.as_deref_mut() {
+                        si.0 = *value;
+                    }
+                    if let Some(li) = last_input.as_deref_mut() {
+                        li.steering = *value;
+                    }
+                }
+                (t, SystemControlPayload::LateralThrustInput { lateral })
+                    if *t == crate::system_registry::lateral_thrust_system_id().0 =>
+                {
+                    if let Some(la) = lateral_in.as_deref_mut() {
+                        la.0 = *lateral;
+                    }
+                    if let Some(li) = last_input.as_deref_mut() {
+                        li.lateral = *lateral;
+                    }
+                }
+                (t, SystemControlPayload::StartImpulseCharge)
+                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID =>
+                {
+                    if !entity_inside_blocks_impulse(entity, &membership, &region_query) {
+                        if let Some(ic) = impulse_cmd.as_deref_mut() {
+                            ic.0 = crate::impulse::ImpulsePhase::Charging;
+                        }
+                        // Zero the LocalShip's cached helm input the moment a
+                        // charge is commanded, so a stale steering/thrust
+                        // value can't resurface when impulse cancels or the
+                        // autopilot disengages (the pre-#824 phase-edge
+                        // detection, applied at the command rather than one
+                        // tick later at the observed transition). A Set*
+                        // admitted later in this same tick still overrides —
+                        // the loop applies commands in admission order.
+                        if is_local {
+                            if let Some(li) = last_input.as_deref_mut() {
+                                li.thrust = 0.0;
+                                li.steering = 0.0;
+                            }
+                            if let Some(ti) = thrust_in.as_deref_mut() {
+                                ti.0 = 0.0;
+                            }
+                            if let Some(si) = steering_in.as_deref_mut() {
+                                si.0 = 0.0;
+                            }
+                        }
+                    }
+                }
+                (t, SystemControlPayload::CancelImpulse)
+                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID =>
+                {
+                    if let Some(ic) = impulse_cmd.as_deref_mut() {
+                        ic.0 = crate::impulse::ImpulsePhase::Idle;
+                    }
+                }
+                _ => {}
             }
-        }
-    }
-
-    if !steering_ai {
-        for cmd in admitted.for_target(crate::system_registry::HELM_STEERING_SYSTEM_ID) {
-            if let SystemControlPayload::SetSteering { value } = &cmd.payload {
-                last_input.steering = *value;
-            }
-        }
-    }
-
-    for cmd in admitted.for_target(&crate::system_registry::lateral_thrust_system_id().0) {
-        if let SystemControlPayload::LateralThrustInput { lateral } = &cmd.payload {
-            last_input.lateral = *lateral;
-        }
-    }
-
-    if let Some((thrust_in, steering_in, lateral_in)) = intent_q.iter_mut().next() {
-        if let Some(mut t) = thrust_in {
-            if !thrust_ai {
-                t.0 = last_input.thrust;
-            }
-        }
-        if let Some(mut s) = steering_in {
-            if !steering_ai {
-                s.0 = last_input.steering;
-            }
-        }
-        if let Some(mut l) = lateral_in {
-            l.0 = last_input.lateral;
         }
     }
 }
@@ -403,6 +461,127 @@ mod tests {
         assert_eq!(
             after.forward_speed, before.forward_speed,
             "forward_speed must not change when process_helm_inputs skips admission"
+        );
+    }
+
+    // ── Ship-aware admission symmetry (issue #824) ─────────────────────────
+
+    /// Spawn a minimal NPC ship the admission gate can route to: its own
+    /// `AdmittedCommands`, control sources with `helm-thrust` on `source`,
+    /// a `ShipConfigComponent`, and a `ThrustInput` intent for
+    /// `process_helm_inputs` to land on. Registers `ai:<uuid>` in the
+    /// `AiTokenRegistry` and returns `(entity, token)`.
+    fn spawn_admission_npc(app: &mut App, source: ControlSource) -> (Entity, String) {
+        let mut sources = ShipSystemControlSources::default();
+        sources
+            .0
+            .set(crate::system_registry::helm_thrust_system_id(), source);
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::ship::components::ShipConfigComponent::default(),
+                sources,
+                crate::messages::AdmittedCommands::default(),
+                ThrustInput::default(),
+            ))
+            .id();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(&uuid, npc);
+        (npc, format!("ai:{uuid}"))
+    }
+
+    fn thrust_input_of(app: &App, entity: Entity) -> f32 {
+        app.world().entity(entity).get::<ThrustInput>().unwrap().0
+    }
+
+    /// AC (issue #824): a registered `ai:` token's `ControlSystem` resolves
+    /// through `AiTokenRegistry` to the owning NPC entity and is admitted
+    /// into THAT entity's `AdmittedCommands` — and the admitted command is
+    /// applied to the NPC's own intent components, not the LocalShip's.
+    #[test]
+    fn ai_token_routes_to_owning_npc_entity_and_applies_to_its_intents() {
+        let mut app = test_app();
+        let (npc, token) = spawn_admission_npc(&mut app, ControlSource::Ai);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.7 },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            thrust_input_of(&app, npc),
+            0.7,
+            "the NPC's admitted AI command must apply to the NPC's own ThrustInput"
+        );
+        let local = find_ship_entity(&mut app);
+        assert_eq!(
+            thrust_input_of(&app, local),
+            0.0,
+            "the LocalShip's ThrustInput must be untouched by an NPC-routed command"
+        );
+    }
+
+    /// AC (issue #824): a human token still routes to the LocalShip even
+    /// with NPC ships present.
+    #[test]
+    fn human_token_still_routes_to_the_local_ship() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+        let (npc, _token) = spawn_admission_npc(&mut app, ControlSource::Ai);
+
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.4 },
+            },
+        );
+        tick_twice(&mut app);
+
+        let local = find_ship_entity(&mut app);
+        assert_eq!(
+            thrust_input_of(&app, local),
+            0.4,
+            "the station holder's SetThrust must land on the LocalShip's intent"
+        );
+        assert_eq!(
+            thrust_input_of(&app, npc),
+            0.0,
+            "a human command must never land on an NPC's intent"
+        );
+    }
+
+    /// AC (issue #824): mismatched authority is rejected — an `ai:` token
+    /// addressing a system the owning ship holds as Human is refused by that
+    /// ship's own `ControlSourceResolver` at the gate.
+    #[test]
+    fn mismatched_authority_ai_token_is_rejected() {
+        let mut app = test_app();
+        let (npc, token) = spawn_admission_npc(&mut app, ControlSource::Human);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_thrust_system_id(),
+                payload: SystemControlPayload::SetThrust { value: 0.9 },
+            },
+        );
+        tick(&mut app);
+
+        assert_eq!(
+            thrust_input_of(&app, npc),
+            0.0,
+            "an ai: token must be refused when the owning ship's helm-thrust is human-held"
         );
     }
 

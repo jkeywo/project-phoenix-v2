@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::console_bridge::AiChatterEvent;
 
-pub(crate) use crate::ship::components::{load_ship_config_from_disk, HelmInputTimer};
+pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
     CoordinationQueue, HelmWaypointClearance, ImpulseConfigResource, LastHelmInput,
@@ -18,8 +18,8 @@ pub(crate) use crate::ship::helm_admission::{
 };
 pub(crate) use crate::ship::helm_ai::{
     ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust, ai_helm_tick_ready,
-    detect_reached_objective_completion, helm_axes_operate_ai, tick_ai_helm_timer, AiHelmTickReady,
-    AiHelmTickTimer,
+    build_helm_ai_surfaces_frame, detect_reached_objective_completion, helm_axes_operate_ai,
+    tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer, HelmAiSurfacesFrame,
 };
 pub use crate::ship::impulse_boost_systems::{handle_boost_messages, handle_impulse_messages};
 pub(crate) use crate::ship::impulse_boost_systems::{tick_boost, tick_impulse};
@@ -34,139 +34,168 @@ pub struct ShipPlugin;
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(HelmInputTimer(Timer::from_seconds(
-            1.0 / 30.0,
-            TimerMode::Repeating,
-        )))
-        .init_resource::<BankConfigResource>()
-        .add_message::<CoordinationEnqueue>()
-        .add_message::<AiChatterEvent>()
+        app.init_resource::<BankConfigResource>()
+            .add_message::<CoordinationEnqueue>()
+            .add_message::<AiChatterEvent>();
         // Shared AI-helm sim tick (issue #803): the timer/latch pair that
         // gates all four per-axis AI helm systems, plus the dedicated system
         // that advances it. The tick system runs `.after` every gated system
         // so the latch is consumed before it is re-armed — the same
         // consume-then-arm shape as `ai::server::tick_ai_snapshot_timer`.
-        .init_resource::<AiHelmTickTimer>()
-        .insert_resource(AiHelmTickReady(true))
-        .add_systems(
-            Update,
-            tick_ai_helm_timer
-                .after(ai_helm_thrust)
-                .after(ai_helm_steering)
-                .after(ai_helm_lateral_thrust)
-                .after(ai_helm_impulse),
-        )
-        .add_systems(
-            Update,
-            (
-                // `.after(AiTickLabel)`: this system reads the viewscreen
-                // blackboard's scored objectives, which the AI tick writes.
-                ai_helm_lateral_thrust
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel)
-                    .before(process_helm_inputs)
-                    // Shared AI-helm sim tick (issue #803) — one fixed-rate
-                    // cadence for all four per-axis systems.
-                    .run_if(ai_helm_tick_ready),
-                // Applies commanded impulse/boost phase transitions (issue
-                // #695). Must run before `process_helm_inputs` — whose
-                // stale-input edge-detection reads `ShipImpulse.phase` and
-                // needs to see this tick's transition, not last tick's —
-                // and before `tick_impulse`/`tick_boost` so a
-                // freshly-started charge/engagement begins progressing the
-                // same tick it was commanded, mirroring the old fused
-                // `process_helm_inputs`/`handle_impulse_messages` ordering.
-                apply_helm_commands
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(handle_impulse_messages)
-                    .after(handle_boost_messages)
-                    .before(process_helm_inputs)
-                    .before(tick_impulse)
-                    .before(tick_boost),
-                process_helm_inputs
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(tick_impulse),
-                publish_joystick_to_engines
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(process_helm_inputs),
-                // A `LastHelmInput` thrust/steering pair reader.
-                // `ai_helm_thrust`/`ai_helm_steering` declare
-                // `.before(operate_helm_engine_ai)` themselves, and
-                // `ai_helm_lateral_thrust` (the `.lateral` field's writer) is
-                // transitively before it via `process_helm_inputs`.
-                operate_helm_engine_ai.in_set(crate::sim_sets::SimSet::Physics),
-                detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
-                tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
-                tick_boost.in_set(crate::sim_sets::SimSet::Physics),
-                handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
-                handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
-                // Sole helm-path writer of ShipPhysics (issues #695, #699):
-                // reads the intent components written by
-                // `process_helm_inputs` (human/admission) and the per-axis
-                // helm AI (`ai_helm_thrust`/`ai_helm_steering`/
-                // `ai_helm_lateral_thrust`), plus the post-transition
-                // `ShipImpulse`/`ShipBoost` state applied by
-                // `apply_helm_commands`, then performs the actual physics
-                // integration for whichever ship (LocalShip or promoted NPC)
-                // has fresh values this tick. Ordered after every writer of
-                // those intents and after `tick_impulse` so it reads this
-                // tick's freshly-ticked impulse phase, mirroring the old fused
-                // `process_helm_inputs` ordering. (`ai_helm_thrust` /
-                // `ai_helm_steering` declare `.before(integrate_ship_physics)`
-                // themselves; `ai_helm_lateral_thrust` and `ai_helm_impulse`
-                // are covered by `.after(process_helm_inputs)` /
-                // `.after(apply_helm_commands)` respectively.)
-                integrate_ship_physics
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(process_helm_inputs)
-                    .after(apply_helm_commands)
-                    .after(tick_impulse)
-                    .after(tick_boost),
-                sync_ship_position
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(process_helm_inputs)
-                    .after(integrate_ship_physics),
-                handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
-                handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
-                handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
-                process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
-                sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
-                detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),
+        app.init_resource::<AiHelmTickTimer>()
+            .insert_resource(AiHelmTickReady(true))
+            // The shared helm decision surface (issue #824): rebuilt once per
+            // AI-helm sim tick by `build_helm_ai_surfaces_frame` and consumed
+            // read-only by the four per-axis systems below.
+            .init_resource::<HelmAiSurfacesFrame>()
+            .add_systems(
+                Update,
+                tick_ai_helm_timer
+                    .after(ai_helm_thrust)
+                    .after(ai_helm_steering)
+                    .after(ai_helm_lateral_thrust)
+                    .after(ai_helm_impulse),
             )
-                .after(crate::lobby::LobbySystemSet),
-        );
+            .add_systems(
+                Update,
+                (
+                    // One assembly of the helm decision surface per AI tick
+                    // (issue #824). `.after(AiTickLabel)`: it reads the viewscreen
+                    // blackboard's scored objectives and the WorldSnapshot, which
+                    // the AI tick writes. `.before` all four per-axis systems so
+                    // whenever they run, the frame they read was built this tick
+                    // (they share the same `run_if` latch).
+                    build_helm_ai_surfaces_frame
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(crate::sim_sets::AiTickLabel)
+                        .before(ai_helm_thrust)
+                        .before(ai_helm_steering)
+                        .before(ai_helm_lateral_thrust)
+                        .before(ai_helm_impulse)
+                        .run_if(ai_helm_tick_ready),
+                    // `.after(AiTickLabel)`: this system reads the frame built
+                    // from the viewscreen blackboard's scored objectives.
+                    // `.before(process_helm_inputs)`: its emitted admitted
+                    // command must be applied this tick (issue #824).
+                    ai_helm_lateral_thrust
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(crate::sim_sets::AiTickLabel)
+                        .before(process_helm_inputs)
+                        // Shared AI-helm sim tick (issue #803) — one fixed-rate
+                        // cadence for all four per-axis systems.
+                        .run_if(ai_helm_tick_ready),
+                    // Applies commanded impulse/boost phase transitions (issue
+                    // #695). Since #824 it runs AFTER `process_helm_inputs` —
+                    // which is now the applier of admitted impulse commands into
+                    // `ImpulseCommand` for every ship — and still before
+                    // `tick_impulse`/`tick_boost` so a freshly-started
+                    // charge/engagement begins progressing the same tick it was
+                    // commanded. (`process_helm_inputs`' stale-input
+                    // edge-detection therefore observes last tick's
+                    // `ShipImpulse.phase`, one tick later than before #824 — the
+                    // zeroing it performs is a handover cosmetic, not a physics
+                    // input, and the impulse autopilot overrides helm intent
+                    // while the drive is active anyway.)
+                    apply_helm_commands
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(handle_impulse_messages)
+                        .after(handle_boost_messages)
+                        .after(process_helm_inputs)
+                        .before(tick_impulse)
+                        .before(tick_boost),
+                    // Per-entity admitted-command applier (issue #824): applies
+                    // this tick's admitted helm payloads — human-admitted at the
+                    // gate, AI-emitted by the four per-axis systems above — to
+                    // every ship's intent components. Runs after every AI
+                    // emitter (each declares `.before(process_helm_inputs)`) and
+                    // before every intent/`LastHelmInput` reader below.
+                    process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
+                    publish_joystick_to_engines
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(process_helm_inputs),
+                    // A `LastHelmInput` thrust/steering pair reader. Since #824
+                    // `process_helm_inputs` is the sole writer of that pair, so
+                    // one `.after` edge is the whole torn-pair contract
+                    // (`helm_ai_last_input_pair_is_not_torn` pins it).
+                    operate_helm_engine_ai
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(process_helm_inputs),
+                    detect_reached_objective_completion.in_set(crate::sim_sets::SimSet::Broadcast),
+                    tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
+                    // `tick_boost` reads the `LastHelmInput` pair for drain
+                    // scaling — `.after(process_helm_inputs)` is the torn-pair
+                    // edge (see above); the boost-transition ordering edge is
+                    // declared as `.before(tick_boost)` on `apply_helm_commands`.
+                    tick_boost
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(process_helm_inputs),
+                    handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
+                    handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
+                    // Sole helm-path writer of ShipPhysics (issues #695, #699):
+                    // reads the intent components written by
+                    // `process_helm_inputs` (human/admission) and the per-axis
+                    // helm AI (`ai_helm_thrust`/`ai_helm_steering`/
+                    // `ai_helm_lateral_thrust`), plus the post-transition
+                    // `ShipImpulse`/`ShipBoost` state applied by
+                    // `apply_helm_commands`, then performs the actual physics
+                    // integration for whichever ship (LocalShip or promoted NPC)
+                    // has fresh values this tick. Ordered after every writer of
+                    // those intents and after `tick_impulse` so it reads this
+                    // tick's freshly-ticked impulse phase, mirroring the old fused
+                    // `process_helm_inputs` ordering. (`ai_helm_thrust` /
+                    // `ai_helm_steering` declare `.before(integrate_ship_physics)`
+                    // themselves; `ai_helm_lateral_thrust` and `ai_helm_impulse`
+                    // are covered by `.after(process_helm_inputs)` /
+                    // `.after(apply_helm_commands)` respectively.)
+                    integrate_ship_physics
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(process_helm_inputs)
+                        .after(apply_helm_commands)
+                        .after(tick_impulse)
+                        .after(tick_boost),
+                    sync_ship_position
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(process_helm_inputs)
+                        .after(integrate_ship_physics),
+                    handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
+                    handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
+                    handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
+                    process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
+                    sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
+                    detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),
+                )
+                    .after(crate::lobby::LobbySystemSet),
+            );
 
-        // Per-axis helm AI (issue #701). Registered separately from the tuple
-        // above purely because that tuple is at Bevy's 20-element limit.
+        // Per-axis helm AI (issues #701, #824). Registered separately from the
+        // tuple above purely because that tuple is at Bevy's 20-element limit.
         //
-        // Ordering contract:
-        // - `.after(AiTickLabel)`: both systems read the viewscreen
-        //   blackboard's scored objectives, which the AI tick writes.
+        // Ordering contract (issue #824 — emit-before-apply):
+        // - `.after(AiTickLabel)`: the frame these systems consume is built
+        //   from the viewscreen blackboard's scored objectives and the
+        //   WorldSnapshot, which the AI tick writes.
+        //   (`build_helm_ai_surfaces_frame` declares `.before` each of them.)
         // - Each system gates on its own axis alone (#800) and is the sole
-        //   writer of the axis it owns, so no edge between them (or against a
-        //   second writer) is needed for write exclusion. They are
-        //   deliberately *unordered* against each other: each writes only its
-        //   own axis and neither reads the other's output.
-        // - Ordered AFTER `process_helm_inputs`, unlike
-        //   `ai_helm_lateral_thrust` (lateral's fine system being AI-operated
-        //   means no lateral command is ever admitted, so there is nothing
-        //   for `process_helm_inputs` to clobber it with). Thrust and
-        //   steering are per-axis admitted (`SetThrust` → `helm-thrust`,
-        //   `SetSteering` → `helm-steering`), and `process_helm_inputs`
-        //   additionally skips writing an AI-held axis's intent. Running last
-        //   makes the per-axis AI the authoritative writer of its axis
-        //   deterministically rather than by set-order luck.
-        // - Both systems write `LastHelmInput.{thrust,steering}` for the
-        //   player ship, one field each, and are the only writers of those
-        //   fields. Every reader of that *pair* in `SimSet::Physics` must be
-        //   ordered after BOTH of them, or it can observe a torn pair — this
-        //   tick's AI throttle next to last tick's stale human steering. The
-        //   pair readers are `publish_joystick_to_engines`,
-        //   `operate_helm_engine_ai` and `tick_boost`;
-        //   `helm_ai_last_input_pair_is_not_torn` pins the result.
-        //   (`ai_helm_lateral_thrust` writes only the disjoint `.lateral`
-        //   field and is already `.before(process_helm_inputs)`;
-        //   `ai_power_allocation` reads `.thrust` alone, so it cannot see a
+        //   *decider* of the axis it owns. They are deliberately *unordered*
+        //   against each other: each emits only its own axis's admitted
+        //   command and none reads another's output.
+        // - Ordered BEFORE `process_helm_inputs` — the reverse of the
+        //   pre-#824 shape. The AI no longer writes intent components
+        //   directly; it emits admitted commands into its own ship's
+        //   `AdmittedCommands` (Option A of #824: a direct same-tick write
+        //   via `validate_and_admit`, never a round-trip through the
+        //   InboundMessage queue), and `process_helm_inputs` is the single
+        //   applier for AI and human commands alike. Authority is checked
+        //   once, at admission: a human command for an AI-held axis was
+        //   already refused at the gate, so "who wins the axis" is decided
+        //   by admission, not by system order.
+        // - `LastHelmInput` now has ONE writer (`process_helm_inputs`
+        //   mirrors applied payloads for the LocalShip), so the torn-pair
+        //   contract is the single `.after(process_helm_inputs)` edge each
+        //   pair reader (`publish_joystick_to_engines`,
+        //   `operate_helm_engine_ai`, `tick_boost`) declares in the tuple
+        //   above; `helm_ai_last_input_pair_is_not_torn` pins the result.
+        //   (`ai_power_allocation` reads `.thrust` alone, so it cannot see a
         //   torn pair and needs no edge.)
         app.add_systems(
             Update,
@@ -174,35 +203,26 @@ impl Plugin for ShipPlugin {
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
-                .after(process_helm_inputs)
-                .before(publish_joystick_to_engines)
-                .before(operate_helm_engine_ai)
-                .before(tick_boost)
-                .before(integrate_ship_physics)
+                .before(process_helm_inputs)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate
                 // cadence for all four per-axis systems.
                 .run_if(ai_helm_tick_ready),
         );
 
-        // Per-axis helm AI: impulse (issue #703). Registered on its own because
-        // its ordering is the mirror image of the other two per-axis systems.
-        //
-        // `.before(apply_helm_commands)` is the hard requirement — that is what
-        // consumes `ImpulseCommand` into a `ShipImpulse` phase transition, and
-        // it already runs before `process_helm_inputs`, so this system cannot
-        // join `ai_helm_thrust`/`ai_helm_steering` in running last.
-        // `.after(AiTickLabel)` covers the scored objectives this system reads.
-        // The `apply_helm_commands` edge also transitively keeps this system
-        // before `ai_helm_thrust` (`apply_helm_commands` runs before
-        // `process_helm_inputs`, which `ai_helm_thrust` runs after), so no
-        // explicit edge between them is needed.
+        // Per-axis helm AI: impulse (issues #703, #824). Registered on its own
+        // for symmetry with its pre-#824 shape; since #824 its ordering is the
+        // same as its three siblings: `.before(process_helm_inputs)`, which
+        // applies the emitted `StartImpulseCharge`/`CancelImpulse` into
+        // `ImpulseCommand` and itself runs `.before(apply_helm_commands)` —
+        // so the phase transition still lands the same tick it was decided.
+        // `.after(AiTickLabel)` covers the frame this system reads.
         app.add_systems(
             Update,
             ai_helm_impulse
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
-                .before(apply_helm_commands)
+                .before(process_helm_inputs)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate
                 // cadence for all four per-axis systems.
                 .run_if(ai_helm_tick_ready),

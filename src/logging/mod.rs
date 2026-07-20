@@ -113,7 +113,7 @@ pub enum LogCat {
     Regions,
     /// Rapier, `integrate_ship_physics`, collisions.
     Physics,
-    /// `SimOutbox`, `dispatch_sim_broadcasts`, codec encoding.
+    /// `SimOutbox`, `broadcast::dispatch::<Sim>`, codec encoding.
     Broadcast,
     /// `src/server/asset_preload.rs`.
     Assets,

@@ -211,7 +211,7 @@ pub struct ShipSystemBlackboards(
 // ── Plugin ───────────────────────────────────────────────────────────────────
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
-/// run before this anchor so that `dispatch_sim_broadcasts` (which has
+/// run before this anchor so that `broadcast::dispatch::<Sim>` (which has
 /// `.after(sim_processing_anchor)`) drains their `SimOutbox` writes.
 pub fn sim_processing_anchor() {}
 
@@ -697,7 +697,7 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
 /// everything else (commands, lobby messages, Welcome, etc.) is reliable.
 /// This is the single place where delivery class is decided server-side
 /// (AC 1). The function is not exported — everything routes through
-/// `sim_outbox_broadcaster` or `dispatch_sim_broadcasts`.
+/// `sim_outbox_broadcaster` or `broadcast::dispatch::<Sim>`.
 fn delivery_class_for_msg(msg: &ServerMessage) -> DeliveryClass {
     match msg {
         ServerMessage::SimState { .. }
@@ -1240,7 +1240,7 @@ fn reset_broadcast_caches_on_start(
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
 /// the last broadcast. Reads from the `LocalShip` entity's per-entity component
 /// (populated by `dual_publish_blackboards`). Runs in `SimSet::PublishAggregate`
-/// (before `SimSet::Broadcast` so `dispatch_sim_broadcasts` sees the outbox entries).
+/// (before `SimSet::Broadcast` so `broadcast::dispatch::<Sim>` sees the outbox entries).
 ///
 /// Since issue #737 the *repair* blackboard is fanned out per session token
 /// rather than broadcast to all: it carries exact per-system hull detail, and

@@ -122,6 +122,7 @@
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'tactical',
+      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var radarEl = document.getElementById('tactical-radar');
         var phasersEl = document.getElementById('phasers-controls');

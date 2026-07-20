@@ -53,6 +53,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'repair',
+      // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var oh = s.overall_hull || {};
         document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1 };

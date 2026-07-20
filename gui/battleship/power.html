@@ -51,6 +51,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'power',
+      // s is a PowerConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var groups = s.groups || s.consoles || [];
         var pct = s.battery_max > 0 ? (s.battery_charge / s.battery_max) * 100 : 0;

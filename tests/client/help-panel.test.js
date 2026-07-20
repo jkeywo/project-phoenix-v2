@@ -224,24 +224,9 @@ describe('renderInlineHelp', () => {
   let doc;
   let root;
 
-  function stubWindowLabel() {
-    // Stub CONSOLE_LABEL on global window for label lookups. The keys here
-    // mirror the wire-field PascalCase names that `renderInlineHelp` receives
-    // in production (from `player.consoles`); the values are the labels to
-    // show. Post issue #618 the caller may also pass lowercase station ids —
-    // add both so the tests exercise both spellings.
-    if (typeof globalThis !== 'undefined') {
-      globalThis.CONSOLE_LABEL = {
-        Helm: 'Helm', Tactical: 'Tactical', Repair: 'Repair',
-        helm: 'Helm', tactical: 'Tactical', repair: 'Repair',
-      };
-    }
-  }
-
   beforeEach(() => {
     doc = makeDoc();
     root = doc.createElement('div');
-    stubWindowLabel();
   });
 
   it('renders help sections for a single console', () => {
@@ -250,10 +235,10 @@ describe('renderInlineHelp', () => {
     const groups = root.children.filter((c) => c.className === 'help-console-group');
     expect(groups).toHaveLength(1);
     const heading = groups[0].children.find((c) => c.className === 'help-console-heading');
-    // In the browser the heading is looked up via `window.CONSOLE_LABEL`
-    // (title-cased); in Node the fallback returns the raw station-id
-    // argument. Both paths are exercised — assert on the Node fallback.
-    expect(heading.textContent).toBe('helm');
+    // Post issue #827 the heading resolves through the string table
+    // (station.<id>.name via stationDisplayName) — the tab-bar CONSOLE_LABEL
+    // map is gone.
+    expect(heading.textContent).toBe(t('station.helm.name'));
     // One rendered child per helm help section.
     const sections = groups[0].children.find((c) => c.className === 'help-sections');
     expect(sections.children).toHaveLength(helpSections('helm').length);
@@ -264,8 +249,8 @@ describe('renderInlineHelp', () => {
     const groups = root.children.filter((c) => c.className === 'help-console-group');
     expect(groups).toHaveLength(2);
     // Helm first, Repair second (input order preserved)
-    expect(groups[0].children.find((c) => c.className === 'help-console-heading').textContent).toBe('helm');
-    expect(groups[1].children.find((c) => c.className === 'help-console-heading').textContent).toBe('repair');
+    expect(groups[0].children.find((c) => c.className === 'help-console-heading').textContent).toBe(t('station.helm.name'));
+    expect(groups[1].children.find((c) => c.className === 'help-console-heading').textContent).toBe(t('station.repair.name'));
   });
 
   it('skips consoles with no help text', () => {
@@ -288,9 +273,9 @@ describe('renderInlineHelp', () => {
     expect(root.children).toHaveLength(1);
     renderInlineHelp(root, ['repair'], doc);
     expect(root.children).toHaveLength(1);
-    // Now repair, not helm (see previous test for the raw-label rationale).
+    // Now repair, not helm (string-table label — see the single-console test).
     const heading = root.children[0].children.find((c) => c.className === 'help-console-heading');
-    expect(heading.textContent).toBe('repair');
+    expect(heading.textContent).toBe(t('station.repair.name'));
   });
 
   it('renders correct section content for tactical', () => {

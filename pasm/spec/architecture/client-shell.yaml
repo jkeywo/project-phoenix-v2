@@ -3,8 +3,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Console Registry
-      summary: Pure-JavaScript registry mapping station and ship configuration to the phone console panels, including ship-specific panel variants.
+      title: Client Console Mount Plan
+      summary: Pure-JavaScript mount plan deriving the phone console panels from the server-supplied ship stations — canonical station-id DOM naming with the single tactical alias, console URL resolution, section switching over the mounted stations, and per-console payload builders whose shapes are documented as typedefs; the static console registry it replaced was deleted in issue 827.
     architecture:
       kind: client-shell
       authority: non-authoritative
@@ -12,7 +12,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/console-registry.js, gui/console-state.js, gui/console-resolver.js, gui/single-station.js]
+      paths: [gui/mount-plan.js, gui/content-switcher.js, gui/console-state.js, gui/console-resolver.js]
       tests: [npx vitest run]
 
   - component: client-simulation-state-store
@@ -20,7 +20,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Simulation State Store
-      summary: Pure-JavaScript receiver that folds authoritative server messages into local presentation state and builds per-console iframe payloads.
+      summary: Pure-JavaScript receiver that folds authoritative server messages into local presentation state and builds per-console iframe payloads; the payload contracts are documented as JSDoc typedefs beside each builder (issue 827).
     architecture:
       kind: client-state-store
       authority: non-authoritative
@@ -68,8 +68,8 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Access and Tab Shell
-      summary: Uses authoritative station ownership and the selected ship configuration to show accessible consoles, active-console tabs, responsive phone layout, connection status, and reconnection state.
+      title: Client Access Shell
+      summary: Uses authoritative station ownership and the selected ship configuration to show the player's single console (one human = one station; the active console is derived from station ownership — the tab bar, swipe switching, and their helper modules were deleted in issue 827), plus the lobby station roster, responsive phone layout, connection status, and reconnection state. Message routing, roster folding, lobby view selection, and coordination-popup normalisation are extracted pure modules; client.html keeps only bootstrap and DOM glue.
     architecture:
       kind: client-shell
       authority: non-authoritative
@@ -77,7 +77,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [client.html, gui/console-registry.js, gui/connection-manager.js, assets/phone_border]
+      paths: [client.html, gui/client-router.js, gui/station-roster.js, gui/lobby-view.js, gui/coordination-popup.js, gui/mount-plan.js, gui/connection-manager.js, assets/phone_border]
       tests: [npx vitest run, tests/smoke]
 
   - component: client-settings-and-help-surface

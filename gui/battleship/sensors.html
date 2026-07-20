@@ -95,6 +95,7 @@
 
     var consoleApi = initConsole({
       name: 'sensors',
+      // s is a SensorsConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         document.getElementById('sensor-radar').state = s;
         document.getElementById('sensor-panel').state = s;

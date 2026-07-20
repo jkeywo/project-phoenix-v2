@@ -42,6 +42,7 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
+    // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
     initConsole({ name: 'tactical', render(s) {
       const weapons = system(s, 'tactical-radar', 'blaster-fore');
       const sensors = system(s, 'sensors', 'sensor-radar');

@@ -2,7 +2,7 @@
 title: Console
 type: entity
 tags: [console, role, lobby, station]
-sources: [src/core/messages.rs, src/lobby/stations_config.rs, gui/console-registry.js]
+sources: [src/core/messages.rs, src/lobby/stations_config.rs, gui/mount-plan.js]
 updated: 2026-07-03
 ---
 
@@ -15,9 +15,10 @@ has exactly one console. Access derives from `Player.station: Option<StationId>`
 **The old `Console` enum was deleted in issue #619** (part of PRD #516). The
 canonical identity for lobby/session/authority is now the lowercase-kebab
 `StationId` string (`"captain"`, `"helm"`, `"tactical"`, `"repair"`,
-`"sensors"`, `"shields"`, `"navigation"`, `"power"`, `"comms"`). Client tab
-switching and per-panel routing key on the same lowercase strings via
-`gui/console-registry.js`.
+`"sensors"`, `"shields"`, `"navigation"`, `"power"`, `"comms"`). Client per-panel
+routing keys on the same lowercase strings via the `gui/mount-plan.js`
+naming scheme (one human = one station since #827 - there is no tab
+switching).
 
 Fine-grained authority routing keys on `SystemId` (see [System](./system.md)).
 A single station may own multiple systems (e.g. `tactical` owns `phaser-fore`,
@@ -40,7 +41,8 @@ table).
 | `"comms"` | Comms | Hail stations; relay intelligence |
 
 Defined by the `[[station]]` blocks in `assets/entities/player_ship.toml` and
-the `gui/console-registry.js` mapping (`stationId → sectionId + iframeId`).
+the `gui/mount-plan.js` naming scheme (`stationId → ${id}-ui / ${id}-iframe`,
+with the one tactical → weapons alias).
 There is no runtime enum for these — the strings are the authority.
 
 ## Authority model
@@ -82,8 +84,8 @@ capability is being addressed" address. Both are just lowercase-kebab strings.
    `[[station.rating]]`.
 2. Add a `[[system]]` block for each system the station owns.
 3. Add the station id to `ALL_STATIONS` in `gui/lobby-state.js`.
-4. Register the panel in `gui/console-registry.js` (lowercase station id →
-   section + iframe).
+4. Point the station TOML `console` field at the panel URL - DOM ids
+   derive automatically from the id via `gui/mount-plan.js` (no registry).
 5. Add the client HTML panel (`gui/<name>-console.html`) and wire its actions
    through `gui/action-map.js` as `ControlSystem` envelopes.
 6. Implement the server-side handler plugin under `src/console/<name>/server.rs`.

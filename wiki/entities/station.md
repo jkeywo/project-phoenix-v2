@@ -31,8 +31,9 @@ Sent to clients inside `Welcome.ship_stations.stations`:
 ```
 
 Defined in `src/lobby/stations_config.rs:StationDef`. Its optional `console`
-URL is passed from TOML to the client, while `gui/console-registry.js`
-supplies stable DOM ids for known station ids.
+URL is passed from TOML to the client, while `gui/mount-plan.js` derives
+stable DOM ids from the station id (`${id}-ui` / `${id}-iframe`, one
+tactical → weapons alias).
 
 ## TOML schema (`[[station]]`)
 
@@ -86,7 +87,7 @@ client. This is shared game authority, not a local settings preference.
 3. `SelectStation { station }` from a client matches against `ShipStations.stations`
    by display name or id and writes `Player.station = Some(StationId)`.
 4. `StationAssigned { station_id }` is broadcast to all peers; each client
-   derives the console panel from the id via `gui/console-registry.js`.
+   derives the console panel from the id via `gui/mount-plan.js`.
 
 ## Related
 

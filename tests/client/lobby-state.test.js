@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  LobbyState, lobbyState, reconcileActiveConsole, ALL_STATIONS, playerStationId,
+  LobbyState, lobbyState, reconcileActiveConsole, nextActiveConsole,
+  ALL_STATIONS, playerStationId,
 } from '../../gui/lobby-state.js';
 
 // Post issue #619: a player carries a single lowercase station id (or null).
@@ -409,5 +410,51 @@ describe('playerStationId', () => {
   it('returns null when no station is set', () => {
     expect(playerStationId({})).toBeNull();
     expect(playerStationId(null)).toBeNull();
+  });
+});
+
+// Ported from the deleted tests/client/active-console.test.js (issue #827):
+// nextActiveConsole moved here when gui/active-console.js was absorbed.
+describe('nextActiveConsole', () => {
+  it('normalises null to null', () => {
+    expect(nextActiveConsole('captain', null))
+      .toEqual({ changed: true, next: null });
+  });
+
+  it('normalises undefined to null', () => {
+    expect(nextActiveConsole('tactical', undefined))
+      .toEqual({ changed: true, next: null });
+  });
+
+  it('normalises empty string to null', () => {
+    expect(nextActiveConsole('helm', ''))
+      .toEqual({ changed: true, next: null });
+  });
+
+  it('no change when both are null', () => {
+    expect(nextActiveConsole(null, null).changed).toBe(false);
+  });
+
+  it('no change when the name matches the current console', () => {
+    expect(nextActiveConsole('helm', 'helm').changed).toBe(false);
+  });
+
+  it('switches between consoles', () => {
+    expect(nextActiveConsole('helm', 'tactical'))
+      .toEqual({ changed: true, next: 'tactical' });
+  });
+
+  it('activates from null', () => {
+    expect(nextActiveConsole(null, 'captain'))
+      .toEqual({ changed: true, next: 'captain' });
+  });
+
+  it('activates from undefined current', () => {
+    expect(nextActiveConsole(undefined, 'helm'))
+      .toEqual({ changed: true, next: 'helm' });
+  });
+
+  it('empty-string current equals null current', () => {
+    expect(nextActiveConsole('', null).changed).toBe(false);
   });
 });

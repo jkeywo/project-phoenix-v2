@@ -74,6 +74,7 @@
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'engineering',
+      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var shieldEl = document.getElementById('shield-facings');
         var powerEl = document.getElementById('power-controls');

@@ -1,85 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import {
-  consoleSections,
-  sectionForConsole,
-  isBevyConsole,
-  CONSOLE_SECTION,
-  HTML_SECTION_IDS,
-} from '../../gui/content-switcher.js';
+import { consoleSections, sectionForConsole } from '../../gui/content-switcher.js';
 
-describe('CONSOLE_SECTION map', () => {
-  it('keys every HTML-panel console by lowercase station id', () => {
-    // Post issues #618/#619 the map is single-keyed on lowercase station ids
-    // (matching the Rust `StationId` newtype); the PascalCase Console aliases
-    // are gone along with the enum.
-    const lowercase = ['captain', 'comms', 'engineering', 'helm', 'navigation', 'pilot', 'power', 'repair', 'science', 'sensors', 'shields', 'tactical'];
-    for (const id of lowercase) {
-      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, id)).toBe(true);
-    }
-  });
+// Post issue #827 the switcher derives its section set from the ship's own
+// station roster (uiState.shipStations) via the gui/mount-plan.js naming
+// scheme — the hardcoded console-registry list is gone.
 
-  it('does NOT expose PascalCase Console-enum aliases (retired in #619)', () => {
-    const pascal = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation', 'Science'];
-    for (const name of pascal) {
-      expect(Object.prototype.hasOwnProperty.call(CONSOLE_SECTION, name)).toBe(false);
-    }
-  });
-
-  it('maps captain to captain-ui', () => {
-    expect(CONSOLE_SECTION.captain).toBe('captain-ui');
-  });
-
-  it('maps helm to helm-ui', () => {
-    expect(CONSOLE_SECTION.helm).toBe('helm-ui');
-  });
-
-  it('maps tactical to weapons-ui', () => {
-    expect(CONSOLE_SECTION.tactical).toBe('weapons-ui');
-  });
-
-  it('maps repair to repair-ui', () => {
-    expect(CONSOLE_SECTION.repair).toBe('repair-ui');
-  });
-
-  it('maps power to power-ui', () => {
-    expect(CONSOLE_SECTION.power).toBe('power-ui');
-  });
-
-  it('maps sensors, shields, comms, navigation, and engineering', () => {
-    expect(CONSOLE_SECTION.sensors).toBe('sensors-ui');
-    expect(CONSOLE_SECTION.shields).toBe('shields-ui');
-    expect(CONSOLE_SECTION.comms).toBe('comms-ui');
-    expect(CONSOLE_SECTION.navigation).toBe('navigation-ui');
-    expect(CONSOLE_SECTION.engineering).toBe('engineering-ui');
-  });
-
-  it('CONSOLE_SECTION and HTML_SECTION_IDS are frozen', () => {
-    expect(Object.isFrozen(CONSOLE_SECTION)).toBe(true);
-    expect(Object.isFrozen(HTML_SECTION_IDS)).toBe(true);
-  });
-
-  it('HTML_SECTION_IDS lists all twelve section ids', () => {
-    expect([...HTML_SECTION_IDS].sort()).toEqual([
-      'captain-ui', 'comms-ui', 'engineering-ui', 'helm-ui', 'navigation-ui',
-      'pilot-ui', 'power-ui', 'repair-ui', 'science-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
-    ]);
-  });
-});
+const BATTLESHIP = ['captain', 'helm', 'tactical', 'repair', 'sensors',
+                    'shields', 'navigation', 'power', 'comms'];
 
 describe('sectionForConsole', () => {
-  it('returns the right id for all HTML-section consoles', () => {
+  it('derives `${id}-ui` for regular station ids', () => {
     expect(sectionForConsole('captain')).toBe('captain-ui');
     expect(sectionForConsole('helm')).toBe('helm-ui');
-    expect(sectionForConsole('tactical')).toBe('weapons-ui');
-    expect(sectionForConsole('repair')).toBe('repair-ui');
-    expect(sectionForConsole('power')).toBe('power-ui');
-    expect(sectionForConsole('sensors')).toBe('sensors-ui');
-    expect(sectionForConsole('shields')).toBe('shields-ui');
-    expect(sectionForConsole('science')).toBe('science-ui');
-    expect(sectionForConsole('comms')).toBe('comms-ui');
-    expect(sectionForConsole('navigation')).toBe('navigation-ui');
     expect(sectionForConsole('engineering')).toBe('engineering-ui');
     expect(sectionForConsole('pilot')).toBe('pilot-ui');
+    expect(sectionForConsole('science')).toBe('science-ui');
+  });
+
+  it('applies the tactical → weapons-ui alias', () => {
+    expect(sectionForConsole('tactical')).toBe('weapons-ui');
   });
 
   it('returns null for empty / null / undefined', () => {
@@ -87,107 +26,49 @@ describe('sectionForConsole', () => {
     expect(sectionForConsole(null)).toBeNull();
     expect(sectionForConsole(undefined)).toBeNull();
   });
-
-  it('returns null for unknown console strings', () => {
-    expect(sectionForConsole('NotAConsole')).toBeNull();
-  });
-
-  it('returns null for retired PascalCase Console-enum names', () => {
-    expect(sectionForConsole('CaptainChair')).toBeNull();
-    expect(sectionForConsole('Helm')).toBeNull();
-  });
 });
 
 describe('consoleSections', () => {
-  function allFalse() {
-    return {
-      'captain-ui': false, 'helm-ui': false, 'weapons-ui': false,
-      'repair-ui': false, 'power-ui': false, 'science-ui': false,
-      'sensors-ui': false, 'shields-ui': false, 'comms-ui': false,
-      'navigation-ui': false, 'engineering-ui': false, 'pilot-ui': false,
-    };
-  }
-
-  function withTrue(key) {
-    return { ...allFalse(), [key]: true };
-  }
-
-  it('returns all-false when not in-game (lobby)', () => {
-    const out = consoleSections('captain', false);
-    expect(out).toEqual(allFalse());
+  it('covers exactly the ship stations, all false in the lobby', () => {
+    const out = consoleSections('captain', false, BATTLESHIP);
+    expect(Object.keys(out).sort()).toEqual([
+      'captain-ui', 'comms-ui', 'helm-ui', 'navigation-ui', 'power-ui',
+      'repair-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
+    ]);
+    expect(Object.values(out).every(v => v === false)).toBe(true);
   });
 
-  it('returns all-false when active console is null', () => {
-    const out = consoleSections(null, true);
-    expect(out).toEqual(allFalse());
+  it('all false when active console is null', () => {
+    const out = consoleSections(null, true, BATTLESHIP);
+    expect(Object.values(out).every(v => v === false)).toBe(true);
   });
 
-  it('shows only captain-ui for captain', () => {
-    const out = consoleSections('captain', true);
-    expect(out).toEqual(withTrue('captain-ui'));
+  it('shows only the active console section in-game', () => {
+    const out = consoleSections('helm', true, BATTLESHIP);
+    expect(out['helm-ui']).toBe(true);
+    expect(Object.entries(out).filter(([, v]) => v)).toHaveLength(1);
   });
 
-  it('shows only helm-ui for helm', () => {
-    const out = consoleSections('helm', true);
-    expect(out).toEqual(withTrue('helm-ui'));
+  it('shows weapons-ui for tactical (the alias)', () => {
+    const out = consoleSections('tactical', true, BATTLESHIP);
+    expect(out['weapons-ui']).toBe(true);
+    expect(Object.entries(out).filter(([, v]) => v)).toHaveLength(1);
   });
 
-  it('shows only weapons-ui for tactical', () => {
-    const out = consoleSections('tactical', true);
-    expect(out).toEqual(withTrue('weapons-ui'));
+  it('works for cruiser/destroyer aggregate stations', () => {
+    const out = consoleSections('engineering', true, ['captain', 'engineering', 'science']);
+    expect(out).toEqual({
+      'captain-ui': false, 'engineering-ui': true, 'science-ui': false,
+    });
   });
 
-  it('shows only repair-ui for repair', () => {
-    const out = consoleSections('repair', true);
-    expect(out).toEqual(withTrue('repair-ui'));
+  it('an active console not in the station list shows nothing', () => {
+    const out = consoleSections('navigation', true, ['captain', 'helm']);
+    expect(Object.values(out).every(v => v === false)).toBe(true);
   });
 
-  it('shows only power-ui for power', () => {
-    const out = consoleSections('power', true);
-    expect(out).toEqual(withTrue('power-ui'));
-  });
-
-  it('shows only sensors-ui for sensors', () => {
-    const out = consoleSections('sensors', true);
-    expect(out).toEqual(withTrue('sensors-ui'));
-  });
-
-  it('shows only shields-ui for shields', () => {
-    const out = consoleSections('shields', true);
-    expect(out).toEqual(withTrue('shields-ui'));
-  });
-
-  it('shows only comms-ui for comms', () => {
-    const out = consoleSections('comms', true);
-    expect(out).toEqual(withTrue('comms-ui'));
-  });
-
-  it('shows only navigation-ui for navigation', () => {
-    const out = consoleSections('navigation', true);
-    expect(out).toEqual(withTrue('navigation-ui'));
-  });
-
-  it('shows only engineering-ui for engineering', () => {
-    const out = consoleSections('engineering', true);
-    expect(out).toEqual(withTrue('engineering-ui'));
-  });
-
-  it('returns all-false for unknown console strings', () => {
-    const out = consoleSections('Unknown', true);
-    expect(out).toEqual(allFalse());
-  });
-});
-
-describe('isBevyConsole', () => {
-  it('returns false for all eleven HTML-section consoles', () => {
-    for (const c of ['captain', 'helm', 'tactical', 'repair', 'power', 'sensors', 'shields', 'comms', 'navigation', 'science', 'engineering']) {
-      expect(isBevyConsole(c)).toBe(false);
-    }
-  });
-
-  it('returns false for null / empty / undefined (no active console)', () => {
-    expect(isBevyConsole(null)).toBe(false);
-    expect(isBevyConsole('')).toBe(false);
-    expect(isBevyConsole(undefined)).toBe(false);
+  it('is empty for an empty / missing station list', () => {
+    expect(consoleSections('helm', true, [])).toEqual({});
+    expect(consoleSections('helm', true, null)).toEqual({});
   });
 });

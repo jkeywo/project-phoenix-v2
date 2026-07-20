@@ -62,6 +62,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'helm',
+      // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, heading: s.heading || 0, speed: s.speed || 0, ship_heading: s.heading || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0 };
         document.getElementById('helm-joystick').state = { auto: !!s.helm_auto };

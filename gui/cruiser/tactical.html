@@ -57,6 +57,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'tactical',
+      // s is a WeaponsConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var r = document.getElementById('tactical-radar');
         var p = document.getElementById('phasers-controls');

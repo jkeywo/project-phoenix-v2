@@ -159,7 +159,7 @@ export function dirtyConsolesFor(msg, stationSystems) {
 }
 
 // Expose for the non-module inline script in client.html (same pattern as
-// gui/console-state.js / gui/console-registry.js).
+// gui/console-state.js / gui/mount-plan.js).
 if (typeof window !== 'undefined') {
   window.dirtyConsolesFor = dirtyConsolesFor;
   window.DIRTY_ALWAYS_PUSH = ALWAYS_PUSH;

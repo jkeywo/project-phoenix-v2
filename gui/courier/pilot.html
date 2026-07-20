@@ -164,6 +164,7 @@
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'pilot',
+      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var w = system(s, 'tactical-radar', 'blaster-fore');
         var sensors = system(s, 'sensors', 'sensor-radar');

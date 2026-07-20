@@ -24,6 +24,7 @@
 
 /** @type {Record<string, Array<[string, string]>>} */
 import { t } from './strings.js';
+import { stationDisplayName } from './console-state.js';
 
 const HELP_SECTIONS = {
   captain: [
@@ -298,8 +299,9 @@ export function renderInlineHelp(root, consoles) {
     group.className = 'help-console-group';
     const heading = doc.createElement('div');
     heading.className = 'help-console-heading';
-    const label = (typeof window !== 'undefined' && window.CONSOLE_LABEL && window.CONSOLE_LABEL[consoleName]) || consoleName;
-    heading.textContent = label;
+    // Station labels resolve through the string table (station.<id>.name) —
+    // the tab-bar CONSOLE_LABEL map was deleted with the tab bar (#827).
+    heading.textContent = stationDisplayName(consoleName);
     group.appendChild(heading);
     const body = doc.createElement('div');
     body.className = 'help-sections';

@@ -71,6 +71,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'helm',
+      // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var radarEl = document.getElementById('helm-radar');
         var joystickEl = document.getElementById('helm-joystick');

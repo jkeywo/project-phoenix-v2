@@ -77,6 +77,7 @@
     var currentState = {};
     var consoleApi = initConsole({
       name: 'navigation',
+      // s is a NavigationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         currentState = s || {};
         document.getElementById('navigation-map').state = { blips: s.blips || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };

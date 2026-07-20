@@ -110,6 +110,7 @@
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'comms',
+      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var cl = document.getElementById('comms-contact-list');
         var hl = document.getElementById('comms-hail-list');

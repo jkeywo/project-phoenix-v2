@@ -1,69 +1,46 @@
-// Content switcher for the client GUI shell. Pure function (issue #441).
+// Content switcher for the client GUI shell. Pure function (issues #441, #827).
 //
 // Maps the currently-active console to which HTML <section> should be
-// visible. All nine consoles have HTML sections in client.html
-// (captain -> #captain-ui, helm -> #helm-ui, tactical -> #weapons-ui,
-// repair -> #repair-ui, power -> #power-ui, shields -> #shields-ui,
-// sensors -> #sensors-ui, navigation -> #navigation-ui, comms -> #comms-ui).
+// visible. The section ids come from the server-supplied ship_stations
+// roster (the stations this ship actually mounts), resolved through the
+// canonical `${id}-ui` naming scheme in gui/mount-plan.js (which owns the
+// one tactical → weapons-ui alias). The deleted gui/console-registry.js
+// hardcoded list is gone: whatever the ship declares is what gets toggled.
 //
-// This module exports a pure function `consoleSections(activeConsole, inGame)`
-// returning a visibility map keyed by section id. The inline `<script>` in
-// client.html applies it by toggling `.active` on each section.
-//
-// The canvas itself is always in the DOM; visibility of the iframe is what
-// changes here. When Tactical is active the iframe sits on top of the canvas
-// at z-index 10.
+// The inline `<script>` in client.html applies the returned visibility map
+// by toggling `.active` on each section.
 
-import { REGISTRY } from './console-registry.js';
-
-// Console name -> HTML section id. Derived from REGISTRY so there is a single
-// source of truth for all HTML-panel consoles.
-//
-// Keys are the lowercase station ids (matching `StationId` on the wire after
-// issues #618/#619). `sectionForConsole(activeConsole)` expects `activeConsole`
-// to be a lowercase station id.
-export const CONSOLE_SECTION = Object.freeze(
-  Object.fromEntries(
-    Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId])
-  )
-);
-
-// Set of all known section ids that the switcher will reset.
-export const HTML_SECTION_IDS = Object.freeze(
-  Object.values(REGISTRY).map(v => v.sectionId)
-);
+import { sectionIdFor } from './mount-plan.js';
 
 // Returns the section id that should be visible for `activeConsole`, or null
-// if no HTML section maps to this console (Bevy renders it).
+// when there is no active console.
 export function sectionForConsole(activeConsole) {
   if (!activeConsole) return null;
-  return CONSOLE_SECTION[activeConsole] || null;
+  return sectionIdFor(activeConsole);
 }
 
-// Returns a visibility map keyed by section id. `true` means "show".
-// Only one section is ever `true` at a time; rest are `false`. Lobby (when
-// `inGame === false`) returns all-false — `client.html`'s `#lobby-ui` is a
-// sibling section managed by the phase-toggle module, not here.
-export function consoleSections(activeConsole, inGame) {
+// Returns a visibility map keyed by section id, covering exactly the
+// sections of `stationIds` (the ship's mounted stations). `true` means
+// "show"; at most one section is ever `true`. Lobby (`inGame === false`)
+// returns all-false — client.html's `#lobby-ui` is a sibling section managed
+// by the phase-toggle module, not here.
+//
+//   activeConsole — lowercase station id or null
+//   inGame        — boolean
+//   stationIds    — string[] of the ship's station ids (from
+//                   uiState.shipStations.stations)
+export function consoleSections(activeConsole, inGame, stationIds) {
   const out = {};
   const target = inGame ? sectionForConsole(activeConsole) : null;
-  for (const id of HTML_SECTION_IDS) out[id] = id === target;
+  for (const id of stationIds || []) {
+    const sectionId = sectionIdFor(id);
+    if (sectionId) out[sectionId] = sectionId === target;
+  }
   return out;
-}
-
-// True when the active console is rendered by Bevy (no HTML section).
-// Useful for the inline script to decide whether the canvas should be
-// raised above the (hidden) HTML sections.
-export function isBevyConsole(activeConsole) {
-  if (!activeConsole) return false;
-  return !(activeConsole in CONSOLE_SECTION);
 }
 
 // Expose for non-module scripts in `client.html`.
 if (typeof window !== 'undefined') {
   window.consoleSections = consoleSections;
   window.sectionForConsole = sectionForConsole;
-  window.isBevyConsole = isBevyConsole;
-  window.CONSOLE_SECTION = CONSOLE_SECTION;
-  window.HTML_SECTION_IDS = HTML_SECTION_IDS;
 }

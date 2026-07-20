@@ -121,7 +121,7 @@ src/
   sim_sets.rs   — SimSet: Input → Physics → Damage → Modifiers → Publish → PublishAggregate → Broadcast
 
 gui/            — CLIENT: pure JS modules + one HTML file per console (iframe),
-                  console-registry.js is the single source of truth for panels
+                  mount-plan.js owns the station-id → DOM-id/URL mount plan
 assets/         — TOML configs: worlds/, entities/, factions/; models, shaders, sounds
 server.html     — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
 client.html     — Client page: pure HTML/JS, connects via PeerJS peer ID in URL hash

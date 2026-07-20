@@ -88,6 +88,7 @@
       const open = overlay.classList.contains('open'); close();
       if (!open) { overlay.classList.add('open'); button.classList.add('active'); }
     }
+    // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
     initConsole({ name: 'captain', render(s) {
       const command = system(s, 'captain', 'viewscreen', 'red-alert');
       const shields = system(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');

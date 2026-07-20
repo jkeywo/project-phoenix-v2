@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Local Console Bridge
-      summary: Decodes actions from host-page HTML consoles and injects them under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
+      summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
     architecture:
       kind: local-command-bridge
       authority: authoritative
@@ -14,9 +14,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app.rs]
-      symbols: [LOCAL_CONSOLE_TOKEN]
-      tests: [cargo test]
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app.rs, server.html, gui/action-map.js]
+      symbols: [LOCAL_CONSOLE_TOKEN, wasm_receive_message, dispatchConsoleAction]
+      tests: [cargo test, npx vitest run]
 
   - state: host-local-console-identity-state
     core:
@@ -38,26 +38,26 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Local UI Action Command
-      summary: Browser server-page action envelope decoded by the host bridge before it is admitted as a local-ship system command.
+      summary: Browser server-page console action translated by the shared gui/action-map.js table into a full ClientMessage before it is admitted as a local-ship system command; the Rust-side UiAction translation layer was deleted by issue 822.
     architecture:
       authority: request
       producer: [host-camera-renderer, viewscreen-hud-effects]
       consumer: [host-local-console-bridge]
       validator: [host-local-console-bridge]
       trust_boundary: host-page-to-host
-      payload: UiAction
+      payload: ClientMessage
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/core/codec.rs]
-      symbols: [decode_ui_action]
-      tests: [cargo test]
+      paths: [server.html, gui/action-map.js, src/core/codec.rs]
+      symbols: [decode_bridge_client_message]
+      tests: [cargo test, npx vitest run]
 
   - component: wire-codec-protocol
     core:
       status: implemented
       confidence: confirmed
       title: Wire Codec Protocol
-      summary: Sole JSON codec boundary for remote client and server envelopes, host-page UI actions, short-form system-control compatibility normalization, and serialized HUD, lobby, chatter, and audio host-channel payloads.
+      summary: Sole JSON codec boundary for remote client and server envelopes and serialized HUD, lobby, chatter, and audio host-channel payloads; every inbound path decodes one full ClientMessage dialect (issue 822 retired the UiAction and short-form vocabularies).
     architecture:
       kind: protocol-codec
       authority: authoritative
@@ -67,7 +67,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/codec.rs, src/core/messages.rs]
-      symbols: [JsonCodec, decode_bridge_client_message, decode_ui_action, encode_hud_state, encode_chatter, encode_lobby_state]
+      symbols: [JsonCodec, decode_bridge_client_message, encode_hud_state, encode_chatter, encode_lobby_state]
       tests: [cargo test]
 
   - component: host-page-push-bridge

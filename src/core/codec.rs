@@ -1,4 +1,4 @@
-use crate::messages::{ClientMessage, ServerMessage, SystemControlPayload, SystemId};
+use crate::messages::{ClientMessage, ServerMessage};
 
 pub trait MessageCodec {
     type Error;
@@ -34,7 +34,7 @@ impl MessageCodec for JsonCodec {
 //
 // These are the sanctioned `serde_json` surface for the HTML bridge: the
 // host-channel pushes (HUD, lobby, chatter, audio) and the inbound
-// `__sendAction` decode. Bridge / plugin code must call these, never
+// `ClientMessage` decode. Bridge / plugin code must call these, never
 // `serde_json` directly.
 
 /// Encode a `ViewscreenHudState` to JSON for the HTML viewscreen overlay.
@@ -67,24 +67,14 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
-/// Decode a `window.__sendAction` envelope into a typed `UiAction`. The
-/// envelope's extra `console` field is ignored by serde.
-pub fn decode_ui_action(s: &str) -> Result<crate::messages::UiAction, serde_json::Error> {
-    serde_json::from_str(s)
-}
-
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
-/// The preferred wire shape is a full `ClientMessage`. Some smoke-test and
-/// legacy browser paths still send short-form system payloads such as
-/// `{"type":"SetThrust","data":{"value":0.5}}`; this helper
-/// wraps those as `ClientMessage::ControlSystem` while keeping raw JSON handling
-/// inside the codec module.
+/// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
+/// host-page consoles via `gui/action-map.js`, smoke fixtures) sends the
+/// serde envelope directly. The short-form system-control shim that used to
+/// live here was retired by issue #822 once no console emitted short form.
 pub fn decode_bridge_client_message(s: &str) -> Result<ClientMessage, serde_json::Error> {
-    match serde_json::from_str(s) {
-        Ok(msg) => Ok(msg),
-        Err(original_err) => decode_short_form_system_control(s).ok_or(original_err),
-    }
+    serde_json::from_str(s)
 }
 
 /// Encode a `LobbyStatePayload` to JSON for the HTML lobby overlay.
@@ -92,65 +82,6 @@ pub fn encode_lobby_state(
     s: &crate::messages::LobbyStatePayload,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(s)
-}
-
-fn decode_short_form_system_control(s: &str) -> Option<ClientMessage> {
-    let v: serde_json::Value = serde_json::from_str(s).ok()?;
-    let type_name = v.get("type")?.as_str()?;
-    let target = system_target_for_payload_type(type_name)?;
-    let payload_type = system_payload_type_name(type_name);
-    let rekeyed = match v.get("data") {
-        Some(data) => serde_json::json!({
-            "type": payload_type,
-            "data": data,
-        }),
-        None => serde_json::json!({ "type": payload_type }),
-    };
-    let payload: SystemControlPayload = serde_json::from_value(rekeyed).ok()?;
-    Some(ClientMessage::ControlSystem {
-        target: SystemId(target.to_string()),
-        payload,
-    })
-}
-
-fn system_payload_type_name(type_name: &str) -> &str {
-    match type_name {
-        "SetSensorsTarget" => "SetScienceTarget",
-        other => other,
-    }
-}
-
-fn system_target_for_payload_type(type_name: &str) -> Option<&'static str> {
-    match type_name {
-        // Per-axis helm systems (issue #801): each payload resolves to the
-        // declared system that owns it, never to a coarse `helm` id.
-        "SetThrust" => Some(crate::system_registry::HELM_THRUST_SYSTEM_ID),
-        "SetSteering" => Some(crate::system_registry::HELM_STEERING_SYSTEM_ID),
-        "StartImpulseCharge" | "CancelImpulse" => {
-            Some(crate::system_registry::HELM_IMPULSE_SYSTEM_ID)
-        }
-        "ToggleBoost" | "SetBoost" => Some(crate::system_registry::HELM_BOOST_SYSTEM_ID),
-        "ToggleRedAlert" => Some(crate::system_registry::RED_ALERT_SYSTEM_ID),
-        "SetView" => Some(crate::system_registry::VIEWSCREEN_SYSTEM_ID),
-        // Ship-wide tactical operations (issue #801): target lock lives on the
-        // tactical radar; phaser mode/frequency on the phaser-control system.
-        "SetTarget" => Some(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID),
-        "SetPhaserMode" | "SetPhaserFrequency" => {
-            Some(crate::system_registry::PHASER_CONTROL_SYSTEM_ID)
-        }
-        "Hail" | "SelectCommsMessage" | "RespondToMessage" | "ClearComms" | "ShowOnScreen" => {
-            Some(crate::system_registry::COMMS_SYSTEM_ID)
-        }
-        "SetNavigationWaypoint" | "ClearNavigationWaypoint" => {
-            Some(crate::system_registry::NAVIGATION_SYSTEM_ID)
-        }
-        "SetScienceTarget" | "SetSensorsTarget" => Some(crate::system_registry::SENSORS_SYSTEM_ID),
-        // `SetShieldArcFocus` (issue #514) intentionally omitted — arcs are
-        // variable and there is no single fallback target. The JS layer
-        // must always include an explicit `shield-arc-<id>` target.
-        "SetPowerGroupAllocation" => Some(crate::system_registry::POWER_REACTOR_SYSTEM_ID),
-        _ => None,
-    }
 }
 
 // ── Batch inbound decode (issue #602) ───────────────────────────────────────
@@ -1412,9 +1343,9 @@ mod tests {
 
     // ── Bridge decode helper tests (decode_bridge_client_message) ──────────
     //
-    // These exercise `decode_bridge_client_message`'s short-form rewriting,
-    // not raw `ClientMessage`/`ServerMessage` round-trips, so they are out of
-    // scope for table-driven replacement.
+    // The short-form system-control shim was retired by issue #822: every
+    // emitter now sends the full `ClientMessage` envelope, so the bridge
+    // decode is a plain serde decode.
 
     #[test]
     fn decode_bridge_client_message_accepts_full_client_message() {
@@ -1424,165 +1355,106 @@ mod tests {
         assert_eq!(msg, ClientMessage::SetReady { ready: true });
     }
 
+    /// Post-#822 the bridge no longer rewrites bare short-form payloads such
+    /// as `{"type":"SetThrust",...}` — they are a hard decode error, exactly
+    /// like any other unknown `type` tag.
     #[test]
-    fn decode_bridge_client_message_wraps_short_form_set_thrust() {
-        let msg =
-            decode_bridge_client_message(r#"{"type":"SetThrust","data":{"value":0.5}}"#).unwrap();
-
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
-                payload: SystemControlPayload::SetThrust { value: 0.5 },
-            }
-        );
+    fn decode_bridge_client_message_rejects_short_form_payloads() {
+        for json in [
+            r#"{"type":"SetThrust","data":{"value":0.5}}"#,
+            r#"{"type":"StartImpulseCharge"}"#,
+            r#"{"type":"Hail","data":{"target_uuid":"s1"}}"#,
+        ] {
+            assert!(
+                decode_bridge_client_message(json).is_err(),
+                "short-form payload must no longer decode: {json}"
+            );
+        }
     }
 
+    /// Comms control payloads round-trip inside the `ControlSystem` envelope
+    /// (issue #822 — pins the shapes `gui/action-map.js` now emits after the
+    /// short-form shim was retired).
     #[test]
-    fn decode_bridge_client_message_wraps_short_form_set_steering() {
-        let msg = decode_bridge_client_message(r#"{"type":"SetSteering","data":{"value":-0.25}}"#)
-            .unwrap();
-
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
-                payload: SystemControlPayload::SetSteering { value: -0.25 },
-            }
-        );
-    }
-
-    #[test]
-    fn decode_bridge_client_message_wraps_short_form_unit_payload() {
-        let msg = decode_bridge_client_message(r#"{"type":"StartImpulseCharge"}"#).unwrap();
-
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
-                payload: SystemControlPayload::StartImpulseCharge,
-            }
-        );
-    }
-
-    #[test]
-    fn decode_bridge_client_message_wraps_short_form_boost_payloads() {
-        let msg = decode_bridge_client_message(r#"{"type":"ToggleBoost"}"#).unwrap();
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
-                payload: SystemControlPayload::ToggleBoost,
-            }
-        );
-
-        let msg =
-            decode_bridge_client_message(r#"{"type":"SetBoost","data":{"active":true}}"#).unwrap();
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
-                payload: SystemControlPayload::SetBoost { active: true },
-            }
-        );
-    }
-
-    #[test]
-    fn decode_bridge_client_message_wraps_short_form_phaser_control() {
-        let msg =
-            decode_bridge_client_message(r#"{"type":"SetPhaserMode","data":{"mode":"Auto"}}"#)
-                .unwrap();
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
-                payload: SystemControlPayload::SetPhaserMode {
-                    mode: crate::messages::PhaserMode::Auto,
-                },
-            }
-        );
-
-        // The legacy top-level `ClientMessage::SetPhaserFrequency` was deleted
-        // by #804, so a bare `{"type":"SetPhaserFrequency",...}` now falls
-        // through full decode and is wrapped by the short-form table as a
-        // `ControlSystem` envelope targeting phaser-control:
-        let msg = decode_bridge_client_message(
-            r#"{"type":"SetPhaserFrequency","data":{"frequency":0.6}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
-                payload: SystemControlPayload::SetPhaserFrequency { frequency: 0.6 },
-            }
-        );
-
-        // The envelope form pins the phaser-control target explicitly:
-        let msg = decode_bridge_client_message(
-            r#"{"type":"ControlSystem","data":{"target":"phaser-control","payload":{"type":"SetPhaserFrequency","data":{"frequency":0.4}}}}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
-                payload: SystemControlPayload::SetPhaserFrequency { frequency: 0.4 },
-            }
-        );
-    }
-
-    #[test]
-    fn decode_bridge_client_message_wraps_short_form_set_view() {
-        let msg = decode_bridge_client_message(
-            r#"{"type":"SetView","data":{"mode":{"kind":"Camera","data":"camera_aft"}}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
-                payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Camera(CameraView::new("camera_aft")),
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn decode_bridge_client_message_wraps_short_form_comms_response() {
-        let msg = decode_bridge_client_message(
-            r#"{"type":"RespondToMessage","data":{"message_id":"m1","response_index":0}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
+    fn comms_control_system_payloads_round_trip() {
+        let payloads = vec![
+            SystemControlPayload::Hail {
+                target_uuid: "starbase-1".into(),
+            },
+            SystemControlPayload::SelectCommsMessage {
+                message_id: "m1".into(),
+            },
+            SystemControlPayload::RespondToMessage {
+                message_id: "m1".into(),
+                response_index: 0,
+            },
+            SystemControlPayload::ClearComms,
+            SystemControlPayload::ShowOnScreen {
+                message_id: "m1".into(),
+            },
+        ];
+        for payload in payloads {
+            let msg = ClientMessage::ControlSystem {
                 target: crate::system_registry::comms_system_id(),
-                payload: SystemControlPayload::RespondToMessage {
-                    message_id: "m1".into(),
-                    response_index: 0,
+                payload,
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
+
+        // Pin one wire shape exactly — action-map.js `hail` depends on this.
+        let encoded = JsonCodec
+            .encode_client(&ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: SystemControlPayload::Hail {
+                    target_uuid: "starbase-1".into(),
                 },
-            }
+            })
+            .unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"comms","payload":{"type":"Hail","data":{"target_uuid":"starbase-1"}}}}"#,
+            "Hail wire shape must match what action-map.js sends"
         );
     }
 
+    /// Navigation waypoint payloads round-trip inside the `ControlSystem`
+    /// envelope (issue #822 — pins the shapes `gui/action-map.js` now emits).
     #[test]
-    fn decode_bridge_client_message_wraps_short_form_tactical_target() {
-        let msg =
-            decode_bridge_client_message(r#"{"type":"SetTarget","data":{"uuid":"raider-1"}}"#)
-                .unwrap();
+    fn navigation_control_system_payloads_round_trip() {
+        for payload in [
+            SystemControlPayload::SetNavigationWaypoint {
+                x: 12.5,
+                z: -8.0,
+                source_uuid: None,
+            },
+            SystemControlPayload::SetNavigationWaypoint {
+                x: 12.5,
+                z: -8.0,
+                source_uuid: Some("station-alpha".into()),
+            },
+            SystemControlPayload::ClearNavigationWaypoint,
+        ] {
+            let msg = ClientMessage::ControlSystem {
+                target: crate::system_registry::navigation_system_id(),
+                payload,
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
 
+        // Pin the unit-payload wire shape — action-map.js
+        // `clear_navigation_waypoint` depends on this.
+        let encoded = JsonCodec
+            .encode_client(&ClientMessage::ControlSystem {
+                target: crate::system_registry::navigation_system_id(),
+                payload: SystemControlPayload::ClearNavigationWaypoint,
+            })
+            .unwrap();
         assert_eq!(
-            msg,
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
-                payload: SystemControlPayload::SetTarget {
-                    uuid: "raider-1".into(),
-                },
-            }
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"navigation","payload":{"type":"ClearNavigationWaypoint"}}}"#,
+            "ClearNavigationWaypoint wire shape must match what action-map.js sends"
         );
     }
 
@@ -1880,79 +1752,6 @@ mod tests {
     }
 
     // ── HTML console bridge (de)serialisation ─────────────────────────────
-
-    #[test]
-    fn decode_ui_action_fire_torpedo_envelope() {
-        // Full envelope as produced by window.__sendAction; the extra
-        // `console` field is ignored by serde.
-        let json =
-            r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":null}"#;
-        let action = decode_ui_action(json).expect("decode fire_torpedo");
-        assert_eq!(
-            action,
-            UiAction::FireTorpedo {
-                tube: "fore".into(),
-                target_uuid: None
-            }
-        );
-    }
-
-    #[test]
-    fn decode_ui_action_fire_torpedo_with_target() {
-        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":"abc-123"}"#;
-        let action = decode_ui_action(json).expect("decode fire_torpedo");
-        assert_eq!(
-            action,
-            UiAction::FireTorpedo {
-                tube: "fore".into(),
-                target_uuid: Some("abc-123".into())
-            }
-        );
-    }
-
-    #[test]
-    fn decode_ui_action_fire_torpedo_omitted_target_defaults_none() {
-        // target_uuid omitted entirely → defaults to None via #[serde(default)].
-        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"aft"}"#;
-        let action = decode_ui_action(json).expect("decode fire_torpedo");
-        assert_eq!(
-            action,
-            UiAction::FireTorpedo {
-                tube: "aft".into(),
-                target_uuid: None
-            }
-        );
-    }
-
-    #[test]
-    fn decode_ui_action_fire_phaser_envelope() {
-        let json = r#"{"action":"fire_phaser","console":"Tactical","bank":"port"}"#;
-        let action = decode_ui_action(json).expect("decode fire_phaser");
-        assert_eq!(
-            action,
-            UiAction::FirePhaser {
-                bank: "port".into()
-            }
-        );
-    }
-
-    #[test]
-    fn decode_ui_action_toggle_boost() {
-        let json = r#"{"action":"toggle_boost","console":"Helm"}"#;
-        let action = decode_ui_action(json).expect("decode toggle_boost");
-        assert_eq!(action, UiAction::ToggleBoost);
-    }
-
-    #[test]
-    fn decode_ui_action_set_boost() {
-        let json = r#"{"action":"set_boost","console":"Helm","active":true}"#;
-        let action = decode_ui_action(json).expect("decode set_boost true");
-        assert_eq!(action, UiAction::SetBoost { active: true });
-
-        let json = r#"{"action":"set_boost","console":"Helm","active":false}"#;
-        let action = decode_ui_action(json).expect("decode set_boost false");
-        assert_eq!(action, UiAction::SetBoost { active: false });
-    }
 
     #[test]
     fn encode_hud_state_round_trips() {

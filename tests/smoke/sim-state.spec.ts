@@ -84,7 +84,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   // Wait for the first BlackboardUpdate to confirm simulation is running
   await helm.waitForMessage('BlackboardUpdate', 2_000);
 
-  await helm.send('StartImpulseCharge');
+  await helm.send('ControlSystem', { target: 'helm-impulse', payload: { type: 'StartImpulseCharge' } });
 
   // Wait up to 8× the TOML-configured charge duration for a HelmBlackboard
   // showing impulse_charge has reached 1.0 (headroom for CI latency).

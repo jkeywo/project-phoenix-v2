@@ -473,19 +473,39 @@ export function fireTorpedoMessage(tube, targetUuid) {
 }
 
 export function setTargetMessage(uuid) {
-  return { type: 'SetTarget', data: { uuid } };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'tactical-radar',
+      payload: { type: 'SetTarget', data: { uuid } },
+    },
+  };
 }
 
 export function setScienceTargetMessage(uuid) {
-  return { type: 'SetScienceTarget', data: { uuid } };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'sensors',
+      payload: { type: 'SetScienceTarget', data: { uuid } },
+    },
+  };
 }
 
+/** Alias for the sensors console: same wire message as a science target
+ *  (the old short-form `SetSensorsTarget` rename is now applied here). */
 export function setSensorsTargetMessage(uuid) {
-  return { type: 'SetSensorsTarget', data: { uuid } };
+  return setScienceTargetMessage(uuid);
 }
 
 export function setPhaserModeMessage(mode) {
-  return { type: 'SetPhaserMode', data: { mode } };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'phaser-control',
+      payload: { type: 'SetPhaserMode', data: { mode } },
+    },
+  };
 }
 
 /** Auto → Manual, Manual → Auto. */
@@ -495,7 +515,16 @@ export function togglePhaserModeMessage(current) {
 
 /** Frequency is clamped to [0, 1] before wrapping. */
 export function setPhaserFrequencyMessage(frequency) {
-  return { type: 'SetPhaserFrequency', data: { frequency: Math.min(1.0, Math.max(0.0, frequency)) } };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'phaser-control',
+      payload: {
+        type: 'SetPhaserFrequency',
+        data: { frequency: Math.min(1.0, Math.max(0.0, frequency)) },
+      },
+    },
+  };
 }
 
 /**

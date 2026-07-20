@@ -56,7 +56,7 @@ test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }
     );
   });
 
-  await captain.send('Hail', { target_uuid: starbaseUuid });
+  await captain.send('ControlSystem', { target: 'comms', payload: { type: 'Hail', data: { target_uuid: starbaseUuid } } });
 
   const hailComms = await captain.waitForMessage('CommsState', 8_000) as any;
   const messages: Array<{ id: string; body: string; responses: string[]; sender_in_range: boolean }> =
@@ -74,7 +74,7 @@ test('comms — hail contact, respond, get ObjectiveSummary', async ({ context }
     );
   });
 
-  await captain.send('RespondToMessage', { message_id: msg.id, response_index: 0 });
+  await captain.send('ControlSystem', { target: 'comms', payload: { type: 'RespondToMessage', data: { message_id: msg.id, response_index: 0 } } });
 
   // CommsState must reflect the selected response.
   const respondComms = await captain.waitForMessage('CommsState', 8_000) as any;

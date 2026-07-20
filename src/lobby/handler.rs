@@ -518,9 +518,13 @@ pub(crate) fn handle_return_to_lobby(
 }
 
 /// Handle `ConfirmScenario`: broadcast `ScenarioLoaded` during Lobby.
-pub(crate) fn handle_confirm_scenario(phase: GamePhase) -> LobbyHandlerResult {
+///
+/// Token-gated to the host page (issue #822): the scenario re-selection panel
+/// on `server.html` is the only sender, so the message is only honoured from
+/// `console_bridge::LOCAL_CONSOLE_TOKEN`. Any network token is ignored.
+pub(crate) fn handle_confirm_scenario(token: &str, phase: GamePhase) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
-    if phase == GamePhase::Lobby {
+    if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN && phase == GamePhase::Lobby {
         outbound.push((Target::All, ServerMessage::ScenarioLoaded));
     }
     LobbyHandlerResult {
@@ -749,7 +753,7 @@ mod tests {
                 ship_stations,
             ),
             ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
-            ClientMessage::ConfirmScenario => handle_confirm_scenario(phase),
+            ClientMessage::ConfirmScenario => handle_confirm_scenario(token, phase),
             ClientMessage::SetStationRating { rating_name } => {
                 handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
             }
@@ -1845,10 +1849,10 @@ max_level = 4
     }
 
     #[test]
-    fn confirm_scenario_during_lobby_broadcasts_scenario_loaded() {
+    fn confirm_scenario_from_host_token_during_lobby_broadcasts_scenario_loaded() {
         let mut sessions = sessions_with("t1", "Alice");
         let result = pm(
-            "t1",
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
             &ClientMessage::ConfirmScenario,
             &mut sessions,
             GamePhase::Lobby,
@@ -1858,6 +1862,25 @@ max_level = 4
         assert!(result.outbound.iter().any(|(target, m)| {
             matches!(target, Target::All) && matches!(m, ServerMessage::ScenarioLoaded)
         }));
+    }
+
+    /// Token gate (issue #822): only the host page's scenario panel sends
+    /// `ConfirmScenario`, so a network player token must be ignored.
+    #[test]
+    fn confirm_scenario_from_network_token_is_rejected() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let result = pm(
+            "t1",
+            &ClientMessage::ConfirmScenario,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(result.new_phase.is_none());
+        assert!(
+            result.outbound.is_empty(),
+            "ConfirmScenario from a non-host token must be a no-op"
+        );
     }
 
     #[test]
@@ -1870,7 +1893,7 @@ max_level = 4
         ] {
             let phase_copy = phase.clone();
             let result = pm(
-                "t1",
+                crate::console_bridge::LOCAL_CONSOLE_TOKEN,
                 &ClientMessage::ConfirmScenario,
                 &mut sessions,
                 phase,
@@ -1881,6 +1904,23 @@ max_level = 4
                 "no outbound for phase {phase_copy:?}"
             );
         }
+    }
+
+    /// The phone client's game-over overlay sends `ReturnToLobby`
+    /// (`client.html` `initReturnToLobby`), so unlike `ConfirmScenario` it is
+    /// deliberately NOT gated to the host token — any connected player may
+    /// trigger the return.
+    #[test]
+    fn return_to_lobby_from_network_token_is_accepted() {
+        let mut sessions = sessions_with("t1", "Alice");
+        let result = pm(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::GameOver,
+            None,
+        );
+        assert_eq!(result.new_phase, Some(GamePhase::Lobby));
     }
 
     #[test]

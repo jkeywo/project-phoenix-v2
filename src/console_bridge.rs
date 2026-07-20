@@ -12,9 +12,10 @@ use bevy::prelude::*;
 
 /// Session token used for actions originating from the local HTML consoles
 /// (browser server viewscreen / native wry server), where the operator drives
-/// a console directly rather than through a remote PeerJS session. Actions
-/// decoded by `bridge::drain_ui_actions` are injected as `InboundMessage` under
-/// this token, and the gameplay console handlers treat it as an authorized
+/// a console directly rather than through a remote PeerJS session. The host
+/// page routes its console actions through `gui/action-map.js` into full
+/// `ClientMessage` JSON and submits them via `wasm_receive_message` under this
+/// token (issue #822); the gameplay console handlers treat it as an authorized
 /// local operator (see the weapons fire guards). Defined here — ungated — so
 /// both the wasm bridge and the (non-wasm) gameplay handlers can reference it.
 pub const LOCAL_CONSOLE_TOKEN: &str = "__local_console__";

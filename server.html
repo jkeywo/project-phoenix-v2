@@ -841,13 +841,37 @@
   </style>
 </head>
 <body>
-  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
+  <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
+    // Session token for actions from the host page's own consoles. Must match
+    // console_bridge::LOCAL_CONSOLE_TOKEN in Rust (src/console_bridge.rs).
+    var LOCAL_CONSOLE_TOKEN = '__local_console__';
+
+    // send(type, data?) for the local-console path: wraps the ClientMessage
+    // envelope and injects it under the local-console token, exactly like a
+    // PeerJS client message would arrive (issue #822).
+    window.__localConsoleSend = function(type, data) {
+      var msg = data !== undefined ? { type: type, data: data } : { type: type };
+      window.wasmBindings.wasm_receive_message(LOCAL_CONSOLE_TOKEN, JSON.stringify(msg));
+    };
+
+    // Host-page action entry point. Takes the standard { action, ... }
+    // console envelope (as JSON) and dispatches it through the same
+    // gui/action-map.js table the phone clients use, emitting full
+    // ClientMessages via __localConsoleSend (issue #822 — the UiAction
+    // translation layer in Rust is gone). Kept under the __sendAction name
+    // because gui/console-core.js's transport ladder targets it.
     window.__sendAction = function(json) {
       if (window.ipc) {
         window.ipc.postMessage(json);          // wry native server
+        return;
+      }
+      var action;
+      try { action = JSON.parse(json); } catch (_) { return; }
+      if (typeof window.dispatchConsoleAction === 'function') {
+        window.dispatchConsoleAction(action, window.__localConsoleSend);
       } else {
-        window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
+        console.warn('[Phoenix] dropped console action before action-map loaded:', json);
       }
     };
 
@@ -1094,6 +1118,11 @@
     window.phStrings = { t, has, applyToDom };
     applyToDom(document);
   </script>
+  <!-- Console-action dispatch table (issue #822): the host page routes its
+       embedded console actions through the same gui/action-map.js →
+       ClientMessage path the phone clients use. The module publishes
+       window.dispatchConsoleAction for the classic-script __sendAction shim. -->
+  <script type="module" src="gui/action-map.js"></script>
 
   <script>
     // Resolve a string id via the module bridge; falls back to the raw id
@@ -2243,8 +2272,8 @@ function finishInit() {
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
-  // Expose the inbound action entry point and the Host Channel registration.
-  window.wasm_ui_action = wasmBindings.wasm_ui_action;
+  // Expose the Host Channel registration. Inbound actions route through
+  // window.__sendAction → gui/action-map.js → wasm_receive_message (issue #822).
   window.wasm_force_start = wasmBindings.wasm_force_start;
   window.set_host_channel_callback = wasmBindings.set_host_channel_callback;
 
@@ -2285,7 +2314,9 @@ function finishInit() {
   // ── HTML console action relay (issue #428) ───────────────────────────────
   // Standalone console tabs (gui/*.html opened as their own browser tab —
   // ADR-0001 §3 transport target 4) send their actions on
-  // BroadcastChannel('phoenix-console-state'); forward them to wasm_ui_action.
+  // BroadcastChannel('phoenix-console-state'); route them through the same
+  // __sendAction → gui/action-map.js dispatcher as the host page's own
+  // consoles (issue #822).
   // The outbound console-STATE half of this relay (window.__updateConsole +
   // flush_console_state) was removed with the dormant console-preview channel
   // in issue #818 — Rust never produced ConsoleStateChanged.
@@ -2294,8 +2325,8 @@ function finishInit() {
       : null;
   if (_consoleBroadcast) {
     _consoleBroadcast.onmessage = function(e) {
-      if (e.data && e.data.type === 'console_action' && typeof wasm_ui_action === 'function') {
-        wasm_ui_action(e.data.payload);
+      if (e.data && e.data.type === 'console_action') {
+        window.__sendAction(e.data.payload);
       }
     };
   }

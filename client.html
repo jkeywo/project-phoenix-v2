@@ -1855,13 +1855,22 @@
       // are silently deferred (non-critical � they arrive after module load).
       if (action.action === 'set_sensors_target' && action.uuid) {
         if (window.simState) window.simState.sensorsTarget = action.uuid;
-        send('SetScienceTarget', { uuid: action.uuid });
+        send('ControlSystem', {
+          target: 'sensors',
+          payload: { type: 'SetScienceTarget', data: { uuid: action.uuid } },
+        });
       } else if (action.action === 'set_navigation_waypoint'
           && Number.isFinite(action.x)
           && Number.isFinite(action.z)) {
-        send('SetNavigationWaypoint', { x: action.x, z: action.z });
+        send('ControlSystem', {
+          target: 'navigation',
+          payload: { type: 'SetNavigationWaypoint', data: { x: action.x, z: action.z } },
+        });
       } else if (action.action === 'clear_navigation_waypoint') {
-        send('ClearNavigationWaypoint');
+        send('ControlSystem', {
+          target: 'navigation',
+          payload: { type: 'ClearNavigationWaypoint' },
+        });
       }
     });
 

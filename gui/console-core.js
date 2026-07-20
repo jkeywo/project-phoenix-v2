@@ -37,9 +37,10 @@
  * @returns {{ sendAction: function(action: string, payload?: object): void }}
  *   sendAction — Outbound action dispatcher. Injects `console: name` and
  *   stringifies, then routes via the 4-way transport detection:
- *     1. iframe postMessage (running inside client.html)
+ *     1. iframe postMessage  (running inside client.html)
  *     2. window.ipc          (wry native host)
- *     3. wasmBindings.wasm_ui_action  (browser WASM)
+ *     3. window.__sendAction (browser WASM host page — server.html routes the
+ *        envelope through gui/action-map.js, issue #822)
  *     4. BroadcastChannel    (separate-tab mode)
  */
 // strings-boot's top-level await blocks this module (and therefore every
@@ -76,9 +77,9 @@ export function initConsole({ name, render }) {
   // no browser-WASM bindings.
   var _hasParent     = (typeof window !== 'undefined') && window !== window.parent;
   var _hasWryHost    = (typeof window !== 'undefined') && !!window.ipc;
-  var _hasWasmAction = (typeof window !== 'undefined') && !!(window.wasmBindings
-    && typeof window.wasmBindings.wasm_ui_action === 'function');
-  var _useBroadcastInbound = !_hasParent && !_hasWryHost && !_hasWasmAction;
+  var _hasWasmHost   = (typeof window !== 'undefined') && !!(window.wasmBindings
+    && typeof window.wasmBindings.wasm_receive_message === 'function');
+  var _useBroadcastInbound = !_hasParent && !_hasWryHost && !_hasWasmHost;
 
   var _bc = (_useBroadcastInbound && typeof BroadcastChannel !== 'undefined')
     ? new BroadcastChannel('phoenix-console-state')
@@ -117,10 +118,9 @@ export function initConsole({ name, render }) {
       _win.parent.postMessage({ type: 'console_action', payload: json }, '*');
     } else if (_win && _win.ipc) {
       _win.ipc.postMessage(json);
-    } else if (_win && _win.wasmBindings &&
-               typeof _win.wasmBindings.wasm_ui_action === 'function') {
-      _win.wasmBindings.wasm_ui_action(json);
     } else if (_win && typeof _win.__sendAction === 'function') {
+      // Browser WASM host page (server.html): __sendAction dispatches the
+      // envelope through gui/action-map.js → ClientMessage (issue #822).
       _win.__sendAction(json);
     } else if (_bc) {
       _bc.postMessage({ type: 'console_action', payload: json });

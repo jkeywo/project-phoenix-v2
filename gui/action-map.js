@@ -301,17 +301,23 @@ export const ACTION_MAP = Object.freeze({
    */
   set_navigation_waypoint: (a, send) => {
     if (Number.isFinite(a.x) && Number.isFinite(a.z)) {
-      const payload = { x: a.x, z: a.z };
+      const data = { x: a.x, z: a.z };
       if (typeof a.source_uuid === 'string' && a.source_uuid.length > 0) {
-        payload.source_uuid = a.source_uuid;
+        data.source_uuid = a.source_uuid;
       }
-      send('SetNavigationWaypoint', payload);
+      send('ControlSystem', {
+        target: 'navigation',
+        payload: { type: 'SetNavigationWaypoint', data },
+      });
     }
   },
 
   /** Clear the shared custom navigation waypoint. */
   clear_navigation_waypoint: (a, send) => {
-    send('ClearNavigationWaypoint');
+    send('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'ClearNavigationWaypoint' },
+    });
   },
 
   /**
@@ -327,27 +333,53 @@ export const ACTION_MAP = Object.freeze({
 
   /** Open a comms channel to a contact by UUID. */
   hail: (a, send) => {
-    if (a.target_uuid) send('Hail', { target_uuid: a.target_uuid });
+    if (a.target_uuid) {
+      send('ControlSystem', {
+        target: 'comms',
+        payload: { type: 'Hail', data: { target_uuid: a.target_uuid } },
+      });
+    }
   },
 
   /** Mark a comms message as selected / read. */
   select_comms_message: (a, send) => {
-    if (a.message_id) send('SelectCommsMessage', { message_id: a.message_id });
+    if (a.message_id) {
+      send('ControlSystem', {
+        target: 'comms',
+        payload: { type: 'SelectCommsMessage', data: { message_id: a.message_id } },
+      });
+    }
   },
 
   /** Send a pre-written response to a comms message. */
   respond_to_message: (a, send) => {
-    if (a.message_id) send('RespondToMessage', { message_id: a.message_id, response_index: a.response_index });
+    if (a.message_id) {
+      send('ControlSystem', {
+        target: 'comms',
+        payload: {
+          type: 'RespondToMessage',
+          data: { message_id: a.message_id, response_index: a.response_index },
+        },
+      });
+    }
   },
 
   /** Clear all read/acknowledged comms messages from the inbox. */
   clear_comms: (a, send) => {
-    send('ClearComms');
+    send('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'ClearComms' },
+    });
   },
 
   /** Send the selected comms message to the view screen. */
   show_on_screen: (a, send) => {
-    if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
+    if (a.message_id) {
+      send('ControlSystem', {
+        target: 'comms',
+        payload: { type: 'ShowOnScreen', data: { message_id: a.message_id } },
+      });
+    }
   },
 
   /** Set the phaser frequency to an explicit value (0.0–1.0).
@@ -370,6 +402,26 @@ export const ACTION_MAP = Object.freeze({
         data: { lateral: a.lateral || 0 },
       },
     });
+  },
+
+  /**
+   * Return everyone to the Lobby from the GameOver screen (issue #822).
+   *
+   * Sent by the host page's game-over overlay and the phone client's
+   * game-over overlay alike; the server only honours it during GameOver.
+   */
+  return_to_lobby: (a, send) => {
+    send('ReturnToLobby');
+  },
+
+  /**
+   * Confirm the scenario re-selection after ReturnToLobby (issue #822).
+   *
+   * Only the host page's scenario panel sends this; the server additionally
+   * gates it to the host local-console token.
+   */
+  confirm_scenario: (a, send) => {
+    send('ConfirmScenario');
   },
 });
 

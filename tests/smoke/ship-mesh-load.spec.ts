@@ -61,7 +61,7 @@ test.skip('NPC ship GLB model loads (200) after game start', async ({ context })
 
   // Point the viewscreen at the raider (it sits fore-starboard of spawn) and
   // give the asset server time to fetch + spawn the SceneRoot.
-  await helm.send('SetView', { mode: { kind: 'Camera', data: 'Starboard' } });
+  await helm.send('ControlSystem', { target: 'viewscreen', payload: { type: 'SetView', data: { mode: { kind: 'Camera', data: 'Starboard' } } } });
 
   await serverPage.bringToFront();
 

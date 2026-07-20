@@ -290,9 +290,25 @@ describe('multi-speaker thread summaries', () => {
 
 describe('outbound message builders', () => {
   it('build serde tag/content wire objects', () => {
-    expect(hailMessage('u1')).toEqual({ type: 'Hail', data: { target_uuid: 'u1' } });
-    expect(selectCommsMessage('m1')).toEqual({ type: 'SelectCommsMessage', data: { message_id: 'm1' } });
-    expect(respondToMessage('m1', 2)).toEqual({ type: 'RespondToMessage', data: { message_id: 'm1', response_index: 2 } });
-    expect(clearCommsMessage()).toEqual({ type: 'ClearComms' });
+    // Post-#822: full ControlSystem envelopes targeting the comms system.
+    expect(hailMessage('u1')).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'comms', payload: { type: 'Hail', data: { target_uuid: 'u1' } } },
+    });
+    expect(selectCommsMessage('m1')).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'comms', payload: { type: 'SelectCommsMessage', data: { message_id: 'm1' } } },
+    });
+    expect(respondToMessage('m1', 2)).toEqual({
+      type: 'ControlSystem',
+      data: {
+        target: 'comms',
+        payload: { type: 'RespondToMessage', data: { message_id: 'm1', response_index: 2 } },
+      },
+    });
+    expect(clearCommsMessage()).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'comms', payload: { type: 'ClearComms' } },
+    });
   });
 });

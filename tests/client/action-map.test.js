@@ -8,13 +8,14 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 34 expected action keys', () => {
+  it('contains exactly the 36 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
       'charge_blaster_start',
       'clear_comms',
       'clear_navigation_waypoint',
+      'confirm_scenario',
       'dispatch_repair_team',
       'fire_blaster',
       'fire_phaser',
@@ -23,6 +24,7 @@ describe('ACTION_MAP', () => {
       'helm_input',
       'load_tube',
       'respond_to_message',
+      'return_to_lobby',
       'select_comms_message',
       'set_boost',
       'set_helm',
@@ -466,10 +468,13 @@ describe('set_sensors_target', () => {
 });
 
 describe('hail', () => {
-  it('calls send Hail with target_uuid', () => {
+  it('sends ControlSystem Hail targeting comms (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.hail({ action: 'hail', target_uuid: 'npc-1' }, send);
-    expect(send).toHaveBeenCalledWith('Hail', { target_uuid: 'npc-1' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'Hail', data: { target_uuid: 'npc-1' } },
+    });
   });
 
   it('does nothing when target_uuid is absent', () => {
@@ -480,10 +485,13 @@ describe('hail', () => {
 });
 
 describe('select_comms_message', () => {
-  it('calls send SelectCommsMessage with message_id', () => {
+  it('sends ControlSystem SelectCommsMessage targeting comms (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.select_comms_message({ action: 'select_comms_message', message_id: 'msg-42' }, send);
-    expect(send).toHaveBeenCalledWith('SelectCommsMessage', { message_id: 'msg-42' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'SelectCommsMessage', data: { message_id: 'msg-42' } },
+    });
   });
 
   it('does nothing when message_id is absent', () => {
@@ -494,10 +502,13 @@ describe('select_comms_message', () => {
 });
 
 describe('respond_to_message', () => {
-  it('calls send RespondToMessage with message_id and response_index', () => {
+  it('sends ControlSystem RespondToMessage targeting comms (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.respond_to_message({ action: 'respond_to_message', message_id: 'msg-1', response_index: 2 }, send);
-    expect(send).toHaveBeenCalledWith('RespondToMessage', { message_id: 'msg-1', response_index: 2 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'RespondToMessage', data: { message_id: 'msg-1', response_index: 2 } },
+    });
   });
 
   it('does nothing when message_id is absent', () => {
@@ -508,19 +519,25 @@ describe('respond_to_message', () => {
 });
 
 describe('clear_comms', () => {
-  it('calls send ClearComms with no payload', () => {
+  it('sends ControlSystem ClearComms targeting comms (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.clear_comms({}, send);
-    expect(send).toHaveBeenCalledWith('ClearComms');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'ClearComms' },
+    });
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('show_on_screen', () => {
-  it('calls send ShowOnScreen with message_id', () => {
+  it('sends ControlSystem ShowOnScreen targeting comms (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.show_on_screen({ action: 'show_on_screen', message_id: 'msg-7' }, send);
-    expect(send).toHaveBeenCalledWith('ShowOnScreen', { message_id: 'msg-7' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'comms',
+      payload: { type: 'ShowOnScreen', data: { message_id: 'msg-7' } },
+    });
   });
 
   it('does nothing when message_id is absent', () => {
@@ -542,10 +559,13 @@ describe('set_navigation_chart', () => {
 });
 
 describe('set_navigation_waypoint', () => {
-  it('calls send SetNavigationWaypoint with coordinates', () => {
+  it('sends ControlSystem SetNavigationWaypoint targeting navigation (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.set_navigation_waypoint({ action: 'set_navigation_waypoint', x: 12.5, z: -8 }, send);
-    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 12.5, z: -8 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'SetNavigationWaypoint', data: { x: 12.5, z: -8 } },
+    });
   });
 
   it('does nothing for invalid coordinates', () => {
@@ -560,10 +580,12 @@ describe('set_navigation_waypoint', () => {
       { action: 'set_navigation_waypoint', x: 50, z: -100, source_uuid: 'station-alpha' },
       send,
     );
-    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', {
-      x: 50,
-      z: -100,
-      source_uuid: 'station-alpha',
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: {
+        type: 'SetNavigationWaypoint',
+        data: { x: 50, z: -100, source_uuid: 'station-alpha' },
+      },
     });
   });
 
@@ -573,7 +595,10 @@ describe('set_navigation_waypoint', () => {
       { action: 'set_navigation_waypoint', x: 1, z: 2, source_uuid: '' },
       send,
     );
-    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 1, z: 2 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'SetNavigationWaypoint', data: { x: 1, z: 2 } },
+    });
   });
 
   it('omits source_uuid when null (legacy free-waypoint path)', () => {
@@ -582,15 +607,43 @@ describe('set_navigation_waypoint', () => {
       { action: 'set_navigation_waypoint', x: 3, z: 4, source_uuid: null },
       send,
     );
-    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 3, z: 4 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'SetNavigationWaypoint', data: { x: 3, z: 4 } },
+    });
   });
 });
 
 describe('clear_navigation_waypoint', () => {
-  it('calls send ClearNavigationWaypoint', () => {
+  it('sends ControlSystem ClearNavigationWaypoint targeting navigation (issue #822)', () => {
     const send = mkSend();
     ACTION_MAP.clear_navigation_waypoint({}, send);
-    expect(send).toHaveBeenCalledWith('ClearNavigationWaypoint');
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'navigation',
+      payload: { type: 'ClearNavigationWaypoint' },
+    });
+  });
+});
+
+// ── return_to_lobby / confirm_scenario (issue #822) ───────────────────────────
+// Host-page lobby actions now route through the same action map as everything
+// else; each maps to its bare ClientMessage variant.
+
+describe('return_to_lobby', () => {
+  it('sends the bare ReturnToLobby client message', () => {
+    const send = mkSend();
+    ACTION_MAP.return_to_lobby({ action: 'return_to_lobby' }, send);
+    expect(send).toHaveBeenCalledWith('ReturnToLobby');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('confirm_scenario', () => {
+  it('sends the bare ConfirmScenario client message', () => {
+    const send = mkSend();
+    ACTION_MAP.confirm_scenario({ action: 'confirm_scenario' }, send);
+    expect(send).toHaveBeenCalledWith('ConfirmScenario');
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

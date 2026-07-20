@@ -194,7 +194,8 @@ impl Plugin for LobbyPlugin {
                     .before(tick_countdown)
                     .run_if(in_state(GamePhase::GameOver)),
             )
-            // ConfirmScenario gates on Lobby (scenario picker confirmation).
+            // ConfirmScenario gates on Lobby (scenario picker confirmation)
+            // and on the host local-console token (issue #822).
             .add_systems(
                 Update,
                 handle_confirm_scenario_system
@@ -615,7 +616,9 @@ pub fn handle_return_to_lobby_system(
 
 /// Per-variant system for `ClientMessage::ConfirmScenario` (issue #734). Gated
 /// on Lobby. Needs almost nothing, but still routes its outbound
-/// (`ScenarioLoaded`) through `apply_result`.
+/// (`ScenarioLoaded`) through `apply_result`. The pure handler additionally
+/// gates on the sender token (issue #822): only the host page's
+/// `LOCAL_CONSOLE_TOKEN` may confirm a scenario.
 pub fn handle_confirm_scenario_system(
     mut inbound: MessageReader<InboundMessage>,
     state: Res<State<GamePhase>>,
@@ -638,7 +641,7 @@ pub fn handle_confirm_scenario_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_confirm_scenario(phase.clone());
+            let result = lobby_handler::handle_confirm_scenario(&ev.token, phase.clone());
             apply_result(
                 result,
                 &mut outbox,
@@ -649,7 +652,7 @@ pub fn handle_confirm_scenario_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_confirm_scenario(phase.clone());
+            let result = lobby_handler::handle_confirm_scenario(&ev.token, phase.clone());
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,

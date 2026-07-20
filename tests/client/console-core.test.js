@@ -84,22 +84,24 @@ describe('sendAction — transport selection', () => {
     expect(ipcPost).toHaveBeenCalledWith(expected);
   });
 
-  it('calls wasmBindings.wasm_ui_action when present (WASM mode)', () => {
-    const wasmFn = vi.fn();
-    setup({ wasmBindings: { wasm_ui_action: wasmFn } });
+  it('routes via window.__sendAction on the WASM host page (issue #822)', () => {
+    // server.html defines __sendAction (dispatching through gui/action-map.js)
+    // alongside wasmBindings; the ladder must hand the raw envelope to it.
+    const sendActionFn = vi.fn();
+    setup({ wasmBindings: { wasm_receive_message: vi.fn() }, __sendAction: sendActionFn });
     sendAction('toggle_red_alert', {});
     const expected = JSON.stringify({ action: 'toggle_red_alert', console: 'Test' });
-    expect(wasmFn).toHaveBeenCalledWith(expected);
+    expect(sendActionFn).toHaveBeenCalledWith(expected);
   });
 
-  it('does not call wasmBindings if wasm_ui_action is not a function', () => {
-    const { bc } = setup({ wasmBindings: { wasm_ui_action: 'not-a-function' } });
+  it('falls through to BroadcastChannel when wasmBindings exist without __sendAction', () => {
+    const { bc } = setup({ wasmBindings: { wasm_receive_message: 'not-a-function' } });
     sendAction('toggle_red_alert', {});
     // Falls through to BroadcastChannel
     expect(bc.instance.postMessage).toHaveBeenCalled();
   });
 
-  it('calls window.__sendAction when present (legacy/test transport)', () => {
+  it('calls window.__sendAction when present (host page / test transport)', () => {
     const sendActionFn = vi.fn();
     setup({ __sendAction: sendActionFn });
     sendAction('toggle_red_alert', {});
@@ -319,9 +321,9 @@ describe('initConsole — BroadcastChannel inbound context gating (#482)', () =>
     );
   });
 
-  it('does NOT attach the BC listener when wasmBindings.wasm_ui_action is present (WASM mode)', () => {
+  it('does NOT attach the BC listener when wasmBindings.wasm_receive_message is present (WASM mode)', () => {
     withBC(
-      () => { global.window.wasmBindings = { wasm_ui_action: vi.fn() }; },
+      () => { global.window.wasmBindings = { wasm_receive_message: vi.fn() }; },
       () => {
         const render = vi.fn();
         initConsole({ name: 'Helm', render });

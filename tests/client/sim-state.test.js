@@ -408,21 +408,35 @@ describe('message builders', () => {
     expect(firePhaserMessage('port')).toEqual({ type: 'FirePhaser', data: { bank: 'port' } });
     expect(fireTorpedoMessage('fore', 'tgt')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: 'tgt' } });
     expect(fireTorpedoMessage('fore')).toEqual({ type: 'FireTorpedo', data: { tube: 'fore', target_uuid: null } });
-    expect(setTargetMessage('u')).toEqual({ type: 'SetTarget', data: { uuid: 'u' } });
-    expect(setScienceTargetMessage('u')).toEqual({ type: 'SetScienceTarget', data: { uuid: 'u' } });
-    expect(setSensorsTargetMessage('u')).toEqual({ type: 'SetSensorsTarget', data: { uuid: 'u' } });
-    expect(setPhaserModeMessage('Manual')).toEqual({ type: 'SetPhaserMode', data: { mode: 'Manual' } });
+    // Post-#822 (short-form shim retired): system controls are full
+    // ControlSystem envelopes addressing the owning fine system.
+    expect(setTargetMessage('u')).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'tactical-radar', payload: { type: 'SetTarget', data: { uuid: 'u' } } },
+    });
+    expect(setScienceTargetMessage('u')).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'sensors', payload: { type: 'SetScienceTarget', data: { uuid: 'u' } } },
+    });
+    // The sensors alias emits the same wire message as a science target —
+    // the old short-form SetSensorsTarget → SetScienceTarget rename now
+    // lives in the builder, not the codec.
+    expect(setSensorsTargetMessage('u')).toEqual(setScienceTargetMessage('u'));
+    expect(setPhaserModeMessage('Manual')).toEqual({
+      type: 'ControlSystem',
+      data: { target: 'phaser-control', payload: { type: 'SetPhaserMode', data: { mode: 'Manual' } } },
+    });
   });
 
   it('togglePhaserModeMessage flips Auto <-> Manual', () => {
-    expect(togglePhaserModeMessage('Auto').data.mode).toBe('Manual');
-    expect(togglePhaserModeMessage('Manual').data.mode).toBe('Auto');
+    expect(togglePhaserModeMessage('Auto').data.payload.data.mode).toBe('Manual');
+    expect(togglePhaserModeMessage('Manual').data.payload.data.mode).toBe('Auto');
   });
 
   it('setPhaserFrequencyMessage clamps to [0, 1]', () => {
-    expect(setPhaserFrequencyMessage(1.5).data.frequency).toBe(1.0);
-    expect(setPhaserFrequencyMessage(-0.5).data.frequency).toBe(0.0);
-    expect(setPhaserFrequencyMessage(0.25).data.frequency).toBe(0.25);
+    expect(setPhaserFrequencyMessage(1.5).data.payload.data.frequency).toBe(1.0);
+    expect(setPhaserFrequencyMessage(-0.5).data.payload.data.frequency).toBe(0.0);
+    expect(setPhaserFrequencyMessage(0.25).data.payload.data.frequency).toBe(0.25);
   });
 });
 

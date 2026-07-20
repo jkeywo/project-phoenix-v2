@@ -18,7 +18,6 @@ use {
     crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, HudStateChanged, LobbyStateChanged,
-        LOCAL_CONSOLE_TOKEN,
     },
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
@@ -176,10 +175,6 @@ thread_local! {
     /// `drain_force_start` each `PreUpdate` frame to transition directly to
     /// `InProgress` without any connected players (fully AI-crewed ship).
     static PENDING_FORCE_START: RefCell<bool> = const { RefCell::new(false) };
-
-    /// Raw `__sendAction` JSON envelopes pushed by `wasm_ui_action`, waiting to
-    /// be decoded and injected into Bevy by `drain_ui_actions`.
-    static UI_ACTION_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
     /// The single Host Channel callback registered by the host page (issue
     /// #818). Signature: `callback(name: string, payload: any)` where `name`
@@ -526,7 +521,6 @@ pub fn wasm_init() {
             drain_inbound,
             drain_disconnects,
             drain_debug_toggles,
-            drain_ui_actions,
             drain_force_start,
         ),
     )
@@ -581,17 +575,6 @@ pub fn wasm_player_disconnected(token: &str) {
 pub fn set_message_callback(callback: Function) {
     OUTBOUND_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by the HTML transport shim (ADR-0001 §3) when a local HTML console
-/// triggers an action. `json` is the raw `__sendAction` envelope; it is queued
-/// and decoded by `drain_ui_actions` on the next `PreUpdate` frame.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_ui_action(json: &str) {
-    UI_ACTION_QUEUE.with(|q| {
-        q.borrow_mut().push(json.to_string());
     });
 }
 
@@ -1127,31 +1110,6 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
             }
         }
     });
-}
-
-/// Drains the UI-action queue each frame: decodes each `__sendAction` envelope
-/// into a `UiAction`, maps it to the corresponding `ClientMessage`, and injects
-/// it as an `InboundMessage` from the local console token so the existing
-/// weapons handlers process it. Decode failures are logged as warnings.
-#[cfg(target_arch = "wasm32")]
-fn drain_ui_actions(mut writer: MessageWriter<InboundMessage>) {
-    let pending: Vec<String> = UI_ACTION_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
-    for json in pending {
-        match codec::decode_ui_action(&json) {
-            Ok(action) => {
-                for msg in messages::ui_action_to_client_messages(&action) {
-                    writer.write(InboundMessage {
-                        token: LOCAL_CONSOLE_TOKEN.to_string(),
-                        msg,
-                    });
-                }
-            }
-            Err(_) => {
-                let snippet: String = json.chars().take(80).collect();
-                bevy::log::warn!("decode failure from local console: payload={}", snippet);
-            }
-        }
-    }
 }
 
 /// The Host Channel flush (issue #818): drains every message-drained host

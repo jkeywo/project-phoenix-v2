@@ -319,7 +319,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs]
+      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/scenario.rs]
       tests: [cargo test]
 
   - state: world-layer-runtime-state
@@ -334,7 +334,7 @@ entities:
       writers: [world-layer-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs]
+      paths: [src/world/server.rs, src/world/layers.rs]
 
   - component: world-trigger-action-dispatcher
     core:
@@ -385,5 +385,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs]
+      paths: [src/world/server.rs, src/world/layers.rs]
       tests: [cargo test]

@@ -7,20 +7,16 @@ use crate::lobby::{Target, WorldResource};
 use crate::messages::{GamePhase, ServerMessage};
 use crate::objectives::ObjectiveManager;
 use crate::simulation::SimOutbox;
-use crate::world::content::{trigger_states_from_world, TriggerAction, TriggerState, WorldEvent};
+#[cfg(test)]
+use crate::world::content::TriggerAction;
+use crate::world::content::{trigger_states_from_world, TriggerState, WorldEvent};
+use crate::world::delayed::{partition_delayed_actions, DelayedAction};
 use crate::world::dispatch::{
     dispatch_action, ActionCmd, DispatchContext, DispatchResult, LayerView,
     WORLD_MODIFIER_SOURCE_ID,
 };
-
-/// An action queued for deferred dispatch via the `action_delays` trigger field.
-#[derive(Clone, Debug)]
-pub struct DelayedAction {
-    pub action: TriggerAction,
-    pub origin_layer: Option<String>,
-    pub entity_name: Option<String>,
-    pub fire_at_elapsed: f32,
-}
+use crate::world::layers::{evaluate_layer_load, evaluate_layer_unload, LayerLoadOutcome};
+use crate::world::scenario::evaluate_scenario_load;
 
 // -- Resources --------------------------------------------------------------
 
@@ -1503,18 +1499,13 @@ fn tick_delayed_actions(
     // `WasmTemplateLoader` per system run, both targets.
     let template_loader = crate::entity_loader::WasmTemplateLoader;
 
-    let mut ready: Vec<DelayedAction> = Vec::new();
-    let mut still_pending: Vec<DelayedAction> = Vec::new();
-    for pda in runtime.pending_delayed_actions.drain(..) {
-        if elapsed >= pda.fire_at_elapsed {
-            ready.push(pda);
-        } else {
-            still_pending.push(pda);
-        }
-    }
-    runtime.pending_delayed_actions = still_pending;
+    // Ready/still-pending is a pure decision (`world::delayed`); only the
+    // elapsed-clock read above and the dispatch below touch Bevy.
+    let queued = std::mem::take(&mut runtime.pending_delayed_actions);
+    let schedule = partition_delayed_actions(queued, elapsed);
+    runtime.pending_delayed_actions = schedule.still_pending;
 
-    for pda in ready {
+    for pda in schedule.ready {
         // Same live-store rule as `tick_trigger_pipeline`: re-project per action so
         // each dispatch sees the previous one's writes.
         let name_to_uuid = runtime.name_to_uuid.clone();
@@ -1731,44 +1722,38 @@ fn apply_pending_scenario_loads(
     let paths: Vec<String> = pending.0.drain(..).collect();
 
     for path in paths {
-        // De-duplicate: skip paths already merged.
-        if runtime.loaded_scenario_paths.contains(&path) {
+        // Decisions (dedup / requeue / parse handling) are pure
+        // (`world::scenario`); this applier resolves the TOML (I/O) and
+        // performs the merges. The dedup check happens before the TOML read
+        // so a duplicate never touches the WASM fetch queue.
+        let already_loaded = runtime.loaded_scenario_paths.contains(&path);
+        let toml_str = if already_loaded {
+            None
+        } else {
+            load_scenario_toml(&path)
+        };
+        let result = evaluate_scenario_load(&path, already_loaded, toml_str.as_deref());
+        for warning in &result.warnings {
+            bevy::log::error!("apply_pending_scenario_loads: {warning}");
+        }
+        if result.requeue {
+            // WASM: TOML not yet available; re-queue for the next frame.
+            pending.0.push(path);
             continue;
         }
-
-        let toml_str_opt = load_scenario_toml(&path);
-        match toml_str_opt {
-            None => {
-                // WASM: TOML not yet available; re-queue for the next frame.
-                pending.0.push(path);
-            }
-            Some(toml_str) => {
-                match crate::world::config::parse_world(&toml_str) {
-                    Err(e) => {
-                        bevy::log::error!(
-                            "apply_pending_scenario_loads: failed to parse {}: {}",
-                            path,
-                            e
-                        );
-                        runtime.loaded_scenario_paths.insert(path);
-                    }
-                    Ok(scenario_config) => {
-                        // Merge trigger states (don't overwrite existing ones).
-                        let new_triggers = trigger_states_from_world(&scenario_config);
-                        runtime.trigger_states.extend(new_triggers);
-
-                        // Merge comms template states + contacts into
-                        // the live comms runtime (skips duplicate
-                        // contacts by uuid).
-                        let _ = crate::comms::server::merge_world_comms(
-                            &mut comms,
-                            &scenario_config,
-                            &runtime.name_to_uuid,
-                        );
-                        runtime.loaded_scenario_paths.insert(path);
-                    }
-                }
-            }
+        // Merge trigger states (don't overwrite existing ones).
+        runtime.trigger_states.extend(result.new_trigger_states);
+        if let Some(scenario_config) = result.scenario_config {
+            // Merge comms template states + contacts into the live comms
+            // runtime (skips duplicate contacts by uuid).
+            let _ = crate::comms::server::merge_world_comms(
+                &mut comms,
+                &scenario_config,
+                &runtime.name_to_uuid,
+            );
+        }
+        if result.mark_loaded {
+            runtime.loaded_scenario_paths.insert(path);
         }
     }
 }
@@ -1844,100 +1829,103 @@ fn apply_world_layer_changes(
     for change in changes {
         match change {
             WorldLayerChange::Load { path, loader_path } => {
-                if layer_map.0.contains_key(&path) {
-                    // Already loaded Ã¢â‚¬â€ de-duplicate, no-op.
-                    continue;
+                // Decisions (dedup / requeue / parse handling / origin
+                // tagging / name→UUID assignment) are pure (`world::layers`);
+                // this applier resolves the TOML (I/O), spawns entities,
+                // merges comms, and mutates the layer map. The dedup check
+                // happens before the TOML read so a duplicate never touches
+                // the WASM fetch queue.
+                let already_loaded = layer_map.0.contains_key(&path);
+                let toml_str = if already_loaded {
+                    None
+                } else {
+                    load_scenario_toml(&path)
+                };
+                let result = evaluate_layer_load(
+                    &path,
+                    already_loaded,
+                    toml_str.as_deref(),
+                    crate::entity_loader::assign_uuid,
+                );
+                for warning in &result.warnings {
+                    bevy::log::error!("apply_world_layer_changes: {warning}");
                 }
-                let toml_str_opt = load_scenario_toml(&path);
-                match toml_str_opt {
-                    None => {
+                match result.outcome {
+                    LayerLoadOutcome::AlreadyLoaded => {
+                        // De-duplicate, no-op.
+                        continue;
+                    }
+                    LayerLoadOutcome::TomlUnavailable => {
                         // WASM: re-queue until the fetch completes.
                         pending.0.push(WorldLayerChange::Load { path, loader_path });
                     }
-                    Some(toml_str) => {
-                        match crate::world::config::parse_world(&toml_str) {
-                            Err(e) => {
-                                bevy::log::error!(
-                                    "apply_world_layer_changes: failed to parse {path}: {e}"
-                                );
-                                // Insert an empty entry so we don't retry a broken file.
-                                layer_map.0.insert(path, WorldRuntime::default());
-                            }
-                            Ok(mut scenario_config) => {
-                                let mut trigger_states =
-                                    trigger_states_from_world(&scenario_config);
-                                // Tag every trigger state from this layer with
-                                // its origin path so `spawn_entity` actions can
-                                // attach the new entity to the right
-                                // `WorldLayerMap` entry (issue #417).
-                                for ts in trigger_states.iter_mut() {
-                                    ts.origin_layer = Some(path.clone());
-                                }
-                                // Merge into live runtime.
-                                runtime.trigger_states.extend(trigger_states.clone());
-
-                                // Assign UUIDs to named entities in this layer's config
-                                // and register them in the live runtime's name_to_uuid map.
-                                let new_names = crate::world::config::assign_named_entity_uuids(
-                                    &scenario_config.entities,
-                                    crate::entity_loader::assign_uuid,
-                                );
-                                for (name, uuid) in &new_names {
-                                    scenario_config
-                                        .name_to_uuid
-                                        .insert(name.clone(), uuid.clone());
-                                    runtime.name_to_uuid.insert(name.clone(), uuid.clone());
-                                }
-
-                                // Spawn the layer's [[entity]] blocks into the ECS.
-                                // On native the global config cache is always empty (no WASM
-                                // pre-load step), so we build a local cache by reading each
-                                // referenced template from disk.  WASM uses the pre-loaded
-                                // global cache as normal.
-                                let config_cache = build_layer_config_cache(&scenario_config);
-                                let spawned_entities = spawn_immediate_entities_internal(
-                                    &mut commands,
-                                    &scenario_config,
-                                    &config_cache,
-                                    Some(&runtime.flags),
-                                );
-
-                                // Merge comms template states + contacts
-                                // into the live comms runtime (skips
-                                // duplicate contacts by uuid); snapshot
-                                // the layer's states for UnloadWorld.
-                                let comms_template_states = crate::comms::server::merge_world_comms(
-                                    &mut comms,
-                                    &scenario_config,
-                                    &runtime.name_to_uuid,
-                                );
-
-                                // Issue #415: emit a WorldLoaded event so
-                                // `on_world_loaded` triggers declared inside
-                                // this sub-world (and merged into the live
-                                // runtime above) fire on the next Update
-                                // tick via `tick_trigger_pipeline`.
-                                runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-
-                                layer_map.0.insert(
-                                    path,
-                                    WorldRuntime {
-                                        trigger_states,
-                                        comms_template_states,
-                                        spawned_entities,
-                                        anchors: scenario_config.anchors.clone(),
-                                        flags: crate::world::flags::FlagStore::new(),
-                                        loader_path,
-                                    },
-                                );
-                            }
+                    LayerLoadOutcome::ParseFailed => {
+                        // Insert an empty entry so we don't retry a broken file.
+                        layer_map.0.insert(path, WorldRuntime::default());
+                    }
+                    LayerLoadOutcome::Loaded {
+                        trigger_states,
+                        name_to_uuid_inserts,
+                        scenario_config,
+                        emit_world_loaded,
+                    } => {
+                        // Merge the origin-tagged trigger states (issue #417)
+                        // into the live runtime and register the layer's
+                        // named entities in the live name_to_uuid map.
+                        runtime.trigger_states.extend(trigger_states.clone());
+                        for (name, uuid) in name_to_uuid_inserts {
+                            runtime.name_to_uuid.insert(name, uuid);
                         }
+
+                        // Spawn the layer's [[entity]] blocks into the ECS.
+                        // On native the global config cache is always empty (no WASM
+                        // pre-load step), so we build a local cache by reading each
+                        // referenced template from disk.  WASM uses the pre-loaded
+                        // global cache as normal.
+                        let config_cache = build_layer_config_cache(&scenario_config);
+                        let spawned_entities = spawn_immediate_entities_internal(
+                            &mut commands,
+                            &scenario_config,
+                            &config_cache,
+                            Some(&runtime.flags),
+                        );
+
+                        // Merge comms template states + contacts
+                        // into the live comms runtime (skips
+                        // duplicate contacts by uuid); snapshot
+                        // the layer's states for UnloadWorld.
+                        let comms_template_states = crate::comms::server::merge_world_comms(
+                            &mut comms,
+                            &scenario_config,
+                            &runtime.name_to_uuid,
+                        );
+
+                        // Issue #415: emit a WorldLoaded event so
+                        // `on_world_loaded` triggers declared inside
+                        // this sub-world (and merged into the live
+                        // runtime above) fire on the next Update
+                        // tick via `tick_trigger_pipeline`.
+                        if emit_world_loaded {
+                            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+                        }
+
+                        layer_map.0.insert(
+                            path,
+                            WorldRuntime {
+                                trigger_states,
+                                comms_template_states,
+                                spawned_entities,
+                                anchors: scenario_config.anchors.clone(),
+                                flags: crate::world::flags::FlagStore::new(),
+                                loader_path,
+                            },
+                        );
                     }
                 }
             }
             WorldLayerChange::Unload(path) => {
                 let Some(layer) = layer_map.0.remove(&path) else {
-                    continue; // Not loaded ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no-op.
+                    continue; // Not loaded - no-op.
                 };
 
                 // Despawn ECS entities that were spawned when this layer loaded.
@@ -1946,21 +1934,13 @@ fn apply_world_layer_changes(
                     commands.entity(*entity).try_despawn();
                 }
 
-                // Remove trigger states belonging to this layer.
-                // We identify them by the condition+actions equality of the stored snapshot.
-                let removed_triggers: std::collections::HashSet<usize> = layer
-                    .trigger_states
-                    .iter()
-                    .filter_map(|ls| {
-                        runtime
-                            .trigger_states
-                            .iter()
-                            .position(|rs| rs.trigger == ls.trigger)
-                    })
-                    .collect();
+                // Remove trigger states belonging to this layer. Which live
+                // indices belong to it is a pure decision (`world::layers`),
+                // matched by trigger equality against the load-time snapshot.
+                let unload = evaluate_layer_unload(&layer.trigger_states, &runtime.trigger_states);
                 let mut ti = 0usize;
                 runtime.trigger_states.retain(|_| {
-                    let keep = !removed_triggers.contains(&ti);
+                    let keep = !unload.triggers_to_remove.contains(&ti);
                     ti += 1;
                     keep
                 });

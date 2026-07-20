@@ -205,8 +205,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs]
-      symbols: [tick_delayed_actions, DelayedAction]
+      paths: [src/world/server.rs, src/world/delayed.rs]
+      symbols: [tick_delayed_actions, DelayedAction, partition_delayed_actions]
       tests: [cargo test]
     evidence:
       - kind: test

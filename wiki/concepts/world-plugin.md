@@ -123,6 +123,9 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 | `src/comms/server.rs` | `CommsWorldPlugin`, `CommsRuntime`, `CommsInboxRes`, `init_comms_runtime`, `tick_pending_follow_ups`, `inject_comms_templates`, `update_comms_range_flags`, `broadcast_comms_state` (consolidated in #816) |
 | `src/comms/content.rs` | Pure (Bevy-free) comms runtime types + evaluators: `CommsTemplateState`, `ActiveDialogue`, `FiredCommsTemplate`, `PendingFollowUp`, `evaluate_comms_templates`, `follow_up_trigger_holds`, `comms_template_states_from_world` |
 | `src/world/dispatch.rs` | Pure trigger-action decision layer: `dispatch_action` + five group functions returning `DispatchResult` for the applier |
+| `src/world/delayed.rs` | Pure (Bevy-free) delayed-action scheduling: `DelayedAction`, `partition_delayed_actions` deciding ready vs. still-pending for the `tick_delayed_actions` applier (#821) |
+| `src/world/layers.rs` | Pure (Bevy-free) world-layer decisions: `evaluate_layer_load` / `evaluate_layer_unload` (dedup, parse handling, origin tagging, name→UUID assignment, trigger-removal set) for the `apply_world_layer_changes` applier; shared `parse_world_triggers` core (#821) |
+| `src/world/scenario.rs` | Pure (Bevy-free) additive scenario-load decisions: `evaluate_scenario_load` (dedup / requeue / parse branches) for the `apply_pending_scenario_loads` applier (#821) |
 | `src/world/config.rs` | Pure (Bevy-free): `WorldConfig`, `parse_world`, `entity_template_paths`, `partition_immediate_entities` |
 | `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `FiredTrigger`, `WorldEvent`, `evaluate_triggers`, `condition_matches` (shared with comms), `trigger_states_from_world`. Schema types re-exported from `world/config` |
 | `src/entities/config_cache.rs` | WASM-side storage: `wasm_load_world` (the real loader), `WORLD_CONFIG` thread-local, `get_world_config` |

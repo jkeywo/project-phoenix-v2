@@ -1598,11 +1598,11 @@ mod tests {
     #[test]
     fn flag_kind_round_trips() {
         for flag in &[
-            crate::flag_kind::FlagKind::CommsJammed,
-            crate::flag_kind::FlagKind::SensorBlind,
+            crate::messages::FlagKind::CommsJammed,
+            crate::messages::FlagKind::SensorBlind,
         ] {
             let json = serde_json::to_string(flag).unwrap();
-            let decoded: crate::flag_kind::FlagKind = serde_json::from_str(&json).unwrap();
+            let decoded: crate::messages::FlagKind = serde_json::from_str(&json).unwrap();
             assert_eq!(*flag, decoded);
         }
     }

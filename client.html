@@ -1519,18 +1519,11 @@
     // removed here; the iframe supersedes them.
 
     // -- iframe state-push helper (wraps gui/iframe-bridge.js) ----------------
-    // Delegates to window.iframeBridgePush when the module is loaded; falls back
-    // to the same inline logic for the rare race where the module hasn't run yet.
     function _pushIframe(iframeEl, consoleName, stateJson) {
-      if (typeof window.iframeBridgePush === 'function') {
-        window.iframeBridgePush(iframeEl, consoleName, stateJson);
-        return;
-      }
-      if (!iframeEl || !iframeEl.contentWindow) return;
-      try {
-        const fn = iframeEl.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn(consoleName, stateJson);
-      } catch (_) {}
+      // Module not loaded yet (boot race): drop the push — pushes are idempotent
+      // snapshots and the next tick repeats them.
+      if (typeof window.iframeBridgePush !== 'function') return;
+      window.iframeBridgePush(iframeEl, consoleName, stateJson);
     }
 
     // -- Generic console state push (ship-agnostic) --------------------------

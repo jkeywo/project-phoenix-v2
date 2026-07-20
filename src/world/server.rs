@@ -3612,7 +3612,7 @@ pub(crate) mod tests {
             vec![TriggerAction::ApplyFlag {
                 entity: "raider_alpha".into(),
                 tag: "jammer".into(),
-                kind: crate::flag_kind::FlagKind::CommsJammed,
+                kind: crate::messages::FlagKind::CommsJammed,
             }],
         );
         let npc_mods = app
@@ -3626,11 +3626,11 @@ pub(crate) mod tests {
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            npc_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            npc_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "ApplyFlag must register on the target NPC's per-entity component"
         );
         assert!(
-            !player_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            !player_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "player entity must be unaffected by an NPC-targeted ApplyFlag"
         );
     }
@@ -3645,12 +3645,12 @@ pub(crate) mod tests {
                 TriggerAction::ApplyFlag {
                     entity: "raider_alpha".into(),
                     tag: "jammer".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveFlag {
                     entity: "raider_alpha".into(),
                     tag: "jammer".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
             ],
         );
@@ -3660,7 +3660,7 @@ pub(crate) mod tests {
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            !npc_mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            !npc_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "RemoveFlag must un-register the flag on the NPC's per-entity component"
         );
     }
@@ -6740,7 +6740,7 @@ entity = "layer_npc"
                 TriggerAction::ApplyFlag {
                     entity: "target_ship".into(),
                     tag: "jammer".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveModifier {
                     entity: "target_ship".into(),
@@ -6755,7 +6755,7 @@ entity = "layer_npc"
                 TriggerAction::RemoveFlag {
                     entity: "target_ship".into(),
                     tag: "jammer".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::SetWorldFlag {
                     name: "ordered".into(),
@@ -6888,7 +6888,7 @@ entity = "layer_npc"
             "RemoveIntModifier must undo the earlier ApplyIntModifier"
         );
         assert!(
-            !mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            !mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "RemoveFlag must undo the earlier ApplyFlag"
         );
 

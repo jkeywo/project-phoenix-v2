@@ -197,9 +197,12 @@ pub struct TrackedEntities {
     pub seeded: bool,
 }
 
-/// Per-entity component holding a ship's system blackboards. All
-/// `publish_*_blackboard` systems write directly to this component on the
-/// `LocalShip` entity. The broadcast pipeline reads from this component.
+/// Per-entity component holding a ship's system blackboards. Each
+/// `publish_*_blackboard` system writes directly into this component on the
+/// entity it publishes for — the weapons publishers already publish per-Ship;
+/// the remaining publishers still query the `LocalShip` entity only and
+/// migrate to per-entity publishing in later issues. The broadcast pipeline
+/// reads from this component.
 #[derive(Component, Default, Clone)]
 pub struct ShipSystemBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,

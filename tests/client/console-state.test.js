@@ -29,6 +29,7 @@ import {
   buildDestroyerEngineeringConsoleState,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
+import { t, getTable } from '../../gui/strings.js';
 
 // ── Entity helpers ────────────────────────────────────────────────────────────
 
@@ -48,6 +49,22 @@ describe('entityRadius', () => {
   it('returns e.radius when present', () => expect(entityRadius({ radius: 10 })).toBe(10));
   it('returns 4 when radius is absent', () => expect(entityRadius({})).toBe(4));
   it('returns 4 when radius is null', () => expect(entityRadius({ radius: null })).toBe(4));
+});
+
+// ── stationDisplayName ────────────────────────────────────────────────────────
+
+describe('stationDisplayName', () => {
+  it('resolves a known station id through the string table CSV row', () => {
+    // The vitest setup loads the real assets/strings/strings.csv, so the
+    // expected value is whatever the CSV holds for station.helm.name — the
+    // id, not the English, is the contract.
+    expect(getTable().has('station.helm.name')).toBe(true);
+    expect(stationDisplayName('helm')).toBe(getTable().get('station.helm.name'));
+  });
+
+  it('renders the missing-id form for an unknown station id (no Title-Case fallback)', () => {
+    expect(stationDisplayName('unknown')).toBe('⟨station.unknown.name⟩');
+  });
 });
 
 // ── buildBlips ────────────────────────────────────────────────────────────────
@@ -2334,7 +2351,7 @@ describe('repairCoreAndTargets', () => {
     const { targets } = repairCoreAndTargets(hull, stationSystems);
     const helm = targets.find(t => t.id === 'helm');
     expect(helm).toBeTruthy();
-    expect(helm.label).toBe(stationDisplayName('helm'));
+    expect(helm.label).toBe(t('station.helm.name'));
     expect(helm.damage_pct).toBeCloseTo(0.3, 5); // 6 of 20 hp lost
 
     // Healthy stations still get a dispatch target — repair teams can be

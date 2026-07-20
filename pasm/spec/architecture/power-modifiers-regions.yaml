@@ -48,7 +48,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/modifiers/cache.rs, src/core/flag_kind.rs]
+      paths: [src/modifiers/cache.rs, src/core/messages.rs]
       symbols: [ShipModifiers]
       tests: [cargo test]
 

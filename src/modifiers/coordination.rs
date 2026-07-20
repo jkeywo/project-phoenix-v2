@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
-use crate::flag_kind::FlagKind;
 use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
+use crate::messages::FlagKind;
 use crate::messages::{ModifierSlot, ModifierSource, PowerGroupId};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
@@ -452,7 +452,7 @@ mod tests {
 
     // ── apply_region_effects tests ─────────────────────────────────────
 
-    use crate::flag_kind::FlagKind;
+    use crate::messages::FlagKind;
     use crate::region_effects::RegionEffectKind;
 
     #[test]

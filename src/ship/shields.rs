@@ -554,7 +554,7 @@ fn publish_shields_blackboard(
             }
             let sid = crate::system_registry::shield_arc_system_id(&snap.id)?;
             let hull_offline = control_sources
-                .map(|cs| cs.0.offline_systems.contains(&sid))
+                .map(|cs| cs.0.is_offline(&sid))
                 .unwrap_or(false);
             let is_online = snap.online && !hull_offline;
             Some((
@@ -1349,8 +1349,7 @@ mod tests {
             .get_mut::<crate::ship_plugin::ShipSystemControlSources>()
             .unwrap()
             .0
-            .offline_systems
-            .insert(arc_sid.clone());
+            .set_offline(arc_sid.clone(), true);
         tick(&mut app);
         let bbs = app
             .world()

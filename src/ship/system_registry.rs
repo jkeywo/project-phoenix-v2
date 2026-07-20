@@ -41,7 +41,7 @@
 //! lowercase-kebab string for both constants to avoid this split.
 
 use crate::messages::SystemId;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 // ── Ownerless capability systems ─────────────────────────────────────────────
 
@@ -52,14 +52,12 @@ use std::collections::HashMap;
 pub const RED_ALERT_SYSTEM_ID: &str = "red-alert";
 /// Registry kind key for Red Alert (snake_case for legacy reasons; see module doc).
 pub const RED_ALERT_KIND: &str = "red_alert";
-pub const RED_ALERT_AI_CONTROLLER: &str = "red_alert_ai";
 
 /// Wire `SystemId` for the Viewscreen coarse system.
 ///
 /// Ownerless capability — single-word lowercase id.
 pub const VIEWSCREEN_SYSTEM_ID: &str = "viewscreen";
 pub const VIEWSCREEN_KIND: &str = "viewscreen";
-pub const VIEWSCREEN_AI_CONTROLLER: &str = "viewscreen_ai";
 
 // ── Station ids (console namespace, issue #801) ──────────────────────────────
 //
@@ -87,65 +85,53 @@ pub const TACTICAL_STATION_ID: &str = "tactical";
 /// Wire `SystemId` for the Power coarse system.
 pub const POWER_SYSTEM_ID: &str = "power";
 pub const POWER_KIND: &str = "power";
-pub const POWER_AI_CONTROLLER: &str = "power_ai";
 
 /// Wire `SystemId` for the Sensors coarse system.
 pub const SENSORS_SYSTEM_ID: &str = "sensors";
 pub const SENSORS_KIND: &str = "sensors";
-pub const SENSORS_AI_CONTROLLER: &str = "sensors_ai";
 
 /// Wire `SystemId` for the Navigation coarse system.
 pub const NAVIGATION_SYSTEM_ID: &str = "navigation";
 pub const NAVIGATION_KIND: &str = "navigation";
-pub const NAVIGATION_AI_CONTROLLER: &str = "navigation_ai";
 
 /// Wire `SystemId` for the Shields coarse system.
 pub const SHIELDS_SYSTEM_ID: &str = "shields";
 pub const SHIELDS_KIND: &str = "shields";
-pub const SHIELDS_AI_CONTROLLER: &str = "shields_ai";
 
 /// Wire `SystemId` for the Comms coarse system.
 pub const COMMS_SYSTEM_ID: &str = "comms";
 pub const COMMS_KIND: &str = "comms";
-pub const COMMS_AI_CONTROLLER: &str = "comms_ai";
 
 /// Wire `SystemId` for the Captain coarse system.
 pub const CAPTAIN_SYSTEM_ID: &str = "captain";
 pub const CAPTAIN_KIND: &str = "captain";
-pub const CAPTAIN_AI_CONTROLLER: &str = "captain_ai";
 
 /// Wire `SystemId` for the Repair coarse system.
 pub const REPAIR_SYSTEM_ID: &str = "repair";
 pub const REPAIR_KIND: &str = "repair";
-pub const REPAIR_AI_CONTROLLER: &str = "repair_ai";
 
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
 pub const HELM_JOYSTICK_KIND: &str = "helm_joystick";
 pub const HELM_JOYSTICK_SYSTEM_ID: &str = "helm-joystick";
-pub const HELM_JOYSTICK_AI_CONTROLLER: &str = "helm_joystick_ai";
 
 /// Wire `SystemId` for the Helm Engine fine systems (port + starboard instances).
 pub const HELM_ENGINE_KIND: &str = "helm_engine";
 pub const HELM_ENGINE_PORT_SYSTEM_ID: &str = "helm-engine-port";
 pub const HELM_ENGINE_STARBOARD_SYSTEM_ID: &str = "helm-engine-starboard";
-pub const HELM_ENGINE_AI_CONTROLLER: &str = "helm_engine_ai";
 
 /// Wire `SystemId` for the Helm Radar fine system.
 pub const HELM_RADAR_KIND: &str = "helm_radar";
 pub const HELM_RADAR_SYSTEM_ID: &str = "helm-radar";
-pub const HELM_RADAR_AI_CONTROLLER: &str = "helm_radar_ai";
 
 /// Wire `SystemId` for the Helm Impulse fine system.
 pub const HELM_IMPULSE_KIND: &str = "helm_impulse";
 pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
-pub const HELM_IMPULSE_AI_CONTROLLER: &str = "helm_impulse_ai";
 
 /// Wire `SystemId` for the Helm Lateral Thrust fine system.
 pub const LATERAL_THRUST_KIND: &str = "lateral_thrust";
 pub const LATERAL_THRUST_SYSTEM_ID: &str = "helm-lateral-thrust";
-pub const LATERAL_THRUST_AI_CONTROLLER: &str = "lateral_thrust_ai";
 
 /// Wire `SystemId` for the Helm Thrust fine system (issue #701).
 ///
@@ -155,7 +141,6 @@ pub const LATERAL_THRUST_AI_CONTROLLER: &str = "lateral_thrust_ai";
 /// and repaired independently.
 pub const HELM_THRUST_KIND: &str = "helm_thrust";
 pub const HELM_THRUST_SYSTEM_ID: &str = "helm-thrust";
-pub const HELM_THRUST_AI_CONTROLLER: &str = "helm_thrust_ai";
 
 /// Wire `SystemId` for the Helm Steering fine system (issue #701).
 ///
@@ -164,7 +149,6 @@ pub const HELM_THRUST_AI_CONTROLLER: &str = "helm_thrust_ai";
 /// per-axis split.
 pub const HELM_STEERING_KIND: &str = "helm_steering";
 pub const HELM_STEERING_SYSTEM_ID: &str = "helm-steering";
-pub const HELM_STEERING_AI_CONTROLLER: &str = "helm_steering_ai";
 
 /// Wire `SystemId` for the Helm Boost fine system (issue #801).
 ///
@@ -173,7 +157,6 @@ pub const HELM_STEERING_AI_CONTROLLER: &str = "helm_steering_ai";
 /// declared system, like every other helm axis.
 pub const HELM_BOOST_KIND: &str = "helm_boost";
 pub const HELM_BOOST_SYSTEM_ID: &str = "helm-boost";
-pub const HELM_BOOST_AI_CONTROLLER: &str = "helm_boost_ai";
 
 // ── Fine-grained Tactical systems (issue #512) ────────────────────────────────
 //
@@ -190,7 +173,6 @@ pub const HELM_BOOST_AI_CONTROLLER: &str = "helm_boost_ai";
 pub const PHASER_BANK_KIND: &str = "phaser_bank";
 pub const PHASER_FORE_SYSTEM_ID: &str = "phaser-fore";
 pub const PHASER_AFT_SYSTEM_ID: &str = "phaser-aft";
-pub const PHASER_BANK_AI_CONTROLLER: &str = "phaser_bank_ai";
 
 /// Wire `SystemId` for the Torpedo Tube fine systems.
 ///
@@ -199,14 +181,12 @@ pub const TORPEDO_TUBE_KIND: &str = "torpedo_tube";
 pub const TORPEDO_TUBE_FORE_PORT_SYSTEM_ID: &str = "torpedo-tube-fore-port";
 pub const TORPEDO_TUBE_FORE_STARBOARD_SYSTEM_ID: &str = "torpedo-tube-fore-starboard";
 pub const TORPEDO_TUBE_AFT_SYSTEM_ID: &str = "torpedo-tube-aft";
-pub const TORPEDO_TUBE_AI_CONTROLLER: &str = "torpedo_tube_ai";
 
 /// Wire `SystemId` for the Blaster Bank fine systems (issue #631).
 ///
 /// Registered per-instance in TOML (e.g. `"blaster-fore"`, `"blaster-aft"`).
 /// A blaster bank fires straight-flying projectiles in data-driven volleys.
 pub const BLASTER_BANK_KIND: &str = "blaster_bank";
-pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
 
 /// Wire `SystemId` for the Phaser Control fine system (issue #801).
 ///
@@ -218,7 +198,6 @@ pub const BLASTER_BANK_AI_CONTROLLER: &str = "blaster_bank_ai";
 /// the deleted coarse `tactical` id.
 pub const PHASER_CONTROL_KIND: &str = "phaser_control";
 pub const PHASER_CONTROL_SYSTEM_ID: &str = "phaser-control";
-pub const PHASER_CONTROL_AI_CONTROLLER: &str = "phaser_control_ai";
 
 /// Wire `SystemId` for the Tactical Radar fine system.
 ///
@@ -227,7 +206,6 @@ pub const PHASER_CONTROL_AI_CONTROLLER: &str = "phaser_control_ai";
 /// fine system.
 pub const TACTICAL_RADAR_KIND: &str = "tactical_radar";
 pub const TACTICAL_RADAR_SYSTEM_ID: &str = "tactical-radar";
-pub const TACTICAL_RADAR_AI_CONTROLLER: &str = "tactical_radar_ai";
 
 /// Wire `SystemId` for the Sensor Radar fine system.
 ///
@@ -236,7 +214,6 @@ pub const TACTICAL_RADAR_AI_CONTROLLER: &str = "tactical_radar_ai";
 /// fine system.
 pub const SENSOR_RADAR_KIND: &str = "sensor_radar";
 pub const SENSOR_RADAR_SYSTEM_ID: &str = "sensor-radar";
-pub const SENSOR_RADAR_AI_CONTROLLER: &str = "sensor_radar_ai";
 
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
 ///
@@ -247,7 +224,6 @@ pub const SENSOR_RADAR_AI_CONTROLLER: &str = "sensor_radar_ai";
 /// path so loaded tubes cannot launch.
 pub const TORPEDO_MAGAZINE_KIND: &str = "torpedo_magazine";
 pub const TORPEDO_MAGAZINE_SYSTEM_ID: &str = "torpedo-magazine";
-pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
 
 // ── Fine-grained Power systems (issue #513) ──────────────────────────────────
 //
@@ -270,7 +246,6 @@ pub const TORPEDO_MAGAZINE_AI_CONTROLLER: &str = "torpedo_magazine_ai";
 /// `accept_human_input` gate.
 pub const POWER_REACTOR_KIND: &str = "power_reactor";
 pub const POWER_REACTOR_SYSTEM_ID: &str = "power-reactor";
-pub const POWER_REACTOR_AI_CONTROLLER: &str = "power_reactor_ai";
 
 /// Wire `SystemId` for the Power Battery fine system.
 ///
@@ -280,7 +255,6 @@ pub const POWER_REACTOR_AI_CONTROLLER: &str = "power_reactor_ai";
 /// (phaser beams) cannot consume from it.
 pub const POWER_BATTERY_KIND: &str = "power_battery";
 pub const POWER_BATTERY_SYSTEM_ID: &str = "power-battery";
-pub const POWER_BATTERY_AI_CONTROLLER: &str = "power_battery_ai";
 
 // ── Fine-grained Shields systems (issue #514) ────────────────────────────────
 //
@@ -302,42 +276,24 @@ pub const POWER_BATTERY_AI_CONTROLLER: &str = "power_battery_ai";
 /// `[[shield_arc]]` block per arc, from which the parser synthesises a
 /// matching `[[system]]` entry.
 pub const SHIELD_ARC_KIND: &str = "shield_arc";
-pub const SHIELD_ARC_AI_CONTROLLER: &str = "shield_arc_ai";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AiControllerRegistration {
-    name: String,
-}
-
-impl AiControllerRegistration {
-    pub fn new(name: impl Into<String>) -> Result<Self, SystemRegistryError> {
-        let name = name.into();
-        if name.trim().is_empty() {
-            return Err(SystemRegistryError::EmptyAiControllerName);
-        }
-        Ok(Self { name })
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SystemKindRegistration {
-    pub kind: String,
-    pub ai_controller: AiControllerRegistration,
-}
-
+/// The set of valid `[[system]]` kind strings a ship TOML may declare.
+///
+/// Consumers (`ship_plugin::load_ship_config_from_disk`,
+/// `entities::config`) build the registry via [`Self::with_core_systems`]
+/// and validate TOML against [`Self::kinds`] / [`Self::contains`]. The
+/// pre-#520 per-kind named AI-controller registration layer that used to
+/// live alongside the kinds was dead weight and has been deleted — AI
+/// behaviour is attached per kind by dedicated Bevy systems gated on
+/// `ControlSourceResolver::policy_for`, not by registry lookup.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemKindRegistry {
-    kinds: HashMap<String, SystemKindRegistration>,
+    kinds: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SystemRegistryError {
     EmptyKind,
-    EmptyAiControllerName,
     DuplicateKind { kind: String },
 }
 
@@ -356,166 +312,68 @@ impl SystemKindRegistry {
 
     pub fn with_red_alert() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::new();
-        registry.register(
-            RED_ALERT_KIND,
-            AiControllerRegistration::new(RED_ALERT_AI_CONTROLLER)?,
-        )?;
+        registry.register(RED_ALERT_KIND)?;
         Ok(registry)
     }
 
     pub fn with_core_systems() -> Result<Self, SystemRegistryError> {
         let mut registry = Self::with_red_alert()?;
-        registry.register(
-            POWER_KIND,
-            AiControllerRegistration::new(POWER_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            SENSORS_KIND,
-            AiControllerRegistration::new(SENSORS_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            NAVIGATION_KIND,
-            AiControllerRegistration::new(NAVIGATION_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            SHIELDS_KIND,
-            AiControllerRegistration::new(SHIELDS_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            COMMS_KIND,
-            AiControllerRegistration::new(COMMS_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            CAPTAIN_KIND,
-            AiControllerRegistration::new(CAPTAIN_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            VIEWSCREEN_KIND,
-            AiControllerRegistration::new(VIEWSCREEN_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            REPAIR_KIND,
-            AiControllerRegistration::new(REPAIR_AI_CONTROLLER)?,
-        )?;
+        registry.register(POWER_KIND)?;
+        registry.register(SENSORS_KIND)?;
+        registry.register(NAVIGATION_KIND)?;
+        registry.register(SHIELDS_KIND)?;
+        registry.register(COMMS_KIND)?;
+        registry.register(CAPTAIN_KIND)?;
+        registry.register(VIEWSCREEN_KIND)?;
+        registry.register(REPAIR_KIND)?;
         // Fine-grained Helm systems (issue #511)
-        registry.register(
-            HELM_JOYSTICK_KIND,
-            AiControllerRegistration::new(HELM_JOYSTICK_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            HELM_ENGINE_KIND,
-            AiControllerRegistration::new(HELM_ENGINE_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            HELM_RADAR_KIND,
-            AiControllerRegistration::new(HELM_RADAR_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            HELM_IMPULSE_KIND,
-            AiControllerRegistration::new(HELM_IMPULSE_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            LATERAL_THRUST_KIND,
-            AiControllerRegistration::new(LATERAL_THRUST_AI_CONTROLLER)?,
-        )?;
+        registry.register(HELM_JOYSTICK_KIND)?;
+        registry.register(HELM_ENGINE_KIND)?;
+        registry.register(HELM_RADAR_KIND)?;
+        registry.register(HELM_IMPULSE_KIND)?;
+        registry.register(LATERAL_THRUST_KIND)?;
         // Per-axis Helm systems (issue #701)
-        registry.register(
-            HELM_THRUST_KIND,
-            AiControllerRegistration::new(HELM_THRUST_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            HELM_STEERING_KIND,
-            AiControllerRegistration::new(HELM_STEERING_AI_CONTROLLER)?,
-        )?;
+        registry.register(HELM_THRUST_KIND)?;
+        registry.register(HELM_STEERING_KIND)?;
         // Helm boost fine system (issue #801)
-        registry.register(
-            HELM_BOOST_KIND,
-            AiControllerRegistration::new(HELM_BOOST_AI_CONTROLLER)?,
-        )?;
+        registry.register(HELM_BOOST_KIND)?;
         // Fine-grained Tactical systems (issue #512)
-        registry.register(
-            PHASER_BANK_KIND,
-            AiControllerRegistration::new(PHASER_BANK_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            TORPEDO_TUBE_KIND,
-            AiControllerRegistration::new(TORPEDO_TUBE_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            TORPEDO_MAGAZINE_KIND,
-            AiControllerRegistration::new(TORPEDO_MAGAZINE_AI_CONTROLLER)?,
-        )?;
+        registry.register(PHASER_BANK_KIND)?;
+        registry.register(TORPEDO_TUBE_KIND)?;
+        registry.register(TORPEDO_MAGAZINE_KIND)?;
         // Blaster bank fine system (issue #631)
-        registry.register(
-            BLASTER_BANK_KIND,
-            AiControllerRegistration::new(BLASTER_BANK_AI_CONTROLLER)?,
-        )?;
+        registry.register(BLASTER_BANK_KIND)?;
         // Phaser control fine system (issue #801)
-        registry.register(
-            PHASER_CONTROL_KIND,
-            AiControllerRegistration::new(PHASER_CONTROL_AI_CONTROLLER)?,
-        )?;
+        registry.register(PHASER_CONTROL_KIND)?;
         // Tactical / sensor radar fine systems
-        registry.register(
-            TACTICAL_RADAR_KIND,
-            AiControllerRegistration::new(TACTICAL_RADAR_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            SENSOR_RADAR_KIND,
-            AiControllerRegistration::new(SENSOR_RADAR_AI_CONTROLLER)?,
-        )?;
+        registry.register(TACTICAL_RADAR_KIND)?;
+        registry.register(SENSOR_RADAR_KIND)?;
         // Fine-grained Power systems (issue #513)
-        registry.register(
-            POWER_REACTOR_KIND,
-            AiControllerRegistration::new(POWER_REACTOR_AI_CONTROLLER)?,
-        )?;
-        registry.register(
-            POWER_BATTERY_KIND,
-            AiControllerRegistration::new(POWER_BATTERY_AI_CONTROLLER)?,
-        )?;
+        registry.register(POWER_REACTOR_KIND)?;
+        registry.register(POWER_BATTERY_KIND)?;
         // Fine-grained Shields systems (issue #514)
-        registry.register(
-            SHIELD_ARC_KIND,
-            AiControllerRegistration::new(SHIELD_ARC_AI_CONTROLLER)?,
-        )?;
+        registry.register(SHIELD_ARC_KIND)?;
         Ok(registry)
     }
 
-    pub fn register(
-        &mut self,
-        kind: impl Into<String>,
-        ai_controller: AiControllerRegistration,
-    ) -> Result<(), SystemRegistryError> {
+    pub fn register(&mut self, kind: impl Into<String>) -> Result<(), SystemRegistryError> {
         let kind = kind.into();
         if kind.trim().is_empty() {
             return Err(SystemRegistryError::EmptyKind);
         }
-        if ai_controller.name.trim().is_empty() {
-            return Err(SystemRegistryError::EmptyAiControllerName);
-        }
-        if self.kinds.contains_key(&kind) {
+        if self.kinds.contains(&kind) {
             return Err(SystemRegistryError::DuplicateKind { kind });
         }
-        self.kinds.insert(
-            kind.clone(),
-            SystemKindRegistration {
-                kind,
-                ai_controller,
-            },
-        );
+        self.kinds.insert(kind);
         Ok(())
     }
 
     pub fn contains(&self, kind: &str) -> bool {
-        self.kinds.contains_key(kind)
-    }
-
-    pub fn registration(&self, kind: &str) -> Option<&SystemKindRegistration> {
-        self.kinds.get(kind)
+        self.kinds.contains(kind)
     }
 
     pub fn kinds(&self) -> impl Iterator<Item = &str> {
-        self.kinds.keys().map(|kind| kind.as_str())
+        self.kinds.iter().map(|kind| kind.as_str())
     }
 }
 
@@ -792,46 +650,28 @@ mod tests {
     // ── Registry API ─────────────────────────────────────────────────────────
 
     #[test]
-    fn registering_kind_requires_ai_controller_argument() {
+    fn register_adds_kind() {
         let mut registry = SystemKindRegistry::new();
-        let ai = AiControllerRegistration::new("red_alert_ai").unwrap();
 
-        registry.register("red_alert", ai).unwrap();
+        registry.register("red_alert").unwrap();
 
         assert!(registry.contains("red_alert"));
-        assert_eq!(
-            registry
-                .registration("red_alert")
-                .unwrap()
-                .ai_controller
-                .name(),
-            "red_alert_ai"
-        );
     }
 
     #[test]
-    fn rejects_empty_ai_controller_name() {
-        assert_eq!(
-            AiControllerRegistration::new(""),
-            Err(SystemRegistryError::EmptyAiControllerName)
-        );
+    fn rejects_empty_kind() {
+        let mut registry = SystemKindRegistry::new();
+
+        assert_eq!(registry.register("  "), Err(SystemRegistryError::EmptyKind));
     }
 
     #[test]
     fn rejects_duplicate_kind() {
         let mut registry = SystemKindRegistry::new();
-        registry
-            .register(
-                "red_alert",
-                AiControllerRegistration::new("red_alert_ai").unwrap(),
-            )
-            .unwrap();
+        registry.register("red_alert").unwrap();
 
         assert_eq!(
-            registry.register(
-                "red_alert",
-                AiControllerRegistration::new("other_ai").unwrap(),
-            ),
+            registry.register("red_alert"),
             Err(SystemRegistryError::DuplicateKind {
                 kind: "red_alert".into()
             })
@@ -839,18 +679,10 @@ mod tests {
     }
 
     #[test]
-    fn red_alert_registry_has_required_ai_controller() {
+    fn red_alert_registry_contains_kind() {
         let registry = SystemKindRegistry::with_red_alert().unwrap();
 
         assert!(registry.contains(RED_ALERT_KIND));
-        assert_eq!(
-            registry
-                .registration(RED_ALERT_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            RED_ALERT_AI_CONTROLLER
-        );
     }
 
     /// The coarse `helm` / `tactical` kinds were deleted by #801: `"helm"`
@@ -882,138 +714,25 @@ mod tests {
     }
 
     #[test]
-    fn core_registry_has_power_ai_controller() {
+    fn core_registry_contains_all_coarse_kinds() {
         let registry = SystemKindRegistry::with_core_systems().unwrap();
 
-        assert!(registry.contains(POWER_KIND));
-        assert_eq!(
-            registry
-                .registration(POWER_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            POWER_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_sensors_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(SENSORS_KIND));
-        assert_eq!(
-            registry
-                .registration(SENSORS_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            SENSORS_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_navigation_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(NAVIGATION_KIND));
-        assert_eq!(
-            registry
-                .registration(NAVIGATION_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            NAVIGATION_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_shields_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(SHIELDS_KIND));
-        assert_eq!(
-            registry
-                .registration(SHIELDS_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            SHIELDS_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_comms_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(COMMS_KIND));
-        assert_eq!(
-            registry
-                .registration(COMMS_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            COMMS_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_captain_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(CAPTAIN_KIND));
-        assert_eq!(
-            registry
-                .registration(CAPTAIN_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            CAPTAIN_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_viewscreen_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(VIEWSCREEN_KIND));
-        assert_eq!(
-            registry
-                .registration(VIEWSCREEN_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            VIEWSCREEN_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn core_registry_has_repair_ai_controller() {
-        let registry = SystemKindRegistry::with_core_systems().unwrap();
-
-        assert!(registry.contains(REPAIR_KIND));
-        assert_eq!(
-            registry
-                .registration(REPAIR_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            REPAIR_AI_CONTROLLER
-        );
-    }
-
-    #[test]
-    fn register_revalidates_ai_controller() {
-        let mut registry = SystemKindRegistry::new();
-
-        assert_eq!(
-            registry.register(
-                "red_alert",
-                AiControllerRegistration {
-                    name: String::new()
-                },
-            ),
-            Err(SystemRegistryError::EmptyAiControllerName)
-        );
+        for kind in [
+            RED_ALERT_KIND,
+            POWER_KIND,
+            SENSORS_KIND,
+            NAVIGATION_KIND,
+            SHIELDS_KIND,
+            COMMS_KIND,
+            CAPTAIN_KIND,
+            VIEWSCREEN_KIND,
+            REPAIR_KIND,
+        ] {
+            assert!(
+                registry.contains(kind),
+                "coarse kind {kind:?} not registered"
+            );
+        }
     }
 
     // ── Fine Helm system tests (issue #511) ───────────────────────────────────
@@ -1042,47 +761,6 @@ mod tests {
             registry.contains(LATERAL_THRUST_KIND),
             "lateral_thrust not registered"
         );
-
-        assert_eq!(
-            registry
-                .registration(HELM_JOYSTICK_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_JOYSTICK_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(HELM_ENGINE_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_ENGINE_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(HELM_RADAR_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_RADAR_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(HELM_IMPULSE_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_IMPULSE_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(LATERAL_THRUST_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            LATERAL_THRUST_AI_CONTROLLER
-        );
     }
 
     /// The per-axis Helm kinds (issue #701) must be registered like every
@@ -1102,31 +780,6 @@ mod tests {
         assert!(
             registry.contains(HELM_BOOST_KIND),
             "helm_boost not registered"
-        );
-
-        assert_eq!(
-            registry
-                .registration(HELM_THRUST_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_THRUST_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(HELM_STEERING_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_STEERING_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(HELM_BOOST_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            HELM_BOOST_AI_CONTROLLER
         );
     }
 
@@ -1203,39 +856,6 @@ mod tests {
         assert!(
             registry.contains(PHASER_CONTROL_KIND),
             "phaser_control not registered"
-        );
-
-        assert_eq!(
-            registry
-                .registration(PHASER_BANK_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            PHASER_BANK_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(TORPEDO_TUBE_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            TORPEDO_TUBE_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(TORPEDO_MAGAZINE_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            TORPEDO_MAGAZINE_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(PHASER_CONTROL_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            PHASER_CONTROL_AI_CONTROLLER
         );
     }
 
@@ -1340,20 +960,11 @@ mod tests {
             registry.contains(BLASTER_BANK_KIND),
             "blaster_bank not registered"
         );
-        assert_eq!(
-            registry
-                .registration(BLASTER_BANK_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            BLASTER_BANK_AI_CONTROLLER
-        );
     }
 
     #[test]
     fn blaster_bank_kind_constant_is_correct() {
         assert_eq!(BLASTER_BANK_KIND, "blaster_bank");
-        assert_eq!(BLASTER_BANK_AI_CONTROLLER, "blaster_bank_ai");
     }
 
     #[test]
@@ -1408,23 +1019,6 @@ mod tests {
             registry.contains(SENSOR_RADAR_KIND),
             "sensor_radar not registered"
         );
-
-        assert_eq!(
-            registry
-                .registration(TACTICAL_RADAR_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            TACTICAL_RADAR_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(SENSOR_RADAR_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            SENSOR_RADAR_AI_CONTROLLER
-        );
     }
 
     #[test]
@@ -1466,23 +1060,6 @@ mod tests {
             registry.contains(POWER_BATTERY_KIND),
             "power_battery not registered"
         );
-
-        assert_eq!(
-            registry
-                .registration(POWER_REACTOR_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            POWER_REACTOR_AI_CONTROLLER
-        );
-        assert_eq!(
-            registry
-                .registration(POWER_BATTERY_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            POWER_BATTERY_AI_CONTROLLER
-        );
     }
 
     #[test]
@@ -1518,14 +1095,6 @@ mod tests {
         assert!(
             registry.contains(SHIELD_ARC_KIND),
             "shield_arc not registered"
-        );
-        assert_eq!(
-            registry
-                .registration(SHIELD_ARC_KIND)
-                .unwrap()
-                .ai_controller
-                .name(),
-            SHIELD_ARC_AI_CONTROLLER
         );
     }
 

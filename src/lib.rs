@@ -38,7 +38,6 @@ pub use asteroids::spawner as asteroid_spawner;
 pub use asteroids::window as asteroid_window;
 pub use console_ai::core as console_ai_core;
 pub use console_ai::server as console_ai_plugin;
-pub use core::flag_kind;
 pub use entities::config_cache;
 pub use weapons::blaster;
 pub use weapons::phaser;

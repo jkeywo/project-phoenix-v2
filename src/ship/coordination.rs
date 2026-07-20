@@ -137,7 +137,7 @@ mod tests {
 
         // Station rating says Human, but damage has taken the console offline.
         resolver.set(helm.clone(), ControlSource::Human);
-        resolver.offline_systems.insert(helm.clone());
+        resolver.set_offline(helm.clone(), true);
 
         let target_policy = resolver.policy_for(&helm);
         assert!(!target_policy.operate_ai && !target_policy.accept_human_input);

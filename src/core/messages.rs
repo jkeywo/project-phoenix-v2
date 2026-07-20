@@ -1,11 +1,20 @@
 use crate::damage::DamageTier;
 pub use crate::entity_tags::EntityTag;
-use crate::flag_kind::FlagKind;
 use crate::stations_config::ShipStations;
 use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
+/// inlined here — it is a wire type like everything else in this module).
+/// Set by modifiers (e.g. region effects) keyed by source; a flag reads true
+/// while any source holds it. Serde round-trip pinned in `core/codec.rs`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FlagKind {
+    CommsJammed,
+    SensorBlind,
+}
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
 /// wire messages without creating a circular dependency with `modifiers.rs`.

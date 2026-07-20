@@ -310,7 +310,7 @@ pub(crate) fn handle_fire_torpedo(
             .0
             .entries()
             .any(|(id, _)| id == &magazine_id)
-            || control_sources.0.offline_systems.contains(&magazine_id);
+            || control_sources.0.is_offline(&magazine_id);
         if magazine_declared {
             let magazine_policy = control_sources.0.policy_for(&magazine_id);
             if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
@@ -445,7 +445,7 @@ pub fn handle_torpedo_magazine_inter_system(
                     .0
                     .entries()
                     .any(|(id, _)| id == &magazine_id)
-                    || control_sources.0.offline_systems.contains(&magazine_id);
+                    || control_sources.0.is_offline(&magazine_id);
                 if magazine_declared {
                     let policy = control_sources.0.policy_for(&magazine_id);
                     if !policy.accept_human_input && !policy.operate_ai {

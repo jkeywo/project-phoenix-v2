@@ -1029,7 +1029,7 @@ mod tests {
         let mut app = fire_response_with_actions(vec![TriggerAction::ApplyFlag {
             entity: "starbase_alpha".into(),
             tag: "jammer".into(),
-            kind: crate::flag_kind::FlagKind::CommsJammed,
+            kind: crate::messages::FlagKind::CommsJammed,
         }]);
         let mut q = app
             .world_mut()
@@ -1039,7 +1039,7 @@ mod tests {
             .find(|(u, _)| u.0 == "station-parity-uuid")
             .expect("target entity must carry EntityUuid + ShipModifiers");
         assert!(
-            mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "ApplyFlag must register a CommsJammed flag on the target entity's per-entity component"
         );
 
@@ -1047,12 +1047,12 @@ mod tests {
             TriggerAction::ApplyFlag {
                 entity: "starbase_alpha".into(),
                 tag: "jammer".into(),
-                kind: crate::flag_kind::FlagKind::CommsJammed,
+                kind: crate::messages::FlagKind::CommsJammed,
             },
             TriggerAction::RemoveFlag {
                 entity: "starbase_alpha".into(),
                 tag: "jammer".into(),
-                kind: crate::flag_kind::FlagKind::CommsJammed,
+                kind: crate::messages::FlagKind::CommsJammed,
             },
         ]);
         let mut q = app
@@ -1063,7 +1063,7 @@ mod tests {
             .find(|(u, _)| u.0 == "station-parity-uuid")
             .expect("target entity must carry EntityUuid + ShipModifiers");
         assert!(
-            !mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            !mods.has_flag(&crate::messages::FlagKind::CommsJammed),
             "RemoveFlag must un-register the CommsJammed flag on the target entity's per-entity component"
         );
     }
@@ -1387,12 +1387,12 @@ mod tests {
                 TriggerAction::ApplyFlag {
                     entity: "x".into(),
                     tag: "x".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveFlag {
                     entity: "x".into(),
                     tag: "x".into(),
-                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                    kind: crate::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::ApplyIntModifier {
                     entity: "x".into(),

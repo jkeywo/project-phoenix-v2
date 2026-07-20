@@ -1,4 +1,4 @@
-use crate::flag_kind::FlagKind;
+use crate::messages::FlagKind;
 pub use crate::messages::{ModifierSlot, ModifierSource};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
@@ -602,7 +602,7 @@ mod tests {
 
     // ── Flag API tests ─────────────────────────────────────────────────────
 
-    use crate::flag_kind::FlagKind;
+    use crate::messages::FlagKind;
 
     #[test]
     fn single_source_adds_flag() {

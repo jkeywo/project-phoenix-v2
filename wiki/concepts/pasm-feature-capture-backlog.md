@@ -142,7 +142,7 @@ This is one feature family because power, impulse, and regions all alter ship
 behaviour through the same modifier/flag contract.
 
 Sources: `src/ship/power.rs`, `src/modifiers/`, `src/regions/`,
-`src/core/flag_kind.rs`.
+`src/core/messages.rs` (`FlagKind`).
 
 ## 11. Weapons — Captured
 

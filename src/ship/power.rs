@@ -371,7 +371,7 @@ pub fn handle_power_inter_system(
     let battery_offline_ships: std::collections::HashSet<Entity> = cs_only_q
         .iter()
         .filter_map(|(e, cs, _)| {
-            if cs.0.offline_systems.contains(&battery_id) {
+            if cs.0.is_offline(&battery_id) {
                 Some(e)
             } else {
                 None
@@ -658,10 +658,10 @@ fn publish_power_blackboard(
     let reactor_id = crate::system_registry::power_reactor_system_id();
     let battery_id = crate::system_registry::power_battery_system_id();
     let reactor_online = control_sources
-        .map(|cs| !cs.0.offline_systems.contains(&reactor_id))
+        .map(|cs| !cs.0.is_offline(&reactor_id))
         .unwrap_or(true);
     let battery_online = control_sources
-        .map(|cs| !cs.0.offline_systems.contains(&battery_id))
+        .map(|cs| !cs.0.is_offline(&battery_id))
         .unwrap_or(true);
 
     let entries: Vec<PowerGroupEntry> = POWER_GROUP_ORDER
@@ -1396,7 +1396,7 @@ mod tests {
             .entity_mut(ship)
             .take::<crate::ship_plugin::ShipSystemControlSources>()
             .unwrap();
-        cs.0.offline_systems.insert(system_id);
+        cs.0.set_offline(system_id, true);
         app.world_mut().entity_mut(ship).insert(cs);
     }
 
@@ -1585,8 +1585,7 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.offline_systems
-                .insert(crate::system_registry::power_reactor_system_id());
+            cs.0.set_offline(crate::system_registry::power_reactor_system_id(), true);
             app.world_mut().entity_mut(ship).insert(cs);
         }
         tick(&mut app);
@@ -1623,8 +1622,7 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.offline_systems
-                .insert(crate::system_registry::power_battery_system_id());
+            cs.0.set_offline(crate::system_registry::power_battery_system_id(), true);
             app.world_mut().entity_mut(ship).insert(cs);
         }
         tick(&mut app);
@@ -1662,8 +1660,7 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.offline_systems
-                .insert(crate::system_registry::power_reactor_system_id());
+            cs.0.set_offline(crate::system_registry::power_reactor_system_id(), true);
             app.world_mut().entity_mut(ship).insert(cs);
         }
 

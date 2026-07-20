@@ -8,8 +8,11 @@ pub enum SimSet {
     Modifiers,
     /// Phase 1a: every system writes its own blackboard from current ECS state.
     /// Runs after Modifiers so blackboards reflect the fully-updated sim state.
-    /// Cross-system reads during Physics/Damage/Modifiers use `FrozenBlackboards`
-    /// (last tick's snapshot) for determinism.
+    /// Blackboards are written exactly once per tick, here. Any cross-system
+    /// consumer ordered before Publish (Input/Physics/Damage/Modifiers)
+    /// therefore reads the values written on the *previous* tick — the
+    /// frozen-snapshot guarantee comes from this set ordering, not from a
+    /// separate snapshot type.
     Publish,
     /// Phase 1b: ship-wide aggregators read all phase-1a blackboards and write
     /// cross-system views (e.g. the Viewscreen blackboard). Strictly after Publish.

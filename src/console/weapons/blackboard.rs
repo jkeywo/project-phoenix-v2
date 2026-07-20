@@ -858,14 +858,13 @@ pub(crate) fn publish_phaser_bank_blackboards(
             target_live_pos,
         );
 
-        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
         for bank_state in &banks {
             let Some(bank_sysid) = crate::system_registry::phaser_bank_system_id(&bank_state.id)
             else {
                 continue;
             };
-            let is_online = offline_systems_opt
-                .map(|set| !set.contains(&bank_sysid))
+            let is_online = control_sources
+                .map(|cs| !cs.0.is_offline(&bank_sysid))
                 .unwrap_or(true);
             entity_bbs.0.insert(
                 bank_sysid,
@@ -907,14 +906,13 @@ pub(crate) fn publish_torpedo_tube_blackboards(
         };
 
         let tubes = build_tube_states(torpedo_sys);
-        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
         for tube_state in &tubes {
             let Some(tube_sysid) = crate::system_registry::torpedo_tube_system_id(&tube_state.id)
             else {
                 continue;
             };
-            let is_online = offline_systems_opt
-                .map(|set| !set.contains(&tube_sysid))
+            let is_online = control_sources
+                .map(|cs| !cs.0.is_offline(&tube_sysid))
                 .unwrap_or(true);
             entity_bbs.0.insert(
                 tube_sysid,
@@ -958,10 +956,9 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
             }
         };
 
-        let offline_systems_opt = control_sources.map(|cs| &cs.0.offline_systems);
         let magazine_sysid = crate::system_registry::torpedo_magazine_system_id();
-        let magazine_online = offline_systems_opt
-            .map(|set| !set.contains(&magazine_sysid))
+        let magazine_online = control_sources
+            .map(|cs| !cs.0.is_offline(&magazine_sysid))
             .unwrap_or(true);
         entity_bbs.0.insert(
             magazine_sysid,

@@ -2464,12 +2464,10 @@ fn integrate_ship_physics(
         // thrust is zeroed.
         let port_offline = sources
             .0
-            .offline_systems
-            .contains(&crate::system_registry::helm_engine_port_system_id());
+            .is_offline(&crate::system_registry::helm_engine_port_system_id());
         let stbd_offline = sources
             .0
-            .offline_systems
-            .contains(&crate::system_registry::helm_engine_starboard_system_id());
+            .is_offline(&crate::system_registry::helm_engine_starboard_system_id());
         let engine_thrust_scale: f32 = match (port_offline, stbd_offline) {
             (true, true) => 0.0,
             (true, false) | (false, true) => 0.5,
@@ -3072,10 +3070,10 @@ pub fn sync_console_damage_tiers(
             let tier = hull.tier_for(sid);
             match tier {
                 DamageTier::Disabled | DamageTier::Destroyed => {
-                    control_sources.0.offline_systems.insert(sid.clone());
+                    control_sources.0.set_offline(sid.clone(), true);
                 }
                 DamageTier::Operational | DamageTier::Damaged => {
-                    control_sources.0.offline_systems.remove(sid);
+                    control_sources.0.set_offline(sid.clone(), false);
                 }
             }
         }
@@ -3089,10 +3087,10 @@ pub fn sync_console_damage_tiers(
                 let tier = arc_hull.tier_for(arc_id);
                 match tier {
                     DamageTier::Disabled | DamageTier::Destroyed => {
-                        control_sources.0.offline_systems.insert(sid);
+                        control_sources.0.set_offline(sid, true);
                     }
                     DamageTier::Operational | DamageTier::Damaged => {
-                        control_sources.0.offline_systems.remove(&sid);
+                        control_sources.0.set_offline(sid, false);
                     }
                 }
             }
@@ -8600,7 +8598,7 @@ station = "helm"
             .unwrap();
         let port_id = crate::system_registry::helm_engine_port_system_id();
         assert!(
-            control_sources.0.offline_systems.contains(&port_id),
+            control_sources.0.is_offline(&port_id),
             "helm-engine-port should be in offline_systems when HP = 0"
         );
     }
@@ -8652,7 +8650,7 @@ station = "helm"
                 .get::<ShipSystemControlSources>()
                 .unwrap();
             assert!(
-                control_sources.0.offline_systems.contains(&helm_sid),
+                control_sources.0.is_offline(&helm_sid),
                 "after tick 1, helm should be in offline_systems (HP = 0)"
             );
         }
@@ -8674,7 +8672,7 @@ station = "helm"
                 .get::<ShipSystemControlSources>()
                 .unwrap();
             assert!(
-                control_sources.0.offline_systems.contains(&helm_sid),
+                control_sources.0.is_offline(&helm_sid),
                 "after tick 2, helm MUST still be in offline_systems (regression \
                  for issue #617 dual-iteration clobber bug)"
             );
@@ -8824,7 +8822,7 @@ station = "helm"
             .unwrap();
         let reactor_id = crate::system_registry::power_reactor_system_id();
         assert!(
-            control_sources.0.offline_systems.contains(&reactor_id),
+            control_sources.0.is_offline(&reactor_id),
             "power-reactor should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
         );
     }
@@ -8851,7 +8849,7 @@ station = "helm"
             .unwrap();
         let battery_id = crate::system_registry::power_battery_system_id();
         assert!(
-            control_sources.0.offline_systems.contains(&battery_id),
+            control_sources.0.is_offline(&battery_id),
             "power-battery should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
         );
     }
@@ -8968,12 +8966,12 @@ station = "helm"
             .unwrap();
         let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
         assert!(
-            cs.0.offline_systems.contains(&fore_sid),
+            cs.0.is_offline(&fore_sid),
             "shield-arc-fore must be in offline_systems when its arc HP is 0"
         );
         let aft_sid = crate::system_registry::shield_arc_system_id("aft").expect("aft");
         assert!(
-            !cs.0.offline_systems.contains(&aft_sid),
+            !cs.0.is_offline(&aft_sid),
             "shield-arc-aft must NOT be in offline_systems (still at full HP)"
         );
     }
@@ -9021,7 +9019,7 @@ station = "helm"
             .unwrap();
         let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
         assert!(
-            !cs.0.offline_systems.contains(&fore_sid),
+            !cs.0.is_offline(&fore_sid),
             "shield-arc-fore must be removed from offline_systems after repair"
         );
     }

@@ -34,7 +34,7 @@ Modules are organised by **domain**, not by audience (server vs client) or layer
 
 ```
 src/
-├── core/           messages.rs, codec.rs, flag_kind.rs, broadcast seam
+├── core/           messages.rs (wire types incl. FlagKind), codec.rs, broadcast seam
 ├── lobby/          lobby.rs, lobby_handler.rs, stations*.rs, client_panel.rs, session.rs
 ├── ship/           ship_state.rs, ship_physics.rs, impulse.rs, damage.rs
 ├── weapons/        phaser.rs, torpedo.rs, shield.rs, beam_render.rs
@@ -79,7 +79,7 @@ While migration is in progress, modules live at their old flat paths alongside t
 | `ship_physics.rs`, `ship_state.rs`, `impulse.rs` | Pure physics + Bevy resource. |
 | `phaser.rs`, `torpedo.rs`, `shield.rs` | Pure weapon/defence state machines. |
 | `damage.rs`, `breakdown.rs`, `repair_teams.rs` | Pure damage formula + breakdown queue + repair dispatch. |
-| `power_system.rs`, `modifiers.rs`, `flag_kind.rs` | Pure 6+2 power model + modifier cache + typed flags. |
+| `power_system.rs`, `modifiers.rs` | Pure 6+2 power model + modifier cache + typed flags (`FlagKind` lives in `core/messages.rs`). |
 | `asteroid_spawner.rs`, `asteroid_window.rs`, `asteroid_lifecycle.rs` | Pure density + ring-buffer window + Bevy lifecycle systems. |
 | `region_*.rs`, `region_plugin.rs` | Region effects (damage zones, slow zones, jammers). |
 | `entity_config.rs`, `entity_loader.rs`, `entity_spawner.rs`, `entity_override.rs`, `entity_tags.rs`, `map_config.rs`, `config_cache.rs` | Data-driven entity pipeline (PRD #153). |

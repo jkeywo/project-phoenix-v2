@@ -51,7 +51,7 @@ use uuid::Uuid;
 use crate::entity_config::EntityConfig;
 use crate::entity_loader::TemplateLoader;
 use crate::faction::FactionRegistry;
-use crate::flag_kind::FlagKind;
+use crate::messages::FlagKind;
 use crate::messages::{AiDirective, GamePhase, ModifierSlot, ObjectiveSource};
 use crate::modifiers::IntModifierSlot;
 use crate::objectives::UtilityConfig;

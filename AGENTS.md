@@ -102,7 +102,7 @@ In-game commands are `ClientMessage::ControlSystem { target: SystemId, payload }
 
 ```
 src/
-  core/         — Wire types, codec, flag_kind, broadcast/ (Broadcaster seam)
+  core/         — Wire types (messages.rs, incl. FlagKind), codec, broadcast/ (Broadcaster seam)
   lobby/        — Session management, station assignment, lobby handler (pure + Bevy)
   ship/         — Physics, damage, power, shields, sensors, ratings, system registry, coordination (mostly pure)
   weapons/      — Phaser, torpedo state machines + beam renderer

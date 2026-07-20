@@ -145,7 +145,7 @@ station = "repair"
         let mut resolver = ControlSourceResolver::new();
         resolver.set(SystemId("repair".into()), source);
         if offline {
-            resolver.offline_systems.insert(SystemId("repair".into()));
+            resolver.set_offline(SystemId("repair".into()), true);
         }
         ShipSystemControlSources(resolver)
     }

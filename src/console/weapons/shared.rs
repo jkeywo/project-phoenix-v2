@@ -253,7 +253,7 @@ pub(crate) fn system_is_registered(
     system_id: &SystemId,
 ) -> bool {
     control_sources.0.entries().any(|(id, _)| id == system_id)
-        || control_sources.0.offline_systems.contains(system_id)
+        || control_sources.0.is_offline(system_id)
 }
 
 #[cfg(test)]

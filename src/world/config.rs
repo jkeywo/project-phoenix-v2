@@ -687,12 +687,12 @@ pub enum TriggerAction {
     ApplyFlag {
         entity: String,
         tag: String,
-        kind: crate::flag_kind::FlagKind,
+        kind: crate::messages::FlagKind,
     },
     RemoveFlag {
         entity: String,
         tag: String,
-        kind: crate::flag_kind::FlagKind,
+        kind: crate::messages::FlagKind,
     },
     ApplyIntModifier {
         entity: String,
@@ -969,8 +969,8 @@ fn parse_int_modifier_slot(s: &str) -> Result<crate::modifiers::IntModifierSlot,
     }
 }
 
-fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
-    use crate::flag_kind::FlagKind;
+fn parse_flag_kind(s: &str) -> Result<crate::messages::FlagKind, String> {
+    use crate::messages::FlagKind;
     match s {
         "CommsJammed" => Ok(FlagKind::CommsJammed),
         "SensorBlind" => Ok(FlagKind::SensorBlind),

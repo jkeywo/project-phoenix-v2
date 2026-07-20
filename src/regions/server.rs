@@ -1670,7 +1670,7 @@ mod tests {
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-    use crate::flag_kind::FlagKind;
+    use crate::messages::FlagKind;
     use crate::region_effects::{CommsJamEffect, SensorBlindEffect};
 
     fn flag_test_app() -> App {

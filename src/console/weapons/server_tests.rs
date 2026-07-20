@@ -5629,7 +5629,7 @@ fn mark_system_offline(app: &mut App, system_id: SystemId) {
     let mut q =
         world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
-        cs.0.offline_systems.insert(system_id.clone());
+        cs.0.set_offline(system_id.clone(), true);
     }
 }
 
@@ -5666,7 +5666,7 @@ fn system_is_registered_returns_true_after_set() {
 fn system_is_registered_returns_true_after_offline_insert() {
     let mut sources = ShipSystemControlSources::default();
     let sysid = crate::system_registry::phaser_fore_system_id();
-    sources.0.offline_systems.insert(sysid.clone());
+    sources.0.set_offline(sysid.clone(), true);
     assert!(system_is_registered(&sources, &sysid));
 }
 
@@ -6545,7 +6545,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
             .world_mut()
             .query_filtered::<&ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         let cs = q.single(app.world()).unwrap();
-        cs.0.offline_systems.contains(&phaser_fore_id)
+        cs.0.is_offline(&phaser_fore_id)
     };
     assert!(
         is_in_offline,

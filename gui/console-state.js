@@ -20,23 +20,19 @@
  * Supports both flat `e.x` field and 3-element `e.position` array.
  * @param {{ x?: number, position?: number[] }} e
  */
-import { t, has } from './strings.js';
+import { t } from './strings.js';
 
 /**
  * Display name for a station id.
  *
  * Station names in TOML are lookup identifiers (Rust matches them by name, see
  * scripts/strings-rules.mjs), so they are localised here from a derived id
- * instead: `station.<id>.name`. Unknown ids fall back to Title Case so a new
- * station renders legibly before its CSV row exists.
+ * instead: `station.<id>.name`. A missing CSV row surfaces via the string
+ * table's missing-id policy (rendered as ⟨station.<id>.name⟩) so gaps are
+ * visible instead of being papered over by a hardcoded-English fallback.
  */
 export function stationDisplayName(id) {
-  const key = 'station.' + id + '.name';
-  if (has(key)) return t(key);
-  return String(id)
-    .split(/[-_]/)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
+  return t('station.' + id + '.name');
 }
 
 export function entityX(e) {

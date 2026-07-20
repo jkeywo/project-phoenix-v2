@@ -147,9 +147,8 @@ CI builds both pages on every push to `main` and deploys to GitHub Pages automat
 ```
 src/
   core/
-    messages.rs       — wire types (ClientMessage, ServerMessage, Console, EntitySnapshot, etc.)
+    messages.rs       — wire types (ClientMessage, ServerMessage, Console, EntitySnapshot, FlagKind, etc.)
     codec.rs          — JSON serialization (only place serde_json is used)
-    flag_kind.rs      — typed boolean flags (CommsJammed, SensorBlind)
     broadcast/        — Broadcaster, LobbyBroadcaster, SimBroadcaster, Cadence, Audience
   lobby/
     handler.rs        — pure lobby message handler (no Bevy, fully testable)

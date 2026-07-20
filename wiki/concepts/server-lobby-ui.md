@@ -15,8 +15,8 @@ The host page is the only consumer of this push channel: each viewer of `server.
 ## Push path (Rust → DOM)
 
 1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs:330` builds a `LobbyStatePayload`, encodes it via `core::codec::encode_lobby_state`, and writes a `LobbyStateChanged` event whenever the lobby state has actually changed (it dedupes by hashing the payload).
-2. **WASM bridge drain.** `flush_lobby_state` in `src/server/bridge.rs` drains those events on every tick and invokes the registered JS callback with the JSON body.
-3. **JS callback registration.** `set_lobby_state_callback(window.__updateLobby)` is invoked in `server.html` once WASM is ready (search for `set_lobby_state_callback` in the boot block).
+2. **WASM bridge drain.** `flush_host_channels` in `src/server/bridge.rs` drains those events on every tick and invokes the single registered host-channel callback with `("lobby", json)` (#818).
+3. **JS callback registration.** `set_host_channel_callback(window.__hostChannel)` is invoked once in `server.html` when WASM is ready; the dispatcher's handlers table routes `"lobby"` payloads to `window.__updateLobby`.
 4. **DOM mutation.** `window.__updateLobby` (`server.html:756` onward) parses the JSON and rewrites `#lobby-title`, `#lobby-subtitle`, `#lobby-crew-count`, `#lobby-crew-dots`, `#lobby-spectator-tag`, `#lobby-ready-badge`, `#station-grid`, `#reserved-aggregate`, `#lobby-spectator-list`, and `#lobby-status-hint`.
 
 This is a **one-way state-push channel** that runs in parallel to the regular [Message Flow](./message-flow.md) (which targets specific peers via PeerJS). Lobby state is broadcast-equivalent: only the host's own DOM consumes it.
@@ -113,7 +113,7 @@ Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.ts` (`SelectStati
 
 - `server.html`
 - `src/server/viewscreen_border.rs:330` — `push_lobby_state`
-- `src/server/bridge.rs` — `set_lobby_state_callback`, `flush_lobby_state`
+- `src/server/bridge.rs` — `set_host_channel_callback`, `flush_host_channels` (named Host Channel table, #818)
 - `src/console_bridge.rs` — `LobbyStateChanged` event
 - `src/core/messages.rs` — `LobbyStatePayload` / `StationPayload`
 - Issue [#436](https://github.com/jkeywo/project-phoenix-v2/issues/436) — original HTML rebuild

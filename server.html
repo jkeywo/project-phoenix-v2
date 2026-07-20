@@ -894,8 +894,8 @@
 
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken).
        No <audio> tags here: filenames and volumes are data-driven from TOML
-       and arrive via set_audio_config_callback, so the elements are built at
-       runtime by __audioConfig below. -->
+       and arrive via the "audio_config" host channel, so the elements are
+       built at runtime by __audioConfig below. -->
 
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
@@ -1118,14 +1118,14 @@
 
   // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
   //
-  // Rust pushes ViewscreenHudState JSON here via the registered
-  // set_hud_state_callback. We parse it, write the status strip cells, and
+  // Rust pushes ViewscreenHudState JSON here via the "hud" host channel
+  // (issue #818). We parse it, write the status strip cells, and
   // toggle the red-alert vignette class. It also carries the two audio state
   // flags (red_alert, phaser_firing) and engine_thrust — see the data-driven
   // audio module below for the playback side.
 
   // ── Screen shake (issue #116 follow-up) ────────────────────────────────
-  // Rust pushes (x, y) pixel offsets every frame via set_shake_callback.
+  // Rust pushes [x, y] pixel offsets every frame via the "shake" host channel.
   // Apply as CSS transform on the body so the entire page (canvas + HUD
   // overlay + border) shakes together. When offset is (0, 0) the transform
   // is removed.
@@ -1228,8 +1228,8 @@
 
   // ── HTML lobby panel (issue #436) ──────────────────────────────────────
   //
-  // Rust pushes LobbyStatePayload JSON here via the registered
-  // set_lobby_state_callback. We parse it and render the station grid,
+  // Rust pushes LobbyStatePayload JSON here via the "lobby" host channel.
+  // We parse it and render the station grid,
   // crew counter, ready badge, and spectator list.
 
   let _lobbyPrevPhase = '';
@@ -1890,7 +1890,7 @@
     // Looping beds and the siren use <audio> elements. The blaster uses Web
     // Audio instead: one-shots overlap, and <audio> cannot pan.
 
-    let _audioCfg = null;      // payload from set_audio_config_callback
+    let _audioCfg = null;      // payload from the "audio_config" host channel
     let _audioUnlocked = false; // user gesture / game start has happened
     let _audioStarted = false;
     let _els = {};             // key -> HTMLAudioElement
@@ -1985,9 +1985,11 @@
     }
 
     // Called on the Loading → InProgress edge, which is also the autoplay
-    // unlock. The config push and this edge land in the same frame and the
-    // PostUpdate flushes are unordered, so whichever arrives second starts
-    // the audio — don't assume an ordering.
+    // unlock. The config push and this edge can land in the same frame, and
+    // although a single flush (`flush_host_channels`, issue #818) now walks
+    // the host channels in a fixed order, cross-channel ordering remains an
+    // implementation detail JS must not rely on — whichever arrives second
+    // starts the audio.
     function startGameAudio() {
       _audioUnlocked = true;
       maybeStartAudio();
@@ -2241,63 +2243,61 @@ function finishInit() {
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
-  // Expose the inbound action entry point and the state-push callback
-  // registrations. The HUD callback is wired immediately so the viewscreen
-  // overlay starts receiving state as soon as the sim runs.
+  // Expose the inbound action entry point and the Host Channel registration.
   window.wasm_ui_action = wasmBindings.wasm_ui_action;
   window.wasm_force_start = wasmBindings.wasm_force_start;
-  window.set_console_state_callback = wasmBindings.set_console_state_callback;
-  window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
-  window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
-  window.set_shake_callback = wasmBindings.set_shake_callback;
-  window.set_chatter_callback = wasmBindings.set_chatter_callback;
-  window.set_audio_config_callback = wasmBindings.set_audio_config_callback;
-  window.set_audio_cue_callback = wasmBindings.set_audio_cue_callback;
-  window.set_audio_level_callback = wasmBindings.set_audio_level_callback;
-  if (typeof set_hud_state_callback === 'function') {
-    set_hud_state_callback(window.__updateHud);
-  }
-  if (typeof set_lobby_state_callback === 'function') {
-    set_lobby_state_callback(window.__updateLobby);
-  }
-  if (typeof set_shake_callback === 'function') {
-    set_shake_callback(window.__applyShake);
-  }
-  if (typeof set_chatter_callback === 'function') {
-    set_chatter_callback(window.__updateChatter);
-  }
-  if (typeof set_audio_config_callback === 'function') {
-    set_audio_config_callback(window.__audioConfig);
-  }
-  if (typeof set_audio_cue_callback === 'function') {
-    set_audio_cue_callback(window.__audioCue);
-  }
-  if (typeof set_audio_level_callback === 'function') {
-    set_audio_level_callback(window.__audioLevel);
+  window.set_host_channel_callback = wasmBindings.set_host_channel_callback;
+
+  // ── Host Channel dispatcher (issue #818) ─────────────────────────────────
+  // One flush system in Rust (`flush_host_channels`) drains every host-page
+  // channel and calls `__hostChannel(name, payload)`. The handlers table
+  // routes each named channel to its existing handler function. Adding a
+  // channel = one Rust table row + one entry here.
+  //
+  // Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
+  // a bare number for audio_level; a two-element [x, y] array for shake.
+  //
+  // JS must not assume any cross-channel ordering: even though a single flush
+  // now walks the channels in a fixed order, that order is an implementation
+  // detail — e.g. the audio config push and the Loading → InProgress edge may
+  // still land in either order within a frame (see startGameAudio).
+  var _hostChannelHandlers = {
+    hud:          function(p) { window.__updateHud(p); },
+    lobby:        function(p) { window.__updateLobby(p); },
+    chatter:      function(p) { window.__updateChatter(p); },
+    audio_config: function(p) { window.__audioConfig(p); },
+    audio_cue:    function(p) { window.__audioCue(p); },
+    audio_level:  function(p) { window.__audioLevel(p); },
+    shake:        function(p) { window.__applyShake(p[0], p[1]); }
+  };
+  window.__hostChannel = function(name, payload) {
+    var handler = _hostChannelHandlers[name];
+    if (handler) {
+      handler(payload);
+    } else {
+      console.warn('[Phoenix] unhandled host channel:', name);
+    }
+  };
+  if (typeof set_host_channel_callback === 'function') {
+    set_host_channel_callback(window.__hostChannel);
   }
 
-  // ── HTML console state relay (issue #428) ────────────────────────────────
-  // WASM pushes console state via flush_console_state → set_console_state_callback.
-  // We relay it to HTML console pages (gui/*.html) open in the same browser
-  // origin via BroadcastChannel ('phoenix-console-state').  Those pages send
-  // their actions back on the same channel and we forward them to wasm_ui_action.
+  // ── HTML console action relay (issue #428) ───────────────────────────────
+  // Standalone console tabs (gui/*.html opened as their own browser tab —
+  // ADR-0001 §3 transport target 4) send their actions on
+  // BroadcastChannel('phoenix-console-state'); forward them to wasm_ui_action.
+  // The outbound console-STATE half of this relay (window.__updateConsole +
+  // flush_console_state) was removed with the dormant console-preview channel
+  // in issue #818 — Rust never produced ConsoleStateChanged.
   var _consoleBroadcast = ('BroadcastChannel' in window)
       ? new BroadcastChannel('phoenix-console-state')
       : null;
-  window.__updateConsole = function(name, json) {
-    if (_consoleBroadcast) {
-      _consoleBroadcast.postMessage({ type: 'console_state', name: name, json: json });
-    }
-  };
   if (_consoleBroadcast) {
     _consoleBroadcast.onmessage = function(e) {
       if (e.data && e.data.type === 'console_action' && typeof wasm_ui_action === 'function') {
         wasm_ui_action(e.data.payload);
       }
     };
-  }
-  if (typeof set_console_state_callback === 'function') {
-    set_console_state_callback(window.__updateConsole);
   }
 
   // ── Available ships from world config (issue #623) ──────────────────────

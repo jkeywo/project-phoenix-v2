@@ -168,7 +168,7 @@ impl Plugin for ViewscreenBorderPlugin {
 
 /// Reads server lobby resources and emits `LobbyStateChanged` for the HTML
 /// lobby overlay whenever the state changes. Runs in `Update` so the bridge's
-/// `flush_lobby_state` (in `PostUpdate`) forwards it to JS.
+/// `flush_host_channels` (in `PostUpdate`) forwards it to JS.
 pub(crate) fn push_lobby_state(
     sessions: Option<Res<Sessions>>,
     ship_stations: Option<Res<ShipStations>>,
@@ -429,7 +429,7 @@ pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
 // the LocalShip's `ShipPhysics` + `EntitySystemHull` components each frame,
 // writes it into a single `ViewscreenHud` component only when it changes, and
 // a `Changed<ViewscreenHud>` system encodes + emits a `HudStateChanged`
-// message. The wasm forwarding to JS lives in `bridge::flush_hud_state`.
+// message. The wasm forwarding to JS lives in `bridge::flush_host_channels`.
 
 /// Single-entity component carrying the latest serialised HUD state. Bevy
 /// change-detection drives the JS push.

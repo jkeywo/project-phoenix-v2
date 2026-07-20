@@ -20,26 +20,16 @@ use bevy::prelude::*;
 pub const LOCAL_CONSOLE_TOKEN: &str = "__local_console__";
 
 /// Emitted by `viewscreen_border::push_hud_state` when the serialised HUD
-/// state changes. `json` is the output of `codec::encode_hud_state`. Read by
-/// `bridge::flush_hud_state` (wasm) to call the registered JS HUD callback.
+/// state changes. `json` is the output of `codec::encode_hud_state`. Drained
+/// by `bridge::flush_host_channels` (wasm) onto the `"hud"` host channel.
 #[derive(Message, Clone, Debug)]
 pub struct HudStateChanged {
     pub json: String,
 }
 
-/// Emitted by a console's push system when its serialised state changes.
-/// `name` is the PascalCase console name (e.g. `"Tactical"`); `json` is the
-/// output of `codec::encode_console_state`. Read by `bridge::flush_console_state`
-/// (wasm) to call the registered JS console callback with `(name, json)`.
-#[derive(Message, Clone, Debug)]
-pub struct ConsoleStateChanged {
-    pub name: String,
-    pub json: String,
-}
-
 /// Emitted by the lobby push system when the serialised lobby state changes.
-/// `json` is the output of `codec::encode_lobby_state`. Read by
-/// `bridge::flush_lobby_state` (wasm) to call the registered JS lobby callback.
+/// `json` is the output of `codec::encode_lobby_state`. Drained by
+/// `bridge::flush_host_channels` (wasm) onto the `"lobby"` host channel.
 #[derive(Message, Clone, Debug)]
 pub struct LobbyStateChanged {
     pub json: String,
@@ -47,8 +37,11 @@ pub struct LobbyStateChanged {
 
 /// Emitted by the coordination lag processor when an AI→AI coordination
 /// message is delivered. Carries pre-formatted labels and text for the
-/// viewscreen chatter widget. Read by `bridge::flush_chatter` (wasm).
-#[derive(Message, Clone, Debug)]
+/// viewscreen chatter widget. Drained by `bridge::flush_host_channels`
+/// (wasm), which encodes it via `codec::encode_chatter` onto the `"chatter"`
+/// host channel — hence the `Serialize` derive; the wire shape is pinned by
+/// `codec`'s `encode_chatter` tests.
+#[derive(Message, Clone, Debug, serde::Serialize)]
 pub struct AiChatterEvent {
     pub from_label: String,
     pub to_label: String,
@@ -57,8 +50,9 @@ pub struct AiChatterEvent {
 
 /// Emitted once by `server::audio::push_audio_config` when the local ship
 /// spawns, carrying the merged ship + world audio config. `json` is the output
-/// of `codec::encode_audio_config`. Read by `bridge::flush_audio_config`
-/// (wasm), which hands it to the JS callback that builds the audio graph.
+/// of `codec::encode_audio_config`. Drained by `bridge::flush_host_channels`
+/// (wasm) onto the `"audio_config"` host channel, whose JS handler builds the
+/// audio graph.
 #[derive(Message, Clone, Debug)]
 pub struct AudioConfigChanged {
     pub json: String,
@@ -66,7 +60,8 @@ pub struct AudioConfigChanged {
 
 /// Emitted by `server::audio::push_blaster_cues` for each one-shot positional
 /// sound. `json` is the output of `codec::encode_audio_cue` and carries
-/// listener-relative coordinates. Read by `bridge::flush_audio_cue` (wasm).
+/// listener-relative coordinates. Drained by `bridge::flush_host_channels`
+/// (wasm) onto the `"audio_cue"` host channel.
 #[derive(Message, Clone, Debug)]
 pub struct AudioCueEvent {
     pub json: String,

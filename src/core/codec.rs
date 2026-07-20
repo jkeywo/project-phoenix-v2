@@ -33,7 +33,7 @@ impl MessageCodec for JsonCodec {
 // ── HTML console bridge (de)serialisation (ADR-0001 / PRD #419) ────────────
 //
 // These are the sanctioned `serde_json` surface for the HTML bridge: the
-// viewscreen HUD push, the generic console-state push, and the inbound
+// host-channel pushes (HUD, lobby, chatter, audio) and the inbound
 // `__sendAction` decode. Bridge / plugin code must call these, never
 // `serde_json` directly.
 
@@ -44,9 +44,13 @@ pub fn encode_hud_state(
     serde_json::to_string(s)
 }
 
-/// Encode any serialisable console-state struct to JSON for `__updateConsole`.
-pub fn encode_console_state<T: serde::Serialize>(s: &T) -> Result<String, serde_json::Error> {
-    serde_json::to_string(s)
+/// Encode an AI→AI chatter event for the `"chatter"` host channel (issue
+/// #818). The wire shape is `{"from_label":…,"to_label":…,"text":…}` — the
+/// `__updateChatter` handler in `server.html` reads exactly these keys.
+pub fn encode_chatter(
+    ev: &crate::console_bridge::AiChatterEvent,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(ev)
 }
 
 /// Encode the merged ship + world audio config for `__audioConfig`. Sent once
@@ -864,6 +868,42 @@ mod tests {
     // — they pin the on-the-wire shape itself (important for cross-client /
     // JS-side compatibility), which the table-driven harness above does not
     // inherently cover.
+
+    /// `encode_chatter` wire shape pin (issue #818): the `"chatter"` host
+    /// channel's JSON must expose exactly `from_label` / `to_label` / `text` —
+    /// `__updateChatter` in `server.html` reads these keys.
+    #[test]
+    fn encode_chatter_wire_shape_matches_js_handler() {
+        let ev = crate::console_bridge::AiChatterEvent {
+            from_label: "Shields".into(),
+            to_label: "Helm".into(),
+            text: "Fore shield offline (12s)".into(),
+        };
+        let encoded = encode_chatter(&ev).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"from_label":"Shields","to_label":"Helm","text":"Fore shield offline (12s)"}"#,
+            "chatter wire shape must match what __updateChatter parses"
+        );
+    }
+
+    /// `encode_chatter` must JSON-escape quotes/backslashes in display text —
+    /// the pre-#818 hand-rolled `format!` encoder did this by hand; serde now
+    /// owns it. Round-trips through `serde_json::Value` to prove the output
+    /// is valid JSON with the original strings intact.
+    #[test]
+    fn encode_chatter_escapes_special_characters() {
+        let ev = crate::console_bridge::AiChatterEvent {
+            from_label: r#"AI "Sensors""#.into(),
+            to_label: r"helm\aux".into(),
+            text: "line1\nline2".into(),
+        };
+        let encoded = encode_chatter(&ev).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
+        assert_eq!(v["from_label"], r#"AI "Sensors""#);
+        assert_eq!(v["to_label"], r"helm\aux");
+        assert_eq!(v["text"], "line1\nline2");
+    }
 
     #[test]
     fn client_control_system_json_shape_uses_string_ids() {

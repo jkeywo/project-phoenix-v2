@@ -57,7 +57,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Wire Codec Protocol
-      summary: Sole JSON codec boundary for remote client and server envelopes, host-page UI actions, short-form system-control compatibility normalization, and serialized HUD, console, and lobby snapshots.
+      summary: Sole JSON codec boundary for remote client and server envelopes, host-page UI actions, short-form system-control compatibility normalization, and serialized HUD, lobby, chatter, and audio host-channel payloads.
     architecture:
       kind: protocol-codec
       authority: authoritative
@@ -67,7 +67,7 @@ entities:
     implementation:
       status: declared
       paths: [src/core/codec.rs, src/core/messages.rs]
-      symbols: [JsonCodec, decode_bridge_client_message, decode_ui_action, encode_hud_state, encode_console_state, encode_lobby_state]
+      symbols: [JsonCodec, decode_bridge_client_message, decode_ui_action, encode_hud_state, encode_chatter, encode_lobby_state]
       tests: [cargo test]
 
   - component: host-page-push-bridge
@@ -75,7 +75,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Page Push Bridge
-      summary: Forwards encoded host HUD, console, lobby, and AI chatter updates to registered server-page JavaScript callbacks without making that page authoritative for simulation state.
+      summary: Single named Host Channel seam that drains host HUD, lobby, AI chatter, audio config/cue events plus the per-frame shake and forcefield-level taps and forwards each as (name, payload) to the one server-page JavaScript callback, without making that page authoritative for simulation state.
     architecture:
       kind: host-presentation-bridge
       authority: derived
@@ -83,8 +83,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs]
-      symbols: [HudStateChanged, ConsoleStateChanged, LobbyStateChanged, AiChatterEvent]
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server/viewscreen_border.rs, src/server/audio.rs]
+      symbols: [flush_host_channels, set_host_channel_callback, HudStateChanged, LobbyStateChanged, AiChatterEvent, AudioConfigChanged, AudioCueEvent]
       tests: [cargo test]
 
   - component: entity-targetability-contract

@@ -60,8 +60,8 @@ export function initConsole({ name, render }) {
   //      and calls `iframeEl.contentWindow.__updateConsole` directly.
   //   2. Inside a wry native webview — host calls `__updateConsole` via
   //      `webview.evaluate_script`.
-  //   3. Inside a browser WASM page — Bevy's `set_console_state_callback`
-  //      calls `__updateConsole` directly.
+  //   3. Inside a browser WASM page — the host page calls `__updateConsole`
+  //      directly.
   //   4. As its own browser tab — same-origin server.html broadcasts state
   //      on `BroadcastChannel('phoenix-console-state')`.
   //

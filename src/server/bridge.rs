@@ -17,8 +17,8 @@ use {
     crate::codec::{self, JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
-        AiChatterEvent, AudioConfigChanged, AudioCueEvent, ConsoleStateChanged, HudStateChanged,
-        LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
+        AiChatterEvent, AudioConfigChanged, AudioCueEvent, HudStateChanged, LobbyStateChanged,
+        LOCAL_CONSOLE_TOKEN,
     },
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
@@ -181,57 +181,30 @@ thread_local! {
     /// be decoded and injected into Bevy by `drain_ui_actions`.
     static UI_ACTION_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
-    /// JS callback registered by the HTML console to receive per-console state
-    /// pushes. Signature: `callback(name: string, stateJson: string)`.
-    static CONSOLE_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the HTML viewscreen overlay to receive HUD
-    /// state pushes. Signature: `callback(stateJson: string)`.
-    static HUD_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the HTML lobby overlay to receive lobby state
-    /// pushes. Signature: `callback(stateJson: string)`.
-    static LOBBY_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the HTML viewscreen overlay to receive chatter
-    /// events. Signature: `callback(stateJson: string)` where stateJson is a
-    /// JSON string containing `{from_label, to_label, text}`.
-    static CHATTER_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the HTML viewscreen overlay to receive screen
-    /// shake offsets. Signature: `callback(x: number, y: number)`.
-    /// Called every frame with the current pixel offset; (0, 0) when no shake.
-    static SHAKE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+    /// The single Host Channel callback registered by the host page (issue
+    /// #818). Signature: `callback(name: string, payload: any)` where `name`
+    /// is one of [`host_channels::ALL`] and `payload` is a JSON string for the
+    /// message-drained channels, a bare number for `audio_level`, and a
+    /// two-element `[x, y]` array for `shake`. Replaces the eight per-channel
+    /// callback slots + `set_*_callback` exports.
+    static HOST_CHANNEL_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 
     /// Latest screen shake offset (x, y) in CSS pixels, written by
     /// [`viewscreen_border::apply_camera_shake`] each frame and read by
-    /// [`flush_shake_state`] for the JS callback.
+    /// [`flush_host_channels`] for the JS callback.
     static SHAKE_OFFSET: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
-
-    /// JS callback registered by the host page to receive the merged ship +
-    /// world audio config, once, on game start. Signature:
-    /// `callback(configJson: string)`.
-    static AUDIO_CONFIG_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the host page to receive one-shot positional
-    /// audio cues. Signature: `callback(cueJson: string)`.
-    static AUDIO_CUE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
-
-    /// JS callback registered by the host page to receive the forcefield SFX
-    /// level. Signature: `callback(level: number)`, `level` in 0.0–1.0.
-    static AUDIO_LEVEL_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 
     /// Latest forcefield SFX volume, written by
     /// [`server::audio::drive_forcefield_level`] each frame and read by
-    /// [`flush_audio_level`].
+    /// [`flush_host_channels`].
     static FORCEFIELD_LEVEL: RefCell<f32> = const { RefCell::new(0.0) };
 
-    /// Last value handed to `AUDIO_LEVEL_CB`. Unlike the shake offset (which
-    /// fires unconditionally so JS can reset its transform), a `.volume` write
-    /// that changes nothing is pure overhead at 60 Hz — so
-    /// [`flush_audio_level`] calls JS only when the level actually moves.
-    /// Starts at a sentinel no real level can equal, so the first flush always
-    /// fires.
+    /// Last forcefield level handed to the `audio_level` host channel. Unlike
+    /// the shake offset (which fires unconditionally so JS can reset its
+    /// transform), a `.volume` write that changes nothing is pure overhead at
+    /// 60 Hz — so [`flush_host_channels`] emits `audio_level` only when the
+    /// level actually moves. Starts at a sentinel no real level can equal, so
+    /// the first flush always fires.
     static LAST_SENT_FORCEFIELD: RefCell<f32> = const { RefCell::new(-1.0) };
 
     /// Template path of the player ship selected by the host. Set by
@@ -245,6 +218,52 @@ thread_local! {
 
     /// Instagib: local ship deals 100× damage.
     static INSTAGIB: RefCell<bool> = const { RefCell::new(false) };
+}
+
+// ── Host Channels (issue #818) ─────────────────────────────────────────────
+//
+// Named host-page-local outbound channels (CONTEXT.md "Host Channel"). These
+// feed `server.html` chrome only — they never reach peers and must NOT be
+// folded into `ServerMessage`. One flush system (`flush_host_channels`,
+// wasm-gated below) drains every channel and hands `(name, payload)` to the
+// single JS callback registered via `set_host_channel_callback`.
+//
+// Adding a host channel = add a name const here (and to `ALL`), drain it in
+// `flush_host_channels`, and add one handler entry to the `__hostChannel`
+// dispatcher table in `server.html`.
+//
+// The names are ungated so native `cargo test` can pin the table's shape.
+pub mod host_channels {
+    /// Viewscreen HUD state — JSON string (`codec::encode_hud_state`).
+    pub const HUD: &str = "hud";
+    /// Lobby overlay state — JSON string (`codec::encode_lobby_state`).
+    pub const LOBBY: &str = "lobby";
+    /// AI→AI chatter events — JSON string (`codec::encode_chatter`).
+    pub const CHATTER: &str = "chatter";
+    /// Merged ship + world audio config — JSON string
+    /// (`codec::encode_audio_config`), sent once on game start.
+    pub const AUDIO_CONFIG: &str = "audio_config";
+    /// One-shot positional audio cues — JSON string
+    /// (`codec::encode_audio_cue`).
+    pub const AUDIO_CUE: &str = "audio_cue";
+    /// Screen-shake offset — two-element `[x, y]` array of CSS pixels,
+    /// emitted every frame (`[0, 0]` when idle so JS resets its transform).
+    pub const SHAKE: &str = "shake";
+    /// Forcefield SFX volume — bare number in 0.0–1.0, emitted only when the
+    /// level moves by at least the audible epsilon.
+    pub const AUDIO_LEVEL: &str = "audio_level";
+
+    /// Every registered host channel name. The JS dispatcher table in
+    /// `server.html` must have a handler per entry.
+    pub const ALL: [&str; 7] = [
+        HUD,
+        LOBBY,
+        CHATTER,
+        AUDIO_CONFIG,
+        AUDIO_CUE,
+        SHAKE,
+        AUDIO_LEVEL,
+    ];
 }
 
 // ── God mode / Instagib helpers ────────────────────────────────────────────
@@ -511,20 +530,7 @@ pub fn wasm_init() {
             drain_force_start,
         ),
     )
-    .add_systems(
-        PostUpdate,
-        (
-            flush_outbound,
-            flush_hud_state,
-            flush_console_state,
-            flush_lobby_state,
-            flush_chatter,
-            flush_shake_state,
-            flush_audio_config,
-            flush_audio_cue,
-            flush_audio_level,
-        ),
-    );
+    .add_systems(PostUpdate, (flush_outbound, flush_host_channels));
 
     // Insert the validated ShipStations resource if it was pre-validated.
     SHIP_STATIONS.with(|slot| {
@@ -589,55 +595,23 @@ pub fn wasm_ui_action(json: &str) {
     });
 }
 
-/// Called by JS once to register the per-console state-push callback.
-/// Bevy calls `callback(name: string, stateJson: string)` on console change.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_console_state_callback(callback: Function) {
-    CONSOLE_STATE_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the viewscreen HUD-state push callback.
-/// Bevy calls `callback(stateJson: string)` on HUD change.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_hud_state_callback(callback: Function) {
-    HUD_STATE_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the lobby-state push callback.
-/// Bevy calls `callback(stateJson: string)` on lobby state change.
+/// Called by JS once to register the single Host Channel callback (issue
+/// #818). Bevy calls `callback(name: string, payload: any)` from
+/// [`flush_host_channels`] for every host-page channel:
+///
+/// - `"hud"`, `"lobby"`, `"chatter"`, `"audio_config"`, `"audio_cue"` —
+///   `payload` is a JSON string.
+/// - `"shake"` — `payload` is a two-element `[x, y]` array (CSS pixels),
+///   emitted every frame.
+/// - `"audio_level"` — `payload` is a bare number in 0.0–1.0, emitted on
+///   change only.
+///
 /// Must be registered before `wasm_init()` so the first push is never missed.
+/// JS must not assume any cross-channel ordering.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn set_lobby_state_callback(callback: Function) {
-    LOBBY_STATE_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the screen-shake callback.
-/// Bevy calls `callback(x: number, y: number)` every frame with the current
-/// CSS pixel offset. `(0, 0)` means no shake.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_shake_callback(callback: Function) {
-    SHAKE_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the viewscreen chatter callback.
-/// Bevy calls `callback(stateJson: string)` for each AI→AI coordination
-/// event. The JSON is `{from_label, to_label, text}`.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_chatter_callback(callback: Function) {
-    CHATTER_CB.with(|slot| {
+pub fn set_host_channel_callback(callback: Function) {
+    HOST_CHANNEL_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
 }
@@ -657,36 +631,6 @@ pub fn set_shake_offset(x: f32, y: f32) {
 pub fn set_forcefield_level(level: f32) {
     FORCEFIELD_LEVEL.with(|slot| {
         *slot.borrow_mut() = level;
-    });
-}
-
-/// Called by JS once to register the audio-config callback.
-/// Bevy calls `callback(configJson: string)` once, when the local ship spawns.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_audio_config_callback(callback: Function) {
-    AUDIO_CONFIG_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the positional audio-cue callback.
-/// Bevy calls `callback(cueJson: string)` for each one-shot sound.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_audio_cue_callback(callback: Function) {
-    AUDIO_CUE_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
-    });
-}
-
-/// Called by JS once to register the forcefield-level callback.
-/// Bevy calls `callback(level: number)` whenever the level changes.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn set_audio_level_callback(callback: Function) {
-    AUDIO_LEVEL_CB.with(|slot| {
-        *slot.borrow_mut() = Some(callback);
     });
 }
 
@@ -1210,38 +1154,63 @@ fn drain_ui_actions(mut writer: MessageWriter<InboundMessage>) {
     }
 }
 
-/// Reads `HudStateChanged` messages each frame and forwards the JSON to the
-/// registered HUD-state callback via `cb.call1(NULL, json)`.
+/// The Host Channel flush (issue #818): drains every message-drained host
+/// channel and samples the two per-frame value taps, forwarding each as
+/// `cb(name, payload)` to the single callback registered via
+/// [`set_host_channel_callback`].
+///
+/// Per-channel behaviour (unchanged from the pre-#818 per-channel flushes):
+/// - message channels forward every drained event's JSON, in event order;
+/// - `shake` fires every frame (even `[0, 0]`) so the JS handler resets the
+///   CSS transform when shake ends;
+/// - `audio_level` fires only when the level moved by at least 0.001 — an
+///   unchanged `.volume` write 60 times a second buys nothing, and the
+///   epsilon is well below audible resolution.
+///
+/// The message channels are drained even when no callback is registered, so
+/// registering late never replays a backlog.
 #[cfg(target_arch = "wasm32")]
-fn flush_hud_state(mut reader: MessageReader<HudStateChanged>) {
-    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
-    if payloads.is_empty() {
-        return;
-    }
-    HUD_STATE_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for json in &payloads {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
-            }
-        }
-    });
-}
+fn flush_host_channels(
+    mut hud: MessageReader<HudStateChanged>,
+    mut lobby: MessageReader<LobbyStateChanged>,
+    mut chatter: MessageReader<AiChatterEvent>,
+    mut audio_config: MessageReader<AudioConfigChanged>,
+    mut audio_cue: MessageReader<AudioCueEvent>,
+) {
+    // Declarative channel table: name → drained JSON payloads. Adding a
+    // message channel = one row here (see `host_channels`).
+    let message_batches: [(&str, Vec<String>); 5] = [
+        (
+            host_channels::HUD,
+            hud.read().map(|m| m.json.clone()).collect(),
+        ),
+        (
+            host_channels::LOBBY,
+            lobby.read().map(|m| m.json.clone()).collect(),
+        ),
+        (
+            host_channels::CHATTER,
+            chatter
+                .read()
+                .filter_map(|ev| codec::encode_chatter(ev).ok())
+                .collect(),
+        ),
+        (
+            host_channels::AUDIO_CONFIG,
+            audio_config.read().map(|m| m.json.clone()).collect(),
+        ),
+        (
+            host_channels::AUDIO_CUE,
+            audio_cue.read().map(|m| m.json.clone()).collect(),
+        ),
+    ];
 
-/// Reads `ConsoleStateChanged` messages each frame and forwards `(name, json)`
-/// to the registered console-state callback via `cb.call2(NULL, name, json)`.
-#[cfg(target_arch = "wasm32")]
-fn flush_console_state(mut reader: Option<MessageReader<ConsoleStateChanged>>) {
-    let Some(mut reader) = reader else { return };
-    let payloads: Vec<(String, String)> = reader
-        .read()
-        .map(|m| (m.name.clone(), m.json.clone()))
-        .collect();
-    if payloads.is_empty() {
-        return;
-    }
-    CONSOLE_STATE_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for (name, json) in &payloads {
+    HOST_CHANNEL_CB.with(|slot| {
+        let borrowed = slot.borrow();
+        let Some(cb) = borrowed.as_ref() else { return };
+
+        for (name, payloads) in &message_batches {
+            for json in payloads {
                 let _ = cb.call2(
                     &JsValue::NULL,
                     &JsValue::from_str(name),
@@ -1249,123 +1218,28 @@ fn flush_console_state(mut reader: Option<MessageReader<ConsoleStateChanged>>) {
                 );
             }
         }
-    });
-}
 
-/// Reads `LobbyStateChanged` messages each frame and forwards the JSON to the
-/// registered lobby-state callback via `cb.call1(NULL, json)`.
-#[cfg(target_arch = "wasm32")]
-fn flush_lobby_state(mut reader: MessageReader<LobbyStateChanged>) {
-    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
-    if payloads.is_empty() {
-        return;
-    }
-    LOBBY_STATE_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for json in &payloads {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
-            }
-        }
-    });
-}
+        // Per-frame tap: shake, unconditional.
+        let (x, y) = SHAKE_OFFSET.with(|slot| *slot.borrow());
+        let offset = Array::of2(&JsValue::from_f64(x as f64), &JsValue::from_f64(y as f64));
+        let _ = cb.call2(
+            &JsValue::NULL,
+            &JsValue::from_str(host_channels::SHAKE),
+            &offset,
+        );
 
-/// Reads the current screen-shake offset each frame and forwards it to the
-/// registered shake callback via `cb.call2(NULL, x, y)`.
-///
-/// Always fires on every frame (even with (0, 0)) so the JS handler resets
-/// the CSS transform when shake ends.
-#[cfg(target_arch = "wasm32")]
-fn flush_shake_state() {
-    let current = SHAKE_OFFSET.with(|slot| *slot.borrow());
-    SHAKE_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
+        // Per-frame tap: forcefield level, epsilon-deduped.
+        let current = FORCEFIELD_LEVEL.with(|slot| *slot.borrow());
+        let last = LAST_SENT_FORCEFIELD.with(|slot| *slot.borrow());
+        if (current - last).abs() >= 0.001 {
+            LAST_SENT_FORCEFIELD.with(|slot| {
+                *slot.borrow_mut() = current;
+            });
             let _ = cb.call2(
                 &JsValue::NULL,
-                &JsValue::from_f64(current.0 as f64),
-                &JsValue::from_f64(current.1 as f64),
+                &JsValue::from_str(host_channels::AUDIO_LEVEL),
+                &JsValue::from_f64(current as f64),
             );
-        }
-    });
-}
-
-/// Reads `AudioConfigChanged` messages and forwards the config JSON to the
-/// registered audio-config callback via `cb.call1(NULL, json)`.
-#[cfg(target_arch = "wasm32")]
-fn flush_audio_config(mut reader: MessageReader<AudioConfigChanged>) {
-    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
-    if payloads.is_empty() {
-        return;
-    }
-    AUDIO_CONFIG_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for json in &payloads {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
-            }
-        }
-    });
-}
-
-/// Reads `AudioCueEvent` messages and forwards each cue's JSON to the
-/// registered audio-cue callback via `cb.call1(NULL, json)`.
-#[cfg(target_arch = "wasm32")]
-fn flush_audio_cue(mut reader: MessageReader<AudioCueEvent>) {
-    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
-    if payloads.is_empty() {
-        return;
-    }
-    AUDIO_CUE_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for json in &payloads {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
-            }
-        }
-    });
-}
-
-/// Forwards the current forcefield SFX level to JS via `cb.call1(NULL, level)`.
-///
-/// Only fires when the level actually moved — an unchanged `.volume` write 60
-/// times a second buys nothing. The epsilon is well below audible resolution.
-#[cfg(target_arch = "wasm32")]
-fn flush_audio_level() {
-    let current = FORCEFIELD_LEVEL.with(|slot| *slot.borrow());
-    let last = LAST_SENT_FORCEFIELD.with(|slot| *slot.borrow());
-    if (current - last).abs() < 0.001 {
-        return;
-    }
-    LAST_SENT_FORCEFIELD.with(|slot| {
-        *slot.borrow_mut() = current;
-    });
-    AUDIO_LEVEL_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            let _ = cb.call1(&JsValue::NULL, &JsValue::from_f64(current as f64));
-        }
-    });
-}
-
-/// Reads `AiChatterEvent` messages each frame and forwards them to the
-/// registered chatter callback as JSON via `cb.call1(NULL, json)`.
-#[cfg(target_arch = "wasm32")]
-fn flush_chatter(mut reader: MessageReader<AiChatterEvent>) {
-    let payloads: Vec<String> = reader
-        .read()
-        .map(|ev| {
-            format!(
-                r#"{{"from_label":"{}","to_label":"{}","text":"{}"}}"#,
-                ev.from_label.replace('\\', "\\\\").replace('"', "\\\""),
-                ev.to_label.replace('\\', "\\\\").replace('"', "\\\""),
-                ev.text.replace('\\', "\\\\").replace('"', "\\\""),
-            )
-        })
-        .collect();
-    if payloads.is_empty() {
-        return;
-    }
-    CHATTER_CB.with(|slot| {
-        if let Some(cb) = slot.borrow().as_ref() {
-            for json in &payloads {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
-            }
         }
     });
 }
@@ -1377,7 +1251,39 @@ fn flush_chatter(mut reader: MessageReader<AiChatterEvent>) {
 // `cargo test` on native, with no Bevy App and no wasm_bindgen involved.
 #[cfg(test)]
 mod tests {
-    use super::{apply_pending_toggles, DebugToggleKind};
+    use super::{apply_pending_toggles, host_channels, DebugToggleKind};
+
+    /// The Host Channel name table (issue #818) must have no duplicates —
+    /// the JS dispatcher in `server.html` keys its handlers by these names.
+    #[test]
+    fn host_channel_names_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for name in host_channels::ALL {
+            assert!(
+                seen.insert(name),
+                "duplicate host channel name: {name:?} — each name must map to \
+                 exactly one JS handler"
+            );
+        }
+    }
+
+    /// Every named channel const is present in `ALL` (and nothing else is) —
+    /// `flush_host_channels` and the JS dispatcher both key off these.
+    #[test]
+    fn host_channel_all_covers_every_const() {
+        assert_eq!(
+            host_channels::ALL,
+            [
+                host_channels::HUD,
+                host_channels::LOBBY,
+                host_channels::CHATTER,
+                host_channels::AUDIO_CONFIG,
+                host_channels::AUDIO_CUE,
+                host_channels::SHAKE,
+                host_channels::AUDIO_LEVEL,
+            ]
+        );
+    }
 
     /// Queuing a single toggle flips exactly the corresponding flag, exactly
     /// once, and leaves every other flag untouched.

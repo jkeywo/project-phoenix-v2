@@ -4,7 +4,7 @@
 // in-browser), but every filename and tuning value comes from TOML that only
 // Rust parses. This test verifies the whole chain end-to-end: ship/world TOML
 // → EntityConfig/WorldConfig → ShipAudioSection on the LocalShip →
-// AudioConfigChanged → set_audio_config_callback → window.__audioConfig →
+// AudioConfigChanged → "audio_config" host channel → window.__audioConfig →
 // constructed <audio> elements.
 //
 // It asserts on the audio module's *state*, not on sound — headless Chromium

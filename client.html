@@ -41,6 +41,10 @@
        chrome. Relays them to the active console (see gui/key-relay.js). -->
   <script type="module" src="gui/key-relay.js"></script>
   <script type="module" src="gui/console-state.js"></script>
+  <!-- Declarative message → dirty-console table (issue #823): handleMessage()
+       fans iframe pushes out through window.dirtyConsolesFor instead of
+       per-console push wrappers. -->
+  <script type="module" src="gui/dirty-consoles.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
@@ -1529,10 +1533,10 @@
     // Every station id (including the aggregate cruiser/destroyer consoles like
     // `engineering` = power+repair and `science` = sensors+shields) is handled
     // generically by window.buildConsoleState(name, window.simState), which nests the
-    // sub-panel payloads. The per-console push*ConsoleState helpers below only
-    // cover the legacy standalone iframes, so aggregate consoles (engineering,
-    // science, …) would otherwise never receive state. Route by the console
-    // registry so whatever iframe the current ship actually mounted is fed.
+    // sub-panel payloads. Route by the console registry so whatever iframe the
+    // current ship actually mounted is fed. This is the ONLY push path (#823):
+    // handleMessage fans out through pushDirtyConsoles below, and renderGame /
+    // iframe-load listeners push the active console directly.
     function pushConsoleStateFor(name) {
       if (!name) return;
       const registry = window.CONSOLE_REGISTRY || {};
@@ -1569,20 +1573,23 @@
       });
     }
 
-    // -- Weapons console iframe bridge (issue #422) --------------------------
-    // Builds a WeaponsConsoleState JSON from client state and pushes it to the
-    // gui/weapons-console.html iframe via its window.__updateConsole function.
-    // The iframe's __sendAction postMessages back; we forward those to the server.
-    // State builder extracted to gui/console-state.js (issue #454).
-
-    function buildWeaponsConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('tactical', window.simState);
-      return JSON.stringify({ target_uuid: null, target_name: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
-    }
-
-    function pushWeaponsConsoleState() {
-      if (activeConsole !== 'tactical') return;
-      _pushIframe($('weapons-iframe'), 'tactical', buildWeaponsConsoleState());
+    // -- Message-driven console refresh (issue #823) --------------------------
+    // The per-console build*/push*ConsoleState wrapper pairs that used to live
+    // here were deleted: handleMessage() now computes which consoles a message
+    // dirties via the declarative table in gui/dirty-consoles.js and pushes
+    // each through the generic pushConsoleStateFor above. Pushes are gated on
+    // the console being active, except the names in DIRTY_ALWAYS_PUSH
+    // (captain — its push was always unconditional).
+    function pushDirtyConsoles(msg) {
+      // Boot race: the module scripts may not have executed yet — drop the
+      // fan-out; pushes are idempotent snapshots and the next message repeats
+      // them (same tolerance as _pushIframe / pushConsoleStateFor).
+      if (typeof window.dirtyConsolesFor !== 'function') return;
+      const stationSystems = window.simState ? window.simState.stationSystems : null;
+      const alwaysPush = window.DIRTY_ALWAYS_PUSH || new Set();
+      for (const name of window.dirtyConsolesFor(msg, stationSystems)) {
+        if (alwaysPush.has(name) || activeConsole === name) pushConsoleStateFor(name);
+      }
     }
 
     // Attach on-load listener for an iframe that was created dynamically by
@@ -1604,105 +1611,9 @@
     function renderGame(s) {
       // Refresh whichever console is currently visible. This is ship-agnostic:
       // it covers the aggregate cruiser/destroyer consoles (engineering,
-      // science, …) that the per-name push helpers below do not, and the
-      // standalone consoles resolve to the same iframe via the registry.
+      // science, …) as well as the standalone ones — all resolve to their
+      // iframe via the registry.
       pushActiveConsoleState();
-    }
-
-    // -- Captain console iframe bridge (issue #428) ---------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-
-    function buildCaptainConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('captain', window.simState);
-      return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
-    }
-
-    function pushCaptainConsoleState() {
-      _pushIframe($('captain-iframe'), 'captain', buildCaptainConsoleState());
-    }
-
-    // -- Helm console iframe bridge (issue #423) ------------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-
-    function buildHelmConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('helm', window.simState);
-      return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
-    }
-
-    function pushHelmConsoleState() {
-      if (activeConsole !== 'helm') return;
-      _pushIframe($('helm-iframe'), 'helm', buildHelmConsoleState());
-    }
-
-    // -- Repair console iframe bridge (issue #425) ----------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-    function buildRepairConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('repair', window.simState);
-      return JSON.stringify({ teams: [], system_hull: [], damageable_systems: [], travel_duration_secs: 5.0 });
-    }
-
-    function pushRepairConsoleState() {
-      if (activeConsole !== 'repair') return;
-      _pushIframe($('repair-iframe'), 'repair', buildRepairConsoleState());
-    }
-
-    // -- Power console iframe bridge (issue #425) -----------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-    function buildPowerConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('power', window.simState);
-      return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
-    }
-
-    function pushPowerConsoleState() {
-      if (activeConsole !== 'power') return;
-      _pushIframe($('power-iframe'), 'power', buildPowerConsoleState());
-    }
-
-    // -- Shields console iframe bridge (issue #423) ---------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-    function buildShieldsConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('shields', window.simState);
-      return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
-    }
-
-    function pushShieldsConsoleState() {
-      if (activeConsole !== 'shields') return;
-      _pushIframe($('shields-iframe'), 'shields', buildShieldsConsoleState());
-    }
-
-    // -- Sensors console iframe bridge -----------------------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-    function buildSensorsConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('sensors', window.simState);
-      return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
-    }
-
-    function pushSensorsConsoleState() {
-      if (activeConsole !== 'sensors') return;
-      _pushIframe($('sensors-iframe'), 'sensors', buildSensorsConsoleState());
-    }
-
-    // -- Science console iframe bridge --------------------------------------------
-    function buildScienceConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('science', window.simState);
-      return JSON.stringify({ sensors: { scan_range: 2000, blips: [], target_uuid: null }, shields: { facings: [], hull_integrity_pct: 100, grid_status: 'GRID OFFLINE' }, science_auto: false });
-    }
-
-    function pushScienceConsoleState() {
-      if (activeConsole !== 'science') return;
-      _pushIframe($('science-iframe'), 'science', buildScienceConsoleState());
-    }
-
-    // -- Comms console iframe bridge --------------------------------------------
-    // State builder extracted to gui/console-state.js (issue #454).
-    function buildCommsConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('comms', window.simState);
-      return JSON.stringify({ messages: [], contacts: [] });
-    }
-
-    function pushCommsConsoleState() {
-      if (activeConsole !== 'comms') return;
-      _pushIframe($('comms-iframe'), 'comms', buildCommsConsoleState());
     }
 
     // -- Coordination popup (issue #494) ---------------------------------------
@@ -1768,18 +1679,6 @@
         clearTimeout(coordinationPopupTimer);
         coordinationPopupTimer = null;
       }
-    }
-
-    // -- Navigation console iframe bridge (issue #458) -------------------------
-    // State builder extracted to gui/console-state.js.
-    function buildNavigationConsoleState() {
-      if (typeof window.buildConsoleState === 'function' && window.simState) return window.buildConsoleState('navigation', window.simState);
-      return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
-    }
-
-    function pushNavigationConsoleState() {
-      if (activeConsole !== 'navigation') return;
-      _pushIframe($('navigation-iframe'), 'navigation', buildNavigationConsoleState());
     }
 
     // -- Dynamic console mounting (Module H / issue #621) ----------------------
@@ -2017,6 +1916,15 @@
       if (window.lobbyState)      window.lobbyState.apply(msg);
       if (window.simState)        window.simState.apply(msg);
       if (window.commsState)      window.commsState.apply(msg);
+      // Declarative iframe fan-out (#823): gui/dirty-consoles.js maps the
+      // message (static table + BlackboardUpdate station-ownership derivation)
+      // to the console names to re-push. Runs after the state applies above so
+      // every push carries fresh data; the switch below keeps only per-case
+      // side effects (bezel, vibrate, popup, lobby/uiState writes, mounting).
+      // On Welcome the consoles are (re)mounted inside the switch AFTER this
+      // fan-out — that is fine: each iframe's load listener re-pushes its
+      // snapshot via pushConsoleStateFor once it actually loads.
+      pushDirtyConsoles(msg);
       switch (msg.type) {
         case 'Welcome':
           if (window.lobbyState) {
@@ -2035,10 +1943,10 @@
           mountConsoles(uiState.shipStations);
           // Sim data (world, radar/chart config, blackboards, …) was applied
           // to window.simState above — there is no client-side mirror to
-          // refresh. Push the pre-seeded repair teams so the Repair console
-          // renders its rows immediately on (re)connect, before the first
-          // RepairState broadcast (no-op unless Repair is the active console).
-          pushRepairConsoleState();
+          // refresh. The pre-seeded repair teams reach the Repair console via
+          // the Welcome→repair entry in gui/dirty-consoles.js plus each
+          // iframe's on-load re-push, so its rows render immediately on
+          // (re)connect, before the first RepairState broadcast.
 
           // Inject ship theme CSS from Welcome ship_css (Fix: Module F).
           const shipCss = (msg.data.ship_config || {}).ship_css;
@@ -2143,20 +2051,10 @@
           // SimSnapshot carries only entity_states, applied in place by
           // simState above. Per-system fields (ship position, view_mode,
           // red_alert, etc.) are delivered via BlackboardUpdate below.
-          // Refresh every radar-bearing console each tick. The tactical radar
-          // blips are built client-side from ship_x/z/yaw + the entity array
-          // (same as sensors), so the weapons console must be pushed here too �
-          // otherwise it only refreshes on the sparse WeaponsUpdate/TargetLock
-          // events and the radar appears to crawl at ~1 Hz while sensors is
-          // smooth at the 10 Hz SimState cadence.
-          pushWeaponsConsoleState();
-          pushRepairConsoleState();
-          pushSensorsConsoleState();
-          pushNavigationConsoleState();
+          // The radar-bearing console refresh happens in pushDirtyConsoles.
           // Don't re-render the full lobby at 10Hz when spectating or when a
           // mid-game station claim is still pending Ready � it destroys CSS
           // hover state and tears down the Ready/Leave button listeners.
-          // The push calls are no-ops when no game console is active.
           if (showingLobbyDuringGame(uiState)) return;
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state.
@@ -2166,25 +2064,16 @@
         case 'EntitySpawned':
         case 'AsteroidSpawned': {
           // World / entity list handled by the sim-state module (idempotent
-          // append, in-place updates); refresh the radar-bearing consoles.
-          pushWeaponsConsoleState();
-          pushHelmConsoleState();
-          pushSensorsConsoleState();
-          pushNavigationConsoleState();
+          // append, in-place updates); the radar-bearing consoles were
+          // refreshed by pushDirtyConsoles. No full re-render needed.
           return;
-        }
-        case 'TargetLock': {
-          // Lock state (currentTargetUuid / weaponsFireReady) applied by
-          // simState; just refresh the console.
-          pushWeaponsConsoleState();
-          break;
         }
         case 'BlackboardUpdate': {
           // simState.apply() already wrote blackboards[systemId] = bb.data
           // above (and derived navigationWaypoint / currentView / redAlert);
-          // here we only fan pushes out to the affected consoles.
+          // the console fan-out happened in pushDirtyConsoles. Only the
+          // bezel side effect remains here.
           const updatedSystems = new Set((msg.data.updates || []).map(([id]) => id));
-          if (updatedSystems.has('helm')) pushHelmConsoleState();
           if (updatedSystems.has('captain') || updatedSystems.has('viewscreen')) {
             // Phone-bezel red-alert glow: toggle only on change.
             const nextAlert = !!(window.simState && window.simState.redAlert);
@@ -2192,24 +2081,7 @@
               bezelAlertOn = nextAlert;
               applyBezelAlert(nextAlert);
             }
-            pushCaptainConsoleState();
-            // Helm/Sensors/Comms/Navigation each derive their own "on screen"
-            // button state from simState.currentView, so a view-mode change
-            // must refresh all of them too, not just the captain console �
-            // otherwise the button that requested the view change never
-            // reflects the toggle (see #on-screen-btn on Helm).
-            pushHelmConsoleState();
-            pushSensorsConsoleState();
-            pushCommsConsoleState();
-            pushNavigationConsoleState();
           }
-          if (updatedSystems.has('navigation')) pushNavigationConsoleState();
-          if (updatedSystems.has('tactical'))   pushWeaponsConsoleState();
-          if (updatedSystems.has('power'))      pushPowerConsoleState();
-          if (updatedSystems.has('shields'))    pushShieldsConsoleState();
-          if (updatedSystems.has('repair'))     pushRepairConsoleState();
-          if (updatedSystems.has('comms'))      pushCommsConsoleState();
-          if (updatedSystems.has('sensors'))    pushSensorsConsoleState();
           // Same guard as SimState: don't re-render the lobby at 10 Hz while
           // spectating or mid-game-claim-pending � it rebuilds the station
           // list every frame, destroying button listeners before a click can
@@ -2217,42 +2089,18 @@
           if (showingLobbyDuringGame(uiState)) return;
           break;
         }
-        case 'WeaponsUpdate': {
-          // Bank/tube/torpedo/mode state + derived UI flags applied by
-          // simState; just refresh the console.
-          pushWeaponsConsoleState();
-          break;
-        }
+        case 'TargetLock':
+        case 'WeaponsUpdate':
         case 'BeamStarted':
-        case 'BeamEnded': {
-          // weaponsFiring toggled by simState.
-          pushWeaponsConsoleState();
-          break;
-        }
-        case 'SystemHullUpdate': {
-          pushRepairConsoleState();
-          break;
-        }
-        case 'RepairState': {
-          pushRepairConsoleState();
-          break;
-        }
-        case 'PowerState': {
-          pushPowerConsoleState();
-          break;
-        }
-        case 'ShieldStatus': {
-          // Facings + focused-facing derivation applied by simState.
-          pushShieldsConsoleState();
-          break;
-        }
+        case 'BeamEnded':
+        case 'SystemHullUpdate':
+        case 'RepairState':
+        case 'PowerState':
+        case 'ShieldStatus':
         case 'AsteroidDestroyed':
         case 'EntityDespawned': {
-          // In-place entity removal and weapons/sensors target clearing
-          // applied by simState; refresh the radar-bearing consoles.
-          pushWeaponsConsoleState();
-          pushHelmConsoleState();
-          pushSensorsConsoleState();
+          // State applied by the modules above, iframe pushes fanned out by
+          // pushDirtyConsoles; fall through to scheduleRender().
           break;
         }
         case 'DamageTaken': {
@@ -2271,9 +2119,9 @@
         }
         case 'CommsState': {
           // Handled by the comms-state module (gui/comms-state.js); simState
-          // exposes commsMessages/commsContacts as delegating getters, so
-          // buildCommsConsoleState reads it live — just refresh the console.
-          pushCommsConsoleState();
+          // exposes commsMessages/commsContacts as delegating getters, so the
+          // comms console builder reads it live — pushDirtyConsoles refreshed
+          // the console already.
           break;
         }
         case 'ShipDestroyed':
@@ -2286,10 +2134,10 @@
         case 'RatingChanged': {
           // sim-state.js already updated window.simState.stationRatings with
           // the new rating before this handler fires; the builders read it
-          // live. Push the captain console state immediately — the captain
-          // badge reads controlSources which lags (next SimState tick, up to
-          // 100 ms later), but stationRatings is already fresh.
-          pushCaptainConsoleState();
+          // live and pushDirtyConsoles pushed the captain console immediately
+          // (unconditionally — see DIRTY_ALWAYS_PUSH). The captain badge reads
+          // controlSources which lags (next SimState tick, up to 100 ms
+          // later), but stationRatings is already fresh.
           break;
         }
         case 'ReadyChanged':

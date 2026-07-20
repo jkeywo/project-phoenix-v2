@@ -1333,6 +1333,33 @@ export function buildCourierConsoleState(state) {
 }
 
 /**
+ * Map a fine (TOML) system id to the console family that renders it, or null
+ * for ids no console view covers.
+ *
+ * Single source of truth for system-id → console-family matching: used here
+ * to pick which owned systems feed each aggregate view, and by
+ * gui/dirty-consoles.js to derive which station's console a BlackboardUpdate
+ * dirties. Keep the two consumers in sync by editing only this function.
+ *
+ * @param {string} id  fine system id (e.g. 'helm-throttle', 'phaser-bank-1')
+ * @returns {string|null}  console family name ('captain', 'helm', 'tactical',
+ *   'sensors', 'navigation', 'comms', 'shields', 'power', 'repair') or null
+ */
+export function consoleForSystemId(id) {
+  if (id === 'captain' || id === 'viewscreen' || id === 'red-alert') return 'captain';
+  if (id.startsWith('helm-')) return 'helm';
+  if (id === 'tactical-radar' || id === 'phaser-control' || id.startsWith('phaser-')
+      || id.startsWith('torpedo-') || id.startsWith('blaster-')) return 'tactical';
+  if (id === 'sensors' || id === 'sensor-radar') return 'sensors';
+  if (id === 'navigation') return 'navigation';
+  if (id === 'comms') return 'comms';
+  if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
+  if (id === 'power-reactor' || id === 'power-battery') return 'power';
+  if (id === 'repair') return 'repair';
+  return null;
+}
+
+/**
  * Build a console payload from the fine systems owned by a station.
  *
  * Each entry in `systems` is keyed by its actual SystemId. A console therefore
@@ -1351,9 +1378,9 @@ export function buildSystemStationConsoleState(stationId, state) {
   const ids = state.stationSystems?.[stationId] || [];
   const systems = {};
   const controlSources = state.controlSources || {};
-  const add = (matches, build, adjust) => {
+  const add = (group, build, adjust) => {
     const view = JSON.parse(build(state));
-    const owned = ids.filter(matches);
+    const owned = ids.filter(id => consoleForSystemId(id) === group);
     if (owned.length === 0) return;
     if (adjust) adjust(view, owned);
     owned.forEach(id => { systems[id] = view; });
@@ -1361,26 +1388,25 @@ export function buildSystemStationConsoleState(stationId, state) {
   const allAi = idsToCheck => idsToCheck.length > 0
     && idsToCheck.every(id => controlSources[id] === 'Ai');
 
-  add(id => ['captain', 'viewscreen', 'red-alert'].includes(id), buildCaptainConsoleState,
+  add('captain', buildCaptainConsoleState,
     (view) => {
       view.red_alert_auto = controlSources['red-alert'] === 'Ai';
       view.viewscreen_auto = controlSources['viewscreen'] === 'Ai';
     });
-  add(id => id.startsWith('helm-'), buildHelmConsoleState,
+  add('helm', buildHelmConsoleState,
     (view, owned) => { view.helm_auto = allAi(owned); view.lateral_auto = controlSources['helm-lateral-thrust'] === 'Ai'; });
-  add(id => id === 'tactical-radar' || id === 'phaser-control' || id.startsWith('phaser-')
-      || id.startsWith('torpedo-') || id.startsWith('blaster-'), buildWeaponsConsoleState,
+  add('tactical', buildWeaponsConsoleState,
     (view, owned) => { view.tactical_auto = allAi(owned); });
-  add(id => id === 'sensors' || id === 'sensor-radar', buildSensorsConsoleState,
+  add('sensors', buildSensorsConsoleState,
     (view, owned) => { view.sensors_auto = allAi(owned); });
-  add(id => id === 'navigation', buildNavigationConsoleState);
-  add(id => id === 'comms', buildCommsConsoleState,
+  add('navigation', buildNavigationConsoleState);
+  add('comms', buildCommsConsoleState,
     (view) => { view.comms_auto = controlSources['comms'] === 'Ai'; });
-  add(id => id === 'shields-system' || id.startsWith('shield-arc-'), buildShieldsConsoleState,
+  add('shields', buildShieldsConsoleState,
     (view) => { view.shields_auto = controlSources['shields-system'] === 'Ai'; });
-  add(id => id === 'power-reactor' || id === 'power-battery', buildPowerConsoleState,
+  add('power', buildPowerConsoleState,
     (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
-  add(id => id === 'repair', buildRepairConsoleState,
+  add('repair', buildRepairConsoleState,
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
 
   return JSON.stringify({ station_id: stationId, system_ids: ids, systems });

@@ -748,6 +748,83 @@ describe('buildRepairConsoleState', () => {
     const s = parse(buildRepairConsoleState({}));
     expect(s.damageable_systems).toEqual([]);
   });
+
+  // ── Issue #737: render from what the host GAVE us, never re-derive ──────────
+
+  const projectedState = (systemHull, extra = {}) => ({
+    stationSystems: { helm: ['helm-radar'], engineering: ['repair'] },
+    blackboards: {
+      repair: {
+        teams: [],
+        travel_duration_secs: 5.0,
+        system_hull: systemHull,
+        damageable_systems: ['core', 'helm-radar', 'repair'],
+        aggregate_hull_fraction: 0.5,
+        ...extra,
+      },
+    },
+  });
+
+  it('renders only the system_hull rows the host sent — it never invents the rest', () => {
+    // Engineering pre-arrival: core + its own `repair`, no helm-radar row.
+    const s = parse(parse(JSON.stringify(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 4, max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ])))));
+    expect(s.system_hull.map(h => h.system_id)).toEqual(['core', 'repair']);
+    expect(s.core_systems.map(h => h.system_id)).toEqual(['core']);
+  });
+
+  it('uses the host aggregate for the hero bar instead of summing the projection', () => {
+    // Visible rows sum to 14/20 = 0.7, but the ship is authoritatively at 0.5.
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ])));
+    expect(s.overall_hull.pct).toBe(0.5);
+  });
+
+  it('offers dispatch targets for stations whose detail it cannot see', () => {
+    // Only core + repair are visible, but helm still owns a damageable system,
+    // so Engineering must be able to send a team there.
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ])));
+    expect(s.dispatch_targets.map(t => t.id).sort()).toEqual(['core', 'engineering', 'helm']);
+  });
+
+  it('reports damage_pct as null for a station whose detail it cannot see', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',   display_name: 'Core',   current: 4,  max_hp: 10 },
+      { system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 },
+    ])));
+    // Hidden: unknown, not "undamaged".
+    expect(s.dispatch_targets.find(t => t.id === 'helm').damage_pct).toBeNull();
+    // Visible: a real figure.
+    expect(s.dispatch_targets.find(t => t.id === 'engineering').damage_pct).toBe(0);
+  });
+
+  it('shows non-core detail once the host includes it (team on site)', () => {
+    const s = parse(buildRepairConsoleState(projectedState([
+      { system_id: 'core',       display_name: 'Core',   current: 4,  max_hp: 10 },
+      { system_id: 'helm-radar', display_name: 'Radar',  current: 2,  max_hp: 10 },
+      { system_id: 'repair',     display_name: 'Repair', current: 10, max_hp: 10 },
+    ])));
+    expect(s.system_hull.map(h => h.system_id)).toContain('helm-radar');
+    expect(s.dispatch_targets.find(t => t.id === 'helm').damage_pct).toBeCloseTo(0.8, 5);
+    // The revealed row is helm's, not core's.
+    expect(s.core_systems.map(h => h.system_id)).toEqual(['core']);
+  });
+
+  it('the legacy consoleHull fallback also reads the host aggregate', () => {
+    const s = parse(buildRepairConsoleState({
+      consoleHull: [{ system_id: 'repair', display_name: 'Repair', current: 10, max_hp: 10 }],
+      hullAggregate: 0.25,
+      stationSystems: { engineering: ['repair'] },
+    }));
+    expect(s.overall_hull.pct).toBe(0.25);
+  });
 });
 
 describe('buildPowerConsoleState', () => {

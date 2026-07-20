@@ -64,6 +64,29 @@ impl RepairTeams {
         &self.slots
     }
 
+    /// System ids where a repair team is currently **on site** — i.e. physically
+    /// present and working, not en route and not heading home.
+    ///
+    /// This is the information gate for issue #737: a repair team's travel time
+    /// is both a repair delay *and* an information delay, so only
+    /// [`TeamSlot::Repairing`] counts. `Travelling` teams have not arrived yet,
+    /// and `Returning` teams have left — including the recall case, where a team
+    /// recalled from `Travelling` goes straight to `Returning` without ever
+    /// passing through `Repairing` and therefore never reveals anything.
+    ///
+    /// Named here (rather than inlined as a `matches!` at the publisher) so the
+    /// host visibility projection and the PASM `onsite-repair-detail-state`
+    /// entity can both point at one symbol.
+    pub fn on_site_systems(&self) -> impl Iterator<Item = &SystemId> {
+        self.slots.iter().filter_map(|slot| match slot {
+            TeamSlot::Repairing {
+                system_id: Some(sid),
+                ..
+            } => Some(sid),
+            _ => None,
+        })
+    }
+
     /// Returns the index of the lowest-numbered idle team, or `None` if all are busy.
     pub fn lowest_free_team(&self) -> Option<usize> {
         self.slots.iter().position(|s| matches!(s, TeamSlot::Idle))

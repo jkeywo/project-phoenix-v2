@@ -91,8 +91,21 @@ export class ClientSimState {
     this.repairTeams = [];
     this.phaserFrequency = 0.5;
     this.frequencyHint = null;
-    /** Per-console hull integrity from the latest SimState. */
+    /**
+     * Per-system hull detail this client is entitled to see.
+     *
+     * Post issue #737 this is a host-side *projection*, not the whole ship:
+     * a station holder gets only its own systems, and Engineering additionally
+     * gets core systems plus any system a repair team is on site at. Never sum
+     * it to obtain a ship-wide figure — use `hullAggregate`.
+     */
     this.consoleHull = [];
+    /**
+     * Authoritative ship-wide hull fraction (0.0–1.0) across every damageable
+     * system, published by the host (issue #737). `null` until the first
+     * `SystemHullUpdate` arrives.
+     */
+    this.hullAggregate = null;
     /** Per-bank blaster state from the latest WeaponsUpdate or blackboard. */
     this.blasterBanks = [];
     /** Per-bank phaser state from the latest WeaponsUpdate. */
@@ -148,7 +161,12 @@ export class ClientSimState {
         // `ConsoleHullUpdate`. Entries carry `{ system_id, display_name,
         // current, max_hp, tier, debuff_magnitude }` — see SystemHullStatus
         // in src/core/messages.rs.
+        // `entries` is the recipient's projection (issue #737);
+        // `aggregate_fraction` is the ship-wide figure that replaces summing it.
         this.consoleHull = d.entries || [];
+        if (typeof d.aggregate_fraction === 'number') {
+          this.hullAggregate = d.aggregate_fraction;
+        }
         break;
       case 'SimState': {
         const snap = d.snapshot || {};

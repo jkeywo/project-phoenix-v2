@@ -74,6 +74,24 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.consoleHull).toEqual(entries);
   });
 
+  it('SystemHullUpdate stores the authoritative ship-wide aggregate (issue #737)', () => {
+    const s = new ClientSimState();
+    expect(s.hullAggregate).toBeNull();
+    // `entries` is only this client's projection; the ship as a whole is 0.42.
+    s.apply({ type: 'SystemHullUpdate', data: {
+      entries: [{ system_id: 'helm', display_name: 'Helm', current: 100, max_hp: 100 }],
+      aggregate_fraction: 0.42,
+    } });
+    expect(s.hullAggregate).toBe(0.42);
+  });
+
+  it('SystemHullUpdate keeps the last known aggregate when a payload omits it', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SystemHullUpdate', data: { entries: [], aggregate_fraction: 0.6 } });
+    s.apply({ type: 'SystemHullUpdate', data: { entries: [] } });
+    expect(s.hullAggregate).toBe(0.6);
+  });
+
   it('SimState leaves position untouched when the snapshot omits it', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 7, 8)];

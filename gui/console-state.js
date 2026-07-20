@@ -117,7 +117,7 @@ export function aggregateStationHull(stationId, consoleHull, stationSystems) {
  * @param {Array<{system_id,display_name,current,max_hp,tier}>} systemHull
  * @param {Object<string,string[]>} stationSystems  station id → system ids
  */
-export function repairCoreAndTargets(systemHull, stationSystems) {
+export function repairCoreAndTargets(systemHull, stationSystems, damageableSystems) {
   const hull = Array.isArray(systemHull) ? systemHull : [];
   const stations = stationSystems || {};
 
@@ -126,18 +126,39 @@ export function repairCoreAndTargets(systemHull, stationSystems) {
 
   const coreSystems = hull.filter(h => !owned.has(h.system_id));
 
+  // Dispatch targets come from the id-only `damageable_systems` list, NOT from
+  // `system_hull`. Post issue #737 `system_hull` is a host-side projection —
+  // Engineering cannot see another station's rows — but it must still be able
+  // to send a team there, and system ids carry no hull detail. Falling back to
+  // the visible rows keeps older payloads (and the legacy path) working.
+  const dispatchable = Array.isArray(damageableSystems) && damageableSystems.length > 0
+    ? damageableSystems.map(id => (id && id.system_id) || id)
+    : hull.map(h => h.system_id);
+
+  // `damage_pct` is only reported for stations whose detail this recipient
+  // actually holds; `null` means "not visible to me", which is different from
+  // "undamaged" and must not be rendered as 0.
   const targets = [];
   Object.keys(stations).forEach(st => {
+    const stationIds = stations[st] || [];
+    if (!stationIds.some(id => dispatchable.includes(id))) return;
     const agg = aggregateStationHull(st, hull, stations);
-    if (agg.totalMax > 0) {
-      targets.push({ id: st, label: stationDisplayName(st), damage_pct: agg.damagePct });
-    }
+    targets.push({
+      id: st,
+      label: stationDisplayName(st),
+      damage_pct: agg.totalMax > 0 ? agg.damagePct : null,
+    });
   });
 
-  const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
-  if (coreMax > 0) {
+  const coreIds = dispatchable.filter(id => !owned.has(id));
+  if (coreIds.length > 0) {
+    const coreMax = coreSystems.reduce((s, h) => s + (h.max_hp || 0), 0);
     const coreCur = coreSystems.reduce((s, h) => s + (h.current || 0), 0);
-    targets.push({ id: 'core', label: t('console.repair.core'), damage_pct: 1 - coreCur / coreMax });
+    targets.push({
+      id: 'core',
+      label: t('console.repair.core'),
+      damage_pct: coreMax > 0 ? 1 - coreCur / coreMax : null,
+    });
   }
 
   return { coreSystems, targets };
@@ -777,10 +798,17 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
  *
  * @param {Array<{current,max_hp}>} systemHull
  */
-export function overallHull(systemHull) {
+export function overallHull(systemHull, aggregateFraction) {
   const hull = Array.isArray(systemHull) ? systemHull : [];
   const current = hull.reduce((s, h) => s + (h.current || 0), 0);
   const max = hull.reduce((s, h) => s + (h.max_hp || 0), 0);
+  // Post issue #737 `system_hull` is a per-recipient projection, so summing it
+  // yields the *visible* slice, not the ship. When the host supplies the
+  // authoritative ship-wide fraction, that wins — always. The local sum is only
+  // a fallback for payloads predating the aggregate field.
+  if (typeof aggregateFraction === 'number' && Number.isFinite(aggregateFraction)) {
+    return { current, max, pct: aggregateFraction };
+  }
   return { current, max, pct: max > 0 ? current / max : 1 };
 }
 
@@ -794,16 +822,23 @@ export function buildRepairConsoleState(state) {
     const rawTeams = bb.teams || [];
     const travelDur = bb.travel_duration_secs ?? 5.0;
     const teams = rawTeams.map((slot, idx) => normalizeTeamSlot(slot, idx, travelDur));
+    // `system_hull` is what the HOST decided this recipient may see (issue
+    // #737): core detail, this station's own systems, and any system a repair
+    // team is currently on site at. The console renders what it was given and
+    // never re-derives a ship-wide view from it.
     const systemHull = bb.system_hull ?? [];
-    const { coreSystems, targets } = repairCoreAndTargets(systemHull, state.stationSystems);
+    const damageableSystems = bb.damageable_systems ?? [];
+    const aggregate = bb.aggregate_hull_fraction ?? state.hullAggregate;
+    const { coreSystems, targets } =
+      repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems);
     return JSON.stringify({
       teams,
       // SystemId-keyed fields (post issues #618/#619).
       system_hull:          systemHull,
-      damageable_systems:   bb.damageable_systems   ?? [],
-      // Overall ship-wide hull aggregate (every damageable system, not just
-      // one station's slice) — feeds the Repair console's hero hull bar.
-      overall_hull:         overallHull(systemHull),
+      damageable_systems:   damageableSystems,
+      // Authoritative ship-wide hull aggregate from the host — the only
+      // whole-ship figure available now that `system_hull` is a projection.
+      overall_hull:         overallHull(systemHull, aggregate),
       // Only ownerless "core" systems stay on the repair console; per-station
       // system status moved to each console's footer bar (issue #12).
       core_systems:         coreSystems,
@@ -819,13 +854,16 @@ export function buildRepairConsoleState(state) {
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
   // after issue #618) so the repair panel renders even without the blackboard.
+  // `consoleHull` is itself the #737 projection — the rows this recipient is
+  // entitled to — so the fallback is likewise a partial view, and the hero bar
+  // still reads the host's `hullAggregate` rather than summing those rows.
   const legacyHull = state.consoleHull || [];
   const legacy = repairCoreAndTargets(legacyHull, state.stationSystems);
   return JSON.stringify({
     teams:                state.repairTeams || [],
     system_hull:          legacyHull,
     damageable_systems:   legacyHull.map(h => h.system_id),
-    overall_hull:         overallHull(legacyHull),
+    overall_hull:         overallHull(legacyHull, state.hullAggregate),
     core_systems:         legacy.coreSystems,
     dispatch_targets:     legacy.targets,
     travel_duration_secs: 5.0,

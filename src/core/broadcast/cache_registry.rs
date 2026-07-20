@@ -81,10 +81,19 @@ pub struct LastBroadcastEntityPositions(pub HashMap<String, (bevy::math::Vec3, f
 #[derive(Resource, Default)]
 pub struct LastBroadcastEntityHealth(pub HashMap<String, (Option<f32>, Option<f32>)>);
 
-/// Last-broadcast per-system hull state. When the hull changes, a
-/// `SystemHullUpdate` event message is emitted and this cache is updated.
+/// Last-broadcast per-system hull state, **keyed by session token**.
+///
+/// Since issue #737 `SystemHullUpdate` is a per-recipient projection rather
+/// than one ship-wide payload, so the delta cache has to be per-recipient too:
+/// a recipient's visible detail can change without the hull changing at all
+/// (a repair team arriving on site, or a player moving to another station).
+/// Written wholesale each tick by
+/// [`crate::console::repair::visibility::push_hull_updates`], so disconnected
+/// tokens drop out instead of accumulating.
 #[derive(Resource, Default)]
-pub struct LastBroadcastHull(pub Vec<crate::messages::SystemHullStatus>);
+pub struct LastBroadcastHull(
+    pub HashMap<String, crate::console::repair::visibility::HullProjection>,
+);
 
 /// Last-broadcast shield facings. Used to suppress the per-tick `ShieldStatus`
 /// broadcast to all players when nothing has changed.
@@ -174,7 +183,6 @@ pub fn prune(
 /// still diffs normally instead of being forced to re-send to everyone.
 pub fn resync_for_token(world: &mut World, token: &str) {
     use crate::console::weapons::compute_current_weapons_update;
-    use crate::entity_spawner::EntitySystemHull;
     use crate::lobby::Sessions;
     use crate::messages::StationId;
     use crate::ship::shields::ShipShields;
@@ -183,24 +191,12 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     let target = Target::Token(token.to_string());
     let mut messages: Vec<ServerMessage> = Vec::new();
 
-    // ── SystemHullUpdate: current per-system hull for the reconnecting client's ship.
-    {
-        let mut q = world.query_filtered::<&EntitySystemHull, With<LocalShip>>();
-        if let Ok(hull) = q.single(world) {
-            let entries: Vec<crate::messages::SystemHullStatus> = hull
-                .0
-                .iter()
-                .map(|(sid, entry)| crate::messages::SystemHullStatus {
-                    system_id: sid.clone(),
-                    display_name: entry.display_name.clone(),
-                    current: entry.current,
-                    max_hp: entry.max,
-                    tier: hull.0.tier_for(sid),
-                    debuff_magnitude: hull.0.debuff_magnitude_for(sid),
-                })
-                .collect();
-            messages.push(ServerMessage::SystemHullUpdate { entries });
-        }
+    // ── SystemHullUpdate: the reconnecting client's *projection* of per-system
+    // hull, not the whole ship (issue #737). Built by the same
+    // `HullVisibility` the live broadcaster uses, so reconnecting can never be
+    // used to obtain detail the live path withholds.
+    if let Some(msg) = crate::console::repair::visibility::hull_update_for_token(world, token) {
+        messages.push(msg);
     }
 
     // ── ShieldStatus: current shield facings.
@@ -230,12 +226,29 @@ pub fn resync_for_token(world: &mut World, token: &str) {
     }
 
     // ── BlackboardUpdate: every current blackboard, not just changed ones.
+    // The repair blackboard carries exact hull detail, so it goes through the
+    // same #737 projection as the live path; the rest pass through untouched.
     {
+        let vis = crate::console::repair::visibility::hull_visibility(world);
+        let station = world
+            .resource::<Sessions>()
+            .0
+            .station_for_token(token)
+            .cloned();
         let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
         if let Ok(bb) = q.single(world) {
             let updates: Vec<(SystemId, SystemBlackboard)> =
                 bb.0.iter()
-                    .map(|(id, bb)| (id.clone(), bb.clone()))
+                    .map(|(id, bb)| {
+                        (
+                            id.clone(),
+                            crate::console::repair::visibility::project_blackboard_for_token(
+                                vis.as_ref(),
+                                station.as_ref(),
+                                bb,
+                            ),
+                        )
+                    })
                     .collect();
             if !updates.is_empty() {
                 messages.push(ServerMessage::BlackboardUpdate { updates });
@@ -298,15 +311,21 @@ mod tests {
 
     #[test]
     fn reset_all_zeroes_every_cache() {
-        let mut hull = LastBroadcastHull(vec![]);
-        hull.0.push(crate::messages::SystemHullStatus {
-            system_id: SystemId("helm".into()),
-            display_name: "Helm".into(),
-            current: 10.0,
-            max_hp: 25.0,
-            tier: crate::damage::DamageTier::Damaged,
-            debuff_magnitude: 0.5,
-        });
+        let mut hull = LastBroadcastHull::default();
+        hull.0.insert(
+            "token-1".into(),
+            crate::console::repair::visibility::HullProjection {
+                entries: vec![crate::messages::SystemHullStatus {
+                    system_id: SystemId("helm".into()),
+                    display_name: "Helm".into(),
+                    current: 10.0,
+                    max_hp: 25.0,
+                    tier: crate::damage::DamageTier::Damaged,
+                    debuff_magnitude: 0.5,
+                }],
+                aggregate_fraction: Some(0.4),
+            },
+        );
         let mut shields = LastBroadcastShields(vec![ShieldFacingStatus {
             label: "Fore".into(),
             hp: 50,

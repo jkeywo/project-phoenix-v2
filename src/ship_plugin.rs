@@ -2717,6 +2717,50 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
     }
 }
 
+/// Strip exact damage numbers from an outbound `CoordinationPopup` payload that
+/// `viewer` is not entitled to (issue #737).
+///
+/// `CoordinationPayload::RepairRequest` is the only coordination payload that
+/// carries a hull number. It is targeted at the `repair` system, which resolves
+/// to the Engineering station, so before this gate existed every worsening tier
+/// crossing handed Engineering the exact HP deficit of an arbitrary non-Core
+/// system with no team dispatched and no travel elapsed — the exact thing the
+/// hull projection withholds, arriving through the other door.
+///
+/// The gate is [`HullVisibility::can_see`], the same predicate the hull rows and
+/// the repair blackboard use, resolved through the same
+/// `RepairTeams::on_site_systems()` on-site set. Core systems and the viewer's
+/// own systems keep exact detail; a non-Core system keeps it only while a team
+/// is on site. Otherwise the tier still crosses and the popup still fires — the
+/// number is simply absent, which is the "needs attention" signal.
+///
+/// Withholding is the default: with no visibility (a ship carrying no hull
+/// component) the deficit is dropped.
+fn coarsen_repair_request(
+    payload: &CoordinationPayload,
+    vis: Option<&crate::console::repair::visibility::HullVisibility>,
+    viewer: Option<&crate::messages::StationId>,
+) -> CoordinationPayload {
+    let CoordinationPayload::RepairRequest {
+        system_id,
+        station_id,
+        station_label,
+        tier,
+        deficit,
+    } = payload
+    else {
+        return payload.clone();
+    };
+    let entitled = vis.map(|v| v.can_see(viewer, system_id)).unwrap_or(false);
+    CoordinationPayload::RepairRequest {
+        system_id: system_id.clone(),
+        station_id: station_id.clone(),
+        station_label: station_label.clone(),
+        tier: *tier,
+        deficit: if entitled { *deficit } else { None },
+    }
+}
+
 pub fn process_coordination_lag(
     time: Res<Time>,
     mut ship_components: Query<
@@ -2729,6 +2773,11 @@ pub fn process_coordination_lag(
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
+            // Read-only, and only for the #737 popup gate below: the same
+            // damage store and repair-team state machine the visibility
+            // projection reads, so the popup cannot drift from the wire rule.
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::console::repair::server::ShipRepairTeams>,
             Has<LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -2736,6 +2785,9 @@ pub fn process_coordination_lag(
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     mut chatter_writer: MessageWriter<AiChatterEvent>,
+    // LocalShip-only fallback for the #737 popup gate, matching the wire
+    // projection's preference order. See `ship_hull_visibility`.
+    teams_res: Option<Res<crate::console::repair::server::ShipRepairTeams>>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
     let shields_id = crate::system_registry::shields_system_id();
@@ -2749,9 +2801,30 @@ pub fn process_coordination_lag(
         mut alerted,
         mut repair_queue,
         mut pending_shields_threat,
+        entity_hull,
+        entity_teams,
         is_local,
     ) in ship_components.iter_mut()
     {
+        // The #737 damage-visibility projection for this ship. Built once per
+        // ship per tick and only used to decide how much detail a
+        // `CoordinationPopup` may carry — see `coarsen_repair_request`.
+        //
+        // Deliberately built by `ship_hull_visibility`, the same constructor the
+        // wire projection uses, rather than by calling `HullVisibility
+        // ::from_parts` directly: a second on-site resolution path here is free
+        // to drift from the one the broadcast enforces, which is the very shape
+        // of bug this issue closes. The resource fallback is passed only for the
+        // `LocalShip` because the global `ShipRepairTeams` is the player ship's
+        // singleton and an NPC must not inherit it.
+        let repair_vis = entity_hull.map(|hull| {
+            crate::console::repair::visibility::ship_hull_visibility(
+                &hull.0,
+                &ship_config.0,
+                entity_teams,
+                if is_local { teams_res.as_deref() } else { None },
+            )
+        });
         let due = queue.0.due_messages(now);
         for msg in due {
             // Coordination targets are console-level station-id keys (issue
@@ -2801,6 +2874,7 @@ pub fn process_coordination_lag(
                             station_label,
                             tier,
                             deficit,
+                            ..
                         } = &msg.payload
                         {
                             if let Some(ref mut rq) = repair_queue {
@@ -2809,7 +2883,12 @@ pub fn process_coordination_lag(
                                         station_id: station_id.clone(),
                                         station_label: station_label.clone(),
                                         tier: *tier,
-                                        deficit: *deficit,
+                                        // Host-internal path: the enqueue side
+                                        // always fills this in. A coarsened
+                                        // `None` never reaches the queue, but
+                                        // sorting on 0.0 is the safe reading if
+                                        // one ever does.
+                                        deficit: deficit.unwrap_or(0.0),
                                     },
                                 );
                             }
@@ -2911,18 +2990,29 @@ pub fn process_coordination_lag(
                                     crate::lobby_handler::Target::Token(token),
                                     crate::messages::ServerMessage::CoordinationPopup {
                                         target: msg.target.clone(),
-                                        payload: msg.payload.clone(),
+                                        payload: coarsen_repair_request(
+                                            &msg.payload,
+                                            repair_vis.as_ref(),
+                                            Some(station_id),
+                                        ),
                                         sender_label: label,
                                     },
                                 ));
                             }
                         }
                     } else {
+                        // Ownerless target — broadcast. No recipient is
+                        // entitled to exact non-Core detail, so coarsen against
+                        // "no station".
                         outbox.0.push((
                             crate::lobby_handler::Target::All,
                             crate::messages::ServerMessage::CoordinationPopup {
                                 target: msg.target.clone(),
-                                payload: msg.payload.clone(),
+                                payload: coarsen_repair_request(
+                                    &msg.payload,
+                                    repair_vis.as_ref(),
+                                    None,
+                                ),
                                 sender_label: label,
                             },
                         ));
@@ -3060,7 +3150,9 @@ pub fn detect_damage_tier_crossings(
                 let station_id = system_config
                     .and_then(|s| s.station.as_ref())
                     .map(|s| s.0.clone())
-                    .unwrap_or_else(|| "core".to_string());
+                    .unwrap_or_else(|| {
+                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
+                    });
                 let station_label = station_id.clone();
                 let entry = hull.get(system_id).expect("just iterated entry");
                 let deficit = entry.max - entry.current;
@@ -3071,10 +3163,15 @@ pub fn detect_damage_tier_crossings(
                     sender_origin,
                     target: crate::ship::system_registry::repair_system_id(),
                     payload: CoordinationPayload::RepairRequest {
+                        system_id: system_id.clone(),
                         station_id,
                         station_label,
                         tier: current_tier,
-                        deficit,
+                        // Exact on the host-internal enqueue — the AI repair
+                        // queue sorts by it. Coarsened to `None` on the way out
+                        // to a human console unless the recipient is entitled
+                        // to exact detail for this system (issue #737).
+                        deficit: Some(deficit),
                     },
                     sender_label: system_id.0.clone(),
                 });
@@ -3084,7 +3181,9 @@ pub fn detect_damage_tier_crossings(
                 let station_id = system_config
                     .and_then(|s| s.station.as_ref())
                     .map(|s| s.0.clone())
-                    .unwrap_or_else(|| "core".to_string());
+                    .unwrap_or_else(|| {
+                        crate::console::repair::visibility::CORE_BUCKET_ID.to_string()
+                    });
                 if let Some(ref mut a) = alerted {
                     if crate::console::repair::server::all_systems_in_station_are_operational(
                         &station_id,
@@ -9151,6 +9250,170 @@ station = "helm"
         assert!(
             has_popup,
             "Human Captain must receive a CoordinationPopup for destroyed system"
+        );
+    }
+
+    // ── Issue #737: the repair-request popup is subject to the same boundary ──
+    //
+    // `CoordinationPayload::RepairRequest` targets the `repair` system, which
+    // resolves to the Engineering holder. Before the gate, every worsening tier
+    // crossing handed Engineering the exact HP deficit of an arbitrary non-Core
+    // system with no team dispatched and no travel elapsed — the projection's
+    // boundary, walked around through the coordination bus.
+
+    /// Start a game with a human on the Repair station — the station that owns
+    /// the `repair` system on the battleship, i.e. Engineering in the role
+    /// sense, and therefore the recipient of every `RepairRequest` popup.
+    fn start_game_with_engineer(app: &mut App) {
+        for (token, name, station) in [
+            ("captain", "Alice", "Captain"),
+            ("helm", "Hikaru", "Helm"),
+            ("engineer", "Scotty", "Repair"),
+        ] {
+            push(
+                app,
+                token,
+                ClientMessage::Identify {
+                    token: token.into(),
+                    name: name.into(),
+                },
+            );
+            tick(app);
+            push(
+                app,
+                token,
+                ClientMessage::SelectStation {
+                    station: station.into(),
+                },
+            );
+            tick(app);
+        }
+        for token in ["captain", "helm", "engineer"] {
+            push(app, token, ClientMessage::SetReady { ready: true });
+        }
+        tick(app);
+        assert_eq!(
+            app.world()
+                .resource::<Sessions>()
+                .0
+                .holder_for_station(&crate::messages::StationId("repair".into())),
+            Some("engineer"),
+            "test setup must seat a human on the station that owns `repair`"
+        );
+    }
+
+    /// Give the ship a hull whose entries are *declared* systems, so a tier
+    /// crossing resolves to a real owning station. `test_app`'s default hull
+    /// holds the retired coarse ids, which resolve to no `[[system]]` and would
+    /// therefore land in the ownerless Core bucket — the one case #737 lets
+    /// through.
+    fn give_ship_hull(app: &mut App, entries: &[(&str, f32)]) {
+        let hull = crate::damage::SystemHull::from_config(
+            &entries
+                .iter()
+                .map(|(id, hp)| (SystemId((*id).into()), *hp))
+                .collect::<Vec<_>>(),
+        );
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entity_spawner::EntitySystemHull(hull));
+    }
+
+    /// Put `system_id` under AI control. `route_coordination` only raises a
+    /// popup for an AI sender talking to a human target, which is the shape the
+    /// leak had: an AI-run station reporting damage to a human Engineering.
+    fn set_ai(app: &mut App, system_id: &SystemId) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+        for mut cs in q.iter_mut(app.world_mut()) {
+            cs.0.set(system_id.clone(), ControlSource::Ai);
+        }
+    }
+
+    /// The deficit carried by the delivered `RepairRequest` popup, if any.
+    fn repair_popup_deficits(app: &App) -> Vec<Option<f32>> {
+        app.world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .filter_map(|(_, msg)| match msg {
+                crate::messages::ServerMessage::CoordinationPopup { payload, .. } => {
+                    match payload {
+                        CoordinationPayload::RepairRequest { deficit, .. } => Some(*deficit),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Put a repair team physically on site at `system_id` before the crossing.
+    fn place_team_on_site(app: &mut App, system_id: &SystemId) {
+        use crate::modifiers::repair_teams::RepairTeams;
+        let mut teams = RepairTeams::new(1);
+        let mut scratch = crate::damage::SystemHull::from_config(&[(system_id.clone(), 100.0)]);
+        scratch.set_hp(system_id, 10.0);
+        teams.dispatch(0, system_id.clone(), system_id.0.clone());
+        // Travel completes → `Repairing`, which is what `on_site_systems()`
+        // counts. Same state machine the wire projection reads.
+        teams.tick(60.0, &mut scratch);
+        assert!(
+            teams.on_site_systems().any(|s| s == system_id),
+            "test setup must actually put the team on site"
+        );
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::console::repair::server::ShipRepairTeams(teams));
+    }
+
+    #[test]
+    fn repair_popup_withholds_exact_non_core_deficit_before_a_team_arrives() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+
+        // helm-radar is owned by Helm — non-Core, and no team dispatched.
+        let radar = SystemId("helm-radar".into());
+        give_ship_hull(&mut app, &[("helm-radar", 100.0), ("repair", 100.0)]);
+        set_ai(&mut app, &radar);
+        set_console_hp_direct(&mut app, radar.clone(), 1.0);
+        tick(&mut app);
+        tick(&mut app);
+        tick(&mut app);
+
+        let deficits = repair_popup_deficits(&app);
+        assert!(
+            !deficits.is_empty(),
+            "Engineering must still be told the system needs attention"
+        );
+        assert!(
+            deficits.iter().all(|d| d.is_none()),
+            "the exact HP deficit of a non-Core system must not reach Engineering \
+             before a team is on site; got {deficits:?}"
+        );
+    }
+
+    #[test]
+    fn repair_popup_carries_the_exact_deficit_once_a_team_is_on_site() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+
+        let radar = SystemId("helm-radar".into());
+        give_ship_hull(&mut app, &[("helm-radar", 100.0), ("repair", 100.0)]);
+        set_ai(&mut app, &radar);
+        place_team_on_site(&mut app, &radar);
+        set_console_hp_direct(&mut app, radar.clone(), 1.0);
+        tick(&mut app);
+        tick(&mut app);
+        tick(&mut app);
+
+        let deficits = repair_popup_deficits(&app);
+        assert!(
+            deficits.iter().any(|d| d.is_some()),
+            "a team on site is the information gate opening; got {deficits:?}"
         );
     }
 }

@@ -607,39 +607,15 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
         let entity_states: Vec<_> = asteroid_states.into_iter().chain(npc_states).collect();
 
-        // ── Emit SystemHullUpdate only when hull HP changed.
+        // ── Emit SystemHullUpdate per recipient, only when that recipient's
+        // *visible* detail changed (issue #737).
         //
-        // Post issue #618: publisher no longer emits legacy Console-keyed
-        // `ConsoleHullUpdate` wire messages. `SystemHullStatus` carries the
-        // authoritative `SystemId`, human-readable display_name, and tier for
-        // every damageable system on the ship.
-        {
-            let hull_current: Vec<crate::messages::SystemHullStatus> = world
-                .query_filtered::<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>()
-                .single(world)
-                .map(|h| {
-                    h.0.iter()
-                        .map(|(sid, entry)| crate::messages::SystemHullStatus {
-                            system_id: sid.clone(),
-                            display_name: entry.display_name.clone(),
-                            current: entry.current,
-                            max_hp: entry.max,
-                            tier: h.0.tier_for(sid),
-                            debuff_magnitude: h.0.debuff_magnitude_for(sid),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let hull_changed = world.resource::<LastBroadcastHull>().0 != hull_current;
-            if hull_changed {
-                let entries = hull_current.clone();
-                world.resource_mut::<LastBroadcastHull>().0 = hull_current;
-                world
-                    .resource_mut::<SimOutbox>()
-                    .0
-                    .push((Target::All, ServerMessage::SystemHullUpdate { entries }));
-            }
-        }
+        // Post issue #618 `SystemHullStatus` carries the authoritative
+        // `SystemId`, display_name and tier. Post #737 the entry list is a
+        // role-scoped projection instead of the whole ship, so the send is a
+        // per-token fan-out rather than one `Target::All` push — see
+        // `crate::console::repair::visibility`.
+        crate::console::repair::visibility::push_hull_updates(world);
 
         let snapshot = crate::messages::SimSnapshot { entity_states };
         vec![ServerMessage::SimState { snapshot }]
@@ -1241,7 +1217,13 @@ fn reset_broadcast_caches_on_start(
     mut health: ResMut<LastBroadcastEntityHealth>,
     mut weapons: ResMut<LastWeaponsUpdate>,
     mut last_bb: ResMut<LastBroadcastBlackboards>,
+    last_repair_bb: Option<ResMut<crate::console::repair::visibility::LastVisibleRepairBlackboard>>,
 ) {
+    // Per-token repair-blackboard projections (issue #737) are a seventh delta
+    // cache; clear them alongside the shared six so a restarted game re-sends.
+    if let Some(mut last_repair_bb) = last_repair_bb {
+        last_repair_bb.clear();
+    }
     crate::core::broadcast::cache_registry::reset_all(
         &mut hull,
         &mut shields,
@@ -1256,28 +1238,87 @@ fn reset_broadcast_caches_on_start(
 /// the last broadcast. Reads from the `LocalShip` entity's per-entity component
 /// (populated by `dual_publish_blackboards`). Runs in `SimSet::PublishAggregate`
 /// (before `SimSet::Broadcast` so `dispatch_sim_broadcasts` sees the outbox entries).
-pub fn broadcast_blackboard_updates(
-    ship_query: Query<&ShipSystemBlackboards, With<LocalShip>>,
-    mut last: ResMut<LastBroadcastBlackboards>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    let Some(bb) = ship_query.iter().next() else {
-        return;
-    };
-    let updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> =
+///
+/// Since issue #737 the *repair* blackboard is fanned out per session token
+/// rather than broadcast to all: it carries exact per-system hull detail, and
+/// who may see which system is a host-side decision. Every other blackboard
+/// still goes out unprojected at `Target::All`.
+pub fn broadcast_blackboard_updates(world: &mut World) {
+    use crate::console::repair::visibility;
+
+    world.init_resource::<visibility::LastVisibleRepairBlackboard>();
+
+    let mut updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = {
+        let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let Some(bb) = q.iter(world).next() else {
+            return;
+        };
+        let last = world.resource::<LastBroadcastBlackboards>();
         bb.0.iter()
             .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
             .map(|(id, bb)| (id.clone(), bb.clone()))
-            .collect();
+            .collect()
+    };
 
-    if !updates.is_empty() {
-        for (id, bb) in &updates {
-            last.0.insert(id.clone(), bb.clone());
-        }
-        outbox
-            .0
-            .push((Target::All, ServerMessage::BlackboardUpdate { updates }));
+    let viewers = visibility::connected_viewers(world);
+
+    // A token's station is an input to its repair-blackboard projection, so a
+    // player changing station mid-game invalidates it even though nothing the
+    // `LastBroadcastBlackboards` diff can see has changed. Without this, an
+    // idle undamaged ship would leave the previous station's detail on that
+    // phone until the internal blackboard next changed — possibly never.
+    let stations_changed = {
+        let cache = world.resource::<visibility::LastVisibleRepairBlackboard>();
+        cache.stations_changed(&viewers)
+    };
+
+    // Prune first so a disconnected token cannot keep suppressing a resend if
+    // it reconnects into the same station later in the same game.
+    {
+        let mut cache = world.resource_mut::<visibility::LastVisibleRepairBlackboard>();
+        visibility::prune_repair_blackboard_cache(&mut cache, &viewers);
+        cache.record_stations(&viewers);
     }
+
+    if updates.is_empty() && !stations_changed {
+        return;
+    }
+
+    // Station change with an otherwise-unchanged blackboard: re-feed the
+    // current repair blackboard so the per-token projection is recomputed. The
+    // per-token cache inside `project_repair_blackboards` still suppresses the
+    // send for every token whose *view* did not actually change.
+    if stations_changed
+        && !updates
+            .iter()
+            .any(|(_, bb)| matches!(bb, crate::messages::SystemBlackboard::Repair(_)))
+    {
+        let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        if let Some(bb) = q.iter(world).next() {
+            if let Some((id, repair)) =
+                bb.0.iter()
+                    .find(|(_, bb)| matches!(bb, crate::messages::SystemBlackboard::Repair(_)))
+            {
+                updates.push((id.clone(), repair.clone()));
+            }
+        }
+    }
+
+    for (id, bb) in &updates {
+        world
+            .resource_mut::<LastBroadcastBlackboards>()
+            .0
+            .insert(id.clone(), bb.clone());
+    }
+
+    let vis = visibility::hull_visibility(world);
+    let mut cache = world
+        .remove_resource::<visibility::LastVisibleRepairBlackboard>()
+        .unwrap_or_default();
+    let pending =
+        visibility::project_repair_blackboards(updates, vis.as_ref(), &viewers, &mut cache);
+    world.insert_resource(cache);
+    world.resource_mut::<SimOutbox>().0.extend(pending);
 }
 
 // The command-admission seam lives in its own module (issue #736) so that
@@ -4141,15 +4182,19 @@ station = "pilot"
             .0
             .clear();
         let out = tick(&mut app);
-        let entries = out
+        // Post issue #737 `entries` is a per-recipient projection, so the
+        // whole-ship figure is `aggregate_fraction` — the authoritative
+        // ship-wide hull producer — not the sum of the visible rows.
+        let aggregate = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate {
+                    aggregate_fraction, ..
+                } => Some(*aggregate_fraction),
                 _ => None,
             })
             .expect("expected a SystemHullUpdate broadcast");
-        let total: f32 = entries.iter().map(|c| c.current).sum();
-        assert!((total - 100.0).abs() < 1e-6);
+        assert!((aggregate.expect("aggregate fraction") - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -4163,15 +4208,17 @@ station = "pilot"
         apply_hull_damage(&mut app, 10.0);
 
         let out = tick(&mut app);
-        let entries = out
+        // See the note above: the ship-wide figure is now `aggregate_fraction`.
+        let aggregate = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate {
+                    aggregate_fraction, ..
+                } => Some(*aggregate_fraction),
                 _ => None,
             })
             .expect("expected a SystemHullUpdate after damage");
-        let total: f32 = entries.iter().map(|c| c.current).sum();
-        assert!((total - 90.0).abs() < 1e-6);
+        assert!((aggregate.expect("aggregate fraction") - 0.9).abs() < 1e-6);
     }
 
     // â"€â"€ SetTarget / TargetLock tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -5638,16 +5685,18 @@ station = "pilot"
         // Verify the hull loses only the scaled amount by triggering damage through the component.
         apply_hull_damage(&mut app, scaled_damage);
         let out = tick(&mut app);
-        let entries = out
+        // Ship-wide hull reads off `aggregate_fraction` post issue #737.
+        let aggregate = out
             .iter()
             .find_map(|m| match &m.msg {
-                ServerMessage::SystemHullUpdate { entries } => Some(entries.clone()),
+                ServerMessage::SystemHullUpdate {
+                    aggregate_fraction, ..
+                } => Some(*aggregate_fraction),
                 _ => None,
             })
             .expect("expected SystemHullUpdate");
-        let total: f32 = entries.iter().map(|c| c.current).sum();
         assert!(
-            near(total, 50.0),
+            near(aggregate.expect("aggregate fraction"), 0.5),
             "hull should be 100 - 50 = 50 with halved collision damage"
         );
     }

@@ -754,6 +754,7 @@ mod tests {
                         tier: crate::damage::DamageTier::Operational,
                         debuff_magnitude: 0.0,
                     }],
+                    aggregate_fraction: Some(0.75),
                 },
             ),
             (
@@ -1065,10 +1066,11 @@ mod tests {
         let send_msg = ClientMessage::SendCoordination {
             target: crate::system_registry::repair_system_id(),
             payload: CoordinationPayload::RepairRequest {
+                system_id: crate::messages::SystemId("helm-radar".into()),
                 station_id: "helm".into(),
                 station_label: "Helm".into(),
                 tier: crate::damage::DamageTier::Damaged,
-                deficit: 12.5,
+                deficit: Some(12.5),
             },
         };
         assert_client_roundtrip(&JsonCodec, send_msg.clone());
@@ -1077,10 +1079,13 @@ mod tests {
         let popup_msg = ServerMessage::CoordinationPopup {
             target: crate::system_registry::repair_system_id(),
             payload: CoordinationPayload::RepairRequest {
+                system_id: crate::messages::SystemId("helm-radar".into()),
                 station_id: "helm".into(),
                 station_label: "Helm".into(),
                 tier: crate::damage::DamageTier::Disabled,
-                deficit: 20.0,
+                // The wire form of a coarsened popup: tier crosses, exact
+                // deficit withheld (issue #737).
+                deficit: None,
             },
             sender_label: "Helm System".into(),
         };
@@ -1966,6 +1971,77 @@ mod tests {
         assert!(json.contains("\"impulse_charge\":0.3"), "got: {json}");
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
+    }
+
+    /// `SystemBlackboard::Repair` round-trip, tag shape and full envelope
+    /// (issue #737).
+    ///
+    /// The repair blackboard is the only blackboard carrying gated damage
+    /// detail, and #737 added two wire fields to it: `QueueEntryPreview
+    /// ::station_id` — the bucket the host projection decides entitlement from,
+    /// which the client also keys its queue rows by — and
+    /// `RepairBlackboard::aggregate_hull_fraction`, the one whole-ship figure
+    /// every recipient may have now that `system_hull` is a projection and can
+    /// no longer be summed into one. Both are new on the wire; neither had any
+    /// round-trip coverage. `queue_depth` and `system_hull` are populated here
+    /// because the empty-vec case is what `#[serde(default)]` already covers.
+    #[test]
+    fn system_blackboard_repair_round_trips() {
+        fn hull(id: &str, current: f32, tier: crate::damage::DamageTier) -> SystemHullStatus {
+            SystemHullStatus {
+                system_id: SystemId(id.into()),
+                display_name: id.into(),
+                current,
+                max_hp: 100.0,
+                tier,
+                debuff_magnitude: 0.25,
+            }
+        }
+
+        let bb = SystemBlackboard::Repair(RepairBlackboard {
+            teams: vec![],
+            travel_duration_secs: 5.0,
+            system_hull: vec![
+                hull("core", 40.0, crate::damage::DamageTier::Damaged),
+                hull("repair", 100.0, crate::damage::DamageTier::Operational),
+            ],
+            damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
+            queue_depth: vec![
+                QueueEntryPreview {
+                    station_id: "core".into(),
+                    station_label: "Core".into(),
+                    tier: crate::damage::DamageTier::Damaged,
+                    deficit: 60.0,
+                },
+                QueueEntryPreview {
+                    station_id: "helm".into(),
+                    station_label: "Helm".into(),
+                    tier: crate::damage::DamageTier::Disabled,
+                    deficit: 90.0,
+                },
+            ],
+            aggregate_hull_fraction: Some(0.75),
+        });
+
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"kind\":\"Repair\""), "got: {json}");
+        assert!(json.contains("\"station_id\":\"core\""), "got: {json}");
+        assert!(json.contains("\"station_id\":\"helm\""), "got: {json}");
+        assert!(
+            json.contains("\"aggregate_hull_fraction\":0.75"),
+            "got: {json}"
+        );
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+
+        // ...and through the envelope it actually ships in. Post-#737 this is
+        // sent per token (`Target::Token`), not broadcast, but the encoding is
+        // the same one the resync path reuses.
+        let msg = ServerMessage::BlackboardUpdate {
+            updates: vec![(SystemId("repair".into()), bb)],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]

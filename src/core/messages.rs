@@ -1215,11 +1215,25 @@ pub enum CoordinationPayload {
     /// [`NavigationWaypoint::generation`]: crate::navigation_plugin::NavigationWaypoint::generation
     NavigateTo { generation: u64, label: String },
     /// A system has crossed to a worse damage tier and needs repair (issue #682).
+    ///
+    /// `deficit` is the exact HP shortfall and is therefore gated by the #737
+    /// visibility boundary: it is `Some` on the host-internal enqueue (the AI
+    /// repair queue sorts by it) but `None` on the `CoordinationPopup` copy
+    /// whenever the recipient is not entitled to exact detail for `system_id`
+    /// — i.e. a non-Core system with no repair team on site. A `None` deficit
+    /// is the coarse "needs attention" signal: the tier still crosses, the
+    /// number does not.
+    ///
+    /// `system_id` is the system that crossed the tier. `station_id` is the
+    /// bucket that owns it (`"core"` when ownerless). Both are carried because
+    /// the visibility gate is per-system while the repair queue dedupes per
+    /// station; deriving one from `sender_label` would let the two drift.
     RepairRequest {
+        system_id: SystemId,
         station_id: String,
         station_label: String,
         tier: DamageTier,
-        deficit: f32,
+        deficit: Option<f32>,
     },
     /// Sensors warns Shields of an incoming threat (hostile closing or torpedo).
     ThreatBearing { bearing_rad: f32, label: String },
@@ -1491,10 +1505,21 @@ pub enum ServerMessage {
         station_id: StationId,
         rating_name: String,
     },
-    /// Sent once at game start and whenever per-system hull HP changes.
-    /// SystemId-keyed successor of the retired `ConsoleHullUpdate` variant.
+    /// Sent once at game start and whenever the recipient's *visible* per-system
+    /// hull detail changes.
+    ///
+    /// `entries` is a **per-recipient projection** (issue #737), not the whole
+    /// ship: a station holder sees exact detail only for the systems its own
+    /// station owns, and the Engineering holder additionally sees ownerless
+    /// "core" systems plus any system a repair team is currently on site at.
+    /// `aggregate_fraction` is the authoritative ship-wide hull fraction
+    /// (0.0–1.0) across *every* damageable system — it is the only whole-ship
+    /// figure a recipient may show, because `entries` can no longer be summed
+    /// to derive one. `None` only on legacy/unprojected payloads.
     SystemHullUpdate {
         entries: Vec<SystemHullStatus>,
+        #[serde(default)]
+        aggregate_fraction: Option<f32>,
     },
     /// Broadcast when the ship takes damage (from collision or damage zone).
     /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.
@@ -2159,8 +2184,15 @@ pub struct PowerGroupEntry {
 }
 
 /// Preview of a queued repair request for blackboard publication (issue #682).
+///
+/// Carries exact damage numbers, so it is subject to the same #737 visibility
+/// boundary as [`RepairBlackboard::system_hull`]: `station_id` is the bucket
+/// the repair queue is keyed by (a station id, or `"core"` for the ownerless
+/// bucket) and exists so the projection can decide entitlement from the same
+/// rule rather than parsing the display label.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct QueueEntryPreview {
+    pub station_id: String,
     pub station_label: String,
     pub tier: DamageTier,
     pub deficit: f32,
@@ -2175,6 +2207,11 @@ pub struct RepairBlackboard {
     /// Travel duration in seconds (from ship TOML `[repair]` block).
     pub travel_duration_secs: f32,
     /// Per-system hull status. Drives the hull bar and team-destination labels.
+    ///
+    /// On the wire this is the Engineering **projection** (issue #737): core
+    /// systems, the Engineering station's own systems, and any system a repair
+    /// team is currently on site at. The host-internal copy (read by the repair
+    /// AI controller) still carries every system.
     #[serde(default)]
     pub system_hull: Vec<SystemHullStatus>,
     /// Systems that can be targeted for repair dispatch (in display order).
@@ -2183,6 +2220,12 @@ pub struct RepairBlackboard {
     /// Priority-queue preview entries (worst-first) for human repair UI (issue #682).
     #[serde(default)]
     pub queue_depth: Vec<QueueEntryPreview>,
+    /// Authoritative ship-wide hull fraction (0.0–1.0) across every damageable
+    /// system (issue #737). Engineering's hero hull bar reads this, because
+    /// `system_hull` is a projection and can no longer be summed to a whole-ship
+    /// figure. `None` on the host-internal copy before projection.
+    #[serde(default)]
+    pub aggregate_hull_fraction: Option<f32>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

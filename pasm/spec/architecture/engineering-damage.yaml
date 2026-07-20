@@ -328,13 +328,38 @@ entities:
 
   - component: repair-visibility-publisher
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Repair Visibility Publisher
       summary: Host publisher that derives the different damage views for Engineering and owning stations.
       rationale:
         - Aggregate hull, core detail, owner-local detail, and on-site team detail are different information surfaces.
         - Team arrival is an information gate for non-core engineering detail.
+        - >-
+          Issue #737: the four views must be decided on the host. Before it, the
+          publisher's paths spanned host AND client and every connected client
+          received exact per-system detail for the whole ship at `Target::All`,
+          so the separation was presentation-only and the hidden rows were
+          already on every phone. The entity is now host-only.
+        - >-
+          One projection serves both the live broadcast and the reconnect
+          resync, so reconnecting cannot be used to obtain withheld detail.
+        - >-
+          The boundary needs two gates, not one. Filtering `system_hull` alone
+          left `RepairBlackboard.queue_depth` — every *damaged* system's exact
+          tier and HP deficit — and `teams` — each team's destination system —
+          riding through a `..bb.clone()` spread to every connected token, which
+          made the row filter cosmetic in exactly the case that matters. The
+          repair blackboard is now (1) sent only to the Engineering holder, and
+          (2) projected field by field with no struct-update spread, so a newly
+          added field cannot silently ride through unprojected.
+        - >-
+          Restricting the audience is safe because nothing but the Engineering
+          console reads this payload: `buildRepairConsoleState` is reached only
+          from a station that owns the `repair` system (battleship `repair`,
+          cruiser/destroyer `engineering`, courier `captain`). A viewer who is
+          not entitled receives an *empty* blackboard rather than no message, so
+          a player who has just moved off Engineering cannot keep a stale copy.
     architecture:
       kind: adapter
       authority: authoritative
@@ -346,25 +371,100 @@ entities:
         - core-damage-detail-state
         - station-owner-local-damage-state
         - onsite-repair-detail-state
+      depends_on:
+        # The projection pushes finished per-token payloads straight into the
+        # broadcaster's outbox: there is no per-recipient fan-out primitive in
+        # the `SimBroadcaster` Audience model, which resolves one producer to
+        # one Target.
+        - host-state-broadcaster
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
+      # `src/console/repair/server.rs` is genuinely part of this entity's
+      # surface — `publish_repair_blackboard` constructs the unprojected
+      # blackboard, `queue_depth` included. It is deliberately NOT listed: five
+      # other entities already claim that file (repair-team-cycle-policy,
+      # authoritative-damage-state, host-repair-team-state, repair-team-state,
+      # and the NPC-AI console router), so it is already multi-owned and
+      # dropped from attribution. Adding a sixth claim would not restore
+      # attribution, only obscure the ownership. The projection seam this entity
+      # is actually observed at is `visibility.rs`, which owns the decision.
       paths:
-        - src/console/repair/server.rs
-        - gui/console-state.js
+        - src/console/repair/visibility.rs
       symbols:
-        - publish_repair_blackboard
-        - buildRepairConsoleState
+        - HullVisibility
+        - push_hull_updates
+        - project_repair_blackboards
+        - hull_update_for_token
+        - may_receive_repair_blackboard
+        - project_repair_blackboard
       tests:
-        - tests/client/console-state.test.js
+        - cargo test
+    evidence:
+      - kind: code
+        reference: src/console/repair/visibility.rs
+        summary: >-
+          Host-only module. Names the authoritative damage store with a
+          line-start `use crate::damage::SystemHull;` and the repair-team state
+          machine with `use crate::modifiers::repair_teams::RepairTeams;`, so
+          both reads are real code edges rather than prose claims.
+      - kind: test
+        reference: live_broadcast_gives_engineering_core_only_with_no_team_on_site
+        summary: >-
+          Engineering's `SystemHullUpdate` carries core detail and its own
+          station's systems, and no other station's rows.
+      - kind: test
+        reference: live_broadcast_gives_a_station_owner_only_its_own_systems
+        summary: A station holder receives exact detail for its own systems only.
+      - kind: test
+        reference: reconnect_resync_honours_the_same_gating_as_the_live_broadcast
+        summary: >-
+          The reconnect payload for a token is byte-identical in row set to what
+          the live broadcaster sent it.
+      - kind: test
+        reference: repair_blackboard_fans_out_per_token_while_others_stay_broadcast
+        summary: >-
+          The repair blackboard (the other carrier of exact hull detail) is
+          targeted per token and never reaches `Target::All`. A non-Engineering
+          recipient receives the empty blackboard, not a filtered one.
+      - kind: test
+        reference: only_the_engineering_holder_receives_the_repair_blackboard
+        summary: >-
+          The audience gate: `may_receive_repair_blackboard` admits the station
+          that owns the `repair` system and nobody else, including an unassigned
+          viewer.
+      - kind: test
+        reference: a_station_owner_gets_no_queue_entry_for_a_station_it_does_not_own
+        summary: >-
+          `queue_depth` carries exact tier and HP deficit scoped to damaged
+          systems, and is filtered on the same rule as the hull rows.
+      - kind: test
+        reference: the_projection_names_every_field_so_none_can_ride_through_unprojected
+        summary: >-
+          Pins which fields are projected and which are deliberately whole, so
+          reintroducing a `..bb.clone()` spread fails a test rather than
+          silently widening the boundary.
+      - kind: test
+        reference: a_station_change_invalidates_the_cached_projection
+        summary: >-
+          A recipient's station is an input to their projection, so the
+          per-token cache tracks it: changing station mid-game re-projects even
+          when the internal blackboard is unchanged, which on an idle undamaged
+          ship would otherwise never happen.
 
   - component: station-owner-damage-interface
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Station Owner Damage Interface
       summary: The local station-facing damage surface that shows exact machine state for systems the station owns.
+      rationale:
+        - >-
+          Issue #737: this surface now renders what it was given. The client no
+          longer holds the whole ship's detail, so `withStationDamage` filters a
+          set that is already this station's own, and the repair console reads
+          the host aggregate instead of summing its rows.
     architecture:
       kind: client-interface
       authority: non-authoritative
@@ -401,6 +501,10 @@ entities:
         - ShipRepairTeams
         - RepairTeams
         - tick_repair_teams
+        # Issue #737: the named on-site predicate. Only `TeamSlot::Repairing`
+        # counts, which is what makes travel an information delay as well as a
+        # repair delay.
+        - on_site_systems
       tests:
         - cargo test
 
@@ -424,13 +528,22 @@ entities:
       symbols:
         - TeamSlot
         - RepairTeams
+        - on_site_systems
 
   - state: engineering-aggregate-hull-state
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Engineering Aggregate Hull State
       summary: Ship-wide aggregate hull percentage visible to Engineering before any team arrives.
+      rationale:
+        - >-
+          Issue #737 gave this state a host producer. It is carried on the wire
+          as `SystemHullUpdate.aggregate_fraction` and
+          `RepairBlackboard.aggregate_hull_fraction`, computed over *every*
+          damageable system. It has to be published rather than derived: the
+          per-system rows a recipient receives are a projection, so summing them
+          yields the visible slice, not the ship.
     architecture:
       classification: replicated
       owner: repair-visibility-publisher
@@ -443,13 +556,30 @@ entities:
       symbols:
         - overallHull
         - buildRepairConsoleState
+    evidence:
+      - kind: test
+        reference: every_recipient_receives_the_same_ship_wide_aggregate
+        summary: >-
+          The published aggregate spans systems no single recipient can see, and
+          is identical for every recipient.
+      - kind: test
+        reference: uses the host aggregate for the hero bar instead of summing the projection
+        summary: >-
+          `overallHull` prefers the host figure over the local sum, so the hero
+          bar shows ship hull rather than visible-slice hull.
 
   - state: core-damage-detail-state
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Core Damage Detail State
       summary: Exact core damage detail visible to Engineering through the dedicated core interface.
+      rationale:
+        - >-
+          "Core" is an ownerless bucket, not a flag: a hull entry whose system id
+          has no `[[system]]` declaration carrying a `station`. Issue #737 lifted
+          that rule from the client to the host, so Engineering is *sent* core
+          rows and no others rather than being sent everything and filtering.
     architecture:
       classification: replicated
       owner: repair-visibility-publisher
@@ -465,13 +595,33 @@ entities:
       symbols:
         - buildRepairConsoleState
         - repairCoreAndTargets
+    evidence:
+      - kind: test
+        reference: live_broadcast_gives_engineering_core_only_with_no_team_on_site
+        summary: >-
+          Engineering's projection contains the ownerless core rows (plus its
+          own station's systems) and no other station's rows.
+      - kind: test
+        reference: station_owner_never_sees_core
+        summary: Core detail is Engineering-only; a station holder never receives it.
+      - kind: test
+        reference: offers dispatch targets for stations whose detail it cannot see
+        summary: >-
+          `damageable_systems` stays whole on the wire — it is system ids and
+          carries no hull detail — so Engineering can still dispatch teams to
+          systems it cannot see.
 
   - state: station-owner-local-damage-state
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Station Owner Local Damage State
       summary: Exact damage detail for the systems owned by a station.
+      rationale:
+        - >-
+          Issue #737: a station holder is sent exact detail for the systems its
+          own station owns and nothing else — not the whole ship filtered down
+          on the phone.
     architecture:
       classification: player-knowledge
       owner: repair-visibility-publisher
@@ -481,16 +631,53 @@ entities:
       status: suspected
       paths:
         - gui/console-state.js
+    evidence:
+      - kind: test
+        reference: live_broadcast_gives_a_station_owner_only_its_own_systems
+        summary: >-
+          The Helm holder's `SystemHullUpdate` contains only helm-owned systems
+          — no core rows and no other station's rows.
+      - kind: test
+        reference: on_site_reveal_does_not_extend_to_other_systems_of_that_station
+        summary: >-
+          The grant is per-system, so a team on site at one helm system does not
+          expose the station's other systems.
 
   - state: onsite-repair-detail-state
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: On-Site Repair Detail State
       summary: Exact non-core damage detail revealed to Engineering only for a station where a repair team is currently on site.
       rationale:
         - Team travel is both a repair delay and an information delay.
         - Recalling a team before arrival should not reveal hidden details.
+        - >-
+          Issue #737: the on-site predicate is the named
+          `RepairTeams::on_site_systems`, which counts only `TeamSlot::Repairing`.
+          `Travelling` has not arrived and `Returning` has left, so a team
+          recalled before arrival goes `Travelling -> Returning` without ever
+          passing through `Repairing` and never reveals anything. The predicate
+          is named rather than inlined so the publisher and this entity point at
+          one symbol.
+        - >-
+          The wire projection is not the only door into this state. The
+          channel-3 coordination bus carries
+          `CoordinationPayload::RepairRequest`, which targets the `repair`
+          system and therefore lands on the Engineering holder as a
+          `CoordinationPopup`. It was introduced by issue #682 carrying the
+          exact HP deficit, which handed Engineering that number on every
+          worsening tier crossing of an arbitrary non-Core system, with no team
+          dispatched and no travel elapsed. That is a leak, not a designed
+          exception: it contradicts the rule this state exists to express, so
+          the payload's `deficit` is now `Option<f32>` and is gated through the
+          same `HullVisibility::can_see` — and therefore the same
+          `on_site_systems()` set — as the hull rows. Core systems and the
+          recipient's own systems keep the exact number. Everything else still
+          raises the popup and still names the tier; the number is simply
+          absent, which is the coarse "needs attention" signal. `deficit` stays
+          exact on the host-internal enqueue because the AI repair queue sorts
+          by it.
     architecture:
       classification: player-knowledge
       owner: repair-visibility-publisher
@@ -502,6 +689,47 @@ entities:
       paths:
         - src/modifiers/repair_teams.rs
         - gui/console-state.js
+      symbols:
+        - on_site_systems
+    evidence:
+      - kind: test
+        reference: travelling_team_does_not_reveal_non_core_detail_to_engineering
+        summary: A team part-way through its travel leg reveals nothing.
+      - kind: test
+        reference: arrival_reveals_non_core_detail_to_engineering
+        summary: >-
+          Once travel completes and the slot becomes `Repairing`, the target
+          system's exact detail appears in Engineering's projection.
+      - kind: test
+        reference: recall_before_arrival_never_reveals_detail
+        summary: >-
+          Walks the entire return leg of a recalled team and asserts the detail
+          never appears at any point.
+      - kind: test
+        reference: detail_is_withdrawn_again_once_the_team_leaves
+        summary: >-
+          Recall from `Repairing` withdraws the detail immediately, so the
+          reveal tracks presence rather than latching on first arrival.
+      - kind: test
+        reference: live_broadcast_reveals_non_core_detail_once_a_team_is_on_site
+        summary: The reveal is visible end-to-end on the broadcast wire path.
+      - kind: test
+        reference: engineering_gets_no_non_core_queue_entry_before_a_team_arrives
+        summary: >-
+          The queue preview obeys the same arrival gate as the hull rows;
+          `engineering_gets_the_non_core_queue_entry_once_a_team_is_on_site`
+          is the paired positive, and the reveal stays per-station.
+      - kind: test
+        reference: repair_popup_withholds_exact_non_core_deficit_before_a_team_arrives
+        summary: >-
+          The channel-3 `RepairRequest` popup reaches the Engineering holder
+          with the tier but no exact deficit while the reporting non-Core system
+          has no team on site.
+      - kind: test
+        reference: repair_popup_carries_the_exact_deficit_once_a_team_is_on_site
+        summary: >-
+          The paired positive: a team on site opens the same gate on the
+          coordination bus that it opens on the wire projection.
 
   - message: dispatch-repair-team-command
     core:

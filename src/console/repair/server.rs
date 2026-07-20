@@ -268,6 +268,7 @@ fn publish_repair_blackboard(
             entries
                 .iter()
                 .map(|e| QueueEntryPreview {
+                    station_id: e.station_id.clone(),
                     station_label: e.station_label.clone(),
                     tier: e.tier,
                     deficit: e.deficit,
@@ -283,7 +284,13 @@ fn publish_repair_blackboard(
         travel_duration_secs: teams.0.timings().travel_duration,
         system_hull,
         damageable_systems,
+        // Host-internal copy: unprojected. `system_hull` and `queue_depth` both
+        // carry exact per-system detail and are filtered on the wire by
+        // `visibility::project_repair_blackboard`, which also fills in the
+        // aggregate (issue #737). The repair AI controller reads this copy and
+        // needs every system.
         queue_depth,
+        aggregate_hull_fraction: None,
     };
 
     if let Some(mut blackboards) = blackboards_q.iter_mut().next() {

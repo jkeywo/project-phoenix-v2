@@ -4,9 +4,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint Controller
-      summary: Owns each ship's free or entity-anchored navigation waypoint, accepting admitted set and clear commands and issuing the same Channel-3 NavigateTo clearance to the Helm station that the Navigation AI issues.
+      summary: Owns each ship's free or entity-anchored navigation waypoint, applying admitted set and clear commands — from a human console OR the Navigation AI operator, symmetrically — and driving the same Channel-3 NavigateTo clearance to the Helm station.
       rationale:
-        - "A waypoint reaches the AI Helm identically no matter who set it (AGENTS.md rule 6): both writers — the admitted human SetNavigationWaypoint path and operate_navigation_ai — enqueue the clearance through one shared helper, so the message, the delivery lag, and the HelmWaypointClearance latch are the same. Previously only the AI path sent the clearance, so a human-set waypoint sat on the shared component unfollowed."
+        - "A waypoint reaches the AI Helm identically no matter who set it (AGENTS.md rule 6): the single admitted applier (`handle_navigation_waypoint`) writes the shared component for BOTH sources — the human `SetNavigationWaypoint` and the Navigation AI's admitted emission (issue #830) — and the shared issuer enqueues the clearance, so the message, the delivery lag, and the HelmWaypointClearance latch are the same. Previously the AI wrote the waypoint component directly, bypassing admission."
+        - "Issue #830 moved the applier from Input into Physics `.after(operate_navigation_ai)`: admission clears AdmittedCommands once per tick before Input, so the AI operator's same-tick emission must be applied after it in Physics. The clearance issuer is pinned `.after(handle_navigation_waypoint)` so a waypoint set this tick — by either writer — gets its clearance this tick (the #702 shared-issuer invariant)."
         - The sender origin is derived from the navigation system's resolved control source, like every other post-admission enqueuer, not assumed from the wire path. Clearing needs no clearance message because a cleared waypoint leaves the Helm nothing to follow.
     architecture:
       kind: control-handler
@@ -32,7 +33,10 @@ entities:
     architecture:
       classification: authoritative
       owner: navigation-waypoint-controller
-      writers: [navigation-waypoint-controller, navigation-ai-operator]
+      # Issue #830: the Navigation AI no longer writes this state directly — it
+      # emits an admitted system-control-command that the controller applies, so
+      # the controller is the sole writer.
+      writers: [navigation-waypoint-controller]
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
@@ -60,7 +64,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Chart Publisher
-      summary: Publishes the authored chart range, show/select filters, and current waypoint for the local ship's navigation surface.
+      summary: Publishes each ship's current navigation waypoint into its own blackboard; the authored chart range and show/select filters are player-only and gated to the local ship.
+      rationale:
+        - "Issue #830 made this per-Ship: every ship (player + NPC) carries its own NavigationWaypoint, so the waypoint field is published for each. The chart config (range / shows / selects) is a player display surface sourced from the local ShipClientConfigResource, so it is gated on Has<LocalShip>; NPCs get the default (empty) chart config. Nothing consumes an NPC nav blackboard and the wire broadcaster is LocalShip-filtered, but the AC asks NPC ships to carry navigation blackboards."
     architecture:
       kind: blackboard-publisher
       authority: authoritative
@@ -76,13 +82,14 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation AI Operator
-      summary: Selects a positive Helm-relevant objective within navigation range, writes the resulting free or anchored waypoint, and sends Helm a NavigateTo coordination message through the same shared clearance helper the human waypoint path uses.
+      summary: Selects a positive Helm-relevant objective, resolves it to a free or anchored waypoint, and emits an admitted SetNavigationWaypoint / ClearNavigationWaypoint system-control-command (on change) for the waypoint controller to apply — rather than writing the waypoint state directly.
+      rationale:
+        - "Issue #830 (RADAR_TARGET_AUTHORITY_AND_ADMISSION.md §2): the operator kept its decision logic but now emits its decision as an admitted command through the shared validate_and_admit seam using this ship's own ai:<uuid> token, so no AI path mutates system state through a private write. Emission is on-change (compared against the current waypoint by identity) to keep AdmittedCommands clean; the applier's set is generation-idempotent. The NavigateTo clearance is issued by the shared origin-agnostic issuer, not here."
     architecture:
       kind: ai-operator
       authority: authoritative
       reads: [system-control-source-state, scored-objective-pool-state, radar-contact-projection-state]
-      writes: [navigation-waypoint-state]
-      sends: [inter-system-message-state]
+      sends: [system-control-command]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared

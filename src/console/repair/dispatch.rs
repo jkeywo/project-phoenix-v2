@@ -22,14 +22,20 @@ use super::server::ShipRepairTeams;
 /// The repair dispatch handler, scheduled so it can only ever observe a
 /// fully-populated `AdmittedCommands`.
 ///
-/// `SimSet::Input` already runs after [`AdmissionSet`]; the explicit
-/// `.after(AdmissionSet)` states the dependency at the point of use so it
-/// survives any future re-ordering of the sim sets.
+/// Runs in `SimSet::Physics`, `.after(operate_repair_ai)` (issue #830). The AI
+/// operator emits its `DispatchRepairTeam` into `AdmittedCommands` in Physics;
+/// admission clears `AdmittedCommands` once per tick *before* `SimSet::Input`,
+/// so the applier must run after the AI emit in the same set for a same-tick
+/// AI dispatch to land. Human dispatches admitted before Input survive to
+/// Physics unchanged. The explicit `.after(AdmissionSet)` keeps the router's
+/// dependency on the admission seam a real, observed code edge (the `use`
+/// above) even though `SimSet::Physics` already runs downstream of it.
 pub fn register_repair_dispatch(app: &mut App) {
     app.add_systems(
         Update,
         handle_dispatch_repair_team
-            .in_set(crate::sim_sets::SimSet::Input)
+            .in_set(crate::sim_sets::SimSet::Physics)
+            .after(super::server::operate_repair_ai)
             .after(AdmissionSet),
     );
 }
@@ -48,76 +54,49 @@ pub fn register_repair_dispatch(app: &mut App) {
 /// `RepairTarget::Core` dispatches to `SystemId("core")`, the repair bucket for
 /// ownerless ship-wide systems.
 ///
-/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` component
-/// on the LocalShip entity; falls back to the global `ShipRepairTeams` resource
-/// for tests. Dual-writes to the Resource so legacy Resource-based readers
-/// stay in sync.
+/// Per-entity (issue #830): iterates every `Ship` (player + NPC) and applies
+/// each ship's own admitted `DispatchRepairTeam` commands to its own
+/// `ShipRepairTeams` component. The global `ShipRepairTeams` Resource and its
+/// dual-write are gone — a same-source admitted command lands on exactly the
+/// ship that owns it, whether a human Engineering console or an AI operator's
+/// `ai:<uuid>` emission produced it.
 pub fn handle_dispatch_repair_team(
     mut ship_query: Query<
         (
             &AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
-            Option<&mut ShipRepairTeams>,
+            &mut ShipRepairTeams,
             Option<&crate::entity_spawner::EntitySystemHull>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
-    teams_res: Option<ResMut<ShipRepairTeams>>,
 ) {
-    let Some((admitted, ship_config, mut teams_comp, hull_opt)) = ship_query.iter_mut().next()
-    else {
-        return;
-    };
-    let mut teams_res = teams_res;
+    for (admitted, ship_config, mut teams, hull_opt) in ship_query.iter_mut() {
+        // Look up a human-readable display name for a SystemId. Prefer the
+        // ship's `EntitySystemHull` entry (populated from TOML with the
+        // designer-authored display name), and fall back to the raw SystemId
+        // string when the hull has no entry for that id.
+        let hull_ref = hull_opt.map(|h| &h.0);
+        let display_name_for = |sid: &SystemId| -> String {
+            if let Some(hull) = hull_ref {
+                if let Some(entry) = hull.get(sid) {
+                    return entry.display_name.clone();
+                }
+            }
+            sid.0.clone()
+        };
 
-    // Look up a human-readable display name for a SystemId. Prefer the
-    // ship's `EntitySystemHull` entry (populated from TOML with the
-    // designer-authored display name), and fall back to the raw SystemId
-    // string when the hull has no entry for that id.
-    let hull_ref = hull_opt.map(|h| &h.0);
-    let display_name_for = |sid: &SystemId| -> String {
-        if let Some(hull) = hull_ref {
-            if let Some(entry) = hull.get(sid) {
-                return entry.display_name.clone();
+        for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
+            if let SystemControlPayload::DispatchRepairTeam {
+                team_idx,
+                target: repair_target,
+            } = &cmd.payload
+            {
+                let sid = resolve_repair_target(repair_target, ship_config, hull_ref);
+                let display = display_name_for(&sid);
+                teams.0.dispatch(*team_idx as usize, sid, display);
             }
         }
-        sid.0.clone()
-    };
-
-    // Collect all dispatches into a batch first, then apply once — avoids the
-    // closure-captures-borrow tangle when routing between Component and Resource.
-    let mut pending: Vec<(usize, SystemId, String)> = Vec::new();
-
-    for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
-        if let SystemControlPayload::DispatchRepairTeam {
-            team_idx,
-            target: repair_target,
-        } = &cmd.payload
-        {
-            let sid = resolve_repair_target(repair_target, ship_config, hull_ref);
-            let display = display_name_for(&sid);
-            pending.push((*team_idx as usize, sid, display));
-        }
-    }
-
-    if pending.is_empty() {
-        return;
-    }
-
-    // Apply to whichever backing store is available; dual-write when both.
-    for (idx, sid, display) in pending {
-        if let Some(t) = teams_comp.as_deref_mut() {
-            t.0.dispatch(idx, sid.clone(), display.clone());
-        }
-        if let Some(r) = teams_res.as_deref_mut() {
-            r.0.dispatch(idx, sid, display);
-        }
-    }
-    // Keep Resource in sync with per-entity component (Resource is dual-written
-    // above; but if only the Component was updated we snapshot the Component
-    // into the Resource so legacy Resource-based readers see the latest state).
-    if let (Some(t), Some(r)) = (teams_comp.as_deref(), teams_res.as_deref_mut()) {
-        r.0 = t.0.clone();
     }
 }
 

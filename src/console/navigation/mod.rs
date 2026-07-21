@@ -10,9 +10,17 @@ pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
+        // The admitted-waypoint applier moves Input→Physics (issue #830):
+        // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
+        // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`
+        // once per tick *before* Input, so the applier must run after the AI
+        // emit in the same set for a same-tick AI waypoint to land. Human
+        // commands admitted before Input survive to Physics unchanged.
         app.add_systems(
             Update,
-            handle_navigation_waypoint.in_set(crate::sim_sets::SimSet::Input),
+            handle_navigation_waypoint
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .after(operate_navigation_ai),
         )
         // Refresh anchored waypoints from the parent entity's live
         // Transform every tick, before the broadcaster reads the
@@ -27,14 +35,17 @@ impl Plugin for NavigationPlugin {
             operate_navigation_ai.in_set(crate::sim_sets::SimSet::Physics),
         )
         // The single, origin-agnostic Channel-3 clearance issuer (issue #702
-        // follow-up): runs after both waypoint writers (`handle_navigation_waypoint`
-        // in Input, `operate_navigation_ai` in Physics) so a waypoint set this
-        // tick is cleared this tick, whoever set it.
+        // follow-up): runs after BOTH waypoint writers — `operate_navigation_ai`
+        // (which emits) and `handle_navigation_waypoint` (which applies both the
+        // human- and AI-set waypoints, now in Physics, #830) — so a waypoint set
+        // this tick gets its clearance this tick, whoever set it (#702 shared-
+        // issuer invariant).
         .add_systems(
             Update,
             issue_navigate_to_clearance
                 .in_set(crate::sim_sets::SimSet::Physics)
-                .after(operate_navigation_ai),
+                .after(operate_navigation_ai)
+                .after(handle_navigation_waypoint),
         )
         .add_systems(
             Update,
@@ -386,24 +397,41 @@ fn refresh_anchored_waypoint(
 
 // ── Blackboard publish ────────────────────────────────────────────────────────
 
+/// Per-`Ship` publisher (issue #830). Every ship carries its own
+/// `NavigationWaypoint`, so the waypoint field is computed per entity. The chart
+/// config (range / shows / selects) is a player-only display surface sourced
+/// from the local `ShipClientConfigResource`, so it is gated on `Has<LocalShip>`;
+/// NPCs get the default (empty) chart config. Nothing consumes an NPC's nav
+/// blackboard, and the wire broadcaster is `LocalShip`-filtered — but the AC
+/// asks NPC ships to carry navigation blackboards, so this publishes for every
+/// AI-bearing ship (those carrying `ShipSystemBlackboards`).
 fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    waypoint_q: Query<&NavigationWaypoint, With<crate::server_app::LocalShip>>,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
+    mut ship_q: Query<
+        (
+            &NavigationWaypoint,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
     >,
 ) {
     let cfg = &ship_config.0;
-    let navigation_waypoint = waypoint_q.single().ok().and_then(|w| w.snapshot());
-    let bb = NavigationBlackboard {
-        nav_chart_range: cfg.nav_chart_range,
-        nav_chart_shows: cfg.nav_chart_shows.clone(),
-        nav_chart_selects: cfg.nav_chart_selects.clone(),
-        navigation_waypoint,
-    };
-
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
+    for (waypoint, is_local, mut bbs) in ship_q.iter_mut() {
+        let navigation_waypoint = waypoint.snapshot();
+        let bb = if is_local {
+            NavigationBlackboard {
+                nav_chart_range: cfg.nav_chart_range,
+                nav_chart_shows: cfg.nav_chart_shows.clone(),
+                nav_chart_selects: cfg.nav_chart_selects.clone(),
+                navigation_waypoint,
+            }
+        } else {
+            NavigationBlackboard {
+                navigation_waypoint,
+                ..Default::default()
+            }
+        };
         bbs.0.insert(
             SystemId(NAVIGATION_SYSTEM_ID.to_string()),
             SystemBlackboard::Navigation(bb),
@@ -418,19 +446,28 @@ fn publish_navigation_blackboard(
 ///
 /// Reads the viewscreen blackboard's `scored_objectives`, picks the top
 /// Helm-relevant objective with `score > 0`, resolves its `AiDirective` to a
-/// world location using a nav-range-filtered entity view, and sets the ship's
-/// `NavigationWaypoint` (AI write path). The Channel-3 `NavigateTo` clearance
-/// for the waypoint is issued by [`issue_navigate_to_clearance`], the shared
-/// origin-agnostic issuer — not here.
+/// world location, and — decide-and-emit (issue #830) — emits an admitted
+/// `SetNavigationWaypoint` / `ClearNavigationWaypoint` through the shared
+/// [`crate::command_admission::validate_and_admit`] seam with this ship's own
+/// `ai:<uuid>` token, rather than writing `NavigationWaypoint` directly (the §2
+/// violation). `handle_navigation_waypoint` applies it later this tick (Physics,
+/// `.after(operate_navigation_ai)`). Emission is on-change only (compared
+/// against the current `NavigationWaypoint`): the applier's `set` is
+/// generation-idempotent, but emit-on-change keeps `AdmittedCommands` clean and
+/// mirrors #828. The Channel-3 `NavigateTo` clearance is issued by
+/// [`issue_navigate_to_clearance`], the shared origin-agnostic issuer — not here.
 pub fn operate_navigation_ai(
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<(
         Entity,
         &crate::ship_plugin::ShipSystemControlSources,
         &crate::server_app::ShipSystemBlackboards,
-        &mut NavigationWaypoint,
+        &NavigationWaypoint,
         &crate::ship_state::ShipPhysics,
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&crate::ai_plugin::ObjectiveCursors>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &mut crate::messages::AdmittedCommands,
     )>,
     entities: Query<(
         &crate::entity_spawner::EntityUuid,
@@ -455,8 +492,17 @@ pub fn operate_navigation_ai(
         })
         .collect();
 
-    for (_entity, sources, blackboards, mut waypoint, _ship_physics, _self_uuid_opt, cursors) in
-        ships.iter_mut()
+    for (
+        _entity,
+        sources,
+        blackboards,
+        waypoint,
+        _ship_physics,
+        entity_uuid,
+        cursors,
+        ship_config,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         let policy = sources
             .0
@@ -484,94 +530,170 @@ pub fn operate_navigation_ai(
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-        let Some(top_obj) = top else {
-            waypoint.clear();
-            continue;
-        };
-
-        // Resolve the directive to the waypoint Navigation wants the Helm to
-        // travel to, or `None` when it names nowhere reachable.
-        let resolved: Option<WaypointMode> = match &top_obj.directive {
-            // A `Destroy` target may be authored as a UUID *or* an entity name —
-            // `combat_test.toml` names "Starbase Alpha" — so resolve both, the
-            // way every other objective consumer does (`ai_target_selection`,
-            // `operate_helm`, `operate_sensors_ai`). Matching on UUID alone made
-            // every name-authored assault silently unresolvable, which cleared
-            // the waypoint and dropped the ship back to its patrol doctrine.
-            //
-            // There is deliberately no range filter here. Navigation is the
-            // ship's *chart*, not a radar: it shows the whole system, and the
-            // entire point of the Channel-3 handoff is to steer a short-ranged
-            // Helm toward something it cannot yet see for itself. This used to
-            // cull candidates by `nav_chart_range` read from the local player's
-            // ship config — a display extent, applied to NPCs that never owned
-            // it.
-            crate::messages::AiDirective::Destroy { target } => (!target.is_empty())
-                .then(|| resolve_destroy_target(&all_entities, runtime.as_deref(), target))
-                .flatten()
-                .map(|(uuid, pos)| WaypointMode::Anchored {
-                    // The resolved UUID, not the authored target: `Anchored`
-                    // tracks its parent by UUID, so storing a name here would
-                    // leave the waypoint unable to follow a moving target.
-                    source_uuid: uuid,
-                    last_x: pos[0],
-                    last_z: pos[2],
-                }),
-            crate::messages::AiDirective::Reach { anchor } => (!anchor.is_empty())
-                .then(|| anchor_pos(&world_config, anchor))
-                .flatten()
-                .map(|pos| WaypointMode::Free {
-                    x: pos[0],
-                    z: pos[2],
-                }),
-            crate::messages::AiDirective::Retreat { anchor } => (!anchor.is_empty())
-                .then(|| anchor_pos(&world_config, anchor))
-                .flatten()
-                .map(|pos| WaypointMode::Free {
-                    x: pos[0],
-                    z: pos[2],
-                }),
-            crate::messages::AiDirective::Patrol { anchors, loop_path } => {
-                // Resolve from the objective's *active cursor target*, not
-                // `anchors[0]` (issue #702). This system was cursor-blind: it
-                // parked the waypoint on the first anchor of the route and left
-                // it there for the whole patrol, so Navigation kept telling the
-                // Helm to fly to a waypoint the ship had already rounded laps
-                // ago. The cursor is the objective's own record of where it is
-                // on its route — the same one `helm_patrol` steers from and
-                // `advance_objective_cursors` advances — so reading it is what
-                // makes Navigation and Helm agree about which waypoint is
-                // current.
-                let index = cursors
-                    .and_then(|c| {
-                        c.0.iter()
-                            .find(|cursor| cursor.objective_id == top_obj.id)
-                            .map(|cursor| cursor.index())
-                    })
-                    .unwrap_or(0);
-                let world_anchors = world_config
-                    .as_ref()
-                    .map(|wc| wc.anchors.clone())
-                    .unwrap_or_default();
-                crate::ai::patrol_cursor::cursor_target(index, anchors, *loop_path, &world_anchors)
+        // The waypoint this ship's Navigation AI wants, or `None` to clear it.
+        let desired: Option<WaypointMode> = if let Some(top_obj) = top {
+            // Resolve the directive to the waypoint Navigation wants the Helm to
+            // travel to, or `None` when it names nowhere reachable.
+            let resolved: Option<WaypointMode> = match &top_obj.directive {
+                // A `Destroy` target may be authored as a UUID *or* an entity name —
+                // `combat_test.toml` names "Starbase Alpha" — so resolve both, the
+                // way every other objective consumer does (`ai_target_selection`,
+                // `operate_helm`, `operate_sensors_ai`). Matching on UUID alone made
+                // every name-authored assault silently unresolvable, which cleared
+                // the waypoint and dropped the ship back to its patrol doctrine.
+                //
+                // There is deliberately no range filter here. Navigation is the
+                // ship's *chart*, not a radar: it shows the whole system, and the
+                // entire point of the Channel-3 handoff is to steer a short-ranged
+                // Helm toward something it cannot yet see for itself. This used to
+                // cull candidates by `nav_chart_range` read from the local player's
+                // ship config — a display extent, applied to NPCs that never owned
+                // it.
+                crate::messages::AiDirective::Destroy { target } => (!target.is_empty())
+                    .then(|| resolve_destroy_target(&all_entities, runtime.as_deref(), target))
+                    .flatten()
+                    .map(|(uuid, pos)| WaypointMode::Anchored {
+                        // The resolved UUID, not the authored target: `Anchored`
+                        // tracks its parent by UUID, so storing a name here would
+                        // leave the waypoint unable to follow a moving target.
+                        source_uuid: uuid,
+                        last_x: pos[0],
+                        last_z: pos[2],
+                    }),
+                crate::messages::AiDirective::Reach { anchor } => (!anchor.is_empty())
+                    .then(|| anchor_pos(&world_config, anchor))
+                    .flatten()
+                    .map(|pos| WaypointMode::Free {
+                        x: pos[0],
+                        z: pos[2],
+                    }),
+                crate::messages::AiDirective::Retreat { anchor } => (!anchor.is_empty())
+                    .then(|| anchor_pos(&world_config, anchor))
+                    .flatten()
+                    .map(|pos| WaypointMode::Free {
+                        x: pos[0],
+                        z: pos[2],
+                    }),
+                crate::messages::AiDirective::Patrol { anchors, loop_path } => {
+                    // Resolve from the objective's *active cursor target*, not
+                    // `anchors[0]` (issue #702). This system was cursor-blind: it
+                    // parked the waypoint on the first anchor of the route and left
+                    // it there for the whole patrol, so Navigation kept telling the
+                    // Helm to fly to a waypoint the ship had already rounded laps
+                    // ago. The cursor is the objective's own record of where it is
+                    // on its route — the same one `helm_patrol` steers from and
+                    // `advance_objective_cursors` advances — so reading it is what
+                    // makes Navigation and Helm agree about which waypoint is
+                    // current.
+                    let index = cursors
+                        .and_then(|c| {
+                            c.0.iter()
+                                .find(|cursor| cursor.objective_id == top_obj.id)
+                                .map(|cursor| cursor.index())
+                        })
+                        .unwrap_or(0);
+                    let world_anchors = world_config
+                        .as_ref()
+                        .map(|wc| wc.anchors.clone())
+                        .unwrap_or_default();
+                    crate::ai::patrol_cursor::cursor_target(
+                        index,
+                        anchors,
+                        *loop_path,
+                        &world_anchors,
+                    )
                     .map(|pos| WaypointMode::Free {
                         x: pos[0],
                         z: pos[2],
                     })
-            }
-            _ => None,
+                }
+                _ => None,
+            };
+            resolved
+        } else {
+            // No positive Helm-relevant objective: clear the waypoint.
+            None
         };
 
-        let Some(mode) = resolved else {
-            waypoint.clear();
+        // ── Emit on change only (issue #828 shape) ───────────────────────────
+        // Compare against the current waypoint by identity (`same_waypoint`):
+        // an anchored waypoint whose parent has merely moved is the same
+        // waypoint, so no re-emit — `refresh_anchored_waypoint` keeps its cache
+        // fresh independently.
+        let changed = match (waypoint.mode(), &desired) {
+            (None, None) => false,
+            (Some(_), None) | (None, Some(_)) => true,
+            (Some(current), Some(next)) => !same_waypoint(current, next),
+        };
+        if !changed {
             continue;
+        }
+
+        let payload = match &desired {
+            Some(WaypointMode::Free { x, z }) => SystemControlPayload::SetNavigationWaypoint {
+                x: *x,
+                z: *z,
+                source_uuid: None,
+            },
+            Some(WaypointMode::Anchored {
+                source_uuid,
+                last_x,
+                last_z,
+            }) => SystemControlPayload::SetNavigationWaypoint {
+                x: *last_x,
+                z: *last_z,
+                source_uuid: Some(source_uuid.clone()),
+            },
+            None => SystemControlPayload::ClearNavigationWaypoint,
         };
 
-        // `set` is idempotent for an unchanged waypoint, so re-running this
-        // every tick does not re-bump the generation and re-incur the lag on a
-        // Helm already following it.
-        waypoint.set(mode);
+        emit_navigation_ai_command(
+            entity_uuid,
+            payload,
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
     }
+}
+
+/// Emit an admitted Navigation AI command targeting the navigation system
+/// through the shared [`crate::command_admission::validate_and_admit`] seam,
+/// using this ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
+fn emit_navigation_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    payload: SystemControlPayload,
+    sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    admitted: &mut AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token,
+        crate::system_registry::navigation_system_id(),
+        payload,
+        sources,
+        sessions,
+        config,
+        admitted,
+    )
 }
 
 /// Resolve a `Destroy` directive's target to `(uuid, position)`.

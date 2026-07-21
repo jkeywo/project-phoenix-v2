@@ -392,13 +392,8 @@ pub fn ship_hull_visibility(
     hull: &SystemHull,
     config: &ShipConfig,
     entity_teams: Option<&super::server::ShipRepairTeams>,
-    local_ship_teams: Option<&super::server::ShipRepairTeams>,
 ) -> HullVisibility {
-    HullVisibility::from_parts(
-        hull,
-        config,
-        entity_teams.or(local_ship_teams).map(|t| &t.0),
-    )
+    HullVisibility::from_parts(hull, config, entity_teams.map(|t| &t.0))
 }
 
 /// Build a [`HullVisibility`] for the `LocalShip`, or `None` before spawn.
@@ -412,23 +407,14 @@ pub fn hull_visibility(world: &mut World) -> Option<HullVisibility> {
         &ShipConfigComponent,
         Option<&super::server::ShipRepairTeams>,
     ), With<LocalShip>>();
-    // Clone out of the query so the `world` borrow is released before reading
-    // the fallback resource.
     let (hull, config, entity_teams) = {
         let (hull, config, teams) = q.iter(world).next()?;
         (hull.0.clone(), config.0.clone(), teams.cloned())
     };
 
-    // This *is* the LocalShip, so the resource fallback applies here.
-    let resource_teams = world
-        .get_resource::<super::server::ShipRepairTeams>()
-        .cloned();
-    Some(ship_hull_visibility(
-        &hull,
-        &config,
-        entity_teams.as_ref(),
-        resource_teams.as_ref(),
-    ))
+    // Issue #830: the LocalShip carries its own `ShipRepairTeams` component;
+    // the global-Resource fallback is gone.
+    Some(ship_hull_visibility(&hull, &config, entity_teams.as_ref()))
 }
 
 /// Every connected session token paired with the station it currently holds.

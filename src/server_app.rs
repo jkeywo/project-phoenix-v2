@@ -2166,9 +2166,8 @@ fn spawn_game_start_entities(
                 let teams = ShipRepairTeams(crate::repair_teams::RepairTeams::new_with_timings(
                     team_count, timings,
                 ));
-                // Insert as per-entity component AND global resource (dual-write migration).
-                commands.entity(spawned).insert(teams.clone());
-                commands.insert_resource(teams);
+                // Per-entity component only (issue #830 retired the global Resource).
+                commands.entity(spawned).insert(teams);
             }
 
             // Apply shield focus config + base shield-system values from TOML if present.
@@ -5018,6 +5017,29 @@ station = "pilot"
         fast_forward_countdown(app);
         tick(app);
         tick(app);
+        // Issue #830: the global `ShipRepairTeams` Resource is gone and this
+        // test's ship template carries no `[hull]` block, so the spawner attaches
+        // no `ShipRepairTeams`. Give the LocalShip its own component so the
+        // per-entity dispatch handler has a store to write.
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip must be spawned by start_game_with_repair");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)));
+    }
+
+    /// Read the LocalShip's own `ShipRepairTeams` component (issue #830 — no
+    /// global Resource). Returns an owned clone for assertion convenience.
+    fn local_teams(app: &mut App) -> ShipRepairTeams {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipRepairTeams, With<LocalShip>>();
+        q.single(app.world())
+            .expect("LocalShip must carry ShipRepairTeams")
+            .clone()
     }
 
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
@@ -5049,9 +5071,9 @@ station = "pilot"
             },
         );
         tick(&mut app);
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_idle(teams, 0),
+            team_is_idle(&teams, 0),
             "team 0 should remain idle after non-Repair dispatch"
         );
     }
@@ -5072,9 +5094,9 @@ station = "pilot"
             },
         );
         tick(&mut app);
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_travelling(teams, 0),
+            team_is_travelling(&teams, 0),
             "team 0 should be travelling after dispatch"
         );
     }
@@ -5120,12 +5142,12 @@ station = "pilot"
             },
         );
         tick(&mut app);
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(matches!(
-            &teams.0.slots()[0],
+            teams.0.slots()[0],
             crate::messages::TeamSlot::Returning { .. }
         ));
-        assert!(team_is_travelling(teams, 1));
+        assert!(team_is_travelling(&teams, 1));
     }
 
     #[test]

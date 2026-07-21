@@ -203,9 +203,6 @@ pub fn process_coordination_lag(
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     mut chatter_writer: MessageWriter<AiChatterEvent>,
-    // LocalShip-only fallback for the #737 popup gate, matching the wire
-    // projection's preference order. See `ship_hull_visibility`.
-    teams_res: Option<Res<crate::console::repair::server::ShipRepairTeams>>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
     let shields_id = crate::system_registry::shields_system_id();
@@ -232,15 +229,13 @@ pub fn process_coordination_lag(
         // wire projection uses, rather than by calling `HullVisibility
         // ::from_parts` directly: a second on-site resolution path here is free
         // to drift from the one the broadcast enforces, which is the very shape
-        // of bug this issue closes. The resource fallback is passed only for the
-        // `LocalShip` because the global `ShipRepairTeams` is the player ship's
-        // singleton and an NPC must not inherit it.
+        // of bug this issue closes. Issue #830: every ship (player + NPC) reads
+        // its own per-entity `ShipRepairTeams` — no global-Resource fallback.
         let repair_vis = entity_hull.map(|hull| {
             crate::console::repair::visibility::ship_hull_visibility(
                 &hull.0,
                 &ship_config.0,
                 entity_teams,
-                if is_local { teams_res.as_deref() } else { None },
             )
         });
         let due = queue.0.due_messages(now);

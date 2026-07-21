@@ -210,6 +210,8 @@ entities:
       confidence: confirmed
       title: Current Red Alert AI Operator
       summary: For AI-controlled Red Alert systems, derives desired alert from per-ship recent combat activity and emits the existing toggle only when desired and current state differ.
+      rationale:
+        - "Issue #830 (RADAR_TARGET_AUTHORITY_AND_ADMISSION.md §2): the operator's decision (CaptainAi, 10s window) is unchanged, but it now emits the ToggleRedAlert through the shared command_admission::validate_and_admit seam with this ship's own ai:<uuid> token, instead of pushing straight into AdmittedCommands — true AI/human admission symmetry. This is purely the admission routing of the existing toggle; it is orthogonal to the separately-planned red-alert-toggle-to-set-migration-plan (which changes the command shape), and does not pre-empt it."
     architecture:
       kind: ai-operator
       authority: authoritative

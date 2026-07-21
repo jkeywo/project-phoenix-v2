@@ -27,6 +27,24 @@ pub fn test_app() -> App {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
+        // Mirror the production SimSet chain (server_app) so cross-set ordering
+        // holds: admission (`.before(SimSet::Input)`) → Input → Physics → …
+        // Issue #830 moved `handle_navigation_waypoint` / `handle_dispatch_repair_team`
+        // into Physics `.after(operate_*_ai)`, which only runs after admission
+        // when Input precedes Physics — this chain is what guarantees it.
+        .configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
         .add_plugins(ShipPlugin);
     let hull_config = &[
         (crate::messages::SystemId("helm".into()), 25.0_f32),
@@ -420,6 +438,20 @@ pub fn test_app_with_engine_hull() -> App {
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(200),
         ))
+        // See `test_app` — mirror the production SimSet chain (issue #830).
+        .configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
         .add_plugins(ShipPlugin);
     let hull_config = &[
         (crate::messages::SystemId("helm".into()), 25.0_f32),

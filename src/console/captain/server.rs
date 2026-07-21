@@ -109,9 +109,8 @@ fn handle_set_view(
 /// Sending the same id twice clears the boost.
 fn handle_set_objective_priority(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
-    boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
+    mut boost: ResMut<crate::server_app::CaptainPriorityBoost>,
 ) {
-    let Some(mut boost) = boost else { return };
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
@@ -137,17 +136,22 @@ fn handle_set_objective_priority(
 /// `ControlSource::Ai`.
 fn operate_captain_ai(
     time: Res<Time>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
         &RecentCombatActivity,
         Option<&crate::ship_state::ShipRedAlert>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
     )>,
 ) {
     let now = time.elapsed_secs();
     let ai = crate::ai::core::CaptainAi;
 
-    for (mut admitted, control_sources, activity, red_alert_opt) in ship_query.iter_mut() {
+    for (mut admitted, control_sources, activity, red_alert_opt, entity_uuid, ship_config) in
+        ship_query.iter_mut()
+    {
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::red_alert_system_id());
@@ -163,14 +167,60 @@ fn operate_captain_ai(
         if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
             let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
             if should_be_red_alert != current_red_alert {
-                admitted.0.push(crate::messages::AdmittedCommand {
-                    target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
-                    payload: SystemControlPayload::ToggleRedAlert,
-                    response_token: None,
-                });
+                // Route through the shared admission seam with this ship's own
+                // `ai:<uuid>` token (issue #830) rather than pushing straight
+                // into `AdmittedCommands` — true AI/human symmetry, mirroring
+                // `emit_sensors_ai_command`. The decision above (CaptainAi, 10s
+                // window) and its change-guard are unchanged.
+                emit_captain_ai_command(
+                    entity_uuid,
+                    SystemControlPayload::ToggleRedAlert,
+                    control_sources,
+                    &sessions,
+                    ship_config,
+                    &mut admitted,
+                );
             }
         }
     }
+}
+
+/// Emit an admitted Captain AI command targeting the red-alert system through
+/// the shared [`crate::command_admission::validate_and_admit`] seam, using this
+/// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
+fn emit_captain_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    payload: SystemControlPayload,
+    sources: &ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    admitted: &mut AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token,
+        crate::system_registry::red_alert_system_id(),
+        payload,
+        sources,
+        sessions,
+        config,
+        admitted,
+    )
 }
 
 fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
@@ -184,138 +234,142 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 
 // ── Blackboard publish ───────────────────────────────────────────────────────
 
+/// Per-`Ship` publisher (issue #830). Ship-wide fields (red_alert, auto flags,
+/// hull integrity, game_status) are computed for every ship from its own
+/// per-entity `ShipRedAlert` + `ShipSystemControlSources` + `EntitySystemHull`.
+/// Player-only fields — camera views (from the local `ModelMarkers` /
+/// `CinematicCameraSection`), view direction/mode (from the local
+/// `ShipViewMode`), and the objectives list + boost (from `ObjectiveManagerRes`
+/// / `CaptainPriorityBoost`) — are gated on `Has<LocalShip>`; NPCs get the
+/// empty/default equivalents (nothing reads an NPC captain blackboard, and the
+/// wire broadcaster is `LocalShip`-filtered).
 fn publish_captain_blackboard(
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    boost: Option<Res<crate::server_app::CaptainPriorityBoost>>,
+    boost: Res<crate::server_app::CaptainPriorityBoost>,
     markers_q: Query<&crate::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
     cinematic_q: Query<
         Option<&crate::entity_spawner::CinematicCameraSection>,
         With<crate::server_app::LocalShip>,
     >,
-    ship_query: Query<
+    mut ship_query: Query<
         (
             &ShipSystemControlSources,
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::ship_state::ShipViewMode>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            &mut crate::server_app::ShipSystemBlackboards,
         ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    let (control_sources, red_alert_comp, view_mode_comp) = ship_query
-        .single()
-        .map(|(cs, ra, vm)| (Some(cs), ra, vm))
-        .unwrap_or((None, None, None));
+    for (control_sources, red_alert_comp, view_mode_comp, hull_opt, is_local, mut bbs) in
+        ship_query.iter_mut()
+    {
+        let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
 
-    let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
-    let view_mode = view_mode_comp
-        .map(|vm| vm.view_mode.clone())
-        .unwrap_or(ViewMode::Camera(CameraView::default()));
+        let (hull_fraction, hull_integrity_pct) = hull_opt
+            .map(|h| {
+                let max = h.0.total_max();
+                if max > 0.0 {
+                    let frac = h.0.total_current() / max;
+                    (frac, (frac * 100.0).clamp(0.0, 100.0))
+                } else {
+                    (1.0, 100.0)
+                }
+            })
+            .unwrap_or((1.0, 100.0));
 
-    let hull_fraction = hull_q
-        .single()
-        .map(|h| {
-            let max = h.0.total_max();
-            if max > 0.0 {
-                h.0.total_current() / max
-            } else {
-                1.0
+        let red_alert_auto = control_sources
+            .0
+            .source_for(&crate::system_registry::red_alert_system_id())
+            == ControlSource::Ai;
+        let viewscreen_auto = control_sources
+            .0
+            .source_for(&crate::system_registry::viewscreen_system_id())
+            == ControlSource::Ai;
+
+        // ── Player-only fields (LocalShip) ────────────────────────────────────
+        // View mode / camera list / objectives are player camera + doctrine
+        // surfaces. NPCs get the same defaults the pre-#830 `.single()` error
+        // arms produced for a ship missing the component.
+        let view_mode = if is_local {
+            view_mode_comp
+                .map(|vm| vm.view_mode.clone())
+                .unwrap_or(ViewMode::Camera(CameraView::default()))
+        } else {
+            ViewMode::Camera(CameraView::default())
+        };
+        let view_direction = match &view_mode {
+            ViewMode::Camera(cv) => cv.marker_name.clone(),
+            ViewMode::Cinematic => "cinematic".to_string(),
+            _ => String::new(),
+        };
+
+        let mut camera_views: Vec<String> = Vec::new();
+        let mut objectives_snap: Vec<ObjectiveSnapshot> = Vec::new();
+        let mut boosted_objective_id: Option<String> = None;
+        if is_local {
+            camera_views = markers_q
+                .single()
+                .ok()
+                .map(|mm| {
+                    mm.marker_names()
+                        .filter(|n| n.starts_with("camera_"))
+                        .map(|n| n.to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let has_cinematic = cinematic_q.single().ok().is_some_and(|c| c.is_some());
+            if has_cinematic {
+                camera_views.push("cinematic".to_string());
             }
-        })
-        .unwrap_or(1.0);
-    let red_alert_auto = control_sources.is_some_and(|cs| {
-        cs.0.source_for(&crate::system_registry::red_alert_system_id()) == ControlSource::Ai
-    });
-    let viewscreen_auto = control_sources.is_some_and(|cs| {
-        cs.0.source_for(&crate::system_registry::viewscreen_system_id()) == ControlSource::Ai
-    });
 
-    // Extract the current camera view name from the view mode.
-    let view_direction = match &view_mode {
-        ViewMode::Camera(cv) => cv.marker_name.clone(),
-        ViewMode::Cinematic => "cinematic".to_string(),
-        _ => String::new(),
-    };
+            let conditions = WorldConditions {
+                red_alert,
+                hull_fraction,
+                attacked: false,
+            };
+            let captain_boost = boost
+                .boosted_id
+                .as_deref()
+                .map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT));
+            objectives_snap = objectives
+                .as_ref()
+                .map(|obj| {
+                    let scored = obj.0.scored_pool_with_boost(&conditions, captain_boost);
+                    scored
+                        .into_iter()
+                        .filter(|o| o.source == ObjectiveSource::Mission || o.score > 0.0)
+                        .map(|o| o.snapshot)
+                        .collect()
+                })
+                .unwrap_or_default();
+            boosted_objective_id = boost.boosted_id.clone();
+        }
 
-    // Collect available camera marker names from the ship's model rig.
-    let mut camera_views: Vec<String> = markers_q
-        .single()
-        .ok()
-        .map(|mm| {
-            mm.marker_names()
-                .filter(|n| n.starts_with("camera_"))
-                .map(|n| n.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+        let game_status = if red_alert {
+            "RED ALERT — All hands to battlestations."
+        } else {
+            "Standing by. All systems nominal."
+        }
+        .to_string();
 
-    // Add synthetic "cinematic" button if the ship has a cinematic camera config.
-    let has_cinematic = cinematic_q.single().ok().is_some_and(|c| c.is_some());
-    if has_cinematic {
-        camera_views.push("cinematic".to_string());
-    }
+        let bb = CaptainBlackboard {
+            red_alert,
+            red_alert_system_id: crate::system_registry::red_alert_system_id(),
+            red_alert_auto,
+            viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+            viewscreen_auto,
+            view_direction,
+            view_mode,
+            camera_views,
+            objectives: objectives_snap,
+            hull_integrity_pct,
+            game_status,
+            boosted_objective_id,
+        };
 
-    let conditions = WorldConditions {
-        red_alert,
-        hull_fraction,
-        attacked: false,
-    };
-    let captain_boost = boost.as_ref().and_then(|b| {
-        b.boosted_id
-            .as_deref()
-            .map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT))
-    });
-    let objectives_snap: Vec<ObjectiveSnapshot> = objectives
-        .as_ref()
-        .map(|obj| {
-            let scored = obj.0.scored_pool_with_boost(&conditions, captain_boost);
-            scored
-                .into_iter()
-                .filter(|o| o.source == ObjectiveSource::Mission || o.score > 0.0)
-                .map(|o| o.snapshot)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let hull_integrity_pct = hull_q
-        .single()
-        .map(|h| {
-            let max_hp = h.0.total_max();
-            if max_hp > 0.0 {
-                (h.0.total_current() / max_hp * 100.0).clamp(0.0, 100.0)
-            } else {
-                100.0
-            }
-        })
-        .unwrap_or(100.0);
-
-    let game_status = if red_alert {
-        "RED ALERT — All hands to battlestations."
-    } else {
-        "Standing by. All systems nominal."
-    }
-    .to_string();
-
-    let bb = CaptainBlackboard {
-        red_alert,
-        red_alert_system_id: crate::system_registry::red_alert_system_id(),
-        red_alert_auto,
-        viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
-        viewscreen_auto,
-        view_direction,
-        view_mode,
-        camera_views,
-        objectives: objectives_snap,
-        hull_integrity_pct,
-        game_status,
-        boosted_objective_id: boost.as_ref().and_then(|b| b.boosted_id.clone()),
-    };
-
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
         bbs.0.insert(
             SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
             SystemBlackboard::Captain(bb),
@@ -1190,10 +1244,15 @@ mod tests {
     /// Minimal app: just publish_captain_blackboard + per-entity components.
     fn bb_test_app() -> App {
         let mut app = App::new();
+        // `publish_captain_blackboard` now takes a plain `Res<CaptainPriorityBoost>`
+        // (issue #830); this harness does not add `CaptainPlugin`, so init it here.
+        app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         app.add_systems(Update, publish_captain_blackboard);
         let hull = SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
         // Spawn LocalShip entity with required components for publish_captain_blackboard.
+        // Ship marker required: the publisher now iterates `With<Ship>` (issue #830).
         app.world_mut().spawn((
+            crate::server_app::Ship,
             crate::server_app::LocalShip,
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_state::ShipViewMode::default(),

@@ -223,6 +223,8 @@ entities:
       confidence: confirmed
       title: Objective Player Projection
       summary: Projects objective snapshots into console blackboards and GUI objective lists. Captain sees mission objectives regardless of score and doctrine objectives only when score is positive; Comms receives the complete snapshot list.
+      rationale:
+        - "Issue #830 made publish_captain_blackboard per-Ship: ship-wide fields (red_alert, auto flags, hull integrity, game_status) are computed for every ship from its own per-entity components, while the player-only fields — the objectives list + boost, camera views, and view mode — are gated on Has<LocalShip>. NPCs get empty objective lists (nothing reads an NPC captain blackboard; the wire broadcaster is LocalShip-filtered). The objective projection itself is therefore the local ship's."
     architecture:
       kind: projection
       authority: authoritative

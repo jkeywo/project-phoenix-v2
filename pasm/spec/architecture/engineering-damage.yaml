@@ -290,7 +290,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Repair Router
-      summary: Server-side repair handler that routes station-level repair-team dispatches into authoritative ship systems.
+      summary: Per-entity server-side repair handler that applies each ship's own admitted station-level repair-team dispatches to that ship's own repair-team state, resolving the station to its most-damaged repairable fine system.
+      rationale:
+        - "Issue #830: the router iterates every Ship (player + NPC) and writes each ship's own per-entity ShipRepairTeams component — the global ShipRepairTeams Resource and the dispatch's dual-write to it are gone. A same-source admitted DispatchRepairTeam lands on exactly the ship that owns it, whether a human Engineering console or an AI operator's ai:<uuid> emission produced it."
+        - "It moved from SimSet::Input into SimSet::Physics `.after(operate_repair_ai)`: admission clears AdmittedCommands once per tick before Input, so the AI operator's same-tick emission is only visible when the applier runs after it in Physics. Human dispatches admitted before Input survive to Physics unchanged."
+        - "The admitted DispatchRepairTeam is station-granular, so resolve_repair_target — the router's single fine-system resolver — decides which repairable fine system in the station heals first, IDENTICALLY for human and AI dispatch (§2 admission symmetry). The AI operator no longer carries a private per-system choice: its retired inline heuristic ranked by absolute HP deficit, whereas resolve_repair_target ranks by damage fraction, so for a station owning multiple simultaneously-damaged systems of differing max HP the healed-first system can differ from the pre-#830 choice. That is the intended dissolution of the AI's bespoke resolution into the shared seam, not a regression."
     architecture:
       kind: subsystem
       authority: authoritative
@@ -484,7 +488,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Repair Team State
-      summary: Authoritative host-side repair team travel and assignment state.
+      summary: Authoritative per-entity host-side repair team travel and assignment state; every ship carries its own ShipRepairTeams component.
+      rationale:
+        - "Issue #830 dropped the legacy global ShipRepairTeams Resource: player and NPC ships alike read and write their own per-entity component, so there is no ship-wide singleton. The AI repair operator (operate_repair_ai) no longer writes team state directly — it emits an admitted system-control-command (DispatchRepairTeam) that host-repair-router applies."
     architecture:
       kind: subsystem
       authority: authoritative

@@ -14,11 +14,12 @@ use crate::ship_plugin::ShipSystemControlSources;
 
 // ── Resources ─────────────────────────────────────────────────────────────────
 
-/// Bevy resource wrapping the pure `RepairTeams` state machine.
+/// Per-entity component wrapping the pure `RepairTeams` state machine.
 ///
-/// Derives both `Resource` (existing player-ship singleton) and `Component`
-/// (per-entity path after issue #590 unification).
-#[derive(Resource, Component, Clone)]
+/// Issue #830 dropped the legacy global `Resource` derive: every ship reads and
+/// writes its own `ShipRepairTeams` component (player + NPC alike), so there is
+/// no ship-wide singleton to fall back to.
+#[derive(Component, Clone)]
 pub struct ShipRepairTeams(pub RepairTeams);
 
 /// Priority queue of pending repair requests for a ship (issue #682).
@@ -121,18 +122,17 @@ pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ShipRepairTeams(RepairTeams::default()))
-            .add_systems(
-                Update,
-                (
-                    tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
-                    operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
-                    publish_repair_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-                ),
-            )
-            .add_plugins(repair_state_broadcaster());
-        // The dispatch router registers itself, pinning its own
-        // `.after(AdmissionSet)` ordering. See `super::dispatch`.
+        app.add_systems(
+            Update,
+            (
+                tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
+                publish_repair_blackboard.in_set(crate::sim_sets::SimSet::Publish),
+            ),
+        )
+        .add_plugins(repair_state_broadcaster());
+        // The dispatch router registers itself in Physics, pinning its own
+        // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
         super::dispatch::register_repair_dispatch(app);
     }
 }
@@ -144,8 +144,9 @@ impl Plugin for RepairPlugin {
 /// Broadcasts `RepairState` at 10 Hz to the `Repair` console holder only.
 /// Registered by [`RepairPlugin`].
 ///
-/// After PR 6 (PRD #597): prefers the per-entity `ShipRepairTeams` component
-/// on the LocalShip entity, falling back to the global Resource for tests.
+/// Reads the LocalShip's own per-entity `ShipRepairTeams` component (issue #830
+/// dropped the global-Resource fallback). Stays `LocalShip`-filtered: this is
+/// the player's own repair wire, and NPC team state never reaches a client.
 pub fn repair_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::HoldingSystem(SystemId("repair".into())),
@@ -153,16 +154,7 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
         |world: &mut World| {
             let mut q =
                 world.query_filtered::<&ShipRepairTeams, With<crate::server_app::LocalShip>>();
-            let slots = q
-                .iter(world)
-                .next()
-                .map(|t| t.0.slots().to_vec())
-                .or_else(|| {
-                    world
-                        .get_resource::<ShipRepairTeams>()
-                        .map(|t| t.0.slots().to_vec())
-                });
-            let Some(slots) = slots else {
+            let Some(slots) = q.iter(world).next().map(|t| t.0.slots().to_vec()) else {
                 return vec![];
             };
             vec![ServerMessage::RepairState { teams: slots }]
@@ -203,97 +195,93 @@ pub fn tick_repair_teams(
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
+/// Per-`Ship` publisher (issue #830). Each ship builds its own repair blackboard
+/// from its own `ShipRepairTeams` / `EntitySystemHull` / `RepairRequestQueue`
+/// components and writes it into its own `ShipSystemBlackboards`. Ships without a
+/// `[repair]` block carry no `ShipRepairTeams`; the missing-default idiom gives
+/// them an empty team set. Only ships with `[behaviour]` carry
+/// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
+/// the wire broadcaster stays `LocalShip`-filtered.
 fn publish_repair_blackboard(
-    teams_res: Option<Res<ShipRepairTeams>>,
-    ship_q: Query<
+    mut ship_q: Query<
         (
             Option<&ShipRepairTeams>,
-            &crate::entity_spawner::EntitySystemHull,
+            Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&RepairRequestQueue>,
+            &mut crate::server_app::ShipSystemBlackboards,
         ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut blackboards_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    // Prefer per-entity component on LocalShip; fall back to global Resource.
-    let entity_view = ship_q.single().ok();
-    let default_teams;
-    let teams: &ShipRepairTeams = match entity_view.as_ref().and_then(|(t, _, _)| t.as_ref()) {
-        Some(t) => t,
-        None => match teams_res.as_deref() {
+    for (teams_opt, hull_opt, repair_queue_ref, mut blackboards) in ship_q.iter_mut() {
+        let default_teams;
+        let teams: &ShipRepairTeams = match teams_opt {
             Some(t) => t,
             None => {
                 default_teams = ShipRepairTeams(crate::repair_teams::RepairTeams::default());
                 &default_teams
             }
-        },
-    };
-    let hull_ref = entity_view.as_ref().map(|(_, h, _)| h);
-    let repair_queue_ref = entity_view.as_ref().and_then(|(_, _, rq)| rq.as_deref());
-    let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
+        };
+        let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    // Build the SystemHullStatus list from the authoritative `SystemHull`
-    // iteration.
-    let system_hull: Vec<SystemHullStatus> = hull_ref
-        .map(|h| {
-            h.0.iter()
-                .map(|(sid, entry)| SystemHullStatus {
-                    system_id: sid.clone(),
-                    display_name: entry.display_name.clone(),
-                    current: entry.current,
-                    max_hp: entry.max,
-                    tier: h.0.tier_for(sid),
-                    debuff_magnitude: h.0.debuff_magnitude_for(sid),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+        // Build the SystemHullStatus list from the authoritative `SystemHull`
+        // iteration.
+        let system_hull: Vec<SystemHullStatus> = hull_opt
+            .map(|h| {
+                h.0.iter()
+                    .map(|(sid, entry)| SystemHullStatus {
+                        system_id: sid.clone(),
+                        display_name: entry.display_name.clone(),
+                        current: entry.current,
+                        max_hp: entry.max,
+                        tier: h.0.tier_for(sid),
+                        debuff_magnitude: h.0.debuff_magnitude_for(sid),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
-    let damageable_systems: Vec<SystemId> =
-        system_hull.iter().map(|s| s.system_id.clone()).collect();
+        let damageable_systems: Vec<SystemId> =
+            system_hull.iter().map(|s| s.system_id.clone()).collect();
 
-    let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
-        .map(|rq| {
-            let mut entries = rq.entries.clone();
-            entries.sort_by(|a, b| {
-                b.tier.cmp(&a.tier).then_with(|| {
-                    b.deficit
-                        .partial_cmp(&a.deficit)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-            });
-            entries
-                .iter()
-                .map(|e| QueueEntryPreview {
-                    station_id: e.station_id.clone(),
-                    station_label: e.station_label.clone(),
-                    tier: e.tier,
-                    deficit: e.deficit,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+        let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
+            .map(|rq| {
+                let mut entries = rq.entries.clone();
+                entries.sort_by(|a, b| {
+                    b.tier.cmp(&a.tier).then_with(|| {
+                        b.deficit
+                            .partial_cmp(&a.deficit)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                });
+                entries
+                    .iter()
+                    .map(|e| QueueEntryPreview {
+                        station_id: e.station_id.clone(),
+                        station_label: e.station_label.clone(),
+                        tier: e.tier,
+                        deficit: e.deficit,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
-    // Emit the new SystemId-keyed hull + damageable list only (legacy
-    // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
-    let bb = RepairBlackboard {
-        teams: team_slots,
-        travel_duration_secs: teams.0.timings().travel_duration,
-        system_hull,
-        damageable_systems,
-        // Host-internal copy: unprojected. `system_hull` and `queue_depth` both
-        // carry exact per-system detail and are filtered on the wire by
-        // `visibility::project_repair_blackboard`, which also fills in the
-        // aggregate (issue #737). The repair AI controller reads this copy and
-        // needs every system.
-        queue_depth,
-        aggregate_hull_fraction: None,
-    };
+        // Emit the new SystemId-keyed hull + damageable list only (legacy
+        // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
+        let bb = RepairBlackboard {
+            teams: team_slots,
+            travel_duration_secs: teams.0.timings().travel_duration,
+            system_hull,
+            damageable_systems,
+            // Host-internal copy: unprojected. `system_hull` and `queue_depth` both
+            // carry exact per-system detail and are filtered on the wire by
+            // `visibility::project_repair_blackboard`, which also fills in the
+            // aggregate (issue #737). The repair AI controller reads this copy and
+            // needs every system.
+            queue_depth,
+            aggregate_hull_fraction: None,
+        };
 
-    if let Some(mut blackboards) = blackboards_q.iter_mut().next() {
         blackboards.0.insert(
             SystemId(REPAIR_SYSTEM_ID.to_string()),
             SystemBlackboard::Repair(bb),
@@ -321,164 +309,198 @@ pub fn all_systems_in_station_are_operational(
             .all(|s| hull.tier_for(&s.id) == DamageTier::Operational)
 }
 
-fn best_damaged_system_in_station(
-    station_id: &str,
-    hull: &crate::damage::SystemHull,
-    config: &crate::ship::config::ShipConfig,
-) -> Option<crate::messages::SystemId> {
-    config
-        .systems
-        .iter()
-        .filter(|s| {
-            s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id)
-                && hull.tier_for(&s.id) != DamageTier::Operational
-                && hull.tier_for(&s.id) != DamageTier::Destroyed
-        })
-        .max_by(|a, b| {
-            let deficit_a = hull.get(&a.id).map(|e| e.max - e.current).unwrap_or(0.0);
-            let deficit_b = hull.get(&b.id).map(|e| e.max - e.current).unwrap_or(0.0);
-            deficit_a
-                .partial_cmp(&deficit_b)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|s| s.id.clone())
-}
+// `best_damaged_system_in_station` was removed in #830: `operate_repair_ai` now
+// emits a station-granular `DispatchRepairTeam` and the host repair router's
+// `resolve_repair_target` picks the fine system in the station, so the AI no
+// longer resolves the fine system inline. See `operate_repair_ai` for why this
+// is a deliberate change of the healed-first heuristic, not an equivalence.
 
 /// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
-/// Repair system is `ControlSource::Ai` and auto-dispatches any idle team to
-/// the most-damaged console on that ship's hull.
-///
-/// The most-damaged console is the one with the largest absolute HP deficit
-/// (`max - current`) that is still > 0. Ties are broken by the entry order in
-/// `EntitySystemHull`. Ships with no per-entity `ShipRepairTeams` component
-/// silently skip — an NPC without a `[repair]` block simply has no teams to
-/// dispatch.
+/// Repair system is `ControlSource::Ai` and auto-dispatches idle teams to the
+/// station of each unassigned repair-queue entry (worst tier, then largest
+/// deficit). Ships with no per-entity `ShipRepairTeams` component silently
+/// skip — an NPC without a `[repair]` block simply has no teams to dispatch.
 ///
 /// After PRD #597 gap-5 closure: same code path for player Backfill AI and
 /// NPC AI. The only differentiator is `ShipSystemControlSources`
 /// (data-driven) and `LocalShip` marker.
+///
+/// Decide-and-emit (issue #830): the queue-based *station* decision is
+/// unchanged, but instead of calling `teams.dispatch(..)` directly (the §2
+/// violation) each assignment is emitted as an admitted `DispatchRepairTeam {
+/// team_idx, target: Station(..) }` through the shared
+/// [`crate::command_admission::validate_and_admit`] seam with this ship's own
+/// `ai:<uuid>` token — the identical admitted path a human Engineering dispatch
+/// takes. `handle_dispatch_repair_team` applies it later this tick (Physics,
+/// `.after(operate_repair_ai)`).
+///
+/// # Which fine system heals first is now the shared applier's call
+///
+/// A station-granular admitted payload cannot carry the AI's old *private*
+/// per-system choice, so the fine target is resolved by the router's
+/// `resolve_repair_target` — the same code a human dispatch runs. This is the
+/// point of admission symmetry (§2): both sources resolve the fine system
+/// identically. It is a deliberate change, not an equivalence. The retired
+/// inline `best_damaged_system_in_station` ranked candidates by **absolute HP
+/// deficit** (`max - current`); `resolve_repair_target` ranks by **damage
+/// fraction** (`1 - current/max`). For a station owning a single repairable
+/// system the two agree, but shipped hulls have multi-system stations of
+/// differing max HP (e.g. `alliance_destroyer`'s helm owns
+/// `helm-engine-{port,starboard}` / `helm-radar` at max 15 and
+/// `helm-lateral-thrust` at max 10), so when several of a station's systems are
+/// damaged at once the healed-first system can differ from the pre-#830 choice.
+/// The AI adopting the human path's fraction-ranking is the intended refinement
+/// (same class as #826 dissolving the AI's bespoke resolution into the shared
+/// seam), not a regression.
 pub fn operate_repair_ai(
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Option<&crate::entity_spawner::EntityUuid>,
             &ShipSystemControlSources,
-            Option<&mut ShipRepairTeams>,
+            Option<&ShipRepairTeams>,
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&mut RepairRequestQueue>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (sources, teams_comp, hull_comp, repair_queue_comp, config_comp) in ships.iter_mut() {
+    for (
+        entity_uuid,
+        sources,
+        teams_comp,
+        hull_comp,
+        repair_queue_comp,
+        config_comp,
+        mut admitted,
+    ) in ships.iter_mut()
+    {
         let policy = sources.0.policy_for(&repair_system_id());
         if !policy.operate_ai {
             continue;
         }
-        let (Some(mut teams), Some(hull)) = (teams_comp, hull_comp) else {
+        // The queue + config are always present together on production ships
+        // (the entity spawner inserts both unconditionally). Ships lacking
+        // either simply have nothing to auto-dispatch — the old queue-less
+        // hull-poll fallback (a direct-write §2 violation) is removed (#830).
+        let (Some(teams), Some(hull), Some(mut rq), Some(config)) =
+            (teams_comp, hull_comp, repair_queue_comp, config_comp)
+        else {
             continue;
         };
 
-        if let (Some(mut rq), Some(config)) = (repair_queue_comp, config_comp) {
-            rq.entries.retain(|entry| {
-                config
-                    .0
-                    .systems
-                    .iter()
-                    .filter(|s| {
-                        s.station.as_ref().map(|st| st.0.as_str())
-                            == Some(entry.station_id.as_str())
-                    })
-                    .any(|s| {
-                        let t = hull.0.tier_for(&s.id);
-                        t != DamageTier::Operational && t != DamageTier::Destroyed
-                    })
-            });
-
-            // Determine which stations already have at least one active team
-            // (Travelling or Repairing), so idle teams are directed to
-            // unassigned queue entries only (Option C).
-            let assigned_stations: std::collections::HashSet<String> = teams
+        rq.entries.retain(|entry| {
+            config
                 .0
-                .slots()
+                .systems
                 .iter()
-                .filter_map(|slot| match slot {
-                    TeamSlot::Travelling { system_id, .. }
-                    | TeamSlot::Repairing { system_id, .. } => system_id.as_ref().and_then(|sid| {
+                .filter(|s| {
+                    s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
+                })
+                .any(|s| {
+                    let t = hull.0.tier_for(&s.id);
+                    t != DamageTier::Operational && t != DamageTier::Destroyed
+                })
+        });
+
+        // Determine which stations already have at least one active team
+        // (Travelling or Repairing), so idle teams are directed to
+        // unassigned queue entries only (Option C).
+        let assigned_stations: std::collections::HashSet<String> = teams
+            .0
+            .slots()
+            .iter()
+            .filter_map(|slot| match slot {
+                TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
+                    system_id.as_ref().and_then(|sid| {
                         config
                             .0
                             .system(sid)
                             .and_then(|sc| sc.station.as_ref())
                             .map(|s| s.0.clone())
-                    }),
-                    _ => None,
-                })
-                .collect();
-
-            // Sort entries by priority (worst tier, then largest deficit).
-            let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
-            sorted_entries.sort_by(|a, b| {
-                b.tier.cmp(&a.tier).then_with(|| {
-                    b.deficit
-                        .partial_cmp(&a.deficit)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-            });
-
-            // Dispatch each idle team to the next unassigned queue entry.
-            let mut newly_assigned: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
-            for entry in &sorted_entries {
-                if assigned_stations.contains(&entry.station_id)
-                    || newly_assigned.contains(&entry.station_id)
-                {
-                    continue;
+                    })
                 }
-                let Some(idx) = teams.0.lowest_free_team() else {
-                    break;
-                };
-                let target_sid =
-                    best_damaged_system_in_station(&entry.station_id, &hull.0, &config.0)
-                        .unwrap_or_else(|| crate::messages::SystemId(entry.station_id.clone()));
-                let display = hull
-                    .0
-                    .get(&target_sid)
-                    .map(|e| e.display_name.clone())
-                    .unwrap_or_else(|| entry.station_label.clone());
-                teams.0.dispatch(idx, target_sid, display);
-                newly_assigned.insert(entry.station_id.clone());
-            }
-        } else {
-            // Fallback: no queue component — poll hull directly (NPC ships
-            // that were not spawned through the full entity spawner path).
-            let target: Option<crate::messages::SystemId> = hull
-                .0
-                .entries()
-                .filter(|(sid, cur, max)| {
-                    max - cur > 0.0 && hull.0.tier_for(sid) != DamageTier::Destroyed
-                })
-                .max_by(|(_, a_cur, a_max), (_, b_cur, b_max)| {
-                    let a_deficit = a_max - a_cur;
-                    let b_deficit = b_max - b_cur;
-                    a_deficit
-                        .partial_cmp(&b_deficit)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map(|(sid, _, _)| sid.clone());
-            let Some(target) = target else {
+                _ => None,
+            })
+            .collect();
+
+        // Sort entries by priority (worst tier, then largest deficit).
+        let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
+        sorted_entries.sort_by(|a, b| {
+            b.tier.cmp(&a.tier).then_with(|| {
+                b.deficit
+                    .partial_cmp(&a.deficit)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        });
+
+        // Free team indices, consumed as we assign. Because emission does not
+        // mutate `teams` this tick (the applier does, in Physics after us),
+        // `lowest_free_team()` would return the same idx for every entry — so we
+        // draw from a locally-consumed list instead.
+        let mut free_teams = teams
+            .0
+            .slots()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| matches!(s, TeamSlot::Idle).then_some(i));
+
+        // Emit an admitted DispatchRepairTeam for each idle team → unassigned
+        // queue entry. Station-granular: the applier resolves the fine system.
+        let mut newly_assigned: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for entry in &sorted_entries {
+            if assigned_stations.contains(&entry.station_id)
+                || newly_assigned.contains(&entry.station_id)
+            {
                 continue;
-            };
-            let target_display = hull
-                .0
-                .get(&target)
-                .map(|e| e.display_name.clone())
-                .unwrap_or_else(|| target.0.clone());
-            while let Some(idx) = teams.0.lowest_free_team() {
-                teams
-                    .0
-                    .dispatch(idx, target.clone(), target_display.clone());
             }
+            let Some(idx) = free_teams.next() else {
+                break;
+            };
+            emit_repair_ai_command(
+                entity_uuid,
+                crate::messages::SystemControlPayload::DispatchRepairTeam {
+                    team_idx: idx as u8,
+                    target: crate::messages::RepairTarget::Station(crate::messages::StationId(
+                        entry.station_id.clone(),
+                    )),
+                },
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
+            newly_assigned.insert(entry.station_id.clone());
         }
     }
+}
+
+/// Emit an admitted Repair AI command targeting the repair system through the
+/// shared [`crate::command_admission::validate_and_admit`] seam, using this
+/// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
+fn emit_repair_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    payload: crate::messages::SystemControlPayload,
+    sources: &ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    config: &crate::ship_plugin::ShipConfigComponent,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    crate::command_admission::validate_and_admit(
+        &token,
+        crate::system_registry::repair_system_id(),
+        payload,
+        sources,
+        sessions,
+        &config.0,
+        admitted,
+    )
 }
 
 #[cfg(test)]
@@ -551,10 +573,38 @@ mod tests {
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
             RepairRequestQueue::default(),
-            crate::ship_plugin::RepairHumanAlerted::default(),
-            crate::ship_plugin::LastSystemTiers::default(),
+            // Nested tuple to keep the outer bundle within Bevy's 15-arity limit.
+            // Issue #830: the global `ShipRepairTeams` Resource is gone; every
+            // ship (including this test's LocalShip) carries its own component.
+            (
+                crate::ship_plugin::RepairHumanAlerted::default(),
+                crate::ship_plugin::LastSystemTiers::default(),
+                ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
+            ),
         ));
         app
+    }
+
+    /// Read the LocalShip's own `ShipRepairTeams` component (issue #830 — no
+    /// global Resource). Returns an owned clone for assertion convenience.
+    fn local_teams(app: &mut App) -> ShipRepairTeams {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipRepairTeams, With<crate::simulation::LocalShip>>();
+        q.single(app.world())
+            .expect("LocalShip must carry ShipRepairTeams")
+            .clone()
+    }
+
+    /// Dispatch a team on the LocalShip's own `ShipRepairTeams` component.
+    fn dispatch_local(app: &mut App, idx: usize, sid: SystemId, name: &str) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipRepairTeams, With<crate::simulation::LocalShip>>();
+        q.single_mut(app.world_mut())
+            .expect("LocalShip must carry ShipRepairTeams")
+            .0
+            .dispatch(idx, sid, name.to_string());
     }
 
     fn repair_bb(app: &mut App) -> RepairBlackboard {
@@ -667,9 +717,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_idle(teams, 0),
+            team_is_idle(&teams, 0),
             "team 0 should remain idle after non-Repair dispatch"
         );
     }
@@ -693,9 +743,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_travelling(teams, 0),
+            team_is_travelling(&teams, 0),
             "team 0 should be travelling after dispatch"
         );
     }
@@ -746,7 +796,7 @@ mod tests {
         tick(&mut app);
 
         {
-            let teams = app.world().resource::<ShipRepairTeams>();
+            let teams = local_teams(&mut app);
             let TeamSlot::Travelling { system_id, .. } = &teams.0.slots()[0] else {
                 panic!("team 0 should be travelling to the damaged fine system");
             };
@@ -818,13 +868,13 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         // team 0 should be Returning (redirected), team 1 still Travelling
         assert!(matches!(
             &teams.0.slots()[0],
             crate::messages::TeamSlot::Returning { .. }
         ));
-        assert!(team_is_travelling(teams, 1));
+        assert!(team_is_travelling(&teams, 1));
     }
 
     /// RepairState broadcast includes the team slot states.
@@ -878,9 +928,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_travelling(teams, 0),
+            team_is_travelling(&teams, 0),
             "team 0 should be travelling after ControlSystem dispatch"
         );
     }
@@ -904,9 +954,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_idle(teams, 0),
+            team_is_idle(&teams, 0),
             "team 0 should remain idle when non-Repair sender uses ControlSystem"
         );
     }
@@ -943,9 +993,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_idle(teams, 0),
+            team_is_idle(&teams, 0),
             "team 0 should remain idle when repair system is AI-controlled"
         );
     }
@@ -968,9 +1018,9 @@ mod tests {
         );
         tick(&mut app);
 
-        let teams = app.world().resource::<ShipRepairTeams>();
+        let teams = local_teams(&mut app);
         assert!(
-            team_is_travelling(teams, 0),
+            team_is_travelling(&teams, 0),
             "team 0 should be travelling to Core after RepairTarget::Core dispatch"
         );
     }
@@ -1029,10 +1079,7 @@ mod tests {
         start_game(&mut app);
         tick(&mut app);
 
-        app.world_mut()
-            .resource_mut::<ShipRepairTeams>()
-            .0
-            .dispatch(0, SystemId("helm".into()), "Helm".to_string());
+        dispatch_local(&mut app, 0, SystemId("helm".into()), "Helm");
         tick(&mut app);
 
         let bb = repair_bb(&mut app);
@@ -1157,131 +1204,209 @@ mod tests {
         assert!(!human_policy.operate_ai, "human Repair must not operate AI");
     }
 
-    /// Verifies that an NPC ship (without Ship marker) with Repair on AI
-    /// runs operate_repair_ai independently (issue #590 AC).
-    #[test]
-    fn npc_ship_with_repair_on_ai_runs_operate_repair_ai() {
-        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+    // ── NPC AI repair through admission (issue #830) ─────────────────────────
 
-        // Build a test app with operate_repair_ai registered.
-        let mut app = bevy::prelude::App::new();
-        app.add_plugins(bevy::time::TimePlugin)
-            .add_systems(bevy::prelude::Update, operate_repair_ai);
-
-        // Spawn an NPC entity (no Ship marker) with ShipSystemControlSources set to AI.
-        let mut ai_resolver = ControlSourceResolver::new();
-        ai_resolver.set(
-            crate::system_registry::repair_system_id(),
-            ControlSource::Ai,
-        );
-        let npc_entity = app
-            .world_mut()
-            .spawn(ShipSystemControlSources(ai_resolver))
-            .id();
-
-        // Should not panic.
-        app.update();
-        assert!(
-            app.world()
-                .get::<ShipSystemControlSources>(npc_entity)
-                .is_some(),
-            "NPC entity must still exist after operate_repair_ai runs"
-        );
+    /// A minimal ship config whose `helm` station owns a single `helm` fine
+    /// system, so `resolve_repair_target(Station("helm"))` resolves to it.
+    fn npc_repair_config() -> crate::ship_plugin::ShipConfigComponent {
+        use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+        crate::ship_plugin::ShipConfigComponent(ShipConfig {
+            stations: vec![],
+            systems: vec![SystemInstanceConfig {
+                id: SystemId("helm".into()),
+                kind: "helm".into(),
+                station: Some(StationId("helm".into())),
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            }],
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        })
     }
 
-    /// Regression test for PRD #597 gap-5: an NPC ship that carries a per-entity
-    /// `[repair]` block (ShipRepairTeams + EntitySystemHull) must have its
-    /// teams ticked by `tick_repair_teams` AND auto-dispatched by
-    /// `operate_repair_ai`, and the resulting HP restoration must land on its
-    /// own hull — no LocalShip marker involved.
-    ///
-    /// Sequence: spawn NPC ship (Ship marker only, no LocalShip) with hull
-    /// damaged well below max, register both AI + tick systems, run enough
-    /// simulated time for a team to travel + start repairing, assert the
-    /// NPC hull's total_current has increased.
-    #[test]
-    fn npc_ship_with_repair_teams_regenerates_hull_over_time() {
-        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
-
+    /// Build an app that runs the full per-entity admitted repair pipeline —
+    /// `operate_repair_ai` (emit) → `handle_dispatch_repair_team` (apply) →
+    /// `tick_repair_teams` — chained so the same-tick emit→apply→repair shape of
+    /// production holds. `Sessions` is present because `validate_and_admit`
+    /// consults it (the `ai:` path only needs the resource to exist).
+    fn npc_repair_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(1000),
         ));
-        app.add_systems(Update, (operate_repair_ai, tick_repair_teams).chain());
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ));
+        // Stand in for `admit_system_commands`, which clears `AdmittedCommands`
+        // once per tick before the AI decide systems refill it. Without this the
+        // AI's `DispatchRepairTeam` would re-apply every tick and recall the team
+        // (Travelling → Returning) forever, so it would never reach Repairing.
+        app.add_systems(
+            Update,
+            (
+                clear_admitted_commands,
+                operate_repair_ai,
+                crate::console::repair::dispatch::handle_dispatch_repair_team,
+                tick_repair_teams,
+            )
+                .chain(),
+        );
+        app
+    }
 
-        // NPC ship: Ship marker, AI-controlled Repair, damaged hull.
-        // Damage the hull by 40 HP so total_current == 60 (max = 100).
-        let mut ai_resolver = ControlSourceResolver::new();
-        ai_resolver.set(repair_system_id(), ControlSource::Ai);
+    /// Test-only mirror of admission's per-tick `AdmittedCommands` clear.
+    fn clear_admitted_commands(mut q: Query<&mut crate::messages::AdmittedCommands>) {
+        for mut admitted in q.iter_mut() {
+            admitted.0.clear();
+        }
+    }
+
+    /// Spawn an NPC ship (Ship marker, no LocalShip) whose Repair system is
+    /// under the given control source, with a `helm` hull damaged by `damage`,
+    /// a queue entry naming the `helm` station, an `EntityUuid` for its `ai:`
+    /// token, and an empty `AdmittedCommands`.
+    fn spawn_npc_repair(
+        app: &mut App,
+        source: crate::ship::control_source::ControlSource,
+        damage: f32,
+    ) -> Entity {
+        use crate::ship::control_source::ControlSourceResolver;
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(repair_system_id(), source);
+
         let mut hull =
             crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
         let mut rng = rand::rng();
-        hull.apply_damage(40.0, &mut rng);
-        let hp_before = hull.total_current();
-        assert!(
-            (hp_before - 60.0).abs() < 1e-3,
-            "test fixture: hull should have 60 HP after 40 damage, got {hp_before}"
-        );
+        hull.apply_damage(damage, &mut rng);
 
-        let npc = app
-            .world_mut()
+        let mut queue = RepairRequestQueue::default();
+        queue.push_or_merge(RepairQueueEntry {
+            station_id: "helm".into(),
+            station_label: "Helm".into(),
+            tier: DamageTier::Disabled,
+            deficit: damage,
+        });
+
+        app.world_mut()
             .spawn((
                 crate::server_app::Ship,
-                ShipSystemControlSources(ai_resolver),
+                crate::entity_spawner::EntityUuid("npc-repair-1".into()),
+                ShipSystemControlSources(resolver),
                 ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
                 crate::entity_spawner::EntitySystemHull(hull),
                 crate::modifiers::ShipModifiers::new(),
+                queue,
+                npc_repair_config(),
+                crate::messages::AdmittedCommands::default(),
             ))
-            .id();
+            .id()
+    }
 
-        // Warm-up tick so TimePlugin registers a delta.
+    /// The NPC applier consumes the AI operator's admitted `DispatchRepairTeam`
+    /// in the same tick and sends a team travelling — proving the per-entity
+    /// emit→admit→apply chain runs on an NPC ship with no LocalShip marker.
+    #[test]
+    fn npc_applier_consumes_ai_emitted_dispatch_same_tick() {
+        let mut app = npc_repair_app();
+        let npc = spawn_npc_repair(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            80.0,
+        );
+
+        // One warm-up tick (TimePlugin baseline). The AI emits into the NPC's
+        // own AdmittedCommands and the applier dispatches on the same tick.
         app.update();
-        // After warm-up, operate_repair_ai should have dispatched at least
-        // one team. If it didn't, the wiring is wrong — fail loudly with a
-        // useful diagnostic before spending 20 more ticks.
-        {
-            let teams = app
-                .world()
-                .get::<ShipRepairTeams>(npc)
-                .expect("NPC must have ShipRepairTeams");
-            let any_dispatched = teams
+
+        let teams = app
+            .world()
+            .get::<ShipRepairTeams>(npc)
+            .expect("NPC must have ShipRepairTeams");
+        assert!(
+            teams
                 .0
                 .slots()
                 .iter()
-                .any(|s| !matches!(s, crate::messages::TeamSlot::Idle));
-            assert!(
-                any_dispatched,
-                "operate_repair_ai should have dispatched at least one team after \
-                 warm-up, got {:?}",
-                teams.0.slots()
-            );
-        }
-        // Bevy's `TimeUpdateStrategy::ManualDuration` first-tick warm-up
-        // ends up producing a smaller-than-configured `delta_secs` (roughly
-        // 250 ms/tick observed under 1000 ms configuration). 200 iterations
-        // is comfortably more than enough to cover the 5 s travel + several
-        // seconds of repair at 0.5 HP/s.
+                .any(|s| matches!(s, TeamSlot::Travelling { .. })),
+            "the NPC applier must have dispatched a team from the AI's own \
+             AdmittedCommands, got {:?}",
+            teams.0.slots()
+        );
+    }
+
+    /// Regression for PRD #597 gap-5 (retained through #830): an NPC ship's
+    /// AI-driven repair restores its own hull over time — now flowing through
+    /// admission (`operate_repair_ai` emits, `handle_dispatch_repair_team`
+    /// applies, `tick_repair_teams` heals) rather than a direct team write.
+    #[test]
+    fn npc_ship_with_repair_teams_regenerates_hull_over_time() {
+        let mut app = npc_repair_app();
+        let npc = spawn_npc_repair(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            80.0,
+        );
+        let hp_before = app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .unwrap()
+            .0
+            .total_current();
+
+        // 200 iterations comfortably covers the 5 s travel + repair time.
         for _ in 0..200 {
             app.update();
         }
-        let teams_dbg = app
-            .world()
-            .get::<ShipRepairTeams>(npc)
-            .expect("teams")
-            .0
-            .slots()
-            .to_vec();
 
-        let hull_after = app
+        let hp_after = app
             .world()
             .get::<crate::entity_spawner::EntitySystemHull>(npc)
-            .expect("NPC must still have hull component");
-        let hp_after = hull_after.0.total_current();
+            .expect("NPC must still have hull component")
+            .0
+            .total_current();
         assert!(
             hp_after > hp_before,
-            "NPC hull HP must increase after operate_repair_ai + tick_repair_teams \
-             (before={hp_before}, after={hp_after}, teams={teams_dbg:?})"
+            "NPC hull HP must increase after AI-admitted dispatch + repair \
+             (before={hp_before}, after={hp_after})"
+        );
+    }
+
+    /// A human-held Repair system rejects an `ai:` emission at the admission
+    /// gate: `validate_and_admit` returns false and nothing is admitted. This is
+    /// the symmetry contract — the AI operator gates on `operate_ai` before
+    /// emitting, and admission independently enforces it.
+    #[test]
+    fn human_held_repair_rejects_ai_emission() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(repair_system_id(), ControlSource::Human);
+        let sources = ShipSystemControlSources(resolver);
+        let sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
+        let config = npc_repair_config();
+        let mut admitted = crate::messages::AdmittedCommands::default();
+
+        let admitted_ok = crate::command_admission::validate_and_admit(
+            "ai:npc-repair-1",
+            repair_system_id(),
+            SystemControlPayload::DispatchRepairTeam {
+                team_idx: 0,
+                target: RepairTarget::Station(StationId("helm".into())),
+            },
+            &sources,
+            &sessions,
+            &config.0,
+            &mut admitted,
+        );
+        assert!(
+            !admitted_ok,
+            "ai: emission must be rejected when repair is human-held"
+        );
+        assert!(
+            admitted.0.is_empty(),
+            "no command may be admitted for a human-held repair system"
         );
     }
 }

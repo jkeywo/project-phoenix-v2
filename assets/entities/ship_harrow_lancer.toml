@@ -1,0 +1,207 @@
+# Harrow Escort (Lancer class)
+#
+# The only NPC hull carrying all three weapon kinds — phasers, blasters and
+# torpedoes. Every other enemy is phaser-only, which left the torpedo and
+# blaster damage chokepoints with no scenario that fired them at the player.
+# `assets/worlds/rng_coverage.toml` uses this hull to drive all of them, so
+# `tests/rng_determinism.rs`'s determinism guard actually covers every RNG
+# site rather than just the beam one (issue #837).
+#
+# The bank and tube ids ("lash", "spike", "lance") are deliberately unique
+# across the whole asset set: balance events name the weapon by bank/tube id
+# alone, so the test classifies a hit as beam / blaster / torpedo by that id.
+# Reusing an id another hull already carries would make the classification lie.
+#
+# Tuned to hurt without killing: short ranges and modest damage so a hostile
+# Lancer degrades the player's systems over a minute rather than ending the
+# run in ten seconds.
+
+name = "entity.ship_harrow_lancer.name"
+tags = ["ship", "npc", "enemy"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+
+[target]
+tags = ["ship"]
+threat_level = "medium"
+description = "entity.ship_harrow_lancer.target.description"
+
+# Deliberately tanky. The observable torpedo damage in this scenario is the
+# *Lancer's* torpedoes landing on the shieldless player (see the player-ship
+# shield override in the world file) — torpedo damage dealt to an NPC is
+# invisible to the report. For that the Lancers have to stay alive and keep
+# firing across the whole run, so their hull outlasts the player's return fire.
+[hull]
+hull_integrity = 2000.0
+
+# Single omni arc, as on every other NPC hull: NPCs have no `[shields]`
+# station, so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
+[[shield_arc]]
+id = "all"
+label = "entity.ship_harrow_lancer.shield_arc.all.label"
+center_deg = 0
+width_deg = 360
+max_hp = 5
+regen_per_sec = 0.0
+
+[collider]
+shape = "Capsule"
+radius = 4.0
+length = 10.0
+
+[radar_appearance]
+colour = [0.9, 0.3, 0.1]
+size = 10.0
+icon = "destroyer"
+
+[mesh]
+model = "assets/models/dynasty_battleship.glb"
+shape = "cuboid"
+size = [8.0, 3.0, 14.0]
+colour = [0.9, 0.3, 0.1]
+
+[helm_console]
+max_speed = 10.0
+max_reverse_speed = 5.0
+acceleration = 4.0
+deceleration = 10.0
+max_yaw_rate = 0.2
+max_bank_deg = 5.0
+
+[weapons_console]
+
+# Omni phaser. 360° so the beam site fires without waiting on a facing
+# solution — this hull exists to make damage happen, not to be tactically
+# interesting.
+[[weapons_console.phaser_banks]]
+id = "lash"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+auto_arc_deg = 360.0
+beam_range = 90.0
+beam_damage_per_sec = 1.5
+beam_duration_secs = 6.0
+cooldown_secs = 3.0
+# No pierce: the beam's job here is to strip the player's shields, because
+# NPC torpedo auto-fire only unlocks once the target's online shield facings
+# are at zero. A high-pierce beam would bypass the shields, leave them up, and
+# the torpedo chokepoint would never fire.
+shield_pierce = 0.0
+beam_color = [1.0, 0.3, 0.1, 1.0]
+
+# Omni blaster bank, matched to the phaser's engagement envelope so the
+# blaster chokepoint fires whenever the beam one does.
+[[weapons_console.blaster_banks]]
+id = "spike"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+volley_count = 2
+volley_interval_secs = 0.5
+cooldown_secs = 3.0
+projectile_speed = 60.0
+collision_radius = 1.0
+visual_scale = 0.5
+damage = 2
+shield_pierce = 0.3
+range = 80.0
+
+[torpedoes]
+count = 40
+burst_interval_secs = 0.4
+damage_hull = 3
+damage_shields = 0
+speed = 30.0
+turn_rate_deg_per_sec = 120.0
+lifespan = 12.0
+load_time = 2.0
+detonation_radius = 6.0
+
+[[torpedoes.tubes]]
+id = "lance"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+load_time = 3.0
+volley_max = 2
+
+[comms]
+range = 800.0
+
+[ai_profile]
+aggression = 1.0
+sensor_range = 200.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Destroy only. The Lancer has no patrol route: it is dropped next to its
+# target and told to engage, so the scenario reaches two-sided fire in seconds.
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.ship_harrow_lancer.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 40.0
+target_speed   = 0.9
+maintain_range = 40.0
+
+# Ship systems. No stations on this hull, so every system is ownerless and
+# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+ai_only = true
+
+[[system]]
+id = "phaser-lash"
+kind = "phaser_bank"
+ai_only = true
+
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
+ai_only = true
+
+[[system]]
+id = "blaster-spike"
+kind = "blaster_bank"
+ai_only = true
+
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-lance"
+kind = "torpedo_tube"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

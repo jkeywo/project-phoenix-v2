@@ -3,7 +3,11 @@ class = "cruiser"
 hull_id = "NCC-1864"
 power_rating = 90
 css = "gui/themes/cruiser.css"
-tags = [ "player", "ship" ]
+# Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
+# here — it is injected onto the selected hull at the player game-start spawn
+# (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of
+# this hull is an ordinary NPC ship, so it must not masquerade as the player.
+tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
@@ -15,6 +19,51 @@ colour = []
 shape = "Capsule"
 radius = 1.5
 length = 4
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Default doctrine for a backfilled/unmanned player cruiser (#842 — the other
+# half of #838's human/AI symmetry). A player hull that nobody is flying is
+# AI-crewed exactly like an NPC; giving it a `[behaviour]` block is the single
+# missing piece that makes `spawn_entity` attach the `BehaviourSection` on the
+# player game-start path, so the ship's per-ship blackboard carries scored
+# objectives and its Tactical AI is licensed to acquire and engage — not merely
+# return fire once hit. A world-spawned copy of this hull (an ordinary NPC) reads
+# the same doctrine, which is correct: it should fight like any other ship.
+#
+# Two standing objectives, scored each tick in priority order:
+#
+#   Destroy (45) — an UNTARGETED Destroy (no `directive_target`), which is what
+#                  every shipped hostile authors and what licenses the
+#                  nearest-hostile acquisition tier (see the root-cause note in
+#                  `src/console/weapons/mod.rs::ai_target_selection`). This is
+#                  what makes the ship PROACTIVELY engage rather than wait to be
+#                  shot at.
+#   Hold    (20) — the default when no hostile is visible: no directive
+#                  (`AiDirective::None`), so the helm holds station rather than
+#                  wandering to a world anchor this hull's worlds need not declare.
+#
+# The engage priority sits deliberately LOW (45). Scenario objectives authored as
+# `spawn_entity` overrides (combat_test / probe_duel author Destroy at 80) merge
+# by id and dominate this band, so mission doctrine always wins over the standing
+# default (#842 AC3). No Retreat is authored: this is a defending warship — it
+# fights rather than flees. `maintain_range = 30` keeps the cruiser inside its
+# 40-unit phaser range while giving its torpedoes room.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.alliance_cruiser.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 45.0
+target_speed   = 0.85
+maintain_range = 30.0
+
+[[behaviour.doctrine]]
+id            = "hold-station"
+text          = "entity.alliance_cruiser.behaviour.doctrine.hold_station.text"
+base_priority = 20.0
+target_speed  = 0.0
 
 [[hull.system_hull]]
 system_id = "science"
@@ -318,7 +367,9 @@ red_alert_battery_recharge_pct = 100.0
 [radar_appearance]
 colour = [ 0, 1, 0.2 ]
 size = 6
-icon = "playerShip"
+# Ordinary-ship icon: a world-spawned copy of this hull is an NPC. The player's
+# own ship gets the `playerShip` icon injected at spawn (see cruiser tags note).
+icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_cruiser.power_groups.ops.label"

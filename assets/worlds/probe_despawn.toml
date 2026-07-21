@@ -1,0 +1,70 @@
+# Probe world for issue #838 — regression harness for the "destroyed entity
+# emits EntityDespawned twice" bug.
+#
+# Two world-spawned hulls fight far from the player: a strong Harrow battleship
+# (the aggressor) and a weaker Federation destroyer (the victim), placed a few
+# units apart and made mutually hostile. The battleship kills the destroyer,
+# producing exactly one destroyed entity. The bug emitted `EntityDespawned`
+# twice for that one kill — once eagerly at the weapon kill site and again from
+# the reconcile sweep, which the kill site never told about the despawn. With
+# the fix the kill site forgets the uuid from `TrackedEntities`, so the run
+# emits exactly one `EntityDespawned`.
+#
+# The player sits at the origin, ~500 units away and outside the 100-unit AI
+# sensor range, so it never joins the fight — keeping the despawn count at
+# exactly one.
+
+[global]
+seed = 8380
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Make Harrow and Federation mutually hostile before the hulls spawn.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# The aggressor: a Harrow-flagged battleship with a standing Destroy doctrine.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_battleship.toml"
+  name          = "aggressor"
+  position      = [500.0, 0.0, 0.0]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 20.0 },
+  ] } }
+
+  # The victim: a lightly-built Federation courier placed right next to the
+  # aggressor. It also has a Destroy doctrine so both sides trade fire, but it is
+  # heavily outgunned by the battleship and is the one that dies.
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_courier.toml"
+  name          = "victim"
+  position      = [514.0, 0.0, 0.0]
+  overrides = { behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 12.0 },
+  ] } }

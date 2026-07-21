@@ -1,0 +1,33 @@
+# Probe world for issue #843 — the victory classification path, end to end.
+#
+# A player Alliance cruiser (AI-backfilled in a headless run) sits alone; a
+# one-shot timer fires a `game_over` action carrying `outcome = "victory"`. No
+# combat is involved on purpose: this is a deterministic tripwire for the whole
+# outcome-declaration wiring — config parse (`outcome = "victory"`) → dispatch
+# (`SetGameOverReason { outcome }`) → the `GameOverReason` resource → the pure
+# classifier — proving a scenario-declared victory reaches the exit report as
+# `outcome: "victory"`. The `message` is deliberately omitted (it is optional),
+# so this world needs no strings.csv entry.
+
+[global]
+seed = 843
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# A scripted victory: end the run in a declared win after one second.
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+  [[trigger.action]]
+  type    = "game_over"
+  outcome = "victory"

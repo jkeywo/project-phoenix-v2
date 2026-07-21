@@ -13,6 +13,9 @@
 #   [[comms]]   — comms dialogue templates keyed by trigger condition
 
 [global]
+# Master seed for the simulation RNG (issue #837). `phoenix-headless --seed`
+# overrides it; omit the key entirely and a seed is drawn from the OS instead.
+# Whichever wins is echoed in the headless exit report, so a run can be replayed.
 seed = 42
 title = "world.default.global.title"
 description = "world.default.global.description"

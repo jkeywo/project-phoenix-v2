@@ -1,0 +1,56 @@
+# Probe world for issue #842 AC4 — same-hull behavioural symmetry.
+#
+# A backfilled player Alliance cruiser faces a world-spawned copy of the SAME
+# hull. The world-spawned copy overrides ONLY its faction (to Harrow); it keeps
+# the cruiser template's default `[behaviour]` doctrine untouched. Both ships
+# therefore run byte-identical doctrine — the player through the game-start spawn
+# path, the copy through `spawn_entity` — which is the whole point of #838/#842's
+# human/AI symmetry: a backfilled player hull engages through the same path, with
+# the same doctrine, an NPC does.
+#
+# With both sides carrying the same UNTARGETED Destroy doctrine and mutual
+# faction hostility, each acquires the other through the nearest-hostile tier and
+# trades fire. The duel should be behaviourally symmetric: comparable damage
+# dealt in both directions (positions and first-shot differ, so not exact).
+
+[global]
+seed = 842
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Make Harrow and Federation mutually hostile before the copy spawns.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# Spawn the world-side Alliance cruiser close to the player at t=0. Only the
+# faction is overridden — the template's default combat doctrine is kept, so this
+# copy and the backfilled player run the same behaviour.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_cruiser.toml"
+  name          = "probe_twin"
+  position      = [45.0, 0.0, 0.0]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc" }

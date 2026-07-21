@@ -42,8 +42,8 @@ Per-tick (SimSet::Physics, on the shared AI-helm sim tick — issue #803)
 
   ai_target_selection (SimSet::Input)
     └─ every ship whose tactical surface is AI-operated: picks a target and
-       writes both WeaponsBlackboard.locked_target (intent) and WeaponsTarget
-       (truth). Firing is separate: ai_phaser_auto_fire / ai_torpedo_auto_fire
+       writes both TacticalRadarBlackboard.selected_target (intent) and
+       TacticalRadarSelection (truth). Firing is separate: ai_phaser_auto_fire / ai_torpedo_auto_fire
        decide, integrate_weapons_state applies.
 
   ai_shield_focus, ai_power_allocation, operate_comms_ai, …

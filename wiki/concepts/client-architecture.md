@@ -15,12 +15,20 @@ The client (`client.html`) is **pure HTML/CSS/JS — no WASM, no Bevy, no `clien
 ```
 PeerJS message (JSON)
   → client.html handleMessage()
-  → gui/sim-state.js apply(msg)          # folds ServerMessage into sim-state object
+  → gui/client-router.js route(msg)       # pure per-message driver: uiState mutation + side-effect plan
+  → gui/sim-state.js apply(msg)           # folds ServerMessage into the single simState store
       gui/lobby-state.js                  # lobby-phase state
       gui/comms-state.js                  # comms inbox/contacts state
-  → gui/console-state.js build*(state)    # pure per-console view-model → JSON string
+  → gui/dirty-consoles.js dirtyConsolesFor(msg, stationSystems)   # which consoles this message dirtied
+  → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
 ```
+
+`simState` (`gui/sim-state.js`) is the single client store; there is no
+separate `client.html` state mirror (removed in #819–#823). `client-router.js`
+drives each inbound message and `dirty-consoles.js` narrows the rebuild to just
+the consoles a given message affects, rather than rebuilding every console every
+tick.
 
 Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
@@ -38,6 +46,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `content-switcher.js` | Section visibility over the ship's mounted stations (one human = one station — the tab bar was deleted in #827) |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue |
+| `dirty-consoles.js` | Declarative `ServerMessage` → dirty-console mapping (`dirtyConsolesFor(msg, stationSystems)`, #823); narrows each tick's rebuild to only the consoles a message affects |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
 | `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |

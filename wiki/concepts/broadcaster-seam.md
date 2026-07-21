@@ -16,8 +16,8 @@ The broadcaster seam replaces this boilerplate with a `register(audience, cadenc
 
 | Plugin | Active phase | Location |
 |---|---|---|
-| `SimBroadcaster` | `InProgress` | `src/core/broadcast/sim.rs` (struct at line 75) |
-| `LobbyBroadcaster` | `Lobby` | `src/core/broadcast/lobby.rs` (struct at line 71) |
+| `SimBroadcaster` | `InProgress` | `src/core/broadcast/sim.rs:32` (`pub type SimBroadcaster = Broadcaster<Sim>`; the `Sim` marker is at `sim.rs:12`) |
+| `LobbyBroadcaster` | `Lobby` | `src/core/broadcast/lobby.rs:39` (`pub type LobbyBroadcaster = Broadcaster<Lobby>`; the `Lobby` marker is at `lobby.rs:12`) |
 
 Both plugins expose a builder-style `register()` method and implement `bevy::Plugin`. The dispatch system is an exclusive world system (takes `&mut World`) that:
 
@@ -113,8 +113,8 @@ The `SimOutbox` producer (`sim_outbox_broadcaster`, `src/server_app.rs:661`) is 
 |---|---|---|---|---|
 | `broadcast_shield_status` | `ShieldStatus` | `All` | `src/server_app.rs:1094` | Snapshot |
 | `broadcast_world_setup_on_start` | `WorldSetup` | `All` | `src/server_app.rs:1443` | Reliable |
-| `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/world/server.rs:1164` | Reliable |
-| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:1223` | Reliable |
+| `broadcast_comms_state` | `CommsState` | `Holding(StationId("comms"))` | `src/comms/server.rs:599` | Reliable |
+| `broadcast_objective_summary` | `ObjectiveSummary` | `Holding(StationId("captain"))` | `src/world/server.rs:644` | Reliable |
 | Torpedo systems | `TorpedoLaunched` | `All` via `SimOutbox` | `src/console/weapons/mod.rs` | Reliable |
 | `asteroid_spawn` / `update_asteroid_window` | `EntitySpawned` / `EntityDespawned` | `All` via `SimOutbox` | `asteroids/lifecycle.rs` | Reliable |
 | Phaser / damage systems | `PhaserFired`, `AsteroidDestroyed`, etc. | `All` via `SimOutbox` | `src/console/weapons/mod.rs` | Reliable |
@@ -165,8 +165,8 @@ The following Bevy systems still write to `SimOutbox` (not `OutboundMessage` dir
 
 - `broadcast_shield_status` (`src/server_app.rs:1094`)
 - `broadcast_world_setup_on_start` (`src/server_app.rs:1443`)
-- `broadcast_comms_state` (`src/world/server.rs:1164`)
-- `broadcast_objective_summary` (`src/world/server.rs:1223`)
+- `broadcast_comms_state` (`src/comms/server.rs:599`)
+- `broadcast_objective_summary` (`src/world/server.rs:644`)
 
 Each could be replaced by a `SimBroadcaster` registration that produces the same `ServerMessage` at the right cadence, eliminating the hand-written gating and timer.
 

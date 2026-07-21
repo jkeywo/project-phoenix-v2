@@ -19,10 +19,10 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 | `mod.rs` | Declares the sibling modules; hosts `WeaponsPlugin` (all system + resource registration), the systems that are still genuinely shared between phaser and torpedo (`integrate_weapons_state`, `ai_target_selection`, `tick_weapons_arc_request`, `tick_npc_auto_match_frequency`), the re-export blocks that keep every sibling module's items reachable at `crate::console::weapons::…` / `crate::weapons_plugin::…`, and the `#[cfg(test)] mod tests` declaration — matching issue #731's expected layout of "plugin assembly, re-exports" with no separate `server.rs` |
 | `server_tests.rs` | All 119 `#[cfg(test)]` tests + test helpers for the weapons module, loaded into `mod.rs` via `#[path = "server_tests.rs"] mod tests;` (kept as a child module rather than an external `tests/` integration file — see [Test placement](#test-placement)) |
 | `shared.rs` | Small pure helpers used by every weapons file (`live_entity_xz`, `tactical_authorized`, `system_is_registered`, bank/AI-operates predicates) plus the one-tick handoff resources `BeamContext`, `ShooterState`, `TorpedoTargetSnapshot` |
-| `beam.rs` | Phaser/beam domain: `ActiveBeam`, `PhaserCooldown`, `WeaponsTarget`, `LastShipAttacker`, `CurrentPhaserMode`, `PhaserCombatConfigResource`, beam events, `handle_fire_phaser`, `ai_phaser_auto_fire`, `handle_set_phaser_mode`/`_frequency`, `handle_set_target`, `drain_power_for_active_beam`, and the three-phase beam tick (see below) |
+| `beam.rs` | Phaser/beam domain: `ActiveBeam`, `PhaserCooldown`, `TacticalRadarSelection`, `LastShipAttacker`, `CurrentPhaserMode`, `PhaserCombatConfigResource`, beam events, `handle_fire_phaser`, `ai_phaser_auto_fire`, `handle_set_phaser_mode`/`_frequency`, `handle_set_target`, `drain_power_for_active_beam`, and the three-phase beam tick (see below) |
 | `torpedo.rs` | Torpedo domain: `TorpedoSystemResource`, `handle_fire_torpedo`, `handle_load_tube`, `handle_unload_tube`, `handle_set_torpedo_volley_target`, `handle_torpedo_magazine_inter_system`, and the two-phase torpedo tick (see below) |
 | `blaster.rs` | Blaster (NPC hitscan weapon) domain: `BlasterSystemResource`, `handle_fire_blaster`, `tick_blaster_auto_fire`, `tick_blaster_system`, `handle_blaster_hits` |
-| `blackboard.rs` | Publish-phase output: the four `publish_*_blackboard` systems, `compute_current_weapons_update`, `weapons_update_broadcaster`, `LastWeaponsUpdate`, and the radar-blip projection helpers |
+| `blackboard.rs` | Publish-phase output: the four `publish_*_blackboard` systems, `compute_current_weapons_update`, `weapons_update_broadcaster`, `LastWeaponsUpdate`, and the radar-blip projection helpers. The radar blips and region overlays are published into `TacticalRadarBlackboard` (not `WeaponsBlackboard`) by `publish_tactical_radar_blackboard` (#829); the ship's combat target is `TacticalRadarSelection`, lifted into `ViewscreenBlackboard::combat_lock` |
 
 Every system stays registered from `WeaponsPlugin::build` in `mod.rs`; the sibling files are pure implementation modules, not separate plugins. Cross-file items are `pub(crate)` (or `pub` where an item is also consumed outside the weapons module, e.g. `TorpedoSystemResource`) and re-exported from `mod.rs` so both the plugin build function and the test module resolve them without needing to know which file they actually live in.
 
@@ -32,7 +32,7 @@ Every system stays registered from `WeaponsPlugin::build` in `mod.rs`; the sibli
 
 1. **`tick_beams_prepare`** — snapshots shooter state: live position lookup, arc/range check, damage accumulator, LOS raycast (Rapier), friendly-fire classification. Clears and repopulates `BeamContext`.
 2. **`tick_beams_apply_damage`** — shield routing, hull damage, asteroid/NPC despawn, instagib/god-mode, VFX, broadcasts (`DamageTaken`, `ShipDestroyed`, `AsteroidDestroyed`, `EntityDespawned`), attacker tracking (`LastShipAttacker` via `set_if_neq`).
-3. **`tick_beams_tick_lifetimes`** — ends beams on destroyed targets, ticks `remaining_secs`, fires `BeamEndedEvent`, clears `WeaponsTarget`.
+3. **`tick_beams_tick_lifetimes`** — ends beams on destroyed targets, ticks `remaining_secs`, fires `BeamEndedEvent`, clears `TacticalRadarSelection`.
 
 Registered as an instance-based `.chain()` rather than type-set `.after(...)` edges, because the test harness registers a second instance of each phase — `SystemTypeSet` ordering would be ambiguous (and panic at schedule build) across two instances of the same system type.
 
@@ -78,7 +78,7 @@ Registered as an instance-based `.chain()` rather than type-set `.after(...)` ed
 
 | Resource | Purpose |
 |---|---|
-| `WeaponsTarget` | Currently locked target UUID (`None` if no lock) |
+| `TacticalRadarSelection` | Currently locked target UUID (`None` if no lock); the ship's Combat Lock, lifted into `ViewscreenBlackboard::combat_lock` (#829) |
 | `ActiveBeam` | Active phaser beam: target UUID, remaining seconds, damage accumulator, bank |
 | `PhaserCooldown` | Post-beam cooldown (duration sourced from `PhaserCombatConfigResource`) |
 | `CurrentPhaserMode` | Auto or Manual phaser mode |
@@ -120,7 +120,7 @@ The `weapons_update_broadcaster()` function (a `SimBroadcaster` producing `Weapo
 `weapons_update_broadcaster()` reads:
 - `ShipState` — for ship position and yaw (fire-ready arc check)
 - `WorldResource` — for target entity position
-- `WeaponsTarget`, `PhaserCooldown`, `ActiveBeam`
+- `TacticalRadarSelection`, `PhaserCooldown`, `ActiveBeam`
 - `TorpedoSystemResource` — for per-tube reload state and magazine count
 - `ShipModifiers` — for `RadarRange` multiplier (effective weapons range)
 

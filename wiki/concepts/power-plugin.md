@@ -14,13 +14,13 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 
 After PR 6 of PRD #597 (2026-07-02), `ShipPowerSystem`, `PowerConfigResource`, `PowerAiConfigResource`, and `PowerMultiplierResource` all derive both `Resource` and `Component`. Every ship entity (player and NPC alike) carries a per-entity `ShipPowerSystem`; the player ship also carries per-entity power config components populated from the ship TOML.
 
-`tick_power_system` iterates ALL ships (`Query<..., With<Ship>>`) rather than being LocalShip-scoped — NPCs tick their own power with the same code path as the player. NPC/AI power reallocation now runs through `console_ai::server::ai_power_allocation` (decides `PowerReactorIntents` from the movement/red-alert rules) and `integrate_power_state` (applies those intents via `set_group_allocation`, dual-writing the legacy `ShipPowerSystem` Resource when the mutated entity is the `LocalShip`) — issue #693 replaced the old fused `operate_power_ai`. Player-facing readers (`handle_power_messages`, `handle_power_inter_system`, `publish_power_blackboard`, `power_state_broadcaster`) remain LocalShip-scoped but prefer the per-entity component with a Resource fallback for tests.
+`tick_power_system` iterates ALL ships (`Query<..., With<Ship>>`) rather than being LocalShip-scoped — NPCs tick their own power with the same code path as the player. NPC/AI power reallocation is admission-routed (issue #831): `console_ai::server::ai_power_allocation` decides the group/level from the movement/red-alert rules and emits it as an admitted `SetPowerGroupAllocation` payload through the same `command_admission::validate_and_admit` seam the human path uses. There is no longer a `PowerReactorIntents` component or an `integrate_power_state` adapter — both were deleted. `ship::power::handle_power_messages` is the **single applier**: it consumes admitted `SetPowerGroupAllocation` envelopes (AI and human alike) and calls `PowerSystem::increase` / `decrease`, and is scheduled `.before(...)` nothing but with `ai_power_allocation.before(handle_power_messages)` so the AI's decision is applied the same tick. Player-facing readers (`handle_power_messages`, `handle_power_inter_system`, `publish_power_blackboard`, `power_state_broadcaster`) remain LocalShip-scoped but prefer the per-entity component with a Resource fallback for tests.
 
 ### Systems
 
 | System | Responsibility |
 |---|---|
-| `handle_power_messages` | Processes `IncreasePower` / `DecreasePower` from the Power console holder; forwards to `PowerSystem::increase` / `decrease` which enforce 6-base + 2-battery cap and exhaustion lock |
+| `handle_power_messages` | Single applier for admitted `SetPowerGroupAllocation` payloads (from both the Power console holder and `ai_power_allocation`); forwards to `PowerSystem::increase` / `decrease` which enforce 6-base + 2-battery cap and exhaustion lock |
 | `tick_power_system` | Advances battery charge each frame; triggers exhaustion lock when charge reaches zero, re-engages at recharge threshold |
 
 ### Resources
@@ -41,7 +41,7 @@ Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is d
 
 ## Broadcaster
 
-`power_state_broadcaster()` (defined in `power_plugin.rs` and registered by `PowerPlugin`) reads:
+`power_state_broadcaster()` (defined in `src/ship/power.rs` and registered by `PowerPlugin`) reads:
 - `ShipPowerSystem` — for current levels, battery charge, and locked flag
 
 Produces `ServerMessage::PowerState` sent to the Power console holder at 10 Hz.
@@ -52,7 +52,7 @@ Power levels do **not** write to `ShipModifiers` directly. The coordinator syste
 
 ## Tests
 
-Tests live in `src/power_plugin.rs` under `#[cfg(test)] mod tests`.
+Tests live in `src/ship/power.rs` under `#[cfg(test)] mod tests`.
 
 | Test | Behaviour verified |
 |---|---|
@@ -71,7 +71,8 @@ Tests live in `src/power_plugin.rs` under `#[cfg(test)] mod tests`.
 
 ## Sources
 
-- `src/power_plugin.rs`
+- `src/ship/power.rs` (`src/power_plugin.rs` is only a `pub use` alias in `src/lib.rs`)
+- `src/console_ai/server.rs` (`ai_power_allocation`, admission-routed NPC power)
 - `src/server_app.rs` (ordering constraints within `add_simulation_plugins`)
 - `src/modifiers/coordination.rs` (`translate_power_modifiers`)
 - Issue [#254](https://github.com/jkeywo/project-phoenix-v2/issues/254)

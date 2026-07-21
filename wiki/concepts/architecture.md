@@ -134,7 +134,7 @@ read `Res<ShipModifiers>` only. See [Modifier Coordination](./modifier-coordinat
 
 ### Broadcaster seam
 
-The **broadcaster seam** (`src/core/broadcast/`) replaces hand-written broadcast systems with a `register(audience, cadence, producer)` API. Two plugins (`SimBroadcaster` for `InProgress`, `LobbyBroadcaster` for `Lobby`) gate on `GamePhase`, resolve `Audience` → `Target`, and call producers. Producers are `Fn(&mut World) -> Vec<ServerMessage>` closures that know nothing about routing or timing. See [Broadcaster Seam](./broadcaster-seam.md) for the full catalogue, recipe, and contract.
+The **broadcaster seam** (`src/core/broadcast/`) replaces hand-written broadcast systems with a `register(audience, cadence, producer)` API. Two broadcaster instances (`SimBroadcaster` for `InProgress`, `LobbyBroadcaster` for `Lobby` — now `pub type` aliases of the generic `Broadcaster<M>`, #817) gate on `GamePhase`, resolve `Audience` → `Target`, and call producers. Producers are `Fn(&mut World) -> Vec<ServerMessage>` closures that know nothing about routing or timing. See [Broadcaster Seam](./broadcaster-seam.md) for the full catalogue, recipe, and contract.
 
 ## Related
 

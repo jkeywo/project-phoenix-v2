@@ -119,8 +119,10 @@ need enforcement or player-information review.
 
 The scanner accurately reports direct Rust/JS/HTML edges, but it cannot
 attribute individual callers within shared files or observe runtime dataflow.
-For example, `client-console-registry` owns 88 observed UI files, while
-multiple subsystems share `src/ship_plugin.rs` and `src/server_app.rs`.
+For example, at the time of this audit `client-console-registry` owned 88
+observed UI files (that module has since been deleted in #827; the equivalent
+broad-ownership bucket is now `gui/console-state.js` / `gui/mount-plan.js`),
+while multiple subsystems share `src/ship_plugin.rs` and `src/server_app.rs`.
 Existing Helm migration warnings demonstrate the resulting ambiguity.
 
 This is an accepted Phase 5/6 limit, not a validation failure. It means PASM

@@ -1,66 +1,49 @@
 ---
-title: SciencePlugin
+title: Science / Sensors target
 ---
 
-# SciencePlugin
+# Science / Sensors target
 
-Extracted from `simulation.rs` as part of the simulation split series (issue [#258](https://github.com/jkeywo/project-phoenix-v2/issues/258)).
+> **This page was rewritten (2026-07).** The old `SciencePlugin` /
+> `handle_set_science_target` / `ScienceTargetSuggestion` /
+> `src/science_plugin.rs` model described here no longer exists — it was a
+> stale advisory-message design superseded by the per-entity Sensors migration
+> (#828) and the raw-blackboard split (#829). The current reality is below.
 
 ## Ownership
 
-`SciencePlugin` owns the Science/Sensors console advisory hand-off logic. It handles `SetScienceTarget`, which lets the Sensors console holder suggest a target to the Weapons console holder. No resources are owned by this plugin — all state lives in the message-passing layer.
+There is no standalone `SciencePlugin`. The Science/Sensors **target** — what
+used to be called the "science target" — is now first-class per-ship sensor
+state owned by the Sensors system in `src/ship/sensors.rs`:
 
-### Systems
+- The selection lives in the per-entity **`SensorRadarSelection`** component
+  (`src/ship/sensors.rs:18`; also reachable via the
+  `crate::sensors_plugin::SensorRadarSelection` alias). Every ship — player and
+  NPC — carries its own.
+- `handle_sensors_messages` (`src/ship/sensors.rs:122`) consumes admitted
+  `SetScienceTarget` / `ClearScienceTarget` command payloads and writes the
+  ship's own `SensorRadarSelection`.
+- `operate_sensors_ai` (`src/ship/sensors.rs:627`) is the AI decide-and-emit
+  system (issue #828): rather than writing `SensorRadarSelection` directly, it
+  emits an admitted `SetScienceTarget` / `ClearScienceTarget` through the same
+  command-admission seam the human path uses, so AI and human converge on one
+  applier.
 
-| System | Responsibility |
-|---|---|
-| `handle_set_science_target` | Processes `SetScienceTarget` from the Sensors console holder; validates sender is the Sensors holder, then routes a `ScienceTargetSuggestion` to the Tactical (Weapons) console holder via `SimOutbox` |
+## Publishing to the blackboard (#829)
 
-### Resources
-
-`SciencePlugin` introduces no new resources. It reads:
-
-| Resource | Source |
-|---|---|
-| `CurrentPhase` | `LobbyPlugin` — gate: only active during `InProgress` |
-| `Sessions` | `LobbyPlugin` — console-holder lookup |
-| `SimOutbox` | `SimulationPlugin` — targeted message routing |
-
-## Registration
-
-```rust
-.add_plugins(crate::science_plugin::SciencePlugin)
-```
-
-Registered by `add_simulation_plugins()` in `src/server_app.rs`. The module is declared in `src/lib.rs`.
-
-## Message Flow
-
-```
-Sensors console holder
-  → ClientMessage::SetScienceTarget { uuid }
-    → handle_set_science_target
-      → SimOutbox (Target::Token(weapons_token))
-        → ServerMessage::ScienceTargetSuggestion { uuid }
-          → Tactical (Weapons) console holder only
-```
-
-The Tactical player is free to act on or ignore the suggestion. No game state is mutated by the suggestion itself.
-
-## Tests
-
-Tests live in `src/science_plugin.rs` under `#[cfg(test)] mod tests`.
-
-| Test | Behaviour verified |
-|---|---|
-| `sensors_set_science_target_broadcasts_suggestion_to_weapons` | Sensors holder sending `SetScienceTarget` produces `ScienceTargetSuggestion` routed only to Weapons token |
-| `non_sensors_player_cannot_send_science_target` | Non-Sensors sender is silently ignored |
-| `set_science_target_ignored_in_lobby` | Message is dropped outside `InProgress` phase |
+The Sensors system publishes its raw truth into the ship's `sensor-radar`
+blackboard: `SensorRadarBlackboard.selected_target` mirrors this ship's
+`SensorRadarSelection`. The viewscreen aggregator lifts that value into
+`ViewscreenBlackboard::science_target` (`src/core/messages.rs`), and every
+cross-system consumer reads the frozen `science_target` viewscreen fact rather
+than the live per-ship selection. The Sensors-panel target-info snapshot also
+carries `science_target_uuid` per ship (`src/ship/sensors.rs`).
 
 ## Sources
 
-- `src/science_plugin.rs`
-- `src/server_app.rs` (aggregator registration via `add_simulation_plugins`)
-- Issue [#258](https://github.com/jkeywo/project-phoenix-v2/issues/258)
-- [Console UI Authoring Library](./console-ui-library.md)
-- [Broadcaster Seam](./broadcaster-seam.md)
+- `src/ship/sensors.rs` (`SensorRadarSelection`, `handle_sensors_messages`,
+  `operate_sensors_ai`, publish systems)
+- `src/core/messages.rs` (`SensorRadarBlackboard`, `ViewscreenBlackboard.science_target`)
+- Issues #828 (per-entity Sensors migration) and #829 (raw-blackboard split)
+- [Radar Projection](./radar-projection.md)
+- [WeaponsPlugin](./weapons-plugin.md) (the Combat Lock counterpart, `TacticalRadarSelection`)

@@ -23,5 +23,6 @@ part of the accepted focus policy.
 
 ## Sources
 
-- `src/ship/shields.rs:535`
-- `src/console_ai/core.rs:471`
+- `src/console_ai/server.rs:192` (`ai_shield_focus` — the shield-focus AI decide-and-emit system)
+- `src/ship/shields.rs:285` (`handle_shields_messages` — applies the admitted `SetShieldFocus` from human and AI alike)
+- `src/console_ai/core.rs:471` (`tick_shield_focus_ai` — the pure focus-policy decision)

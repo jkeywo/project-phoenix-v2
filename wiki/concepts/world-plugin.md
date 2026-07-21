@@ -2,7 +2,7 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/world/server.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
+sources: [src/world/server.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/layers.rs, src/world/scenario.rs, src/world/delayed.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
 updated: 2026-07-16
 ---
 

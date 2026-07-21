@@ -253,8 +253,10 @@ also records the desired replacement: ship-authored station overviews plus
 system-generated, vessel-specific manual sections aggregated into tabs for all
 stations. The client remains non-authoritative.
 
-Sources: `gui/console-registry.js`, `gui/action-map.js`,
-`gui/settings-panel.js`, `gui/help-panel.js`, `gui/`.
+Sources: `gui/mount-plan.js`, `gui/content-switcher.js`, `gui/action-map.js`,
+`gui/settings-panel.js`, `gui/help-panel.js`, `gui/`. (`gui/console-registry.js`
+was deleted with the tab-bar in #827; station/console mounting now lives in
+`mount-plan.js` + `content-switcher.js`.)
 
 ## 22. Presentation, effects, audio, and loading — Captured
 

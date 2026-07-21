@@ -31,7 +31,7 @@ The helm AI owns no goals; it reads shared surfaces a human could equally drive 
 
 | Surface | Owner | Answers |
 |---|---|---|
-| `WeaponsTarget` | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
+| `TacticalRadarSelection` | Tactical (human `SetTarget` / `ai_target_selection`) | who to pursue |
 | `NavigationWaypoint` + `HelmWaypointClearance` | Navigation (+ the channel-3 lag) | where to travel |
 | `ObjectiveCursors` | `advance_objective_cursors` (`SimSet::Modifiers`, sole writer) | where on the route |
 
@@ -85,7 +85,7 @@ Two independent LOD systems share nothing but the word.
 
 Pure evaluation in `src/ai/lod.rs`: `evaluate_lod(current, distance, sensor_range, …) -> LodState` (High/Low). Promotion (Low→High) is immediate when `distance <= sensor_range`; demotion requires `distance > sensor_range * 1.2` (`LOD_HYSTERESIS = 0.2`) **and** a 2 s dwell (`LOD_DWELL_SECS`) since the last transition — hysteresis plus dwell prevent oscillation at the range boundary.
 
-`lod_ai_ships` (`src/ai/server.rs`) applies it per NPC against the player ship's position, inserting/removing the `AiHighFidelity` marker **and its scoped intent bundle** together: the five helm intent components plus `ShipFrequencyHintState`, `PowerReactorIntents`, `ShipPowerAiState`, `TorpedoIntents` (`ShieldArcIntents` retired into admitted emissions by issue #826). `LocalShip` is never evaluated and always keeps its marker.
+`lod_ai_ships` (`src/ai/server.rs`) applies it per NPC against the player ship's position, inserting/removing the `AiHighFidelity` marker **and its scoped intent bundle** together: the five helm intent components plus `ShipFrequencyHintState`, `ShipPowerAiState`, `TorpedoIntents` (`ShieldArcIntents` retired into admitted emissions by issue #826; `PowerReactorIntents` likewise retired by issue #831 — NPC power now flows as admitted `SetPowerGroupAllocation`). `LocalShip` is never evaluated and always keeps its marker.
 
 What each fidelity level runs:
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Navigation Console</title>
+  <title data-i18n="console.navigation.doc_title">Project Phoenix - Navigation Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -29,18 +29,18 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Navigation Console">
+  <div class="frame" data-screen-label="Navigation Console" data-i18n-attr="data-screen-label:console.navigation.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>NAVIGATION<span class="sub">COURSE &amp; WAYPOINTS</span></h1>
-        <span class="auto-badge" id="navigation-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.navigation.title">NAVIGATION</span><span class="sub" data-i18n="console.navigation.subtitle">COURSE &amp; WAYPOINTS</span></h1>
+        <span class="auto-badge" id="navigation-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="map-col">
           <div class="btn-row">
-            <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label">On Screen</span></button>
-            <button class="btn" id="btn-clear-waypoint" type="button"><span class="btn-bg"></span><span class="label">Clear Waypoint</span></button>
+            <button class="btn" id="btn-on-screen" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.on_screen">On Screen</span></button>
+            <button class="btn" id="btn-clear-waypoint" type="button"><span class="btn-bg"></span><span class="label" data-i18n="console.navigation.clear_waypoint">Clear Waypoint</span></button>
           </div>
           <div class="map-wrap" id="map-canvas">
             <ph-navigation-map id="navigation-map"></ph-navigation-map>
@@ -48,9 +48,9 @@
         </div>
         <div class="side-col">
           <div class="side-panel">
-            <div class="metric"><span>Selected</span><strong id="ent-name">NONE</strong></div>
-            <div class="metric"><span>Waypoint</span><strong id="waypoint-name">NOT SET</strong></div>
-            <div class="metric"><span>Contacts</span><strong id="nav-contact-count">0</strong></div>
+            <div class="metric"><span data-i18n="console.navigation.selected">Selected</span><strong id="ent-name" data-i18n="console.navigation.none">NONE</strong></div>
+            <div class="metric"><span data-i18n="console.navigation.waypoint">Waypoint</span><strong id="waypoint-name">NOT SET</strong></div>
+            <div class="metric"><span data-i18n="console.navigation.contacts">Contacts</span><strong id="nav-contact-count">0</strong></div>
           </div>
           <div class="side-panel" style="flex:1">
             <ph-objective-list id="objective-list"></ph-objective-list>
@@ -59,9 +59,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>NAVIGATION STATION</span>
+        <span data-i18n="console.navigation.station_footer">NAVIGATION STATION</span>
         <span class="spacer"></span>
-        <span id="footer-target">NO WAYPOINT</span>
+        <span id="footer-target" data-i18n="console.common.no_waypoint">NO WAYPOINT</span>
         <ph-station-damage id="station-damage"></ph-station-damage>
       </footer>
     </div>
@@ -71,18 +71,20 @@
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
     var currentState = {};
     var consoleApi = initConsole({
       name: 'navigation',
+      // s is a NavigationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         currentState = s || {};
         document.getElementById('navigation-map').state = { blips: s.blips || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };
         document.getElementById('objective-list').state = { objectives: s.objectives || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('nav-contact-count').textContent = String((s.blips || []).length);
-        var wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? 'WAYPOINT' : 'NOT SET');
+        var wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? t('console.common.waypoint') : t('console.navigation.not_set'));
         document.getElementById('waypoint-name').textContent = wpName;
         document.getElementById('footer-target').textContent = wpName;
         setAutoState(document.getElementById('btn-on-screen'), document.getElementById('navigation-auto-badge'), !!s.navigation_auto);
@@ -96,14 +98,14 @@
         var match = (currentState.blips || []).find(function(b) { return b.uuid === payload.source_uuid; });
         document.getElementById('ent-name').textContent = match && match.name ? match.name : payload.source_uuid;
       } else if (action === 'set_navigation_waypoint') {
-        document.getElementById('ent-name').textContent = 'CUSTOM';
+        document.getElementById('ent-name').textContent = t('console.navigation.custom');
       }
       return originalSendAction.call(this, action, payload);
     };
 
     document.getElementById('btn-clear-waypoint').addEventListener('click', function() {
       consoleApi.sendAction('clear_navigation_waypoint', {});
-      document.getElementById('ent-name').textContent = 'NONE';
+      document.getElementById('ent-name').textContent = t('console.navigation.none');
     });
     document.getElementById('btn-on-screen').addEventListener('click', function() {
       consoleApi.sendAction('set_navigation_chart', {});

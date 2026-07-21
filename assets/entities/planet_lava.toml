@@ -1,10 +1,10 @@
-name = "Lava Planet"
+name = "entity.planet_lava.name"
 tags = ["planet"]
 
 [target]
 tags = ["planet"]
 threat_level = "none"
-description = "A volcanic hellscape"
+description = "entity.planet_lava.target.description"
 
 [collider]
 shape = "Ball"

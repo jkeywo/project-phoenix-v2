@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhSensorPanel extends HTMLElement {
   #state = null;
   #scanRowCache = new Map();
@@ -11,8 +18,8 @@ export class PhSensorPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -43,23 +50,23 @@ export class PhSensorPanel extends HTMLElement {
     }
   </style>
   <div class="header">
-    <span>SCAN RANGE <span class="v" id="range-val">0</span></span>
-    <span class="blip-count" id="blip-count">0 CONTACTS</span>
+    <span>${t('component.sensor_panel.scan_range')} <span class="v" id="range-val">0</span></span>
+    <span class="blip-count" id="blip-count">${t('console.common.contacts.other', { n: 0 })}</span>
   </div>
   <div id="target-area">
-    <div class="no-target" id="no-target">NO TARGET</div>
+    <div class="no-target" id="no-target">${t('console.common.no_target')}</div>
     <div class="target-card" id="target-card" style="display:none">
       <div class="name" id="target-name"></div>
       <div class="badges" id="badges"></div>
       <div class="pos-row">
-        <div><span class="k">BRG</span> <span class="v" id="brg-val">—</span><span class="u">°</span></div>
-        <div><span class="k">RNG</span> <span class="v" id="rng-val">—</span><span class="u">AU</span></div>
+        <div><span class="k">${t('component.sensor_panel.brg')}</span> <span class="v" id="brg-val">—</span><span class="u">°</span></div>
+        <div><span class="k">${t('component.sensor_panel.rng')}</span> <span class="v" id="rng-val">—</span><span class="u">AU</span></div>
       </div>
     </div>
   </div>
   <div class="scan-data" id="scan-data"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   set state(val) {
@@ -76,7 +83,9 @@ export class PhSensorPanel extends HTMLElement {
     root.getElementById('range-val').textContent = s.scan_range || 0;
 
     const blips = s.blips || [];
-    root.getElementById('blip-count').textContent = blips.length + ' CONTACT' + (blips.length !== 1 ? 'S' : '');
+    root.getElementById('blip-count').textContent = blips.length === 1
+      ? t('console.common.contacts.one', { n: 1 })
+      : t('console.common.contacts.other', { n: blips.length });
 
     if (!this.#noTargetEl) this.#noTargetEl = root.getElementById('no-target');
     if (!this.#targetCardEl) this.#targetCardEl = root.getElementById('target-card');
@@ -96,8 +105,19 @@ export class PhSensorPanel extends HTMLElement {
       const kind = s.target_kind || 'unknown';
       const stance = s.target_stance || 'neutral';
       const stanceClass = { hostile: 'hostile', friendly: 'friendly', allied: 'friendly', neutral: 'neutral' }[stance] || 'neutral';
-      const stanceLabel = { hostile: 'HOSTILE', friendly: 'ALLIED', allied: 'ALLIED', neutral: 'NEUTRAL' }[stance] || 'UNKNOWN';
-      const kindLabel = { ship: 'WARSHIP', asteroid: 'ASTEROID', station: 'STARBASE', planet: 'PLANET', star: 'STAR' }[kind] || kind.toUpperCase();
+      const stanceLabel = {
+        hostile: t('console.stance.hostile'),
+        friendly: t('console.stance.allied'),
+        allied: t('console.stance.allied'),
+        neutral: t('console.stance.neutral'),
+      }[stance] || t('console.common.unknown');
+      const kindLabel = {
+        ship: t('console.kind.ship'),
+        asteroid: t('console.kind.asteroid'),
+        station: t('console.kind.station'),
+        planet: t('console.kind.planet'),
+        star: t('console.kind.star'),
+      }[kind] || kind.toUpperCase();
 
       this.#badgesEl.innerHTML = '<span class="badge"></span><span class="badge neutral"></span>';
       this.#badgesEl.children[0].className = 'badge ' + stanceClass;
@@ -110,11 +130,11 @@ export class PhSensorPanel extends HTMLElement {
 
     const sd = root.getElementById('scan-data');
     const scanRows = [];
-    if (s.target_class) scanRows.push({ k: 'CLASS', v: s.target_class });
-    if (s.target_hull_pct != null) scanRows.push({ k: 'HULL', v: Math.round(s.target_hull_pct) + '%' });
-    if (s.target_heading != null) scanRows.push({ k: 'HEADING', v: s.target_heading.toFixed(0) + '°' });
-    if (s.target_speed != null) scanRows.push({ k: 'SPEED', v: s.target_speed.toFixed(1) + ' kn' });
-    if (s.target_threat) scanRows.push({ k: 'THREAT', v: s.target_threat.toUpperCase() });
+    if (s.target_class) scanRows.push({ k: t('component.sensor_panel.class'), v: s.target_class });
+    if (s.target_hull_pct != null) scanRows.push({ k: t('component.sensor_panel.hull'), v: Math.round(s.target_hull_pct) + '%' });
+    if (s.target_heading != null) scanRows.push({ k: t('component.sensor_panel.heading'), v: s.target_heading.toFixed(0) + '°' });
+    if (s.target_speed != null) scanRows.push({ k: t('component.sensor_panel.speed'), v: s.target_speed.toFixed(1) + ' kn' });
+    if (s.target_threat) scanRows.push({ k: t('component.sensor_panel.threat'), v: s.target_threat.toUpperCase() });
 
     if (scanRows.length > 0) {
       const live = new Set(scanRows.map(r => r.k));
@@ -138,7 +158,7 @@ export class PhSensorPanel extends HTMLElement {
       if (!scanning) {
         scanning = document.createElement('div');
         scanning.className = 'scan-row';
-        scanning.innerHTML = '<span class="k">STATUS</span><span class="v dim">SCANNING...</span>';
+        scanning.innerHTML = '<span class="k">' + t('component.sensor_panel.status') + '</span><span class="v dim">' + t('component.sensor_panel.scanning') + '</span>';
         this.#scanRowCache.set('__scanning', scanning);
         sd.appendChild(scanning);
       }

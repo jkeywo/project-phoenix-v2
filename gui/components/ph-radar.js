@@ -12,15 +12,15 @@ export class PhRadar extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = [
+    const tpl = document.createElement('template');
+    tpl.innerHTML = [
       '<style>',
       ':host { display: block; }',
       'canvas { display: block; width: 100%; height: 100%; }',
       '</style>',
       '<canvas></canvas>',
     ].join('\n');
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#canvas = this.shadowRoot.querySelector('canvas');
     this.#ctx = this.#canvas.getContext('2d', { alpha: false });
     this.#initResize();

@@ -1,11 +1,18 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhRedAlert extends HTMLElement {
   #state = null;
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -19,12 +26,12 @@ export class PhRedAlert extends HTMLElement {
     .alert-btn:disabled { opacity: 0.4; cursor: default; }
   </style>
   <div class="header">
-    <span>RED ALERT</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.red_alert.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
-  <button class="alert-btn standby" id="alert-btn">STAND DOWN</button>
+  <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
@@ -51,7 +58,7 @@ export class PhRedAlert extends HTMLElement {
     const root = this.shadowRoot;
     const btn = root.getElementById('alert-btn');
 
-    btn.textContent = active ? 'RED ALERT' : 'STAND DOWN';
+    btn.textContent = active ? t('component.red_alert.active') : t('component.red_alert.standby');
     btn.className = 'alert-btn' + (active ? ' active' : ' standby');
     btn.disabled = auto;
 

@@ -1,11 +1,11 @@
-name = "Requiem Courier"
+name = "entity.ship_requiem_courier.name"
 tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
 
 [target]
 tags = ["ship"]
 threat_level = "low"
-description = "Requiem Courier"
+description = "entity.ship_requiem_courier.target.description"
 
 [hull]
 hull_integrity = 40.0
@@ -55,7 +55,7 @@ sensor_range = 80.0
 
 [[behaviour.doctrine]]
 id         = "reach-destination"
-text       = "Proceed to destination"
+text       = "entity.ship_requiem_courier.behaviour.doctrine.reach_destination.text"
 directive_kind = "Reach"
 directive_anchors = ["destination"]
 base_priority    = 30.0

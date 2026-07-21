@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhCameraSelect extends HTMLElement {
   #state = null;
   #btnCache = new Map();
@@ -6,8 +13,8 @@ export class PhCameraSelect extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -22,12 +29,12 @@ export class PhCameraSelect extends HTMLElement {
     .placeholder { font-size: 0.7rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
   </style>
   <div class="header">
-    <span>CAMERA</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.camera_select.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="container"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
@@ -59,7 +66,7 @@ export class PhCameraSelect extends HTMLElement {
     }
 
     if (views.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'placeholder'; this.#emptyEl.textContent = 'NO CAMERA'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'placeholder'; this.#emptyEl.textContent = t('component.camera_select.empty'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }

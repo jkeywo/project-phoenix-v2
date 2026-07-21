@@ -1,4 +1,10 @@
 import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhBoostBtn extends HTMLElement {
   #state = null;
@@ -12,8 +18,8 @@ export class PhBoostBtn extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -31,16 +37,16 @@ export class PhBoostBtn extends HTMLElement {
     .recharge-fill.draining { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
   </style>
   <div class="header">
-    <span>BOOST</span>
-    <span class="binding" id="binding">HOLD SHIFT · A</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.boost.title')}</span>
+    <span class="binding" id="binding">${t('component.boost.binding')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div class="recharge-wrap" id="recharge-wrap" style="display:none">
     <div class="recharge-fill" id="recharge-fill" style="width:100%"></div>
   </div>
-  <button class="btn available" id="btn">BOOST</button>
+  <button class="btn available" id="btn">${t('component.boost.ready')}</button>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   #pointerId = null;
@@ -151,15 +157,17 @@ export class PhBoostBtn extends HTMLElement {
     const recharging = !active && batteryPct < 100;
 
     if (active) {
-      btn.textContent = batteryPct < 100 ? 'BOOSTING ' + Math.round(batteryPct) + '%' : 'BOOSTING';
+      btn.textContent = batteryPct < 100
+        ? t('component.boost.boosting', { pct: Math.round(batteryPct) })
+        : t('component.boost.boosting_full');
       btn.className = 'btn active';
       btn.disabled = false;
     } else if (recharging) {
-      btn.textContent = 'RECHARGING ' + Math.round(batteryPct) + '%';
+      btn.textContent = t('component.boost.recharging', { pct: Math.round(batteryPct) });
       btn.className = 'btn recharging';
       btn.disabled = true;
     } else {
-      btn.textContent = 'BOOST';
+      btn.textContent = t('component.boost.ready');
       btn.className = 'btn available';
       btn.disabled = auto;
     }

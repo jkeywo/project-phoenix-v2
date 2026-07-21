@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhShieldPanel extends HTMLElement {
   #state = null;
   #facingCache = new Map();
@@ -6,8 +13,8 @@ export class PhShieldPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -37,20 +44,20 @@ export class PhShieldPanel extends HTMLElement {
     }
   </style>
   <div class="header">
-    <span>SHIELDS</span>
-    <span class="v" id="grid-status">GRID NOMINAL</span>
+    <span>${t('component.shield_panel.title')}</span>
+    <span class="v" id="grid-status">${t('component.shield_panel.grid_nominal')}</span>
   </div>
   <div id="hull-section">
     <div class="hull-row">
-      <span class="lbl">INTEGRITY</span>
+      <span class="lbl">${t('component.shield_panel.integrity')}</span>
       <div class="bar-wrap"><div class="fill" id="panel-hull-fill" style="width:100%"></div></div>
       <span class="val" id="panel-hull-val">100%</span>
     </div>
   </div>
   <div class="facings" id="facings-container"></div>
-  <div class="status" id="panel-focus-display">FOCUS: OMNI</div>
+  <div class="status" id="panel-focus-display">${t('component.shield_panel.focus', { name: t('console.common.omni') })}</div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   set state(val) {
@@ -70,13 +77,19 @@ export class PhShieldPanel extends HTMLElement {
     hullFill.className = 'fill' + (hullPct < 30 ? ' crit' : hullPct < 60 ? ' warn' : '');
     root.getElementById('panel-hull-val').textContent = Math.round(hullPct) + '%';
 
-    const gridStatus = s.grid_status || 'GRID NOMINAL';
+    // grid_status is a console-state token, kept verbatim for the CSS class
+    // decision; only the visible text is localised.
+    const gridOffline = (s.grid_status || 'GRID NOMINAL') === 'GRID OFFLINE';
     const gs = root.getElementById('grid-status');
-    gs.textContent = gridStatus;
-    gs.className = gridStatus === 'GRID OFFLINE' ? 'grid-offline' : 'grid-online';
+    gs.textContent = gridOffline
+      ? t('component.shield_panel.grid_offline')
+      : t('component.shield_panel.grid_nominal');
+    gs.className = gridOffline ? 'grid-offline' : 'grid-online';
 
-    const focusName = s.focused_facing || 'OMNI';
-    root.getElementById('panel-focus-display').textContent = 'FOCUS: ' + focusName;
+    // focused_facing is a shield-arc label from the wire, already localised.
+    const focusName = s.focused_facing || t('console.common.omni');
+    root.getElementById('panel-focus-display').textContent =
+      t('component.shield_panel.focus', { name: focusName });
 
     const facings = s.facings || [];
     const container = root.getElementById('facings-container');
@@ -87,7 +100,7 @@ export class PhShieldPanel extends HTMLElement {
     }
 
     if (facings.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:var(--ink-dim);padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = 'NO SHIELD DATA'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:var(--ink-dim);padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = t('console.common.no_shield_data'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -96,7 +109,7 @@ export class PhShieldPanel extends HTMLElement {
       const key = f.label || '';
       const pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
       const cls = !f.online ? 'down' : pct > 60 ? '' : pct > 25 ? 'warn' : 'crit';
-      const pctLabel = !f.online ? 'OFF' : pct + '%';
+      const pctLabel = !f.online ? t('component.shield_facings.off') : pct + '%';
       let row = this.#facingCache.get(key);
       if (!row) {
         row = document.createElement('div');

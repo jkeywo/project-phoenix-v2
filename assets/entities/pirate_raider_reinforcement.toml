@@ -9,14 +9,14 @@
 # at 0.5/s regen, phaser pierce 0.1, no flee — fight to the death.
 # (#572) FSM dissolved — doctrine-based AI.
 
-name = "Harrow Destroyer"
+name = "entity.pirate_raider_reinforcement.name"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "high"
-description = "Harrow Destroyer"
+description = "entity.pirate_raider_reinforcement.target.description"
 
 [hull]
 hull_integrity = 30.0
@@ -25,7 +25,7 @@ hull_integrity = 30.0
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
 [[shield_arc]]
 id = "all"
-label = "All"
+label = "entity.pirate_raider_reinforcement.shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 15
@@ -90,7 +90,7 @@ sensor_range = 120.0
 
 [[behaviour.doctrine]]
 id        = "patrol-sector"
-text      = "Patrol the sector"
+text      = "entity.pirate_raider_reinforcement.behaviour.doctrine.patrol_sector.text"
 directive_kind    = "Patrol"
 directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
 directive_loop    = true
@@ -99,7 +99,7 @@ target_speed      = 0.4
 
 [[behaviour.doctrine]]
 id            = "destroy-hostiles"
-text          = "Engage and destroy hostile ships"
+text          = "entity.pirate_raider_reinforcement.behaviour.doctrine.destroy_hostiles.text"
 directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9

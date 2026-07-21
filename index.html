@@ -9,7 +9,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Project Phoenix — View Screen</title>
+  <title data-i18n="server.doc_title">Project Phoenix — View Screen</title>
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -839,15 +839,39 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-30614e9b83c5193b.js" crossorigin="anonymous" integrity="sha384-ltAyUE4tC2NQAfxBtoAETuHHpvTxZtG7dyHyJ7zLJ6t1YjD45MAnAwhn1jWqDid3"><link rel="preload" href="./project-phoenix-30614e9b83c5193b_bg.wasm" crossorigin="anonymous" integrity="sha384-eCsmBfGKgP7SBC6UAMMOdGTx32kFQTvJmWz0PoVtAx3QeQ9bE2ndoBT9eijlgq8A" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-48b3e064c0fc2019.js" crossorigin="anonymous" integrity="sha384-KaH/2IHkazlwPDxE2YdW2nAjX7AbsqseRll4v+cb9/zP482r5eQqcGuzdk29DXZV"><link rel="preload" href="./project-phoenix-48b3e064c0fc2019_bg.wasm" crossorigin="anonymous" integrity="sha384-Yv3GBueACkiuGqWPdnImPHjdNpxbu0auWjVN4MB1oG1RUa1wJzp5x4imnqBnChaa" as="fetch" type="application/wasm"></head>
 <body>
-  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
+  <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
+    // Session token for actions from the host page's own consoles. Must match
+    // console_bridge::LOCAL_CONSOLE_TOKEN in Rust (src/console_bridge.rs).
+    var LOCAL_CONSOLE_TOKEN = '__local_console__';
+
+    // send(type, data?) for the local-console path: wraps the ClientMessage
+    // envelope and injects it under the local-console token, exactly like a
+    // PeerJS client message would arrive (issue #822).
+    window.__localConsoleSend = function(type, data) {
+      var msg = data !== undefined ? { type: type, data: data } : { type: type };
+      window.wasmBindings.wasm_receive_message(LOCAL_CONSOLE_TOKEN, JSON.stringify(msg));
+    };
+
+    // Host-page action entry point. Takes the standard { action, ... }
+    // console envelope (as JSON) and dispatches it through the same
+    // gui/action-map.js table the phone clients use, emitting full
+    // ClientMessages via __localConsoleSend (issue #822 — the UiAction
+    // translation layer in Rust is gone). Kept under the __sendAction name
+    // because gui/console-core.js's transport ladder targets it.
     window.__sendAction = function(json) {
       if (window.ipc) {
         window.ipc.postMessage(json);          // wry native server
+        return;
+      }
+      var action;
+      try { action = JSON.parse(json); } catch (_) { return; }
+      if (typeof window.dispatchConsoleAction === 'function') {
+        window.dispatchConsoleAction(action, window.__localConsoleSend);
       } else {
-        window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
+        console.warn('[Phoenix] dropped console action before action-map loaded:', json);
       }
     };
 
@@ -894,16 +918,16 @@
 
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken).
        No <audio> tags here: filenames and volumes are data-driven from TOML
-       and arrive via set_audio_config_callback, so the elements are built at
-       runtime by __audioConfig below. -->
+       and arrive via the "audio_config" host channel, so the elements are
+       built at runtime by __audioConfig below. -->
 
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
     <div id="world-list">
-      <div id="world-list-label">Select a world</div>
-      <button class="world-btn" data-path="assets/worlds/default.toml">Starbase Alpha</button>
-      <button class="world-btn" data-path="assets/worlds/combat_test.toml">Combat Test</button>
-      <button class="world-btn" data-path="assets/worlds/before_the_fire.toml">Before the Fire</button>
+      <div id="world-list-label" data-i18n="server.select_world">Select a world</div>
+      <button class="world-btn" data-path="assets/worlds/default.toml" data-i18n="world.default.global.title">Starbase Alpha</button>
+      <button class="world-btn" data-path="assets/worlds/combat_test.toml" data-i18n="world.combat_test.global.title">Combat Test</button>
+      <button class="world-btn" data-path="assets/worlds/before_the_fire.toml" data-i18n="world.before_the_fire.global.title">Before the Fire</button>
     </div>
   </div>
 
@@ -922,17 +946,17 @@
       <!-- Header row: title + crew counter + ready badge -->
       <div class="lobby-header">
         <div class="lobby-title-block">
-          <div id="lobby-title">Loading…</div>
+          <div id="lobby-title" data-i18n="server.loading">Loading…</div>
           <div id="lobby-subtitle"></div>
         </div>
         <div class="lobby-status-block">
           <div class="lobby-crew-info">
-            <span class="lobby-crew-label">Crew</span>
+            <span class="lobby-crew-label" data-i18n="server.crew">Crew</span>
             <span id="lobby-crew-count">0/0</span>
             <div id="lobby-crew-dots"></div>
-            <span id="lobby-spectator-tag" style="display:none;">Spectator</span>
+            <span id="lobby-spectator-tag" style="display:none;" data-i18n="server.spectator">Spectator</span>
           </div>
-          <div id="lobby-ready-badge">AWAITING SELECTION</div>
+          <div id="lobby-ready-badge" data-i18n="server.awaiting_selection">AWAITING SELECTION</div>
         </div>
       </div>
 
@@ -948,11 +972,11 @@
         <!-- Log rail: spectators + status -->
         <aside class="lobby-rail">
           <div>
-            <div class="lobby-rail-label">Connected</div>
+            <div class="lobby-rail-label" data-i18n="server.connected">Connected</div>
             <div id="lobby-spectator-list" class="lobby-rail-section"></div>
           </div>
           <div class="lobby-rail-spacer"></div>
-          <div id="lobby-status-hint" class="lobby-status-hint">Waiting for players to connect…</div>
+          <div id="lobby-status-hint" class="lobby-status-hint" data-i18n="server.waiting_players">Waiting for players to connect…</div>
           <div id="lobby-countdown" class="lobby-countdown" style="display:none;">5</div>
         </aside>
       </div>
@@ -964,7 +988,7 @@
       <!-- Loading spinner shown until WASM is ready -->
       <div id="wasm-spinner">
         <div class="spinner-ring"></div>
-        <span>Loading…</span>
+        <span data-i18n="server.loading">Loading…</span>
       </div>
 
       <!-- Full-screen overlay shown during GamePhase::Loading while server caches assets -->
@@ -979,7 +1003,7 @@
       <!-- Game-over overlay: shown when GamePhase::GameOver via __updateHud. -->
       <div id="game-over-overlay" style="display:none;position:absolute;inset:0;z-index:85;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.88);color:#cde;font-family:'Chakra Petch',monospace;text-align:center;padding:32px;">
         <div id="game-over-message" style="font-size:clamp(0.95rem,2.5vw,1.15rem);white-space:pre-wrap;line-height:1.7;max-width:64ch;letter-spacing:0.03em;"></div>
-        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;">Return to Lobby</button>
+        <button id="return-to-lobby-btn" style="margin-top:32px;padding:12px 32px;font-family:'Chakra Petch',monospace;font-size:1rem;letter-spacing:0.08em;text-transform:uppercase;color:#cde;background:rgba(140,180,220,0.12);border:1px solid #8ac;border-radius:2px;cursor:pointer;" data-i18n="client.return_to_lobby">Return to Lobby</button>
       </div>
 
       <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
@@ -994,7 +1018,7 @@
         <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
           <span id="hud-heading">000</span>
           <span id="hud-hull">100</span>
-          <span id="hud-condition">NOMINAL</span>
+          <span id="hud-condition" data-i18n="server.hud_nominal">NOMINAL</span>
         </div>
 
         <!-- Viewscreen border frame (tiled edges) -->
@@ -1011,13 +1035,13 @@
         <div class="vs-piece vs-cap top"></div>
         <div class="vs-piece vs-cap bottom"></div>
         <!-- Ship designation (top-centre, above cap) -->
-        <div class="vs-designation" id="hud-designation">PHOENIX</div>
+        <div class="vs-designation" id="hud-designation" data-i18n="server.hud_designation">PHOENIX</div>
         <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
         <div class="vs-status-strip">
-          <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
-          <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_nav">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_tac">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_eng">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+          <div class="vs-status-slot"><div class="vs-slot-label" data-i18n="server.hud_sys">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
         </div>
 
         <!-- AI chatter bubbles (bottom-left) -->
@@ -1080,8 +1104,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-30614e9b83c5193b.js';
-const wasm = await init({ module_or_path: './project-phoenix-30614e9b83c5193b_bg.wasm' });
+import init, * as bindings from './project-phoenix-48b3e064c0fc2019.js';
+const wasm = await init({ module_or_path: './project-phoenix-48b3e064c0fc2019_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1096,7 +1120,28 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   
   <!-- HTML console pages (issue #422): copied to dist/gui/ -->
   
+  <script type="module">
+    // Localisation bridge (same pattern as client.html): the page logic below
+    // is classic-script, so publish the strings API on window and substitute
+    // the static data-i18n markup once the table loads.
+    import './gui/strings-boot.js';
+    import { t, has, applyToDom } from './gui/strings.js';
+    window.phStrings = { t, has, applyToDom };
+    applyToDom(document);
+  </script>
+  <!-- Console-action dispatch table (issue #822): the host page routes its
+       embedded console actions through the same gui/action-map.js →
+       ClientMessage path the phone clients use. The module publishes
+       window.dispatchConsoleAction for the classic-script __sendAction shim. -->
+  <script type="module" src="gui/action-map.js"></script>
+
   <script>
+    // Resolve a string id via the module bridge; falls back to the raw id
+    // before modules load. Render loops re-resolve on every state message.
+    function t(id, params) {
+      return window.phStrings ? window.phStrings.t(id, params) : id;
+    }
+
   // ── Ship selection logic (issue #623, inlined from gui/ship-picker.js) ──
   function resolveShipSelection(ships) {
     if (!ships || ships.length === 0) {
@@ -1113,14 +1158,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
   // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
   //
-  // Rust pushes ViewscreenHudState JSON here via the registered
-  // set_hud_state_callback. We parse it, write the status strip cells, and
+  // Rust pushes ViewscreenHudState JSON here via the "hud" host channel
+  // (issue #818). We parse it, write the status strip cells, and
   // toggle the red-alert vignette class. It also carries the two audio state
   // flags (red_alert, phaser_firing) and engine_thrust — see the data-driven
   // audio module below for the playback side.
 
   // ── Screen shake (issue #116 follow-up) ────────────────────────────────
-  // Rust pushes (x, y) pixel offsets every frame via set_shake_callback.
+  // Rust pushes [x, y] pixel offsets every frame via the "shake" host channel.
   // Apply as CSS transform on the body so the entire page (canvas + HUD
   // overlay + border) shakes together. When offset is (0, 0) the transform
   // is removed.
@@ -1192,13 +1237,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     const vEng = document.getElementById('v-eng');
     const vSys = document.getElementById('v-sys');
     if (vNav && typeof s.heading === 'number') {
-      vNav.textContent = 'HEADING ' + String(s.heading).padStart(3, '0');
+      vNav.textContent = t('server.hud_heading', { deg: String(s.heading).padStart(3, '0') });
     }
     if (vTac) {
       vTac.textContent = s.red_alert ? 'WEAPONS HOT' : 'CLEAR';
     }
     if (vEng && typeof s.hull_pct === 'number') {
-      vEng.textContent = 'HULL ' + s.hull_pct;
+      vEng.textContent = t('server.hud_hull', { pct: s.hull_pct });
     }
     if (vSys && typeof s.condition === 'string') {
       vSys.textContent = s.condition;
@@ -1223,8 +1268,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
   // ── HTML lobby panel (issue #436) ──────────────────────────────────────
   //
-  // Rust pushes LobbyStatePayload JSON here via the registered
-  // set_lobby_state_callback. We parse it and render the station grid,
+  // Rust pushes LobbyStatePayload JSON here via the "lobby" host channel.
+  // We parse it and render the station grid,
   // crew counter, ready badge, and spectator list.
 
   let _lobbyPrevPhase = '';
@@ -1333,13 +1378,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
       if (s.countdown_secs > 0) {
-        badge.textContent = 'LAUNCHING IN ' + s.countdown_secs + 's';
+        badge.textContent = t('server.launching_in', { secs: s.countdown_secs });
         badge.className = 'go';
       } else if (s.all_ready) {
-        badge.textContent = 'ALL CREW READY';
+        badge.textContent = t('client.all_crew_ready');
         badge.className = 'go';
       } else {
-        badge.textContent = 'AWAITING CREW';
+        badge.textContent = t('client.awaiting_crew');
         badge.className = '';
       }
     }
@@ -1429,7 +1474,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         card.className = 'station-card empty per-slot';
         const label = document.createElement('div');
         label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
-        label.textContent = 'RESERVED';
+        label.textContent = t('server.reserved');
         card.appendChild(label);
       }
 
@@ -1474,7 +1519,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
         const empty = document.createElement('span');
         empty.className = 'spectator-empty';
-        empty.textContent = 'No players connected yet';
+        empty.textContent = t('server.no_players');
         specList.appendChild(empty);
       }
     }
@@ -1483,16 +1528,16 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     const hint = document.getElementById('lobby-status-hint');
     if (hint) {
       if (s.countdown_secs > 0) {
-        hint.textContent = 'Launching in ' + s.countdown_secs + 's — anyone can unready to cancel';
+        hint.textContent = t('server.hint_launching', { secs: s.countdown_secs });
         hint.style.color = '#5fd8e8';
       } else if (crewN === 0) {
-        hint.textContent = 'Waiting for players to connect…';
+        hint.textContent = t('server.waiting_players');
         hint.style.color = '#667';
       } else if (s.all_ready) {
-        hint.textContent = 'All crew ready — launching!';
+        hint.textContent = t('client.status_all_ready');
         hint.style.color = '#5fd8e8';
       } else {
-        hint.textContent = 'Waiting for crew to ready up…';
+        hint.textContent = t('server.waiting_ready');
         hint.style.color = '#889';
       }
     }
@@ -1578,10 +1623,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const label = document.getElementById('conn-label');
       if (state === 'disconnected') {
         dot.style.background = '#f44';
-        label.textContent = 'Disconnected — reconnecting…';
+        label.textContent = t('client.reconnecting');
       } else if (state === 'error') {
         dot.style.background = '#f44';
-        label.textContent = 'Error — refresh to retry';
+        label.textContent = t('server.conn_error_refresh');
       } else {
         dot.style.background = '#4c4';
         label.textContent = '';
@@ -1885,7 +1930,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // Looping beds and the siren use <audio> elements. The blaster uses Web
     // Audio instead: one-shots overlap, and <audio> cannot pan.
 
-    let _audioCfg = null;      // payload from set_audio_config_callback
+    let _audioCfg = null;      // payload from the "audio_config" host channel
     let _audioUnlocked = false; // user gesture / game start has happened
     let _audioStarted = false;
     let _els = {};             // key -> HTMLAudioElement
@@ -1980,9 +2025,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     // Called on the Loading → InProgress edge, which is also the autoplay
-    // unlock. The config push and this edge land in the same frame and the
-    // PostUpdate flushes are unordered, so whichever arrives second starts
-    // the audio — don't assume an ordering.
+    // unlock. The config push and this edge can land in the same frame, and
+    // although a single flush (`flush_host_channels`, issue #818) now walks
+    // the host channels in a fixed order, cross-channel ordering remains an
+    // implementation detail JS must not rely on — whichever arrives second
+    // starts the audio.
     function startGameAudio() {
       _audioUnlocked = true;
       maybeStartAudio();
@@ -2200,6 +2247,8 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
+  window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
+  window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
   window.wasm_toggle_debug_pause = wasmBindings.wasm_toggle_debug_pause;
@@ -2234,63 +2283,63 @@ function finishInit() {
   });
 
   // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
-  // Expose the inbound action entry point and the state-push callback
-  // registrations. The HUD callback is wired immediately so the viewscreen
-  // overlay starts receiving state as soon as the sim runs.
-  window.wasm_ui_action = wasmBindings.wasm_ui_action;
+  // Expose the Host Channel registration. Inbound actions route through
+  // window.__sendAction → gui/action-map.js → wasm_receive_message (issue #822).
   window.wasm_force_start = wasmBindings.wasm_force_start;
-  window.set_console_state_callback = wasmBindings.set_console_state_callback;
-  window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
-  window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
-  window.set_shake_callback = wasmBindings.set_shake_callback;
-  window.set_chatter_callback = wasmBindings.set_chatter_callback;
-  window.set_audio_config_callback = wasmBindings.set_audio_config_callback;
-  window.set_audio_cue_callback = wasmBindings.set_audio_cue_callback;
-  window.set_audio_level_callback = wasmBindings.set_audio_level_callback;
-  if (typeof set_hud_state_callback === 'function') {
-    set_hud_state_callback(window.__updateHud);
-  }
-  if (typeof set_lobby_state_callback === 'function') {
-    set_lobby_state_callback(window.__updateLobby);
-  }
-  if (typeof set_shake_callback === 'function') {
-    set_shake_callback(window.__applyShake);
-  }
-  if (typeof set_chatter_callback === 'function') {
-    set_chatter_callback(window.__updateChatter);
-  }
-  if (typeof set_audio_config_callback === 'function') {
-    set_audio_config_callback(window.__audioConfig);
-  }
-  if (typeof set_audio_cue_callback === 'function') {
-    set_audio_cue_callback(window.__audioCue);
-  }
-  if (typeof set_audio_level_callback === 'function') {
-    set_audio_level_callback(window.__audioLevel);
+  window.set_host_channel_callback = wasmBindings.set_host_channel_callback;
+
+  // ── Host Channel dispatcher (issue #818) ─────────────────────────────────
+  // One flush system in Rust (`flush_host_channels`) drains every host-page
+  // channel and calls `__hostChannel(name, payload)`. The handlers table
+  // routes each named channel to its existing handler function. Adding a
+  // channel = one Rust table row + one entry here.
+  //
+  // Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
+  // a bare number for audio_level; a two-element [x, y] array for shake.
+  //
+  // JS must not assume any cross-channel ordering: even though a single flush
+  // now walks the channels in a fixed order, that order is an implementation
+  // detail — e.g. the audio config push and the Loading → InProgress edge may
+  // still land in either order within a frame (see startGameAudio).
+  var _hostChannelHandlers = {
+    hud:          function(p) { window.__updateHud(p); },
+    lobby:        function(p) { window.__updateLobby(p); },
+    chatter:      function(p) { window.__updateChatter(p); },
+    audio_config: function(p) { window.__audioConfig(p); },
+    audio_cue:    function(p) { window.__audioCue(p); },
+    audio_level:  function(p) { window.__audioLevel(p); },
+    shake:        function(p) { window.__applyShake(p[0], p[1]); }
+  };
+  window.__hostChannel = function(name, payload) {
+    var handler = _hostChannelHandlers[name];
+    if (handler) {
+      handler(payload);
+    } else {
+      console.warn('[Phoenix] unhandled host channel:', name);
+    }
+  };
+  if (typeof set_host_channel_callback === 'function') {
+    set_host_channel_callback(window.__hostChannel);
   }
 
-  // ── HTML console state relay (issue #428) ────────────────────────────────
-  // WASM pushes console state via flush_console_state → set_console_state_callback.
-  // We relay it to HTML console pages (gui/*.html) open in the same browser
-  // origin via BroadcastChannel ('phoenix-console-state').  Those pages send
-  // their actions back on the same channel and we forward them to wasm_ui_action.
+  // ── HTML console action relay (issue #428) ───────────────────────────────
+  // Standalone console tabs (gui/*.html opened as their own browser tab —
+  // ADR-0001 §3 transport target 4) send their actions on
+  // BroadcastChannel('phoenix-console-state'); route them through the same
+  // __sendAction → gui/action-map.js dispatcher as the host page's own
+  // consoles (issue #822).
+  // The outbound console-STATE half of this relay (window.__updateConsole +
+  // flush_console_state) was removed with the dormant console-preview channel
+  // in issue #818 — Rust never produced ConsoleStateChanged.
   var _consoleBroadcast = ('BroadcastChannel' in window)
       ? new BroadcastChannel('phoenix-console-state')
       : null;
-  window.__updateConsole = function(name, json) {
-    if (_consoleBroadcast) {
-      _consoleBroadcast.postMessage({ type: 'console_state', name: name, json: json });
-    }
-  };
   if (_consoleBroadcast) {
     _consoleBroadcast.onmessage = function(e) {
-      if (e.data && e.data.type === 'console_action' && typeof wasm_ui_action === 'function') {
-        wasm_ui_action(e.data.payload);
+      if (e.data && e.data.type === 'console_action') {
+        window.__sendAction(e.data.payload);
       }
     };
-  }
-  if (typeof set_console_state_callback === 'function') {
-    set_console_state_callback(window.__updateConsole);
   }
 
   // ── Available ships from world config (issue #623) ──────────────────────
@@ -2332,7 +2381,7 @@ function finishInit() {
     // Multiple ships — show ph-ship-picker component, defer server start until selection.
     const panel = document.getElementById('scenario-panel');
     const worldList = document.getElementById('world-list');
-    document.getElementById('world-list-label').textContent = 'Select a ship';
+    document.getElementById('world-list-label').textContent = t('server.select_ship');
     worldList.innerHTML = '';
 
     // Dynamically import the ship-picker web component (registers custom element).
@@ -2386,6 +2435,15 @@ function startServer() {
   if (urlParams.get('debug_regions') === '1') {
     wasm_set_debug_regions(true);
   }
+
+  // Logging: ?log= sets category levels, ?log_entity= restricts to named
+  // entities. Same syntax as phoenix-headless --log / --log-entity, parsed by
+  // the same Rust parser. Both must be set before wasm_init().
+  //   ?log=info,ai=debug,admit=trace&log_entity=Ironveil
+  const logSpec = urlParams.get('log');
+  if (logSpec) wasm_set_log_spec(logSpec);
+  const logEntity = urlParams.get('log_entity');
+  if (logEntity) wasm_set_log_entity(logEntity);
 
   set_message_callback(routeOutbound);
 

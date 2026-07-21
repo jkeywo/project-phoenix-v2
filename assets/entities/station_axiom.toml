@@ -1,10 +1,10 @@
-name = "Axiom Station"
+name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]
 
 [target]
 tags = [ "station" ]
 threat_level = "none"
-description = "Axiom Station"
+description = "entity.station_axiom.target.description"
 
 [hull]
 hull_integrity = 800

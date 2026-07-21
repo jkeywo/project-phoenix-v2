@@ -1,4 +1,4 @@
-name = "Nebula"
+name = "entity.region_nebula.name"
 tags = ["region", "nebula"]
 
 [radar_appearance]
@@ -7,7 +7,7 @@ region_colour = [0.6, 0.4, 1.0]
 [target]
 tags = ["region"]
 threat_level = "none"
-description = "Nebula region"
+description = "entity.region_nebula.target.description"
 
 [shape]
 type = "sphere"

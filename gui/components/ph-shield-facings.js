@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhShieldFacings extends HTMLElement {
   #state = null;
   #facingGs = new Map();
@@ -8,8 +15,8 @@ export class PhShieldFacings extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -27,15 +34,15 @@ export class PhShieldFacings extends HTMLElement {
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
-    <span>SHIELD FACINGS</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.shield_facings.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div class="arc-container" id="arc-container">
-    <div class="empty" id="empty-placeholder">NO FACING DATA</div>
+    <div class="empty" id="empty-placeholder">${t('component.shield_facings.empty')}</div>
     <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" id="facing-svg" style="display:none"><g id="facing-arcs"></g></svg>
   </div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
@@ -157,7 +164,7 @@ export class PhShieldFacings extends HTMLElement {
       labelEl.setAttribute('class', 'facing-label' + (isFocused ? ' focused-label' : ''));
 
       // HP text inside arc
-      const hpLabel = !online ? 'OFF' : Math.round(pct * 100) + '%';
+      const hpLabel = !online ? t('component.shield_facings.off') : Math.round(pct * 100) + '%';
       const ix = cx + (ir + (r - ir) / 2) * Math.cos(midAngle);
       const iy = cy + (ir + (r - ir) / 2) * Math.sin(midAngle);
       const hpText = g.children[3];

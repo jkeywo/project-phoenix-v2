@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhLateralThrustJoystick extends HTMLElement {
   #state = null;
   #value = 0;
@@ -12,8 +19,8 @@ export class PhLateralThrustJoystick extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -38,17 +45,17 @@ export class PhLateralThrustJoystick extends HTMLElement {
     .readout { font-size: 0.75rem; color: rgba(108,182,208,0.8); letter-spacing: 0.1em; margin-top: 0.25rem; }
   </style>
   <div class="header">
-    <span>LATERAL</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.lateral.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div class="track" id="track">
     <div class="center-line"></div>
-    <div class="labels"><span>PORT</span><span>STBD</span></div>
+    <div class="labels"><span>${t('console.common.port')}</span><span>${t('console.common.stbd')}</span></div>
     <div class="nub" id="nub"></div>
   </div>
   <div class="readout" id="readout">0.00</div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {

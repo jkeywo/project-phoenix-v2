@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 import './ph-damage-bar.js';
 import './ph-damage-detail.js';
 
@@ -9,8 +16,8 @@ export class PhHullIntegrity extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -18,13 +25,13 @@ export class PhHullIntegrity extends HTMLElement {
     .placeholder { font-size: 0.65rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
     .systems-label { font-size: 0.65rem; letter-spacing: 0.2em; color: var(--ink-dim); margin-top: 0.25rem; }
   </style>
-  <div class="header"><span>HULL INTEGRITY</span></div>
+  <div class="header"><span>${t('component.hull_integrity.title')}</span></div>
   <div id="bar-container"></div>
-  <div class="placeholder" id="placeholder">NO HULL DATA</div>
-  <div class="systems-label" id="systems-label">SYSTEMS</div>
+  <div class="placeholder" id="placeholder">${t('component.hull_integrity.no_data')}</div>
+  <div class="systems-label" id="systems-label">${t('component.hull_integrity.systems')}</div>
   <div id="detail-container"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
 
     this.#barEl = document.createElement('ph-damage-bar');
     this.#detailEl = document.createElement('ph-damage-detail');

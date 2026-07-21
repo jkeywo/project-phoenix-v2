@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Engineering Console</title>
+  <title data-i18n="console.engineering.doc_title">Project Phoenix — Engineering Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -26,25 +26,25 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Engineering Console">
+  <div class="frame" data-screen-label="Engineering Console" data-i18n-attr="data-screen-label:console.engineering.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>ENGINEERING<span class="sub">SHIELDS &middot; POWER &middot; REPAIR</span></h1>
-        <span class="auto-badge" id="engineering-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.engineering.title">ENGINEERING</span><span class="sub" data-i18n="console.destroyer_engineering.subtitle">SHIELDS &middot; POWER &middot; REPAIR</span></h1>
+        <span class="auto-badge" id="engineering-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Shields</h2>
+          <h2 data-i18n="console.engineering.shields">Shields</h2>
           <ph-shield-facings id="shield-facings"></ph-shield-facings>
         </div>
         <div class="col">
-          <h2>Power</h2>
+          <h2 data-i18n="console.engineering.power">Power</h2>
           <ph-power-controls id="power-controls"></ph-power-controls>
           <ph-battery-bar id="battery-bar"></ph-battery-bar>
         </div>
         <div class="col">
-          <h2>Repair</h2>
+          <h2 data-i18n="console.engineering.repair">Repair</h2>
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
           <ph-station-damage id="core-damage" label="Core"></ph-station-damage>
           <ph-repair-teams id="repair-teams"></ph-repair-teams>
@@ -52,7 +52,7 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">ENGINEERING STATION</span>
+        <span id="footer-status" data-i18n="console.engineering.station_footer">ENGINEERING STATION</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -67,38 +67,40 @@
     import '../components/ph-hull-integrity.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    // Generic system-id-keyed payload (issue #825): resolve each panel's view
+    // from the fine system ids this station owns.
+    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'engineering',
+      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var shieldEl = document.getElementById('shield-facings');
         var powerEl = document.getElementById('power-controls');
         var batteryEl = document.getElementById('battery-bar');
         var repairTeamsEl = document.getElementById('repair-teams');
         var hullEl = document.getElementById('hull-integrity');
-        if (s.shields) {
-          var sh = s.shields;
-          shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
-        }
-        if (s.power) {
-          var p = s.power;
-          powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
-          batteryEl.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
-        }
-        if (s.repair) {
-          var r = s.repair;
-          // Overall ship-wide hull (every damageable system), not just this
-          // station's own systems.
-          var oh = r.overall_hull || {};
-          hullEl.state = { total_pct: oh.pct != null ? oh.pct : 1 };
-          // Ownerless "core" systems get their own click-to-expand bar that
-          // hides itself entirely when there are none (issue #12).
-          document.getElementById('core-damage').state = { entries: r.core_systems || [] };
-          repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
-        }
+        var sh = system(s, 'shields-system');
+        var p = system(s, 'power-reactor', 'power-battery');
+        var r = system(s, 'repair');
+        shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
+        powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
+        batteryEl.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !p.locked, emergency_threshold_pct: 20 };
+        // Overall ship-wide hull (every damageable system), not just this
+        // station's own systems.
+        var oh = r.overall_hull || {};
+        hullEl.state = { total_pct: oh.pct != null ? oh.pct : 1 };
+        // Ownerless "core" systems get their own click-to-expand bar that
+        // hides itself entirely when there are none (issue #12).
+        document.getElementById('core-damage').state = { entries: r.core_systems || [] };
+        repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [] };
         document.getElementById('station-damage').state = s.own_hull || null;
-        var isAuto = !!s.engineering_auto;
-        setAutoState(null, document.getElementById('engineering-auto-badge'), isAuto);
+        // Station badge: the retired composite's engineering_auto meant
+        // "station is Backfill-rated". The per-system equivalent is every
+        // owned system AI-run — the conjunction of the resolved views' *_auto
+        // flags (controlSources can lag a rating change by one tick).
+        setAutoState(null, document.getElementById('engineering-auto-badge'), !!(sh.shields_auto && p.power_auto && r.repair_auto));
       }
     });
   </script>

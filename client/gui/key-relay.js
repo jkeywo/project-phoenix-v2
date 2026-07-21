@@ -9,7 +9,7 @@
  * clicked back into the console. This relays the host's key events to the
  * active console so the bindings work no matter what was last clicked.
  *
- * This is the keyboard twin of the SwipeConsole relay in client.html, which
+ * This is the keyboard relay injected into console iframes (the swipe relay was deleted in #827), which
  * exists because touch events inside an iframe don't reach the host either.
  *
  * There is no double-delivery risk: when focus IS inside the iframe the host

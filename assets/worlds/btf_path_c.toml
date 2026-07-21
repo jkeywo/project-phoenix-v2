@@ -5,27 +5,27 @@
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "Ironveil"
+entity    = "world.entity.ironveil.name"
 
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-harrow-orders"
-  text      = "Decrypted Harrow orders recovered: Ashrender is the weapon platform."
+  text      = "world.btf_path_c.trigger.action.obj_harrow_orders.text"
   mandatory = false
 
 # ── Comms templates ───────────────────────────────────────────────────────────
 
 [[comms]]
 thread_id = "path-c-internal"
-from    = "_self"
+from    = "world.btf_path_c.comms.path_c_internal.from"
 trigger = "on_world_loaded"
 urgent  = true
-message = "TACTICAL ALERT — I.V. Ironveil has opened fire. Science is tracking hull frequencies. Recommend Tactical tune shield harmonics to counter gamma-frequency phaser banks."
+message = "world.btf_path_c.comms.path_c_internal.message"
 
 [[comms]]
 thread_id = "path-c-internal"
-from    = "_self"
+from    = "world.btf_path_c.comms.path_c_internal.from_2"
 trigger = "on_destroyed"
-entity  = "Ironveil"
+entity  = "world.entity.ironveil.name"
 urgent  = true
-message = "INTERNAL REPORT — DECRYPTED SIGNAL INTERCEPT from I.V. Ironveil wreckage: HARROW OPERATIONAL ORDER HK-7 CONFIRMED. CODENAME: APHELION PROTOCOL. Authorised by High Executor Veth Harrow, countersigned Archivist Kallas. PRIMARY TARGET: Axiom Station (coordinates attached). SECONDARY TARGET: Kaleth Prime — atmospheric saturation required as territorial demonstration. ASHRENDER CONFIRMED ON STATION. WEAPON CHARGE: PROCEEDING ON SCHEDULE. NOTE: negotiator extraction complete. Varen is aboard Ashrender. — END INTERCEPT."
+message = "world.btf_path_c.comms.path_c_internal.message_2"

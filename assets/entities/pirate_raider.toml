@@ -10,14 +10,14 @@
 # TOMLs (`default.toml`, `patrol.toml`, `reinforcements.toml`) continue
 # to reference it without cascading renames.
 
-name = "Harrow Destroyer"
+name = "entity.pirate_raider.name"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "low"
-description = "Harrow Destroyer"
+description = "entity.pirate_raider.target.description"
 
 [hull]
 hull_integrity = 30.0
@@ -26,7 +26,7 @@ hull_integrity = 30.0
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
 [[shield_arc]]
 id = "all"
-label = "All"
+label = "entity.pirate_raider.shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 15
@@ -104,7 +104,7 @@ sensor_range = 120.0
 
 [[behaviour.doctrine]]
 id        = "patrol-sector"
-text      = "Patrol the sector"
+text      = "entity.pirate_raider.behaviour.doctrine.patrol_sector.text"
 directive_kind    = "Patrol"
 directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
 directive_loop    = true
@@ -113,7 +113,7 @@ target_speed      = 0.4
 
 [[behaviour.doctrine]]
 id            = "destroy-hostiles"
-text          = "Engage and destroy hostile ships"
+text          = "entity.pirate_raider.behaviour.doctrine.destroy_hostiles.text"
 directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9
@@ -135,7 +135,7 @@ maintain_range = 25.0
 # behaviour it had before this objective existed.
 [[behaviour.doctrine]]
 id               = "retreat-when-hurt"
-text             = "Hull critical — break off and run for the haven"
+text             = "entity.pirate_raider.behaviour.doctrine.retreat_when_hurt.text"
 directive_kind   = "Retreat"
 directive_anchor = "pirate_haven"
 base_priority    = 100.0

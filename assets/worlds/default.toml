@@ -14,8 +14,8 @@
 
 [global]
 seed = 42
-title = "Starbase Alpha"
-description = "Defend the Federation outpost against an incoming raider patrol."
+title = "world.default.global.title"
+description = "world.default.global.description"
 # Fixed rate (Hz) of the shared AI-helm sim tick: every per-axis AI helm
 # system (thrust, steering, lateral thrust, impulse) decides at this cadence,
 # independent of the host's frame rate (issue #803). Omitting the key
@@ -66,14 +66,14 @@ transform = { position = [0.0, 0.0, 0.0] }
 [[entity]]
 template_path = "assets/entities/planet_earth.toml"
 id = "earth"
-name = "earth"
+name = "world.entity.earth.name"
 transform = { position = [400.0, 0.0, 400.0] }
 
 # Earth's moon, placed relative to the planet (static — no orbital motion).
 [[entity]]
 template_path = "assets/entities/moon_luna.toml"
 id = "luna"
-name = "luna"
+name = "world.entity.luna.name"
 transform = { relative_to = "earth", offset = [60.0, 0.0, 30.0] }
 
 # Lava planet in a further-out position (r ~922; the asteroid field spans
@@ -81,7 +81,7 @@ transform = { relative_to = "earth", offset = [60.0, 0.0, 30.0] }
 [[entity]]
 template_path = "assets/entities/planet_lava.toml"
 id = "lava-planet"
-name = "lava-planet"
+name = "world.entity.lava_planet.name"
 transform = { position = [-700.0, 0.0, -600.0] }
 
 [[entity]]
@@ -110,7 +110,7 @@ transform = { position = [600.0, 0.0, -600.0] }
 
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"
-name = "Starbase Alpha"
+name = "world.entity.starbase_alpha.name"
 transform = { anchor = "starbase_alpha" }
 
 # ── Named NPC entities (trigger-eligible) ─────────────────────────────────────
@@ -121,24 +121,24 @@ transform = { anchor = "starbase_alpha" }
 
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
-name          = "raider_alpha"
+name          = "world.entity.raider_alpha.name"
 transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "raider_alpha"
+entity    = "world.entity.raider_alpha.name"
 
   [[trigger.action]]
   type      = "add_objective"
   id        = "obj-raider-destroyed"
-  text      = "Pirate raider eliminated."
+  text      = "world.default.trigger.action.obj_raider_destroyed.text"
   mandatory = false
 
 [[trigger]]
 condition = "on_attacked"
-entity    = "raider_alpha"
+entity    = "world.entity.raider_alpha.name"
 
   [[trigger.action]]
   type = "load_world"
@@ -146,45 +146,45 @@ entity    = "raider_alpha"
 
 [[available_ships]]
 template_path = "assets/entities/alliance_cruiser.toml"
-label = "Alliance Cruiser"
+label = "world.default.available_ships.0.label"
 
 [[available_ships]]
 template_path = "assets/entities/alliance_destroyer.toml"
-label = "Alliance Destroyer"
+label = "world.default.available_ships.1.label"
 
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 # Automatic distress call broadcast when the raider is first attacked.
 [[comms]]
-from    = "raider_alpha"
+from    = "world.entity.raider_alpha.name"
 trigger = "on_attacked"
-entity  = "raider_alpha"
-message = "MAYDAY MAYDAY — Pirate raider calling for backup. USS Phoenix has engaged. All units converge on our position!"
+entity  = "world.entity.raider_alpha.name"
+message = "world.default.comms.0.message"
 
 # Automatic distress call broadcast from Starbase Alpha when the station is first attacked.
 [[comms]]
-from    = "Starbase Alpha"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_attacked"
-entity  = "Starbase Alpha"
-message = "Starbase Alpha to all vessels — we are under attack! Requesting immediate assistance!"
+entity  = "world.entity.starbase_alpha.name"
+message = "world.default.comms.1.message"
 
 [[comms]]
-from    = "Starbase Alpha"
+from    = "world.entity.starbase_alpha.name"
 trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+entity  = "world.entity.starbase_alpha.name"
+message = "world.default.comms.2.message"
 
   [[comms.response]]
-  text = "We are on a survey mission."
+  text = "world.default.comms.response.0.text"
     [[comms.response.action]]
     type = "add_objective"
     id   = "obj-survey"
-    text = "Complete the survey in this sector."
+    text = "world.default.comms.response.action.obj_survey.text"
 
   [[comms.response]]
-  text = "We require docking clearance."
+  text = "world.default.comms.response.1.text"
     [[comms.response.action]]
     type      = "add_objective"
     id        = "obj-dock"
-    text      = "Dock at Starbase Alpha."
+    text      = "world.default.comms.response.action.obj_dock.text"
     mandatory = true

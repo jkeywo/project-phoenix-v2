@@ -7,14 +7,14 @@
 # gained `on_attacked → pursue` transition (mirrors the destroyer),
 # gained a `[shields]` block, removed flee/warp_out from combat.
 
-name = "Harrow Cruiser"
+name = "entity.ship_harrow_patrol.name"
 tags = ["ship", "npc", "comms_contact"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [target]
 tags = ["ship"]
 threat_level = "medium"
-description = "Harrow Cruiser"
+description = "entity.ship_harrow_patrol.target.description"
 
 [hull]
 hull_integrity = 120.0
@@ -23,7 +23,7 @@ hull_integrity = 120.0
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
 [[shield_arc]]
 id = "all"
-label = "All"
+label = "entity.ship_harrow_patrol.shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 60
@@ -105,7 +105,7 @@ sensor_range = 110.0
 
 [[behaviour.doctrine]]
 id            = "patrol-ironveil"
-text          = "Patrol the Ironveil sector"
+text          = "entity.ship_harrow_patrol.behaviour.doctrine.patrol_ironveil.text"
 directive_kind    = "Patrol"
 directive_anchors = ["ironveil_patrol_a", "ironveil_patrol_b"]
 directive_loop    = true
@@ -114,7 +114,7 @@ target_speed      = 0.5
 
 [[behaviour.doctrine]]
 id            = "destroy-hostiles"
-text          = "Engage and destroy hostile ships"
+text          = "entity.ship_harrow_patrol.behaviour.doctrine.destroy_hostiles.text"
 directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9

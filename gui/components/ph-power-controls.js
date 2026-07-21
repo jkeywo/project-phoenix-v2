@@ -1,4 +1,10 @@
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhPowerControls extends HTMLElement {
   #state = null;
@@ -8,8 +14,8 @@ export class PhPowerControls extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -29,12 +35,12 @@ export class PhPowerControls extends HTMLElement {
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
-    <span>POWER ALLOCATION</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.power.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="groups-container"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
   }
 
@@ -58,7 +64,7 @@ export class PhPowerControls extends HTMLElement {
     badge.style.display = auto ? 'inline' : 'none';
 
     if (groups.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = 'NO POWER GROUPS'; container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.power.empty'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -131,7 +137,7 @@ export class PhPowerControls extends HTMLElement {
       const maxLevel = group.max_level != null ? group.max_level : 4;
 
       el.querySelector('.group-label').textContent = group.label || group.id;
-      el.querySelector('.level-text').textContent = 'LVL ' + level;
+      el.querySelector('.level-text').textContent = t('component.power.level', { n: level });
 
       const pipRow = el.querySelector('.pip-row');
 

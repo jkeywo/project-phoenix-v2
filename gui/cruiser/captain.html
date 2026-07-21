@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix — Captain Console</title>
+  <title data-i18n="console.captain.doc_title">Project Phoenix — Captain Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { font-size: 16px; margin: 0; background: #000; overflow: hidden; }
@@ -25,15 +25,15 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Captain Console">
+  <div class="frame" data-screen-label="Captain Console" data-i18n-attr="data-screen-label:console.captain.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>CAPTAIN<span class="sub">COMMAND</span></h1>
+        <h1><span data-i18n="console.captain.title">CAPTAIN</span><span class="sub" data-i18n="console.captain.subtitle">COMMAND</span></h1>
       </div>
       <div class="console-body">
         <div class="col">
-          <h2>Command</h2>
+          <h2 data-i18n="console.captain.command">Command</h2>
           <ph-camera-select id="camera-select"></ph-camera-select>
           <ph-red-alert id="red-alert"></ph-red-alert>
           <ph-objective-list id="objective-list"></ph-objective-list>
@@ -41,9 +41,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span id="footer-status">CAPTAIN STATION</span>
+        <span id="footer-status" data-i18n="console.captain.station_footer">CAPTAIN STATION</span>
         <span class="sep">·</span>
-        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span id="footer-target" style="color:var(--ink-faint)" data-i18n="console.common.no_target">NO TARGET</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
@@ -56,8 +56,10 @@
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     initConsole({
       name: 'captain',
+      // s is a CaptainConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var c = document.getElementById('camera-select');
         var r = document.getElementById('red-alert');

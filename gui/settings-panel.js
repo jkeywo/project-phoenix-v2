@@ -16,6 +16,8 @@
  *   </script>
  */
 
+import { t, has } from './strings.js';
+
 const STORAGE_KEY = 'phoenix-settings-volume';
 
 /**
@@ -34,8 +36,8 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
     btn = doc.createElement('button');
     btn.id = 'settings-btn';
     btn.className = 'settings-btn';
-    btn.setAttribute('aria-label', 'Settings');
-    btn.title = 'Settings';
+    btn.setAttribute('aria-label', t('settings.title'));
+    btn.title = t('settings.title');
     btn.textContent = '\u2699';
     doc.body.appendChild(btn);
   }
@@ -75,7 +77,7 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
 
       const heading = doc.createElement('div');
       heading.className = 'settings-section-heading';
-      heading.textContent = 'Rating';
+      heading.textContent = t('settings.rating');
       ratingSection.appendChild(heading);
 
       const row = doc.createElement('div');
@@ -83,7 +85,10 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
       for (const r of ratings) {
         const btn2 = doc.createElement('button');
         btn2.className = 'settings-rating-btn' + (r === activeRating ? ' active' : '');
-        btn2.textContent = r === 'Std' ? 'STANDARD' : r.toUpperCase();
+        // Rating names are lookup identifiers in the ship TOML (Rust matches
+        // them by name), so the display text comes from a derived string id.
+        const ratingKey = 'station.rating.' + r.toLowerCase() + '.name';
+        btn2.textContent = has(ratingKey) ? t(ratingKey) : r.toUpperCase();
         btn2.addEventListener('click', () => {
           if (r !== activeRating && typeof send === 'function') {
             send('SetStationRating', { rating_name: r });
@@ -101,7 +106,7 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
 
     const volHeading = doc.createElement('div');
     volHeading.className = 'settings-section-heading';
-    volHeading.textContent = 'Volume';
+    volHeading.textContent = t('settings.volume');
     volSection.appendChild(volHeading);
 
     const volRow = doc.createElement('div');
@@ -141,12 +146,12 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
 
     const qrHeading = doc.createElement('div');
     qrHeading.className = 'settings-section-heading';
-    qrHeading.textContent = 'QR Code';
+    qrHeading.textContent = t('settings.qr_code');
     qrSection.appendChild(qrHeading);
 
     const qrBtn = doc.createElement('button');
     qrBtn.className = 'settings-action-btn';
-    qrBtn.textContent = 'Toggle QR on Screen';
+    qrBtn.textContent = t('settings.toggle_qr');
     qrBtn.addEventListener('click', () => {
       if (typeof send === 'function') send('ToggleQrCode', {});
     });
@@ -160,12 +165,12 @@ export function mountSettings({ send, getState, audioEl, myToken, doc: _doc } = 
 
       const leaveHeading = doc.createElement('div');
       leaveHeading.className = 'settings-section-heading';
-      leaveHeading.textContent = 'Station';
+      leaveHeading.textContent = t('settings.station');
       leaveSection.appendChild(leaveHeading);
 
       const leaveBtn = doc.createElement('button');
       leaveBtn.className = 'settings-action-btn settings-leave-btn';
-      leaveBtn.textContent = 'Leave Station';
+      leaveBtn.textContent = t('settings.leave_station');
       leaveBtn.addEventListener('click', () => {
         close();
         if (typeof send === 'function') send('ReleaseStation');

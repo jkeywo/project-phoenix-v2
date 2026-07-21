@@ -1,0 +1,136 @@
+/**
+ * gui/lobby-view.js — Pure selectors behind client.html's renderLobby()
+ * (issue #827).
+ *
+ * Computes everything renderLobby decides (row classes, button kinds, the
+ * detail panel's auto-selected console, ready-button state, status-line
+ * string-id selection) from (uiState, myToken, lobbyConsole). All DOM writes
+ * stay in client.html's inline glue, which consumes this view model.
+ */
+
+/**
+ * Detail-panel console auto-select. Post issue #619 one station == one
+ * console, so the single console chip is auto-selected the moment the player
+ * holds a station; releasing the station clears the selection.
+ *
+ * @param {string|null} lobbyConsole  currently selected console id
+ * @param {{ id?: string }|null} myStation  the station row I hold, or null
+ * @returns {string|null} the console id that should be selected
+ */
+export function nextLobbyConsole(lobbyConsole, myStation) {
+  if (!myStation) return null;
+  const consoles = myStation.id ? [myStation.id] : [];
+  if (consoles.length === 1 && lobbyConsole !== consoles[0]) return consoles[0];
+  return lobbyConsole;
+}
+
+/**
+ * Build the lobby view model.
+ *
+ * @param {object} s  uiState (players, stations, maxPlayers, allReady,
+ *                    countdownSecs, phase)
+ * @param {string|null} myToken
+ * @param {string|null} lobbyConsole  console selection before auto-select
+ * @param {{ labelFor?: (station: object) => string,
+ *           stationRatings?: Object<string,string>|null }} [opts]
+ *        labelFor resolves a station row to its display label (client.html
+ *        passes its string-table stationLabel); stationRatings is
+ *        simState.stationRatings for the active-rating highlight.
+ * @returns {object} view model — see the return literal.
+ */
+export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
+  const labelFor = opts.labelFor || (st => (st && (st.name || st.id)) || '');
+  const stationRatings = opts.stationRatings || null;
+
+  const myPlayer = (s.players || []).find(p => p.token === myToken) || null;
+  const myStation = myPlayer
+    ? ((s.stations || []).find(st => st.holder_token === myToken) || null)
+    : null;
+  const hasStation = !!myStation;
+  const selectedConsole = nextLobbyConsole(lobbyConsole, myStation);
+
+  const rows = (s.stations || []).map(st => {
+    const isMine = !!st.holder_token && st.holder_token === myToken;
+    return {
+      id: st.id,
+      name: st.name,
+      isMine,
+      rowClass: 'station-row'
+        + (isMine ? ' mine' : '')
+        + (st.holder_name && !isMine ? ' taken' : ''),
+      glyph: st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--',
+      label: labelFor(st),
+      rank: st.rank || null,
+      chipId: st.id || null,
+      occupant: (st.holder_name && !isMine) ? st.holder_name : null,
+      // 'release' (mine) | 'taken' (someone else's) | 'claim' (free)
+      button: isMine ? 'release' : (st.holder_name ? 'taken' : 'claim'),
+    };
+  });
+
+  const detail = hasStation
+    ? {
+        active: true,
+        stationName: labelFor(myStation),
+        consoles: myStation.id ? [myStation.id] : [],
+        selectedConsole,
+        ratings: (myStation.ratings && myStation.ratings.length > 1)
+          ? {
+              list: myStation.ratings,
+              active: (stationRatings && stationRatings[myStation.id]) || myStation.ratings[0],
+            }
+          : null,
+      }
+    : { active: false, stationName: null, consoles: [], selectedConsole: null, ratings: null };
+
+  let readyBtn;
+  if (myPlayer && hasStation && selectedConsole) {
+    const isReady = !!myPlayer.ready;
+    if (s.countdownSecs > 0) {
+      // Countdown active — keep button in ready state, show timer.
+      readyBtn = { visible: true, mode: 'countdown', secs: s.countdownSecs, sendReady: false };
+    } else if (isReady) {
+      readyBtn = { visible: true, mode: 'ready-confirmed', sendReady: false };
+    } else {
+      readyBtn = { visible: true, mode: 'ready', sendReady: true };
+    }
+  } else {
+    readyBtn = { visible: false };
+  }
+
+  let statusLine;
+  if (!myPlayer || !hasStation) {
+    statusLine = { id: 'client.status_select_station', params: {} };
+  } else if (!selectedConsole) {
+    statusLine = { id: 'client.status_select_console', params: { station: labelFor(myStation) } };
+  } else if (s.countdownSecs > 0) {
+    statusLine = { id: 'client.status_launching', params: { secs: s.countdownSecs } };
+  } else if (s.allReady) {
+    statusLine = { id: 'client.status_all_ready', params: {} };
+  } else if (myPlayer.ready) {
+    statusLine = { id: 'client.status_waiting_crew', params: {} };
+  } else {
+    statusLine = { id: 'client.status_standing_by', params: { station: labelFor(myStation) } };
+  }
+
+  return {
+    hasStation,
+    myStation,
+    selectedConsole,
+    rows,
+    detail,
+    readyBtn,
+    statusLine,
+    crew: {
+      filled: (s.stations || []).filter(st => st.holder_name).length,
+      max: s.maxPlayers || 0,
+    },
+    allReady: !!s.allReady,
+  };
+}
+
+// Expose for the non-module inline script in client.html.
+if (typeof window !== 'undefined') {
+  window.lobbyViewModel = lobbyViewModel;
+  window.nextLobbyConsole = nextLobbyConsole;
+}

@@ -1,3 +1,11 @@
+// Side-effect import: strings-boot's top-level await blocks this module until
+// the string table is loaded, so localiseTree below can never run against an
+// empty table and leak raw ids into a console. Do not drop this in favour of
+// relying on <script> ordering in client.html — that only holds if every entry
+// point keeps strings-boot first.
+import './strings-boot.js';
+import { localiseTree } from './strings.js';
+
 export function defaultIceServers() {
   return [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -153,7 +161,9 @@ export class ConnectionManager {
                 if (typeof onData !== 'function') return;
                 try {
                   const str = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
-                  onData(JSON.parse(str));
+                  // Resolve TOML string ids to display text once, here, so no
+                  // console has to know which of its fields are localisable.
+                  onData(localiseTree(JSON.parse(str)));
                 } catch (e) {
                   if (onLog) onLog('[snapshot] bad message ' + e);
                 }
@@ -179,7 +189,7 @@ export class ConnectionManager {
           if (typeof onData !== 'function') return;
           try {
             const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-            onData(JSON.parse(str));
+            onData(localiseTree(JSON.parse(str)));
           } catch (e) {
             if (onLog) onLog('[client] bad message ' + e + ' ' + raw);
           }

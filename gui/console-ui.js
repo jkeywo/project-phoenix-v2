@@ -1,3 +1,5 @@
+import { t } from './strings.js';
+
 /**
  * gui/console-ui.js — Shared authoring library for console iframe UI.
  *
@@ -118,7 +120,7 @@ export function setAutoState(button, badge, isAuto) {
   }
   if (badge) {
     badge.hidden = !isAuto;
-    badge.textContent = 'AUTO';
+    badge.textContent = t('console.common.auto');
   }
 }
 

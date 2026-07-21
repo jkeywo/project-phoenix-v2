@@ -1,4 +1,10 @@
 import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhImpulseBtn extends HTMLElement {
   #state = null;
@@ -7,8 +13,8 @@ export class PhImpulseBtn extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -23,13 +29,13 @@ export class PhImpulseBtn extends HTMLElement {
     .btn:disabled { opacity: 0.4; cursor: default; }
   </style>
   <div class="header">
-    <span>IMPULSE DRIVE</span>
-    <span class="binding" id="binding">CTRL · B</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.impulse.title')}</span>
+    <span class="binding" id="binding">${t('component.impulse.binding')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
-  <button class="btn ready" id="btn">IMPULSE</button>
+  <button class="btn ready" id="btn">${t('component.impulse.ready')}</button>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
@@ -91,17 +97,17 @@ export class PhImpulseBtn extends HTMLElement {
 
     // Button text and classes
     if (st === 'ready') {
-      btn.textContent = 'IMPULSE';
+      btn.textContent = t('component.impulse.ready');
       btn.className = 'btn ready';
       btn.disabled = auto;
     } else if (st === 'charging') {
       // Keep the button enabled during charging so a second press cancels it
       // (disabled only under AUTO, where the operator has no manual control).
-      btn.textContent = 'CANCEL ' + Math.round(chargePct) + '%';
+      btn.textContent = t('component.impulse.cancel', { pct: Math.round(chargePct) });
       btn.className = 'btn charging';
       btn.disabled = auto;
     } else if (st === 'cooldown') {
-      btn.textContent = 'COOLDOWN';
+      btn.textContent = t('console.common.cooldown');
       btn.className = 'btn cooldown';
       btn.disabled = true;
     }

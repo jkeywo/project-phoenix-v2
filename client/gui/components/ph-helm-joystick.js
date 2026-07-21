@@ -1,3 +1,10 @@
+// strings-boot first: it populates the string table synchronously during its
+// module evaluation, so this element's constructor-time template t() calls
+// never see an empty table. No-op in Node tests (setup-strings.js loads the
+// table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 /** Half-width of the gamepad stick's centre deadzone, in axis units. */
 export const GAMEPAD_DEADZONE = 0.1;
 
@@ -32,8 +39,8 @@ export class PhHelmJoystick extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -75,8 +82,8 @@ export class PhHelmJoystick extends HTMLElement {
     .readout .sep { color: var(--ink-dim); }
   </style>
   <div class="header">
-    <span>HELM</span>
-    <span class="auto-badge" id="auto-badge" style="display:none">AUTO</span>
+    <span>${t('component.helm_joystick.title')}</span>
+    <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div class="well" id="well">
     <div class="ring outer"></div>
@@ -87,10 +94,10 @@ export class PhHelmJoystick extends HTMLElement {
     <div class="arrow rev"></div>
     <div class="arrow port"></div>
     <div class="arrow stbd"></div>
-    <div class="ax-label fwd">FWD</div>
-    <div class="ax-label rev">REV</div>
-    <div class="ax-label port">PORT</div>
-    <div class="ax-label stbd">STBD</div>
+    <div class="ax-label fwd">${t('component.helm_joystick.fwd')}</div>
+    <div class="ax-label rev">${t('component.helm_joystick.rev')}</div>
+    <div class="ax-label port">${t('console.common.port')}</div>
+    <div class="ax-label stbd">${t('console.common.stbd')}</div>
     <div class="nub" id="nub"></div>
   </div>
   <div class="readout">
@@ -99,7 +106,7 @@ export class PhHelmJoystick extends HTMLElement {
     <span id="yaw-readout">+0.00</span>
   </div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {

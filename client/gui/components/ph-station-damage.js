@@ -19,8 +19,8 @@ export class PhStationDamage extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: inline-flex; position: relative; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host([hidden]) { display: none; }
@@ -56,7 +56,7 @@ export class PhStationDamage extends HTMLElement {
     <ph-damage-detail id="detail"></ph-damage-detail>
   </div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   static get observedAttributes() { return ['label']; }

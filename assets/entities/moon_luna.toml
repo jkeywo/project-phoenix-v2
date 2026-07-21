@@ -1,10 +1,10 @@
-name = "Luna"
+name = "entity.moon_luna.name"
 tags = ["moon"]
 
 [target]
 tags = ["moon"]
 threat_level = "none"
-description = "A cratered rocky moon"
+description = "entity.moon_luna.target.description"
 
 [collider]
 shape = "Ball"

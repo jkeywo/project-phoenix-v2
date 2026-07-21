@@ -1,10 +1,10 @@
-name = "Ice Moon"
+name = "entity.moon_ice.name"
 tags = ["moon"]
 
 [target]
 tags = ["moon"]
 threat_level = "none"
-description = "A frozen cryovolcanic moon"
+description = "entity.moon_ice.target.description"
 
 [collider]
 shape = "Ball"

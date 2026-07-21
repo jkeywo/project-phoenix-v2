@@ -6,6 +6,8 @@
  * first coarse system fragment; issue #529 adds Viewscreen.
  */
 
+import { t } from './strings.js';
+
 export const RED_ALERT_SYSTEM_ID = 'red-alert';
 export const RED_ALERT_KIND = 'red_alert';
 
@@ -28,7 +30,7 @@ export function renderRedAlertFragment(doc, state) {
 
   if (badge) {
     badge.hidden = !auto;
-    badge.textContent = 'AUTO';
+    badge.textContent = t('console.common.auto');
   }
 }
 
@@ -50,7 +52,7 @@ export function renderViewscreenFragment(doc, state) {
 
   const auto = !!state?.viewscreen_auto;
   badge.hidden = !auto;
-  badge.textContent = 'AUTO';
+  badge.textContent = t('console.common.auto');
   badge.dataset.systemId = state?.viewscreen_system_id || VIEWSCREEN_SYSTEM_ID;
   badge.dataset.auto = String(auto);
 }

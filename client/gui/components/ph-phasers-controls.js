@@ -1,4 +1,10 @@
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhPhasersControls extends HTMLElement {
   #state = null;
@@ -6,8 +12,8 @@ export class PhPhasersControls extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -23,10 +29,10 @@ export class PhPhasersControls extends HTMLElement {
     .mode-toggle.auto { border-color: var(--reloading); color: var(--reloading); }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
-  <div class="header"><span>PHASERS</span><button class="mode-toggle" id="mode-toggle" type="button">MANUAL</button></div>
+  <div class="header"><span>${t('component.phasers.title')}</span><button class="mode-toggle" id="mode-toggle" type="button">${t('component.phasers.manual')}</button></div>
   <div id="banks"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
   }
 
@@ -57,11 +63,11 @@ export class PhPhasersControls extends HTMLElement {
     const container = this.shadowRoot.getElementById('banks');
 
     const toggle = this.shadowRoot.getElementById('mode-toggle');
-    toggle.textContent = auto ? 'AUTO' : 'MANUAL';
+    toggle.textContent = auto ? t('console.common.auto') : t('component.phasers.manual');
     toggle.className = 'mode-toggle' + (auto ? ' auto' : '');
 
     if (banks.length === 0) {
-      container.innerHTML = '<div class="empty">NO PHASER BANKS</div>';
+      container.innerHTML = '<div class="empty">' + t('component.phasers.empty') + '</div>';
       return;
     }
 
@@ -89,12 +95,12 @@ export class PhPhasersControls extends HTMLElement {
         row.appendChild(wrap);
         const badge = document.createElement('span');
         badge.className = 'auto-badge';
-        badge.textContent = 'AUTO';
+        badge.textContent = t('console.common.auto');
         row.appendChild(badge);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
-        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">FIRE</span>';
+        btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
         btn.addEventListener('click', () => {
           if (this.sendAction && !btn.disabled) {
             this.sendAction('fire_phaser', { bank: bank.id });
@@ -108,7 +114,7 @@ export class PhPhasersControls extends HTMLElement {
         }
       }
 
-      row.querySelector('.lbl').textContent = bank.label || bank.id || 'BANK';
+      row.querySelector('.lbl').textContent = bank.label || bank.id || t('component.phasers.bank_fallback');
 
       // Wire type is `PhaserBankState` (core/messages.rs): fire_ready /
       // on_cooldown / cooldown_remaining — there is no per-bank `cooldown_pct`

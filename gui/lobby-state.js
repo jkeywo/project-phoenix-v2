@@ -279,6 +279,24 @@ export function reconcileActiveConsole(current, newStationIds) {
   return newStationIds[0];
 }
 
+/**
+ * Normalise a proposed active-console value against the current one
+ * (absorbed from the deleted gui/active-console.js — issue #827).
+ *
+ * Returns `{ changed, next }` where `next` is the value to store (empty
+ * string and undefined both normalise to null) and `changed` is true when
+ * `next` differs from `current` — callers use it to skip redundant work on
+ * no-change rerenders.
+ */
+export function nextActiveConsole(current, name) {
+  const next = name || null;
+  const cur = current || null;
+  return {
+    changed: next !== cur,
+    next,
+  };
+}
+
 /** Singleton used by client.html. */
 export const lobbyState = new LobbyState();
 
@@ -287,4 +305,5 @@ if (typeof window !== 'undefined') {
   window.reconcileActiveConsole = reconcileActiveConsole;
   window.isLoadingPhase = () => lobbyState.isLoading();
   window.playerStationId = playerStationId;
+  window.nextActiveConsole = nextActiveConsole;
 }

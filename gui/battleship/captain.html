@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Captain Console</title>
+  <title data-i18n="console.captain.doc_title">Project Phoenix - Captain Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -31,12 +31,12 @@
   <div id="objectives" hidden></div>
   <div id="dir" hidden></div>
   <div id="alert" hidden></div>
-  <div class="frame" data-screen-label="Captain Console">
+  <div class="frame" data-screen-label="Captain Console" data-i18n-attr="data-screen-label:console.captain.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>CAPTAIN<span class="sub">COMMAND &amp; BATTLESPACE</span></h1>
-        <span class="auto-badge" id="captain-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.captain.title">CAPTAIN</span><span class="sub" data-i18n="console.battleship_captain.subtitle">COMMAND &amp; BATTLESPACE</span></h1>
+        <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <div class="controls-row">
@@ -47,9 +47,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>CAPTAIN STATION</span>
+        <span data-i18n="console.captain.station_footer">CAPTAIN STATION</span>
         <span class="spacer"></span>
-        <span id="footer-target">NO TARGET</span>
+        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
         <ph-station-damage id="station-damage"></ph-station-damage>
       </footer>
     </div>
@@ -60,10 +60,12 @@
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
     initConsole({
       name: 'captain',
+      // s is a CaptainConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         // The battleship's Captain station does not own a sensors system
         // (Sensors is its own dedicated station) — buildCaptainConsoleState
@@ -75,7 +77,7 @@
         document.getElementById('objective-list').state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
         document.getElementById('station-damage').state = s.own_hull || null;
         var contacts = (s.blips && s.blips.length) || 0;
-        document.getElementById('footer-target').textContent = contacts > 0 ? contacts + ' CONTACTS' : 'NO TARGET';
+        document.getElementById('footer-target').textContent = contacts > 0 ? t('console.common.contacts.other', { n: contacts }) : t('console.common.no_target');
         setAutoState(null, document.getElementById('captain-auto-badge'), !!s.captain_auto);
 
         var objectivesEl = document.getElementById('objectives');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Repair Console</title>
+  <title data-i18n="console.repair.doc_title">Project Phoenix - Repair Console</title>
   <link rel="stylesheet" href="../console.css">
   <style>
     body { margin: 0; background: #000; overflow: hidden; }
@@ -23,12 +23,12 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Repair Console">
+  <div class="frame" data-screen-label="Repair Console" data-i18n-attr="data-screen-label:console.repair.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>REPAIR<span class="sub">HULL &amp; SYSTEM MAINTENANCE</span></h1>
-        <span class="auto-badge" id="repair-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.repair.title">REPAIR</span><span class="sub" data-i18n="console.repair.subtitle">HULL &amp; SYSTEM MAINTENANCE</span></h1>
+        <span class="auto-badge" id="repair-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
@@ -37,7 +37,7 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>REPAIR STATION</span>
+        <span data-i18n="console.repair.station_footer">REPAIR STATION</span>
         <span class="spacer"></span>
         <ph-station-damage id="station-damage"></ph-station-damage>
         <span id="footer-right">—</span>
@@ -49,9 +49,11 @@
     import '../components/ph-station-damage.js';
     import '../components/ph-repair-teams.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'repair',
+      // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var oh = s.overall_hull || {};
         document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1 };

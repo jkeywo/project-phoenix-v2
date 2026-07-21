@@ -18,7 +18,22 @@
  *
  * DOM-free; import in client.html and apply the returned descriptors to the
  * button/readout elements there.
+ *
+ * The press path builds its envelope through the explicit client command
+ * gateway (`gui/command-gateway.js`, via `gui/repair-dispatch.js`) rather than
+ * hand-rolling the wire shape, so the shell button and the Repair console
+ * share one definition of a `DispatchRepairTeam` command.
  */
+import { controlSystemEnvelope } from './command-gateway.js';
+import { REPAIR_SYSTEM_ID, dispatchRepairTeamPayload } from './repair-dispatch.js';
+
+/**
+ * The shell button's fixed default dispatch: team slot 0 to the helm station.
+ * Structural defaults for a one-button affordance with no target picker — the
+ * host resolves the station to a concrete damaged system from its TOML config.
+ */
+const SHELL_DEFAULT_TEAM_IDX = 0;
+const SHELL_DEFAULT_TARGET = 'helm';
 
 /** True when a single team slot is not the 'Idle' string (i.e. active/busy). */
 export function isTeamBusy(slot) {
@@ -58,16 +73,10 @@ export function anyTeamActive(repairTeams) {
  */
 export function repairButtonPress(repairTeams) {
   if (allTeamsBusy(repairTeams)) return null;
-  return {
-    type: 'ControlSystem',
-    data: {
-      target: 'repair',
-      payload: {
-        type: 'DispatchRepairTeam',
-        data: { team_idx: 0, target: { type: 'Station', data: 'helm' } },
-      },
-    },
-  };
+  return controlSystemEnvelope(
+    REPAIR_SYSTEM_ID,
+    dispatchRepairTeamPayload(SHELL_DEFAULT_TEAM_IDX, SHELL_DEFAULT_TARGET),
+  );
 }
 
 /**

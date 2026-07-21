@@ -10,6 +10,12 @@
 // element so it can be embedded in the per-hull tactical consoles
 // (destroyer/tactical.html, cruiser/tactical.html).
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
 
 export class PhTorpedoControls extends HTMLElement {
   #state = null;
@@ -18,8 +24,8 @@ export class PhTorpedoControls extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -51,12 +57,12 @@ export class PhTorpedoControls extends HTMLElement {
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
-    <span>TORPEDOES</span>
+    <span>${t('component.torpedoes.title')}</span>
     <span class="magazine" id="magazine">0 / 0</span>
   </div>
   <div id="tubes"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     phAdoptConsoleStyles(this.shadowRoot);
   }
 
@@ -107,7 +113,7 @@ export class PhTorpedoControls extends HTMLElement {
     const fireBtn = document.createElement('button');
     fireBtn.type = 'button';
     fireBtn.className = 'btn';
-    fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">FIRE</span>';
+    fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
     fireBtn.addEventListener('click', () => {
       if (fireBtn.disabled || !this.sendAction) return;
       const targetUuid = this.#state && this.#state.target_uuid ? this.#state.target_uuid : null;
@@ -189,7 +195,7 @@ export class PhTorpedoControls extends HTMLElement {
     const container = this.shadowRoot.getElementById('tubes');
 
     if (tubes.length === 0) {
-      container.innerHTML = '<div class="empty">NO TORPEDO TUBES</div>';
+      container.innerHTML = '<div class="empty">' + t('component.torpedoes.empty') + '</div>';
       this.#tubeEls = {};
       return;
     }

@@ -166,21 +166,38 @@ export class ClientCommsState {
 }
 
 // ── Outbound ClientMessage builders ─────────────────────────────────────────
+// Post-#822 (short-form shim retired): full ControlSystem envelopes targeting
+// the `comms` system, matching gui/action-map.js.
 
 export function hailMessage(targetUuid) {
-  return { type: 'Hail', data: { target_uuid: targetUuid } };
+  return {
+    type: 'ControlSystem',
+    data: { target: 'comms', payload: { type: 'Hail', data: { target_uuid: targetUuid } } },
+  };
 }
 
 export function selectCommsMessage(messageId) {
-  return { type: 'SelectCommsMessage', data: { message_id: messageId } };
+  return {
+    type: 'ControlSystem',
+    data: { target: 'comms', payload: { type: 'SelectCommsMessage', data: { message_id: messageId } } },
+  };
 }
 
 export function respondToMessage(messageId, responseIndex) {
-  return { type: 'RespondToMessage', data: { message_id: messageId, response_index: responseIndex } };
+  return {
+    type: 'ControlSystem',
+    data: {
+      target: 'comms',
+      payload: { type: 'RespondToMessage', data: { message_id: messageId, response_index: responseIndex } },
+    },
+  };
 }
 
 export function clearCommsMessage() {
-  return { type: 'ClearComms' };
+  return {
+    type: 'ControlSystem',
+    data: { target: 'comms', payload: { type: 'ClearComms' } },
+  };
 }
 
 /** Singleton used by client.html. */

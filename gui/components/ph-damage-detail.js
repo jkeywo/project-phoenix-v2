@@ -1,3 +1,10 @@
+// strings-boot first: its top-level await delays this module's evaluation —
+// and therefore this element's registration and upgrade — until the string
+// table is loaded, so the constructor's template t() calls never see an
+// empty table. No-op in Node tests (setup-strings.js loads the table there).
+import '../strings-boot.js';
+import { t } from '../strings.js';
+
 export class PhDamageDetail extends HTMLElement {
   #state = null;
   #rowCache = new Map();
@@ -5,8 +12,8 @@ export class PhDamageDetail extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    const t = document.createElement('template');
-    t.innerHTML = `
+    const tpl = document.createElement('template');
+    tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -24,7 +31,7 @@ export class PhDamageDetail extends HTMLElement {
   </style>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(t.content.cloneNode(true));
+    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   set state(val) {
@@ -76,7 +83,7 @@ export class PhDamageDetail extends HTMLElement {
       tierEl.textContent = tierLabel;
       var dEl = el.querySelector('.destroyed-label');
       if (destroyed) {
-        if (!dEl) { dEl = document.createElement('span'); dEl.className = 'destroyed-label'; dEl.textContent = 'DESTROYED'; el.insertBefore(dEl, tierEl); }
+        if (!dEl) { dEl = document.createElement('span'); dEl.className = 'destroyed-label'; dEl.textContent = t('console.common.destroyed'); el.insertBefore(dEl, tierEl); }
       } else if (dEl) {
         dEl.remove();
       }

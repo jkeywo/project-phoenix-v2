@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Project Phoenix - Helm Console</title>
+  <title data-i18n="console.helm.doc_title">Project Phoenix - Helm Console</title>
   <script src="../bg-raf-keepalive.js"></script>
   <link rel="stylesheet" href="../console.css">
   <style>
@@ -25,12 +25,12 @@
   </style>
 </head>
 <body>
-  <div class="frame" data-screen-label="Helm Console">
+  <div class="frame" data-screen-label="Helm Console" data-i18n-attr="data-screen-label:console.helm.screen_label">
     <div class="panel"></div>
     <div class="panel-inner">
       <div class="hero">
-        <h1>HELM<span class="sub">PROPULSION &amp; COURSE</span></h1>
-        <span class="auto-badge" id="helm-auto-badge" hidden>AUTO</span>
+        <h1><span data-i18n="console.helm.title">HELM</span><span class="sub" data-i18n="console.helm.subtitle">PROPULSION &amp; COURSE</span></h1>
+        <span class="auto-badge" id="helm-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
       </div>
       <div class="console-body">
         <ph-helm-radar id="helm-radar"></ph-helm-radar>
@@ -44,9 +44,9 @@
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
-        <span>HELM STATION</span>
+        <span data-i18n="console.helm.station_footer">HELM STATION</span>
         <span class="spacer"></span>
-        <span id="footer-target">NO TARGET</span>
+        <span id="footer-target" data-i18n="console.common.no_target">NO TARGET</span>
         <ph-station-damage id="station-damage"></ph-station-damage>
       </footer>
     </div>
@@ -58,9 +58,11 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
+    import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'helm',
+      // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, heading: s.heading || 0, speed: s.speed || 0, ship_heading: s.heading || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0 };
         document.getElementById('helm-joystick').state = { auto: !!s.helm_auto };

@@ -131,10 +131,15 @@ pub(crate) fn process_helm_inputs(
                         li.lateral = *lateral;
                     }
                 }
+                // The blocks-impulse region check lives in the guard: a charge
+                // commanded inside such a region falls through to `_ => {}`,
+                // i.e. it is ignored — the same no-op the inner `if` produced
+                // before it was collapsed (clippy::collapsible_if).
                 (t, SystemControlPayload::StartImpulseCharge)
-                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID =>
+                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID
+                        && !entity_inside_blocks_impulse(entity, &membership, &region_query) =>
                 {
-                    if !entity_inside_blocks_impulse(entity, &membership, &region_query) {
+                    {
                         if let Some(ic) = impulse_cmd.as_deref_mut() {
                             ic.0 = crate::impulse::ImpulsePhase::Charging;
                         }

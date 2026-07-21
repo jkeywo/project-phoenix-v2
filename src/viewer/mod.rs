@@ -87,6 +87,10 @@ thread_local! {
     static COMMAND_QUEUE: RefCell<Vec<ViewerCommand>> = const { RefCell::new(Vec::new()) };
 }
 
+// Every caller is a `#[wasm_bindgen]` export gated on `target_arch = "wasm32"`,
+// so on a native build (CI's clippy target) this is genuinely unreachable —
+// gate it to match its callers rather than silencing dead_code.
+#[cfg(target_arch = "wasm32")]
 fn push_command(cmd: ViewerCommand) {
     COMMAND_QUEUE.with(|q| q.borrow_mut().push(cmd));
 }

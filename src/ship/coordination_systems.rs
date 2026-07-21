@@ -766,12 +766,10 @@ mod tests {
             .0
             .iter()
             .filter_map(|(_, msg)| match msg {
-                crate::messages::ServerMessage::CoordinationPopup { payload, .. } => {
-                    match payload {
-                        CoordinationPayload::RepairRequest { deficit, .. } => Some(*deficit),
-                        _ => None,
-                    }
-                }
+                crate::messages::ServerMessage::CoordinationPopup {
+                    payload: CoordinationPayload::RepairRequest { deficit, .. },
+                    ..
+                } => Some(*deficit),
                 _ => None,
             })
             .collect()

@@ -28,12 +28,21 @@ The wiki is not a replacement for code, `README.md`, `CONTEXT.md`, this file, PA
 ## Common Commands
 
 ```bash
-# Rust unit tests / quick compile check
-cargo test
-cargo check
+# ── CI gates you can run locally — run ALL of these before calling work done ─
+# These are the three fast CI jobs (test, editor-test, pasm) in full. Anything
+# red here fails the build. `cargo test` alone is NOT sufficient: clippy denies
+# warnings, and the PASM suite gates on the spec model. The remaining two jobs
+# (build, smoke) need a WASM build — see the trunk/playwright commands below.
+cargo fmt -- --check                           # CI: test job, step 1
+cargo clippy --all-targets --all-features -- -D warnings   # CI: test job, step 2
+cargo test                                     # CI: test job, step 3
+npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
+node scripts/check-strings.mjs --strict        # CI: editor-test job
+uv run pytest -q tests/pasm                    # CI: pasm job — asserts on the spec model
+uv run pasm validate                           # CI: pasm job
 
-# JS client module tests (Vitest, tests/client/*.test.js)
-npx vitest run
+# Quick compile check while iterating (not a CI gate)
+cargo check
 
 # Local dev — server page (WASM, Bevy, peer host)
 trunk serve                                    # → http://localhost:8080
@@ -66,7 +75,21 @@ node scripts/build-client.mjs
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
-# CI: ci.yml — unit tests → WASM build → Playwright smoke tests → deploy (on main)
+# CI: ci.yml — five jobs. `pasm`, `test` and `editor-test` run in PARALLEL and
+# gate independently (any one of them red fails the build); `build` needs
+# `test`; `smoke` needs `build`; `deploy` runs on main.
+#
+#   pasm         uv run pytest -q tests/pasm ; uv run pasm validate
+#   test         cargo fmt --check ; cargo clippy --all-targets --all-features
+#                -D warnings ; cargo test
+#   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict
+#   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
+#                node scripts/build-client.mjs
+#   smoke        npx playwright test (against the built dist/)
+#
+# Keep this list in sync with .github/workflows/ci.yml — if you add a gate
+# there, add it above, and vice versa. Trusting a stale list here is how a
+# batch lands "green" and breaks the build.
 ```
 
 Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo install trunk`, node/npm.
@@ -190,6 +213,7 @@ Two rules that are easy to get wrong:
 - **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels).
 - **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC).
 - **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
+- **PASM tests (`uv run pytest -q tests/pasm`):** Python tests over the design model in `pasm/spec/` — traceability roll-ups, cross-domain link integrity, CLI output. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`.
 - **Not tested:** renderer visual output, bridge internals, CI pipeline.
 
 > Good tests: set up state → perform action → assert on observable output through the public interface. Do NOT assert on private fields, internal call counts, or implementation-specific details.

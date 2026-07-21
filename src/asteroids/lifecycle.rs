@@ -545,6 +545,66 @@ fn full_rebuild(
     }
 }
 
+/// A stable v4-formatted UUID for the rock in one field cell.
+///
+/// Two runs of the same scenario must name the same rock the same thing, or
+/// the headless report's per-uuid damage ledgers cannot be compared. A rock
+/// destroyed and respawned on re-entering its cell is the same rock as far as
+/// the world is concerned, so reusing its identity is correct rather than
+/// merely convenient.
+///
+/// The whole identifying tuple is *hashed* into all 16 bytes rather than
+/// packed into byte positions, because packing aliases two ways and both were
+/// live bugs: `uuid::Builder::from_random_bytes` rewrites byte 8's top two bits
+/// (and byte 6's top four) to stamp the v4 variant/version, silently discarding
+/// whatever field landed there, and any field narrower than the bytes it shares
+/// collides with its neighbour. Two rocks sharing a uuid merge into one
+/// `damage_by_ship` row, so uniqueness here is a reporting correctness
+/// requirement, not a nicety.
+fn deterministic_cell_uuid(
+    field_idx: usize,
+    cell_gx: i32,
+    cell_gz: i32,
+    slot_x: usize,
+    slot_z: usize,
+) -> String {
+    // Each component is folded in through the whole 64-bit state before the
+    // next arrives, so no component owns a byte range another can overwrite.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |value: u64| {
+        for byte in value.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    mix(field_idx as u64);
+    mix(cell_gx as u32 as u64);
+    mix(cell_gz as u32 as u64);
+    mix(slot_x as u64);
+    mix(slot_z as u64);
+
+    // Two splitmix64 draws fill all 16 bytes; the builder is then free to
+    // overwrite its version/variant bits without costing us any input entropy.
+    let mut bytes = [0u8; 16];
+    let lo = splitmix64(hash);
+    let hi = splitmix64(lo);
+    bytes[0..8].copy_from_slice(&lo.to_le_bytes());
+    bytes[8..16].copy_from_slice(&hi.to_le_bytes());
+    uuid::Builder::from_random_bytes(bytes)
+        .into_uuid()
+        .to_string()
+}
+
+/// SplitMix64's finaliser. Local twin of the one in [`crate::sim_rng`]: this
+/// path deliberately does not depend on the master seed (a rock's identity is
+/// a pure function of its cell), so it does not reach for that module's state.
+fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 /// Evaluate a single cell for asteroid spawning. If the cell passes the
 /// density check and is within the torus, spawn a gameplay asteroid entity
 /// and populate the window slot.
@@ -642,7 +702,15 @@ fn try_spawn_cell(
     });
     let radar_size = radar_appearance.and_then(|r| r.size);
 
-    let uuid = uuid::Uuid::new_v4().to_string();
+    // Derived from the cell, not drawn at random. Everything else about a
+    // streamed rock — whether it exists, where it sits, how it is rotated — is
+    // already a pure function of `(field_idx, cell)` (Key Constraint 8), and a
+    // random uuid was the one thing making two identical runs report different
+    // `damage_by_ship` keys once a torpedo hit one. Deliberately independent of
+    // the `SimRng` master seed: the rock's own identity does not vary with it,
+    // and threading the resource through here would mean plumbing it into the
+    // whole streaming spawner.
+    let uuid = deterministic_cell_uuid(field_idx, cell_gx, cell_gz, slot_x, slot_z);
 
     // Apply anchor offset as a pure post-seed translation. Seeds and
     // (cell_gx, cell_gz) remain anchor-relative; only the final world
@@ -934,6 +1002,47 @@ mod tests {
     use crate::entity_spawner::AsteroidFieldSection;
     use crate::lobby::OutboundMessage;
     use crate::simulation::SimOutbox;
+
+    /// A rock's uuid keys its row in the headless report's `damage_by_ship`
+    /// ledger, so two distinct rocks sharing one is silent data corruption
+    /// rather than a cosmetic clash. The first packed implementation aliased
+    /// two ways and both are pinned here: `cell_gx` values differing only in
+    /// the top two bits of their low byte (the bits the v4 variant stamp
+    /// overwrites), and the `(field_idx, slot_x)` swap that two overlapping
+    /// fields hit for real.
+    #[test]
+    fn cell_uuids_are_unique_across_the_identifying_tuple() {
+        let mut seen: std::collections::HashMap<String, (usize, i32, i32, usize, usize)> =
+            std::collections::HashMap::new();
+        for field_idx in 0..4usize {
+            for cell_gx in [-193, -1, 0, 1, 64, 65, 128, 192, 256] {
+                for cell_gz in [-64, 0, 3, 64, 128] {
+                    for slot_x in 0..4usize {
+                        for slot_z in 0..4usize {
+                            let key = (field_idx, cell_gx, cell_gz, slot_x, slot_z);
+                            let uuid = deterministic_cell_uuid(
+                                field_idx, cell_gx, cell_gz, slot_x, slot_z,
+                            );
+                            if let Some(other) = seen.insert(uuid.clone(), key) {
+                                panic!("{key:?} and {other:?} share uuid {uuid}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Same rock, same name — the identity has to be stable, not merely
+        // collision-free, or a respawned asteroid changes ledger row.
+        assert_eq!(
+            deterministic_cell_uuid(1, 7, -9, 2, 3),
+            deterministic_cell_uuid(1, 7, -9, 2, 3)
+        );
+        // v4 formatting survives the hashing.
+        let parsed =
+            uuid::Uuid::parse_str(&deterministic_cell_uuid(0, 0, 0, 0, 0)).expect("valid uuid");
+        assert_eq!(parsed.get_version_num(), 4);
+    }
 
     fn test_app() -> App {
         let mut app = App::new();

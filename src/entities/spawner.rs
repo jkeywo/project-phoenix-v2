@@ -1856,4 +1856,52 @@ ai_only = true
             "tactical-radar system must be present"
         );
     }
+
+    /// Issue #839: a world-spawned Alliance hull (i.e. spawned as an NPC, not
+    /// selected by the player) must present as a plain ship — no `player` tag,
+    /// ordinary `ship` radar icon. Player identity is injected only at the
+    /// player game-start spawn (see `player_ship_identity` in `server_app.rs`),
+    /// so the checked-in template must not author it. Parses the real template
+    /// so it regresses if the `player` tag / `playerShip` icon creep back in.
+    #[test]
+    fn world_spawned_alliance_hull_has_no_player_identity() {
+        use crate::entity_config::EntityConfig;
+        use bevy::prelude::*;
+
+        let toml = include_str!("../../assets/entities/alliance_cruiser.toml");
+        let config = EntityConfig::from_toml(toml).expect("cruiser template must parse");
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        let entity = {
+            let mut cmds = app.world_mut().commands();
+            spawn_entity(&mut cmds, &config, Vec3::ZERO, "world-cruiser".into(), None)
+        };
+        app.world_mut().flush();
+
+        let tags = app
+            .world()
+            .get::<EntityTagsSection>(entity)
+            .expect("hull must carry EntityTagsSection");
+        assert!(
+            tags.0.iter().any(|t| t == "ship"),
+            "world-spawned hull keeps the ship tag; got {:?}",
+            tags.0
+        );
+        assert!(
+            !tags.0.iter().any(|t| t == "player"),
+            "world-spawned hull must NOT carry the player tag; got {:?}",
+            tags.0
+        );
+
+        let radar = app
+            .world()
+            .get::<RadarAppearanceSection>(entity)
+            .expect("hull must carry RadarAppearanceSection");
+        assert_eq!(
+            radar.0.icon.as_deref(),
+            Some("ship"),
+            "world-spawned hull shows the ordinary ship icon, not playerShip"
+        );
+    }
 }

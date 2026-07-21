@@ -393,6 +393,7 @@ impl BlasterSystem {
             Some(HitData {
                 damage: p.damage,
                 shield_pierce: p.shield_pierce,
+                source_uuid: p.source_uuid,
             })
         } else {
             None
@@ -429,6 +430,10 @@ pub struct LaunchEvent {
 pub struct HitData {
     pub damage: i32,
     pub shield_pierce: f32,
+    /// UUID of the ship that fired the bolt. Carried through so the damage
+    /// system can attribute the hit — it has no other route back to the
+    /// shooter once the projectile is consumed.
+    pub source_uuid: String,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

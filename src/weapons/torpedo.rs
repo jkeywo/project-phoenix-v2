@@ -51,6 +51,12 @@ pub struct TorpedoConfig {
     /// Interval in seconds between successive torpedo launches in a burst
     /// volley (issue #632). Default `0.3`.
     pub burst_interval_secs: f32,
+    /// Ship-wide default for how many rounds an AI-operated crew keeps loaded
+    /// per tube (`[torpedoes] ai_volley_target`). `None` → each tube falls
+    /// back to its own `volley_max`. Consumed only by
+    /// [`TorpedoSystem::from_configs`] when it resolves
+    /// [`TorpedoTube::ai_target_count`].
+    pub ai_volley_target: Option<u32>,
 }
 
 impl Default for TorpedoConfig {
@@ -66,6 +72,7 @@ impl Default for TorpedoConfig {
             detonation_radius: 5.0,
             shield_pierce: 0.0,
             burst_interval_secs: 0.3,
+            ai_volley_target: None,
         }
     }
 }
@@ -85,6 +92,10 @@ pub struct Torpedo {
     /// detonating on its launcher (the torpedo spawns at the launcher's
     /// centre, well within any reasonable detonation radius).
     pub source_uuid: Option<String>,
+    /// Id of the tube that launched it, carried so balance telemetry can
+    /// attribute damage per-tube. The tube is out of scope by detonation
+    /// time, and `TorpedoConfig` is ship-wide, so this has to ride along.
+    pub tube_id: String,
     /// Snapshot of the firing tube's `shield_pierce` at launch time, so
     /// detonation logic can split `damage_shields` between absorbed and
     /// pierced portions without re-resolving the source config. Clamped
@@ -176,6 +187,15 @@ pub struct TorpedoTube {
     /// Desired number of loaded torpedoes (0..=volley_max). The tube
     /// loads/unloads toward this value automatically.
     pub target_count: u32,
+    /// The `target_count` an AI-operated crew asks this tube to sit at,
+    /// resolved from TOML (`[[torpedoes.tubes]] ai_target_count`, then
+    /// `[torpedoes] ai_volley_target`, then `volley_max`).
+    ///
+    /// Read only by `console_ai::server::ai_torpedo_load`, which turns it
+    /// into the same `SetTorpedoVolleyTarget` command a human console sends —
+    /// it is never applied to `target_count` directly, so AI and human
+    /// loading share one code path.
+    pub ai_target_count: u32,
 }
 
 impl TorpedoTube {
@@ -340,6 +360,9 @@ impl TorpedoSystem {
     pub fn new(config: TorpedoConfig) -> Self {
         let count = config.count;
         let load_time = config.load_time;
+        // Legacy tubes are all `volley_max: 1`, so the ship-wide AI default
+        // clamps to at most one round per tube.
+        let ai_target_count = config.ai_volley_target.unwrap_or(1).min(1);
         let tubes = vec![
             TorpedoTube {
                 id: "fore_port".to_string(),
@@ -350,6 +373,7 @@ impl TorpedoSystem {
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
+                ai_target_count,
             },
             TorpedoTube {
                 id: "fore_starboard".to_string(),
@@ -360,6 +384,7 @@ impl TorpedoSystem {
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
+                ai_target_count,
             },
             TorpedoTube {
                 id: "aft".to_string(),
@@ -370,6 +395,7 @@ impl TorpedoSystem {
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
+                ai_target_count,
             },
         ];
         Self {
@@ -387,6 +413,7 @@ impl TorpedoSystem {
         config: TorpedoConfig,
     ) -> Self {
         let global_load_time = config.load_time;
+        let global_ai_target = config.ai_volley_target;
         let tubes = tubes
             .iter()
             .map(|c| TorpedoTube {
@@ -397,7 +424,16 @@ impl TorpedoSystem {
                 load_time: c.load_time.unwrap_or(global_load_time),
                 volley_max: c.volley_max,
                 loaded_count: 0,
+                // Tubes start empty for everyone — human and AI alike. The AI
+                // reaches `ai_target_count` only by sending the same
+                // `SetTorpedoVolleyTarget` command a console sends, so a
+                // human-crewed tube stays exactly as the player left it.
                 target_count: 0,
+                ai_target_count: c
+                    .ai_target_count
+                    .or(global_ai_target)
+                    .unwrap_or(c.volley_max)
+                    .min(c.volley_max),
             })
             .collect();
         let count = config.count;
@@ -559,6 +595,7 @@ impl TorpedoSystem {
             lifespan_remaining: lifespan,
             target_uuid: target_uuid.clone(),
             source_uuid: source_uuid.clone(),
+            tube_id: tube_id.to_string(),
             shield_pierce,
         });
         let count_remaining = count - 1;
@@ -667,6 +704,7 @@ impl TorpedoSystem {
                     lifespan_remaining: lifespan,
                     target_uuid: burst.target_uuid.clone(),
                     source_uuid: burst.source_uuid.clone(),
+                    tube_id: burst.tube_id.clone(),
                     shield_pierce,
                 });
                 burst_events.push((
@@ -724,6 +762,10 @@ impl TorpedoSystem {
             damage_hull: self.config.damage_hull,
             damage_shields: self.config.damage_shields,
             shield_pierce: removed.shield_pierce,
+            source_uuid: removed.source_uuid,
+            tube_id: removed.tube_id,
+            impact_x: removed.x,
+            impact_z: removed.z,
         })
     }
 
@@ -746,11 +788,37 @@ impl TorpedoSystem {
 /// - `damage_shields` is the shield-eligible portion. Use
 ///   [`split_damage_for_pierce`](crate::damage::split_damage_for_pierce)
 ///   with `shield_pierce` to compute the pierced vs absorbed split for it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TorpedoDetonation {
     pub damage_hull: i32,
     pub damage_shields: i32,
     pub shield_pierce: f32,
+    /// UUID of the ship that launched the torpedo, carried through from
+    /// [`Torpedo::source_uuid`] so the damage system can attribute the hit.
+    /// `None` for torpedoes launched by the legacy resource-only test paths.
+    pub source_uuid: Option<String>,
+    /// Id of the tube that fired it, carried through from [`Torpedo::tube_id`]
+    /// so balance telemetry can report the tube rather than a generic
+    /// `"torpedo"` label.
+    pub tube_id: String,
+    /// Where the torpedo was when it went off, carried through from
+    /// [`Torpedo::x`] / [`Torpedo::z`].
+    ///
+    /// # Why the caller needs this
+    ///
+    /// Shield arcs are directional: `ShieldSystem::apply_damage` routes a hit
+    /// to a facing via `facing_index_for_bearing`, so it needs the bearing the
+    /// blow arrived on. The torpedo is removed from `in_flight` right here, so
+    /// by the time the damage system runs there is nothing left to ask — the
+    /// impact point has to ride along with the detonation, exactly as
+    /// `source_uuid` and `tube_id` already do. Callers pair it with the
+    /// victim's own position and yaw via
+    /// [`attacker_bearing_relative`](crate::shield::attacker_bearing_relative).
+    ///
+    /// It is the *torpedo's* position, not the firing ship's: a homing torpedo
+    /// curves, and the arc it meets is the one it is nose-on to at detonation.
+    pub impact_x: f32,
+    pub impact_z: f32,
 }
 
 impl TorpedoSystem {
@@ -829,6 +897,7 @@ mod tests {
             load_time: None,
             marker: None,
             volley_max: 1,
+            ai_target_count: None,
         }
     }
 
@@ -1345,6 +1414,7 @@ mod tests {
             lifespan_remaining: 10.0,
             target_uuid: None,
             source_uuid: None,
+            tube_id: "fore_port".into(),
             shield_pierce: 0.0,
         });
         let targets = vec![
@@ -1410,6 +1480,7 @@ mod tests {
             load_time: None,
             marker: None,
             volley_max,
+            ai_target_count: None,
         }
     }
 
@@ -1417,6 +1488,45 @@ mod tests {
     fn volley_max_defaults_to_1_on_standard_tube() {
         let sys = default_system();
         assert_eq!(sys.tube("fore_port").unwrap().volley_max, 1);
+    }
+
+    /// The AI's standing volley target is TOML, not a constant, and a hull
+    /// that says nothing gets "keep the tube as full as it can".
+    #[test]
+    fn ai_target_count_defaults_to_volley_max() {
+        let sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], TorpedoConfig::default());
+        assert_eq!(sys.tube("t1").unwrap().ai_target_count, 3);
+        // The tube still starts empty — the AI has to *ask* for the load.
+        assert_eq!(sys.tube("t1").unwrap().target_count, 0);
+    }
+
+    #[test]
+    fn ai_target_count_reads_the_ship_wide_default() {
+        let config = TorpedoConfig {
+            ai_volley_target: Some(2),
+            ..Default::default()
+        };
+        let sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], config);
+        assert_eq!(sys.tube("t1").unwrap().ai_target_count, 2);
+    }
+
+    #[test]
+    fn per_tube_ai_target_count_overrides_the_ship_wide_default_and_clamps() {
+        let config = TorpedoConfig {
+            ai_volley_target: Some(2),
+            ..Default::default()
+        };
+        let mut low = volley_cfg("low", 3);
+        low.ai_target_count = Some(1);
+        let mut greedy = volley_cfg("greedy", 3);
+        greedy.ai_target_count = Some(9);
+        let sys = TorpedoSystem::from_configs(&[low, greedy], config);
+        assert_eq!(sys.tube("low").unwrap().ai_target_count, 1);
+        assert_eq!(
+            sys.tube("greedy").unwrap().ai_target_count,
+            3,
+            "a per-tube ai_target_count above volley_max clamps to what fits"
+        );
     }
 
     #[test]

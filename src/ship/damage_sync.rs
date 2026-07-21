@@ -93,10 +93,14 @@ pub fn detect_damage_tier_crossings(
         &ShipConfigComponent,
         &ShipSystemControlSources,
         Option<&mut RepairHumanAlerted>,
+        Option<&crate::entity_spawner::EntityUuid>,
     )>,
     mut coord_writer: MessageWriter<CoordinationEnqueue>,
+    // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
+    // that never registered the message still pass parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
-    for (entity, hull_comp, mut last_tiers, config, sources, mut alerted) in &mut ships {
+    for (entity, hull_comp, mut last_tiers, config, sources, mut alerted, ship_uuid) in &mut ships {
         let hull = &hull_comp.0;
         for (system_id, _cur, _max) in hull.entries() {
             let current_tier = hull.tier_for(system_id);
@@ -105,6 +109,22 @@ pub fn detect_damage_tier_crossings(
                 .get(system_id)
                 .copied()
                 .unwrap_or(DamageTier::Operational);
+
+            // Balance tracer: report every tier crossing (either direction),
+            // on every ship. A crossing to Disabled/Destroyed is the knockout
+            // the ledger timestamps. Emitted unconditionally, alongside the
+            // coordination traffic below. Skipped for a ship with no uuid —
+            // there is no identity to key a ledger on.
+            if current_tier != prev_tier {
+                if let (Some(ref mut msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                    msgs.write(crate::balance::BalanceEvent::SystemTierCrossed {
+                        ship: uuid.0.clone(),
+                        system_id: system_id.0.clone(),
+                        from_tier: format!("{prev_tier:?}"),
+                        to_tier: format!("{current_tier:?}"),
+                    });
+                }
+            }
 
             if current_tier > prev_tier {
                 if current_tier == DamageTier::Destroyed {
@@ -171,12 +191,63 @@ pub fn detect_damage_tier_crossings(
                 }
             }
         }
+        // Disarmed detection (issue #841): a ship is disarmed when every
+        // weapon-*emitter* system (phaser bank, torpedo tube, blaster bank) is
+        // non-operational — it can no longer put a shot downrange. Emitted once
+        // on the transition into fully-disarmed, using the pre-update
+        // `last_tiers` for the "before" state. Reported, never terminal.
+        //
+        // Enabling systems (phaser control, torpedo magazine) are deliberately
+        // *not* in the emitter set: a live control panel over dead banks is
+        // still a ship that cannot fire, so keying disarm off the emitters
+        // reports the true "can't attack" moment.
+        if let (Some(ref mut msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+            let emitters: Vec<&crate::messages::SystemId> = config
+                .0
+                .systems
+                .iter()
+                .filter(|s| is_weapon_emitter_kind(&s.kind))
+                .map(|s| &s.id)
+                .collect();
+            if !emitters.is_empty() {
+                let nonoperational =
+                    |tier: DamageTier| matches!(tier, DamageTier::Disabled | DamageTier::Destroyed);
+                let now_disarmed = emitters
+                    .iter()
+                    .all(|sid| nonoperational(hull.tier_for(sid)));
+                let prev_disarmed = emitters.iter().all(|sid| {
+                    nonoperational(
+                        last_tiers
+                            .0
+                            .get(sid)
+                            .copied()
+                            .unwrap_or(DamageTier::Operational),
+                    )
+                });
+                if now_disarmed && !prev_disarmed {
+                    msgs.write(crate::balance::BalanceEvent::Disarmed {
+                        ship: uuid.0.clone(),
+                    });
+                }
+            }
+        }
+
         for (system_id, _cur, _max) in hull.entries() {
             last_tiers
                 .0
                 .insert(system_id.clone(), hull.tier_for(system_id));
         }
     }
+}
+
+/// Whether a system `kind` is a weapon *emitter* — a system that itself puts a
+/// shot downrange (a phaser bank, torpedo tube, or blaster bank), as opposed to
+/// an enabling system (phaser control, torpedo magazine). Used by the
+/// `Disarmed` detector to decide when a ship can no longer attack.
+fn is_weapon_emitter_kind(kind: &str) -> bool {
+    kind == crate::system_registry::PHASER_BANK_KIND
+        || kind == crate::system_registry::TORPEDO_TUBE_KIND
+        || kind == crate::system_registry::BLASTER_BANK_KIND
 }
 
 #[cfg(test)]
@@ -737,6 +808,89 @@ mod tests {
         assert!(
             !cs.0.is_offline(&fore_sid),
             "shield-arc-fore must be removed from offline_systems after repair"
+        );
+    }
+
+    // ── Issue #841: tier-crossing family balance emission ─────────────────────
+
+    /// Tier-crossing family: destroying the only weapon system on a NON-LOCAL
+    /// ship emits both `SystemTierCrossed` (to `Destroyed`) and `Disarmed`,
+    /// keyed on that ship — guarding the unconditional, all-ships convention.
+    #[test]
+    fn weapon_system_destruction_emits_tier_crossed_and_disarmed_for_a_non_local_ship() {
+        use crate::balance::BalanceEvent;
+        use crate::messages::SystemId;
+        use bevy::ecs::message::Messages;
+
+        let mut app = App::new();
+        app.add_message::<CoordinationEnqueue>()
+            .add_message::<BalanceEvent>()
+            .add_systems(Update, detect_damage_tier_crossings);
+
+        // A ship whose only weapon is one phaser bank — so knocking it out is
+        // both a tier crossing and a full disarm. `ShipConfigComponent::default`
+        // ships a full default weapons suite, so clear it to the single system
+        // this fixture actually carries in its hull.
+        let mut config = ShipConfigComponent::default();
+        config.0.systems.clear();
+        config
+            .0
+            .systems
+            .push(crate::ship::config::SystemInstanceConfig {
+                id: SystemId("phaser-fore".into()),
+                kind: crate::system_registry::PHASER_BANK_KIND.into(),
+                station: None,
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            });
+
+        let hull =
+            crate::damage::SystemHull::from_config(&[(SystemId("phaser-fore".into()), 100.0)]);
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("raider".into()),
+                crate::entity_spawner::EntitySystemHull(hull),
+                LastSystemTiers::default(),
+                config,
+                ShipSystemControlSources::default(),
+            ))
+            .id();
+
+        // Seed LastSystemTiers at full HP (Operational), then discard events.
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<BalanceEvent>>()
+            .clear();
+
+        // Destroy the bank.
+        {
+            let mut e = app.world_mut().entity_mut(ship);
+            let mut hull = e
+                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .unwrap();
+            hull.0.set_hp(&SystemId("phaser-fore".into()), 0.0);
+        }
+        app.update();
+
+        let messages = app.world().resource::<Messages<BalanceEvent>>();
+        let mut cursor = messages.get_cursor();
+        let events: Vec<BalanceEvent> = cursor.read(messages).cloned().collect();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                BalanceEvent::SystemTierCrossed { ship, system_id, to_tier, .. }
+                    if ship == "raider" && system_id == "phaser-fore" && to_tier == "Destroyed"
+            )),
+            "destroying the bank must emit SystemTierCrossed to Destroyed, got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, BalanceEvent::Disarmed { ship } if ship == "raider")),
+            "a ship whose only weapon is destroyed must emit Disarmed, got {events:?}"
         );
     }
 }

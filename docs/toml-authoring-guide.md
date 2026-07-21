@@ -365,7 +365,7 @@ template_path = "assets/entities/star_sun.toml"
 position = [0.0, 0.0, 0.0]
 
 [[entity]]
-template_path = "assets/entities/player_ship.toml"
+template_path = "assets/entities/alliance_cruiser.toml"
 id = "player-ship"
 position = [150.0, 0.0, 0.0]
 spawn_on = "game_start"
@@ -581,12 +581,29 @@ chart pushed to the viewscreen.
 | `rates` | `[f32; 6]` | **required** | Per-level drain/regen rates (level 0..5). Negative = recharge. |
 | `emergency_threshold` | f32 | **required** | Battery level below which all consoles lock to level 1. |
 
-### 2.2.1 Example — `assets/entities/player_ship.toml`
+### 2.2.1 Example — `assets/entities/alliance_cruiser.toml`
+
+The player-selectable hulls are `alliance_courier`, `alliance_destroyer`,
+`alliance_cruiser`, and `alliance_battleship`. There is **no**
+`player_ship.toml`.
+
+**Do not author player identity in a hull template.** The `player` tag and the
+`playerShip` radar icon are injected by the engine at player spawn
+(`spawn_game_start_entities` in `src/server_app.rs`), scoped to the single hull
+the local player actually flies. A hull template carries only `tags = ["ship"]`
+and an ordinary `icon = "ship"` — the same file is spawned as an NPC when a
+world places a copy of it, and authoring `"player"` there would make every NPC
+copy masquerade as the player (answering `player`-only radar filters, drawing
+the player blip). The ordinary icon is the `icon` field of `[radar_appearance]`
+(**§6**), left as `"ship"`.
 
 ```toml
-name = "Player Ship"
-tags = ["player", "ship"]
+name = "Alliance Cruiser"
+tags = ["ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[radar_appearance]
+icon = "ship"   # ordinary ship blip; `playerShip` is injected at spawn
 
 [collider]
 shape = "Capsule"

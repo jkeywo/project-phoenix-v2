@@ -174,6 +174,7 @@ fn test_app() -> App {
     .add_message::<AsteroidDestroyedVfx>()
     .add_message::<ShipDestroyedVfx>()
     .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+    .add_message::<crate::balance::BalanceEvent>()
     .init_resource::<CurrentPhaserMode>()
     .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
         TorpedoConfig::default(),
@@ -2234,6 +2235,260 @@ fn phaser_beam_breaks_shield_then_leaks_to_hull() {
     );
 }
 
+fn shield_hp(app: &App, entity: Entity) -> f32 {
+    app.world()
+        .get::<crate::ship::shields::ShipShields>(entity)
+        .expect("target must have ShipShields")
+        .0
+        .facings[0]
+        .hp as f32
+}
+
+/// The balance tracer has to name both ends of the exchange and split the
+/// damage the same way the hull and shields actually took it — that split is
+/// the whole point of the event, and nothing on the wire carries it.
+#[test]
+fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
+    use crate::balance::BalanceEvent;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+
+    let npc_entity = spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 10.0, 0.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    // Ignore the trickle from the ticks above; only the burst below is being
+    // reconciled against the components.
+    app.world_mut()
+        .resource_mut::<Messages<BalanceEvent>>()
+        .clear();
+    let shield_before = shield_hp(&app, npc_entity);
+    let hull_before = hull_hp(&app, npc_entity);
+
+    // 15 units into a partly-charged shield: the shield eats what it has
+    // left, the rest leaks to hull.
+    set_active_beam_damage_accumulator(&mut app, 15.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+
+    let shield_lost = shield_before - shield_hp(&app, npc_entity);
+    let hull_lost = hull_before - hull_hp(&app, npc_entity);
+    assert!(shield_lost > 0.0 && hull_lost > 0.0, "the hit must do both");
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let hits: Vec<&BalanceEvent> = cursor.read(messages).collect();
+    assert!(
+        !hits.is_empty(),
+        "the beam hit must produce a balance event"
+    );
+
+    // A `tick` pumps the app more than once, so the sustained beam lands in
+    // more than one instalment; the totals are what must reconcile.
+    let mut shield_reported = 0.0f32;
+    let mut hull_reported = 0.0f32;
+    for hit in &hits {
+        let BalanceEvent::DamageApplied {
+            attacker,
+            victim,
+            victim_kind,
+            weapon,
+            amount,
+            shield_absorbed,
+            hull_damage,
+            system_hit,
+        } = hit
+        else {
+            continue;
+        };
+
+        assert_eq!(attacker.as_deref(), Some("test-local-ship"));
+        assert_eq!(victim, "npc-1");
+        assert_eq!(*victim_kind, crate::balance::VictimKind::Ship);
+        assert_eq!(weapon, "port", "weapon must name the firing bank");
+        assert!(
+            *amount >= shield_absorbed + hull_damage && *amount > 0.0,
+            "offered damage must cover what landed, got {amount}"
+        );
+        assert_eq!(
+            *system_hit, None,
+            "no chokepoint can name the system hit yet"
+        );
+        shield_reported += shield_absorbed;
+        hull_reported += hull_damage;
+    }
+    assert_eq!(
+        shield_reported, shield_lost,
+        "reported shield absorption must match what the shield actually lost"
+    );
+    assert_eq!(
+        hull_reported, hull_lost,
+        "reported hull damage must match what the hull actually lost"
+    );
+}
+
+/// Mining is not combat. The rock still shows up in the timeline — an
+/// asteroid soaking a beam is a real thing a balance pass wants to see — but
+/// it must not open a ledger row, and it must not inflate the shooter's
+/// `damage_dealt` in a report field literally named `damage_by_ship`.
+#[test]
+fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
+    use crate::balance::{aggregate_damage, BalanceEvent, VictimKind};
+    use bevy::ecs::message::Messages;
+    use std::collections::BTreeMap;
+
+    let mut app = test_app();
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+
+    spawn_asteroid_target(&mut app, "rock-1", 0.0, -20.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "rock-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+    set_active_beam_damage_accumulator(&mut app, 10.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let hits: Vec<BalanceEvent> = cursor.read(messages).cloned().collect();
+    assert!(
+        !hits.is_empty(),
+        "shooting the rock must still reach the timeline"
+    );
+    for hit in &hits {
+        let BalanceEvent::DamageApplied {
+            victim,
+            victim_kind,
+            ..
+        } = hit
+        else {
+            continue;
+        };
+        assert_eq!(victim, "rock-1");
+        assert_eq!(*victim_kind, VictimKind::Asteroid);
+    }
+
+    // Scope to the damage events — `WeaponFired` records the trigger-pull
+    // regardless of target, so it legitimately opens a `shots_fired` row; this
+    // assertion is about damage, which mining must not credit.
+    let damage_only: Vec<BalanceEvent> = hits
+        .iter()
+        .filter(|h| matches!(h, BalanceEvent::DamageApplied { .. }))
+        .cloned()
+        .collect();
+    assert!(
+        aggregate_damage(damage_only.iter(), &BTreeMap::new()).is_empty(),
+        "no ledger row for the rock, and no damage_dealt for the shooter"
+    );
+}
+
+/// A shooter with no `EntityUuid` is *unknown*, not a ship named `""`. Every
+/// other chokepoint models that as `None`; an empty string here would key a
+/// junk `""` row in the ledger and print `"attacker":""` in the timeline.
+#[test]
+fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
+    use crate::balance::BalanceEvent;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+
+    spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 10.0, 0.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    // Strip the shooter's identity mid-run — the cheapest way to reach the
+    // `shooter_uuid_opt == None` branch of the beam snapshot.
+    let shooter = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
+        q.single(app.world()).expect("fixture has a local ship")
+    };
+    app.world_mut()
+        .entity_mut(shooter)
+        .remove::<crate::entity_spawner::EntityUuid>();
+
+    app.world_mut()
+        .resource_mut::<Messages<BalanceEvent>>()
+        .clear();
+    set_active_beam_damage_accumulator(&mut app, 15.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let hits: Vec<&BalanceEvent> = cursor.read(messages).collect();
+    assert!(!hits.is_empty(), "the beam must still land and be traced");
+    for hit in &hits {
+        let BalanceEvent::DamageApplied { attacker, .. } = hit else {
+            continue;
+        };
+        assert_eq!(
+            *attacker, None,
+            "an unidentified shooter is None, never Some(\"\")"
+        );
+    }
+}
+
 #[test]
 fn phaser_beam_post_break_skips_shield_routing_entirely() {
     let mut app = test_app();
@@ -2436,7 +2691,8 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
         heading: 0.0,
         lifespan_remaining: 30.0,
         target_uuid: Some("player-ship".into()),
-        source_uuid: None,  // no source → no self-detonation exclusion
+        source_uuid: None, // no source → no self-detonation exclusion
+        tube_id: "fore_port".into(),
         shield_pierce: 0.0, // no pierce → all damage goes to shields first
     };
     // Write to the per-entity component (preferred by systems) and resource.
@@ -2490,6 +2746,138 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     assert!(
         hull_after <= hull_before,
         "hull must not increase after torpedo hit, got {hull_after} > {hull_before}"
+    );
+}
+
+/// Closes the loop `ai_torpedo_auto_fire_gates_on_the_arc_the_torpedo_would_strike`
+/// leaves open: that test asserts only the *launch* decision, so it passed
+/// while `tick_torpedo_lifecycle` still routed every detonation through a
+/// hardcoded bearing of `0.0` — i.e. the gate cleared a collapsed aft arc and
+/// the hit then landed on the healthy fore arc. This asserts the other half:
+/// a torpedo that arrives from astern depletes the ASTERN arc and leaves the
+/// fore arc untouched. Arcs are named via the ship's own
+/// `facing_index_for_bearing` rather than hardcoded indices, so the test
+/// tracks the routing instead of restating it.
+#[test]
+fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
+    use crate::entity_spawner::EntityUuid;
+    use crate::server_app::LocalShip;
+    use crate::weapons::shield::{ShieldConfig, ShieldSystem};
+    use crate::weapons::torpedo::Torpedo;
+
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+
+    let player_entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+
+    // Four arcs, no regen, so the only HP movement in this test is the hit.
+    let shield_sys = ShieldSystem::new(&ShieldConfig {
+        num_facings: 4,
+        max_hp: 100,
+        regen_per_sec: 0.0,
+        offline_duration: 10.0,
+    });
+    app.world_mut().entity_mut(player_entity).insert((
+        EntityUuid("player-ship".into()),
+        crate::ship::shields::ShipShields(shield_sys, 0.5),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
+
+    app.world_mut()
+        .insert_resource(WorldResource(crate::messages::WorldData {
+            entities: vec![crate::messages::EntitySnapshot {
+                uuid: "player-ship".into(),
+                position: Some([0.0, 0.0, 0.0]),
+                radius: Some(5.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+
+    // Forward is -z, so a torpedo sitting at +z is astern of a yaw-0 ship.
+    // It is launched far enough back that one tick of flight (heading 0 →
+    // straight down -z) closes to within the detonation radius while still
+    // leaving it astern: detonation is evaluated *after* the torpedo moves, so
+    // a torpedo started at z=1 would overshoot to z=-2 and legitimately strike
+    // the fore arc.
+    let (start_x, start_z) = (0.0_f32, 6.0_f32);
+    let (astern_arc, fore_arc) = {
+        let shields = app
+            .world()
+            .entity(player_entity)
+            .get::<crate::ship::shields::ShipShields>()
+            .unwrap();
+        let astern = shields
+            .0
+            .facing_index_for_bearing(crate::shield::attacker_bearing_relative(
+                start_x, start_z, 0.0, 0.0, 0.0,
+            ));
+        let fore = shields
+            .0
+            .facing_index_for_bearing(crate::shield::attacker_bearing_relative(
+                0.0, -1.0, 0.0, 0.0, 0.0,
+            ));
+        assert_ne!(
+            astern, fore,
+            "precondition: a four-arc hull must route fore and astern to different arcs"
+        );
+        (astern, fore)
+    };
+
+    let hp_of = |app: &App, idx: usize| -> i32 {
+        app.world()
+            .entity(player_entity)
+            .get::<crate::ship::shields::ShipShields>()
+            .unwrap()
+            .0
+            .facings[idx]
+            .hp
+    };
+    let astern_before = hp_of(&app, astern_arc);
+    let fore_before = hp_of(&app, fore_arc);
+
+    let torpedo = Torpedo {
+        uuid: "test-torp-astern".into(),
+        x: start_x,
+        z: start_z,
+        heading: 0.0,
+        lifespan_remaining: 30.0,
+        target_uuid: Some("player-ship".into()),
+        source_uuid: None,
+        tube_id: "aft".into(),
+        shield_pierce: 0.0, // no pierce → the shield arc takes it all
+    };
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+        if let Ok(mut ts) = q.single_mut(app.world_mut()) {
+            ts.0.in_flight.push(torpedo.clone());
+        }
+    }
+    app.world_mut()
+        .resource_mut::<TorpedoSystemResource>()
+        .0
+        .in_flight
+        .push(torpedo);
+
+    tick(&mut app);
+
+    assert!(
+        hp_of(&app, astern_arc) < astern_before,
+        "the arc facing the torpedo's approach must absorb the hit: {} → {}",
+        astern_before,
+        hp_of(&app, astern_arc)
+    );
+    assert_eq!(
+        hp_of(&app, fore_arc),
+        fore_before,
+        "the arc pointing away from the torpedo must be untouched — a hardcoded \
+         bearing of 0.0 would have put this hit on the fore arc"
     );
 }
 
@@ -2694,6 +3082,88 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
         "ShipDestroyedVfx must fire on a blaster kill too; got {:?}",
         vfx.0
     );
+}
+
+/// The blaster's twin of `phaser_beam_from_an_unidentified_shooter_...`.
+///
+/// `BlasterProjectile::source_uuid` is a plain `String` and carries `""` for a
+/// shooter with no `EntityUuid` — so the detonation has to narrow it to
+/// `Option` on the way to the tracer. Without that, the ledger grows a junk
+/// `""` row and the timeline prints `"attacker":""`.
+#[test]
+fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
+    use crate::balance::BalanceEvent;
+    use crate::entity_spawner::EntityUuid;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+
+    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
+        id: "fore".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 360.0,
+        volley_count: 1,
+        volley_interval_secs: 0.1,
+        cooldown_secs: 3.0,
+        charge_time_secs: 0.0,
+        projectile_speed: 40.0,
+        collision_radius: 5.0,
+        visual_scale: 1.0,
+        damage: 5,
+        shield_pierce: 0.0,
+        recoil_impulse: 0.0,
+        screenshake_magnitude: 0.0,
+        marker: None,
+        range: 35.0,
+    });
+    bank.in_flight.push(crate::blaster::BlasterProjectile {
+        id: "proj-1".into(),
+        x: 0.0,
+        z: -20.0,
+        heading: 0.0,
+        speed: 40.0,
+        lifespan_remaining: 5.0,
+        collision_radius: 5.0,
+        damage: 5,
+        shield_pierce: 0.0,
+        // What the firing path writes when the shooter has no `EntityUuid`.
+        source_uuid: String::new(),
+    });
+
+    // The shooter deliberately has no `EntityUuid`, matching the projectile.
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        BlasterSystemResource(vec![bank]),
+        Transform::default(),
+    ));
+    app.world_mut().spawn((
+        EntityUuid("npc-blaster-target".into()),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            100.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -20.0),
+    ));
+
+    app.update();
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let hits: Vec<&BalanceEvent> = cursor.read(messages).collect();
+    assert!(!hits.is_empty(), "the blaster hit must be traced");
+    for hit in &hits {
+        let BalanceEvent::DamageApplied {
+            attacker, weapon, ..
+        } = hit
+        else {
+            continue;
+        };
+        assert_eq!(
+            *attacker, None,
+            "an unidentified shooter is None, never Some(\"\")"
+        );
+        assert_eq!(weapon, "fore", "weapon must name the firing bank");
+    }
 }
 
 // ── NPC as shooter: handle_fire_phaser (unified) / tick_beams ────────────
@@ -5726,11 +6196,11 @@ fn integrate_weapons_state_launches_from_torpedo_intent() {
 }
 
 /// Issue #698 promotion: `ai_torpedo_auto_fire` used to hardcode
-/// `TorpedoAiInput { target_shields: 0 }`, which made `auto_fire_torpedo`'s
-/// "shields must be down" condition unreachable — the AI fired torpedoes
-/// straight into a fully-shielded target. It now reads the target's real
-/// `ShipShields`, so the pure function's documented doctrine (phasers strip
-/// shields, torpedoes finish the hull) actually holds.
+/// `TorpedoAiInput { target_facing_shields: 0 }`, which made
+/// `auto_fire_torpedo`'s "shields must be down" condition unreachable — the AI
+/// fired torpedoes straight into a fully-shielded target. It now reads the
+/// target's real `ShipShields`, so the pure function's documented doctrine
+/// (phasers strip shields, torpedoes finish the hull) actually holds.
 #[test]
 fn ai_torpedo_auto_fire_holds_fire_while_target_shields_are_up() {
     let mut app = torpedo_ai_test_app();
@@ -5745,7 +6215,7 @@ fn ai_torpedo_auto_fire_holds_fire_while_target_shields_are_up() {
     assert!(
         !out.iter()
             .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
-        "torpedoes must hold while the target's shields are still up"
+        "torpedoes must hold while the arc facing the shooter is still up"
     );
 
     // Collapse every facing — now the shot is on.
@@ -5765,6 +6235,81 @@ fn ai_torpedo_auto_fire_holds_fire_while_target_shields_are_up() {
         out.iter()
             .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
         "torpedoes must fire once the target's shields are down"
+    );
+}
+
+/// The multi-arc case the summed gate got wrong: the shooter sits astern of a
+/// four-arc target, so the torpedo would strike the target's Aft arc. Collapsing
+/// only the *front* arc must NOT unlock the shot; collapsing the aft arc must —
+/// and the three still-healthy arcs must not veto it. Uses the target's own
+/// `facing_index_for_bearing` to name the arc rather than hardcoding an index,
+/// so the test tracks the routing rather than restating it.
+#[test]
+fn ai_torpedo_auto_fire_gates_on_the_arc_the_torpedo_would_strike() {
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+
+    // Target ahead of the shooter at the origin, so the shot arrives on the
+    // target's own aft bearing.
+    let target = spawn_shielded_target(&mut app, "target-uuid", 0.0, -30.0);
+
+    // Which arc is actually in the way? Ask the shield system, not a constant.
+    let (struck, away) = {
+        let shields = app
+            .world()
+            .get::<crate::ship::shields::ShipShields>(target)
+            .unwrap();
+        assert!(
+            shields.0.facings.len() >= 2,
+            "precondition: this test needs a multi-arc target"
+        );
+        let incoming = crate::shield::attacker_bearing_relative(0.0, 0.0, 0.0, -30.0, 0.0);
+        let struck = shields.0.facing_index_for_bearing(incoming);
+        let away = (struck + 1) % shields.0.facings.len();
+        (struck, away)
+    };
+
+    // Collapse an arc pointing somewhere else: still no shot.
+    {
+        let mut shields = app
+            .world_mut()
+            .get_mut::<crate::ship::shields::ShipShields>(target)
+            .unwrap();
+        shields.0.facings[away].hp = 0;
+    }
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "a collapsed arc facing elsewhere must not unlock the shot"
+    );
+
+    // Collapse the arc actually in the way, leaving the others healthy: fire.
+    {
+        let mut shields = app
+            .world_mut()
+            .get_mut::<crate::ship::shields::ShipShields>(target)
+            .unwrap();
+        shields.0.facings[away].hp = shields.0.facings[away].max_hp;
+        shields.0.facings[struck].hp = 0;
+        assert!(
+            shields
+                .0
+                .facings
+                .iter()
+                .enumerate()
+                .any(|(i, f)| i != struck && f.hp > 0),
+            "precondition: other arcs must still be healthy"
+        );
+    }
+    load_tube_now(&mut app, "fore_port");
+    let out = tick(&mut app);
+    assert!(
+        out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "healthy rear arcs must not veto a shot into the collapsed facing arc"
     );
 }
 
@@ -6023,6 +6568,174 @@ fn load_tube_emits_claim_torpedo_round_via_channel_2() {
     assert!(
         claim_present,
         "handle_load_tube should emit ClaimTorpedoRound on channel-2"
+    );
+}
+
+/// Reads the LocalShip tube's volley target, preferring the per-entity
+/// component the way the handler does.
+fn local_tube_target_count(app: &mut App, tube: &str) -> u32 {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+    let from_component = q
+        .single(app.world())
+        .ok()
+        .and_then(|ts| ts.0.tube(tube).map(|t| t.target_count));
+    from_component.unwrap_or_else(|| {
+        app.world()
+            .resource::<TorpedoSystemResource>()
+            .0
+            .tube(tube)
+            .expect("test tube should exist")
+            .target_count
+    })
+}
+
+/// The human half of the command `console_ai::server::ai_torpedo_load` issues:
+/// the Tactical operator's console sends `ControlSystem { target:
+/// "torpedo-tube-<id>", SetTorpedoVolleyTarget }`, and it must still land on
+/// the player ship's own tube now that the handler reads `AdmittedCommands`
+/// per ship instead of the raw inbound stream.
+#[test]
+fn human_set_torpedo_volley_target_reaches_the_local_ship_tube() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(
+        local_tube_target_count(&mut app, "fore_port"),
+        1,
+        "an admitted human volley order must set the tube's target_count"
+    );
+}
+
+/// A torpedo that kills the *player's* ship must end the run, exactly as a beam
+/// or blaster kill does. Before AI crews fired torpedoes at all this branch was
+/// unreachable, so the torpedo detonation path simply despawned whatever it
+/// killed: the player vanished, the ledger recorded the death, and the run
+/// carried on `InProgress` to the tick budget with no game-over reason.
+#[test]
+fn torpedo_kill_on_the_local_ship_latches_game_over() {
+    use crate::simulation::GameOverReason;
+
+    let mut app = test_app();
+    app.init_resource::<GameOverReason>();
+    start_game_with_weapons(&mut app);
+
+    let player = local_ship(&mut app);
+
+    // An enemy ship whose torpedo is already on top of the player, carrying
+    // more than enough hull damage to finish it.
+    let mut enemy_torpedoes = TorpedoSystem::new(TorpedoConfig {
+        damage_hull: 100_000,
+        ..TorpedoConfig::default()
+    });
+    enemy_torpedoes.in_flight.push(crate::torpedo::Torpedo {
+        uuid: "torpedo-uuid".into(),
+        x: 0.0,
+        z: 0.0,
+        heading: 0.0,
+        lifespan_remaining: 10.0,
+        target_uuid: Some("test-local-ship".into()),
+        source_uuid: Some("enemy-uuid".into()),
+        tube_id: "fore_port".into(),
+        shield_pierce: 1.0,
+    });
+    app.world_mut().spawn((
+        crate::simulation::Ship,
+        crate::entity_spawner::EntityUuid("enemy-uuid".into()),
+        Transform::from_xyz(0.0, 0.0, 40.0),
+        TorpedoSystemResource(enemy_torpedoes),
+    ));
+
+    tick(&mut app);
+
+    assert!(
+        app.world().get_entity(player).is_ok(),
+        "the LocalShip must never be despawned on death — the run ends instead"
+    );
+    let reason = app.world().resource::<GameOverReason>();
+    assert!(
+        reason.0.is_some(),
+        "a torpedo kill on the player must latch a game-over reason"
+    );
+    assert_eq!(
+        reason.1,
+        Some(crate::balance::Outcome::Defeat),
+        "the player's death is a defeat, whatever weapon delivered it"
+    );
+}
+
+/// Tube ids are designer-authored and `alliance_battleship` spells them with
+/// hyphens (`id = "fore-port"`). The handler used to recover the tube id by
+/// inverting the SystemId mapping — strip `torpedo-tube-`, turn hyphens back
+/// into underscores — which is lossy, so a hyphenated tube resolved to
+/// `fore_port`, matched nothing, and every volley order for that hull was
+/// dropped: its AI crew never loaded a round. The handler now compares
+/// forward-mapped ids, so either spelling lands.
+#[test]
+fn set_torpedo_volley_target_accepts_a_hyphenated_tube_id() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+
+    // Re-spell the tube the way a hyphen-authoring hull does.
+    {
+        let world = app.world_mut();
+        let mut q = world
+            .query_filtered::<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+        for mut ts in q.iter_mut(world) {
+            ts.0.tube_mut("fore_port")
+                .expect("test ship should have a fore_port tube")
+                .id = "fore-port".to_string();
+        }
+    }
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(
+        local_tube_target_count(&mut app, "fore-port"),
+        1,
+        "a hyphen-spelled tube id must still receive its volley order"
+    );
+}
+
+#[test]
+fn set_torpedo_volley_target_refused_when_tube_fine_system_offline() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    mark_system_offline(&mut app, SystemId("torpedo-tube-fore-port".into()));
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(
+        local_tube_target_count(&mut app, "fore_port"),
+        0,
+        "an offline tube must refuse volley orders from any origin"
     );
 }
 
@@ -7016,6 +7729,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
             load_time: None,
             marker: None,
             volley_max: 1,
+            ai_target_count: None,
         }],
         TorpedoConfig {
             count: 10,
@@ -7779,5 +8493,287 @@ fn handle_fire_blaster_accepts_ai_token() {
     assert!(
         blaster_res.0[0].volley.on_cooldown,
         "handle_fire_blaster must accept AI token and enter cooldown after firing"
+    );
+}
+
+/// The blaster twin of `set_torpedo_volley_target_accepts_a_hyphenated_tube_id`.
+///
+/// `blaster_bank_system_id` folds `_` to `-`, so `handle_fire_blaster`'s old
+/// inverse ("strip `blaster-`, the rest is the bank id") turned
+/// `blaster-fore-port` back into `fore-port` and matched no bank on a hull that
+/// authored `fore_port` — the order vanished with no error. Latent only because
+/// every shipped hull happens to author hyphen-free bank ids. The handler now
+/// forward-maps each authored bank id and compares, so both spellings resolve.
+#[test]
+fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
+    use crate::entity_spawner::EntityUuid;
+
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+
+    let npc_uuid = "bb000000-0000-0000-0000-000000000040";
+    let target_uuid_str = "bb000000-0000-0000-0000-000000000041";
+
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    let npc_entity = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            // The lock lives on the viewscreen blackboard's Combat Lock
+            // (issue #829/#822) — `TacticalRadarSelection` is no longer read
+            // by the fire path, so seeding it here would prove nothing.
+            {
+                let mut bbs = crate::server_app::ShipSystemBlackboards::default();
+                bbs.0.insert(
+                    crate::system_registry::viewscreen_system_id(),
+                    crate::messages::SystemBlackboard::Viewscreen(
+                        crate::messages::ViewscreenBlackboard {
+                            combat_lock: Some(target_uuid_str.to_string()),
+                            ..Default::default()
+                        },
+                    ),
+                );
+                bbs
+            },
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            ShipPhysics::default(),
+            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                crate::blaster::BlasterBankConfig {
+                    // Underscore-authored, the spelling the inverse dropped.
+                    id: "fore_port".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 360.0,
+                    volley_count: 1,
+                    volley_interval_secs: 0.1,
+                    cooldown_secs: 3.0,
+                    charge_time_secs: 0.0,
+                    projectile_speed: 40.0,
+                    collision_radius: 1.5,
+                    visual_scale: 1.0,
+                    damage: 10,
+                    shield_pierce: 0.0,
+                    recoil_impulse: 0.0,
+                    screenshake_magnitude: 0.0,
+                    marker: None,
+                    range: 35.0,
+                },
+            )]),
+            Transform::default(),
+        ))
+        .id();
+
+    // Deliberately BEYOND the bank's 35-unit range. `tick_blaster_auto_fire`
+    // runs in the same `SimSet::Input` on any bank whose fine system operates
+    // AI, and would arm this bank on its own — which would make the assertion
+    // below true whether or not `handle_fire_blaster` resolved the bank id at
+    // all. Out of range, auto-fire skips the bank, and the explicit
+    // `FireBlaster` order is the only thing that can arm it (the handler skips
+    // its own range/arc check for AI tokens by design — `tick_blaster_auto_fire`
+    // owns arc enforcement for AI fire).
+    app.world_mut().spawn((
+        EntityUuid(target_uuid_str.to_string()),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -100.0),
+    ));
+
+    {
+        let mut reg = app
+            .world_mut()
+            .resource_mut::<crate::ai_plugin::AiTokenRegistry>();
+        reg.register_with_entity(npc_uuid, npc_entity);
+    }
+
+    let ai_token = format!("ai:{}", npc_uuid);
+    push(
+        &mut app,
+        &ai_token,
+        ClientMessage::ControlSystem {
+            // The id the registry actually produces for `fore_port`.
+            target: crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
+            payload: SystemControlPayload::FireBlaster,
+        },
+    );
+
+    app.update();
+
+    let blaster_res = app
+        .world()
+        .get::<BlasterSystemResource>(npc_entity)
+        .unwrap();
+    assert!(
+        blaster_res.0[0].volley.on_cooldown,
+        "an underscore-authored bank id must still receive its fire order"
+    );
+}
+
+// ── Issue #841: balance-taxonomy emission, per chokepoint family ─────────────
+//
+// Each test drives a NON-LOCAL ship, guarding the "emitted unconditionally,
+// outside every is_local gate" convention: an event that only fired for the
+// player ship would report half the fight.
+
+/// Weapon-fire family: a beam opening from a NON-LOCAL (NPC) shooter emits
+/// `WeaponFired` attributed to that shooter.
+#[test]
+fn npc_beam_fire_emits_weapon_fired_for_the_non_local_shooter() {
+    use crate::ai_plugin::AiTokenRegistry;
+    use crate::balance::BalanceEvent;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+    app.init_resource::<AiTokenRegistry>();
+
+    let npc_uuid = "00000000-0000-0000-0000-000000000001";
+    let target_uuid = "00000000-0000-0000-0000-000000000002";
+    setup_npc_shooter(&mut app, npc_uuid, target_uuid, 0.0, -20.0);
+
+    let ai_token = format!("ai:{}", npc_uuid);
+    push(
+        &mut app,
+        &ai_token,
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    app.update();
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let saw = cursor.read(messages).any(|e| {
+        matches!(
+            e,
+            BalanceEvent::WeaponFired { shooter, kind, .. }
+                if shooter.as_deref() == Some(npc_uuid)
+                    && kind == crate::balance::FIRED_KIND_BEAM
+        )
+    });
+    assert!(
+        saw,
+        "an NPC beam opening must emit WeaponFired for the non-local shooter"
+    );
+}
+
+/// Shields family: a beam that drives a NON-LOCAL ship's only shield facing to
+/// zero emits `ShieldArcCollapsed` once, keyed on that ship.
+#[test]
+fn beam_collapsing_a_non_local_shield_facing_emits_shield_arc_collapsed() {
+    use crate::balance::BalanceEvent;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+
+    // Small single-facing shield (10 HP) over ample hull so the facing, not the
+    // hull, is what the burst breaks.
+    spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 200.0, 10.0, 0.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<BalanceEvent>>()
+        .clear();
+    // A burst well above the facing's remaining HP collapses it.
+    set_active_beam_damage_accumulator(&mut app, 60.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let saw = cursor
+        .read(messages)
+        .any(|e| matches!(e, BalanceEvent::ShieldArcCollapsed { ship, .. } if ship == "npc-1"));
+    assert!(
+        saw,
+        "collapsing the non-local ship's facing must emit ShieldArcCollapsed"
+    );
+}
+
+/// Destruction family: a beam kill on a NON-LOCAL ship emits exactly one
+/// `EntityDestroyed`, crediting the local shooter as killer.
+#[test]
+fn beam_kill_of_a_non_local_ship_emits_entity_destroyed_with_killer_credit() {
+    use crate::balance::BalanceEvent;
+    use bevy::ecs::message::Messages;
+
+    let mut app = test_app();
+    setup_npc_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+
+    // Unshielded NPC sturdy enough to survive the beam-start ticks, so the
+    // kill lands in the measured burst below rather than before the clear.
+    spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        },
+    );
+    tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<BalanceEvent>>()
+        .clear();
+    set_active_beam_damage_accumulator(&mut app, 50.0);
+    set_active_beam_remaining_secs(&mut app, 5.0);
+    tick(&mut app);
+
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let deaths: Vec<&BalanceEvent> = cursor
+        .read(messages)
+        .filter(|e| matches!(e, BalanceEvent::EntityDestroyed { victim, .. } if victim == "npc-1"))
+        .collect();
+    assert_eq!(
+        deaths.len(),
+        1,
+        "the kill must emit exactly one EntityDestroyed for the victim"
+    );
+    assert!(
+        matches!(
+            deaths[0],
+            BalanceEvent::EntityDestroyed { killer, .. }
+                if killer.as_deref() == Some("test-local-ship")
+        ),
+        "EntityDestroyed must credit the local shooter as killer"
     );
 }

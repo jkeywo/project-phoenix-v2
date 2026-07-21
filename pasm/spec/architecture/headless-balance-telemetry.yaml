@@ -1,0 +1,224 @@
+entities:
+  - runtime: headless-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Headless Runtime
+      summary: The native phoenix-headless binary that runs the authoritative Phoenix simulation with no window, renderer, or connected clients, driving a fixed timestep as fast as the CPU allows and emitting a JSON exit report.
+    architecture:
+      kind: runtime
+      authority: authoritative
+
+  - runtime: node-tooling-runtime
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Node Tooling Runtime
+      summary: Node.js runtime for offline repo tooling scripts, outside the simulation, that orchestrate and post-process headless runs.
+    architecture:
+      kind: runtime
+      authority: non-authoritative
+
+  - component: balance-event-emitter
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Balance Event Emitter
+      summary: Emits a structured BalanceEvent at every combat chokepoint (damage applied, weapon fired, shield arc collapsed, system tier crossed, disarmed, entity destroyed, red alert changed, objective completed, phase changed, repair applied), unconditionally for all ships in all builds — the wire-independent combat-telemetry channel a balance pass reads.
+      rationale:
+        - "Emission is unconditional and sits OUTSIDE the is_local player-only gates that wrap ServerMessage::DamageTaken/ShipDestroyed/GameOver, so NPC-vs-NPC combat is captured. Registered on the simulation app (add_simulation_plugins_with), not behind the headless feature, so the browser host also produces the stream and a future in-game crew-debrief screen needs no re-instrumentation."
+    architecture:
+      kind: telemetry-emitter
+      authority: observational
+      reads: [authoritative-damage-state, shield-arc-state, ship-station-system-topology-state]
+      produces: [balance-event-stream]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai.rs]
+      symbols: [BalanceEvent, VictimKind, Outcome]
+      tests: [cargo test]
+
+  - state: balance-event-stream
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Balance Event Stream
+      summary: The BalanceEvent message stream — one event per combat occurrence, carrying attacker/victim uuids, weapon bank/tube id, shield-absorbed vs hull split, tier transitions, and kill credit.
+    architecture:
+      classification: observational
+      owner: balance-event-emitter
+      writers: [balance-event-emitter]
+      readers: [headless-telemetry-collector]
+    implementation:
+      status: declared
+      paths: [src/core/balance.rs]
+      symbols: [BalanceEvent]
+      tests: [cargo test]
+
+  - component: headless-telemetry-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Headless Telemetry Collector
+      summary: Headless-only system that drains the BalanceEvent stream each tick, stamping every event with tick and sim-time and snapshotting each referenced ship's display-name key and faction, into the run telemetry buffer.
+    architecture:
+      kind: telemetry-collector
+      authority: observational
+      reads: [balance-event-stream]
+      produces: [run-telemetry-state]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/headless/report.rs, src/headless/app.rs]
+      symbols: [RunTelemetry, StampedBalanceEvent, collect_balance_events]
+      tests: [cargo test, tests/headless_runner.rs]
+
+  - state: run-telemetry-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Run Telemetry State
+      summary: Accumulated per-run buffer of stamped balance events plus uuid-to-name and uuid-to-faction snapshots, surviving NPC despawn so destroyed ships still appear in the report.
+    architecture:
+      classification: observational
+      owner: headless-telemetry-collector
+      writers: [headless-telemetry-collector]
+      readers: [combat-ledger-aggregator, run-outcome-classifier]
+    implementation:
+      status: declared
+      paths: [src/headless/report.rs]
+      symbols: [RunTelemetry]
+      tests: [cargo test]
+
+  - component: combat-ledger-aggregator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Combat Ledger Aggregator
+      summary: Pure fold over the stamped balance-event log producing per-ship ledgers — damage dealt/taken split by weapon and by attacker-victim pair, shield-absorbed vs hull, shots fired, kills, death timestamp, system knockouts with timestamps, and repair HP — keyed by uuid. Asteroid victims are excluded from ship ledgers.
+      rationale:
+        - "Aggregation is a pure function over the event log rather than a walk of surviving entities, so ships destroyed mid-run still carry a full ledger, and the report is unit-testable with no ECS app."
+    architecture:
+      kind: pure-aggregator
+      authority: observational
+      reads: [run-telemetry-state]
+      produces: [run-report-artifact]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/balance.rs, src/headless/report.rs]
+      symbols: [aggregate_ledgers, aggregate_damage, DamageLedger, ledgers_to_json]
+      tests: [cargo test]
+
+  - component: sim-rng
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Seeded Simulation RNG
+      summary: Sim-wide seeded RNG resource exposing per-subsystem streams derived from the master seed and a stream name, replacing the OS-seeded damage-distribution sites and entity/asteroid uuid generation, so a seeded headless run is byte-identically reproducible on the same binary and machine.
+      rationale:
+        - "Streams derive from splitmix64(master + fnv1a64(stream_name)), keyed by name not discriminant, so adding or reordering consumers never shifts an existing site's sequence. Seed precedence is --seed > world [global] seed > a randomly drawn seed; the resolved seed and its provenance are always echoed in the report, and --seed implies the single-threaded deterministic scheduler."
+    architecture:
+      kind: determinism-source
+      authority: authoritative
+      owns: [sim-rng-state]
+      produces: [sim-rng-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/sim_rng.rs, src/server_app.rs, src/headless/app.rs, src/headless/args.rs, src/regions/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/asteroids/lifecycle.rs, src/world/server.rs]
+      symbols: [SimRng, SimStream, SeedSource, assign_uuid_with]
+      tests: [cargo test, tests/rng_determinism.rs]
+
+  - state: sim-rng-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Simulation RNG State
+      summary: The resolved master seed, its provenance (cli / world / random), and the per-stream generators.
+    architecture:
+      classification: authoritative
+      owner: sim-rng
+      writers: [sim-rng]
+    implementation:
+      status: declared
+      paths: [src/sim_rng.rs]
+      symbols: [SimRng]
+      tests: [cargo test, tests/rng_determinism.rs]
+
+  - component: run-outcome-classifier
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Run Outcome Classifier
+      summary: Pure classifier assigning each run an outcome — victory, defeat, draw, or timeout — with per-side margins (remaining hull fraction, cumulative damage both ways, closing-window damage rate), sides bucketed by faction relative to the player ship.
+      rationale:
+        - "Victory vs defeat has no other structured signal, so the game_over trigger action carries an author-declared outcome threaded through GameOverReason; built-in player-ship death latches Defeat, an undeclared scenario game_over defaults to Victory. Budget exhaustion is timeout when damage still flows in the closing window, draw when it has gone silent — a reported heuristic, never adjudicated by the engine."
+    architecture:
+      kind: pure-classifier
+      authority: observational
+      reads: [run-telemetry-state, ship-station-system-topology-state, game-phase-state]
+      produces: [run-report-artifact]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/balance.rs, src/headless/report.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/server_app.rs]
+      symbols: [classify, closing_damage_rates, RunOutcome, OutcomeReport, SideMargins, GameOverReason]
+      tests: [cargo test, tests/headless_runner.rs]
+
+  - state: run-report-artifact
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Run Report Artifact
+      summary: The headless exit summary — ticks, sim/wall time, resolved seed and provenance, final phase and game-over reason, per-ship combat ledgers, run outcome with per-side margins, and (in ndjson mode) the full stamped event timeline. Report on stdout, logs on stderr, so the JSON is never corrupted.
+    architecture:
+      classification: derived
+      owner: combat-ledger-aggregator
+      derived_from: [run-telemetry-state]
+      readers: [balance-batch-runner]
+    implementation:
+      status: declared
+      paths: [src/headless/report.rs, src/bin/phoenix_headless.rs]
+      symbols: [RunReport]
+      tests: [cargo test, tests/headless_runner.rs]
+
+  - component: duel-composition-transform
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Duel Composition Transform
+      summary: Pure transform over the parsed duel world config that fills up to five pre-authored spawn_entity slot triggers per side from CLI side lists (--side-a / --side-b), resolves each ship name (alliance-prefixed template, then bare template, then literal path) via an injected resolver, sets each side's faction, and deletes unused slots and any annihilation trigger whose group ends empty.
+      rationale:
+        - "Slots are spawn_entity triggers, not static entities, because on_all_destroyed group membership only registers through SpawnEntity dispatch. Side A slot 1 is the game-start player ship (set from --side-a[0] via --ship); victory is side B annihilation, defeat is the built-in player-death latch — no side_a annihilation trigger is authored, because an empty side_a group would instant-fire and LocalShip death is the real defeat condition."
+    architecture:
+      kind: pure-transform
+      authority: authoritative
+      reads: [world-configuration-state]
+      writes: [world-configuration-state]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/headless/duel.rs, src/headless/app.rs, src/headless/args.rs, assets/worlds/duel.toml]
+      symbols: [apply_duel_sides, resolve_template]
+      tests: [cargo test, tests/headless_runner.rs]
+
+  - component: balance-batch-runner
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Balance Batch Runner
+      summary: Node script that reads a TOML config (class-matrix shorthand, explicit matchups, or a scenario sweep), fans out phoenix-headless processes across a bounded concurrency pool, and merges the per-run report JSON into per-matchup win/loss/draw/timeout rates, time-to-kill distributions, and mean damage margins as a markdown table and optional merged JSON.
+      rationale:
+        - "The merge and formatting are pure functions exported for vitest; the CLI entry is guarded so importing never spawns. Failed, unparseable, and hung runs (configurable run_timeout_secs kill) are recorded per-run and never sink the batch."
+    architecture:
+      kind: offline-tool
+      authority: observational
+      reads: [run-report-artifact]
+      runs_in: [node-tooling-runtime]
+    implementation:
+      status: declared
+      paths: [scripts/balance-runs.mjs, scripts/balance-runs.example.toml]
+      symbols: [mergeReports, formatMarkdown, formatMatrix, expandMatchups, buildRunTasks]
+      tests: [tests/client/balance-runs.test.js]

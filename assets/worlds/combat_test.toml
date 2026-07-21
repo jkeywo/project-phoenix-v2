@@ -639,6 +639,7 @@ when      = "counter(ship_power) < 90"
   [[trigger.action]]
   type       = "game_over"
   message    = "world.combat_test.trigger.action.18.message"
+  outcome    = "victory"
   delay_secs = 5.0
 
 [[trigger]]
@@ -650,6 +651,7 @@ when      = "counter(ship_power) >= 90 and counter(ship_power) < 100"
   [[trigger.action]]
   type       = "game_over"
   message    = "world.combat_test.trigger.action.19.message"
+  outcome    = "victory"
   delay_secs = 5.0
 
 [[trigger]]
@@ -661,6 +663,7 @@ when      = "counter(ship_power) >= 100"
   [[trigger.action]]
   type       = "game_over"
   message    = "world.combat_test.trigger.action.20.message"
+  outcome    = "victory"
   delay_secs = 5.0
 
 # Defeat: Starbase Alpha destroyed.
@@ -671,6 +674,7 @@ entity    = "world.entity.starbase_alpha.name"
   [[trigger.action]]
   type    = "game_over"
   message = "world.combat_test.trigger.action.21.message"
+  outcome = "defeat"
 
 # Complete wave objectives as their named attackers are destroyed.
 [[trigger]]

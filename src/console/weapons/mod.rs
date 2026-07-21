@@ -100,21 +100,33 @@ impl Plugin for WeaponsPlugin {
         // handler (`tactical-radar`) and the phaser-mode/control handlers
         // (`phaser-control`).
         //
-        // NOTE: the weapons FIRE/LOAD handlers (`handle_fire_phaser` /
+        // NOTE: the weapons FIRE handlers (`handle_fire_phaser` /
         // `handle_fire_torpedo` / `handle_fire_blaster` / `handle_load_tube` /
-        // `handle_unload_tube` / `handle_set_torpedo_volley_target`) are NOT
-        // admitted-command consumers — they read `MessageReader<InboundMessage>`
-        // for dedicated top-level `ClientMessage` variants that carry no
-        // `SystemId` target. That is a separate client→host channel outside
-        // admitted routing (a possible future migration, not #833), so the
-        // per-weapon ids (`phaser-fore`, `torpedo-tube-*`, `blaster-*`) are
-        // deliberately not registered here — they never enter `AdmittedCommands`.
+        // `handle_unload_tube`) are NOT admitted-command consumers — they read
+        // `MessageReader<InboundMessage>` for dedicated top-level
+        // `ClientMessage` variants that carry no `SystemId` target. That is a
+        // separate client→host channel outside admitted routing (a possible
+        // future migration, not #833), so `phaser-fore` and `blaster-*` are
+        // deliberately not registered here.
+        //
+        // `torpedo-tube-*` IS registered, and is the exception #833 scoped out.
+        // `handle_set_torpedo_volley_target` was migrated to read per-ship
+        // `AdmittedCommands` over `With<Ship>` because it had to: the volley
+        // order is the only way a tube ever loads, and as an
+        // `InboundMessage` + `With<LocalShip>` handler it was unreachable for
+        // every NPC — so AI crews never loaded a torpedo and no NPC ever fired
+        // one. `ai_torpedo_load` now issues that order through
+        // `emit_ai_command`, the same seam and the same `SystemId` a human's
+        // `ControlSystem` command travels, which is exactly the symmetry
+        // admitted routing exists to express. A prefix matcher covers the
+        // per-hull tube ids (`torpedo-tube-fore-port`, …).
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::TACTICAL_RADAR_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::PHASER_CONTROL_SYSTEM_ID,
-        ));
+        ))
+        .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"));
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
@@ -394,6 +406,9 @@ pub(crate) fn integrate_weapons_state(
     >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<crate::simulation::SimOutbox>,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     for (
         ship_entity,
@@ -471,6 +486,19 @@ pub(crate) fn integrate_weapons_state(
                         uuid: launched_uuid,
                         ..
                     } => {
+                        // Balance tracer: the torpedo left the tube. The human
+                        // path (`handle_fire_torpedo`) has always written this;
+                        // this AI path did not, so every AI-launched torpedo
+                        // was invisible in `shots_fired` while its damage still
+                        // showed up in `by_weapon`. Now that AI crews actually
+                        // load and fire tubes, that gap made the ledger lie.
+                        if let Some(ref mut msgs) = balance_events {
+                            msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                                shooter: source_uuid.clone().filter(|u| !u.is_empty()),
+                                weapon: cmd.tube_id.clone(),
+                                kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
+                            });
+                        }
                         outbox.0.push((
                             crate::lobby::Target::All,
                             crate::messages::ServerMessage::TorpedoLaunched {
@@ -816,8 +844,12 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// re-establishing that ordering — see `WeaponsPlugin::build` and
 /// `human_set_target_survives_the_tick_on_a_mixed_rating_ship`.
 fn ai_target_selection(
+    // `Option<Res<_>>`, never a bare `Res` — this system runs in bare-`App`
+    // weapons fixtures that never insert `LogFilterConfig` (see the macro docs).
+    log: Option<Res<crate::logging::LogFilterConfig>>,
     mut ship_query: Query<
         (
+            Entity,
             &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
             &LastShipAttacker,
@@ -884,7 +916,18 @@ fn ai_target_selection(
             })
     };
 
+    // Resolve a targetable UUID to a display name for readable log lines,
+    // falling back to the raw UUID when the entity carries no `EntityName`.
+    let name_of = |uuid: &str| -> String {
+        other_ships_q
+            .iter()
+            .find_map(|(u, _, n)| (u.0 == uuid).then(|| n.map(|n| n.0.clone())))
+            .flatten()
+            .unwrap_or_else(|| uuid.to_string())
+    };
+
     for (
+        ship_entity,
         ship_config,
         control_sources,
         last_attacker,
@@ -1042,14 +1085,26 @@ fn ai_target_selection(
             })
         };
 
-        let acquired = objective_target
-            .or_else(retained_lock)
-            .or_else(|| last_attacker.0.clone())
-            .or_else(|| {
-                destroy_is_untargeted
-                    .then(|| nearest_hostile(registry))
-                    .flatten()
-            });
+        // Which tier produced the acquisition, kept alongside the result for the
+        // `debug`-level "why this target" line below. The `if let ... else if`
+        // chain preserves the exact short-circuit laziness of the original
+        // `.or_else` chain: `retained_lock` and `nearest_hostile` are only
+        // evaluated when the higher tiers yield `None`.
+        let (acquired, acquired_tier): (Option<String>, &'static str) =
+            if let Some(t) = objective_target {
+                (Some(t), "objective")
+            } else if let Some(t) = retained_lock() {
+                (Some(t), "retained")
+            } else if let Some(t) = last_attacker.0.clone() {
+                (Some(t), "last-attacker")
+            } else if let Some(t) = destroy_is_untargeted
+                .then(|| nearest_hostile(registry))
+                .flatten()
+            {
+                (Some(t), "nearest-hostile")
+            } else {
+                (None, "none")
+            };
 
         // The radar gate applies to every tier alike (issue #680): a ship must
         // not lock what its own damage-scaled tactical radar cannot see.
@@ -1079,6 +1134,31 @@ fn ai_target_selection(
         // would fire change detection every tick even when the lock is
         // unchanged.
         if weapons_target.0 != selected {
+            // Target CHANGED — the single most load-bearing balance line: the
+            // headline `info` edge names the from→to, and the `debug` line
+            // records which acquisition tier won (why this target). Entity-
+            // scoped so `--log-entity <ship>` narrows it to one hull.
+            let from = weapons_target
+                .0
+                .as_deref()
+                .map(name_of)
+                .unwrap_or_else(|| "none".to_string());
+            let to = selected
+                .as_deref()
+                .map(name_of)
+                .unwrap_or_else(|| "none".to_string());
+            crate::pinfo!(
+                log,
+                crate::logging::LogCat::Ai,
+                entity = ship_entity,
+                "target {from} -> {to}"
+            );
+            crate::pdebug!(
+                log,
+                crate::logging::LogCat::Ai,
+                entity = ship_entity,
+                "acquired {to} via tier {acquired_tier}"
+            );
             weapons_target.0 = selected;
         }
     }

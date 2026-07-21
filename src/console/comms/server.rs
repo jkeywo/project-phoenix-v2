@@ -256,6 +256,8 @@ pub(crate) fn handle_respond_to_message(
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
@@ -340,6 +342,9 @@ pub(crate) fn handle_respond_to_message(
         // filesystem fallback on native. Collapses comms's old three-message
         // cfg-split loader (cache / native-fs / wasm) into this one path.
         let template_loader = crate::entity_loader::WasmTemplateLoader;
+        // Seeded, for the same reason the trigger pipeline is: a spawned
+        // entity's UUID keys the balance ledgers in the headless report.
+        let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
 
         for action in &response.actions {
             let layers =
@@ -357,7 +362,7 @@ pub(crate) fn handle_respond_to_message(
                         .map(|wc| &wc.anchors)
                         .unwrap_or(&empty_anchors),
                     factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
-                    uuid_source: &crate::entity_loader::assign_uuid,
+                    uuid_source: &uuid_source,
                     template_loader: &template_loader,
                 };
                 crate::world::dispatch::dispatch_action(action, &ctx)
@@ -384,6 +389,7 @@ pub(crate) fn handle_respond_to_message(
                 game_over_reason.as_deref_mut(),
                 &mut faction_dispatch,
                 &mut ai_query,
+                balance_events.as_deref_mut(),
             );
             runtime.pending_world_events.extend(new_events);
         }
@@ -1006,6 +1012,7 @@ mod tests {
     fn comms_response_dispatches_game_over() {
         let app = fire_response_with_actions(vec![TriggerAction::GameOver {
             message: Some("you lost".into()),
+            outcome: None,
         }]);
         let reason = app.world().resource::<crate::simulation::GameOverReason>();
         assert_eq!(reason.0.as_deref(), Some("you lost"));
@@ -1450,7 +1457,10 @@ mod tests {
                     tag: "x".into(),
                     slot: crate::modifiers::IntModifierSlot::RepairTeams,
                 },
-                TriggerAction::GameOver { message: None },
+                TriggerAction::GameOver {
+                    message: None,
+                    outcome: None,
+                },
                 TriggerAction::LoadWorld { path: "x".into() },
                 TriggerAction::UnloadWorld { path: "x".into() },
                 TriggerAction::SetWorldFlag { name: "x".into() },

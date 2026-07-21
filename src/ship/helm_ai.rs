@@ -823,6 +823,7 @@ pub(crate) fn detect_reached_objective_completion(
         ),
         With<crate::server_app::Ship>,
     >,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let Some(mut objectives) = objectives else {
         return;
@@ -862,7 +863,15 @@ pub(crate) fn detect_reached_objective_completion(
             let dx = target[0] - physics.x;
             let dz = target[2] - physics.z;
             if (dx * dx + dz * dz).sqrt() < arrival_radius {
-                objectives.0.complete(&obj.snapshot.id);
+                // Guard the tracer on the actual transition so repeated arrivals
+                // at a shared anchor (idempotent complete) emit once (issue #841).
+                if objectives.0.complete(&obj.snapshot.id) {
+                    if let Some(ref mut msgs) = balance_events {
+                        msgs.write(crate::balance::BalanceEvent::ObjectiveCompleted {
+                            objective_id: obj.snapshot.id.clone(),
+                        });
+                    }
+                }
             }
         }
     }
@@ -3304,6 +3313,85 @@ mod tests {
             obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed)
                 .unwrap_or(false),
             "Reach objective should be completed when ship is within arrival radius"
+        );
+    }
+
+    /// Drives the REAL emission seam — `detect_reached_objective_completion`
+    /// running in `test_app` — rather than constructing the variant by hand, so
+    /// a regression of the `if objectives.0.complete(...)` guard at the site
+    /// (issue #841) fails a test. The pure JSON round-trip test constructs the
+    /// variant literally and would stay green even if this wiring were deleted;
+    /// this is the only guard on the `ObjectiveCompleted` emission itself.
+    ///
+    /// Two ticks share one cursor: arrival emits exactly one
+    /// `ObjectiveCompleted` for the right id, and the second tick — where
+    /// `complete()` no longer transitions — emits nothing, pinning the
+    /// idempotency guard (deleting `if complete()` would double-emit here).
+    #[test]
+    fn detect_reach_completion_emits_objective_completed_once() {
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig};
+        use crate::world::server::ObjectiveManagerRes;
+        use bevy::ecs::message::Messages;
+
+        let mut app = test_app();
+        // Register the balance sink the emission site writes to. `init_resource`
+        // (not `add_message`) so no per-frame double-buffer swap can drop the
+        // first-tick message before the second-tick idempotency read.
+        app.init_resource::<Messages<crate::balance::BalanceEvent>>();
+
+        let anchor = "dock-alpha";
+        // Anchor at origin — the ship also starts at origin (distance == 0).
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 8.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, 0.0]));
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "reach-dock-alpha",
+            "Dock at Alpha",
+            true,
+            vec![],
+            AiDirective::Reach {
+                anchor: anchor.into(),
+            },
+            UtilityConfig::default(),
+            ObjectiveSource::Mission,
+        );
+        app.insert_resource(ObjectiveManagerRes(mgr));
+
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::balance::BalanceEvent>>()
+            .get_cursor();
+
+        tick(&mut app);
+
+        let messages = app
+            .world()
+            .resource::<Messages<crate::balance::BalanceEvent>>();
+        let first: Vec<&crate::balance::BalanceEvent> = cursor.read(messages).collect();
+        assert_eq!(
+            first.len(),
+            1,
+            "arrival must emit exactly one balance event, got {first:?}"
+        );
+        match first[0] {
+            crate::balance::BalanceEvent::ObjectiveCompleted { objective_id } => {
+                assert_eq!(objective_id, "reach-dock-alpha");
+            }
+            other => panic!("expected ObjectiveCompleted, got {other:?}"),
+        }
+
+        tick(&mut app);
+
+        let messages = app
+            .world()
+            .resource::<Messages<crate::balance::BalanceEvent>>();
+        let second: Vec<&crate::balance::BalanceEvent> = cursor.read(messages).collect();
+        assert!(
+            second.is_empty(),
+            "re-completing an already-Completed objective must not emit again; got {second:?}"
         );
     }
 

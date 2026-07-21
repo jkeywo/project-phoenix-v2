@@ -664,7 +664,7 @@ mod tests {
     fn compute_hud_state_game_over_ship_destroyed() {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
-        let reason = GameOverReason(Some("All consoles destroyed".into()));
+        let reason = GameOverReason(Some("All consoles destroyed".into()), None);
         let state = compute_hud_state(
             false,
             &physics,
@@ -682,7 +682,7 @@ mod tests {
     fn compute_hud_state_game_over_scenario_message() {
         use crate::server_app::GameOverReason;
         let physics = ShipPhysics::default();
-        let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()));
+        let reason = GameOverReason(Some("VICTORY: All enemies eliminated.".into()), None);
         let state = compute_hud_state(
             false,
             &physics,

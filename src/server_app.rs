@@ -7,7 +7,6 @@ use crate::messages::{
     DeliveryClass, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, StationId,
 };
 use crate::shield::ShieldSystem;
-use rand::SeedableRng as _;
 
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
@@ -148,11 +147,20 @@ impl CaptainPriorityBoost {
     pub const BOOST_AMOUNT: f32 = 15.0;
 }
 
-/// Carries the reason string when the game ends. Set to `Some(reason)` before
+/// Carries the reason string — and, since #843, the structured
+/// [`Outcome`](crate::balance::Outcome) — when the game ends. Set before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
-/// this resource and broadcasts the reason to all clients.
+/// `.0` and broadcasts the reason to all clients; the headless exit report
+/// reads `.1` to classify victory vs defeat without string-matching the
+/// per-world reason.
+///
+/// Field `.0` (display string) is unchanged — every existing site that reads or
+/// writes it keeps working. Field `.1` is the outcome: `Some(Defeat)` at the
+/// built-in player-death sites, whatever a scenario declared on its `game_over`
+/// action, or `None` for an undeclared scripted end (the classifier defaults
+/// that to victory).
 #[derive(Resource, Default)]
-pub struct GameOverReason(pub Option<String>);
+pub struct GameOverReason(pub Option<String>, pub Option<crate::balance::Outcome>);
 
 /// Prevents `handle_collisions` from applying damage every frame while the
 /// ship is in contact. After damage is applied once, a 1-second cooldown
@@ -208,6 +216,58 @@ pub struct TrackedEntities {
     /// Whether the registry has been seeded from initial WorldResource
     /// on the first InProgress frame.
     pub seeded: bool,
+}
+
+impl TrackedEntities {
+    /// Record that a kill site has already broadcast `EntityDespawned` for this
+    /// uuid, so the reconcile sweep (`reconcile_runtime_entities`) does not
+    /// re-emit a second one (issue #838). No-op if the uuid was never reported.
+    pub fn forget(&mut self, uuid: &str) {
+        self.reported.remove(uuid);
+    }
+}
+
+/// The [`WorldResource`] snapshot plus the [`TrackedEntities`] registry, bundled
+/// as one `SystemParam` for a kill-site system that would otherwise blow Bevy's
+/// 16-parameter ceiling (the torpedo lifecycle) by carrying both separately.
+/// `world` is non-optional — every app that runs the torpedo tick inserts
+/// `WorldResource` — while `tracked` is `Option` for the bare-`App` fixtures
+/// that never insert it (there the reconcile sweep does not run either, so the
+/// eager `EntityDespawned` stands alone and the tests asserting it stay green).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct WorldAndTracked<'w> {
+    pub world: ResMut<'w, crate::lobby::WorldResource>,
+    pub tracked: Option<ResMut<'w, TrackedEntities>>,
+}
+
+/// The two resources a kill site touches when the *player's* ship is the one
+/// that dies: the phase transition and the first-write reason/outcome latch.
+///
+/// Bundled for the same reason as [`WorldAndTracked`] — the torpedo lifecycle
+/// is already at Bevy's 16-parameter ceiling and could not carry them
+/// separately. Both are `Option` because bare-`App` fixtures that only exercise
+/// damage never insert them, and a missing latch must not fail parameter
+/// validation.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct PlayerDeathLatch<'w> {
+    pub next_state: Option<ResMut<'w, NextState<crate::messages::GamePhase>>>,
+    pub reason: Option<ResMut<'w, GameOverReason>>,
+}
+
+/// The two ambient resources every damage chokepoint reads: the seeded RNG it
+/// draws hull distribution from, and the log filter its `plog!` lines are
+/// gated on.
+///
+/// Bundled for the same reason as [`WorldAndTracked`] — the blaster and
+/// torpedo damage systems are at Bevy's 16-parameter ceiling, and adding the
+/// damage log sites (`--log damage=info` printed nothing for a blaster or
+/// torpedo kill) pushed both over it. Both fields are `Option` because a bare
+/// `App` unit-test fixture inserts neither, and a bare `Res` would fail
+/// parameter validation there.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SimRngAndLog<'w> {
+    pub rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
 }
 
 /// Per-entity component holding a ship's system blackboards. Each
@@ -290,7 +350,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_message::<AsteroidDestroyedVfx>()
+    // Balance telemetry. Registered here (not behind `headless`) so the
+    // chokepoints can emit unconditionally — only the *collection* is
+    // headless-only.
+    .add_message::<crate::balance::BalanceEvent>()
     .init_resource::<CaptainPriorityBoost>()
+    // The sim's one source of randomness. `init_resource` draws an OS seed, so
+    // an unconfigured app (browser host, unit tests) behaves as it always did;
+    // headless overrides it with a configured one via `insert_resource`.
+    .init_resource::<crate::sim_rng::SimRng>()
     .insert_resource(crate::config_cache::FactionRegistryResource(
         crate::config_cache::get_faction_registry(),
     ))
@@ -328,7 +396,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .chain(),
     )
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
-    .insert_resource(GameOverReason(None))
+    // Balance tracer for game-phase transitions. One global reader, one emit
+    // per transition — inherently unconditional, no per-`next_state.set` taps.
+    .add_systems(Update, emit_phase_change_balance_events)
+    .insert_resource(GameOverReason(None, None))
     .add_systems(
         Update,
         (reconcile_runtime_entities, broadcast_world_setup_on_start)
@@ -399,7 +470,16 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         (
             clear_last_attacker_on_death,
             clear_last_attacker_on_red_alert_off,
-            publish_viewscreen_blackboard,
+            // `publish_viewscreen_blackboard` (LocalShip) and
+            // `aggregate_doctrine_blackboards` (BehaviourSection) both write the
+            // SAME viewscreen blackboard entry, and after #842 the game-start
+            // player carries BOTH markers. Without a defined order they raced and
+            // last-writer-wins CLOBBERED — the doctrine writer dropped the
+            // player's scenario objectives entirely (a defence scenario stopped
+            // developing combat). Pin the LocalShip writer to run *after* the
+            // doctrine writer so it can MERGE the two objective pools (scenario ∪
+            // template doctrine) instead of one silently erasing the other.
+            publish_viewscreen_blackboard.after(crate::ai_plugin::aggregate_doctrine_blackboards),
         )
             .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
@@ -785,6 +865,41 @@ fn clear_last_attacker_on_red_alert_off(
     }
 }
 
+/// Publish the `LocalShip` viewscreen blackboard: hull/alert status plus the
+/// scored objective pool the player ship's per-system AI (weapons, helm,
+/// navigation) reads to pick a directive to serve.
+///
+/// # Why this MERGES rather than clobbers (issue #842)
+///
+/// After #842 the game-start player hull carries a default `[behaviour]`
+/// doctrine, so the player ship holds BOTH `LocalShip` and `BehaviourSection`.
+/// `aggregate_doctrine_blackboards` (`With<BehaviourSection>`) also writes the
+/// same `VIEWSCREEN_SYSTEM_ID` entry, from the *template* doctrine. If this
+/// system simply overwrote that entry — or vice versa — one objective pool
+/// would silently erase the other: the doctrine writer clobbering here dropped
+/// the player's scenario objectives entirely, so a shipped defence scenario
+/// (`combat_test`) stopped developing combat and violated AC3 (scenario
+/// objectives must outrank template doctrine).
+///
+/// Instead this system, pinned to run `.after(aggregate_doctrine_blackboards)`,
+/// combines both sources into one scored pool: the global `ObjectiveManager`
+/// scenario objectives (e.g. targeted `Destroy wave_N` @80) UNIONED with the
+/// hull's template doctrine (untargeted `Destroy` @45 + `Hold` @20), re-sorted
+/// descending by score. Scenario objectives coexist with and outrank the
+/// standing default, so the player pursues the mission (restoring `combat_test`)
+/// while the untargeted @45 remains a fallback that licenses proactive
+/// engagement whenever no scenario objective is in play (the probe worlds).
+///
+/// The doctrine pool is scored fresh from the `BehaviourSection` component here
+/// — NOT read back out of the blackboard entry the doctrine writer left. Those
+/// two writers run at different cadences (the doctrine writer is gated to the
+/// 10 Hz AI snapshot; this one runs every tick), so reading the published entry
+/// and re-merging would re-consume this system's own prior output on the ticks
+/// the doctrine writer skipped and duplicate the pool without bound. Rescoring
+/// from the component is the one source that stays correct every tick.
+///
+/// A `LocalShip` with no `BehaviourSection` (pre-#842 shape) merges an empty
+/// doctrine pool — i.e. behaves exactly as before.
 fn publish_viewscreen_blackboard(
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
@@ -795,6 +910,7 @@ fn publish_viewscreen_blackboard(
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
             Option<&crate::weapons_plugin::LastShipAttacker>,
+            Option<&crate::entities::spawner::BehaviourSection>,
         ),
         With<LocalShip>,
     >,
@@ -806,7 +922,7 @@ fn publish_viewscreen_blackboard(
     let entity_state = ship_blackboards_q.single().ok();
     // Lift Combat Lock + Science Target from the local ship's own radar
     // blackboards (issue #829), published this tick in `SimSet::Publish`.
-    let combat_lock = entity_state.as_ref().and_then(|(bbs, _, _, _)| {
+    let combat_lock = entity_state.as_ref().and_then(|(bbs, _, _, _, _)| {
         match bbs
             .0
             .get(&crate::ship::system_registry::tactical_radar_system_id())
@@ -815,7 +931,7 @@ fn publish_viewscreen_blackboard(
             _ => None,
         }
     });
-    let science_target = entity_state.as_ref().and_then(|(bbs, _, _, _)| {
+    let science_target = entity_state.as_ref().and_then(|(bbs, _, _, _, _)| {
         match bbs
             .0
             .get(&crate::ship::system_registry::sensor_radar_system_id())
@@ -826,17 +942,17 @@ fn publish_viewscreen_blackboard(
     });
     let red_alert = entity_state
         .as_ref()
-        .and_then(|(_, ra, _, _)| ra.map(|r| r.0))
+        .and_then(|(_, ra, _, _, _)| ra.map(|r| r.0))
         .unwrap_or(false);
     let last_damage_taken_secs = entity_state
         .as_ref()
-        .and_then(|(_, _, act, _)| act.and_then(|a| a.last_damage_taken));
+        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_damage_taken));
     let last_weapon_fired_secs = entity_state
         .as_ref()
-        .and_then(|(_, _, act, _)| act.and_then(|a| a.last_weapon_fired));
+        .and_then(|(_, _, act, _, _)| act.and_then(|a| a.last_weapon_fired));
     let last_attacker_uuid = entity_state
         .as_ref()
-        .and_then(|(_, _, _, la)| la.and_then(|l| l.0.clone()));
+        .and_then(|(_, _, _, la, _)| la.and_then(|l| l.0.clone()));
 
     let hull_integrity_pct = hull_q
         .single()
@@ -861,10 +977,35 @@ fn publish_viewscreen_blackboard(
             .as_deref()
             .map(|id| (id, CaptainPriorityBoost::BOOST_AMOUNT))
     });
-    let scored_objectives = objectives
+    let mut scored_objectives = objectives
         .as_ref()
         .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))
         .unwrap_or_default();
+
+    // Merge the hull's standing template doctrine into the scenario pool (see
+    // the "why this MERGES" note above). Score the doctrine with the same
+    // `attacked` signal the NPC path (`aggregate_doctrine_blackboards`) uses, so
+    // a backfilled player and a world-spawned copy of the same hull evaluate
+    // their identical doctrine identically (#842 AC4 symmetry). The scenario
+    // pool keeps its own conditions (unchanged), so existing player-objective
+    // scoring is untouched.
+    if let Some((_, _, _, _, Some(behaviour))) = entity_state.as_ref() {
+        let doctrine_conditions = WorldConditions {
+            red_alert,
+            hull_fraction: hull_integrity_pct / 100.0,
+            attacked: last_attacker_uuid.is_some(),
+        };
+        let doctrine_pool =
+            crate::ai::score_doctrine_pool(&behaviour.0.doctrine, &doctrine_conditions);
+        scored_objectives.extend(doctrine_pool);
+    }
+
+    // Re-sort the unioned pool descending by score. `sort_by` is stable, so
+    // ties keep concatenation order (scenario objectives before doctrine ones —
+    // a deterministic tiebreak the `top_destroy_objective_target` / helm
+    // consumers rely on to read the highest-scored directive first). `total_cmp`
+    // gives a total, deterministic order the rng-determinism guard depends on.
+    scored_objectives.sort_by(|a, b| b.score.total_cmp(&a.score));
 
     let bb = ViewscreenBlackboard {
         red_alert,
@@ -878,7 +1019,7 @@ fn publish_viewscreen_blackboard(
     };
 
     // Write directly to the per-entity component.
-    if let Some((mut entity_bbs, _, _, _)) = ship_blackboards_q.iter_mut().next() {
+    if let Some((mut entity_bbs, _, _, _, _)) = ship_blackboards_q.iter_mut().next() {
         entity_bbs.0.insert(
             SystemId(VIEWSCREEN_SYSTEM_ID.to_string()),
             SystemBlackboard::Viewscreen(bb),
@@ -900,6 +1041,33 @@ fn publish_viewscreen_blackboard(
 /// responding. It deliberately does not opt into the debug
 /// `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
 /// (`src/ship/state.rs`).
+/// Balance tracer: emit a [`BalanceEvent::PhaseChanged`] for every game-phase
+/// transition. Reads the global `StateTransitionEvent<GamePhase>` stream, so it
+/// fires exactly once per real transition without tapping each `next_state.set`
+/// call site. Same-state "transitions" are skipped. `Option<ResMut<Messages>>`
+/// so bare-`App` fixtures without the message registered still validate.
+fn emit_phase_change_balance_events(
+    mut reader: MessageReader<bevy::state::state::StateTransitionEvent<GamePhase>>,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+) {
+    let Some(msgs) = balance_events.as_mut() else {
+        return;
+    };
+    for ev in reader.read() {
+        if ev.exited == ev.entered {
+            continue;
+        }
+        let fmt = |s: &Option<GamePhase>| match s {
+            Some(p) => format!("{p:?}"),
+            None => "None".to_string(),
+        };
+        msgs.write(crate::balance::BalanceEvent::PhaseChanged {
+            from: fmt(&ev.exited),
+            to: fmt(&ev.entered),
+        });
+    }
+}
+
 fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
@@ -932,6 +1100,13 @@ fn handle_collisions(
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     mut world: ResMut<WorldResource>,
     mut commands: Commands,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
+    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
+    mut tracked: Option<ResMut<TrackedEntities>>,
 ) {
     let dt = time.delta_secs();
 
@@ -1066,11 +1241,17 @@ fn handle_collisions(
         // Debug damage log: player-only (single-player debug overlay).
         if is_local {
             damage_log.push(DamageLogEntry {
-                source: source_label,
+                source: source_label.clone(),
                 shield_arc: arc_label,
                 amount: damage,
             });
         }
+
+        // What the shields actually lost, captured before the god-mode clamp
+        // below. The shield hit was already written into `ShipShields` above,
+        // and god mode does not put it back — so the balance tracer has to
+        // report the real figure even when the wire message reports zero.
+        let shield_absorbed_for_balance = shield_amount;
 
         // God mode: local ship takes no damage.
         if is_local && crate::bridge::is_god_mode() {
@@ -1080,19 +1261,59 @@ fn handle_collisions(
 
         let mut ship_destroyed = false;
         let hull_applied = if total_hull > 0.0 {
-            let rng = &mut rand::rngs::SmallRng::from_os_rng();
-            let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
-            // Distribute the same absorbed amount across the per-arc hull
-            // pool (issue #514) so arc tier tracking follows overall hull
-            // damage. Skipped when the ship has no `EntityShipArcHull` (NPCs).
-            if let Some(ref mut arc_hull) = arc_hull_opt {
-                arc_hull.0.apply_damage(applied, rng);
-            }
-            ship_destroyed = destroyed;
-            applied
+            crate::sim_rng::with_stream(
+                sim_rng.as_deref(),
+                crate::sim_rng::SimStream::CollisionDamage,
+                |rng| {
+                    let (applied, destroyed) = apply_hull_damage(&mut hull_comp.0, total_hull, rng);
+                    // Distribute the same absorbed amount across the per-arc
+                    // hull pool (issue #514) so arc tier tracking follows
+                    // overall hull damage. Skipped when the ship has no
+                    // `EntityShipArcHull` (NPCs).
+                    if let Some(ref mut arc_hull) = arc_hull_opt {
+                        arc_hull.0.apply_damage(applied, rng);
+                    }
+                    ship_destroyed = destroyed;
+                    applied
+                },
+            )
         } else {
             0.0
         };
+
+        // The `info` half of the collision damage logging: the per-hit line
+        // above is `debug`/`trace` detail, but destruction is a state edge a
+        // balancer reads as a headline. Same discipline as the beam, blaster,
+        // torpedo, and region kill sites.
+        if ship_destroyed {
+            crate::pinfo!(
+                log,
+                crate::logging::LogCat::Damage,
+                entity = ship_entity,
+                "destroyed by {}",
+                source_label
+            );
+        }
+
+        // Balance tracer. Environmental damage has no attacker — the asteroid
+        // that hit us is identified by the `collision` weapon kind, not by a
+        // shooter uuid. Emitted for every ship, not just the LocalShip.
+        // Skipped for a ship with no `EntityUuid`, which has no identity the
+        // report could key a ledger on.
+        if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+            msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                attacker: None,
+                victim: uuid.0.clone(),
+                // Only ships run this collision path; the asteroid is the
+                // thing collided *with*, and takes no damage from it.
+                victim_kind: crate::balance::VictimKind::Ship,
+                weapon: crate::balance::WEAPON_KIND_COLLISION.to_string(),
+                amount: damage,
+                shield_absorbed: shield_absorbed_for_balance,
+                hull_damage: hull_applied,
+                system_hit: None,
+            });
+        }
 
         // DamageTaken / ShipDestroyed / GameOver are player-facing UI events.
         // Only emit for the LocalShip. NPCs use the AiEntityDestroyed +
@@ -1109,6 +1330,20 @@ fn handle_collisions(
                 outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
                 if game_over_reason.0.is_none() {
                     game_over_reason.0 = Some("All consoles destroyed".into());
+                    // The LocalShip died → this run is a defeat (#843). Latched
+                    // alongside the reason under the same first-write guard.
+                    game_over_reason.1 = Some(crate::balance::Outcome::Defeat);
+                    // EntityDestroyed for the player death, once (guarded by the
+                    // first reason write). Environmental death → no killer.
+                    // Shares the `GameOverReason` latch with a scenario's
+                    // `SetGameOverReason`; see the beam death site (console/
+                    // weapons/beam.rs) for why that coupling is accepted.
+                    if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                        msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                            victim: uuid.0.clone(),
+                            killer: None,
+                        });
+                    }
                 }
                 next_state.set(GamePhase::GameOver);
             }
@@ -1126,6 +1361,17 @@ fn handle_collisions(
                         uuid: uuid.0.clone(),
                     },
                 ));
+                if let Some(t) = tracked.as_mut() {
+                    t.forget(&uuid.0);
+                }
+                // EntityDestroyed for the NPC death, co-located with the
+                // AiEntityDestroyed write. Environmental death → no killer.
+                if let Some(msgs) = balance_events.as_mut() {
+                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                        victim: uuid.0.clone(),
+                        killer: None,
+                    });
+                }
             }
             commands.entity(ship_entity).try_despawn();
         }
@@ -1821,6 +2067,7 @@ fn setup_world(
     mut commands: Commands,
     mut world: ResMut<WorldResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     let Some(world_config) = world_config else {
         return;
@@ -1861,7 +2108,7 @@ fn setup_world(
             }
         };
 
-        let uuid = crate::entity_loader::assign_uuid();
+        let uuid = crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &world_config.anchors,
@@ -1894,6 +2141,43 @@ fn player_spawn_rotation_yaw(rot: [f32; 3]) -> (bevy::math::Quat, f32) {
     (q, yaw)
 }
 
+/// Compute the player ship's identity — the `player` tag and the `playerShip`
+/// radar icon — to inject at the player game-start spawn.
+///
+/// This identity is deliberately NOT authored in the hull templates. If it
+/// were, every world-spawned copy of the same hull (which spawns as an NPC)
+/// would masquerade as the player: it would answer `player`-only radar filters
+/// and draw with the player blip. Injecting here scopes the identity to the one
+/// hull the local player actually flies.
+///
+/// Returns `(tags, radar)`: the template tags with `player` appended (keeping
+/// `ship`, which player-ship selection keys off), and the template's radar
+/// appearance with its icon forced to `playerShip` (colour/size preserved).
+/// The caller re-inserts these onto the spawned entity; Bevy `insert` replaces,
+/// so this overwrites the ordinary-ship sections `spawn_entity` set from the
+/// template.
+fn player_ship_identity(
+    template_tags: &[String],
+    template_radar: Option<&crate::entity_config::RadarAppearanceConfig>,
+) -> (Vec<String>, crate::entity_config::RadarAppearanceConfig) {
+    let mut tags = template_tags.to_vec();
+    let player_tag = crate::entity_tags::EntityTag::Player.as_str();
+    if !tags.iter().any(|t| t == player_tag) {
+        tags.push(player_tag.to_string());
+    }
+    let mut radar =
+        template_radar
+            .cloned()
+            .unwrap_or(crate::entity_config::RadarAppearanceConfig {
+                icon: None,
+                colour: None,
+                size: None,
+                region_colour: None,
+            });
+    radar.icon = Some(crate::server::asset_preload::PLAYER_SHIP_RADAR_ICON.to_string());
+    (tags, radar)
+}
+
 /// Spawn entities with `spawn_on = GameStart` (e.g. player ship) when the
 /// game transitions to InProgress. Registered in `OnEnter(GamePhase::InProgress)`.
 fn spawn_game_start_entities(
@@ -1904,6 +2188,7 @@ fn spawn_game_start_entities(
     mut sessions: Option<ResMut<crate::lobby::Sessions>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut has_spawned: Local<bool>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     if *has_spawned {
         return;
@@ -1963,7 +2248,7 @@ fn spawn_game_start_entities(
             config
         };
 
-        let uuid = crate::entity_loader::assign_uuid();
+        let uuid = crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
         let pos = match crate::world::config::resolve_entity_position_with(
             entity_inst,
             &mc.anchors,
@@ -2169,6 +2454,24 @@ fn spawn_game_start_entities(
                 .insert(WeaponFiredThisTick::default())
                 .insert(ShipAttackedThisTick::default())
                 .insert(crate::weapons_plugin::LastShipAttacker::default());
+
+            // Inject player identity (the `player` tag + `playerShip` radar
+            // icon) HERE, on the one ship the local player flies — not in the
+            // hull template. The templates author only ordinary-ship identity
+            // so that NPC copies of the same hull spawned into the world do not
+            // masquerade as the player. `spawn_entity` already inserted the
+            // template's ordinary `EntityTagsSection` / `RadarAppearanceSection`;
+            // Bevy `insert` replaces, so re-inserting overwrites them. These
+            // components feed the snapshot builders, so the injected tag/icon
+            // reach clients (and the native radar's player dedup) before the
+            // first broadcast.
+            let (player_tags, player_radar) =
+                player_ship_identity(&config.tags, config.radar_appearance.as_ref());
+            commands
+                .entity(spawned)
+                .insert(EntityTagsSection(player_tags))
+                .insert(RadarAppearanceSection(player_radar));
+
             // The player ship's hull lives on its `EntitySystemHull`
             // component (PRD #581). All damage/repair paths write there
             // directly; the old `ShipHullIntegrity` resource was retired
@@ -3827,6 +4130,87 @@ station = "pilot"
         assert_eq!(snapshot.radius, Some(50.0));
         assert_eq!(snapshot.colour, Some([1.0, 0.85, 0.3]));
         assert_eq!(snapshot.radar_icon.as_deref(), Some("star"));
+    }
+
+    /// `player_ship_identity` adds the `player` tag (keeping `ship`) and forces
+    /// the radar icon to `playerShip` while preserving the template's radar
+    /// colour/size.
+    #[test]
+    fn player_ship_identity_adds_player_tag_and_playership_icon() {
+        let (tags, radar) = player_ship_identity(
+            &["ship".to_string()],
+            Some(&crate::entity_config::RadarAppearanceConfig {
+                icon: Some("ship".into()),
+                colour: Some(vec![0.0, 1.0, 0.2]),
+                size: Some(6.0),
+                region_colour: None,
+            }),
+        );
+        assert!(tags.iter().any(|t| t == "ship"), "keeps the ship tag");
+        assert!(tags.iter().any(|t| t == "player"), "adds the player tag");
+        assert_eq!(radar.icon.as_deref(), Some("playerShip"));
+        // Appearance other than the icon is preserved from the template.
+        assert_eq!(radar.colour, Some(vec![0.0, 1.0, 0.2]));
+        assert_eq!(radar.size, Some(6.0));
+    }
+
+    /// End-to-end of the player spawn path's identity injection: parse the real
+    /// cruiser hull template, spawn it via `spawn_entity` (which sets the
+    /// ordinary-ship `EntityTagsSection` / `RadarAppearanceSection`), then apply
+    /// the same injection `spawn_game_start_entities` performs and assert the
+    /// spawned player ship carries the `player` tag AND the `playerShip` radar
+    /// icon. Uses the checked-in template so it regresses on the TOML edits too.
+    #[test]
+    fn player_spawn_injects_player_tag_and_icon_over_template() {
+        use crate::entity_config::EntityConfig;
+        use crate::entity_spawner::{EntityTagsSection, RadarAppearanceSection};
+        use bevy::prelude::*;
+
+        let toml = include_str!("../assets/entities/alliance_cruiser.toml");
+        let config = EntityConfig::from_toml(toml).expect("cruiser template must parse");
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        let spawned = {
+            let mut cmds = app.world_mut().commands();
+            crate::entity_spawner::spawn_entity(
+                &mut cmds,
+                &config,
+                Vec3::ZERO,
+                "player-cruiser".into(),
+                None,
+            )
+        };
+        app.world_mut().flush();
+
+        // Pre-injection: the template presents as an ordinary ship.
+        let tags = app.world().get::<EntityTagsSection>(spawned).unwrap();
+        assert!(!tags.0.iter().any(|t| t == "player"));
+        let radar = app.world().get::<RadarAppearanceSection>(spawned).unwrap();
+        assert_eq!(radar.0.icon.as_deref(), Some("ship"));
+
+        // Apply the player spawn injection (mirrors spawn_game_start_entities).
+        let (player_tags, player_radar) =
+            player_ship_identity(&config.tags, config.radar_appearance.as_ref());
+        app.world_mut()
+            .entity_mut(spawned)
+            .insert(EntityTagsSection(player_tags))
+            .insert(RadarAppearanceSection(player_radar));
+
+        // Post-injection: player identity is present on the spawned ship.
+        let tags = app.world().get::<EntityTagsSection>(spawned).unwrap();
+        assert!(tags.0.iter().any(|t| t == "ship"), "still a ship");
+        assert!(
+            tags.0.iter().any(|t| t == "player"),
+            "player ship carries the player tag; got {:?}",
+            tags.0
+        );
+        let radar = app.world().get::<RadarAppearanceSection>(spawned).unwrap();
+        assert_eq!(
+            radar.0.icon.as_deref(),
+            Some("playerShip"),
+            "player ship carries the playerShip radar icon"
+        );
     }
 
     #[test]
@@ -5712,7 +6096,7 @@ station = "pilot"
         let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
         let total_hull = pierced + leak as f32;
         if total_hull > 0.0 {
-            let rng = &mut rand::rngs::SmallRng::from_os_rng();
+            let rng = &mut rand::rng();
             apply_hull_damage(&mut hull, total_hull, rng);
         }
         assert!(
@@ -5748,7 +6132,7 @@ station = "pilot"
             0
         };
         let total_hull = pierced + leak as f32;
-        let rng = &mut rand::rngs::SmallRng::from_os_rng();
+        let rng = &mut rand::rng();
         apply_hull_damage(&mut hull, total_hull, rng);
         assert!(
             (hull.total_current() - 90.0).abs() < 1e-6,
@@ -5776,7 +6160,7 @@ station = "pilot"
         let (pierced, absorbed) = split_damage_for_pierce(damage, 0.3);
         let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
         let total_hull = pierced + leak as f32;
-        let rng = &mut rand::rngs::SmallRng::from_os_rng();
+        let rng = &mut rand::rng();
         apply_hull_damage(&mut hull, total_hull, rng);
         assert!(
             (hull.total_current() - 97.0).abs() < 1e-6,
@@ -5874,7 +6258,7 @@ station = "pilot"
             .add_plugins(RapierPhysicsPlugin::<()>::default())
             .init_resource::<SimOutbox>()
             .init_resource::<WorldResource>()
-            .insert_resource(GameOverReason(None))
+            .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
             .add_message::<crate::ai_plugin::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
@@ -5991,6 +6375,132 @@ station = "pilot"
         assert!(
             dist >= 10.0 + COLLISION_SEPARATION_SLOP - 1e-5,
             "NPC should be separated outside the two collider radii, distance={dist}"
+        );
+    }
+
+    /// Environmental damage still has to reach the balance log, on an NPC, with
+    /// no attacker — the half of a fight that `DamageTaken` never reports.
+    #[test]
+    fn npc_asteroid_collision_emits_attacker_less_balance_event() {
+        use crate::balance::BalanceEvent;
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy::ecs::message::Messages;
+        use bevy_rapier3d::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None, None))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<BalanceEvent>()
+            .add_systems(Update, handle_collisions);
+
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        let npc_uuid = "npc-collide-uuid".to_string();
+        app.world_mut().spawn((
+            Ship,
+            EntityUuid(npc_uuid.clone()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ShipPhysicsComponent {
+                x: 0.0,
+                z: 0.0,
+                yaw: 0.0,
+                forward_speed: 100.0,
+                roll: 0.0,
+                lateral_speed: 0.0,
+            },
+            CollisionCooldown::default(),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                100.0,
+            )])),
+            ShipModifiers::new(),
+            ShipImpulse::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: 5.0,
+                length: 0.0,
+            }),
+            Collider::ball(5.0),
+            RigidBody::KinematicPositionBased,
+            ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("ast-collide-uuid".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ColliderSection(ColliderConfig {
+                shape: ColliderShape::Ball,
+                radius: 5.0,
+                length: 0.0,
+            }),
+            Collider::ball(5.0),
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let messages = app.world().resource::<Messages<BalanceEvent>>();
+        let mut cursor = messages.get_cursor();
+        let hits: Vec<&BalanceEvent> = cursor.read(messages).collect();
+        assert_eq!(hits.len(), 1, "the collision must emit exactly one event");
+
+        let BalanceEvent::DamageApplied {
+            attacker,
+            victim,
+            victim_kind,
+            weapon,
+            amount,
+            shield_absorbed,
+            hull_damage,
+            ..
+        } = hits[0]
+        else {
+            panic!("the collision event must be a DamageApplied");
+        };
+        assert_eq!(*attacker, None, "environmental damage has no shooter");
+        assert_eq!(victim, &npc_uuid);
+        assert_eq!(
+            *victim_kind,
+            crate::balance::VictimKind::Ship,
+            "the ship takes the collision damage, not the rock it hit"
+        );
+        assert_eq!(weapon, crate::balance::WEAPON_KIND_COLLISION);
+        assert!(*amount > 0.0, "a 100-speed impact must offer damage");
+        assert_eq!(
+            *shield_absorbed, 0.0,
+            "this NPC has no shields, so nothing is absorbed"
+        );
+        assert!(
+            *hull_damage > 0.0,
+            "unshielded impact damage must land on hull"
         );
     }
 

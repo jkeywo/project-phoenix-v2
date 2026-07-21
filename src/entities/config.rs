@@ -17,6 +17,19 @@ pub struct DoctrineObjective {
     /// Stable identifier (e.g. `"patrol-sector"`, `"destroy-hostiles"`).
     pub id: String,
     /// Human-readable prose shown on the captain panel when active.
+    ///
+    /// Defaulted (issue #838): a doctrine directive authored *inline* — as a
+    /// world `spawn_entity` override rather than in a ship template — routinely
+    /// omits display prose (every wave in `combat_test.toml` does). Before this
+    /// was `#[serde(default)]`, such an override reparsed with a "missing field
+    /// `text`" error inside `dispatch_spawn_entity`'s round-trip (step 2b), and
+    /// the failure was silently swallowed — discarding the *entire* override,
+    /// faction and behaviour alike, and leaving the raw template. A hull with no
+    /// template `[behaviour]` (e.g. `alliance_destroyer`) was left inert and,
+    /// worse, kept its template faction, so a world-spawned "hostile" was
+    /// neither hostile nor armed. An empty `text` is already a tested value in
+    /// `score_doctrine_pool`; the captain panel simply shows no prose for it.
+    #[serde(default)]
     pub text: String,
     /// Whether this objective blocks mission completion when active (usually `false` for doctrine).
     #[serde(default)]
@@ -1046,6 +1059,18 @@ pub struct TorpedoTubeConfig {
     /// torpedoes and fire them as a rapid burst.
     #[serde(default = "default_tube_volley_max")]
     pub volley_max: u32,
+    /// How many rounds an AI-operated crew keeps loaded in this tube.
+    ///
+    /// The AI has no console to poke, so it issues the same
+    /// `SetTorpedoVolleyTarget` command a human operator's console sends
+    /// (see `console_ai::server::ai_torpedo_load`) and this is the count it
+    /// asks for. Falls back to `[torpedoes] ai_volley_target`, then to
+    /// [`Self::volley_max`] — a designer who says nothing gets "the AI keeps
+    /// the tube as full as it can", which is the sane default for a hull that
+    /// authored tubes at all. Clamped to `volley_max` at runtime.
+    /// `Some(0)` disables AI loading for this tube.
+    #[serde(default)]
+    pub ai_target_count: Option<u32>,
 }
 
 fn default_tube_volley_max() -> u32 {
@@ -1689,6 +1714,12 @@ pub struct TorpedoesConfig {
     /// volley. Applies to all tubes on the ship. Default `0.3s`.
     #[serde(default = "default_burst_interval_secs")]
     pub burst_interval_secs: f32,
+    /// Ship-wide default for `[[torpedoes.tubes]] ai_target_count` — how many
+    /// rounds an AI-operated crew keeps loaded in each tube. A per-tube
+    /// `ai_target_count` overrides it; when both are absent each tube falls
+    /// back to its own `volley_max`.
+    #[serde(default)]
+    pub ai_volley_target: Option<u32>,
 }
 
 fn default_burst_interval_secs() -> f32 {
@@ -1734,6 +1765,7 @@ impl Default for TorpedoesConfig {
             shield_pierce: 0.0,
             tubes: Vec::new(),
             burst_interval_secs: default_burst_interval_secs(),
+            ai_volley_target: None,
         }
     }
 }
@@ -1753,6 +1785,7 @@ impl TorpedoesConfig {
             detonation_radius: self.detonation_radius,
             shield_pierce: self.shield_pierce,
             burst_interval_secs: self.burst_interval_secs,
+            ai_volley_target: self.ai_volley_target,
         }
     }
 }
@@ -2115,6 +2148,72 @@ impl EntityConfig {
         }
 
         Ok(config)
+    }
+
+    /// Serialize this config to a `toml::Value` **losslessly** — re-emitting the
+    /// `[[station]]` / `[[system]]` / `[power_groups]` and `[[shield_arc]]`
+    /// blocks that [`from_toml`](Self::from_toml) assembles into the
+    /// `#[serde(skip)]` [`ship_config`](Self::ship_config) /
+    /// [`shield_arcs`](Self::shield_arcs) fields.
+    ///
+    /// # Why this exists (issue #838)
+    ///
+    /// The override-merge path (`entity_loader::resolve_entity` and
+    /// `world::dispatch::dispatch_spawn_entity`) resolves a `spawn_entity` /
+    /// `[[entity]]` override by round-tripping the template through TOML:
+    /// `template → toml::Value → merge(overrides) → EntityConfig::from_toml`.
+    /// A plain `toml::to_string(&config)` drops `ship_config` and `shield_arcs`
+    /// because both are `#[serde(skip)]` (they have no serialized representation
+    /// — `from_toml` reconstructs them from the raw blocks at parse time). The
+    /// merged string therefore carried **no ship systems at all**, and the
+    /// re-parsed config spawned a hull with zero stations, zero weapons, and
+    /// nothing under AI control: a world-spawned "hostile" that could never lock
+    /// a target or fire. Re-emitting the blocks here makes the round-trip
+    /// faithful, so an override preserves the template's whole system suite.
+    ///
+    /// Synthesized `shield_arc` systems are filtered out of the emitted `system`
+    /// array on purpose: `from_toml` re-synthesizes exactly one per
+    /// `[[shield_arc]]` block, and emitting both would trip `DuplicateSystemId`.
+    pub fn to_toml_value(&self) -> Result<toml::Value, toml::ser::Error> {
+        let mut value = toml::Value::try_from(self)?;
+        let table = value
+            .as_table_mut()
+            .expect("EntityConfig always serializes to a TOML table");
+
+        if let Some(ship_config) = &self.ship_config {
+            if !ship_config.stations.is_empty() {
+                table.insert(
+                    "station".to_string(),
+                    toml::Value::try_from(&ship_config.stations)?,
+                );
+            }
+            let declared_systems: Vec<&crate::ship::config::SystemInstanceConfig> = ship_config
+                .systems
+                .iter()
+                .filter(|s| s.kind != crate::system_registry::SHIELD_ARC_KIND)
+                .collect();
+            if !declared_systems.is_empty() {
+                table.insert(
+                    "system".to_string(),
+                    toml::Value::try_from(&declared_systems)?,
+                );
+            }
+            if !ship_config.power_groups.is_empty() {
+                table.insert(
+                    "power_groups".to_string(),
+                    toml::Value::try_from(&ship_config.power_groups)?,
+                );
+            }
+        }
+
+        if !self.shield_arcs.is_empty() {
+            table.insert(
+                "shield_arc".to_string(),
+                toml::Value::try_from(&self.shield_arcs)?,
+            );
+        }
+
+        Ok(value)
     }
 }
 
@@ -4405,6 +4504,7 @@ fire_arc_deg = 90.0
             load_time: None,
             marker: None,
             volley_max: 1,
+            ai_target_count: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         assert!(sys.start_load("fore"));
@@ -4598,6 +4698,7 @@ count = 10
                 load_time: None,
                 marker: None,
                 volley_max: 1,
+                ai_target_count: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -4606,6 +4707,7 @@ count = 10
                 load_time: None,
                 marker: None,
                 volley_max: 1,
+                ai_target_count: None,
             },
         ];
         assert!(validate_torpedo_tubes(&tubes).is_ok());
@@ -4627,6 +4729,7 @@ count = 10
                 load_time: None,
                 marker: None,
                 volley_max: 1,
+                ai_target_count: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -4635,6 +4738,7 @@ count = 10
                 load_time: None,
                 marker: None,
                 volley_max: 1,
+                ai_target_count: None,
             },
         ];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
@@ -4651,6 +4755,7 @@ count = 10
             load_time: None,
             marker: None,
             volley_max: 1,
+            ai_target_count: None,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));
@@ -4850,9 +4955,12 @@ colour = [0.5, 0.5, 0.5]
 /// shared AI-helm sim-tick rate, all surfaced through WorldConfig).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GlobalConfig {
-    /// Global seed for deterministic generation.
-    #[serde(default = "default_global_seed")]
-    pub seed: u64,
+    /// Master seed for deterministic generation, feeding `SimRng` (issue
+    /// #837). `None` — the key omitted — means "draw one from the OS"; it is
+    /// not defaulted to a constant, because a constant here would make the
+    /// random tier of the seed-precedence chain unreachable.
+    #[serde(default)]
+    pub seed: Option<u64>,
     /// Display name shown in the lobby title bar.
     #[serde(default)]
     pub title: Option<String>,
@@ -4871,16 +4979,12 @@ pub struct GlobalConfig {
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
-            seed: 42,
+            seed: None,
             title: None,
             description: None,
             ai_helm_tick_hz: default_ai_helm_tick_hz(),
         }
     }
-}
-
-fn default_global_seed() -> u64 {
-    42
 }
 
 fn default_ai_helm_tick_hz() -> f32 {

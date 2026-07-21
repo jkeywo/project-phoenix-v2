@@ -1,0 +1,60 @@
+# Probe world for issue #842 — a backfilled player hull engages on its own
+# template doctrine, with NO scenario objective in play.
+#
+# A player Alliance cruiser (AI-backfilled in a headless run) is placed next to a
+# world-spawned Alliance destroyer that has been re-flagged to the Harrow faction
+# and given an EMPTY doctrine (`behaviour = { doctrine = [] }`). Harrow and
+# Federation are made mutually hostile at world-load.
+#
+# The point is the asymmetry of intent: the destroyer, with no Destroy doctrine,
+# can only ever acquire a target through the `last-attacker` tier — i.e. after it
+# has already been shot (see `ai_target_selection` in `src/console/weapons/mod.rs`).
+# It therefore cannot fire the first shot. The player, on the other hand, now
+# carries the default `[behaviour]` doctrine authored on its hull template
+# (#842), whose UNTARGETED Destroy licenses the nearest-hostile scan. So the only
+# ship that can open fire is the player — any damage it deals proves it engaged
+# PROACTIVELY off its template doctrine, not reactively after being hit. There is
+# deliberately no `add_objective` trigger: nothing but the template doctrine is
+# driving the player.
+
+[global]
+seed = 842
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Make Harrow and Federation mutually hostile before the destroyer spawns.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# Spawn the passive hostile destroyer inside the player's phaser range (40u) at
+# t=0. The empty doctrine override strips the template's default combat doctrine,
+# leaving a hull that will only ever return fire once struck — never initiate.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "probe_target"
+  position      = [35.0, 0.0, 0.0]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [] } }

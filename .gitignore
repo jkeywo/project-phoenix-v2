@@ -40,6 +40,9 @@ tests/smoke/.captures
 /.codegraph/daemon.pid
 tests/smoke/test-results-full.json
 
+# balance-runs.mjs --out dir (example config uses .balance-out)
+.balance-out/
+
 # Python
 # Byte-compiled / optimized / DLL files
 __pycache__/

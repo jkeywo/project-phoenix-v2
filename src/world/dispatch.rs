@@ -226,11 +226,16 @@ pub enum ActionCmd {
         tag: String,
         slot: IntModifierSlot,
     },
-    /// Write the game-over reason resource.
+    /// Write the game-over reason resource — reason string plus the declared
+    /// [`Outcome`](crate::balance::Outcome) (#843, `None` for an undeclared
+    /// scripted end).
     ///
     /// Always emitted *before* `SetNextState` — `OnEnter(GamePhase::GameOver)`
     /// reads the reason, so the ordering is load-bearing.
-    SetGameOverReason { reason: String },
+    SetGameOverReason {
+        reason: String,
+        outcome: Option<crate::balance::Outcome>,
+    },
     /// Queue a game-phase transition.
     SetNextState { phase: GamePhase },
     /// Additively load a sub-world. `loader_path` is the layer that issued the
@@ -464,11 +469,14 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
                 .push(ActionCmd::FailObjective { id: id.clone() });
         }
 
-        TriggerAction::GameOver { message } => {
+        TriggerAction::GameOver { message, outcome } => {
             // `None` becomes `Some("")`, not `None` — preserved verbatim.
             let reason = message.clone().unwrap_or_default();
             // Reason first: `OnEnter(GamePhase::GameOver)` reads it.
-            out.commands.push(ActionCmd::SetGameOverReason { reason });
+            out.commands.push(ActionCmd::SetGameOverReason {
+                reason,
+                outcome: *outcome,
+            });
             out.commands.push(ActionCmd::SetNextState {
                 phase: GamePhase::GameOver,
             });
@@ -966,10 +974,14 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
 
             // 2b. Apply overrides if present.
             if let Some(overrides_val) = overrides {
-                let Ok(config_str) = toml::to_string(&config) else {
-                    return out;
-                };
-                let Ok(template_value): Result<toml::Value, _> = toml::from_str(&config_str) else {
+                // Serialise **losslessly** (issue #838): `to_toml_value` re-emits
+                // the `[[station]]`/`[[system]]`/`[power_groups]`/`[[shield_arc]]`
+                // blocks that a plain `toml::to_string(&config)` drops (they live
+                // in `#[serde(skip)]` fields). Without this the merged template
+                // carried no ship systems, so an override-spawned hull had
+                // nothing under AI control — no radar to lock with, no weapons to
+                // fire — and sat inert however hostile its faction and doctrine.
+                let Ok(template_value) = config.to_toml_value() else {
                     return out;
                 };
                 let merged = crate::entity_override::merge_entity_config_toml(
@@ -977,10 +989,19 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                     overrides_val,
                 );
                 let merged_str = toml::to_string(&merged).unwrap_or_default();
-                if let Ok(merged_config) =
-                    crate::entity_config::EntityConfig::from_toml(&merged_str)
-                {
-                    config = merged_config;
+                // Do not silently swallow a failed merge (issue #838). If the
+                // merged config no longer parses, the *entire* override —
+                // faction, behaviour, everything — would otherwise be discarded
+                // and the raw template spawned, which is how a world-spawned
+                // "hostile" ended up neither hostile nor armed. Keep the
+                // template as the fallback (a partial spawn is better than none)
+                // but surface the reason so the scenario author sees it rather
+                // than debugging silent inertness.
+                match crate::entity_config::EntityConfig::from_toml(&merged_str) {
+                    Ok(merged_config) => config = merged_config,
+                    Err(e) => out.warnings.push(format!(
+                        "SpawnEntity '{name}' overrides did not apply (kept template): {e}"
+                    )),
                 }
             }
 
@@ -1515,6 +1536,7 @@ mod tests {
         let fx = Fixture::new();
         let action = TriggerAction::GameOver {
             message: Some("The ship was lost".to_string()),
+            outcome: None,
         };
         let out = dispatch_action(&action, &fx.ctx());
 
@@ -1523,7 +1545,8 @@ mod tests {
             out.commands,
             vec![
                 ActionCmd::SetGameOverReason {
-                    reason: "The ship was lost".to_string()
+                    reason: "The ship was lost".to_string(),
+                    outcome: None,
                 },
                 ActionCmd::SetNextState {
                     phase: GamePhase::GameOver
@@ -1535,13 +1558,17 @@ mod tests {
     #[test]
     fn game_over_without_message_yields_empty_reason_not_none() {
         let fx = Fixture::new();
-        let action = TriggerAction::GameOver { message: None };
+        let action = TriggerAction::GameOver {
+            message: None,
+            outcome: None,
+        };
         let out = dispatch_action(&action, &fx.ctx());
 
         assert_eq!(
             out.commands[0],
             ActionCmd::SetGameOverReason {
-                reason: String::new()
+                reason: String::new(),
+                outcome: None,
             }
         );
     }
@@ -2490,6 +2517,7 @@ mod tests {
         let fx = Fixture::new();
         let action = TriggerAction::GameOver {
             message: Some("The ship was lost".to_string()),
+            outcome: None,
         };
         let out = dispatch_state_action(&action, &fx.ctx());
 
@@ -2498,7 +2526,8 @@ mod tests {
             out.commands,
             vec![
                 ActionCmd::SetGameOverReason {
-                    reason: "The ship was lost".to_string()
+                    reason: "The ship was lost".to_string(),
+                    outcome: None,
                 },
                 ActionCmd::SetNextState {
                     phase: GamePhase::GameOver
@@ -2510,13 +2539,17 @@ mod tests {
     #[test]
     fn state_game_over_without_message_yields_empty_reason_not_none_directly() {
         let fx = Fixture::new();
-        let action = TriggerAction::GameOver { message: None };
+        let action = TriggerAction::GameOver {
+            message: None,
+            outcome: None,
+        };
         let out = dispatch_state_action(&action, &fx.ctx());
 
         assert_eq!(
             out.commands[0],
             ActionCmd::SetGameOverReason {
-                reason: String::new()
+                reason: String::new(),
+                outcome: None,
             }
         );
     }

@@ -1,0 +1,139 @@
+# RNG Coverage Scenario (issue #837)
+#
+# A test fixture, not a playable mission. It exists to drive *all five* seeded
+# damage chokepoints — beam, torpedo, blaster, collision and region — inside a
+# short headless run, so `tests/rng_determinism.rs`'s determinism guard fails
+# when any one of them regresses to OS entropy.
+#
+# The guard it backs used to run on `combat_test.toml`, which over the tested
+# window produced beam traffic and nothing else: four of the five sites could
+# be neutered with the whole suite still green. Everything here is arranged to
+# make each site fire quickly and to make its result *observable* in the exit
+# report, which means every one of them has to land on the player ship — only
+# the player's `damaged_systems` reveals which system `apply_hull_damage`
+# picked. Damage dealt to NPCs is invisible to the report, because the total a
+# hull absorbs is RNG-independent; only the distribution varies.
+#
+# Layout — everything sits on top of everything else at the origin:
+#   - Player spawns at [0, 0, 0].
+#   - Two Harrow Lancers 45u away, inside their own weapons envelope from
+#     tick one. The Lancer is the one NPC hull with phasers *and* blasters
+#     *and* torpedoes, which is what covers three of the five sites.
+#   - A radiation zone centred on the spawn: region damage from t=0.
+#   - An asteroid field whose inner radius reaches the spawn point, so the
+#     player is manoeuvring inside rocks and collides while it fights.
+#
+# Deliberately no `[global] seed`: the guard passes `--seed` explicitly, and a
+# world seed here would make the "world" tier of the precedence chain the thing
+# under test rather than the CLI tier.
+
+[global]
+title = "world.rng_coverage.global.title"
+description = "world.rng_coverage.global.description"
+
+# A tight patrol triangle, all of it well inside the radiation zone's 120u
+# sphere. The player has to be *moving* for the collision chokepoint to matter
+# — collision damage is proportional to speed, so a ship parked at the origin
+# rides through asteroids for free — but it also has to stay inside the zone
+# and inside the Lancers' weapons envelope, hence the small radius.
+[anchors]
+patrol_a = [55.0, 0.0, 0.0]
+patrol_b = [-30.0, 0.0, 45.0]
+patrol_c = [-30.0, 0.0, -45.0]
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+# Radiation zone over the whole engagement, so the region chokepoint fires
+# every tick from t=0. Stock is 8 dps / 0.3 pierce; both are overridden below.
+[[entity]]
+template_path = "assets/entities/region_radiation_zone.toml"
+name          = "world.entity.rng_coverage_zone.name"
+transform     = { position = [0.0, 0.0, 0.0] }
+# Turned right down from the stock 8 dps and set to full pierce. The zone only
+# has to keep the region chokepoint landing hull damage every tick; at stock
+# strength it kills the player long before the slower weapons have had a turn.
+# Full pierce also sidesteps `apply_uniform_damage`'s integer rounding, which
+# silently discards any per-tick shield damage below half a point.
+#
+# 0.9375 is not a rounded-off number, it is an exact one: at the 30 Hz tick this
+# scenario runs at, `dps * dt` is 0.03125 — a power of two, and so exactly
+# representable in f32. The zone fires thousands of times over the run and the
+# report sums every hit into `damage_taken`; at a dps whose per-tick damage is
+# not exactly representable, that sum accumulates rounding and the last printed
+# decimal place stops being reproducible. The guard compares reports byte for
+# byte, so "close enough" is not.
+overrides     = { effects = { damage_zone = { damage_per_second = 0.9375, shield_pierce = 1.0 } } }
+
+# Asteroid field pulled in to the origin. `asteroid_field_main` normally rings
+# r=300..350; overridden to start at 0 so rocks stream in around the player
+# instead of somewhere it would have to fly to.
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+id            = "coverage-belt"
+transform     = { position = [0.0, 0.0, 0.0] }
+overrides     = { asteroid_field = { inner_radius = 0.0, outer_radius = 400.0, density = 0.02 } }
+
+# ── Hostiles ──────────────────────────────────────────────────────────────────
+#
+# Two of them, close in and on opposite sides, so the player is inside somebody's
+# firing arc regardless of which way it turns.
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_lancer.toml"
+name          = "world.entity.lancer_alpha.name"
+transform     = { position = [45.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_lancer.toml"
+name          = "world.entity.lancer_beta.name"
+transform     = { position = [-45.0, 0.0, 20.0] }
+
+# ── Player ship ───────────────────────────────────────────────────────────────
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship is spawned from the headless `--ship` template, not from this
+# `[[entity]]` block, so a world-file `overrides` on it would be ignored. The
+# one thing the scenario needs done to the player that TOML cannot reach — its
+# shields dropped to zero so the Lancers' torpedoes will engage it — the test
+# harness does directly after spawn. See `rng_determinism.rs`.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id            = "player-ship"
+transform     = { position = [0.0, 0.0, 0.0] }
+spawn_on      = "game_start"
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+# Harrow and Federation default to neutral in the faction TOMLs so the same
+# hulls can appear as ambient patrols elsewhere; without this both Lancers sit
+# next to the player without ever acquiring it as a target, and three of the
+# five chokepoints never fire. Both directions, on world load, before the first
+# targeting tick — the same pattern `combat_test.toml` uses.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+  # The player's AI helm needs somewhere to be going. Without a directive the
+  # backfilled crew parks at the spawn point at zero speed, and collision
+  # damage — which scales with speed — rounds to nothing.
+  [[trigger.action]]
+  type              = "add_objective"
+  id                = "obj-rng-coverage-patrol"
+  text              = "world.rng_coverage.trigger.action.obj_patrol.text"
+  mandatory         = true
+  source            = "mission"
+  base_priority     = 40.0
+  directive_kind    = "Patrol"
+  directive_anchors = ["patrol_a", "patrol_b", "patrol_c"]
+  directive_loop    = true

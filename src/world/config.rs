@@ -384,6 +384,10 @@ struct RawActionEntry {
     flag_kind: Option<String>,
     #[serde(default)]
     message: Option<String>,
+    /// Declared run outcome for a `game_over` action (#843):
+    /// `"victory"` | `"defeat"`, case-insensitive.
+    #[serde(default)]
+    outcome: Option<String>,
     #[serde(default)]
     path: Option<String>,
     /// Flag name for `set_flag` / `clear_flag` / `increment_flag` / `set_flag_value`.
@@ -707,6 +711,12 @@ pub enum TriggerAction {
     },
     GameOver {
         message: Option<String>,
+        /// Declared run outcome (#843). Parsed from the case-insensitive
+        /// `outcome = "victory" | "defeat"` field. `None` when the author left
+        /// it off — the headless classifier defaults an undeclared scripted
+        /// game-over to victory (the ship ran to a scripted end-state; the
+        /// built-in player-death path is separately latched as defeat).
+        outcome: Option<crate::balance::Outcome>,
     },
     /// Additively load a sub-world from `path` into the running world layer map.
     LoadWorld {
@@ -1123,6 +1133,14 @@ fn parse_raw_actions(
                 }
                 "game_over" => TriggerAction::GameOver {
                     message: raw_action.message.clone(),
+                    // Validate at parse time: an unknown value fails the world
+                    // load loudly rather than silently mis-classifying the run.
+                    outcome: raw_action
+                        .outcome
+                        .as_deref()
+                        .map(crate::balance::Outcome::parse)
+                        .transpose()
+                        .map_err(|e| format!("Action 'game_over' has an invalid outcome: {e}"))?,
                 },
                 "load_world" => TriggerAction::LoadWorld {
                     path: raw_action
@@ -1817,7 +1835,7 @@ mod tests {
         let cfg = parse_world("").expect("empty TOML should parse");
         assert!(cfg.anchors.is_empty());
         assert!(cfg.entities.is_empty());
-        assert_eq!(cfg.global.seed, 42);
+        assert_eq!(cfg.global.seed, None, "an unauthored seed stays unset");
     }
 
     /// `[global] ai_helm_tick_hz` (issue #803): serde default when omitted,

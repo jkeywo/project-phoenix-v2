@@ -391,7 +391,20 @@ fn build_world_snapshot(
 /// After PRD #597 PR 10: reads red-alert / combat-activity / last-attacker
 /// from each ship's own per-entity components, so NPC ship viewscreen
 /// blackboards mirror the same fields the player ship exposes.
-fn aggregate_doctrine_blackboards(
+///
+/// # Coexists with the LocalShip writer (issue #842)
+///
+/// This writes the template doctrine pool for EVERY `BehaviourSection` ship,
+/// including the game-start player (which after #842 carries `BehaviourSection`
+/// as well as `LocalShip`). For that one ship the entry written here is then
+/// *merged*, not overwritten, by `publish_viewscreen_blackboard`, which runs
+/// `.after` this system and unions the scenario `ObjectiveManager` pool over the
+/// top. Do NOT "fix" the double-write by having this system skip `LocalShip` or
+/// by dropping that ordering: the merge is deliberate, and clobbering either way
+/// drops one of the two objective pools (the regression #842's guard exists to
+/// catch). Pure NPCs (no `LocalShip`) are unaffected — only this writer touches
+/// their entry.
+pub(crate) fn aggregate_doctrine_blackboards(
     mut query: Query<(
         &BehaviourSection,
         &crate::entity_spawner::EntitySystemHull,

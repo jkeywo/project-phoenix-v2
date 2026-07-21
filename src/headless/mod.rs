@@ -10,8 +10,10 @@
 
 pub mod app;
 pub mod args;
+pub mod duel;
 pub mod report;
 
 pub use app::{build_headless_app, run, BuildError};
 pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
+pub use duel::{apply_duel_sides, resolve_template, DuelError};
 pub use report::{build_report, RunReport};

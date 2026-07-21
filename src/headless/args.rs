@@ -7,6 +7,7 @@
 //! cost for eight flags. Keeping it a pure function over an iterator also makes
 //! it directly unit-testable, matching how the rest of this crate is tested.
 
+use crate::headless::duel::MAX_SIDE;
 use crate::logging::{parse_log_entities, parse_log_spec, LogFilterConfig};
 
 /// Default simulation rate. Matches the 60 Hz the browser host effectively runs
@@ -14,6 +15,15 @@ use crate::logging::{parse_log_entities, parse_log_spec, LogFilterConfig};
 pub const DEFAULT_HZ: f64 = 60.0;
 
 const DEFAULT_WORLD: &str = "assets/worlds/default.toml";
+/// World `--side-a`/`--side-b` imply when `--world` is absent.
+///
+/// The duel slots those flags fill only exist in this world, so defaulting to
+/// `default.toml` meant `--side-a cruiser --side-b destroyer` loaded a world
+/// with nothing to fill and ran a combat-free 300s draw that reads like a real
+/// balance result. An explicit `--world` still wins — a user may have authored
+/// their own duel-shaped world — and a world without slots is now rejected by
+/// `duel::apply_duel_sides` rather than silently ignored.
+const DUEL_WORLD: &str = "assets/worlds/duel.toml";
 const DEFAULT_SHIP: &str = "assets/entities/alliance_cruiser.toml";
 
 pub const HELP: &str = "\
@@ -27,6 +37,21 @@ USAGE:
 WORLD
     --world <PATH>        World TOML to load    [default: assets/worlds/default.toml]
     --ship <PATH>         Player ship template  [default: assets/entities/alliance_cruiser.toml]
+
+DUEL (assets/worlds/duel.toml)
+    --side-a <LIST>       Comma-separated ship classes for side A (max 5). The
+                          first is the player ship; the rest are NPC escorts.
+                          Mutually exclusive with --ship.
+    --side-b <LIST>       Comma-separated ship classes for side B (max 5), all
+                          NPCs hostile to side A.
+                          Names resolve in order: alliance_<name>.toml, then
+                          <name>.toml (both under assets/entities/), then <name>
+                          as a literal path. e.g. --side-a cruiser --side-b destroyer
+                          Either flag defaults --world to the duel harness
+                          (assets/worlds/duel.toml) — the only world that authors
+                          the side_a_*/side_b_* slots they fill. An explicit
+                          --world still wins, but a world with no such slots is
+                          rejected rather than silently run as-is.
 
 TIME
     --hz <N>              Simulation rate in ticks per sim-second [default: 60]
@@ -58,10 +83,32 @@ DETERMINISM
     --deterministic       Pin the scheduler to one thread, so system execution
                           order is fixed run to run. A fixed timestep alone gives
                           wall-clock independence, not reproducibility.
-                          CAVEAT: damage distribution and region effects still
-                          seed from the OS (5 `SmallRng::from_os_rng()` sites).
-                          Runs that take damage may still diverge; there is no
-                          --seed flag because there is nothing yet to seed.
+    --seed <N>            Master seed for the simulation RNG (u64). Implies
+                          --deterministic. Every RNG site — damage distribution,
+                          region effects, entity UUIDs — derives its own stream
+                          from this, so two runs with the same seed produce
+                          byte-identical reports.
+                          Byte-identical includes the timing fields: a --seed run
+                          reports wall_seconds, ticks_per_second and
+                          speedup_vs_realtime as 0, because those are measured
+                          off the host clock and would otherwise be the only
+                          lines that differ between two identical --seed runs.
+                          Only --seed gets this, because only --seed pins the
+                          scheduler: zeroed timings mean 'this run is
+                          replayable'. World-TOML-seeded and unseeded runs
+                          report the real figures.
+                          Precedence: --seed, then the world TOML's
+                          [global] seed, then a seed drawn from the OS. The
+                          resolved seed and its source are always in the report,
+                          so you can replay any run by feeding that seed back in
+                          as --seed. Only --seed pins the scheduler, so a run
+                          that took its seed from the world TOML or the OS was
+                          not itself reproducible: replaying it with --seed is a
+                          single-threaded re-run of the same scenario, and may
+                          not match what you saw.
+                          CAVEAT: the contract is same binary, same machine.
+                          Floating-point differences across CPUs or compiler
+                          versions can still diverge.
 
     -h, --help            Show this help
 ";
@@ -93,9 +140,21 @@ pub struct HeadlessArgs {
     pub report_path: Option<String>,
     pub report_format: ReportFormat,
     pub fail_on_game_over: bool,
-    /// Pin the scheduler to a single thread. Does *not* pin the RNG — see the
-    /// caveat in [`HELP`].
+    /// Pin the scheduler to a single thread. Implied by `seed`, which needs a
+    /// fixed system execution order to be worth anything.
     pub deterministic: bool,
+    /// Master RNG seed from `--seed`. `None` falls through to the world TOML's
+    /// `[global] seed`, then to a seed drawn from the OS — resolved in
+    /// `headless::app`, which is where the world config is in scope.
+    pub seed: Option<u64>,
+    /// Side-A ship list from `--side-a` (issue #844). Empty when the flag is
+    /// absent — a plain `--world` run leaves the duel transform off. `side_a[0]`
+    /// is the player ship; `side_a[1..]` fill NPC escort slots. Resolved to
+    /// template paths and applied in `headless::app`.
+    pub side_a: Vec<String>,
+    /// Side-B ship list from `--side-b` (issue #844). Empty when absent. All
+    /// entries fill NPC slots on the enemy side.
+    pub side_b: Vec<String>,
 }
 
 impl Default for HeadlessArgs {
@@ -111,6 +170,9 @@ impl Default for HeadlessArgs {
             report_format: ReportFormat::default(),
             fail_on_game_over: false,
             deterministic: false,
+            seed: None,
+            side_a: Vec::new(),
+            side_b: Vec::new(),
         }
     }
 }
@@ -149,6 +211,12 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     let mut ticks: Option<u64> = None;
     let mut sim_seconds: Option<f64> = None;
     let mut log_entities: Option<String> = None;
+    // Whether `--ship` was given explicitly, so it can be rejected alongside
+    // `--side-a` (which sets the player ship from its first entry).
+    let mut ship_given = false;
+    // Whether `--world` was given explicitly, so `--side-a`/`--side-b` can
+    // default it to the duel harness without overriding a deliberate choice.
+    let mut world_given = false;
 
     while let Some(arg) = it.next() {
         let mut value = || -> Result<String, String> {
@@ -156,8 +224,16 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         };
         match arg.as_str() {
             "-h" | "--help" => return Ok(ParseOutcome::Help),
-            "--world" => out.world_path = value()?,
-            "--ship" => out.ship_path = value()?,
+            "--world" => {
+                out.world_path = value()?;
+                world_given = true;
+            }
+            "--ship" => {
+                out.ship_path = value()?;
+                ship_given = true;
+            }
+            "--side-a" => out.side_a = parse_ship_list(&value()?),
+            "--side-b" => out.side_b = parse_ship_list(&value()?),
             "--hz" => hz = Some(parse_positive_f64(&value()?, "--hz")?),
             "--dt" => dt = Some(parse_positive_f64(&value()?, "--dt")?),
             "--ticks" => {
@@ -189,6 +265,13 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
             }
             "--fail-on-game-over" => out.fail_on_game_over = true,
             "--deterministic" => out.deterministic = true,
+            "--seed" => {
+                let v = value()?;
+                out.seed = Some(
+                    v.parse()
+                        .map_err(|_| format!("--seed expects a whole number, got {v:?}"))?,
+                );
+            }
             other => return Err(format!("unknown argument {other:?} (try --help)")),
         }
     }
@@ -202,6 +285,32 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         );
     }
 
+    // `--side-a` sets the player ship from its first entry, so it collides with
+    // an explicit `--ship`; give one or the other. `--side-b` alone is fine.
+    if ship_given && !out.side_a.is_empty() {
+        return Err(
+            "--ship and --side-a both choose the player ship; give one or the other".into(),
+        );
+    }
+    // The duel flags only mean anything in a world that authors duel slots, so
+    // asking for sides is asking for the duel harness unless the user named a
+    // world themselves. Derived after the loop so the flags are
+    // order-independent, the same idiom `--seed`/`--deterministic` uses below.
+    if !world_given && (!out.side_a.is_empty() || !out.side_b.is_empty()) {
+        out.world_path = DUEL_WORLD.to_string();
+    }
+    // Reject an over-long side here, so a bad roster fails at argument time
+    // rather than deep in the world transform. The transform re-checks (it is
+    // the pure authority) — this is the CLI-facing early error.
+    for (side, list) in [("a", &out.side_a), ("b", &out.side_b)] {
+        if list.len() > MAX_SIDE {
+            return Err(format!(
+                "--side-{side} lists {} ships; the maximum is {MAX_SIDE} per side",
+                list.len()
+            ));
+        }
+    }
+
     out.dt = match (hz, dt) {
         (Some(hz), _) => 1.0 / hz,
         (_, Some(dt)) => dt,
@@ -213,6 +322,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
         (_, Some(s)) => ticks_for_sim_seconds(s, out.dt),
         _ => ticks_for_sim_seconds(60.0, out.dt),
     };
+
+    // Derived after the loop so `--seed` and `--deterministic` are
+    // order-independent, the same idiom `--hz`/`--dt` uses above. A seed with a
+    // varying system execution order is not reproducible, so asking for one
+    // implies the other; `--deterministic` alone remains meaningful.
+    if out.seed.is_some() {
+        out.deterministic = true;
+    }
 
     // Applied after `--log` so the two flags are order-independent: setting the
     // spec replaces the whole config, which would otherwise drop the filter.
@@ -230,6 +347,17 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
 /// [`HeadlessArgs::sim_seconds`].
 pub fn ticks_for_sim_seconds(seconds: f64, dt: f64) -> u64 {
     (seconds / dt).ceil() as u64 + 1
+}
+
+/// Split a `--side-a`/`--side-b` comma list into ship names, trimming
+/// whitespace and dropping empty entries (so `a, ,b` and a trailing comma are
+/// forgiving).
+fn parse_ship_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn parse_positive_f64(s: &str, flag: &str) -> Result<f64, String> {
@@ -359,6 +487,28 @@ mod tests {
     }
 
     #[test]
+    fn seed_is_unset_by_default_and_implies_deterministic() {
+        assert_eq!(parse(&[]).seed, None);
+        assert!(!parse(&[]).deterministic);
+
+        for args in [
+            ["--seed", "9001", "--hz", "30"],
+            ["--hz", "30", "--seed", "9001"],
+        ] {
+            let a = parse(&args);
+            assert_eq!(a.seed, Some(9001));
+            assert!(a.deterministic, "--seed must imply --deterministic");
+        }
+    }
+
+    #[test]
+    fn a_non_numeric_seed_is_rejected() {
+        assert!(err(&["--seed", "lucky"]).contains("whole number"));
+        assert!(err(&["--seed", "-1"]).contains("whole number"));
+        assert!(err(&["--seed"]).contains("requires a value"));
+    }
+
+    #[test]
     fn report_format_is_case_insensitive_and_validated() {
         assert_eq!(
             parse(&["--report-format", "NDJSON"]).report_format,
@@ -383,5 +533,105 @@ mod tests {
         assert!(err(&["--hz", "0"]).contains("positive"));
         assert!(err(&["--dt", "-1"]).contains("positive"));
         assert!(err(&["--hz", "fast"]).contains("expects a number"));
+    }
+
+    // ── --side-a / --side-b (issue #844) ────────────────────────────────────
+
+    #[test]
+    fn sides_default_to_empty() {
+        let a = parse(&[]);
+        assert!(a.side_a.is_empty());
+        assert!(a.side_b.is_empty());
+    }
+
+    #[test]
+    fn side_a_is_a_comma_split_list() {
+        let a = parse(&["--side-a", "cruiser,courier"]);
+        assert_eq!(a.side_a, vec!["cruiser", "courier"]);
+        assert!(a.side_b.is_empty());
+    }
+
+    #[test]
+    fn side_b_is_a_comma_split_list() {
+        let a = parse(&["--side-b", "destroyer"]);
+        assert_eq!(a.side_b, vec!["destroyer"]);
+        assert!(a.side_a.is_empty());
+    }
+
+    /// Forgiving splitting: whitespace trimmed, empty entries dropped.
+    #[test]
+    fn side_list_trims_and_drops_empties() {
+        let a = parse(&["--side-a", " cruiser , , courier ,"]);
+        assert_eq!(a.side_a, vec!["cruiser", "courier"]);
+    }
+
+    #[test]
+    fn a_side_longer_than_five_is_rejected() {
+        assert!(err(&["--side-a", "a,b,c,d,e,f"]).contains("maximum is 5"));
+        assert!(err(&["--side-b", "a,b,c,d,e,f"]).contains("maximum is 5"));
+        // Exactly five is allowed.
+        assert_eq!(parse(&["--side-a", "a,b,c,d,e"]).side_a.len(), 5);
+    }
+
+    /// `--side-a` sets the player ship, so it collides with an explicit
+    /// `--ship`. `--side-b` alone does not.
+    #[test]
+    fn ship_and_side_a_together_are_rejected() {
+        assert!(err(&[
+            "--ship",
+            "assets/entities/alliance_cruiser.toml",
+            "--side-a",
+            "courier"
+        ])
+        .contains("give one or the other"));
+        // --ship with only --side-b is fine (side B is all NPCs).
+        let a = parse(&[
+            "--ship",
+            "assets/entities/alliance_cruiser.toml",
+            "--side-b",
+            "destroyer",
+        ]);
+        assert_eq!(a.side_b, vec!["destroyer"]);
+    }
+
+    /// The trap this closes: `--side-a cruiser --side-b destroyer` with no
+    /// `--world` used to load `default.toml`, which authors none of the slots
+    /// those flags fill — the run was a combat-free draw that looked like a
+    /// balance finding. Either flag alone is enough to imply the harness.
+    #[test]
+    fn sides_without_an_explicit_world_default_to_the_duel_harness() {
+        assert_eq!(
+            parse(&["--side-a", "cruiser", "--side-b", "destroyer"]).world_path,
+            DUEL_WORLD
+        );
+        assert_eq!(parse(&["--side-b", "destroyer"]).world_path, DUEL_WORLD);
+        // No sides → the plain default is untouched.
+        assert_eq!(parse(&[]).world_path, DEFAULT_WORLD);
+    }
+
+    /// An explicit `--world` still wins: a user may have authored their own
+    /// duel-shaped world. Order-independent, like `--seed`/`--deterministic`.
+    #[test]
+    fn an_explicit_world_wins_over_the_duel_default() {
+        assert_eq!(
+            parse(&[
+                "--side-a",
+                "cruiser",
+                "--world",
+                "assets/worlds/combat_test.toml"
+            ])
+            .world_path,
+            "assets/worlds/combat_test.toml"
+        );
+        assert_eq!(
+            parse(&[
+                "--world",
+                "assets/worlds/combat_test.toml",
+                "--side-b",
+                "destroyer"
+            ])
+            .world_path,
+            "assets/worlds/combat_test.toml"
+        );
     }
 }

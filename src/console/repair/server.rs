@@ -179,18 +179,36 @@ pub fn tick_repair_teams(
             Option<&mut ShipRepairTeams>,
             &ShipModifiers,
             &mut crate::entity_spawner::EntitySystemHull,
+            Option<&crate::entity_spawner::EntityUuid>,
         ),
         With<crate::server_app::Ship>,
     >,
+    // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
+    // that never registered the message still pass parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let dt = time.delta_secs();
 
-    for (teams_comp, modifiers, mut hull) in ship_q.iter_mut() {
+    for (teams_comp, modifiers, mut hull, ship_uuid) in ship_q.iter_mut() {
         let Some(mut teams) = teams_comp else {
             continue;
         };
         let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
+        // Capture total hull current before/after the tick so the restored HP
+        // can be reported as a per-ship `RepairApplied` delta (issue #841).
+        // This is the only path that actually ticks a ship's teams — the global
+        // `ShipRepairTeams` resource is publish-only, never ticked.
+        let before = hull.0.total_current();
         teams.0.tick(dt * repair_mult, &mut hull.0);
+        let restored = hull.0.total_current() - before;
+        if restored > 0.0 {
+            if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                msgs.write(crate::balance::BalanceEvent::RepairApplied {
+                    ship: uuid.0.clone(),
+                    hp: restored,
+                });
+            }
+        }
     }
 }
 

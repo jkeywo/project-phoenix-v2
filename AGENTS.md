@@ -53,6 +53,13 @@ cargo run --release --features headless --bin phoenix-headless -- \
   --world assets/worlds/combat_test.toml --sim-seconds 60
 cargo run --features headless --bin phoenix-headless -- --help
 
+# Balance batch runner — TOML matchup×seed matrix over phoenix-headless, fanned
+# out in parallel; merges the per-run reports into win/loss/draw rates, TTK
+# distributions, and damage margins (merged JSON + a markdown table). Needs the
+# release binary above built + `npm install` (for smol-toml). Markdown → stdout;
+# `--out <dir>` also writes merged.json + summary.md (keep that dir out of git).
+node scripts/balance-runs.mjs scripts/balance-runs.example.toml [--out <dir>]
+
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
@@ -210,7 +217,7 @@ Two rules that are easy to get wrong:
 ## Testing Strategy
 
 - **Rust unit tests (`cargo test`):** inline `#[cfg(test)] mod tests` covering the pure modules (session, stations, codec round-trips, lobby handler, physics, damage, repair teams, modifiers, power, ratings, system registry).
-- **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels).
+- **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels) and the pure `scripts/balance-runs.mjs` merge/format/expand fns (`tests/client/balance-runs.test.js`, fabricated report JSON — no sim).
 - **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC).
 - **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
 - **PASM tests (`uv run pytest -q tests/pasm`):** Python tests over the design model in `pasm/spec/` — traceability roll-ups, cross-domain link integrity, CLI output. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`.

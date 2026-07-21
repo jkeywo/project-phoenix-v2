@@ -94,11 +94,11 @@ pub(crate) fn handle_fire_blaster(
             continue;
         }
 
-        // Target must look like "blaster-<bank_id>" — matches `blaster_bank_system_id`.
-        let bank_id = match target.0.strip_prefix("blaster-") {
-            Some(id) if !id.is_empty() => id.to_string(),
-            _ => continue,
-        };
+        // Cheap pre-filter only — the authoritative bank match happens below,
+        // once the shooter's own bank list is in scope.
+        if !target.0.starts_with("blaster-") {
+            continue;
+        }
 
         // Resolve shooter entity — AI tokens route through AiTokenRegistry;
         // human tokens route to the LocalShip.
@@ -120,6 +120,26 @@ pub(crate) fn handle_fire_blaster(
         let Ok((control_sources, physics, blackboards_opt, mut blaster_res)) =
             ship_q.get_mut(shooter_entity)
         else {
+            continue;
+        };
+
+        // Resolve the command's target back to one of THIS ship's banks by
+        // running the canonical forward mapping
+        // (`system_registry::blaster_bank_system_id`) over each authored bank
+        // id and comparing — never by inverting the string.
+        //
+        // The inverse ("strip `blaster-`, take what's left as the bank id") is
+        // lossy: the mapping folds `_` to `-`, so a hull authoring a bank id
+        // like `fore_port` produced `blaster-fore-port`, which inverted back to
+        // `fore-port` and matched no bank — the order was silently dropped.
+        // Exactly the bug the torpedo tube handler carried until this same fix,
+        // latent here only because every shipped hull happens to author
+        // hyphen-free bank ids.
+        let Some(bank_id) = blaster_res.0.iter().find_map(|b| {
+            crate::system_registry::blaster_bank_system_id(&b.config.id)
+                .filter(|id| id == target)
+                .map(|_| b.config.id.clone())
+        }) else {
             continue;
         };
 
@@ -248,77 +268,23 @@ pub(crate) fn tick_blaster_auto_fire(
             }),
         };
         if !ai_controlled {
-            #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                "[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled",
-            ));
-            #[cfg(not(target_arch = "wasm32"))]
-            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — not AI controlled");
             continue;
         }
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-            "[DEBUG] tick_blaster_auto_fire: AI gate passed",
-        ));
-        #[cfg(not(target_arch = "wasm32"))]
-        eprintln!("[DEBUG] tick_blaster_auto_fire: AI gate passed");
 
         // Target selection: the **Combat Lock** from this ship's frozen
         // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted.
         let target_uuid: Option<String> = blaster_combat_lock(blackboards_opt);
         let Some(target_uuid) = target_uuid else {
-            #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                "[DEBUG] tick_blaster_auto_fire: skipped — no target UUID",
-            ));
-            #[cfg(not(target_arch = "wasm32"))]
-            eprintln!("[DEBUG] tick_blaster_auto_fire: skipped — no target UUID");
             continue;
         };
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
-            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
-            target_uuid
-        )));
-        #[cfg(not(target_arch = "wasm32"))]
-        eprintln!(
-            "[DEBUG] tick_blaster_auto_fire: target UUID = {}",
-            target_uuid
-        );
 
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-            #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
-                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
-                target_uuid
-            )));
-            #[cfg(not(target_arch = "wasm32"))]
-            eprintln!(
-                "[DEBUG] tick_blaster_auto_fire: skipped — target {} not alive",
-                target_uuid
-            );
             continue;
         };
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
-            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
-            tx, tz
-        )));
-        #[cfg(not(target_arch = "wasm32"))]
-        eprintln!(
-            "[DEBUG] tick_blaster_auto_fire: target live at ({:.1}, {:.1})",
-            tx, tz
-        );
 
         for bank in blaster_res.0.iter_mut() {
             // Skip banks that are not ready to accept a new fire command.
             if !bank.is_fire_ready() {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                    "[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping",
-                ));
-                #[cfg(not(target_arch = "wasm32"))]
-                eprintln!("[DEBUG] tick_blaster_auto_fire: bank not fire-ready, skipping");
                 continue;
             }
 
@@ -328,18 +294,6 @@ pub(crate) fn tick_blaster_auto_fire(
             let dist_sq = dx * dx + dz * dz;
             let range_sq = bank.config.range * bank.config.range;
             if dist_sq > range_sq {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
-                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
-                    dist_sq.sqrt(),
-                    range_sq.sqrt()
-                )));
-                #[cfg(not(target_arch = "wasm32"))]
-                eprintln!(
-                    "[DEBUG] tick_blaster_auto_fire: bank out of range (dist={:.0} > range={:.0})",
-                    dist_sq.sqrt(),
-                    range_sq.sqrt()
-                );
                 continue;
             }
 
@@ -352,21 +306,9 @@ pub(crate) fn tick_blaster_auto_fire(
                 bank.config.facing_deg,
                 bank.config.fire_arc_deg,
             ) {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                    &format!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg),
-                ));
-                #[cfg(not(target_arch = "wasm32"))]
-                eprintln!("[DEBUG] tick_blaster_auto_fire: bank out of arc (local=({:.1},{:.1}), facing={}, arc={})", rx, ry, bank.config.facing_deg, bank.config.fire_arc_deg);
                 continue;
             }
 
-            #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                "[DEBUG] tick_blaster_auto_fire: FIRING!",
-            ));
-            #[cfg(not(target_arch = "wasm32"))]
-            eprintln!("[DEBUG] tick_blaster_auto_fire: FIRING!");
             bank.request_charge_start();
         }
     }
@@ -404,6 +346,9 @@ pub(crate) fn tick_blaster_system(
     #[cfg(feature = "server")] mut shake_state: Option<
         ResMut<crate::server::viewscreen_border::ShakeState>,
     >,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -523,6 +468,15 @@ pub(crate) fn tick_blaster_system(
                     }
                 }
 
+                // Balance tracer: the blaster bolt left the ship. Unconditional
+                // — all ships, all builds. Blank uuid → `None`.
+                if let Some(ref mut msgs) = balance_events {
+                    msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                        shooter: Some(source_uuid.clone()).filter(|u| !u.is_empty()),
+                        weapon: bank_id.clone(),
+                        kind: crate::balance::FIRED_KIND_BLASTER.to_string(),
+                    });
+                }
                 outbox.0.push((
                     Target::All,
                     ServerMessage::BlasterFired {
@@ -568,7 +522,18 @@ pub(crate) fn handle_blaster_hits(
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     collider_q: Query<&crate::entity_spawner::ColliderSection>,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
+    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
+    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
+    // Seeded RNG + log filter, bundled: separately they put this system one
+    // over Bevy's 16-parameter ceiling.
+    ambient: crate::server_app::SimRngAndLog,
 ) {
+    let sim_rng = &ambient.rng;
+    let log = &ambient.log;
     // Build target list from live ECS transforms.
     let mut targets: Vec<(String, f32, f32, f32)> = Vec::new();
     for (ast_uuid, transform) in asteroid_q.iter() {
@@ -595,6 +560,11 @@ pub(crate) fn handle_blaster_hits(
         target_uuid: String,
         damage: i32,
         shield_pierce: f32,
+        /// Who fired it — needed for balance attribution, since the firing
+        /// ship is long out of scope by the time damage is applied. `None`
+        /// when the shooter had no `EntityUuid`: the projectile carries `""`
+        /// for that case, which is "unknown", not a ship named `""`.
+        source_uuid: Option<String>,
     }
 
     let mut detonations: Vec<BlasterDetonation> = Vec::new();
@@ -609,6 +579,7 @@ pub(crate) fn handle_blaster_hits(
                         target_uuid,
                         damage: hit_data.damage,
                         shield_pierce: hit_data.shield_pierce,
+                        source_uuid: Some(hit_data.source_uuid).filter(|u| !u.is_empty()),
                     });
                 }
             }
@@ -619,7 +590,7 @@ pub(crate) fn handle_blaster_hits(
         outbox.0.push((
             Target::All,
             ServerMessage::BlasterHit {
-                bank: det.bank_id,
+                bank: det.bank_id.clone(),
                 projectile_id: det.projectile_id,
                 target_uuid: det.target_uuid.clone(),
             },
@@ -649,6 +620,18 @@ pub(crate) fn handle_blaster_hits(
 
             let mut hull_damage = det.damage as f32;
 
+            // Snapshot online facings before the shield apply so the
+            // online→offline edge can be reported (issue #841).
+            let arcs_online_before: Vec<(String, bool)> = shield_comp
+                .as_ref()
+                .map(|s| {
+                    s.0.facings
+                        .iter()
+                        .map(|f| (f.id.clone(), f.is_online()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let shield_amount = if let Some(ref mut shields) = shield_comp {
                 let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
                 if !all_offline {
@@ -667,13 +650,28 @@ pub(crate) fn handle_blaster_hits(
                 0.0
             };
 
+            // Balance tracer, emitted for every hit on every ship — including
+            // one the shields ate whole, which never reaches the branch below.
+            let mut hull_applied_total = 0.0f32;
+            // Hoisted out of the branch below so the destroyed-by log line can
+            // be written once, next to the per-hit line, rather than twice
+            // inside the local/non-local arms.
+            let mut ship_destroyed = false;
             if hull_damage > 0.0 {
-                let mut rng = rand::rng();
-                let (hull_applied, destroyed) =
-                    crate::damage::apply_hull_damage(&mut hull_comp.0, hull_damage, &mut rng);
-                if let Some(ref mut ah) = arc_hull {
-                    ah.0.apply_damage(hull_applied, &mut rng);
-                }
+                let (hull_applied, destroyed) = crate::sim_rng::with_stream(
+                    sim_rng.as_deref(),
+                    crate::sim_rng::SimStream::BlasterDamage,
+                    |rng| {
+                        let result =
+                            crate::damage::apply_hull_damage(&mut hull_comp.0, hull_damage, rng);
+                        if let Some(ref mut ah) = arc_hull {
+                            ah.0.apply_damage(result.0, rng);
+                        }
+                        result
+                    },
+                );
+                hull_applied_total = hull_applied;
+                ship_destroyed = destroyed;
                 if is_local {
                     outbox.0.push((
                         Target::All,
@@ -690,6 +688,21 @@ pub(crate) fn handle_blaster_hits(
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
                                 reason.0 = Some("Ship destroyed".into());
+                                // The LocalShip died → defeat (#843), latched
+                                // under the same first-write guard as the reason.
+                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                // EntityDestroyed for the player death, once
+                                // (guarded by the first reason write). Killer =
+                                // the blaster's shooter (issue #841). Shares the
+                                // `GameOverReason` latch with a scenario's
+                                // `SetGameOverReason`; see the beam death site
+                                // for why that coupling is accepted.
+                                if let Some(ref mut msgs) = balance_events {
+                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                                        victim: det.target_uuid.clone(),
+                                        killer: det.source_uuid.clone(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -734,6 +747,84 @@ pub(crate) fn handle_blaster_hits(
                                 uuid: det.target_uuid.clone(),
                             },
                         ));
+                        if let Some(t) = tracked.as_mut() {
+                            t.forget(&det.target_uuid);
+                        }
+                        // EntityDestroyed for the blaster kill, co-located with
+                        // the AiEntityDestroyed write (exactly once). Killer =
+                        // the firing ship (issue #841).
+                        if let Some(ref mut msgs) = balance_events {
+                            msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                                victim: det.target_uuid.clone(),
+                                killer: det.source_uuid.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            // Human-readable logging alongside the structured BalanceEvent
+            // (does NOT replace it). Same level discipline as the beam site:
+            // per-hit detail is `trace`, and the one `info` edge is
+            // destruction — the state change a balancer reads as a headline.
+            // Both entity-scoped to the victim so `--log-entity` narrows to
+            // one hull.
+            let attacker_label: &str = det.source_uuid.as_deref().unwrap_or("unknown");
+            crate::ptrace!(
+                log,
+                crate::logging::LogCat::Damage,
+                entity = entity,
+                "took {} (shield {:.0}/hull {:.0}) from {} via {}",
+                det.damage,
+                shield_amount,
+                hull_applied_total,
+                attacker_label,
+                det.bank_id
+            );
+            if ship_destroyed && ast_uuid.is_none() {
+                crate::pinfo!(
+                    log,
+                    crate::logging::LogCat::Damage,
+                    entity = entity,
+                    "destroyed by {}",
+                    attacker_label
+                );
+            }
+
+            if let Some(ref mut msgs) = balance_events {
+                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                    attacker: det.source_uuid.clone(),
+                    victim: det.target_uuid.clone(),
+                    victim_kind: if ast_uuid.is_some() {
+                        crate::balance::VictimKind::Asteroid
+                    } else {
+                        crate::balance::VictimKind::Ship
+                    },
+                    weapon: det.bank_id.clone(),
+                    amount: det.damage as f32,
+                    shield_absorbed: shield_amount,
+                    hull_damage: hull_applied_total,
+                    system_hit: None,
+                });
+                if ast_uuid.is_none() {
+                    if let Some(ref shields) = shield_comp {
+                        for (id, was_online) in &arcs_online_before {
+                            if !was_online {
+                                continue;
+                            }
+                            let now_offline = shields
+                                .0
+                                .facings
+                                .iter()
+                                .find(|f| &f.id == id)
+                                .map(|f| !f.is_online())
+                                .unwrap_or(false);
+                            if now_offline {
+                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
+                                    ship: det.target_uuid.clone(),
+                                    arc_id: id.clone(),
+                                });
+                            }
+                        }
                     }
                 }
             }

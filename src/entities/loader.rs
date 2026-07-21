@@ -25,11 +25,15 @@ pub fn resolve_entity(
     let config = match &entity_inst.overrides {
         None => template.clone(),
         Some(overrides) => {
-            // Re-serialise the template to a toml::Value, merge, then deserialise back.
-            let template_value: toml::Value = toml::from_str(
-                &toml::to_string(template).map_err(|e| format!("template serialise error: {e}"))?,
-            )
-            .map_err(|e| format!("template re-parse error: {e}"))?;
+            // Serialise the template to a toml::Value **losslessly** (issue
+            // #838): `to_toml_value` re-emits the `[[station]]`/`[[system]]`/
+            // `[power_groups]`/`[[shield_arc]]` blocks that a plain
+            // `toml::to_string` would drop (they live in `#[serde(skip)]`
+            // fields), so the merged config keeps the template's whole system
+            // suite instead of spawning a hull with no stations or weapons.
+            let template_value = template
+                .to_toml_value()
+                .map_err(|e| format!("template serialise error: {e}"))?;
 
             let merged =
                 crate::entity_override::merge_entity_config_toml(&template_value, overrides);
@@ -231,6 +235,74 @@ overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
         assert!(
             !beh.doctrine.is_empty(),
             "template doctrine must survive an inline override"
+        );
+    }
+
+    /// Regression for issue #838: an override on a system-bearing hull must
+    /// preserve the template's whole `[[system]]` suite *and* apply a `faction`
+    /// scalar and an inline (text-less) `[[behaviour.doctrine]]` directive.
+    ///
+    /// The bug was twofold, both in this resolve path: `EntityConfig::ship_config`
+    /// is `#[serde(skip)]` so a plain `toml::to_string` dropped every system, and
+    /// `DoctrineObjective.text` was required so a text-less inline directive made
+    /// the merged config fail to re-parse. Either one left the resolved hull
+    /// stripped of its systems (nothing under AI control) or reverted to the
+    /// un-overridden template. `to_toml_value` + a defaulted `text` fix both.
+    #[test]
+    fn override_on_system_bearing_hull_preserves_systems_faction_and_textless_doctrine() {
+        let template_toml = std::fs::read_to_string("assets/entities/alliance_destroyer.toml")
+            .expect("alliance_destroyer.toml must exist");
+        let cache = make_cache("assets/entities/alliance_destroyer.toml", &template_toml);
+        let template_system_count = cache
+            .get("assets/entities/alliance_destroyer.toml")
+            .unwrap()
+            .ship_config
+            .as_ref()
+            .expect("template has a ship_config")
+            .systems
+            .len();
+        assert!(template_system_count > 0, "fixture must declare systems");
+
+        let harrow = uuid::Uuid::parse_str("cccccccc-3333-4333-8333-cccccccccccc").unwrap();
+        let override_value: toml::Value = toml::from_str(
+            r#"
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+[behaviour]
+[[behaviour.doctrine]]
+id = "kill"
+directive_kind = "Destroy"
+base_priority = 80.0
+"#,
+        )
+        .unwrap();
+
+        let inst = WorldEntity {
+            template_path: "assets/entities/alliance_destroyer.toml".to_string(),
+            overrides: Some(override_value),
+            ..Default::default()
+        };
+        let config = resolve_entity(&inst, &cache).expect("override must resolve");
+
+        // Faction scalar overridden.
+        assert_eq!(config.faction, Some(harrow), "faction override must apply");
+        // Text-less inline doctrine merged in.
+        let beh = config.behaviour.expect("behaviour must be present");
+        assert!(
+            beh.doctrine.iter().any(|d| d.id == "kill"),
+            "inline Destroy doctrine must survive the merge"
+        );
+        // The whole system suite survived the round-trip — the regression.
+        let ship = config
+            .ship_config
+            .expect("override-resolved hull must keep its ship_config");
+        assert_eq!(
+            ship.systems.len(),
+            template_system_count,
+            "every declared system must survive an override (issue #838)"
+        );
+        assert!(
+            ship.systems.iter().any(|s| s.kind == "phaser_bank"),
+            "the phaser bank must survive so the hull's tactical AI can run"
         );
     }
 

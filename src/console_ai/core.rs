@@ -117,8 +117,15 @@ pub struct TubeSummary {
 pub struct TorpedoAiInput {
     /// Whether the player has locked a target.
     pub target_locked: bool,
-    /// Locked target's combined shield HP. Fire only when this is ≤ 0.
-    pub target_shields: i32,
+    /// HP of the **one** shield arc a torpedo arriving from this ship would
+    /// strike — not the target's shield pool. Fire only when this is ≤ 0.
+    ///
+    /// The caller resolves the arc from the attack bearing (see
+    /// `ShieldSystem::facing_index_for_bearing`) and reports 0 when that arc
+    /// is offline (an offline arc passes damage through to the hull, so it is
+    /// not blocking the shot) or when the target has no shield arcs at all
+    /// (asteroids, debris — always torpedo-eligible).
+    pub target_facing_shields: i32,
     /// Tubes considered by the AI, in priority order.
     pub tubes: Vec<TubeSummary>,
     /// Torpedoes remaining in the magazine.
@@ -131,16 +138,28 @@ pub struct TorpedoAiInput {
 ///
 /// Auto-fire conditions (ALL must hold):
 /// - A target is locked
-/// - The locked target's shields ≤ 0
+/// - The shield arc the torpedo would *strike* is down (`target_facing_shields ≤ 0`)
 /// - The tube is loaded
 /// - The tube is in arc
 /// - The magazine has torpedoes remaining
+///
+/// # Why the shield gate is per-arc, not ship-wide
+///
+/// The doctrine is "phasers strip the shields, torpedoes finish the hull", and
+/// on a single-arc hull those are the same test. On a four-arc hull they are
+/// not: summing every arc lets three healthy REAR arcs veto a shot into a
+/// collapsed FRONT arc while the attacker is sitting dead ahead — exactly where
+/// the hull is exposed and where the torpedo would land. Since every arc regens
+/// independently and goes offline for only a few seconds, a multi-arc ship
+/// essentially never has all arcs down at once, so the summed gate meant AI
+/// crews on four-arc hulls never launched a torpedo at all. The gate therefore
+/// asks about the *one* arc the shot would hit.
 ///
 /// Returns a list of `TorpedoTubeId` values to fire in deterministic priority
 /// order `[ForePort, ForeStarboard, Aft]`.  Each tube that passes all
 /// conditions appears at most once in the result.
 pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
-    if !input.target_locked || input.target_shields > 0 || input.magazine == 0 {
+    if !input.target_locked || input.target_facing_shields > 0 || input.magazine == 0 {
         return vec![];
     }
     input
@@ -148,6 +167,36 @@ pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
         .iter()
         .filter(|t| t.loaded && t.in_arc)
         .map(|t| t.id.clone())
+        .collect()
+}
+
+// ── Tube loading ───────────────────────────────────────────────────────────
+
+/// One tube's loading state as seen by the AI *loader* (as opposed to
+/// [`TubeSummary`], which is what the AI *gunner* sees).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TubeLoadSummary {
+    pub id: TorpedoTubeId,
+    /// The tube's current volley target — what it is loading toward now.
+    pub target_count: u32,
+    /// The volley target this tube's TOML says an AI crew keeps it at.
+    pub ai_target_count: u32,
+    /// Whether the tube's own fine system is under AI control this tick.
+    pub operates_ai: bool,
+}
+
+/// Decide which tubes the AI should re-order a volley target for.
+///
+/// Returns `(tube_id, count)` pairs for every AI-operated tube whose current
+/// `target_count` differs from its configured `ai_target_count` — the caller
+/// turns each into one `SetTorpedoVolleyTarget` command. Tubes already sitting
+/// at their configured count are skipped so the AI does not re-issue an
+/// identical order every tick.
+pub fn torpedo_load_orders(tubes: &[TubeLoadSummary]) -> Vec<(TorpedoTubeId, u32)> {
+    tubes
+        .iter()
+        .filter(|t| t.operates_ai && t.target_count != t.ai_target_count)
+        .map(|t| (t.id.clone(), t.ai_target_count))
         .collect()
 }
 
@@ -798,7 +847,7 @@ mod tests {
     fn all_ready_input() -> TorpedoAiInput {
         TorpedoAiInput {
             target_locked: true,
-            target_shields: 0,
+            target_facing_shields: 0,
             tubes: vec![
                 tube("fore_port", true, true),
                 tube("fore_starboard", true, true),
@@ -808,30 +857,75 @@ mod tests {
         }
     }
 
-    // ── Condition: shields ─────────────────────────────────────────────────
+    // ── Condition: facing-arc shields ──────────────────────────────────────
 
     #[test]
-    fn shields_above_zero_no_fire() {
+    fn facing_arc_up_no_fire() {
         let mut input = all_ready_input();
-        input.target_shields = 50;
+        input.target_facing_shields = 50;
         let result = auto_fire_torpedo(&input);
-        assert!(result.is_empty(), "should not fire when target shields > 0");
+        assert!(
+            result.is_empty(),
+            "should not fire while the arc the torpedo would strike is up"
+        );
     }
 
     #[test]
-    fn shields_at_zero_fires() {
+    fn facing_arc_depleted_fires() {
         let mut input = all_ready_input();
-        input.target_shields = 0;
+        input.target_facing_shields = 0;
         let result = auto_fire_torpedo(&input);
-        assert!(!result.is_empty(), "should fire when target shields == 0");
+        assert!(
+            !result.is_empty(),
+            "should fire when the facing arc is depleted"
+        );
     }
 
     #[test]
-    fn shields_below_zero_fires() {
+    fn facing_arc_overkilled_fires() {
         let mut input = all_ready_input();
-        input.target_shields = -5;
+        input.target_facing_shields = -5;
         let result = auto_fire_torpedo(&input);
-        assert!(!result.is_empty(), "should fire when target shields < 0");
+        assert!(
+            !result.is_empty(),
+            "should fire when the facing arc is past zero"
+        );
+    }
+
+    /// A target with no shield arcs at all (asteroid, unshielded NPC) has
+    /// nothing blocking the shot — the caller reports 0 and the AI fires.
+    #[test]
+    fn target_with_no_arcs_fires() {
+        let mut input = all_ready_input();
+        input.target_facing_shields = 0;
+        let result = auto_fire_torpedo(&input);
+        assert!(
+            !result.is_empty(),
+            "an unshielded target must stay torpedo-eligible"
+        );
+    }
+
+    /// The case that motivated the per-arc gate: a four-arc hull whose FRONT
+    /// arc has collapsed while all three others are healthy. Attacking from
+    /// ahead the shot is on; from astern the healthy rear arc still blocks it.
+    /// The caller does the bearing→arc resolution, so the pure fn sees only
+    /// the resolved arc's HP — these two calls are the same target, one tick
+    /// apart, differing solely in where the attacker sits.
+    #[test]
+    fn collapsed_front_arc_fires_only_from_the_front() {
+        let mut from_ahead = all_ready_input();
+        from_ahead.target_facing_shields = 0; // front arc, collapsed
+        assert!(
+            !auto_fire_torpedo(&from_ahead).is_empty(),
+            "healthy rear arcs must not veto a shot into a collapsed front arc"
+        );
+
+        let mut from_astern = all_ready_input();
+        from_astern.target_facing_shields = 120; // rear arc, healthy
+        assert!(
+            auto_fire_torpedo(&from_astern).is_empty(),
+            "a collapsed front arc must not licence a shot into a healthy rear arc"
+        );
     }
 
     // ── Condition: target lock ─────────────────────────────────────────────

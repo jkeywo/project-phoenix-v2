@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use rand::SeedableRng as _;
 use std::collections::{HashMap, HashSet};
 
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
@@ -183,6 +182,14 @@ fn apply_damage_zone_damage(
     >,
     mut world: Option<ResMut<crate::lobby::WorldResource>>,
     mut commands: Commands,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
+    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
+    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
+    // `Option<Res<_>>` so bare-`App` fixtures with no `LogFilterConfig`
+    // inserted still pass parameter validation (see logging macro docs).
+    log_cfg: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -234,28 +241,79 @@ fn apply_damage_zone_damage(
                     hull_amount = 0.0;
                 }
 
-                let mut rng = rand::rngs::SmallRng::from_os_rng();
                 let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
-                    let result =
-                        crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng);
-                    // Distribute the same absorbed amount across per-arc hull
-                    // (issue #514). Skipped for NPCs (no `EntityShipArcHull`).
-                    if let Some(ref mut arc_hull) = arc_hull_opt {
-                        arc_hull.0.apply_damage(result.0, &mut rng);
-                    }
-                    result
+                    crate::sim_rng::with_stream(
+                        sim_rng.as_deref(),
+                        crate::sim_rng::SimStream::RegionDamage,
+                        |rng| {
+                            let result =
+                                crate::damage::apply_hull_damage(&mut hull.0, hull_amount, rng);
+                            // Distribute the same absorbed amount across
+                            // per-arc hull (issue #514). Skipped for NPCs (no
+                            // `EntityShipArcHull`).
+                            if let Some(ref mut arc_hull) = arc_hull_opt {
+                                arc_hull.0.apply_damage(result.0, rng);
+                            }
+                            result
+                        },
+                    )
                 } else {
                     (0.0, false)
                 };
 
+                // Balance tracer. A damage zone has no shooter, so `attacker`
+                // is `None`; emitted for every ship in the zone, not just the
+                // LocalShip. Skipped for a ship with no `EntityUuid` — there
+                // is no identity to key a ledger on.
+                if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                    msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                        attacker: None,
+                        victim: uuid.0.clone(),
+                        // A damage zone only ever ticks ships; asteroids carry
+                        // no hull the zone could touch.
+                        victim_kind: crate::balance::VictimKind::Ship,
+                        weapon: crate::balance::WEAPON_KIND_REGION.to_string(),
+                        amount: total_damage,
+                        shield_absorbed: shield_amount,
+                        hull_damage: hull_applied,
+                        system_hit: None,
+                    });
+                }
+
+                // Human-readable logging alongside the structured BalanceEvent
+                // (does NOT replace it). Same level discipline as the beam
+                // site: a damage zone ticks *every* frame a ship is inside it,
+                // so the per-tick line is `trace`; the one `info` edge is
+                // destruction. Both entity-scoped to the victim so
+                // `--log-entity` narrows to one hull.
+                let source_label = uuid_opt
+                    .map(|u| format!("region:{}", u.0))
+                    .unwrap_or_else(|| "region:damage_zone".to_string());
+                crate::ptrace!(
+                    log_cfg,
+                    crate::logging::LogCat::Damage,
+                    entity = ship_entity,
+                    "took {:.1} (shield {:.0}/hull {:.0}) from {}",
+                    total_damage,
+                    shield_amount,
+                    hull_applied,
+                    source_label
+                );
+                if ship_destroyed {
+                    crate::pinfo!(
+                        log_cfg,
+                        crate::logging::LogCat::Damage,
+                        entity = ship_entity,
+                        "destroyed by {}",
+                        source_label
+                    );
+                }
+
                 // Debug damage log is a single-player developer overlay.
                 if is_local {
                     if let Some(ref mut log) = damage_log {
-                        let source = uuid_opt
-                            .map(|u| format!("region:{}", u.0))
-                            .unwrap_or_else(|| "region:damage_zone".to_string());
                         log.push(DamageLogEntry {
-                            source,
+                            source: source_label.clone(),
                             shield_arc: None,
                             amount: total_damage,
                         });
@@ -281,6 +339,23 @@ fn apply_damage_zone_damage(
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
                                 reason.0 = Some("All consoles destroyed".into());
+                                // The LocalShip died → defeat (#843), latched
+                                // under the same first-write guard as the reason.
+                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                // EntityDestroyed for the player death, once
+                                // (guarded by the first reason write). A damage
+                                // zone has no shooter → no killer. Shares the
+                                // `GameOverReason` latch with a scenario's
+                                // `SetGameOverReason`; see the beam death site
+                                // for why that coupling is accepted.
+                                if let (Some(msgs), Some(uuid)) =
+                                    (balance_events.as_mut(), ship_uuid)
+                                {
+                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                                        victim: uuid.0.clone(),
+                                        killer: None,
+                                    });
+                                }
                             }
                         }
                         if let Some(ref mut ns) = next_state {
@@ -306,6 +381,17 @@ fn apply_damage_zone_damage(
                                     uuid: uuid.0.clone(),
                                 },
                             ));
+                        }
+                        if let Some(t) = tracked.as_mut() {
+                            t.forget(&uuid.0);
+                        }
+                        // EntityDestroyed for the NPC death, co-located with the
+                        // AiEntityDestroyed write. Damage zone → no killer.
+                        if let Some(msgs) = balance_events.as_mut() {
+                            msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                                victim: uuid.0.clone(),
+                                killer: None,
+                            });
                         }
                         commands.entity(ship_entity).try_despawn();
                     }

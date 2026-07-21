@@ -43,6 +43,16 @@ Registered as an instance-based `.chain()` rather than type-set `.after(...)` ed
 1. **`build_torpedo_target_snapshot`** — builds the UUID→(x,z) position map (live ECS + `WorldResource` fallback) and the detonation target list `(uuid, x, z, radius)`, excluding virtual entities (asteroid-field anchors, region triggers — see [Virtual entities](#virtual-entities-are-excluded-from-torpedo-detonation)).
 2. **`tick_torpedo_lifecycle`** — per-ship torpedo tick: proximity detection, shield routing, hull damage, despawn, broadcasts, VFX. Same `.chain()` rationale as the beam split.
 
+A torpedo that kills the **player's** ship latches game over the same way the beam and blaster kill sites do (`ShipDestroyed` → `GamePhase::GameOver` → first-write `GameOverReason` + `Outcome::Defeat`), and the LocalShip entity is never despawned. `NextState` + `GameOverReason` ride in the `server_app::PlayerDeathLatch` `SystemParam` because the lifecycle system sits on Bevy's 16-parameter ceiling.
+
+### The AI torpedo doctrine gate is per-arc
+
+`console_ai::auto_fire_torpedo` holds fire while the target's shields are up — phasers strip, torpedoes finish. The gate asks about the **one arc the torpedo would strike**, not the sum over all arcs: `console_ai::server::ai_torpedo_auto_fire` computes the attack bearing with `shield::attacker_bearing_relative` (in the *target's* frame, so its own yaw matters) and resolves the arc with the target's own `ShieldSystem::facing_index_for_bearing` — the same resolver `apply_damage` uses, so there is one bearing→arc resolver, not two. An offline arc and a target with no arcs at all both report 0, i.e. nothing is blocking the shot.
+
+The hit side has to hold up its end of that: `TorpedoDetonation` carries `impact_x`/`impact_z` (the torpedo's own position when it went off, alongside `source_uuid`/`tube_id`, because the torpedo leaves `in_flight` at detonation), and `tick_torpedo_lifecycle` turns it into a bearing in the victim's frame before calling `apply_damage`. Passing a constant `0.0` there — as the path did until the per-arc gate landed — put every torpedo from every direction on whichever arc contains bearing 0, so a shot green-lit against a collapsed aft arc was absorbed by a healthy fore arc. The gate predicts from the launcher and the hit resolves from the impact point, so a heavily-homing shot can still land on a neighbouring arc; the resolver is shared, the moment sampled is not. **The blaster path still passes `0.0`** (`console/weapons/blaster.rs`) — latent while every blaster-armed hull declares a single omni arc. The beam path already passes a real bearing for the player's ship.
+
+Summing every arc meant three healthy rear arcs vetoed a shot into a collapsed front arc while the attacker sat dead ahead. With per-arc regen and short offline windows a four-arc Alliance hull practically never has all arcs down at once, so AI crews on those hulls never launched a torpedo and same-class duels reported 0% torpedo contribution. Single-omni-arc NPCs are unaffected — their one arc faces every bearing.
+
 ### Per-blackboard publish
 
 `publish_weapons_blackboard` was split into four systems in `SimSet::Publish`, one per blackboard entry the ship writes (`publish_weapons_core_blackboard`, `publish_phaser_bank_blackboards`, `publish_torpedo_tube_blackboards`, `publish_torpedo_magazine_blackboard`). `ShipSystemBlackboards` is a per-ship `HashMap<SystemId, SystemBlackboard>` component, not a struct with named fields — each system writes a disjoint set of map keys, so all four register as a bare (unordered) tuple. Because none of them may depend on another having run first, the bank/tube list each entry needs is *recomputed* per system via shared pure helpers (`build_bank_states`, `build_tube_states` in `blackboard.rs`) rather than read back out of another system's freshly-written map entry.
@@ -59,7 +69,7 @@ Registered as an instance-based `.chain()` rather than type-set `.after(...)` ed
 | `handle_fire_torpedo` | Input | Processes `FireTorpedo { tube, target_uuid }`; launches if tube is loaded |
 | `handle_load_tube` | Input | Processes `LoadTube { tube }`; manually starts loading a tube |
 | `handle_unload_tube` | Input | Processes `UnloadTube { tube }`; manually unloads or cancels loading |
-| `handle_set_torpedo_volley_target` | Input | Processes `SetTorpedoVolleyTarget` for a specific tube |
+| `handle_set_torpedo_volley_target` | Input | Applies admitted `SetTorpedoVolleyTarget` for a specific tube, reading **every ship's own `AdmittedCommands`** (`With<Ship>`) so AI-crewed ships receive it too — the AI loader `console_ai::server::ai_torpedo_load` issues the same command a human console sends. The target `SystemId` is matched by forward-mapping each tube id through `system_registry::torpedo_tube_system_id`, never by inverting the string — the mapping folds `_` to `-`, so inverting silently dropped every order for a hull that authors hyphenated tube ids (`alliance_battleship`) |
 | `handle_fire_blaster` | Input | Processes `FireBlaster` for NPC hitscan weapons |
 | `tick_blaster_auto_fire` | Input | AI auto-fire decision for blaster-equipped NPCs |
 | `integrate_weapons_state` | Physics | Drains `PhaserIntents`/`TorpedoIntents` into `ActiveBeam`/torpedo launches (shared phaser+torpedo adapter; deliberately not split further) |
@@ -192,7 +202,16 @@ speed = 30.0
 turn_rate_deg_per_sec = 45.0   # converted to radians at the boundary
 lifespan = 20.0
 load_time = 10.0
+ai_volley_target = 2            # rounds an AI crew keeps loaded per tube
 ```
+
+`[[torpedoes.tubes]]` may override the AI standing load per tube with
+`ai_target_count`. Resolution order is per-tube `ai_target_count` →
+`[torpedoes] ai_volley_target` → the tube's own `volley_max`, clamped to
+`volley_max`; the result lands on `TorpedoTube::ai_target_count` and is read
+only by `ai_torpedo_load`. Tubes always *start* at `target_count = 0` for
+human and AI alike — a non-zero default would pre-load a human player's tubes
+and drain the magazine with no order given.
 
 All fields use `serde(default)` and fall back to the same values as
 `TorpedoConfig::default()` (`src/weapons/torpedo.rs:49`). Designer-facing

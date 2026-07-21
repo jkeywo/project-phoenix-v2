@@ -24,20 +24,32 @@
 //!   matches no registered consumer. It is warning-only: it changes no
 //!   simulation state, so the headless behavioural gate stays bit-identical.
 //!
-//! ## Out of scope: the weapons FIRE/LOAD channel
+//! ## Out of scope: the weapons FIRE channel
 //!
-//! The weapons fire/load handlers (`handle_fire_phaser` / `handle_fire_torpedo`
-//! / `handle_fire_blaster` / `handle_load_tube` / `handle_unload_tube` /
-//! `handle_set_torpedo_volley_target`) read `MessageReader<InboundMessage>` for
-//! dedicated top-level `ClientMessage` variants (`FirePhaser`, `LoadTube`, …).
-//! Those messages carry **no `SystemId` target** and are a separate
-//! client→host channel — they are not admitted `SystemControlPayload`s and a
-//! `SystemId` router cannot route them. They are intentionally NOT registered
-//! here (a possible future migration, not #833). The per-weapon ids
-//! (`phaser-fore`, `torpedo-tube-*`, `blaster-*`) therefore never appear in
-//! `AdmittedCommands` and need no consumer matcher. Likewise the
-//! `InterSystemQueue` (inter-system Channel-2/3) is a separate bus and is not
-//! covered by this registry.
+//! The weapons fire handlers (`handle_fire_phaser` / `handle_fire_torpedo` /
+//! `handle_fire_blaster` / `handle_load_tube` / `handle_unload_tube`) read
+//! `MessageReader<InboundMessage>` for dedicated top-level `ClientMessage`
+//! variants (`FirePhaser`, `LoadTube`, …). Those messages carry **no `SystemId`
+//! target** and are a separate client→host channel — they are not admitted
+//! `SystemControlPayload`s and a `SystemId` router cannot route them. They are
+//! intentionally NOT registered here (a possible future migration, not #833),
+//! so `phaser-fore` and `blaster-*` never appear in `AdmittedCommands`.
+//! Likewise the `InterSystemQueue` (inter-system Channel-2/3) is a separate bus
+//! and is not covered by this registry.
+//!
+//! ### The `torpedo-tube-*` exception
+//!
+//! `SetTorpedoVolleyTarget` **is** an admitted `SystemControlPayload` carrying a
+//! real tube `SystemId`, and `handle_set_torpedo_volley_target` was migrated to
+//! read per-ship `AdmittedCommands` over `With<Ship>`. It had to be: the volley
+//! order is the only thing that ever loads a tube, and while the handler was
+//! `InboundMessage` + `With<LocalShip>` it was unreachable for every NPC — so AI
+//! crews never loaded a torpedo and no NPC ever fired one. `ai_torpedo_load`
+//! now issues that order through [`crate::command_admission::ai_emit`], the same
+//! seam and the same `SystemId` a human's `ControlSystem` travels. `WeaponsPlugin`
+//! therefore registers `ConsumerMatcher::prefix("torpedo-tube-")`, and the tube
+//! ids are the one weapon family that DOES route. This is the migration #833
+//! scoped out, done where it was load-bearing.
 
 use bevy::prelude::*;
 
@@ -297,6 +309,9 @@ mod tests {
             sr::TACTICAL_RADAR_SYSTEM_ID, // weapons: tactical radar selection
             sr::PHASER_CONTROL_SYSTEM_ID, // weapons: phaser control
             sr::REPAIR_SYSTEM_ID,         // repair: handle_dispatch_repair_team
+            // weapons: handle_set_torpedo_volley_target (the volley order is an
+            // admitted payload; see the module doc's torpedo-tube exception).
+            sr::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID,
         ];
         for id in expected {
             assert!(
@@ -311,17 +326,38 @@ mod tests {
         assert!(reg.is_routed(&arc.0), "shield-arc family not registered");
     }
 
-    /// The weapons FIRE/LOAD channel is intentionally out of scope: those
-    /// per-weapon ids arrive as dedicated top-level `ClientMessage` variants,
-    /// never as admitted `SystemControlPayload`s, so they are not (and must not
-    /// be) registered as admitted consumers.
+    /// The weapons FIRE channel is intentionally out of scope: those per-weapon
+    /// ids arrive as dedicated top-level `ClientMessage` variants, never as
+    /// admitted `SystemControlPayload`s, so they are not (and must not be)
+    /// registered as admitted consumers.
+    ///
+    /// `torpedo-tube-*` is the deliberate exception and is asserted routed by
+    /// [`torpedo_tube_ids_are_registered_as_admitted_consumers`] — the volley
+    /// target IS an admitted payload carrying a real tube `SystemId`. The other
+    /// ids stay asserted here so this test keeps its teeth.
     #[test]
-    fn fire_load_weapon_ids_are_not_registered_as_admitted_consumers() {
+    fn fire_weapon_ids_are_not_registered_as_admitted_consumers() {
         let app = full_consumer_registry_app();
         let reg = app.world().resource::<AdmittedConsumerRegistry>();
         assert!(!reg.is_routed(crate::system_registry::PHASER_FORE_SYSTEM_ID));
-        assert!(!reg.is_routed(crate::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID));
         assert!(!reg.is_routed("no-such-system"));
+    }
+
+    /// `handle_set_torpedo_volley_target` reads per-ship `AdmittedCommands`, and
+    /// `ai_torpedo_load` emits the order through `ai_emit` — so the tube ids must
+    /// route, or the unrouted lint `pwarn!`s on every AI volley order and the
+    /// registry stops describing reality. See the module doc's exception note.
+    #[test]
+    fn torpedo_tube_ids_are_registered_as_admitted_consumers() {
+        let app = full_consumer_registry_app();
+        let reg = app.world().resource::<AdmittedConsumerRegistry>();
+        assert!(
+            reg.is_routed(crate::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID),
+            "torpedo tube ids must be routed — the volley order travels admitted"
+        );
+        // The prefix matcher must cover every authored per-hull tube id, not
+        // just the one constant.
+        assert!(reg.is_routed("torpedo-tube-aft"));
     }
 
     /// The unrouted-lint decision keys on the registry: an admitted command for

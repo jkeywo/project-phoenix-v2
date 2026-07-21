@@ -3,7 +3,11 @@ class = "destroyer"
 hull_id = "NCC-0741"
 power_rating = 70
 css = "gui/themes/cruiser.css"
-tags = [ "player", "ship" ]
+# Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
+# here — it is injected onto the selected hull at the player game-start spawn
+# (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of
+# this hull is an ordinary NPC ship, so it must not masquerade as the player.
+tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
@@ -15,6 +19,39 @@ colour = []
 shape = "Capsule"
 radius = 1.2
 length = 3
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Default doctrine for a backfilled/unmanned player destroyer (#842 — the other
+# half of #838's human/AI symmetry). See the fuller note on `alliance_cruiser.toml`;
+# in short, authoring `[behaviour]` is the single missing piece that makes
+# `spawn_entity` attach the `BehaviourSection` on the player game-start path, so a
+# backfilled destroyer engages through the same path an NPC does instead of only
+# returning fire once hit.
+#
+#   Destroy (45) — UNTARGETED (no `directive_target`) → licenses the
+#                  nearest-hostile scan and proactive engagement.
+#   Hold    (20) — no directive when no hostile is visible: the helm holds station.
+#
+# Engage priority stays LOW (45) so scenario `spawn_entity` overrides (Destroy at
+# 80) merge by id and dominate (#842 AC3). No Retreat — a fast attack hull fights.
+# `maintain_range = 24` keeps the destroyer inside its 30-unit omni phaser and
+# 35-unit blaster range.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.alliance_destroyer.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 45.0
+target_speed   = 0.9
+maintain_range = 24.0
+
+[[behaviour.doctrine]]
+id            = "hold-station"
+text          = "entity.alliance_destroyer.behaviour.doctrine.hold_station.text"
+base_priority = 20.0
+target_speed  = 0.0
 
 [[hull.system_hull]]
 system_id = "power-reactor"
@@ -310,7 +347,9 @@ red_alert_battery_recharge_pct = 100.0
 [radar_appearance]
 colour = [ 0, 1, 0.2 ]
 size = 5
-icon = "playerShip"
+# Ordinary-ship icon: a world-spawned copy of this hull is an NPC. The player's
+# own ship gets the `playerShip` icon injected at spawn (see hull tags note).
+icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_destroyer.power_groups.ops.label"

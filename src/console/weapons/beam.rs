@@ -201,15 +201,41 @@ pub(crate) fn on_beam_started(
     mut outbox: ResMut<SimOutbox>,
     ship_q: Query<&crate::entity_spawner::EntityUuid>,
     mut weapon_fired_q: Query<&mut crate::server_app::WeaponFiredThisTick>,
+    // `Option<Res<_>>`, never bare — observers run in bare-`App` weapons
+    // fixtures with no `LogFilterConfig` inserted (see logging macro docs).
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let ev = trigger.event();
     if let Ok(mut wf) = weapon_fired_q.get_mut(ev.source_entity) {
         wf.0 = true;
     }
+    // "Opened fire" — an `info` edge scoped to the shooter, event-driven (once
+    // per beam), not per-tick.
+    crate::pinfo!(
+        log,
+        crate::logging::LogCat::Weapons,
+        entity = ev.source_entity,
+        "opened fire (bank {}) at {}",
+        ev.bank,
+        ev.target_uuid
+    );
     let source_uuid = ship_q
         .get(ev.source_entity)
         .map(|u| u.0.clone())
         .unwrap_or_default();
+    // Balance tracer: a beam opening is one shot leaving the ship (distinct
+    // from the `DamageApplied` each tick it burns). Unconditional — all ships,
+    // all builds. Blank uuid → `None`, matching the DamageApplied convention.
+    if let Some(ref mut msgs) = balance_events {
+        msgs.write(crate::balance::BalanceEvent::WeaponFired {
+            shooter: Some(source_uuid.clone()).filter(|u| !u.is_empty()),
+            weapon: ev.bank.clone(),
+            kind: crate::balance::FIRED_KIND_BEAM.to_string(),
+        });
+    }
     outbox.0.push((
         Target::All,
         ServerMessage::BeamStarted {
@@ -224,8 +250,21 @@ pub(crate) fn on_beam_ended(
     trigger: On<BeamEndedEvent>,
     mut outbox: ResMut<SimOutbox>,
     ship_q: Query<&crate::entity_spawner::EntityUuid>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let ev = trigger.event();
+    // "Ceased fire" is the trailing half of the opened-fire edge. Kept at
+    // `debug` rather than `info`: a phaser opens and closes once per cooldown
+    // cycle, so emitting both ends at `info` would double the headline volume
+    // for what a balancer reads as one engagement.
+    crate::pdebug!(
+        log,
+        crate::logging::LogCat::Weapons,
+        entity = ev.source_entity,
+        "ceased fire (bank {}) at {}",
+        ev.bank,
+        ev.target_uuid
+    );
     let source_uuid = ship_q
         .get(ev.source_entity)
         .map(|u| u.0.clone())
@@ -1130,6 +1169,24 @@ pub(crate) fn tick_beams_apply_damage(
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     mut beam_context: ResMut<BeamContext>,
+    // `Option<ResMut<Messages<_>>>` rather than `MessageWriter` so bare-`App`
+    // fixtures that never registered the message still pass Bevy's parameter
+    // validation. Balance telemetry must never be the reason a test app fails
+    // to run.
+    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // Single-emission bookkeeping (issue #838): this kill site is the eager
+    // emitter of `EntityDespawned`, so it must forget the uuid from the
+    // `TrackedEntities` registry it despawns. Otherwise the reconcile sweep
+    // (`reconcile_runtime_entities`), which emits `EntityDespawned` for every
+    // reported uuid no longer in the ECS, re-emits a *second* one for the same
+    // kill. `Option` because bare-`App` weapons fixtures never insert the
+    // resource — there the sweep does not run either, so the eager emit stands
+    // alone and the tests that assert on it stay green.
+    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
+    // `Option<Res<_>>`, never bare — bare-`App` weapons fixtures never insert
+    // `LogFilterConfig` (see logging macro docs).
+    log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     for state in beam_context.0.iter_mut() {
         // When a friendly ship blocks the beam this tick, skip all damage and
@@ -1249,6 +1306,19 @@ pub(crate) fn tick_beams_apply_damage(
             };
             let base_damage = (state.damage_to_apply as f32 * freq_mult).round() as i32;
 
+            // Snapshot which facings are online *before* the shield apply, so
+            // the online→offline edge can be reported as `ShieldArcCollapsed`
+            // (issue #841). Cheap clone of ids; only ships carry shields.
+            let arcs_online_before: Vec<(String, bool)> = ship_shields_comp
+                .as_ref()
+                .map(|s| {
+                    s.0.facings
+                        .iter()
+                        .map(|f| (f.id.clone(), f.is_online()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
             // Route damage through shields if present and any facing online.
             let (damage_to_hull, shield_amount) = if let Some(ref mut shields) = ship_shields_comp {
                 let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
@@ -1288,16 +1358,24 @@ pub(crate) fn tick_beams_apply_damage(
                 (base_damage as f32, 0.0f32)
             };
 
+            let mut hull_applied_total = 0.0f32;
             let ship_destroyed = if damage_to_hull > 0.0 {
-                let mut rng = rand::rng();
-                let (hull_applied, destroyed) =
-                    crate::damage::apply_hull_damage(&mut hull_comp.0, damage_to_hull, &mut rng);
-                // Distribute the same absorbed amount across per-arc hull
-                // (issue #514). Skipped when the target has no
-                // `EntityShipArcHull` (NPCs, asteroids).
-                if let Some(ref mut arc_hull) = target_arc_hull {
-                    arc_hull.0.apply_damage(hull_applied, &mut rng);
-                }
+                let (hull_applied, destroyed) = crate::sim_rng::with_stream(
+                    sim_rng.as_deref(),
+                    crate::sim_rng::SimStream::BeamDamage,
+                    |rng| {
+                        let result =
+                            crate::damage::apply_hull_damage(&mut hull_comp.0, damage_to_hull, rng);
+                        // Distribute the same absorbed amount across per-arc
+                        // hull (issue #514). Skipped when the target has no
+                        // `EntityShipArcHull` (NPCs, asteroids).
+                        if let Some(ref mut arc_hull) = target_arc_hull {
+                            arc_hull.0.apply_damage(result.0, rng);
+                        }
+                        result
+                    },
+                );
+                hull_applied_total = hull_applied;
                 // LocalShip: emit DamageTaken every hit; ShipDestroyed +
                 // GameOver on kill. Never despawn the LocalShip entity.
                 if target_is_local {
@@ -1320,6 +1398,38 @@ pub(crate) fn tick_beams_apply_damage(
                         if let Some(ref mut reason) = game_over_reason {
                             if reason.0.is_none() {
                                 reason.0 = Some("Ship destroyed".into());
+                                // The LocalShip died → defeat (#843), latched
+                                // under the same first-write guard as the reason.
+                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                // EntityDestroyed for the player death, exactly
+                                // once (guarded by the first-write of the reason).
+                                // Killer credit = the beam's shooter (issue #841).
+                                //
+                                // Shared-latch coupling (issue #841): the death
+                                // tracer piggybacks on `GameOverReason` as its
+                                // "fire once" latch, but a scenario's
+                                // `ActionCmd::SetGameOverReason`
+                                // (world/server.rs) writes that same latch. If a
+                                // scenario declared game-over in the same tick a
+                                // local ship dies, the reason would already be
+                                // `Some` and this EntityDestroyed (with its death
+                                // timestamp) would be dropped. This is accepted,
+                                // not a bug: weapon/region damage runs only in
+                                // `GamePhase::InProgress`, so it needs a
+                                // *coincident* scenario game-over plus a local
+                                // death in one tick — vanishingly narrow, and the
+                                // consequence is one missing telemetry row, never
+                                // a gameplay effect. A dedicated latch is not
+                                // worth the four extra call sites it would touch.
+                                // The same coupling holds at the blaster,
+                                // collision, and region death sites.
+                                if let Some(ref mut msgs) = balance_events {
+                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                                        victim: state.effective_target_uuid.clone(),
+                                        killer: Some(state.shooter_uuid.clone())
+                                            .filter(|u| !u.is_empty()),
+                                    });
+                                }
                             }
                         }
                     }
@@ -1328,6 +1438,87 @@ pub(crate) fn tick_beams_apply_damage(
             } else {
                 false
             };
+
+            // Human-readable logging alongside the structured BalanceEvent
+            // (does NOT replace it). Level discipline: a live beam applies
+            // damage *every tick*, so the per-hit line is `trace` — that is
+            // what trace is for. The one `info` edge here is destruction, a
+            // true state edge a balancer reads as a headline. Both entity-
+            // scoped to the victim so `--log-entity` narrows to one hull.
+            let attacker_label: &str = if state.shooter_uuid.is_empty() {
+                "unknown"
+            } else {
+                state.shooter_uuid.as_str()
+            };
+            crate::ptrace!(
+                log,
+                crate::logging::LogCat::Damage,
+                entity = target_entity,
+                "took {} (shield {:.0}/hull {:.0}) from {} via {}",
+                base_damage,
+                shield_amount,
+                hull_applied_total,
+                attacker_label,
+                state.active_bank
+            );
+            if ship_destroyed && !is_asteroid {
+                crate::pinfo!(
+                    log,
+                    crate::logging::LogCat::Damage,
+                    entity = target_entity,
+                    "destroyed by {}",
+                    attacker_label
+                );
+            }
+
+            // Balance tracer. Deliberately outside every `is_local` branch
+            // above: the whole point is to see both halves of a fight.
+            if let Some(ref mut msgs) = balance_events {
+                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                    // `ShooterState.shooter_uuid` is empty for a shooter with
+                    // no `EntityUuid`. That is "unknown", not a ship called
+                    // "" — every chokepoint models an unknown attacker as
+                    // `None`, and a blank key would otherwise open a junk
+                    // ledger row.
+                    attacker: Some(state.shooter_uuid.clone()).filter(|u| !u.is_empty()),
+                    victim: state.effective_target_uuid.clone(),
+                    victim_kind: if is_asteroid {
+                        crate::balance::VictimKind::Asteroid
+                    } else {
+                        crate::balance::VictimKind::Ship
+                    },
+                    weapon: state.active_bank.clone(),
+                    amount: base_damage as f32,
+                    shield_absorbed: shield_amount,
+                    hull_damage: hull_applied_total,
+                    system_hit: None,
+                });
+                // Emit `ShieldArcCollapsed` once per facing that just crossed
+                // online→offline under this hit. Ships only — asteroids carry
+                // no shields.
+                if !is_asteroid {
+                    if let Some(ref shields) = ship_shields_comp {
+                        for (id, was_online) in &arcs_online_before {
+                            if !was_online {
+                                continue;
+                            }
+                            let now_offline = shields
+                                .0
+                                .facings
+                                .iter()
+                                .find(|f| &f.id == id)
+                                .map(|f| !f.is_online())
+                                .unwrap_or(false);
+                            if now_offline {
+                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
+                                    ship: state.effective_target_uuid.clone(),
+                                    arc_id: id.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
 
             if ship_destroyed {
                 if is_asteroid {
@@ -1390,6 +1581,20 @@ pub(crate) fn tick_beams_apply_damage(
                             uuid: state.effective_target_uuid.clone(),
                         },
                     ));
+                }
+                // Forget the uuid so the reconcile sweep does not re-emit
+                // (issue #838, single-emission invariant).
+                if let Some(t) = tracked.as_mut() {
+                    t.forget(&state.effective_target_uuid);
+                }
+                // EntityDestroyed for the NPC kill, co-located with the
+                // AiEntityDestroyed write so it fires exactly once. Killer
+                // credit = the beam's shooter (issue #841).
+                if let Some(ref mut msgs) = balance_events {
+                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                        victim: state.effective_target_uuid.clone(),
+                        killer: Some(state.shooter_uuid.clone()).filter(|u| !u.is_empty()),
+                    });
                 }
             }
             state.end_beam_early = true;

@@ -136,60 +136,95 @@ pub(crate) fn handle_unload_tube(
 
 /// Handle `ControlSystem { target: "torpedo-tube-<id>", payload: SetTorpedoVolleyTarget { count } }`.
 ///
-/// Resolves the tube id from the target SystemId, gates on the tube's
-/// fine-system policy, then calls [`TorpedoSystem::set_volley_target`].
+/// Reads every ship's own `AdmittedCommands`, resolves the tube id from the
+/// target SystemId, gates on the tube's fine-system policy, then calls
+/// [`TorpedoSystem::set_volley_target`] on that ship's own torpedo system.
+///
+/// # Why per-ship `AdmittedCommands` rather than raw `InboundMessage`
+///
+/// This used to read the inbound message stream and query `With<LocalShip>`,
+/// which meant an NPC could never receive the command — so when
+/// `console_ai::server::ai_torpedo_load` started issuing volley orders for
+/// AI-crewed ships, they would have been dropped on the floor. Same shape and
+/// same reason as [`crate::console::captain::handle_toggle_red_alert`]: the AI
+/// pushes into each ship's own `AdmittedCommands`, so the consumer has to
+/// iterate every ship (`With<Ship>`), not just the player's.
+///
+/// Admission (`admit_system_commands`) has already answered "may this token
+/// do this?" — including that a human holds the console owning the tube — and
+/// strips the source identity, so there is no token check here and no
+/// human-vs-AI branch. What remains is the *system-state* gate: the tube must
+/// be operable at all. A tube whose fine system is `Offline` (rating or damage
+/// tier) rejects volley orders from either origin.
+///
+/// A ship with no `TorpedoSystemResource` component simply has no tubes and is
+/// skipped: the global `TorpedoSystemResource` Resource mirrors the LOCAL
+/// ship's magazine, so falling back to it here would let one ship's volley
+/// order retarget another ship's tubes (issue #738 removed the same fallback
+/// from `handle_unload_tube` / `handle_fire_torpedo` for exactly that reason).
 ///
 /// Runs in `SimSet::Input`.
 pub(crate) fn handle_set_torpedo_volley_target(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<
+    mut ship_query: Query<
         (
-            &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
+            &crate::messages::AdmittedCommands,
+            Option<&mut TorpedoSystemResource>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
 ) {
-    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
-        return;
-    };
-    for ev in reader.read() {
-        let ClientMessage::ControlSystem {
-            target,
-            payload: SystemControlPayload::SetTorpedoVolleyTarget { count },
-        } = &ev.msg
-        else {
+    for (control_sources, admitted, torpedo_sys_comp) in ship_query.iter_mut() {
+        // The ship's own component, never the global Resource (issue #738).
+        let mut torpedo_sys_comp = torpedo_sys_comp;
+        let Some(torpedo_sys) = torpedo_sys_comp.as_deref_mut().map(|c| &mut c.0) else {
             continue;
         };
-        // Target must look like "torpedo-tube-<tube_id_with_hyphens>".
-        let tube_id_hyphens = match target.0.strip_prefix("torpedo-tube-") {
-            Some(id) if !id.is_empty() => id,
-            _ => continue,
-        };
-        // Gate on the tube's own fine-system policy (default-source policy
-        // for unregistered ids — issue #801).
-        let is_registered = system_is_registered(control_sources, target);
-        let tube_policy = if is_registered {
-            control_sources.0.policy_for(target)
-        } else {
-            // Unregistered fine system → default-source policy (issue #801).
-            crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            )
-        };
-        if !tube_policy.accept_human_input {
-            continue;
-        }
-        if !tactical_authorized(&sessions, ship_config, &ev.token) {
-            continue;
-        }
-        // Convert hyphens → underscores to get the TOML tube id.
-        let tube_id = tube_id_hyphens.replace('-', "_");
-        // The LocalShip's own component, never the global Resource (issue #738).
-        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
-            ts.0.set_volley_target(&tube_id, *count);
+        let torpedo_sys: &mut TorpedoSystem = torpedo_sys;
+        for cmd in admitted.0.iter() {
+            let SystemControlPayload::SetTorpedoVolleyTarget { count } = &cmd.payload else {
+                continue;
+            };
+            // Resolve the command's target back to one of THIS ship's tubes by
+            // running the canonical forward mapping
+            // (`system_registry::torpedo_tube_system_id`) over each tube id and
+            // comparing — never by inverting the string.
+            //
+            // The inverse ("strip `torpedo-tube-`, put the underscores back")
+            // is lossy: the mapping folds `_` to `-`, so a hull that authors its
+            // tubes with hyphens (`id = "fore-port"`, as `alliance_battleship`
+            // does) came back as `fore_port`, matched no tube, and every volley
+            // order for that hull was silently dropped — its AI crew never
+            // loaded a round in its life. Comparing forward-mapped ids accepts
+            // either spelling and keeps one resolver instead of two.
+            let Some(tube_id) = torpedo_sys
+                .tubes
+                .iter()
+                .find(|t| {
+                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                        == Some(&cmd.target)
+                })
+                .map(|t| t.id.clone())
+            else {
+                continue;
+            };
+            // Gate on the tube's own fine-system policy (default-source policy
+            // for unregistered ids — issue #801). Operable for *either*
+            // origin: `accept_human_input` for a Human tube, `operate_ai` for
+            // an Ai one. Both false means Offline — nobody may load it.
+            let is_registered = system_is_registered(control_sources, &cmd.target);
+            let tube_policy = if is_registered {
+                control_sources.0.policy_for(&cmd.target)
+            } else {
+                // Unregistered fine system → default-source policy (issue #801).
+                crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                )
+            };
+            if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                continue;
+            }
+            torpedo_sys.set_volley_target(&tube_id, *count);
         }
     }
 }
@@ -236,6 +271,9 @@ pub(crate) fn handle_fire_torpedo(
     >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     // Snapshot LocalShip identity for human-token routing. `None` when the
     // test/plugin harness has no player ship spawned.
@@ -366,6 +404,15 @@ pub(crate) fn handle_fire_torpedo(
             } => {
                 if let Some(mut wf) = weapon_fired_comp {
                     wf.0 = true;
+                }
+                // Balance tracer: the torpedo left the tube. Unconditional —
+                // all ships, all builds. Blank uuid → `None`.
+                if let Some(ref mut msgs) = balance_events {
+                    msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                        shooter: source_uuid.clone().filter(|u| !u.is_empty()),
+                        weapon: tube.clone(),
+                        kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
+                    });
                 }
                 outbox.0.push((
                     Target::All,
@@ -592,6 +639,29 @@ pub(crate) fn build_torpedo_target_snapshot(
     snapshot.targets = targets;
 }
 
+/// The two position lookups the detonation phase uses to place an explosion,
+/// bundled as one `SystemParam`. Same reason as
+/// [`crate::server_app::WorldAndTracked`]: the torpedo lifecycle sits on Bevy's
+/// 16-parameter ceiling, and the player-death latch had to fit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HitPositionQueries<'w, 's> {
+    pub asteroids: Query<
+        'w,
+        's,
+        (&'static AsteroidUuid, &'static Transform),
+        Without<crate::entity_spawner::EntityUuid>,
+    >,
+    pub entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::entity_spawner::EntityUuid,
+            &'static Transform,
+        ),
+        Without<AsteroidUuid>,
+    >,
+}
+
 /// Phase 2 of the torpedo tick (issue #724): per-ship torpedo tick —
 /// guidance/expiry via the [`TorpedoTargetSnapshot`] built earlier this
 /// tick, proximity detonation, shield routing, hull damage, despawn,
@@ -600,7 +670,10 @@ pub(crate) fn build_torpedo_target_snapshot(
 pub(crate) fn tick_torpedo_lifecycle(
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::Ship>>,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
-    mut world: ResMut<WorldResource>,
+    // `world` + the reported registry bundled into one param to stay under
+    // Bevy's 16-parameter ceiling (issue #838). `world_tracked.world` is the
+    // former `world: ResMut<WorldResource>`.
+    mut world_tracked: crate::server_app::WorldAndTracked,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
     mut hull_query: Query<(
@@ -611,17 +684,38 @@ pub(crate) fn tick_torpedo_lifecycle(
         Option<&mut crate::ship::shields::ShipShields>,
         Option<&mut crate::entity_spawner::EntityShipArcHull>,
         Option<&crate::entity_spawner::ColliderSection>,
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        // Where the victim is and which way it is pointing — shield arcs are
+        // authored in the victim's own frame, so routing the hit to an arc
+        // needs both. `Option` because asteroids and bare-`App` test fixtures
+        // carry neither.
+        Option<&Transform>,
+        Option<&ShipPhysics>,
     )>,
+    mut death_latch: crate::server_app::PlayerDeathLatch,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // The two position lookups bundled as one `SystemParam` (issue #838) —
+    // separately they put this system over Bevy's 16-parameter ceiling. Same
+    // queries main spelled inline; `WeaponsTarget` is now
+    // `TacticalRadarSelection` (issue #822).
+    hit_pos: HitPositionQueries,
     mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
     snapshot: Res<TorpedoTargetSnapshot>,
+    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
+    // registered the message still pass Bevy's parameter validation.
+    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    // Seeded RNG + log filter, bundled: separately they put this system one
+    // over Bevy's 16-parameter ceiling.
+    ambient: crate::server_app::SimRngAndLog,
 ) {
+    let sim_rng = &ambient.rng;
+    let log = &ambient.log;
     let dt = time.delta_secs();
+    // Alias so the `world.0.entities` read sites below read naturally.
+    let world = &mut world_tracked.world;
     let mut weapons_target_opt = weapons_target_q.single_mut().ok();
     let target_positions = &snapshot.target_positions;
     let targets = &snapshot.targets;
@@ -640,6 +734,18 @@ pub(crate) fn tick_torpedo_lifecycle(
         damage_hull: i32,
         damage_shields: i32,
         shield_pierce: f32,
+        /// Who launched it — the firing ship is out of scope by phase 2, so
+        /// balance attribution has to ride along with the detonation.
+        source_uuid: Option<String>,
+        /// Which tube fired it, for the same reason — the balance contract
+        /// wants a configured weapon id, not a generic kind label.
+        tube_id: String,
+        /// Where the torpedo was when it detonated. Shield routing is
+        /// directional, and the torpedo is gone from `in_flight` by phase 2,
+        /// so its impact point has to travel with the detonation the same way
+        /// `source_uuid` does.
+        impact_x: f32,
+        impact_z: f32,
     }
     let mut detonations: Vec<Detonation> = Vec::new();
     let mut any_ship_component = false;
@@ -681,6 +787,10 @@ pub(crate) fn tick_torpedo_lifecycle(
                 damage_hull: det.damage_hull,
                 damage_shields: det.damage_shields,
                 shield_pierce: det.shield_pierce,
+                source_uuid: det.source_uuid,
+                tube_id: det.tube_id,
+                impact_x: det.impact_x,
+                impact_z: det.impact_z,
             });
         }
     }
@@ -723,6 +833,10 @@ pub(crate) fn tick_torpedo_lifecycle(
                 damage_hull: det.damage_hull,
                 damage_shields: det.damage_shields,
                 shield_pierce: det.shield_pierce,
+                source_uuid: det.source_uuid,
+                tube_id: det.tube_id,
+                impact_x: det.impact_x,
+                impact_z: det.impact_z,
             });
         }
     }
@@ -733,6 +847,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         let target_uuid = det.target_uuid;
         let mut asteroid_destroyed = false;
         let mut non_local_ship_destroyed = false;
+        let mut local_ship_destroyed = false;
         let mut hit_x = 0.0_f32;
         let mut hit_z = 0.0_f32;
         let mut destroyed_ship_radius = DEFAULT_SHIP_EXPLOSION_RADIUS;
@@ -745,6 +860,9 @@ pub(crate) fn tick_torpedo_lifecycle(
             mut shield_comp,
             mut target_arc_hull,
             collider_opt,
+            target_is_local,
+            target_tf,
+            target_physics,
         ) in hull_query.iter_mut()
         {
             let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
@@ -753,14 +871,25 @@ pub(crate) fn tick_torpedo_lifecycle(
                 continue;
             }
             let is_asteroid = asteroid_uuid.is_some();
-            let mut rng = rand::rng();
 
             // Route shield-eligible damage through any `ShipShields`
             // component, with overflow leaking to hull. Hull damage
             // (always-pierces) goes straight to hull. Asteroids carry no
             // shield so the shielded path is a no-op for them.
             let mut hull_damage = det.damage_hull as f32;
+            let mut shield_absorbed = 0.0f32;
             let shield_eligible = det.damage_shields as f32;
+            // Snapshot online facings before the shield apply so the
+            // online→offline edge can be reported (issue #841).
+            let arcs_online_before: Vec<(String, bool)> = shield_comp
+                .as_ref()
+                .map(|s| {
+                    s.0.facings
+                        .iter()
+                        .map(|f| (f.id.clone(), f.is_online()))
+                        .collect()
+                })
+                .unwrap_or_default();
             if shield_eligible > 0.0 {
                 if let Some(ref mut shields) = shield_comp {
                     let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
@@ -771,28 +900,148 @@ pub(crate) fn tick_torpedo_lifecycle(
                             shield_eligible,
                             det.shield_pierce,
                         );
-                        let leak = shields.0.apply_damage(absorbed.round() as i32, 0.0);
+                        // Route the hit to the arc the torpedo actually flew
+                        // into, by handing `apply_damage` the bearing the
+                        // torpedo arrived on rather than a hardcoded 0.0.
+                        //
+                        // # Why this matters
+                        //
+                        // `ShieldSystem::apply_damage` resolves the facing with
+                        // `facing_index_for_bearing`, so a constant 0.0 put
+                        // every torpedo — from every direction — on whichever
+                        // arc contains bearing 0 (fore, on a four-arc Alliance
+                        // hull). `ai_torpedo_auto_fire`'s doctrine gate asks
+                        // the same resolver which arc is in the way before it
+                        // shoots; with the hit hardcoded to fore, a shot
+                        // green-lit against a collapsed AFT arc was absorbed by
+                        // the healthy FORE arc. Gate and hit now share one
+                        // resolver, so they agree.
+                        //
+                        // Attacker position is the *torpedo's* impact point,
+                        // not the firing ship's: the gate predicts from the
+                        // launcher, but a homing torpedo curves, and the arc it
+                        // meets is the one it is nose-on to when it goes off.
+                        //
+                        // Bearing falls back to 0.0 for a victim with no
+                        // `Transform` (the degenerate case the beam path also
+                        // takes) — nothing better is knowable there.
+                        let bearing = match target_tf {
+                            Some(tf) => crate::shield::attacker_bearing_relative(
+                                det.impact_x,
+                                det.impact_z,
+                                tf.translation.x,
+                                tf.translation.z,
+                                target_physics.map(|p| p.yaw).unwrap_or(0.0),
+                            ),
+                            None => 0.0,
+                        };
+                        let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
+                        shield_absorbed = (absorbed - leak as f32).max(0.0);
                         hull_damage += pierced + leak as f32;
                     }
                 } else {
                     hull_damage += shield_eligible;
                 }
             }
+            let mut hull_applied = 0.0f32;
             if hull_damage > 0.0 {
                 let before = hull_comp.0.total_current();
-                hull_comp.0.apply_damage(hull_damage, &mut rng);
-                let absorbed = before - hull_comp.0.total_current();
-                // Distribute the same absorbed amount across per-arc hull
-                // (issue #514).
-                if let Some(ref mut arc_hull) = target_arc_hull {
-                    arc_hull.0.apply_damage(absorbed, &mut rng);
+                hull_applied = crate::sim_rng::with_stream(
+                    sim_rng.as_deref(),
+                    crate::sim_rng::SimStream::TorpedoDamage,
+                    |rng| {
+                        hull_comp.0.apply_damage(hull_damage, rng);
+                        let absorbed = before - hull_comp.0.total_current();
+                        // Distribute the same absorbed amount across per-arc
+                        // hull (issue #514).
+                        if let Some(ref mut arc_hull) = target_arc_hull {
+                            arc_hull.0.apply_damage(absorbed, rng);
+                        }
+                        absorbed
+                    },
+                );
+            }
+
+            // Human-readable logging alongside the structured BalanceEvent
+            // (does NOT replace it). Same level discipline as the beam site:
+            // per-hit detail is `trace`, and the one `info` edge is
+            // destruction — the state change a balancer reads as a headline.
+            // Both entity-scoped to the victim so `--log-entity` narrows to
+            // one hull.
+            let attacker_label: &str = det.source_uuid.as_deref().unwrap_or("unknown");
+            crate::ptrace!(
+                log,
+                crate::logging::LogCat::Damage,
+                entity = entity,
+                "took {} (shield {:.0}/hull {:.0}) from {} via {}",
+                det.damage_hull + det.damage_shields,
+                shield_absorbed,
+                hull_applied,
+                attacker_label,
+                det.tube_id
+            );
+            if hull_comp.0.is_destroyed() && !is_asteroid {
+                crate::pinfo!(
+                    log,
+                    crate::logging::LogCat::Damage,
+                    entity = entity,
+                    "destroyed by {}",
+                    attacker_label
+                );
+            }
+
+            // Balance tracer — every torpedo hit, on every ship, regardless of
+            // whether anything downstream is player-facing.
+            if let Some(ref mut msgs) = balance_events {
+                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                    attacker: det.source_uuid.clone(),
+                    victim: target_uuid.clone(),
+                    victim_kind: if is_asteroid {
+                        crate::balance::VictimKind::Asteroid
+                    } else {
+                        crate::balance::VictimKind::Ship
+                    },
+                    weapon: det.tube_id.clone(),
+                    amount: (det.damage_hull + det.damage_shields) as f32,
+                    shield_absorbed,
+                    hull_damage: hull_applied,
+                    system_hit: None,
+                });
+                if !is_asteroid {
+                    if let Some(ref shields) = shield_comp {
+                        for (id, was_online) in &arcs_online_before {
+                            if !was_online {
+                                continue;
+                            }
+                            let now_offline = shields
+                                .0
+                                .facings
+                                .iter()
+                                .find(|f| &f.id == id)
+                                .map(|f| !f.is_online())
+                                .unwrap_or(false);
+                            if now_offline {
+                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
+                                    ship: target_uuid.clone(),
+                                    arc_id: id.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
             }
 
             if hull_comp.0.is_destroyed() {
-                commands.entity(entity).try_despawn();
+                // The player's ship is never despawned on death — the run ends
+                // instead, and the report still needs the wreck to read from.
+                // Same rule the beam and blaster kill sites follow.
+                if !target_is_local {
+                    commands.entity(entity).try_despawn();
+                }
                 if is_asteroid {
                     asteroid_destroyed = true;
+                } else if target_is_local {
+                    local_ship_destroyed = true;
                 } else {
                     non_local_ship_destroyed = true;
                     destroyed_ship_radius = collider_opt
@@ -801,18 +1050,48 @@ pub(crate) fn tick_torpedo_lifecycle(
                 }
                 // Use live position from whichever query matches (asteroid or ship).
                 if is_asteroid {
-                    if let Some((_, t)) = asteroid_q.iter().find(|(u, _)| u.0 == target_uuid) {
+                    if let Some((_, t)) = hit_pos.asteroids.iter().find(|(u, _)| u.0 == target_uuid)
+                    {
                         hit_x = t.translation.x;
                         hit_z = t.translation.z;
                     }
-                } else if let Some((_, t)) = entity_q.iter().find(|(u, _)| u.0 == target_uuid) {
+                } else if let Some((_, t)) =
+                    hit_pos.entities.iter().find(|(u, _)| u.0 == target_uuid)
+                {
                     hit_x = t.translation.x;
                     hit_z = t.translation.z;
                 }
             }
         }
 
-        if asteroid_destroyed {
+        if local_ship_destroyed {
+            // A torpedo can now deliver the killing blow to the player: AI
+            // crews only started firing them once the doctrine gate stopped
+            // demanding every shield arc be down at once. Until then this
+            // branch was unreachable, and the player simply despawned with the
+            // run still `InProgress` — the death was recorded in the ledger but
+            // nothing ever latched game-over. Mirrors the beam kill site
+            // (`tick_beams_apply_damage`) exactly, including the shared
+            // first-write `GameOverReason` latch that the `EntityDestroyed`
+            // tracer piggybacks on.
+            outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+            if let Some(ref mut gs) = death_latch.next_state {
+                gs.set(crate::messages::GamePhase::GameOver);
+            }
+            if let Some(ref mut reason) = death_latch.reason {
+                if reason.0.is_none() {
+                    reason.0 = Some("Ship destroyed".into());
+                    // The LocalShip died → defeat (#843).
+                    reason.1 = Some(crate::balance::Outcome::Defeat);
+                    if let Some(ref mut msgs) = balance_events {
+                        msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                            victim: target_uuid.clone(),
+                            killer: det.source_uuid.clone(),
+                        });
+                    }
+                }
+            }
+        } else if asteroid_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
             outbox.0.push((
@@ -844,6 +1123,17 @@ pub(crate) fn tick_torpedo_lifecycle(
                     uuid: target_uuid.clone(),
                 },
             ));
+            if let Some(t) = world_tracked.tracked.as_mut() {
+                t.forget(&target_uuid);
+            }
+            // EntityDestroyed for the torpedo kill, co-located with the
+            // AiEntityDestroyed write (exactly once). Killer = launching ship.
+            if let Some(ref mut msgs) = balance_events {
+                msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                    victim: target_uuid.clone(),
+                    killer: det.source_uuid.clone(),
+                });
+            }
             if weapons_target_opt.as_deref().and_then(|wt| wt.0.as_deref())
                 == Some(target_uuid.as_str())
             {

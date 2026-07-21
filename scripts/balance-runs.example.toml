@@ -1,0 +1,42 @@
+# Example config for scripts/balance-runs.mjs (issue #845).
+#
+#   node scripts/balance-runs.mjs scripts/balance-runs.example.toml --out .balance-out
+#
+# Requires a release binary (this script does NOT build it):
+#   cargo build --release --features headless --bin phoenix-headless
+#
+# Markdown summary is printed to stdout; --out <dir> also writes merged.json +
+# summary.md there. Keep any output directory out of git.
+
+# ── Global knobs ─────────────────────────────────────────────────────────────
+seeds       = 3                          # count → seeds 1..N (or an explicit list, e.g. [1, 7, 42])
+sim_seconds = 45                         # per-run simulated length
+# hz        = 60                         # optional sim rate; omit to use the binary default (60)
+# concurrency = 8                        # optional; default = os.cpus().length
+# run_timeout_secs = 300                 # optional wall-clock kill switch per run (default 300);
+#                                        #   a hung process is killed and tallied as a failed run
+
+world       = "assets/worlds/duel.toml"  # world for class_matrix / [[matchup]] (default: duel.toml)
+
+# ── Class-matchup matrix ─────────────────────────────────────────────────────
+# Expands to every ORDERED pair including mirrors: side_a = [a] vs side_b = [b].
+# Rendered as a win-rate grid (rows = side_a, cols = side_b) plus the flat table.
+class_matrix = ["courier", "destroyer", "cruiser", "battleship"]
+
+# ── Explicit matchups (arbitrary X-vs-Y) ─────────────────────────────────────
+# Combine freely with class_matrix; each entry is its own row. `name` is
+# optional (defaults to "<side_a>_vs_<side_b>").
+# [[matchup]]
+# name   = "wolfpack_vs_battleship"
+# side_a = ["cruiser", "destroyer", "destroyer"]
+# side_b = ["battleship"]
+
+# ── Scenario sweep (same world, N seeds, one player hull each) ────────────────
+# Point `world` at a scenario that defines its own enemies and list the player
+# hulls to sweep. No side_b — the world supplies the opposition. This is a
+# standalone config shape; drop the class_matrix above when using it.
+#
+# world          = "assets/worlds/combat_test.toml"
+# scenario_hulls = ["courier", "destroyer", "cruiser", "battleship"]
+# seeds          = 5
+# sim_seconds    = 60

@@ -3,7 +3,11 @@ class = "battleship"
 hull_id = "NCC-2001"
 power_rating = 120
 css = "gui/themes/battleship.css"
-tags = [ "player", "ship" ]
+# Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
+# here — it is injected onto the selected hull at the player game-start spawn
+# (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of
+# this hull is an ordinary NPC ship, so it must not masquerade as the player.
+tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
@@ -15,6 +19,39 @@ colour = []
 shape = "Capsule"
 radius = 1.5
 length = 4
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Default doctrine for a backfilled/unmanned player battleship (#842 — the other
+# half of #838's human/AI symmetry). See the fuller note on `alliance_cruiser.toml`;
+# authoring `[behaviour]` is what makes `spawn_entity` attach the
+# `BehaviourSection` on the player game-start path, so a backfilled battleship
+# proactively engages instead of only returning fire once hit.
+#
+#   Destroy (45) — UNTARGETED (no `directive_target`) → licenses the
+#                  nearest-hostile scan and proactive engagement.
+#   Hold    (20) — no directive when no hostile is visible: the helm holds station.
+#
+# Engage priority stays LOW (45) so scenario `spawn_entity` overrides (Destroy at
+# 80) merge by id and dominate (#842 AC3). No Retreat — a capital defender holds
+# the line. `maintain_range = 38` is the widest of the four hulls: the battleship
+# is slow (max_speed 6.7) and stands off, keeping the enemy inside its 40-unit
+# phasers and 50-unit heavy blaster rather than closing to knife-fight range.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.alliance_battleship.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 45.0
+target_speed   = 0.8
+maintain_range = 38.0
+
+[[behaviour.doctrine]]
+id            = "hold-station"
+text          = "entity.alliance_battleship.behaviour.doctrine.hold_station.text"
+base_priority = 20.0
+target_speed  = 0.0
 
 # ── System hull HP — Cruiser baseline × 1.4 (rounded) ───────────────────────
 
@@ -215,6 +252,13 @@ lifespan = 20
 load_time = 10
 detonation_radius = 5
 burst_interval_secs = 0.5
+# How many rounds an AI-crewed Tactical keeps in each tube (the AI issues the
+# same SetTorpedoVolleyTarget a human console does — see `ai_torpedo_load`).
+# Deliberately below `volley_max = 3`: five tubes at full volley would park 15
+# of this hull's 30 rounds inside the tubes, leaving the magazine half empty
+# and every reload competing for the same stock. Two per tube keeps a standing
+# 10-round broadside with 20 in reserve.
+ai_volley_target = 2
 
 [[torpedoes.tubes]]
 id = "fore-port"
@@ -375,7 +419,9 @@ red_alert_battery_recharge_pct = 100.0
 [radar_appearance]
 colour = [ 0, 1, 0.2 ]
 size = 5
-icon = "playerShip"
+# Ordinary-ship icon: a world-spawned copy of this hull is an NPC. The player's
+# own ship gets the `playerShip` icon injected at spawn (see hull tags note).
+icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_battleship.power_groups.ops.label"

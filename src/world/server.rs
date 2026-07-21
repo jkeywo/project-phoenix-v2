@@ -352,6 +352,7 @@ fn spawn_world_entities(
     mut commands: Commands,
     world_config: Option<ResMut<crate::world::config::WorldConfig>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     let Some(mut world_config) = world_config else {
         return; // No unified WorldConfig (native tests, hardcoded fallback).
@@ -363,10 +364,9 @@ fn spawn_world_entities(
     // lookup paths see the same names). This pass runs independently of
     // template resolution so it works even when the config cache is empty
     // (e.g. in unit tests).
-    let new_names = crate::world::config::assign_named_entity_uuids(
-        &world_config.entities,
-        crate::entity_loader::assign_uuid,
-    );
+    let new_names = crate::world::config::assign_named_entity_uuids(&world_config.entities, || {
+        crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+    });
     for (name, uuid) in &new_names {
         world_config.name_to_uuid.insert(name.clone(), uuid.clone());
     }
@@ -382,8 +382,13 @@ fn spawn_world_entities(
     // Startup. Pass the runtime flags so any Immediate-path predicates that
     // don't depend on ship_power still evaluate correctly.
     let flags = runtime.as_ref().map(|r| &r.flags);
-    let _spawned =
-        spawn_immediate_entities_internal(&mut commands, &world_snapshot, &config_cache, flags);
+    let _spawned = spawn_immediate_entities_internal(
+        &mut commands,
+        &world_snapshot,
+        &config_cache,
+        flags,
+        sim_rng.as_deref(),
+    );
 }
 
 /// Spawn the unified-pipeline-owned immediate `[[entity]]` instances.
@@ -406,6 +411,7 @@ pub fn spawn_immediate_entities_internal(
     world_config: &crate::world::config::WorldConfig,
     config_cache: &crate::config_cache::ConfigCache,
     flags: Option<&crate::world::flags::FlagStore>,
+    sim_rng: Option<&crate::sim_rng::SimRng>,
 ) -> Vec<Entity> {
     let (fields, named, _anon) =
         crate::world::config::partition_immediate_entities_three_way(world_config, |path| {
@@ -466,7 +472,7 @@ pub fn spawn_immediate_entities_internal(
                 }
             }
         }
-        let uuid = crate::entity_loader::assign_uuid();
+        let uuid = crate::sim_rng::assign_uuid_with(sim_rng);
         let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
             Err(e) => {
@@ -773,8 +779,13 @@ pub(crate) fn tick_trigger_pipeline(
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
+    // Seeded UUID source for `SpawnEntity` dispatch. Bound once per system run
+    // because `DispatchContext::uuid_source` is a `&dyn Fn`.
+    let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
     // Template source for `SpawnEntity` dispatch (issue #715), built once per
     // system run. `WasmTemplateLoader` unconditionally: it serves the
     // preloaded config cache first and, on native, falls back to the
@@ -972,7 +983,7 @@ pub(crate) fn tick_trigger_pipeline(
                             .map(|wc| &wc.anchors)
                             .unwrap_or(&empty_anchors),
                         factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
-                        uuid_source: &crate::entity_loader::assign_uuid,
+                        uuid_source: &uuid_source,
                         template_loader: &template_loader,
                     };
                     dispatch_action(action, &ctx)
@@ -998,6 +1009,7 @@ pub(crate) fn tick_trigger_pipeline(
                     game_over_reason.as_deref_mut(),
                     &mut faction_dispatch,
                     &mut ai_query,
+                    balance_events.as_deref_mut(),
                 );
             }
         }
@@ -1121,6 +1133,10 @@ pub(crate) fn apply_dispatch_result(
         ),
         With<BehaviourSection>,
     >,
+    // Balance telemetry: `ObjectiveCompleted` is emitted here, guarded on the
+    // objective actually transitioning. `Option<&mut Messages<_>>` so callers
+    // in bare-`App` fixtures (no registered message) can pass `None`.
+    mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
 ) {
     let DispatchResult {
         commands: action_cmds,
@@ -1153,7 +1169,16 @@ pub(crate) fn apply_dispatch_result(
             }
 
             ActionCmd::CompleteObjective { id } => {
-                objectives.0.complete(&id);
+                // Guard the tracer on the actual transition to `Completed`, so
+                // a re-issued CompleteObjective on an already-complete objective
+                // does not double-emit (issue #841).
+                if objectives.0.complete(&id) {
+                    if let Some(msgs) = balance_events.as_deref_mut() {
+                        msgs.write(crate::balance::BalanceEvent::ObjectiveCompleted {
+                            objective_id: id.clone(),
+                        });
+                    }
+                }
             }
 
             ActionCmd::FailObjective { id } => {
@@ -1250,9 +1275,13 @@ pub(crate) fn apply_dispatch_result(
 
             // Always applied before `SetNextState` below —
             // `OnEnter(GamePhase::GameOver)` reads the reason resource.
-            ActionCmd::SetGameOverReason { reason } => {
+            ActionCmd::SetGameOverReason { reason, outcome } => {
                 if let Some(gr) = game_over_reason.as_deref_mut() {
                     gr.0 = Some(reason);
+                    // Declared outcome (#843), or `None` for an undeclared
+                    // scripted end — the headless classifier defaults that to
+                    // victory.
+                    gr.1 = outcome;
                 }
             }
 
@@ -1476,6 +1505,8 @@ fn tick_delayed_actions(
         ),
         With<BehaviourSection>,
     >,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
         runtime
@@ -1498,6 +1529,7 @@ fn tick_delayed_actions(
     // Same template source as `tick_trigger_pipeline` (issue #715): one
     // `WasmTemplateLoader` per system run, both targets.
     let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
 
     // Ready/still-pending is a pure decision (`world::delayed`); only the
     // elapsed-clock read above and the dispatch below touch Bevy.
@@ -1522,7 +1554,7 @@ fn tick_delayed_actions(
                     .map(|wc| &wc.anchors)
                     .unwrap_or(&empty_anchors),
                 factions: faction_dispatch.registry.as_deref().map(|r| &r.0),
-                uuid_source: &crate::entity_loader::assign_uuid,
+                uuid_source: &uuid_source,
                 template_loader: &template_loader,
             };
             dispatch_action(&pda.action, &ctx)
@@ -1547,6 +1579,7 @@ fn tick_delayed_actions(
             game_over_reason.as_deref_mut(),
             &mut faction_dispatch,
             &mut ai_query,
+            balance_events.as_deref_mut(),
         );
         runtime.pending_world_events.extend(out_events);
     }
@@ -1817,6 +1850,7 @@ fn apply_world_layer_changes(
     mut layer_map: ResMut<WorldLayerMap>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -1839,12 +1873,10 @@ fn apply_world_layer_changes(
                 } else {
                     load_scenario_toml(&path)
                 };
-                let result = evaluate_layer_load(
-                    &path,
-                    already_loaded,
-                    toml_str.as_deref(),
-                    crate::entity_loader::assign_uuid,
-                );
+                let result =
+                    evaluate_layer_load(&path, already_loaded, toml_str.as_deref(), || {
+                        crate::sim_rng::assign_uuid_with(sim_rng.as_deref())
+                    });
                 for warning in &result.warnings {
                     bevy::log::error!("apply_world_layer_changes: {warning}");
                 }
@@ -1886,6 +1918,7 @@ fn apply_world_layer_changes(
                             &scenario_config,
                             &config_cache,
                             Some(&runtime.flags),
+                            sim_rng.as_deref(),
                         );
 
                         // Merge comms template states + contacts
@@ -3943,7 +3976,7 @@ pub(crate) mod tests {
         let spawned: Vec<Entity> = {
             let world_cfg = app.world().resource::<UnifiedWorldConfig>().clone();
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None)
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
         };
         app.update();
 
@@ -4012,7 +4045,7 @@ pub(crate) mod tests {
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None)
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
         };
         app.update();
 
@@ -4083,7 +4116,7 @@ base_priority = 35.0
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None)
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
         };
         app.update();
 
@@ -4162,7 +4195,7 @@ base_priority = 35.0
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None)
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
         };
         app.update();
 
@@ -4253,7 +4286,7 @@ base_priority = 35.0
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None)
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
         };
         app.update();
 
@@ -5213,6 +5246,7 @@ entity = "layer_npc"
                 },
                 TriggerAction::GameOver {
                     message: Some("all variants dispatched".into()),
+                    outcome: None,
                 },
             ];
             runtime.trigger_states = vec![
@@ -7086,7 +7120,7 @@ size_max = 2.0
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags))
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags), None)
         };
         app.update();
 
@@ -7121,7 +7155,7 @@ size_max = 2.0
 
         let spawned: Vec<Entity> = {
             let mut commands = app.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags))
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags), None)
         };
         app.update();
 
@@ -7188,7 +7222,7 @@ size_max = 2.0
         app_low.add_plugins(bevy::time::TimePlugin);
         let spawned_low: Vec<Entity> = {
             let mut commands = app_low.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &cfg, &cache, Some(&flags_low))
+            spawn_immediate_entities_internal(&mut commands, &cfg, &cache, Some(&flags_low), None)
         };
         app_low.update();
         assert_eq!(spawned_low.len(), 1, "only scout should spawn at low power");
@@ -7206,7 +7240,7 @@ size_max = 2.0
         app_high.add_plugins(bevy::time::TimePlugin);
         let spawned_high: Vec<Entity> = {
             let mut commands = app_high.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &cfg, &cache, Some(&flags_high))
+            spawn_immediate_entities_internal(&mut commands, &cfg, &cache, Some(&flags_high), None)
         };
         app_high.update();
         assert_eq!(
@@ -7252,6 +7286,7 @@ size_max = 2.0
                 &world_cfg,
                 &cache,
                 Some(&flags_neither),
+                None,
             )
         };
         app_a.update();
@@ -7264,7 +7299,13 @@ size_max = 2.0
         app_b.add_plugins(bevy::time::TimePlugin);
         let spawned_b: Vec<Entity> = {
             let mut commands = app_b.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags_flag))
+            spawn_immediate_entities_internal(
+                &mut commands,
+                &world_cfg,
+                &cache,
+                Some(&flags_flag),
+                None,
+            )
         };
         app_b.update();
         assert_eq!(spawned_b.len(), 1, "flag set → spawn even with low power");
@@ -7278,7 +7319,13 @@ size_max = 2.0
         app_c.add_plugins(bevy::time::TimePlugin);
         let spawned_c: Vec<Entity> = {
             let mut commands = app_c.world_mut().commands();
-            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, Some(&flags_power))
+            spawn_immediate_entities_internal(
+                &mut commands,
+                &world_cfg,
+                &cache,
+                Some(&flags_power),
+                None,
+            )
         };
         app_c.update();
         assert_eq!(spawned_c.len(), 1, "high power → spawn even without flag");

@@ -57,14 +57,30 @@ impl Plugin for CaptainPlugin {
 /// captain-AI red-alert toggles would be silently dropped.
 fn handle_toggle_red_alert(
     mut ship_query: Query<
-        (&AdmittedCommands, &mut crate::ship_state::ShipRedAlert),
+        (
+            &AdmittedCommands,
+            &mut crate::ship_state::ShipRedAlert,
+            Option<&crate::entity_spawner::EntityUuid>,
+        ),
         With<crate::server_app::Ship>,
     >,
+    // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
+    // that never registered the message still pass parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
-    for (admitted, mut ra) in ship_query.iter_mut() {
+    for (admitted, mut ra, ship_uuid) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
             if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
                 ra.toggle();
+                // Balance tracer: every red-alert toggle, human or AI (both
+                // route through this same command), on every ship. Skipped
+                // for a ship with no uuid to key it on.
+                if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
+                    msgs.write(crate::balance::BalanceEvent::RedAlertChanged {
+                        ship: uuid.0.clone(),
+                        on: ra.0,
+                    });
+                }
             }
         }
     }

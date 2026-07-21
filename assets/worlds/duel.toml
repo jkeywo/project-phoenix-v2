@@ -1,0 +1,248 @@
+# Duel world for issue #844 — XvY class matchups driven from the CLI.
+#
+# `phoenix-headless --world assets/worlds/duel.toml --side-a cruiser \
+#   --side-b destroyer` fills the pre-authored slots below by ship class and
+# deletes the unused ones, via the PURE `headless::duel::apply_duel_sides`
+# transform. Up to five ships per side.
+#
+# ── Why the NPC slots are `spawn_entity` triggers, not `[[entity]]` blocks ────
+#
+# `on_all_destroyed group = "..."` only tracks membership registered through
+# `SpawnEntity` dispatch — a static `[[entity]]` never joins a group (there is
+# no groups field on `WorldEntity`, and the game-start spawn path does not
+# register groups). So every NPC combatant is authored as an `on_timer`
+# `spawn_entity` at t=0 with `groups = [...]`, exactly like the world-spawned
+# hostile in `probe_duel.toml`.
+#
+# ── Sides, factions, and how the run ends ─────────────────────────────────────
+#
+# Side A = Federation (the player's own faction). Side A slot 1 is the PLAYER
+#   ship (the LocalShip), set from `--side-a`'s first entry via `--ship`/
+#   `PendingShipConfig` — NOT a spawn slot below. Slots `side_a_2`..`side_a_5`
+#   are the player's NPC escorts.
+# Side B = Harrow. Slots `side_b_1`..`side_b_5` are all NPCs.
+#
+# VICTORY (side A wins) = every side-B ship destroyed: the `on_all_destroyed
+#   group = "side_b"` trigger fires `game_over` outcome = "victory". The
+#   transform DELETES this trigger if `--side-b` is empty, so an empty group
+#   can't instant-fire a false victory.
+# DEFEAT (side A loses) = the PLAYER ship dies. This is the engine's built-in
+#   player-death latch (`GamePhase::GameOver`, `Outcome::Defeat`) — there is
+#   deliberately NO `on_all_destroyed group = "side_a"` trigger: an empty
+#   side_a group (the common player-only case) would fire immediately, and even
+#   with escorts the player may still be alive. Escort deaths never end the run;
+#   the player's death does. This is a hard engine constraint.
+# Neither annihilated nor player dead within the tick budget → the headless
+#   runner classifies the run as timeout/draw off the per-side margins (#843).
+#
+# The doctrine on each slot is an UNTARGETED Destroy (no `directive_target`),
+# which licenses the nearest-hostile acquisition tier — the same shape every
+# shipped hostile authors and what `probe_duel.toml` uses.
+
+[global]
+seed = 844
+ai_helm_tick_hz = 30.0
+
+# ── Geometry (AC5 — tune here, no recompile) ──────────────────────────────────
+#
+# Side A clusters on the origin; side B faces it a short hop away along +X.
+# Spacing is kept inside the ~100-unit default AI sensor range so both sides
+# acquire and engage immediately (probe worlds prove ~35–55 units engages at
+# once; ~500 units never joins the fight). Widen these to stage a longer
+# approach, or pull them in for a knife fight.
+[anchors]
+player_spawn = [0.0, 0.0, 0.0]
+side_a_2     = [-15.0, 0.0,  30.0]
+side_a_3     = [-15.0, 0.0, -30.0]
+side_a_4     = [-40.0, 0.0,  30.0]
+side_a_5     = [-40.0, 0.0, -30.0]
+side_b_1     = [ 55.0, 0.0,   0.0]
+side_b_2     = [ 55.0, 0.0,  30.0]
+side_b_3     = [ 55.0, 0.0, -30.0]
+side_b_4     = [ 80.0, 0.0,  30.0]
+side_b_5     = [ 80.0, 0.0, -30.0]
+
+[player_spawn]
+anchor = "player_spawn"
+
+# Player ship (side-A slot 1) — spawned by spawn_game_start_entities when the
+# game starts. The actual hull comes from `--side-a`'s first entry (applied as
+# PendingShipConfig); the template here is only a placeholder the lobby
+# selection overrides.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { anchor = "player_spawn" }
+spawn_on = "game_start"
+
+# Make Federation and Harrow mutually hostile before the ships spawn. Both
+# directions of the asymmetric `is_enemy` relationship, at world-load. Not
+# touched by the duel transform.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+# ── Side-A NPC escort slots (side_a_2..side_a_5) ──────────────────────────────
+# Filled from `--side-a[1..]`; unused slots are deleted by the transform. The
+# transform also (re)sets each `overrides.faction` to Federation and rewrites
+# `template_path` to the resolved hull; the placeholder path and faction below
+# make the file valid on its own.
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_courier.toml"
+  name          = "side_a_2"
+  anchor        = "side_a_2"
+  groups        = ["side_a"]
+  overrides = { faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_courier.toml"
+  name          = "side_a_3"
+  anchor        = "side_a_3"
+  groups        = ["side_a"]
+  overrides = { faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_courier.toml"
+  name          = "side_a_4"
+  anchor        = "side_a_4"
+  groups        = ["side_a"]
+  overrides = { faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_courier.toml"
+  name          = "side_a_5"
+  anchor        = "side_a_5"
+  groups        = ["side_a"]
+  overrides = { faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+# ── Side-B NPC slots (side_b_1..side_b_5) ─────────────────────────────────────
+# Filled from `--side-b[..]`; unused slots deleted. Faction (re)set to Harrow.
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "side_b_1"
+  anchor        = "side_b_1"
+  groups        = ["side_b"]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "side_b_2"
+  anchor        = "side_b_2"
+  groups        = ["side_b"]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "side_b_3"
+  anchor        = "side_b_3"
+  groups        = ["side_b"]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "side_b_4"
+  anchor        = "side_b_4"
+  groups        = ["side_b"]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "side_b_5"
+  anchor        = "side_b_5"
+  groups        = ["side_b"]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }
+
+# ── Victory (side A annihilates side B) ───────────────────────────────────────
+# Deleted by the transform when `--side-b` is empty (empty group = instant
+# fire). Defeat is the built-in player-death latch — deliberately no side_a
+# on_all_destroyed here. `message` omitted (optional), so no strings.csv entry.
+[[trigger]]
+condition = "on_all_destroyed"
+group     = "side_b"
+
+  [[trigger.action]]
+  type    = "game_over"
+  outcome = "victory"

@@ -99,6 +99,17 @@ impl Plugin for ConsoleAiPlugin {
                 ai_torpedo_auto_fire
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel),
+                // The loading half of the torpedo AI. `Input`, not `Physics`,
+                // and explicitly before the volley-target handler: the command
+                // it emits has to be consumed in the SAME tick, exactly as
+                // `operate_captain_ai` is ordered before
+                // `handle_toggle_red_alert`. That also puts `target_count` in
+                // place before `tick_torpedo_lifecycle` (Physics) runs its
+                // auto-load block, so a tube starts loading the tick the order
+                // is given rather than the tick after.
+                ai_torpedo_load
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .before(crate::weapons_plugin::handle_set_torpedo_volley_target),
                 ai_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
             ),
         );
@@ -419,8 +430,16 @@ pub(crate) fn ai_shield_focus(
 fn ai_power_allocation(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
+    // `Option<Res<_>>`, never bare — this system runs in bare-`App` fixtures
+    // that never insert `LogFilterConfig` (see the logging macro docs). The
+    // global `PowerConfigResource`/`PowerAiConfigResource` reads that used to
+    // sit alongside it are gone: issue #738 made tuning per-entity.
+    log: Option<Res<crate::logging::LogFilterConfig>>,
     mut ships: Query<
         (
+            // `Entity` for the log filter's entity scoping, `EntityUuid` for
+            // the `ai:` token `emit_ai_command` builds — both, not either.
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::power::ShipPowerSystem,
@@ -441,6 +460,7 @@ fn ai_power_allocation(
     let dt = time.delta_secs();
 
     for (
+        ship_entity,
         entity_uuid,
         control_sources,
         power,
@@ -509,15 +529,34 @@ fn ai_power_allocation(
         // ±1 nudge on `group`, but only when the clamped target level actually
         // differs from the current allocation (skip saturated no-ops so a held
         // Engage/Disengage doesn't spam admission every tick — issue #831).
+        //
+        // `reason` carries the branch's per-rule reactor logging (PRD #835)
+        // into main's emit shape: the log line lives here rather than in the
+        // match arms so it reports the *clamped* level actually asked for and
+        // stays silent on the skipped no-ops.
         let emit_delta =
             |group: &crate::messages::PowerGroupId,
              delta: i16,
+             reason: &str,
              admitted: &mut crate::messages::AdmittedCommands| {
                 let current = power.0.level_for(group);
                 let target = (current as i16 + delta).clamp(1, 4) as u8;
                 if target == current {
                     return;
                 }
+                // Engage/Disengage are the natural power edges — they only fire
+                // after the pure rule's own delay/battery gates lapse, so they
+                // are event-driven, not per-tick. `info`, entity-scoped.
+                crate::pinfo!(
+                    log,
+                    crate::logging::LogCat::Power,
+                    entity = ship_entity,
+                    "{} power {} -> {} ({})",
+                    group.0,
+                    current,
+                    target,
+                    reason
+                );
                 emit_ai_command(
                     entity_uuid,
                     crate::system_registry::power_reactor_system_id(),
@@ -547,10 +586,10 @@ fn ai_power_allocation(
             crate::console_ai::tick_power_movement_rule(&mut ai_state.movement, &movement_input);
         match movement_output {
             crate::console_ai::PowerEngageOutput::Engage => {
-                emit_delta(&helm_id, 1, &mut admitted);
+                emit_delta(&helm_id, 1, "sustained thrust", &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::Disengage => {
-                emit_delta(&helm_id, -1, &mut admitted);
+                emit_delta(&helm_id, -1, "thrust/battery lapsed", &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::NoChange => {}
         }
@@ -569,10 +608,10 @@ fn ai_power_allocation(
             crate::console_ai::tick_power_red_alert_rule(&mut ai_state.red_alert, &red_alert_input);
         match red_alert_output {
             crate::console_ai::PowerEngageOutput::Engage => {
-                emit_delta(&weapons_id, 1, &mut admitted);
+                emit_delta(&weapons_id, 1, "red alert", &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::Disengage => {
-                emit_delta(&weapons_id, -1, &mut admitted);
+                emit_delta(&weapons_id, -1, "red alert cleared", &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::NoChange => {}
         }
@@ -612,12 +651,27 @@ fn ai_power_allocation(
 ///   lock. (Pre-#698 this position lookup happened anyway, purely to compute
 ///   bearing; the difference is that failing it is now expressed as
 ///   `target_locked = false` rather than an early `continue`.)
-/// - `target_shields` — the sum of the target's **online** shield facings' HP,
-///   read from its `ShipShields`. `auto_fire_torpedo` only fires when this is
-///   `<= 0`, which is the documented doctrine: phasers strip the shields,
-///   torpedoes finish the hull. Offline facings are excluded because they let
-///   damage through, so they are not blocking the shot. A target with no
-///   `ShipShields` at all (asteroids, debris) contributes 0 and is therefore
+/// - `target_facing_shields` — the HP of the single shield arc a torpedo
+///   arriving from this ship would strike, resolved by handing the attack
+///   bearing to the target's own `ShieldSystem::facing_index_for_bearing` —
+///   the same bearing→arc resolver the damage path uses, so the gate asks
+///   about the arc the shot is on course to meet. (The gate predicts from the
+///   launcher's bearing; `tick_torpedo_lifecycle` routes the hit from the
+///   torpedo's own impact point, so a torpedo that homes far enough around a
+///   moving target can still land on a neighbouring arc. One resolver, two
+///   moments in the shot's life.) `auto_fire_torpedo` only fires when this is
+///   `<= 0`: phasers strip the shields, torpedoes finish the hull.
+///
+///   It is deliberately *not* the sum over all arcs. Summing let three
+///   healthy REAR arcs veto a shot into a collapsed FRONT arc while the
+///   attacker was dead ahead — the hull is exposed exactly where the torpedo
+///   would land. With per-arc regen and short offline windows a four-arc
+///   Alliance hull practically never has every arc down at once, so the
+///   summed gate meant AI crews on those hulls never fired a torpedo. A
+///   single-omni-arc NPC is unaffected: its one arc is the facing arc for
+///   every bearing. An offline arc reports 0 because it passes damage through
+///   to the hull and so is not blocking the shot, and a target with no
+///   `ShipShields` at all (asteroids, debris) reports 0 and stays
 ///   torpedo-eligible — which is what preserves the pre-#698 behaviour for
 ///   every non-ship target.
 ///
@@ -664,6 +718,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             &crate::entity_spawner::EntityUuid,
             &Transform,
             Option<&crate::ship::shields::ShipShields>,
+            Option<&crate::ship_state::ShipPhysics>,
         ),
         Without<crate::simulation::Asteroid>,
     >,
@@ -730,28 +785,42 @@ pub(crate) fn ai_torpedo_auto_fire(
         let target_state = asteroid_q
             .iter()
             .find_map(|(u, t)| {
-                (u.0 == target_uuid).then_some(((t.translation.x, t.translation.z), None))
+                (u.0 == target_uuid).then_some(((t.translation.x, t.translation.z), None, 0.0))
             })
             .or_else(|| {
-                other_ships_q.iter().find_map(|(u, t, shields)| {
-                    (u.0 == target_uuid).then_some(((t.translation.x, t.translation.z), shields))
+                other_ships_q.iter().find_map(|(u, t, shields, tphys)| {
+                    (u.0 == target_uuid).then_some((
+                        (t.translation.x, t.translation.z),
+                        shields,
+                        tphys.map(|p| p.yaw).unwrap_or(0.0),
+                    ))
                 })
             });
-        let Some(((tx, tz), target_shields_comp)) = target_state else {
+        let Some(((tx, tz), target_shields_comp, target_yaw)) = target_state else {
             continue;
         };
 
-        // Combined shield HP across the target's ONLINE facings. Offline
-        // facings pass damage through to the hull, so they are not blocking the
-        // torpedo and must not count towards "shields still up". Targets with
-        // no `ShipShields` (asteroids, debris) read 0 — torpedo-eligible.
-        let target_shields: i32 = target_shields_comp
+        // HP of the ONE arc a torpedo from this ship would strike. Arcs are
+        // authored relative to the target's own facing, so the bearing is taken
+        // from the target's frame (hence `target_yaw`) and resolved by the
+        // target's own `facing_index_for_bearing` — the same resolver
+        // `apply_damage` uses (`tick_torpedo_lifecycle` feeds it the torpedo's
+        // impact bearing), so the gate and the eventual hit agree about
+        // which arc is in the way. A healthy rear arc must not veto a shot into
+        // a collapsed front arc. An offline arc reads 0 (it passes damage
+        // through to the hull, so it is not blocking), and a target with no
+        // `ShipShields` (asteroids, debris) reads 0 — torpedo-eligible.
+        let target_facing_shields: i32 = target_shields_comp
             .map(|s| {
-                s.0.facings
-                    .iter()
-                    .filter(|f| f.is_online())
-                    .map(|f| f.hp)
-                    .sum()
+                let incoming = crate::shield::attacker_bearing_relative(
+                    physics.x, physics.z, tx, tz, target_yaw,
+                );
+                let facing = &s.0.facings[s.0.facing_index_for_bearing(incoming)];
+                if facing.is_online() {
+                    facing.hp
+                } else {
+                    0
+                }
             })
             .unwrap_or(0);
 
@@ -784,7 +853,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             // Reaching here means `TacticalRadarSelection` named an entity that
             // resolved to a live world position above — a real lock.
             target_locked: true,
-            target_shields,
+            target_facing_shields,
             tubes,
             magazine,
         };
@@ -795,6 +864,137 @@ pub(crate) fn ai_torpedo_auto_fire(
                 tube_id,
                 target_uuid: target_uuid.clone(),
             });
+        }
+    }
+}
+
+/// AI torpedo *loading* system — the missing half of the torpedo AI.
+///
+/// `ai_torpedo_auto_fire` decides whether to fire an already-loaded tube, but
+/// nothing ever asked for one to be loaded: `TorpedoSystem::from_configs`
+/// starts every tube at `target_count: 0` and the auto-load block in
+/// `TorpedoSystem::tick` is gated on `target_count > 0`, so an AI-crewed ship
+/// never launched a torpedo in its life. This system is the console operator
+/// nobody in an AI-crewed run is.
+///
+/// # Why it goes through `AdmittedCommands`
+///
+/// It emits `SetTorpedoVolleyTarget` into the ship's own `AdmittedCommands`
+/// rather than writing `target_count` directly, so the AI issues *the same
+/// command a human's console sends* and `handle_set_torpedo_volley_target`
+/// stays the single writer of the tube's volley target (AGENTS.md — "humans
+/// and AI are symmetric"; admission is the only place that knows who sent a
+/// command). The alternative — a non-zero `target_count` default in
+/// `from_configs` — would silently pre-load every *human* player's tubes and
+/// drain their magazine with no order given.
+///
+/// This is the `operate_captain_ai` → `handle_toggle_red_alert` pattern: push
+/// into each ship's own `AdmittedCommands` in `SimSet::Input`, ordered before
+/// the handler that drains it, and let the handler iterate every ship so NPC
+/// commands are not dropped.
+///
+/// # Gating
+/// - Per-tube: the tube's own fine `torpedo-tube-<id>` system must be
+///   `operate_ai` (an unregistered tube id falls back to the default-source
+///   policy, matching `handle_load_tube`'s treatment — issue #801).
+/// - The shared magazine's fine system must also be `operate_ai`, mirroring
+///   `ai_torpedo_auto_fire`'s magazine gate: the magazine is the bottleneck
+///   resource every tube draws from, and a magazine no AI is operating should
+///   not be emptied into the tubes.
+///
+/// How many rounds to keep loaded is TOML, never a constant: the per-tube
+/// `[[torpedoes.tubes]] ai_target_count`, the ship-wide `[torpedoes]
+/// ai_volley_target`, or the tube's `volley_max` — resolved at construction
+/// into `TorpedoTube::ai_target_count`.
+///
+/// Deliberately *not* gated on `AiHighFidelity`: loading is a slow standing
+/// order (seconds of load time), and a ship demoted to low LOD mid-load would
+/// otherwise stop maintaining tubes it is about to need on promotion.
+pub(crate) fn ai_torpedo_load(
+    sessions: Res<crate::lobby::Sessions>,
+    // `Option<Res<_>>`, never bare — bare-`App` fixtures never insert it.
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    mut ships: Query<
+        (
+            Entity,
+            Option<&crate::entity_spawner::EntityUuid>,
+            &crate::ship_plugin::ShipSystemControlSources,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &crate::weapons_plugin::TorpedoSystemResource,
+            &mut crate::messages::AdmittedCommands,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+
+    for (ship_entity, entity_uuid, control_sources, ship_config, torpedo_sys, mut admitted) in
+        ships.iter_mut()
+    {
+        if !control_sources.0.policy_for(&magazine_id).operate_ai {
+            continue;
+        }
+
+        let tubes: Vec<crate::console_ai::TubeLoadSummary> = torpedo_sys
+            .0
+            .tubes
+            .iter()
+            .map(|tube| {
+                let tube_system_id = crate::system_registry::torpedo_tube_system_id(&tube.id)
+                    .filter(|id| {
+                        crate::console::weapons::shared::system_is_registered(control_sources, id)
+                    });
+                let policy = match &tube_system_id {
+                    Some(id) => control_sources.0.policy_for(id),
+                    // Unregistered fine system → default-source policy
+                    // (issue #801 — no coarse fallback).
+                    None => crate::ship::control_source::control_tick_policy(
+                        crate::ship::control_source::ControlSource::default(),
+                    ),
+                };
+                crate::console_ai::TubeLoadSummary {
+                    id: tube.id.clone(),
+                    target_count: tube.target_count,
+                    ai_target_count: tube.ai_target_count,
+                    operates_ai: policy.operate_ai,
+                }
+            })
+            .collect();
+
+        for (tube_id, count) in crate::console_ai::torpedo_load_orders(&tubes) {
+            let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
+                continue;
+            };
+            // Through the shared AI-emit seam (issue #738), never a raw
+            // `admitted.0.push`: admission is the only place that decides what
+            // an `ai:` token may do, and it re-checks `operate_ai` on this
+            // exact tube SystemId.
+            let admitted_ok = emit_ai_command(
+                entity_uuid,
+                target.clone(),
+                crate::messages::SystemControlPayload::SetTorpedoVolleyTarget { count },
+                control_sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
+            // A refusal here is silent by construction — no panic, no order, no
+            // torpedo — and the symptom (an AI crew that never fires) is a long
+            // way from the cause. The decide gate above already required this
+            // tube to be `operate_ai`, so a refusal means the tube's fine
+            // system is not registered in this ship's `ControlSourceResolver`
+            // (an authored `[[torpedoes.tubes]]` with no matching `[[system]]`
+            // block) and the two gates are reading different worlds. Warn.
+            if !admitted_ok {
+                crate::pwarn!(
+                    log,
+                    crate::logging::LogCat::Weapons,
+                    entity = ship_entity,
+                    "torpedo load order for {} refused at admission — no such \
+                     fine system on this ship's control sources",
+                    target.0
+                );
+            }
         }
     }
 }
@@ -2136,5 +2336,146 @@ station = "sensors"
                 .is_empty(),
             "the refused command must never reach AdmittedCommands"
         );
+    }
+    // ── AI torpedo loading (admitted-command path) ──────────────────
+
+    /// One tube, `volley_max = 2`, no per-tube AI override — so its resolved
+    /// `ai_target_count` is `volley_max`.
+    fn torpedo_load_app(tube_source: ControlSource) -> (App, Entity) {
+        let mut app = App::new();
+        // `Sessions` because the emit goes through the admission seam
+        // (`emit_ai_command`), which asks it about station tenure.
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ))
+        .add_systems(
+            Update,
+            (
+                ai_torpedo_load,
+                crate::weapons_plugin::handle_set_torpedo_volley_target,
+            )
+                .chain(),
+        );
+
+        let mut control_sources = ShipSystemControlSources::default();
+        control_sources.0.set(
+            crate::system_registry::torpedo_magazine_system_id(),
+            ControlSource::Ai,
+        );
+        control_sources.0.set(
+            crate::system_registry::torpedo_tube_system_id("fore_port").unwrap(),
+            tube_source,
+        );
+
+        let torpedoes = crate::torpedo::TorpedoSystem::from_configs(
+            &[crate::entity_config::TorpedoTubeConfig {
+                id: "fore_port".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 90.0,
+                load_time: None,
+                marker: None,
+                volley_max: 2,
+                ai_target_count: None,
+            }],
+            crate::torpedo::TorpedoConfig::default(),
+        );
+
+        let e = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                control_sources,
+                crate::weapons_plugin::TorpedoSystemResource(torpedoes),
+                AdmittedCommands::default(),
+            ))
+            .id();
+        (app, e)
+    }
+
+    fn tube_target_count(app: &App, e: Entity) -> u32 {
+        app.world()
+            .entity(e)
+            .get::<crate::weapons_plugin::TorpedoSystemResource>()
+            .unwrap()
+            .0
+            .tube("fore_port")
+            .unwrap()
+            .target_count
+    }
+
+    /// The gap this system closes: an AI-crewed ship now asks for its tubes to
+    /// be loaded, and it does so through the same `SetTorpedoVolleyTarget`
+    /// command a human console sends — so the order lands on an NPC's own
+    /// torpedo system, which the LocalShip-only handler could never do.
+    #[test]
+    fn ai_torpedo_load_sets_volley_target_through_admitted_commands() {
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        app.update();
+
+        assert_eq!(
+            tube_target_count(&app, e),
+            2,
+            "an AI-operated tube should be ordered to its configured \
+             ai_target_count (volley_max = 2 here)"
+        );
+        let admitted = app.world().entity(e).get::<AdmittedCommands>().unwrap();
+        assert_eq!(
+            admitted.0.len(),
+            1,
+            "exactly one SetTorpedoVolleyTarget should have been issued"
+        );
+        assert!(
+            matches!(
+                admitted.0[0].payload,
+                crate::messages::SystemControlPayload::SetTorpedoVolleyTarget { count: 2 }
+            ),
+            "the AI must issue the ordinary console command, not poke state"
+        );
+    }
+
+    /// The tube is already where the AI wants it, so no second order goes out.
+    #[test]
+    fn ai_torpedo_load_does_not_reissue_an_identical_order() {
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        app.update();
+        app.update();
+
+        let admitted = app.world().entity(e).get::<AdmittedCommands>().unwrap();
+        assert_eq!(
+            admitted.0.len(),
+            1,
+            "the AI must not re-issue a volley order the tube already satisfies"
+        );
+    }
+
+    /// A human-crewed tube is the operator's to load. The AI must not touch it
+    /// — this is the behaviour a non-zero `target_count` default in
+    /// `TorpedoSystem::from_configs` would have broken.
+    #[test]
+    fn ai_torpedo_load_leaves_human_controlled_tubes_alone() {
+        let (mut app, e) = torpedo_load_app(ControlSource::Human);
+        app.update();
+
+        assert_eq!(
+            tube_target_count(&app, e),
+            0,
+            "a Human-controlled tube must stay exactly as its operator left it"
+        );
+        assert!(app
+            .world()
+            .entity(e)
+            .get::<AdmittedCommands>()
+            .unwrap()
+            .0
+            .is_empty());
+    }
+
+    /// Offline (rating- or damage-driven) means nobody loads it, AI included.
+    #[test]
+    fn ai_torpedo_load_skips_offline_tubes() {
+        let (mut app, e) = torpedo_load_app(ControlSource::Offline);
+        app.update();
+
+        assert_eq!(tube_target_count(&app, e), 0);
     }
 }

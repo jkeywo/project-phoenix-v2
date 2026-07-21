@@ -44,6 +44,13 @@ pub struct AssetManifest {
     pub sub_worlds: Vec<String>,
 }
 
+/// Radar icon name injected onto the player's own ship at game-start spawn
+/// (see `player_ship_identity` in `src/server_app.rs`). Because it is injected
+/// at spawn rather than authored in any hull template, the template scan below
+/// never discovers it — so it is preloaded unconditionally in
+/// `discover_base_assets`. Keep this in sync with the injection site.
+pub const PLAYER_SHIP_RADAR_ICON: &str = "playerShip";
+
 // ── Icon naming convention (mirrors gui/radar.rs) ─────────────────────────
 
 /// Convert an icon name (e.g. `"destroyer"`) to an asset path
@@ -280,6 +287,15 @@ pub fn discover_base_assets(
         &mut pending_worlds,
         "(base)",
     );
+
+    // The player-ship radar icon is injected onto the selected hull at player
+    // spawn, not authored in any template, so the template scan above never
+    // sees it. Preload it unconditionally so every client has the PNG ready for
+    // the player blip regardless of which hull is flown.
+    let player_icon = icon_asset_path(PLAYER_SHIP_RADAR_ICON);
+    if !manifest.radar_icons.contains(&player_icon) {
+        manifest.radar_icons.push(player_icon);
+    }
 
     (manifest, pending_worlds, seen_entities)
 }
@@ -916,6 +932,22 @@ mod tests {
             manifest.pfx_textures.iter().all(|p| p.starts_with("pfx/")),
             "got {:?}",
             manifest.pfx_textures
+        );
+    }
+
+    /// The player-ship radar icon is injected onto the selected hull at spawn,
+    /// not authored in any template, so the template scan never discovers it.
+    /// `discover_base_assets` must add it unconditionally so clients always
+    /// have the player blip PNG — even for a world that references no ships.
+    #[test]
+    fn discover_base_assets_always_preloads_player_ship_icon() {
+        let world = WorldConfig::default();
+        let (manifest, _, _) = discover_base_assets(&world, &HashMap::new());
+        let expected = icon_asset_path(PLAYER_SHIP_RADAR_ICON);
+        assert!(
+            manifest.radar_icons.contains(&expected),
+            "player-ship radar icon must always preload; got {:?}",
+            manifest.radar_icons
         );
     }
 

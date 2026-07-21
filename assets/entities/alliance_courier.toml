@@ -11,7 +11,11 @@ hull_id = "NCC-0912"
 # combat_test's ship_power counter. Low enough to stay under that scenario's
 # >=90 / >=100 bonus-spawn gates, which is the point of flying solo.
 power_rating = 25
-tags = [ "player", "ship" ]
+# Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
+# here — it is injected onto the selected hull at the player game-start spawn
+# (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of
+# this hull is an ordinary NPC ship, so it must not masquerade as the player.
+tags = [ "ship" ]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [mesh]
@@ -23,6 +27,39 @@ colour = []
 shape = "Capsule"
 radius = 0.6
 length = 1.5
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Default doctrine for a backfilled/unmanned player courier (#842 — the other half
+# of #838's human/AI symmetry). See the fuller note on `alliance_cruiser.toml`;
+# authoring `[behaviour]` is what makes `spawn_entity` attach the
+# `BehaviourSection` on the player game-start path, so a backfilled courier
+# proactively engages instead of only returning fire once hit.
+#
+#   Destroy (40) — UNTARGETED (no `directive_target`) → licenses the
+#                  nearest-hostile scan and proactive engagement. Priority a notch
+#                  below the warship hulls: the courier is a lightly-armed scout,
+#                  willing to fight but not the fleet's spearhead.
+#   Hold    (20) — no directive when no hostile is visible: the helm holds station.
+#
+# Engage priority stays LOW (40) so scenario `spawn_entity` overrides (Destroy at
+# 80) merge by id and dominate (#842 AC3). No Retreat authored. `maintain_range =
+# 22` keeps the courier inside its single 35-unit fore blaster's range.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.alliance_courier.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 40.0
+target_speed   = 0.9
+maintain_range = 22.0
+
+[[behaviour.doctrine]]
+id            = "hold-station"
+text          = "entity.alliance_courier.behaviour.doctrine.hold_station.text"
+base_priority = 20.0
+target_speed  = 0.0
 
 # ── Per-system hull ──────────────────────────────────────────────────────────
 # One entry per damageable system, plus "core" — the ownerless bucket that
@@ -198,7 +235,9 @@ range = 1000
 [radar_appearance]
 colour = [ 0, 1, 0.2 ]
 size = 4
-icon = "playerShip"
+# Ordinary-ship icon: a world-spawned copy of this hull is an NPC. The player's
+# own ship gets the `playerShip` icon injected at spawn (see hull tags note).
+icon = "ship"
 
 # The Courier deliberately offers only its Fore hull camera and this Cinematic
 # camera on the shared viewscreen.

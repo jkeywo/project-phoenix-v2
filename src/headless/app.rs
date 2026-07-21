@@ -29,6 +29,7 @@ use crate::messages::{GamePhase, ServerMessage};
 use crate::modifier_coordination::ModifierCoordinationPlugin;
 use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
 use crate::ship_plugin::PendingShipConfig;
+use crate::sim_rng::{SeedSource, SimRng};
 use crate::world::WorldPlugin;
 
 use super::args::HeadlessArgs;
@@ -95,9 +96,20 @@ fn preload_entity_templates(dir: &str) -> Result<usize, BuildError> {
 
 /// Assemble the headless app. Does not run it — see [`run`].
 pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
+    // When `--side-a` is given, its first entry chooses the player ship
+    // (issue #844): resolve it to a template path and use it in place of
+    // `--ship` so the preload, `PendingShipConfig`, and `SelectedShipResource`
+    // all agree on the hull. `--ship` and `--side-a` are rejected together at
+    // parse time, so this never silently overrides an explicit `--ship`.
+    let ship_path = match args.side_a.first() {
+        Some(name) => super::duel::resolve_template(name)
+            .map_err(|e| BuildError(format!("--side-a player ship: {e}")))?,
+        None => args.ship_path.clone(),
+    };
+
     // Templates first: `update_session_with_config` reads the cache during
     // `Startup`, so it has to be populated before the app is built.
-    let template_dir = std::path::Path::new(&args.ship_path)
+    let template_dir = std::path::Path::new(&ship_path)
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| "assets/entities".to_string());
@@ -111,6 +123,21 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
             // Our own categories gate the `plog!` call sites; this filter only
             // governs bevy-internal events. Keep it quiet by default so the
             // report is the loudest thing on stdout.
+            //
+            // Root cause of issue #840 ("--log emits nothing yet slows the
+            // run"): the plumbing here was always correct — the parser, the
+            // `LogFilterConfig` gate, this subscriber, and the `EnvFilter`
+            // targets all line up. What was missing were `plog!` *call sites*:
+            // `ai`/`power` had none, `weapons` had a single `ptrace!`, so
+            // `--log ai=debug` had nothing to print. #840 added the load-bearing
+            // sites (target changes, opened/ceased fire, power energize/brownout,
+            // damage). The slowdown is inherent, not lost output: any `debug`/
+            // `trace` directive raises `tracing`'s global max-level hint, so
+            // bevy/rapier's own dense debug/trace callsites flip from statically
+            // compiled-out to dynamically `EnvFilter`-checked every tick. That
+            // cost is the filter *running*, and it is unavoidable while the
+            // process shares one global subscriber — logs go to stderr, so it
+            // never corrupts the stdout report.
             filter: if args.log_spec.is_empty() {
                 "warn".to_string()
             } else {
@@ -122,9 +149,9 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         // multithreaded executor, system *execution* order varies run to run
         // even though the schedule graph is fixed.
         //
-        // This is necessary but not sufficient for reproducibility — damage
-        // distribution and region effects still call
-        // `SmallRng::from_os_rng()`. Runs that take damage may diverge.
+        // Necessary but not sufficient on its own — the other half is the
+        // seeded `SimRng` inserted below, which is why `--seed` turns this on.
+        // The contract is same binary, same machine.
         if args.deterministic {
             TaskPoolPlugin {
                 task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(1),
@@ -161,8 +188,38 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // `WorldPlugin`) sources this from the JS bridge, which has no native
     // equivalent — it no-ops off-browser. Inserting it here pre-empts that.
     let world_toml = read_toml(&args.world_path, "world")?;
-    let world_config = crate::world::config::parse_world(&world_toml)
+    let mut world_config = crate::world::config::parse_world(&world_toml)
         .map_err(|e| BuildError(format!("world {:?} failed to parse: {e}", args.world_path)))?;
+
+    // Duel side transform (issue #844). Only when `--side-a`/`--side-b` is
+    // given, so a plain `--world` run is untouched. Pure over `WorldConfig`;
+    // the filesystem-backed resolver is injected here in production.
+    if !args.side_a.is_empty() || !args.side_b.is_empty() {
+        world_config = super::duel::apply_duel_sides(
+            world_config,
+            &args.side_a,
+            &args.side_b,
+            &super::duel::resolve_template,
+        )
+        .map_err(|e| BuildError(format!("duel sides: {e}")))?;
+    }
+
+    // Seed precedence: `--seed`, then the world TOML's `[global] seed`, then a
+    // seed drawn from the OS. Resolved here because this is the first point at
+    // which both the CLI args and the parsed world are in scope. Inserted
+    // *after* `add_simulation_plugins_with`'s `init_resource` further down
+    // would also work — `insert_resource` wins either way — but keeping it
+    // beside the world config keeps the precedence chain readable.
+    let sim_rng = match (args.seed, world_config.global.seed) {
+        (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
+        (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
+        (None, None) => SimRng::random(),
+    };
+    info!(
+        target: "config",
+        "headless: seed={} ({})", sim_rng.seed(), sim_rng.source().as_str()
+    );
+
     app.insert_resource(world_config);
 
     // Ship config, before `LobbyPlugin`: the native twin of
@@ -170,17 +227,14 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // back to `load_ship_config_from_disk`, which returns the *battleship*
     // roster regardless of `--ship` — so every station, and therefore every
     // backfilled AI system, would belong to the wrong hull.
-    let ship_toml = read_toml(&args.ship_path, "ship")?;
+    let ship_toml = read_toml(&ship_path, "ship")?;
     let ship_entity_config = EntityConfig::from_toml(&ship_toml)
-        .map_err(|e| BuildError(format!("ship {:?} failed to parse: {e}", args.ship_path)))?;
-    let ship_config = ship_entity_config.ship_config.ok_or_else(|| {
-        BuildError(format!(
-            "ship {:?} has no [[station]] blocks",
-            args.ship_path
-        ))
-    })?;
+        .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
+    let ship_config = ship_entity_config
+        .ship_config
+        .ok_or_else(|| BuildError(format!("ship {ship_path:?} has no [[station]] blocks")))?;
     app.insert_resource(PendingShipConfig(ship_config));
-    app.insert_resource(SelectedShipResource(args.ship_path.clone()));
+    app.insert_resource(SelectedShipResource(ship_path.clone()));
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done above) and the faction registry, which `add_simulation_plugins`
@@ -191,6 +245,8 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         .add_plugins(crate::lobby::lobby_outbox_broadcaster());
 
     add_simulation_plugins_with(&mut app, SimPluginOptions { render: false });
+    // After the plugins, so it overrides their OS-seeded `init_resource`.
+    app.insert_resource(sim_rng);
     app.add_plugins(WorldPlugin);
 
     // Fixed timestep. `ManualDuration` makes every `Time` clock advance by
@@ -214,12 +270,21 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         ..Default::default()
     })
     .add_systems(First, super::report::count_tick)
-    .add_systems(Last, super::report::collect_outbound);
+    // Chained so an ndjson tick reads message-traffic-then-balance rather
+    // than in whatever order the executor happened to pick.
+    .add_systems(
+        Last,
+        (
+            super::report::collect_outbound,
+            super::report::collect_balance_events,
+        )
+            .chain(),
+    );
 
     info!(
         target: "config",
         "headless: world={} ship={} templates={} dt={:.5}s ({:.1} Hz) ticks={}",
-        args.world_path, args.ship_path, loaded, args.dt, args.hz(), args.max_ticks
+        args.world_path, ship_path, loaded, args.dt, args.hz(), args.max_ticks
     );
 
     Ok(app)

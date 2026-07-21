@@ -4435,7 +4435,7 @@ mod tests {
     }
 
     // (b) All-Backfill player ship — verifies that when the player ship has
-    // both stick axes on Ai control but no AiControllerComponent (no
+    // both stick axes on Ai control but no BehaviourSection (no
     // behaviour tree), `helm_axes_operate_ai` still returns true. A single
     // AI axis is NOT enough — the predicate answers "is the AI flying this
     // ship", which needs both.

@@ -1,0 +1,4 @@
+   Compiling project-phoenix v0.1.0 (C:\Coding\project-phoenix-v2)
+    Finished `release` profile [optimized] target(s) in 8m 30s
+     Running `target\release\phoenix-headless.exe --world assets/worlds/combat_test.toml --sim-seconds 60`
+[2m2026-07-21T01:41:48.008194Z[0m [31mERROR[0m [2mproject_phoenix::world::server[0m[2m:[0m spawn_world_entities: named entity 'world.entity.ice_moon.name': Entity (template 'assets/entities/moon_ice.toml') references unknown relative_to entity 'gas-giant' (must be a previously-declared named entity in the same world)

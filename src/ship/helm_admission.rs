@@ -353,8 +353,8 @@ mod tests {
         );
         tick_twice(&mut app);
 
-        // Human input must be ignored when policy is AI; no AiControllerComponent
-        // on the player ship yet, so LastHelmInput stays at default.
+        // Human input must be ignored when policy is AI; no BehaviourSection
+        // on the player ship, so LastHelmInput stays at default.
         assert_eq!(get_last_helm_input(&mut app), LastHelmInput::default());
     }
 

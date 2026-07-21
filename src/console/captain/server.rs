@@ -1022,44 +1022,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn helm_control_system_set_view_can_request_radar() {
-        let mut app = test_app();
-        start_game(&mut app);
-
-        // Radar is the helm's call, so seat a helm holder and send from it.
-        push(
-            &mut app,
-            "helm",
-            ClientMessage::Identify {
-                token: "helm".into(),
-                name: "Hoshi".into(),
-            },
-        );
-        tick(&mut app);
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .set_station("helm", Some(crate::messages::StationId("helm".into())));
-
-        push(
-            &mut app,
-            "helm",
-            ClientMessage::ControlSystem {
-                // Legacy helm-console path: the wire target is the `"helm"`
-                // station-id string (issue #801 — no coarse helm system).
-                target: crate::messages::SystemId(
-                    crate::system_registry::HELM_STATION_ID.to_string(),
-                ),
-                payload: SystemControlPayload::SetView {
-                    mode: ViewMode::Radar,
-                },
-            },
-        );
-        tick(&mut app);
-
-        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
-    }
+    // (Issue #832) The former `helm_control_system_set_view_can_request_radar`
+    // test drove SetView through the bare `"helm"` station-id wire target,
+    // relying on `station_for_system`'s step-3 station-name fallback. That
+    // fallback was removed (no client emits a station-name target — every
+    // SetView goes through the `viewscreen` system). The production path is
+    // covered by `viewscreen_channel_2_set_view_can_request_radar` below.
 
     #[test]
     fn viewscreen_channel_2_set_view_can_request_radar() {

@@ -116,7 +116,7 @@ entity_commands.insert((
 ));
 ```
 
-The `AiControllerComponent` is attached separately by `attach_controllers_on_spawn` in `src/ai/server.rs`.
+`BehaviourSection` is the "this entity is AI-driven" predicate (issue #832 retired the separate `AiControllerComponent` marker). `register_ai_tokens_on_spawn` in `src/ai/server.rs` registers a synthetic `ai:<uuid>` token the tick each `BehaviourSection` first appears (`Added<BehaviourSection>`), and `unregister_on_despawn` releases it on `RemovedComponents<BehaviourSection>`.
 
 ## Multi-ship readiness
 

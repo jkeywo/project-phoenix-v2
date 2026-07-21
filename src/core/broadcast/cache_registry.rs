@@ -647,7 +647,6 @@ mod tests {
 
         let mut app = resync_test_app();
         app.insert_resource(CurrentPhaserMode(crate::messages::PhaserMode::Manual));
-        app.insert_resource(PhaserCombatConfigResource::default());
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
@@ -660,9 +659,13 @@ mod tests {
 
         let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
         let ship = q.single(app.world()).expect("LocalShip must exist");
+        // #832: `compute_current_weapons_update` reads these per-entity
+        // components off `LocalShip` (no global-resource fallback), matching the
+        // production player-ship spawn which carries both unconditionally.
         app.world_mut().entity_mut(ship).insert((
             TacticalRadarSelection(Some("target-uuid".into())),
             TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
+            PhaserCombatConfigResource::default(),
         ));
         app
     }

@@ -93,14 +93,16 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .unwrap_or_default()
     };
     let tubes: Vec<TorpedoTubeState> = {
-        // Prefer per-entity component on LocalShip; fall back to global resource.
+        // Per-entity component on `LocalShip` is authoritative (#832): every ship
+        // with a `[torpedoes]` block carries its own `TorpedoSystemResource`
+        // component; a ship without one legitimately has no tubes.
         let raw_tubes: Vec<crate::torpedo::TorpedoTube> = {
             let mut q = world
                 .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
             q.single(world)
                 .ok()
                 .map(|ts| ts.0.tubes.clone())
-                .unwrap_or_else(|| world.resource::<TorpedoSystemResource>().0.tubes.clone())
+                .unwrap_or_default()
         };
         raw_tubes
             .iter()
@@ -126,17 +128,13 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .collect()
     };
     let torpedo_count = {
+        // Per-entity component on `LocalShip` is authoritative (#832).
         let mut q =
             world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
         q.single(world)
             .ok()
             .map(|ts| ts.0.torpedoes_remaining)
-            .unwrap_or_else(|| {
-                world
-                    .resource::<TorpedoSystemResource>()
-                    .0
-                    .torpedoes_remaining
-            })
+            .unwrap_or_default()
     };
     let radar_range_mult = {
         let mut q = world
@@ -154,19 +152,15 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         q.single(world).ok().map(|f| f.0).unwrap_or(0.5)
     };
     let banks_config = {
-        // Prefer per-entity component on LocalShip; fall back to global resource.
+        // Per-entity component on `LocalShip` is authoritative (#832): the player
+        // ship unconditionally carries a `PhaserCombatConfigResource` component
+        // (config-derived or defaulted) at spawn.
         let mut q = world
             .query_filtered::<&PhaserCombatConfigResource, With<crate::server_app::LocalShip>>();
         q.single(world)
             .ok()
             .map(|cc| cc.0.banks.clone())
-            .unwrap_or_else(|| {
-                world
-                    .resource::<PhaserCombatConfigResource>()
-                    .0
-                    .banks
-                    .clone()
-            })
+            .unwrap_or_default()
     };
 
     // Query live ECS Transform for the target — WorldResource is a

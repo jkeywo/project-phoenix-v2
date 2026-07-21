@@ -1,9 +1,9 @@
 {
   "ticks": 3601,
   "sim_seconds": 60.0000,
-  "wall_seconds": 2.7899,
-  "ticks_per_second": 1290.7,
-  "speedup_vs_realtime": 21.5,
+  "wall_seconds": 3.9239,
+  "ticks_per_second": 917.7,
+  "speedup_vs_realtime": 15.3,
   "final_phase": "InProgress",
   "game_over_reason": null,
   "entity_count": 256,

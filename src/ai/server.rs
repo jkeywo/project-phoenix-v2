@@ -152,7 +152,7 @@ impl AiTokenRegistry {
     }
 }
 
-// ── AiControllerComponent ─────────────────────────────────────────────────────
+// ── AI entity markers ─────────────────────────────────────────────────────────
 
 // `ShipAiMemory(AiMemory)` lived here until issue #702 deleted it. There is no
 // private per-entity AI memory any more: every goal the AI serves is read from
@@ -161,12 +161,6 @@ impl AiTokenRegistry {
 // `ObjectiveCursors` (the objective), `LastShipAttacker` (the world). Adding a
 // private mirror of any of them back re-creates the split brain — and the
 // helm/weapons targeting divergence — that removing it fixed.
-
-/// Empty marker component placed on NPC entities that carry a `BehaviourSection`.
-/// Used as a query filter in systems that target NPC ships specifically
-/// (e.g. phaser beam handling). Inserted by `register_ai_tokens_on_spawn`.
-#[derive(Component, Default)]
-pub struct AiControllerComponent;
 
 /// Marker component: entity is eligible for high-fidelity AI simulation.
 /// Entities without this marker run at reduced simulation fidelity.
@@ -553,17 +547,18 @@ impl Plugin for AiPlugin {
 
 // -- Systems -------------------------------------------------------------------------------
 
-/// Register a synthetic `ai:<uuid>` token for any entity with `BehaviourSection`
-/// that has not yet been registered, and attach the `AiControllerComponent` empty
-/// marker so legacy `With<AiControllerComponent>` query filters still work.
+/// Register a synthetic `ai:<uuid>` token the tick an entity's `BehaviourSection`
+/// first appears. `Added<BehaviourSection>` fires exactly once — the spawn tick —
+/// and `register_with_entity` is idempotent, so this both registers once and
+/// records the Bevy `Entity` for despawn-time unregistration. `BehaviourSection`
+/// *is* the "this entity is AI-driven" predicate (issue #832); it is inserted at
+/// spawn and only ever removed on despawn, so nothing here needs a separate marker.
 fn register_ai_tokens_on_spawn(
-    mut commands: Commands,
     mut registry: ResMut<AiTokenRegistry>,
-    query: Query<(Entity, &EntityUuid), (With<BehaviourSection>, Without<AiControllerComponent>)>,
+    query: Query<(Entity, &EntityUuid), Added<BehaviourSection>>,
 ) {
     for (entity, uuid) in &query {
         registry.register_with_entity(&uuid.0, entity);
-        commands.entity(entity).insert(AiControllerComponent);
     }
 }
 
@@ -613,9 +608,13 @@ fn emit_attacked_on_new_attacker(
 }
 
 /// Unregister synthetic tokens when AI-controlled entities are despawned.
+///
+/// Keys off `RemovedComponents<BehaviourSection>`: `BehaviourSection` is present
+/// on every AI entity from spawn and is only ever removed on despawn (issue #832),
+/// so its removal is a faithful despawn edge.
 fn unregister_on_despawn(
     mut registry: ResMut<AiTokenRegistry>,
-    mut removed: RemovedComponents<AiControllerComponent>,
+    mut removed: RemovedComponents<BehaviourSection>,
 ) {
     for entity in removed.read() {
         registry.unregister_by_bevy_entity(entity);
@@ -1210,17 +1209,6 @@ mod tests {
                 BehaviourSection(BehaviourConfig::default()),
             ))
             .id()
-    }
-
-    #[test]
-    fn controller_attached_to_entity_with_behaviour_section() {
-        let mut app = build_test_app();
-        let entity = spawn_behaviour_entity(&mut app, "ent-001");
-        app.update();
-        assert!(
-            app.world().get::<AiControllerComponent>(entity).is_some(),
-            "AiControllerComponent must be attached after update"
-        );
     }
 
     #[test]

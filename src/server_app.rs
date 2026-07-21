@@ -48,9 +48,22 @@ pub use crate::power_plugin::{
 #[derive(Component)]
 pub struct Ship;
 
-/// Tags the single entity rendered on the viewscreen and broadcast to clients.
-/// Only rendering, networking (broadcast), pfx, comms-range, and
-/// region-membership systems filter on this. Simulation systems use `With<Ship>`.
+/// Tags the single entity this client owns, renders, and broadcasts — the
+/// "local player's ship." Simulation/gameplay systems treat every ship
+/// uniformly via `With<Ship>` (the unified-ship model); `LocalShip` is
+/// reserved for the things that are inherently about *this one* ship:
+///
+///   - viewscreen rendering, pfx, and audio;
+///   - client networking: broadcast + reconnect resync/cache;
+///   - region membership and comms-range;
+///   - projecting *this* ship's per-console state to its client
+///     (the console-state / blackboard builders and their broadcasters);
+///   - routing a human console command to the ship the human is aboard
+///     (admission's local-token seam) and clearing the player's own UI
+///     selections (e.g. the Tactical lock the local console owns).
+///
+/// It must never gate shared gameplay mechanics (damage, physics, AI) — those
+/// run on `With<Ship>` so the local ship and NPCs behave identically.
 #[derive(Component)]
 pub struct LocalShip;
 
@@ -3137,6 +3150,10 @@ mod tests {
     /// target real declared systems (`tactical-radar`, `phaser-control`),
     /// which resolve through the ordinary system→station lookup — including
     /// on a hull whose weapons station isn't literally named "tactical".
+    ///
+    /// Issue #832 removed the step-3 station-name fallback entirely, so a bare
+    /// station id like `"tactical"` no longer resolves — it is not a declared
+    /// system, and every client wire target names a declared system.
     #[test]
     fn station_for_system_resolves_tactical_systems_via_their_declared_station() {
         let crewed = crate::ship::config::ShipConfig::from_toml(
@@ -3165,12 +3182,12 @@ station = "tactical"
             Some(StationId("tactical".into())),
             "crewed hulls resolve tactical-radar to their tactical station"
         );
-        // The station-name fallback still resolves the bare station string
-        // (legacy coarse-system compatibility), but only because a station
-        // by that name exists — there is no weapons-owner special case.
+        // #832: the bare station string `"tactical"` no longer resolves — the
+        // step-3 station-name fallback was removed and `"tactical"` is not a
+        // declared system.
         assert_eq!(
             station_for_system(&crewed, &SystemId("tactical".into())),
-            Some(StationId("tactical".into())),
+            None,
         );
 
         let courier = crate::ship::config::ShipConfig::from_toml(

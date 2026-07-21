@@ -35,7 +35,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: NPC AI Controller Provisioner
-      summary: Attaches an AI controller and all-AI system control sources to spawned entities that declare authored behavior.
+      summary: Registers an AI token and all-AI system control sources for spawned entities that declare authored behavior (keyed off the BehaviourSection predicate).
     architecture:
       kind: lifecycle-service
       authority: authoritative
@@ -46,7 +46,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/server.rs, src/entities/spawner.rs, src/ship/control_source.rs]
-      symbols: [AiControllerComponent]
+      symbols: [BehaviourSection, register_ai_tokens_on_spawn]
       tests: [cargo test]
 
   - state: npc-ai-controller-state
@@ -54,7 +54,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: NPC AI Controller State
-      summary: Authoritative per-NPC controller presence, doctrine input, current intent, and combat-memory state.
+      summary: Authoritative per-NPC recent combat activity (RecentCombatActivity); doctrine input and current intent are read live from console-owned surfaces, never a private mirror.
     architecture:
       classification: authoritative
       owner: npc-ai-controller-provisioner
@@ -62,7 +62,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/server.rs, src/ship/combat_activity.rs]
-      symbols: [AiControllerComponent, RecentCombatActivity]
+      symbols: [RecentCombatActivity]
 
   - component: npc-doctrine-evaluator
     core:

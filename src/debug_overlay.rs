@@ -187,14 +187,14 @@ fn write_damage_log(log: Res<DamageLog>) {
 #[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn write_damage_log(_log: Res<DamageLog>) {}
 
-/// Reads all entities with `AiControllerComponent` and writes a formatted
-/// table (name, position, current state) to the WASM thread-local for F5.
+/// Reads all entities with `BehaviourSection` (i.e. AI-driven NPCs) and writes a
+/// formatted table (name, position, current state) to the WASM thread-local for F5.
 ///
 /// Only runs when `DebugEntitiesEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
 fn write_entity_debug_state(
     entities: Query<(
-        &crate::ai::server::AiControllerComponent,
+        &crate::entities::spawner::BehaviourSection,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
         Option<&crate::weapons_plugin::TacticalRadarSelection>,
@@ -229,7 +229,7 @@ fn write_entity_debug_state(
 #[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn write_entity_debug_state(
     _entities: Query<(
-        &crate::ai::server::AiControllerComponent,
+        &crate::entities::spawner::BehaviourSection,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
         Option<&crate::weapons_plugin::TacticalRadarSelection>,

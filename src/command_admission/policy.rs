@@ -25,11 +25,11 @@ use crate::messages::{StationId, SystemControlPayload};
 ///      so they must be matched by prefix.
 ///   2. Direct system→station from the config's `[[system]]` blocks
 ///      (handles fine-grained systems and modern coarse systems).
-///   3. Station-name fallback: if the target string matches a known station
-///      id, treat it as the owning station (backward compatibility with
-///      deprecated coarse systems like `"power"` whose `[[system]]` entry
-///      was removed during fine-grained refactoring).
-///   4. `None` — truly unknown system id, caller will deny.
+///   3. `None` — truly unknown system id, caller will deny.
+///
+/// The former station-name fallback (target string matches a station id) was
+/// removed in issue #832: since #801/#822 every wire `target` a client emits
+/// names a declared `[[system]]` id, so it always resolves at step 1 or 2.
 pub fn station_for_system(
     config: &crate::ship::config::ShipConfig,
     target: &crate::messages::SystemId,
@@ -42,12 +42,7 @@ pub fn station_for_system(
     if let Some(system) = config.system(target) {
         return system.station.clone();
     }
-    // Step 3: station-name fallback — does the target match a known station?
-    let candidate = StationId(target.0.clone());
-    if config.station(&candidate).is_some() {
-        return Some(candidate);
-    }
-    // Step 4: unknown.
+    // Step 3: unknown.
     None
 }
 

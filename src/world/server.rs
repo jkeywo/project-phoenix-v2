@@ -764,7 +764,7 @@ pub(crate) fn tick_trigger_pipeline(
             Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<AiControllerComponent>,
+        With<BehaviourSection>,
     >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
@@ -1119,7 +1119,7 @@ pub(crate) fn apply_dispatch_result(
             Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<AiControllerComponent>,
+        With<BehaviourSection>,
     >,
 ) {
     let DispatchResult {
@@ -1474,7 +1474,7 @@ fn tick_delayed_actions(
             Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<AiControllerComponent>,
+        With<BehaviourSection>,
     >,
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
@@ -1558,13 +1558,13 @@ fn tick_delayed_actions(
 /// the new `is_enemy` relationship can be evaluated.
 ///
 /// The two queries cover disjoint sets of entities: `non_ai_factions`
-/// holds factioned entities without an `AiControllerComponent` (player
+/// holds factioned entities without a `BehaviourSection` (player
 /// ship, stations, factioned beacons) and the AI controllers themselves
 /// (which may also carry a faction) are gathered from `ai_factions`.
 pub(crate) fn build_uuid_to_faction(
     non_ai_factions: &Query<
         (&EntityUuid, &crate::entities::spawner::FactionComponent),
-        Without<AiControllerComponent>,
+        Without<BehaviourSection>,
     >,
     ai_factions: &[(uuid::Uuid, uuid::Uuid)],
 ) -> std::collections::HashMap<uuid::Uuid, uuid::Uuid> {
@@ -1639,7 +1639,7 @@ pub struct FactionDispatchParams<'w, 's> {
             &'static EntityUuid,
             &'static crate::entities::spawner::FactionComponent,
         ),
-        Without<AiControllerComponent>,
+        Without<BehaviourSection>,
     >,
 }
 
@@ -1672,7 +1672,7 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
             Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<AiControllerComponent>,
+        With<BehaviourSection>,
     >,
     registry: &crate::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
@@ -1696,8 +1696,6 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
     }
 }
 
-use crate::ai_plugin::AiControllerComponent;
-#[cfg(test)]
 use crate::entity_spawner::BehaviourSection;
 use crate::entity_spawner::EntityUuid;
 
@@ -3421,7 +3419,7 @@ pub(crate) mod tests {
     fn set_ai_state_action_is_noop_in_doctrine_based_ai() {
         // Issue #572: SetAiState is kept in TriggerAction for TOML backward compat
         // but is now a no-op â€” doctrine-based AI has no FSM state slots. Verify
-        // the system doesn't crash and the controller is unmodified.
+        // the system doesn't crash and the AI entity is unmodified.
         use crate::entity_config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
@@ -3437,7 +3435,7 @@ pub(crate) mod tests {
                 BehaviourSection(BehaviourConfig::default()),
             ))
             .id();
-        app.update(); // attach controller
+        app.update(); // register AI tokens
 
         // Set up trigger: on attacked â†’ SetAiState (now a no-op).
         {
@@ -3476,10 +3474,10 @@ pub(crate) mod tests {
         // Must not panic â€” SetAiState is silently ignored.
         app.update();
 
-        // Controller must still exist and have default memory (no FSM state).
+        // The entity must still be AI-controlled (no FSM state to mutate).
         assert!(
-            app.world().get::<AiControllerComponent>(entity).is_some(),
-            "AiControllerComponent must survive a SetAiState no-op"
+            app.world().get::<BehaviourSection>(entity).is_some(),
+            "BehaviourSection must survive a SetAiState no-op"
         );
     }
 
@@ -3664,7 +3662,7 @@ pub(crate) mod tests {
             ))
             .id();
 
-        // First update: attach the AiControllerComponent marker.
+        // First update: register the AI token for the spawned NPC.
         app.update();
 
         // Manually seed the engagement: the NPC has locked the player.
@@ -4092,7 +4090,7 @@ base_priority = 35.0
         assert_eq!(spawned.len(), 1);
         assert!(
             app.world().get::<BehaviourSection>(spawned[0]).is_some(),
-            "NPC spawned through unified pipeline must carry BehaviourSection so AiPlugin can attach a controller"
+            "NPC spawned through unified pipeline must carry BehaviourSection so AiPlugin registers its token"
         );
     }
 

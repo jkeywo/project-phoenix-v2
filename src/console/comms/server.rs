@@ -248,7 +248,7 @@ pub(crate) fn handle_respond_to_message(
             Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<crate::ai_plugin::AiControllerComponent>,
+        With<crate::entity_spawner::BehaviourSection>,
     >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
@@ -1614,7 +1614,7 @@ mod tests {
             ))
             .id();
 
-        // Let `AiPlugin` attach the `AiControllerComponent` marker.
+        // Let `AiPlugin` register the AI token for the spawned NPC.
         app.update();
 
         // Seed the engagement: NPC's TacticalRadarSelection locks the player.

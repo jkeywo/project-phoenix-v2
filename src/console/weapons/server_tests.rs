@@ -2691,7 +2691,7 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
 // ── NPC as shooter: handle_fire_phaser (unified) / tick_beams ────────────
 
-/// Set up `AiTokenRegistry`, an NPC entity with `AiControllerComponent` +
+/// Set up `AiTokenRegistry`, an NPC entity with
 /// `ActiveBeam`/`PhaserCooldown` (unified per-entity phaser state), and a target entity.
 fn setup_npc_shooter(
     app: &mut App,
@@ -2700,7 +2700,6 @@ fn setup_npc_shooter(
     target_x: f32,
     target_z: f32,
 ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
-    use crate::ai_plugin::AiControllerComponent;
     use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
     // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
@@ -2730,7 +2729,6 @@ fn setup_npc_shooter(
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
@@ -2991,19 +2989,15 @@ fn npc_beam_tick_damages_npc_target_not_player() {
     let shooter_uuid = "10000000-0000-0000-0000-000000000001";
     let npc_target_uuid = "20000000-0000-0000-0000-000000000002";
 
-    // Spawn NPC shooter with AiControllerComponent.
+    // Spawn NPC shooter.
     let (shooter_entity, npc_target_entity) =
         setup_npc_shooter(&mut app, shooter_uuid, npc_target_uuid, 0.0, -10.0);
-    // Add ShipPhysics and AiControllerComponent to the target so it looks
-    // like a real production-spawned NPC (AI-controlled, physics-enabled).
-    // The unified `tick_beams` finds targets by EntityUuid in `hull_q`
-    // (no Ship marker requirement on targets), but production NPCs carry
-    // both markers — matching them here keeps the test aligned with real
-    // NPC-vs-NPC scenarios.
-    app.world_mut().entity_mut(npc_target_entity).insert((
-        ShipPhysics::default(),
-        crate::ai_plugin::AiControllerComponent,
-    ));
+    // Add ShipPhysics to the target so it looks like a real production-spawned
+    // NPC (physics-enabled). The unified `tick_beams` finds targets by
+    // EntityUuid in `hull_q` (no Ship marker requirement on targets).
+    app.world_mut()
+        .entity_mut(npc_target_entity)
+        .insert(ShipPhysics::default());
 
     // Activate beam on the shooter.
     {
@@ -3052,8 +3046,12 @@ fn npc_beam_tick_damages_npc_target_not_player() {
 
 #[test]
 fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
-    // Regression test for PRD #597 PR-1: on_beam_started used With<Ship>.single()
-    // which panics when multiple ships exist. After fix it uses With<LocalShip>.
+    // Multi-ship source-uuid behaviour: `on_beam_started` resolves the emitted
+    // `source_uuid` per-entity from `BeamStartedEvent::source_entity` (looking up
+    // that entity's own `EntityUuid`), so a beam fired by one ship names that
+    // ship even when several ships exist. Originally a regression guard for the
+    // PRD #597 PR-1 `With<Ship>.single()` panic; the source is now the event's
+    // shooter entity, not any `LocalShip`/`single()` query (#832).
     use crate::entity_spawner::EntityUuid;
 
     let mut app = test_app();
@@ -3099,7 +3097,7 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
     };
     assert_eq!(
         source_uuid, player_uuid_str,
-        "on_beam_started must emit the LocalShip UUID as source_uuid, not {:?}",
+        "on_beam_started must emit the firing entity's UUID as source_uuid, not {:?}",
         source_uuid
     );
 }
@@ -3158,7 +3156,6 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
             .spawn((
                 crate::server_app::Ship,
                 EntityUuid(npc_uuid.to_string()),
-                crate::ai_plugin::AiControllerComponent,
                 // The NPC's Tactical lock. Was seeded on the private
                 // `ShipAiMemory.target` mirror until #702 deleted it;
                 // `TacticalRadarSelection` is the surface every firing path reads.
@@ -3400,8 +3397,8 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
         ))
         .id();
 
-    // Tick 1: `register_ai_tokens_on_spawn` runs → AiControllerComponent
-    //         marker attached and token registered in AiTokenRegistry.
+    // Tick 1: `register_ai_tokens_on_spawn` runs → token registered in
+    //         AiTokenRegistry.
     app.update();
 
     // Register the Bevy entity in AiTokenRegistry (needed by handle_fire_phaser).
@@ -3483,7 +3480,6 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
             ActiveBeam {
                 target_uuid: Some(target_uuid.to_string()),
                 remaining_secs: 10.0,
@@ -3547,7 +3543,6 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
@@ -4023,7 +4018,6 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             TacticalRadarSelection(Some(target_uuid_parsed.to_string())),
             ActiveBeam::default(),
@@ -6288,7 +6282,6 @@ ai_only = true
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             npc_ship_config,
             crate::server_app::ShipSystemBlackboards::default(),
@@ -7323,7 +7316,6 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
@@ -7397,9 +7389,7 @@ fn handle_fire_blaster_accepts_ai_token() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            EntityUuid(npc_uuid.to_string()),
-            crate::ai_plugin::AiControllerComponent,
-            // Seeds the NPC's Tactical lock. This used to seed
+            EntityUuid(npc_uuid.to_string()), // Seeds the NPC's Tactical lock. This used to seed
             // `ShipAiMemory.target` and rely on `tick_blaster_auto_fire`'s
             // legacy fallback to read it; #702 deleted that fallback, so the
             // lock goes where every other consumer looks for it.

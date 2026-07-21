@@ -232,7 +232,8 @@ pub fn spawn_entity(
         entity_commands.insert(CinematicCameraSection(cam.clone()));
     }
 
-    // Behaviour section — signals ai_plugin to attach an AiControllerComponent.
+    // Behaviour section — the "this entity is AI-driven" predicate; ai_plugin
+    // registers an AI token for any entity carrying it.
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert((
             BehaviourSection(behaviour.clone()),

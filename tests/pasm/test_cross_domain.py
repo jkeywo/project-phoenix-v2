@@ -11,8 +11,18 @@ def test_authored_design_slices_have_traceability_rows() -> None:
     result = validate_spec_root(REPOSITORY_ROOT / "pasm" / "spec", workspace_root=REPOSITORY_ROOT)
     rows = {row.design_entity.value: row for row in build_traceability_rows(result.model.entities)}
 
-    assert rows["dispatch-repair-team"].implementation_status == "declared"
-    assert "src/console/repair/server.rs" in rows["dispatch-repair-team"].implementation_paths
+    # `dispatch-repair-team` realizes across three architecture entities:
+    # repair-console-interface, dispatch-repair-team-command, host-repair-router.
+    # Issue #736 ("explicit Repair command gateway and host admission seam",
+    # commit 43282651) promoted the console interface and the host router from
+    # `declared` to evidence-backed `observed`, while the message entity stayed
+    # `declared` — so the realizing set is genuinely no longer uniform and
+    # `mixed` is the correct roll-up. The same commit extracted the host router
+    # out of `src/console/repair/server.rs` into a new
+    # `src/console/repair/dispatch.rs`, which is where the dispatch handler and
+    # its admission-ordered registration now live.
+    assert rows["dispatch-repair-team"].implementation_status == "mixed"
+    assert "src/console/repair/dispatch.rs" in rows["dispatch-repair-team"].implementation_paths
     assert rows["set-red-alert"].implementation_status == "declared-design-only"
     assert rows["set-helm-actuator-input"].architecture_links
 

@@ -404,8 +404,10 @@ fn parse_doctrine_directive(
 /// - `cursors` — this ship's `ObjectiveCursors`, read-only. `cursor_target()`
 ///   resolves the active waypoint; `advance_objective_cursors`
 ///   (`SimSet::Modifiers`) is the sole writer.
-/// - `weapons_target` — the ship's `TacticalRadarSelection`, i.e. whoever Tactical
-///   (human or AI) has locked.
+/// - `weapons_target` — the ship's **Combat Lock**, read from the frozen
+///   `ViewscreenBlackboard::combat_lock` (the aggregator lifts it from the
+///   tactical radar's own selection, #829) — i.e. whoever Tactical, human or AI,
+///   has locked. Helm never reaches the radar's live selection directly.
 /// - `nav_waypoint` — Navigation's waypoint, `Some` only once the caller has
 ///   confirmed the Channel-3 clearance matches its generation.
 #[allow(clippy::too_many_arguments)]

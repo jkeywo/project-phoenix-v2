@@ -73,10 +73,16 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .map(|p| (p.x, p.z, p.yaw))
             .unwrap_or((0.0, 0.0, 0.0))
     };
+    // Combat Lock from the local ship's own frozen viewscreen blackboard, not
+    // the live `TacticalRadarSelection` (spec §3). `weapons_update_broadcaster`
+    // runs in `SimSet::Broadcast`, i.e. *after* the viewscreen aggregators in
+    // `SimSet::PublishAggregate`, so this reads the current tick's lock with no
+    // lag; the reconnect-resync caller (`cache_registry::resync_for_token`)
+    // reads whatever the last completed tick aggregated.
     let target_uuid: Option<String> = {
-        let mut q =
-            world.query_filtered::<&TacticalRadarSelection, With<crate::server_app::LocalShip>>();
-        q.single(world).ok().and_then(|wt| wt.0.clone())
+        let mut q = world
+            .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+        q.single(world).ok().and_then(viewscreen_combat_lock)
     };
     let (beam_active, active_beam_bank) = {
         let mut q = world.query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
@@ -347,6 +353,23 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 // / per-tube systems via the shared `build_bank_states` / `build_tube_states`
 // helpers — intentional duplication that keeps the systems order-free.
 
+/// Read the **Combat Lock** out of a ship's own frozen `ViewscreenBlackboard`.
+///
+/// The one target surface Weapons — a cross-system consumer of the tactical
+/// radar — is allowed to read (spec §3: "Cross-system target reads must not
+/// bypass the viewscreen blackboard to reach a radar's live selection
+/// synchronously"). Mirrors `blaster::blaster_combat_lock` and the beam /
+/// torpedo / helm / shields / sensors readers converted in issue #829.
+///
+/// Callers in `SimSet::Publish` see the value the viewscreen aggregators wrote
+/// in `SimSet::PublishAggregate` **last** tick — the accepted one-tick lag.
+fn viewscreen_combat_lock(bbs: &crate::server_app::ShipSystemBlackboards) -> Option<String> {
+    match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+        Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+        _ => None,
+    }
+}
+
 /// Build the per-bank [`PhaserBankState`] list from phaser config + live state.
 ///
 /// Shared by `publish_weapons_core_blackboard` (for `WeaponsBlackboard::banks`)
@@ -473,11 +496,17 @@ fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeStat
 /// a Weapons blackboard of its own to read `locked_target` from, and slices
 /// #698 / #700 will need per-NPC `banks` / `tubes` to fire from.
 ///
+/// `target_uuid` is the ship's **Combat Lock**, read from its own frozen
+/// `ViewscreenBlackboard::combat_lock` — never from the live
+/// `TacticalRadarSelection` component, which only the tactical radar's own
+/// publisher and the selection writers may touch (spec §3).
+///
 /// Two tiers of field, split by `Has<LocalShip>` in the loop:
 ///
 /// - **Ship state** — `target_uuid`, `locked_target`, `target_name`, `banks`,
 ///   `tubes`, `torpedo_count`, and `blasters`. All derived from per-entity
-///   components that NPCs carry, so they are computed for every ship.
+///   components (or the ship's own blackboards) that NPCs carry, so they are
+///   computed for every ship.
 /// - **Client render data** — `blips`, `regions`, `phaser_arcs`,
 ///   `torpedo_arcs`, `phaser_mode`. Sourced from the player-only
 ///   `CurrentPhaserMode` / `ShipClientConfigResource` resources and meaningless
@@ -493,7 +522,6 @@ fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeStat
 pub(crate) fn publish_weapons_core_blackboard(
     mut ship_q: Query<
         (
-            Option<&TacticalRadarSelection>,
             Option<&ActiveBeam>,
             Option<&PhaserCooldown>,
             Option<&PhaserCombatConfigResource>,
@@ -516,7 +544,6 @@ pub(crate) fn publish_weapons_core_blackboard(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for (
-        weapons_target,
         beam,
         cooldown,
         combat_config,
@@ -597,7 +624,19 @@ pub(crate) fn publish_weapons_core_blackboard(
             })
             .filter(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q).is_some());
 
-        let target_uuid = weapons_target.and_then(|wt| wt.0.clone());
+        // The **Combat Lock** from this ship's own frozen viewscreen blackboard
+        // (spec §1/§3). Weapons is a cross-system consumer of the tactical
+        // radar's selection, so it must not reach the live
+        // `TacticalRadarSelection` component synchronously — it reads the
+        // aggregated viewscreen fact like every other consumer (#829).
+        //
+        // This system runs in `SimSet::Publish` and the viewscreen aggregators
+        // run in `SimSet::PublishAggregate`, so the value read here is the one
+        // written LAST tick: a deliberate one-tick lag at 30Hz, accepted by
+        // spec §1. `target_uuid` is display/observability only — nothing
+        // downstream steers on it — so the lag costs a single frame of console
+        // latency and nothing else.
+        let target_uuid = viewscreen_combat_lock(&entity_bbs);
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
         let beam_active = beam.target_uuid.is_some();
         let active_beam_bank = beam.bank.clone();
@@ -605,6 +644,15 @@ pub(crate) fn publish_weapons_core_blackboard(
         let target_live_pos: Option<(f32, f32)> = target_uuid
             .as_deref()
             .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+
+        // Liveness filter, for the same reason `locked_target` carries one
+        // (above): the combat lock read here is last tick's, so a target killed
+        // during this tick — or during the tick after the aggregator froze the
+        // lock — would otherwise be published for one extra frame, breaking the
+        // documented `locked_target == target_uuid` agreement and drawing a
+        // reticle on a despawned entity. `target_live_pos` is exactly that
+        // liveness probe, so this costs no extra lookup.
+        let target_uuid = target_uuid.filter(|_| target_live_pos.is_some());
 
         let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
             entity_name_q
@@ -822,7 +870,6 @@ pub(crate) fn publish_tactical_radar_blackboard(
 pub(crate) fn publish_phaser_bank_blackboards(
     mut ship_q: Query<
         (
-            Option<&TacticalRadarSelection>,
             Option<&ActiveBeam>,
             Option<&PhaserCooldown>,
             Option<&PhaserCombatConfigResource>,
@@ -836,16 +883,8 @@ pub(crate) fn publish_phaser_bank_blackboards(
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    for (
-        weapons_target,
-        beam,
-        cooldown,
-        combat_config,
-        ship_physics,
-        modifiers,
-        control_sources,
-        mut entity_bbs,
-    ) in ship_q.iter_mut()
+    for (beam, cooldown, combat_config, ship_physics, modifiers, control_sources, mut entity_bbs) in
+        ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
         // Fallbacks mirror `publish_weapons_core_blackboard`: a ship (or test
@@ -883,7 +922,14 @@ pub(crate) fn publish_phaser_bank_blackboards(
             }
         };
 
-        let target_uuid = weapons_target.and_then(|wt| wt.0.clone());
+        // Combat Lock from this ship's frozen viewscreen blackboard, exactly as
+        // `publish_weapons_core_blackboard` reads it (spec §3) — never the live
+        // `TacticalRadarSelection`. Drives the per-bank in-arc / in-range
+        // `fire_ready` display state, which is observability only: the firing
+        // paths (`handle_fire_phaser`, `ai_phaser_auto_fire`) do their own
+        // in-arc check off the same combat lock and never read these entries.
+        // One-tick lag, as above.
+        let target_uuid = viewscreen_combat_lock(&entity_bbs);
         let target_live_pos: Option<(f32, f32)> = target_uuid
             .as_deref()
             .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));

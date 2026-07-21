@@ -4522,7 +4522,13 @@ station = "pilot"
                 },
             },
         );
-        // Target changes → WeaponsUpdate fires this tick.
+        // Tick 1 admits SetTarget in `SimSet::Input`. `compute_current_weapons_update`
+        // reads the frozen viewscreen combat lock (spec §3), which this harness'
+        // `seed_viewscreen_from_selection` glue refreshes before `SimSet::Input`,
+        // so the new lock reaches the wire on tick 2. The full app aggregates the
+        // viewscreen in `SimSet::PublishAggregate`, ahead of the `SimSet::Broadcast`
+        // broadcaster, so it has no such gap.
+        tick(&mut app);
         let out = tick(&mut app);
 
         let update = out
@@ -4560,7 +4566,8 @@ station = "pilot"
                 },
             },
         );
-        // Target changes → WeaponsUpdate fires this tick.
+        // Two ticks, for the same frozen-combat-lock reason as the test above.
+        tick(&mut app);
         let out = tick(&mut app);
 
         let update = out
@@ -6691,6 +6698,14 @@ station = "pilot"
         let mut app = test_app();
         start_game(&mut app);
 
+        // The thing the NPC is locked onto has to exist: `target_uuid` is the
+        // frozen combat lock filtered for liveness, so a lock on a uuid with no
+        // entity behind it is (correctly) never published.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("npc-only-target".into()),
+            bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
+        ));
+
         // An NPC ship locked onto a target the player ship never sees.
         let npc = app
             .world_mut()
@@ -6709,6 +6724,10 @@ station = "pilot"
             ))
             .id();
 
+        // Two ticks: `target_uuid` is the frozen viewscreen combat lock, which
+        // the aggregator writes in `SimSet::PublishAggregate` — one tick behind
+        // the publisher that reads it in `SimSet::Publish` (spec §1).
+        tick(&mut app);
         let out = tick(&mut app);
 
         // The NPC really does publish its own Weapons blackboard...

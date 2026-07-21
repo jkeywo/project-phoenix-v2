@@ -1458,7 +1458,8 @@ mod tests {
 
     #[test]
     fn publish_npc_target_bearing_uses_its_own_weapons_target() {
-        // target_bearing derives from each ship's OWN TacticalRadarSelection +
+        // target_bearing derives from each ship's OWN Combat Lock (read from
+        // its frozen ViewscreenBlackboard, #829) +
         // ShipPhysics: an NPC at the origin (yaw 0) targeting an entity at
         // +X reads a bearing of 180° (atan2 convention preserved from the
         // LocalShip-only publish); the LocalShip, with no TacticalRadarSelection,

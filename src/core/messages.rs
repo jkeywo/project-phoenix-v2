@@ -2001,17 +2001,33 @@ pub struct ShieldArcBlackboard {
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
+    /// The ship's **Combat Lock**, read from its own frozen
+    /// `ViewscreenBlackboard::combat_lock` and filtered for liveness.
+    ///
+    /// Not a live read of the `TacticalRadarSelection` component: Weapons is a
+    /// cross-system consumer of the tactical radar's selection, so it goes
+    /// through the viewscreen aggregate like every other consumer (spec §3,
+    /// issue #829). Published in `SimSet::Publish` while the aggregator runs in
+    /// `SimSet::PublishAggregate`, so this is last tick's lock — the one-tick
+    /// lag at 30Hz that spec §1 accepts.
     pub target_uuid: Option<String>,
     /// The Tactical AI's *selected* target — the output of
     /// `ai_target_selection` (issues #697, #700).
     ///
-    /// Distinct from `target_uuid`, which mirrors the authoritative
-    /// `TacticalRadarSelection` ECS component (the ship's actual lock, set by whoever
-    /// last wrote it — human `SetTarget`, the Tactical AI, or the beam /
-    /// torpedo paths). `locked_target` is *intent*, `target_uuid` is *truth*:
+    /// Distinct from `target_uuid`, the ship's applied Combat Lock (set by
+    /// whoever last wrote it — human `SetTarget`, the Tactical AI, or the beam
+    /// / torpedo paths). `locked_target` is *intent*, `target_uuid` is *truth*.
+    ///
+    /// **The two are deliberately not collapsed into one field** even though
+    /// they agree on an AI-operated ship: on a human-operated Tactical
+    /// `locked_target` is `None` while `target_uuid` carries the human's lock,
+    /// and telling those two cases apart on the wire is this field's entire
+    /// job. Pinned by
+    /// `human_tactical_leaves_locked_target_empty_and_keeps_the_human_lock`.
     ///
     /// - Tactical AI-operated: `ai_target_selection` publishes `locked_target`
-    ///   and applies the same choice to `TacticalRadarSelection`, so after a tick the
+    ///   and applies the same choice to `TacticalRadarSelection`, so once that
+    ///   selection has been through the viewscreen aggregator (one tick) the
     ///   two agree.
     /// - Tactical human-operated: the AI selects nothing, so `locked_target`
     ///   is `None` while `target_uuid` may be set by the human's lock.

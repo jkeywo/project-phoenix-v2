@@ -710,7 +710,13 @@ fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {
             },
         },
     );
-    // Target changes → WeaponsUpdate fires this tick.
+    // Tick 1 admits SetTarget in `SimSet::Input`. `compute_current_weapons_update`
+    // reads the frozen viewscreen combat lock (spec §3), which this harness'
+    // `seed_viewscreen_from_selection` glue refreshes before `SimSet::Input` —
+    // so the new lock lands on the wire on tick 2. (In the full app the
+    // viewscreen aggregator runs in `SimSet::PublishAggregate`, before the
+    // `SimSet::Broadcast` broadcaster, so there is no such gap.)
+    tick(&mut app);
     let out = tick(&mut app);
 
     let update = out
@@ -745,7 +751,8 @@ fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
             },
         },
     );
-    // Target changes → WeaponsUpdate fires this tick.
+    // Two ticks, for the same frozen-combat-lock reason as the test above.
+    tick(&mut app);
     let out = tick(&mut app);
 
     let update = out
@@ -4981,6 +4988,12 @@ fn ai_target_selection_publishes_locked_target_and_applies_it() {
         .insert("wave_1".into(), target_uuid.clone());
     insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
 
+    // Two ticks: `target_uuid` is the FROZEN viewscreen combat lock (spec §3),
+    // aggregated in `SimSet::PublishAggregate` after this publisher ran in
+    // `SimSet::Publish`, so tick 1's fresh AI selection only reaches
+    // `target_uuid` on tick 2. `locked_target` (written in `SimSet::Input`) is
+    // visible immediately — the one-tick lag is exactly the gap between them.
+    tick(&mut app);
     tick(&mut app);
 
     let local = local_ship_entity(&mut app);
@@ -4999,7 +5012,66 @@ fn ai_target_selection_publishes_locked_target_and_applies_it() {
     );
     assert_eq!(
         bb.target_uuid, bb.locked_target,
-        "on an AI-operated ship, intent and truth agree after a tick"
+        "on an AI-operated ship, intent and truth agree once the combat lock has \
+         been through the viewscreen aggregator"
+    );
+    assert_eq!(
+        bb.target_uuid.as_deref(),
+        Some(target_uuid.as_str()),
+        "target_uuid must be the FROZEN ViewscreenBlackboard.combat_lock, not a live \
+         read of TacticalRadarSelection (spec §3)"
+    );
+}
+
+/// Pins that `WeaponsBlackboard.target_uuid` follows the viewscreen's frozen
+/// Combat Lock and *only* that — mirroring the #829 consumer tests. Writing a
+/// combat lock that disagrees with the live `TacticalRadarSelection` component
+/// must publish the frozen value, proving the publisher no longer reaches the
+/// radar's live selection synchronously.
+#[test]
+fn weapons_blackboard_target_follows_the_frozen_combat_lock_not_the_live_selection() {
+    let mut app = test_app();
+    let frozen_uuid = uuid::Uuid::new_v4().to_string();
+    let live_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Human);
+    spawn_entity_target(&mut app, &frozen_uuid, 0.0, -30.0);
+    spawn_entity_target(&mut app, &live_uuid, 0.0, -40.0);
+
+    let local = local_ship_entity(&mut app);
+    // Live radar selection says one thing...
+    set_weapons_target(&mut app, Some(live_uuid.clone()));
+    // ...the frozen viewscreen fact says another. Overwrite it *after* the
+    // seed glue would have run by writing directly, then read what Publish
+    // produced on the next tick.
+    {
+        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        let mut bbs = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(local)
+            .expect("LocalShip must carry ShipSystemBlackboards");
+        let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+            Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+            _ => ViewscreenBlackboard::default(),
+        };
+        vbb.combat_lock = Some(frozen_uuid.clone());
+        bbs.0.insert(
+            crate::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(vbb),
+        );
+    }
+    // Run only the publisher, so the test harness' seed glue cannot re-sync
+    // the viewscreen fact back to the live selection first.
+    use bevy::ecs::system::RunSystemOnce;
+    app.world_mut()
+        .run_system_once(crate::weapons_plugin::publish_weapons_core_blackboard)
+        .expect("publisher must run");
+
+    let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
+    assert_eq!(
+        bb.target_uuid.as_deref(),
+        Some(frozen_uuid.as_str()),
+        "publish_weapons_core_blackboard must read ViewscreenBlackboard.combat_lock; \
+         reading the live TacticalRadarSelection would have published {live_uuid}"
     );
 }
 
@@ -5255,6 +5327,9 @@ fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
 
     // Tick 1: the AI acquires the target while it is alive.
     tick(&mut app);
+    // Tick 2 lets the acquisition reach the frozen viewscreen combat lock that
+    // `target_uuid` now reads (spec §3 one-tick lag).
+    tick(&mut app);
     let local = local_ship_entity(&mut app);
     assert_eq!(
         weapons_blackboard_of(&mut app, local)
@@ -5265,7 +5340,7 @@ fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
         "precondition: the AI must be locked on before the target dies"
     );
 
-    // Tick 2: Input selects the (still live) target, then the target is
+    // Kill tick: Input selects the (still live) target, then the target is
     // destroyed in Damage — exactly the beam/torpedo kill ordering.
     app.insert_resource(KillTargetOnDamage(target_uuid.clone()));
     app.add_systems(
@@ -5277,7 +5352,9 @@ fn publish_drops_locked_target_when_the_selected_target_dies_mid_tick() {
     let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
     assert_eq!(
         bb.target_uuid, None,
-        "precondition: the kill must have cleared the authoritative TacticalRadarSelection"
+        "the kill cleared the authoritative TacticalRadarSelection; the frozen combat \
+         lock that target_uuid reads still holds the dead uuid for one tick, so the \
+         publisher's liveness filter is what must drop it"
     );
     assert_eq!(
         bb.locked_target, None,
@@ -5308,6 +5385,9 @@ fn npc_ship_publishes_its_own_weapons_blackboard_with_ship_state_only() {
     let npc = spawn_npc_ship(&mut app, "npc-1", 0.0, 0.0);
     set_last_attacker(&mut app, npc, Some(attacker_uuid.clone()));
 
+    // Two ticks: `target_uuid` is the frozen viewscreen combat lock, one tick
+    // behind the NPC Tactical AI's selection (spec §1/§3).
+    tick(&mut app);
     tick(&mut app);
 
     let bb = weapons_blackboard_of(&mut app, npc)

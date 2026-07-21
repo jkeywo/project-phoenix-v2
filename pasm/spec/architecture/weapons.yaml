@@ -63,7 +63,7 @@ entities:
       rationale:
         - "Issue #694 replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire and writes TorpedoIntents; issue #698 folded the former integrate_torpedo_intents into integrate_weapons_state (src/console/weapons/mod.rs), the single adapter that drains both TorpedoIntents and PhaserIntents and applies them via TorpedoSystem::launch / ActiveBeam, dual-writing the legacy TorpedoSystemResource for the LocalShip the same way integrate_power_state does for power."
         - Gated on AiHighFidelity plus a dedicated torpedo_magazine_system_id() operate_ai policy, distinct from the per-fine-system Tactical gate that governs target selection.
-        - "Issue #698 promoted this from preliminary to full: the target_locked and target_shields inputs to the pure auto_fire_torpedo decision were hardcoded to true/0, and now read real state — target_locked from the locked WeaponsTarget resolving to a live entity, target_shields from the sum of the target's online ShipShields facings. Targets without ShipShields (asteroids, debris) read 0 and stay torpedo-eligible."
+        - "Issue #698 promoted this from preliminary to full: the target_locked and target_shields inputs to the pure auto_fire_torpedo decision were hardcoded to true/0, and now read real state — target_locked from the Combat Lock resolving to a live entity, target_shields from the sum of the target's online ShipShields facings. Targets without ShipShields (asteroids, debris) read 0 and stay torpedo-eligible. Issue #829 renamed the underlying component to TacticalRadarSelection and moved cross-system reads onto the frozen ViewscreenBlackboard::combat_lock; this decider reads the lock, not the radar's live selection."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -125,6 +125,7 @@ entities:
       summary: Authoritative Combat Lock owned by the tactical radar. Written only by handle_set_target and ai_target_selection (and cleared by beam/torpedo kill-clears + faction-change revalidation); read only by the tactical-radar publisher (issue #829) — no other module imports the component.
       rationale:
         - "Issue #829 renamed WeaponsTarget to TacticalRadarSelection and made target authority radar-owned. Cross-system consumers — including the firing paths (handle_fire_phaser, ai_phaser_auto_fire, ai_torpedo_auto_fire, blaster fire, tick_npc_auto_match_frequency, tick_weapons_arc_request) — read the FROZEN viewscreen combat_lock (viewscreen-target-facts-state), never this live selection (spec §1/§3). One-tick lag at 30Hz is accepted, including for firing."
+        - "Spec-compliance follow-up: the Weapons publishers (publish_weapons_core_blackboard, publish_phaser_bank_blackboards) and compute_current_weapons_update were the last live readers and now read combat_lock too. WeaponsBlackboard.target_uuid is therefore the frozen Combat Lock, liveness-filtered. It is deliberately NOT merged with locked_target: target_uuid is applied truth, locked_target is Tactical-AI intent and stays None on a human-operated Tactical, which is how the wire distinguishes an AI lock from a human's."
     architecture:
       classification: authoritative
       owner: tactical-weapons-controls

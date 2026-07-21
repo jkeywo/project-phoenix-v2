@@ -638,8 +638,7 @@ mod tests {
     /// takes the "reconnecting client holds Tactical" branch.
     fn resync_test_app_with_tactical_holder(token: &str) -> App {
         use crate::console::weapons::{
-            CurrentPhaserMode, PhaserCombatConfigResource, TacticalRadarSelection,
-            TorpedoSystemResource,
+            CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource,
         };
         use crate::lobby::Sessions;
         use crate::messages::StationId;
@@ -663,10 +662,33 @@ mod tests {
         // components off `LocalShip` (no global-resource fallback), matching the
         // production player-ship spawn which carries both unconditionally.
         app.world_mut().entity_mut(ship).insert((
-            TacticalRadarSelection(Some("target-uuid".into())),
             TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
             PhaserCombatConfigResource::default(),
         ));
+        // The combat lock reaches `compute_current_weapons_update` through the
+        // ship's own frozen `ViewscreenBlackboard`, never the live
+        // `TacticalRadarSelection` component (spec §3). Production aggregates it
+        // in `SimSet::PublishAggregate`; here we write the aggregated fact
+        // directly, merging so the other resync fixtures' entries survive.
+        {
+            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+            let mut bbs = app
+                .world_mut()
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+                .expect("LocalShip must carry ShipSystemBlackboards");
+            let mut vbb = match bbs
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => ViewscreenBlackboard::default(),
+            };
+            vbb.combat_lock = Some("target-uuid".into());
+            bbs.0.insert(
+                crate::ship::system_registry::viewscreen_system_id(),
+                SystemBlackboard::Viewscreen(vbb),
+            );
+        }
         app
     }
 

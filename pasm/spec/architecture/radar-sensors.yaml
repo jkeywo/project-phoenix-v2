@@ -78,7 +78,8 @@ entities:
       title: Tactical Radar Blackboard State
       summary: Per-ship tactical-radar blackboard carrying the Combat Lock (selected_target) plus the tactical radar blips and region overlays, which moved off the Weapons blackboard (issue #829).
       rationale:
-        - "Issue #829: publish_tactical_radar_blackboard (SimSet::Publish) writes selected_target for every ship from that ship's TacticalRadarSelection component; blips/regions are computed for the LocalShip only. This system is the tactical radar authority and is the only reader of the live selection besides its writers (handle_set_target, ai_target_selection, kill-clears, revalidation)."
+        - "Issue #829: publish_tactical_radar_blackboard (SimSet::Publish) writes selected_target for every ship from that ship's TacticalRadarSelection component; blips/regions are computed for the LocalShip only. This system is the tactical radar authority and is the only reader of the live selection besides its writers (handle_set_target, ai_target_selection, kill-clears, revalidation, comms RemoveFactionEnemy) and debug_overlay."
+        - "Spec-compliance follow-up: publish_weapons_core_blackboard, publish_phaser_bank_blackboards and compute_current_weapons_update were missed by #829 and still read the live TacticalRadarSelection. All three now read ViewscreenBlackboard.combat_lock, closing the last §3 breach. The two SimSet::Publish publishers therefore see last tick's lock (spec §1 one-tick lag); compute_current_weapons_update runs in SimSet::Broadcast, after the PublishAggregate aggregator, so it sees the current tick's."
     architecture:
       classification: derived
       owner: tactical-weapons-controls

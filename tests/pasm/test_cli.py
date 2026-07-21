@@ -152,8 +152,13 @@ def test_cli_traceability_json_success(capsys, monkeypatch) -> None:
 
     assert exit_code == 0
     repair_row = next(row for row in payload["rows"] if row["design_entity"]["value"] == "dispatch-repair-team")
-    assert repair_row["implementation_status"] == "declared"
-    assert "src/console/repair/server.rs" in repair_row["implementation_paths"]
+    # See tests/pasm/test_cross_domain.py for the rationale: issue #736
+    # (commit 43282651) made two of this verb's three realizing entities
+    # `observed` while the message stayed `declared` (hence `mixed`), and moved
+    # the host router from `src/console/repair/server.rs` to
+    # `src/console/repair/dispatch.rs`.
+    assert repair_row["implementation_status"] == "mixed"
+    assert "src/console/repair/dispatch.rs" in repair_row["implementation_paths"]
 
 
 def test_cli_audit_bundle_json_success(capsys, monkeypatch) -> None:

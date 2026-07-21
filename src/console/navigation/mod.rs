@@ -10,6 +10,10 @@ pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumer (issue #833): `handle_navigation_waypoint`
+        // reads the `navigation` system's admitted commands.
+        app.register_admitted_consumer(ConsumerMatcher::exact(NAVIGATION_SYSTEM_ID));
         // The admitted-waypoint applier moves Input→Physics (issue #830):
         // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
         // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`

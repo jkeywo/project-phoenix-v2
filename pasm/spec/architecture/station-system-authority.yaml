@@ -141,9 +141,38 @@ entities:
       paths: [src/lobby/session.rs, src/lobby/server.rs, src/ship_plugin.rs]
       tests: [cargo test, tests/smoke/reconnect.spec.ts]
 
+  - component: admitted-command-router
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Admitted Command Router
+      summary: Load-time registry naming which module consumes each admitted SystemId, plus an end-of-frame lint that warns when an admitted command has no registered consumer.
+      rationale:
+        - "One table answers which module handles a payload (#833). Routing itself already landed across #824–#832: admission drains the inbound ControlSystem stream once per tick into the owning ship's per-entity AdmittedCommands, and every consumer reads only its own slice via AdmittedCommands::for_target. There is no central SystemId→module dispatch table (system_target_for_payload_type was deleted in #822) — a runtime dispatcher would re-introduce the chokepoint the per-entity design removed and collapse the consumer scheduling (appliers run in different SimSets: Input/Physics/Modifiers/Broadcast)."
+        - "So the router is a registration seam, not a dispatcher: each console/ship plugin registers its consumer(s) at build with one line (RegisterAdmittedConsumer::register_admitted_consumer, keyed by system kind or by prefix for dynamic families like shield-arc-*). Adding a System is one registration; an admitted command whose target matches no registered consumer is warned (pwarn!, LogCat::Admit) by warn_unrouted_admitted_commands rather than silently dropped. The lint keys on the registry (no consumer), not on whether state changed, and mutates nothing — the headless behavioural gate stays bit-identical."
+        - "Out of scope: the weapons FIRE/LOAD handlers read MessageReader<InboundMessage> for dedicated top-level ClientMessage variants (FirePhaser, LoadTube, …) that carry no SystemId target — a separate client→host channel outside admitted routing, not routable by a SystemId router (a possible future migration, not #833). The InterSystemQueue is likewise a separate inter-system bus."
+    architecture:
+      kind: registry
+      authority: authoritative
+      reads: [ship-station-system-topology-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/command_admission/router.rs, src/ship/system_registry.rs]
+      symbols: [AdmittedConsumerRegistry, ConsumerMatcher, RegisterAdmittedConsumer, warn_unrouted_admitted_commands, unrouted_command_targets]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: every_admitted_consumer_kind_is_registered
+        summary: >-
+          Builds the full set of consumer plugins and asserts every
+          admitted-command-capable system kind (the inverse §2 census) resolves
+          to a registered consumer, and that an unrouted id is flagged by the
+          lint rather than dropped.
+
   - component: system-command-admission-policy
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: System Command Admission Policy
       summary: Host admission checks target system identity, station ownership, availability, and control-source policy before a system handler observes a player command, and routes every command into the target ship's own per-entity AdmittedCommands.
@@ -151,6 +180,7 @@ entities:
         - A client must not gain authority by naming another station's system or by bypassing a damaged, offline, or AI-controlled system.
         - "Every wire target names a declared system since #801 — there is no coarse helm or tactical target — so admission is inherently per-axis for helm commands and per-bank for tactical commands."
         - "Ship-aware since #824 (pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md section 2): every ship's AdmittedCommands is cleared each tick; human tokens route to the LocalShip as before, while a registered ai: token resolves through AiTokenRegistry to the owning entity and is admitted into that entity's own AdmittedCommands, validated by that entity's ControlSourceResolver. The validate+enqueue step is one shared seam (command_admission::validate_and_admit) also used by the console/system AI decide systems to emit their decisions as admitted commands in the same tick — so human and AI, player and NPC, all flow through one gate and nothing downstream branches on source."
+        - "Implemented (was partially-implemented) once #833 formalised routing: the only remaining gap was the 'one table' answering which module consumes each admitted target and the guarantee that an unrouted target is logged rather than silently dropped. That is now the sibling admitted-command-router entity (AdmittedConsumerRegistry + the warn_unrouted_admitted_commands lint); no consumer was moved or re-scheduled — the change is a load-time registration seam plus a warning-only lint."
     architecture:
       kind: command-validator
       authority: authoritative

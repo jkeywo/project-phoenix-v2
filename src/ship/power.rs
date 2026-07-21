@@ -171,6 +171,14 @@ pub struct ShipPowerPlugin;
 
 impl Plugin for ShipPowerPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumer (issue #833): `handle_power_messages` reads
+        // the `power-reactor` system's admitted commands. (The `power-battery`
+        // read in `handle_power_inter_system` is off the InterSystemQueue, a
+        // separate bus outside admitted routing.)
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::POWER_REACTOR_SYSTEM_ID,
+        ));
         app.init_resource::<crate::messages::InterSystemQueue>()
             .add_message::<CoordinationEnqueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))

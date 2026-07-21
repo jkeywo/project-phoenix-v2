@@ -34,6 +34,25 @@ pub struct ShipPlugin;
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumers (issue #833) owned by this plugin:
+        // `process_helm_inputs` applies the four per-axis helm ids in one
+        // applier, and `handle_boost_messages` applies `helm-boost`.
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::HELM_THRUST_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::HELM_STEERING_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::HELM_IMPULSE_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::LATERAL_THRUST_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::HELM_BOOST_SYSTEM_ID,
+        ));
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
             .add_message::<AiChatterEvent>();

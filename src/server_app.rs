@@ -347,6 +347,18 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .before(crate::sim_sets::SimSet::Input)
             .run_if(in_state(GamePhase::InProgress)),
     )
+    // Unrouted-command lint (issue #833). Production wires the admission seam
+    // inline (above) rather than via `AdmissionPlugin`, so the lint is added
+    // here too. Warning-only, ordered after every consumer set; observes the
+    // tick's admitted set before next tick's clear. The `AdmittedConsumerRegistry`
+    // it reads is populated by each consumer plugin's `register_admitted_consumer`
+    // call at build time.
+    .add_systems(
+        Update,
+        crate::command_admission::warn_unrouted_admitted_commands
+            .after(crate::sim_sets::SimSet::Broadcast)
+            .run_if(in_state(GamePhase::InProgress)),
+    )
     .add_systems(
         Update,
         broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),

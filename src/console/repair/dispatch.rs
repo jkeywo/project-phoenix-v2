@@ -31,6 +31,10 @@ use super::server::ShipRepairTeams;
 /// dependency on the admission seam a real, observed code edge (the `use`
 /// above) even though `SimSet::Physics` already runs downstream of it.
 pub fn register_repair_dispatch(app: &mut App) {
+    use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+    // Admitted-command consumer (issue #833): `handle_dispatch_repair_team`
+    // reads the `repair` system's admitted commands.
+    app.register_admitted_consumer(ConsumerMatcher::exact(REPAIR_SYSTEM_ID));
     app.add_systems(
         Update,
         handle_dispatch_repair_team

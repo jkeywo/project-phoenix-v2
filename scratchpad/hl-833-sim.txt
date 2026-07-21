@@ -1,0 +1,19 @@
+{
+  "ticks": 3601,
+  "sim_seconds": 60.0000,
+  "wall_seconds": 2.6857,
+  "ticks_per_second": 1340.8,
+  "speedup_vs_realtime": 22.3,
+  "final_phase": "InProgress",
+  "game_over_reason": null,
+  "entity_count": 256,
+  "ship": {
+    "name": "entity.alliance_cruiser.name",
+    "position": [580.772, 60.097],
+    "yaw": 2.3718,
+    "forward_speed": 10.000,
+    "hull": [216.0, 216.0],
+    "damaged_systems": {}
+  },
+  "message_counts": {"AsteroidSpawned": 71, "BlackboardUpdate": 3601, "CoordinationPopup": 2, "DamageTaken": 29, "EntitySpawned": 3, "GameStarted": 1, "ModifierAdded": 13, "ObjectiveSummary": 2, "ShieldStatus": 86, "SimState": 600, "WorldSetup": 1}
+}

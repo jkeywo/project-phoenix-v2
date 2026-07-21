@@ -95,6 +95,26 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumers (issue #833): the tactical-radar selection
+        // handler (`tactical-radar`) and the phaser-mode/control handlers
+        // (`phaser-control`).
+        //
+        // NOTE: the weapons FIRE/LOAD handlers (`handle_fire_phaser` /
+        // `handle_fire_torpedo` / `handle_fire_blaster` / `handle_load_tube` /
+        // `handle_unload_tube` / `handle_set_torpedo_volley_target`) are NOT
+        // admitted-command consumers — they read `MessageReader<InboundMessage>`
+        // for dedicated top-level `ClientMessage` variants that carry no
+        // `SystemId` target. That is a separate client→host channel outside
+        // admitted routing (a possible future migration, not #833), so the
+        // per-weapon ids (`phaser-fore`, `torpedo-tube-*`, `blaster-*`) are
+        // deliberately not registered here — they never enter `AdmittedCommands`.
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::TACTICAL_RADAR_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::PHASER_CONTROL_SYSTEM_ID,
+        ));
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()

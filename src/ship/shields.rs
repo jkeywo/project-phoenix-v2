@@ -185,6 +185,11 @@ pub struct ShipShieldsPlugin;
 
 impl Plugin for ShipShieldsPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumer (issue #833): `handle_shields_messages`
+        // reads the dynamic `shield-arc-*` family (one arc id per facing), so
+        // it registers by prefix rather than by concrete id.
+        app.register_admitted_consumer(ConsumerMatcher::prefix("shield-arc-"));
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<ShieldsAiConfigResource>()
             .add_systems(

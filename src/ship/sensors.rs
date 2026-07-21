@@ -70,6 +70,12 @@ pub struct ShipSensorsPlugin;
 
 impl Plugin for ShipSensorsPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumer (issue #833): `handle_sensors_messages`
+        // reads the `sensors` system's admitted commands.
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::SENSORS_SYSTEM_ID,
+        ));
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsAiConfigResource>()
             .add_systems(

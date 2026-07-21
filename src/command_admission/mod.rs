@@ -25,8 +25,13 @@ use crate::messages::ClientMessage;
 use crate::server_app::LocalShip;
 
 pub mod policy;
+pub mod router;
 
 pub use policy::{is_command_authorized, station_for_system};
+pub use router::{
+    unrouted_command_targets, warn_unrouted_admitted_commands, AdmittedConsumerRegistry,
+    ConsumerMatcher, RegisterAdmittedConsumer,
+};
 
 /// System set that `admit_system_commands` belongs to. Handlers that run in
 /// `Update` but outside `SimSet::Input` can use `.after(AdmissionSet)` to
@@ -52,6 +57,16 @@ impl Plugin for AdmissionPlugin {
             .add_systems(
                 Update,
                 (admit_system_commands, clear_inter_system_queue).in_set(AdmissionSet),
+            )
+            // Unrouted-command lint (issue #833): warning-only, ordered after
+            // every consumer set so it observes the full tick's admitted set
+            // before next tick's `admit_system_commands` clears it. Not in
+            // `AdmissionSet` (which runs `.before(SimSet::Input)`). Production
+            // `server_app` adds the twin system directly since it wires the
+            // admission seam inline rather than via this plugin.
+            .add_systems(
+                Update,
+                warn_unrouted_admitted_commands.after(crate::sim_sets::SimSet::Broadcast),
             );
     }
 }

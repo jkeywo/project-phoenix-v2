@@ -121,6 +121,13 @@ pub struct CommsWorldPlugin;
 
 impl Plugin for CommsWorldPlugin {
     fn build(&self, app: &mut App) {
+        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // Admitted-command consumer (issue #833): the comms input handlers
+        // (`handle_hail` / `handle_respond_to_message` / `handle_clear_comms`)
+        // all read the `comms` system's admitted commands.
+        app.register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::COMMS_SYSTEM_ID,
+        ));
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<OnScreenMessage>()

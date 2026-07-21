@@ -2245,23 +2245,43 @@ fn spawn_game_start_entities(
             }
 
             // Shields AI config — loaded from [shields_console.ai] if present,
-            // otherwise falls back to ShieldsAiConfigResource defaults. Inserted
-            // as both per-entity Component and global Resource (dual-write
-            // migration; the per-entity Component is queried by operate_shields_ai).
+            // otherwise falls back to ShieldsAiConfigResource defaults. The
+            // per-entity Component is what `operate_shields_ai` and
+            // `emit_shields_coordination` read; the global Resource is a
+            // dual-write with no remaining readers (issue #738).
             let ai_cfg = config
                 .shields_console
                 .as_ref()
                 .and_then(|sc| sc.ai.as_ref())
                 .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
-                    restored_notify_pct: 0.5,
                     damage_window_secs: ai.damage_window_secs,
                     min_damage_window_secs: ai.min_damage_window_secs,
                     damage_pct_threshold: ai.damage_pct_threshold,
                     health_ratio_threshold: ai.health_ratio_threshold,
+                    ..Default::default()
                 })
                 .unwrap_or_default();
             commands.entity(spawned).insert(ai_cfg.clone());
             commands.insert_resource(ai_cfg);
+
+            // Sensors AI config — the player-ship half of the same per-entity
+            // pattern (issue #738 follow-up). `ai_frequency_hint` reads only the
+            // Component, and the spawner attaches one to every entity with a
+            // `[behaviour]` block; without this, `[sensors_console.ai]` authored
+            // on a player-class ship was silently ignored end to end. Behaviour-
+            // neutral for every ship TOML in `assets/` today: none declares the
+            // section, and the fallback the reader already used is this same
+            // parse-time default.
+            commands.entity(spawned).insert(
+                config
+                    .sensors_console
+                    .as_ref()
+                    .and_then(|sc| sc.ai.as_ref())
+                    .map(|ai| crate::ship::sensors::SensorsAiConfigResource {
+                        frequency_hint_delay_secs: ai.frequency_hint_delay_secs,
+                    })
+                    .unwrap_or_default(),
+            );
 
             // Shields damage history — per-ship Component tracking HP deltas
             // for the AI damage-concentration algorithm. Initialised empty; resized

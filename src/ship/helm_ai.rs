@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 #[cfg(test)]
 use crate::ship::components::LastHelmInput;
 use crate::ship::components::{
@@ -616,41 +617,9 @@ pub(crate) fn build_helm_ai_surfaces_frame(
     }
 }
 
-/// Validate-and-enqueue one per-axis helm AI decision into this ship's own
-/// `AdmittedCommands` (issue #824): the AI's `ai:` token flows through the
-/// same `validate_and_admit` seam network commands do, checked against this
-/// entity's own `ControlSourceResolver` (`operate_ai` must hold). The write
-/// happens in the same tick — `process_helm_inputs` applies it later this
-/// frame — so there is no one-tick queue lag on the AI helm path.
-fn emit_helm_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
-    sources: &ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&crate::ship::components::ShipConfigComponent>,
-    admitted: &mut crate::messages::AdmittedCommands,
-) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    crate::command_admission::validate_and_admit(
-        &token, target, payload, sources, sessions, config, admitted,
-    )
-}
+// The per-axis helm AI's private `emit_helm_ai_command` (issue #824 — the
+// first of the seven identical copies) is gone: every AI operator now emits
+// through `command_admission::ai_emit::emit_ai_command` (issue #738).
 
 /// Call the pure `crate::ai::operate_helm` with this ship's TOML-authored
 /// behaviour tuning, returning `(thrust, steering)`.
@@ -1055,7 +1024,7 @@ pub(crate) fn ai_helm_thrust(
             .0
         };
 
-        emit_helm_ai_command(
+        emit_ai_command(
             entity_uuid,
             crate::system_registry::helm_thrust_system_id(),
             crate::messages::SystemControlPayload::SetThrust { value: thrust },
@@ -1151,7 +1120,7 @@ pub(crate) fn ai_helm_steering(
             steering
         };
 
-        emit_helm_ai_command(
+        emit_ai_command(
             entity_uuid,
             crate::system_registry::helm_steering_system_id(),
             crate::messages::SystemControlPayload::SetSteering { value: steering },
@@ -1289,7 +1258,7 @@ pub(crate) fn ai_helm_impulse(
             }
             crate::ai::ImpulseDecision::NoChange => continue,
         };
-        emit_helm_ai_command(
+        emit_ai_command(
             entity_uuid,
             crate::system_registry::helm_impulse_system_id(),
             payload,
@@ -1387,7 +1356,7 @@ pub(crate) fn ai_helm_lateral_thrust(
             )
         };
 
-        emit_helm_ai_command(
+        emit_ai_command(
             entity_uuid,
             crate::system_registry::lateral_thrust_system_id(),
             crate::messages::SystemControlPayload::LateralThrustInput { lateral },

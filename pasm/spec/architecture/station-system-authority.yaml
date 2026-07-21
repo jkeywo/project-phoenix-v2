@@ -189,8 +189,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/command_admission/policy.rs, src/command_admission/mod.rs]
-      symbols: [is_command_authorized, station_for_system, validate_and_admit, admit_system_commands]
+      paths: [src/command_admission/policy.rs]
+      symbols: [is_command_authorized, station_for_system]
       tests: [cargo test]
     evidence:
       - kind: test

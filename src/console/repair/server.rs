@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::damage::DamageTier;
 use crate::messages::ModifierSlot;
@@ -489,16 +490,13 @@ fn emit_repair_ai_command(
     config: &crate::ship_plugin::ShipConfigComponent,
     admitted: &mut crate::messages::AdmittedCommands,
 ) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    crate::command_admission::validate_and_admit(
-        &token,
+    emit_ai_command(
+        entity_uuid,
         crate::system_registry::repair_system_id(),
         payload,
         sources,
         sessions,
-        &config.0,
+        Some(config),
         admitted,
     )
 }

@@ -98,7 +98,6 @@ pub(crate) fn handle_unload_tube(
         With<crate::server_app::LocalShip>,
     >,
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
@@ -125,11 +124,12 @@ pub(crate) fn handle_unload_tube(
         if !tactical_authorized(&sessions, ship_config, &ev.token) {
             continue;
         }
-        // Prefer per-entity component; fall back to global resource for test compat.
+        // The LocalShip's own component, never the global Resource (issue
+        // #738): the Resource is a shared singleton, so the retired
+        // "fall back for test compat" branch let a console command mutate
+        // magazine state that no longer belongs to any particular ship.
         if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
             ts.0.start_unload(tube.as_str());
-        } else {
-            torpedo_sys_res.0.start_unload(tube.as_str());
         }
     }
 }
@@ -151,7 +151,6 @@ pub(crate) fn handle_set_torpedo_volley_target(
         With<crate::server_app::LocalShip>,
     >,
     mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let Some((ship_config, control_sources)) = ship_query.iter().next() else {
         return;
@@ -188,11 +187,9 @@ pub(crate) fn handle_set_torpedo_volley_target(
         }
         // Convert hyphens → underscores to get the TOML tube id.
         let tube_id = tube_id_hyphens.replace('-', "_");
-        // Prefer per-entity component; fall back to global resource.
+        // The LocalShip's own component, never the global Resource (issue #738).
         if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
             ts.0.set_volley_target(&tube_id, *count);
-        } else {
-            torpedo_sys_res.0.set_volley_target(&tube_id, *count);
         }
     }
 }
@@ -320,15 +317,19 @@ pub(crate) fn handle_fire_torpedo(
             }
         }
 
-        // Per-entity `TorpedoSystemResource` first; fall back to the global
-        // Resource so legacy tests that only insert the Resource still work.
-        // Only the LocalShip should ever fall through to the global — NPC
-        // ships that lack the component simply have no torpedo tubes.
+        // Per-entity `TorpedoSystemResource` first; the global Resource is a
+        // fallback ONLY for the LocalShip, so legacy tests that insert just the
+        // Resource still work. Issue #738 made that restriction real: it was
+        // only a comment before, so an NPC shooter with no component fired out
+        // of — and decremented — the PLAYER ship's magazine. An NPC that lacks
+        // the component simply has no torpedo tubes and cannot fire.
+        let shooter_is_local = local_ship.map(|(e, _)| e) == Some(shooter_entity);
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp.as_deref_mut()
         {
             Some(c) => &mut c.0,
-            None => &mut torpedo_sys_res.0,
+            None if shooter_is_local => &mut torpedo_sys_res.0,
+            None => continue,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();

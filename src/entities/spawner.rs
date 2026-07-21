@@ -419,18 +419,46 @@ pub fn spawn_entity(
                 );
             }
         }
-        // Sensors AI config — loaded from [sensors_console.ai] for NPC ships
-        // if present, otherwise the global `SensorsAiConfigResource` default
-        // applies. Inserted as a per-entity Component so `ai_frequency_hint`
-        // reads it via the Component query (mirrors the
-        // [shields_console.ai] pattern below).
-        if let Some(sc) = &config.sensors_console {
-            if let Some(ai) = &sc.ai {
-                entity_commands.insert(crate::ship::sensors::SensorsAiConfigResource {
+        // Sensors AI config — loaded from [sensors_console.ai] if present,
+        // otherwise the parse-time default. Inserted for EVERY entity that
+        // carries a `[behaviour]` block (i.e. every ship spawned through this
+        // path); it used to be inserted only when the TOML also carried the
+        // `.ai` sub-section, and `ai_frequency_hint` then fell back to the
+        // global Resource. The player ship does not come through here at all —
+        // `server_app::spawn_game_start_entities` attaches its copy.
+        entity_commands.insert(
+            config
+                .sensors_console
+                .as_ref()
+                .and_then(|sc| sc.ai.as_ref())
+                .map(|ai| crate::ship::sensors::SensorsAiConfigResource {
                     frequency_hint_delay_secs: ai.frequency_hint_delay_secs,
-                });
-            }
-        }
+                })
+                .unwrap_or_default(),
+        );
+        // Shields AI config — loaded from [shields_console.ai] if present,
+        // otherwise the parse-time default. Inserted for every entity carrying
+        // a `[behaviour]` block, alongside the sensors block above and inside
+        // the same ship gate: `ai_shield_focus` and `emit_shields_coordination`
+        // both query `With<Ship>`, so asteroids/stars/planets have no use for
+        // it. It used to be inserted only when the TOML also carried the `.ai`
+        // sub-section, and those readers then fell back to the global Resource
+        // — which `server_app` writes from the PLAYER ship's TOML. Every NPC
+        // now owns its own shields-AI tuning.
+        entity_commands.insert(
+            config
+                .shields_console
+                .as_ref()
+                .and_then(|sc| sc.ai.as_ref())
+                .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
+                    damage_window_secs: ai.damage_window_secs,
+                    min_damage_window_secs: ai.min_damage_window_secs,
+                    damage_pct_threshold: ai.damage_pct_threshold,
+                    health_ratio_threshold: ai.health_ratio_threshold,
+                    ..Default::default()
+                })
+                .unwrap_or_default(),
+        );
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and
@@ -690,21 +718,6 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ship::shields::ShipShields(shield_system, freq));
     }
 
-    // Shields AI config — loaded from [shields_console.ai] for NPC ships if
-    // present, otherwise defaults. Inserted as per-entity Component so
-    // operate_shields_ai reads it via the Component query (NPCs have no
-    // global Resource override).
-    if let Some(sc) = &config.shields_console {
-        if let Some(ai) = &sc.ai {
-            entity_commands.insert(crate::ship::shields::ShieldsAiConfigResource {
-                restored_notify_pct: 0.5,
-                damage_window_secs: ai.damage_window_secs,
-                min_damage_window_secs: ai.min_damage_window_secs,
-                damage_pct_threshold: ai.damage_pct_threshold,
-                health_ratio_threshold: ai.health_ratio_threshold,
-            });
-        }
-    }
     // Shields damage history — per-ship Component tracking HP deltas for the
     // AI damage-concentration algorithm. Initialised empty; resized lazily.
     entity_commands.insert(crate::ship::shields::ShieldsDamageHistory::default());

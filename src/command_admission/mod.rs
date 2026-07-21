@@ -24,9 +24,14 @@ use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::ClientMessage;
 use crate::server_app::LocalShip;
 
+pub mod ai_emit;
 pub mod policy;
 pub mod router;
 
+// NOTE: `ai_emit` is deliberately NOT re-exported here. It is a `pub mod`, so
+// `crate::command_admission::ai_emit::emit_ai_command` is the one public path
+// every AI operator imports — a second flattened path would let two spellings
+// of the same item drift apart in imports and in the PASM observed edges.
 pub use policy::{is_command_authorized, station_for_system};
 pub use router::{
     unrouted_command_targets, warn_unrouted_admitted_commands, AdmittedConsumerRegistry,

@@ -254,6 +254,8 @@ entities:
       confidence: confirmed
       title: Host Command Admission
       summary: Admission layer that validates incoming system commands before simulation handlers run.
+      rationale:
+        - "Issue #738: the seam owns the AI side of the typed input path too. Every console/system AI operator used to carry its own byte-identical emit_*_ai_command helper (helm #824, shields #826, sensors #828, navigation/repair #830, power #831, captain) that built an ai:<uuid> token, fabricated an empty ShipConfig for entities with no ShipConfigComponent, and called validate_and_admit. Those seven copies collapsed into command_admission::ai_emit::emit_ai_command, so the token shape and the unconfigured-ship admission context are decided in exactly one place."
     architecture:
       kind: service
       authority: authoritative
@@ -263,16 +265,21 @@ entities:
         - dispatch-repair-team-command
       depends_on:
         - system-command-admission-policy
+        - admitted-command-router
       runs_in:
         - host-browser-runtime
     implementation:
       status: observed
       paths:
         - src/command_admission/mod.rs
+        - src/command_admission/ai_emit.rs
       symbols:
         - AdmissionPlugin
         - AdmissionSet
         - admit_system_commands
+        - validate_and_admit
+        - emit_ai_command
+        - ai_token_for
       messages:
         - ControlSystem
       tests:

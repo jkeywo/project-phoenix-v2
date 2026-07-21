@@ -5545,6 +5545,101 @@ fn ai_torpedo_auto_fire_fires_when_ai_controls_unclaimed_station() {
     );
 }
 
+/// Issue #738 per-ship isolation: `ai_torpedo_auto_fire` used to resolve its
+/// tube/magazine state as `per_entity_component.unwrap_or(&global_resource)`,
+/// and the global `TorpedoSystemResource` mirrors the PLAYER ship. An NPC with
+/// no `[torpedoes]` block therefore decided its auto-fire from the player's
+/// tubes — and would publish an intent naming a tube it does not own.
+///
+/// Two NPCs here: one with its own loaded tube (which must still fire) and one
+/// with no torpedo system at all (which must stay silent even though the
+/// player's global Resource has a loaded tube).
+#[test]
+fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = torpedo_ai_test_app();
+    // The player ship's tube is loaded — the retired fallback would have read
+    // it on behalf of any NPC lacking a component of its own.
+    {
+        let mut res = app.world_mut().resource_mut::<TorpedoSystemResource>();
+        res.0.tube_mut("fore_port").unwrap().loaded_count = 1;
+    }
+    spawn_asteroid_target(&mut app, "npc-target", 0.0, -30.0);
+
+    let npc_sources = || {
+        let mut s = crate::ship::control_source::ControlSourceResolver::new();
+        s.set(
+            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        crate::ship_plugin::ShipSystemControlSources(s)
+    };
+
+    let armed_sys = {
+        let mut ts = TorpedoSystem::new(TorpedoConfig::default());
+        ts.tube_mut("fore_port").unwrap().loaded_count = 1;
+        ts
+    };
+    let armed = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            npc_sources(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some("npc-target".into())),
+            TorpedoSystemResource(armed_sys),
+            TorpedoIntents::default(),
+            crate::ai_plugin::AiHighFidelity,
+            bevy::prelude::Transform::default(),
+        ))
+        .id();
+
+    // Deliberately NO `TorpedoSystemResource` component.
+    let bare = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            npc_sources(),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some("npc-target".into())),
+            TorpedoIntents::default(),
+            crate::ai_plugin::AiHighFidelity,
+            bevy::prelude::Transform::default(),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(seed_viewscreen_from_selection)
+        .expect("seed viewscreen");
+    app.world_mut()
+        .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+        .expect("ai_torpedo_auto_fire should run");
+
+    assert!(
+        !app.world()
+            .get::<TorpedoIntents>(armed)
+            .expect("intents")
+            .0
+            .is_empty(),
+        "an NPC with its own loaded tube must still decide to fire"
+    );
+    assert!(
+        app.world()
+            .get::<TorpedoIntents>(bare)
+            .expect("intents")
+            .0
+            .is_empty(),
+        "an NPC with no torpedo system of its own must not decide from the player          ship's global TorpedoSystemResource"
+    );
+}
+
 /// `ai_torpedo_auto_fire` is a *decider*: it must publish to
 /// `TorpedoIntents` and leave the `TorpedoSystem` alone. Mirrors
 /// `ai_phaser_auto_fire_writes_intent_without_touching_the_beam`.
@@ -6735,6 +6830,147 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
         !bb.is_online,
         "PhaserBankBlackboard.is_online must be false end-to-end when the \
          console hull is disabled (hull → offline_systems → blackboard chain)"
+    );
+}
+
+/// Issue #738: the torpedo console handlers used to write the LocalShip's own
+/// component "or fall back to the global resource for test compat". The global
+/// `TorpedoSystemResource` is a shared singleton that belongs to no particular
+/// ship, so that branch was a standing footgun; it is gone. A console unload
+/// now mutates exactly one thing — the operating ship's own component.
+#[test]
+fn unload_tube_mutates_the_ships_own_component_and_never_the_global_resource() {
+    let mut app = test_app();
+    load_tube_now(&mut app, "fore_port");
+    {
+        let mut res = app.world_mut().resource_mut::<TorpedoSystemResource>();
+        res.0.tube_mut("fore_port").unwrap().loaded_count = 1;
+    }
+
+    push(
+        &mut app,
+        crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+        ClientMessage::UnloadTube {
+            tube: "fore_port".to_string(),
+        },
+    );
+    tick(&mut app);
+
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+    let ship_state = q.single(app.world()).unwrap().0.tube("fore_port").unwrap();
+    assert!(
+        matches!(
+            ship_state.load_state,
+            crate::torpedo::TubeLoadState::Unloading { .. }
+        ),
+        "the operating ship's own tube must begin unloading"
+    );
+    assert!(
+        !matches!(
+            app.world()
+                .resource::<TorpedoSystemResource>()
+                .0
+                .tube("fore_port")
+                .unwrap()
+                .load_state,
+            crate::torpedo::TubeLoadState::Unloading { .. }
+        ),
+        "the shared global Resource must never be mutated by a console command"
+    );
+}
+
+/// Issue #738 per-ship isolation: an NPC ship that carries NO
+/// `TorpedoSystemResource` component must not fire, and above all must not
+/// fire out of the PLAYER ship's magazine.
+///
+/// `handle_fire_torpedo` used to resolve the shooter's torpedo state as
+/// `per_entity_component.unwrap_or(&mut global_resource)`. A comment claimed
+/// "only the LocalShip should ever fall through", but nothing enforced it: the
+/// global `TorpedoSystemResource` mirrors the player ship, so an NPC resolved
+/// through `AiTokenRegistry` with no component of its own launched from — and
+/// decremented — the player's tubes. The fallback is now gated on the shooter
+/// actually being the LocalShip.
+#[test]
+fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine() {
+    use crate::ai_plugin::AiTokenRegistry;
+    use crate::entity_spawner::EntityUuid;
+
+    let mut app = test_app();
+    app.init_resource::<AiTokenRegistry>();
+
+    // Load the PLAYER ship's fore_port tube in the global Resource, so the
+    // retired fallback would have had a live round to launch.
+    {
+        let mut res = app.world_mut().resource_mut::<TorpedoSystemResource>();
+        res.0.tube_mut("fore_port").unwrap().loaded_count = 1;
+    }
+    let player_tubes_before = app
+        .world()
+        .resource::<TorpedoSystemResource>()
+        .0
+        .tube("fore_port")
+        .unwrap()
+        .loaded_count;
+    let player_torpedoes_before = app
+        .world()
+        .resource::<TorpedoSystemResource>()
+        .0
+        .torpedoes_remaining;
+
+    let npc_uuid = "cc000000-0000-0000-0000-0000000000ff";
+    let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
+    for sysid in [
+        crate::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::system_registry::torpedo_magazine_system_id(),
+    ] {
+        npc_ai_sources.set(sysid, crate::ship::control_source::ControlSource::Ai);
+    }
+    // Deliberately NO `TorpedoSystemResource` component — this NPC's TOML has
+    // no `[torpedoes]` block, so it has no tubes at all.
+    let npc_entity = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(npc_ai_sources),
+            ShipPhysics::default(),
+            TacticalRadarSelection::default(),
+            crate::server_app::WeaponFiredThisTick::default(),
+            bevy::prelude::Transform::default(),
+        ))
+        .id();
+    {
+        let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
+        reg.register_with_entity(npc_uuid, npc_entity);
+    }
+
+    let ai_token = format!("ai:{}", npc_uuid);
+    push(
+        &mut app,
+        &ai_token,
+        ClientMessage::FireTorpedo {
+            tube: "fore_port".to_string(),
+            target_uuid: None,
+        },
+    );
+    let out = tick(&mut app);
+
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "an NPC with no torpedo system of its own must not launch anything"
+    );
+    let res = app.world().resource::<TorpedoSystemResource>();
+    assert_eq!(
+        res.0.tube("fore_port").unwrap().loaded_count,
+        player_tubes_before,
+        "the player ship's loaded tube must be untouched by an NPC's fire command"
+    );
+    assert_eq!(
+        res.0.torpedoes_remaining, player_torpedoes_before,
+        "the player ship's magazine must be untouched by an NPC's fire command"
     );
 }
 

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::messages::{
     CoordinationPayload, ModifierSlot, SensorsBlackboard, SystemBlackboard, SystemControlPayload,
     SystemId,
@@ -46,9 +47,15 @@ pub struct SensorsThreatState {
 /// Loaded from `[sensors_console.ai]` in the ship entity TOML. Defaults are
 /// used when the section is absent.
 ///
-/// Dual `Resource + Component`, mirroring `ShieldsAiConfigResource`:
-/// production reads use the Resource form (ship-wide default), with the
-/// Component form available for per-ship overrides.
+/// Dual `Resource + Component`, mirroring `ShieldsAiConfigResource` — but the
+/// Resource half is **structural symmetry only, and has never been seeded**.
+/// `ShipSensorsPlugin::build` registers it with `init_resource` and nothing
+/// anywhere writes it (there is no sensors equivalent of the shields dual-write
+/// in `server_app::spawn_game_start_entities`), so it has only ever held
+/// `Self::default()`. Every read goes through the per-entity Component, which
+/// the spawner and `spawn_game_start_entities` both attach; see
+/// `console_ai::server::ai_frequency_hint`. Do not reintroduce a `Res<_>` read
+/// here: it applies one ship's tuning to every ship.
 #[derive(Resource, Component, Clone, Debug)]
 pub struct SensorsAiConfigResource {
     /// Delay (seconds) between a target lock and the AI-driven Sensors
@@ -570,29 +577,13 @@ fn emit_sensors_ai_command(
     ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
     admitted: &mut crate::messages::AdmittedCommands,
 ) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    crate::command_admission::validate_and_admit(
-        &token,
+    emit_ai_command(
+        entity_uuid,
         crate::system_registry::sensors_system_id(),
         payload,
         sources,
         sessions,
-        config,
+        ship_config,
         admitted,
     )
 }

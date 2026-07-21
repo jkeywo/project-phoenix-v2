@@ -115,7 +115,7 @@ entities:
       title: Shields Recent Damage AI
       summary: AI-controlled Shields records recent per-arc damage and focuses concentrated incoming damage, falling back to a configured health imbalance rule; its current prior-health tracking is defective.
       rationale:
-        - "Issue #826 (admission symmetry, following the #824 helm precedent): ai_shield_focus keeps the #692 decision logic (damage tracking, health imbalance, threat-bearing override via tick_shield_focus_ai) but no longer writes an intent component. It emits SetShieldArcFocus payloads through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold on the targeted arc). The write into the per-entity AdmittedCommands is direct and same-tick; shield-focus-controller (handle_shields_messages, SimSet::Physics, ordered after the emit) applies it. The paired integrate_shield_state adapter and the ShieldArcIntents transport are deleted."
+        - "Issue #826 (admission symmetry, following the #824 helm precedent): ai_shield_focus keeps the #692 decision logic (damage tracking, health imbalance, threat-bearing override via tick_shield_focus_ai) but no longer writes an intent component. It emits SetShieldArcFocus payloads through the shared command_admission::ai_emit::emit_ai_command seam (issue #738 collapsed the seven per-operator emit_*_ai_command copies into it) using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold on the targeted arc). The write into the per-entity AdmittedCommands is direct and same-tick; shield-focus-controller (handle_shields_messages, SimSet::Physics, ordered after the emit) applies it. The paired integrate_shield_state adapter and the ShieldArcIntents transport are deleted."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -128,7 +128,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs]
-      symbols: [ai_shield_focus, emit_shield_ai_command, tick_shield_focus_ai, ShieldsDamageHistory, ShieldsAiConfigToml]
+      symbols: [ai_shield_focus, tick_shield_focus_ai, ShieldsDamageHistory, ShieldsAiConfigToml]
       tests: [cargo test]
 
   - state: shields-damage-history-state

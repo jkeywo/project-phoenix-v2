@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::messages::{
     AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource,
     SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
@@ -209,29 +210,13 @@ fn emit_captain_ai_command(
     ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
     admitted: &mut AdmittedCommands,
 ) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    crate::command_admission::validate_and_admit(
-        &token,
+    emit_ai_command(
+        entity_uuid,
         crate::system_registry::red_alert_system_id(),
         payload,
         sources,
         sessions,
-        config,
+        ship_config,
         admitted,
     )
 }

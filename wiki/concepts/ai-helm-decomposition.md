@@ -54,7 +54,7 @@ All four systems share one `run_if(ai_helm_tick_ready)` gate. `AiHelmTickTimer` 
 
 ### Ordering
 
-Since #824 the AI systems emit admitted commands rather than writing intents: `build_helm_ai_surfaces_frame` runs after `AiTickLabel` and before all four per-axis systems; the four emit `SetThrust`/`SetSteering`/lateral/impulse payloads through `command_admission::validate_and_admit` into their own ship's `AdmittedCommands`, all **before** `process_helm_inputs`, which applies every admitted helm payload per-entity (human- and AI-sourced alike) and is the single writer of `LastHelmInput` (LocalShip only). `apply_helm_commands` runs after it, consuming `ImpulseCommand`. The registration comments in `src/ship_plugin.rs` state the full contract.
+Since #824 the AI systems emit admitted commands rather than writing intents: `build_helm_ai_surfaces_frame` runs after `AiTickLabel` and before all four per-axis systems; the four emit `SetThrust`/`SetSteering`/lateral/impulse payloads through `command_admission::ai_emit::emit_ai_command` (the shared AI-emit helper over `validate_and_admit`, issue #738) into their own ship's `AdmittedCommands`, all **before** `process_helm_inputs`, which applies every admitted helm payload per-entity (human- and AI-sourced alike) and is the single writer of `LastHelmInput` (LocalShip only). `apply_helm_commands` runs after it, consuming `ImpulseCommand`. The registration comments in `src/ship_plugin.rs` state the full contract.
 
 ## Intent-component surface
 

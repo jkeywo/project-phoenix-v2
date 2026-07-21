@@ -124,9 +124,12 @@ impl ShieldsDamageHistory {
 /// Loaded from `[shields_console.ai]` in the ship entity TOML. Defaults are
 /// used when the section is absent.
 ///
-/// Dual `Resource + Component` post ship-parity audit: production reads
-/// use the Resource form (single ship-wide AI tuning), but the Component
-/// derive is available if NPC ships ever need per-ship AI tuning.
+/// Dual `Resource + Component`. Since issue #738 **every production read goes
+/// through the per-entity Component** — `ai_shield_focus` and
+/// `emit_shields_coordination` both query it, and the spawner always attaches
+/// one. The `Resource` form survives only as `server_app`'s dual-write of the
+/// PLAYER ship's tuning; nothing reads it. Do not reintroduce a `Res<_>` read:
+/// it applies one ship's tuning to every ship.
 #[derive(Resource, Component, Clone, Debug)]
 pub struct ShieldsAiConfigResource {
     /// HP fraction (0.0–1.0) at or above which a restored facing fires the
@@ -353,13 +356,24 @@ pub fn emit_shields_coordination(
             &crate::ship_state::ShipRedAlert,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut ShieldsCoordinationState,
+            Option<&ShieldsAiConfigResource>,
         ),
         With<crate::server_app::Ship>,
     >,
-    ai_config: Res<ShieldsAiConfigResource>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (entity, shields, red_alert, control_sources, mut coord_state) in ship_q.iter_mut() {
+    // Per-ship tuning only (issue #738). This used to read the global
+    // `ShieldsAiConfigResource` Resource — which `server_app` writes from the
+    // PLAYER ship's `[shields_console.ai]` TOML — while iterating EVERY ship,
+    // so every NPC's restore-notification threshold followed the player's. The
+    // spawner now always attaches the per-entity Component; a ship without one
+    // falls back to the parse-time default the type already supplies for a TOML
+    // that omits the section.
+    let default_ai_cfg = ShieldsAiConfigResource::default();
+    for (entity, shields, red_alert, control_sources, mut coord_state, ai_config_comp) in
+        ship_q.iter_mut()
+    {
+        let ai_config: &ShieldsAiConfigResource = ai_config_comp.unwrap_or(&default_ai_cfg);
         let snapshots = shields.0.snapshot();
         coord_state.ensure_len(snapshots.len());
 
@@ -1207,6 +1221,105 @@ mod tests {
         assert_eq!(
             count, 0,
             "ShieldFacingRestored should not fire when not on red alert"
+        );
+    }
+
+    #[test]
+    fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_resource() {
+        // Issue #738 isolation: `emit_shields_coordination` used to read the
+        // global `ShieldsAiConfigResource` while iterating EVERY ship, and
+        // `server_app` writes that Resource from the PLAYER ship's
+        // `[shields_console.ai]` TOML — so every NPC's restore threshold
+        // followed the player's.
+        //
+        // The global Resource here carries a strict 90% restore threshold; the
+        // parse-time default is 50%. A facing sitting at 60/100 fires under the
+        // default and does not under the global tuning, so the global is
+        // observable — and must not be what an NPC without its own component
+        // uses.
+        let mut app = test_app_with_helm();
+        start_game_with_shields_and_helm(&mut app);
+        app.insert_resource(ShieldsAiConfigResource {
+            restored_notify_pct: 0.9,
+            ..Default::default()
+        });
+
+        let config = crate::shield::ShieldConfig {
+            num_facings: 2,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let arc_sources = || {
+            let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
+            cs.0.set(
+                crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                ControlSource::Ai,
+            );
+            cs
+        };
+        let red_alert = || {
+            let mut ra = crate::ship_state::ShipRedAlert::default();
+            ra.toggle();
+            ra
+        };
+
+        // An NPC with no shields-AI component of its own.
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                arc_sources(),
+                red_alert(),
+                ShieldsCoordinationState::default(),
+            ))
+            .id();
+        // A second NPC that DOES carry the strict tuning on its own entity,
+        // proving the 60/100 facing is suppressible at all.
+        let tuned = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                arc_sources(),
+                red_alert(),
+                ShieldsCoordinationState::default(),
+                ShieldsAiConfigResource {
+                    restored_notify_pct: 0.9,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        for e in [npc, tuned] {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            {
+                let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+                let facing = &mut shields.0.facings[0];
+                facing.offline_remaining = 0.0;
+                facing.hp = 60; // 0.6 — above the 0.5 default, below the 0.9 tuning
+            }
+            let mut coord = entity_mut.get_mut::<ShieldsCoordinationState>().unwrap();
+            coord.down_notified = vec![true, false];
+            coord.restore_notified = vec![false, false];
+        }
+
+        tick(&mut app);
+        let restoring_ships: Vec<Entity> = drain_coord(&mut app)
+            .iter()
+            .filter(|m| matches!(&m.payload, CoordinationPayload::ShieldFacingRestored { .. }))
+            .map(|m| m.source_entity)
+            .collect();
+
+        assert!(
+            restoring_ships.contains(&npc),
+            "an NPC without its own shields-AI tuning must use the parse-time 50% default, \
+             not the player ship's global 90%"
+        );
+        assert!(
+            !restoring_ships.contains(&tuned),
+            "a ship carrying the strict 90% threshold on its own entity must stay silent at 60%"
         );
     }
 

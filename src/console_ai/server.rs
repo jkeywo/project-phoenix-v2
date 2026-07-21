@@ -34,6 +34,8 @@
 
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
+
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
 pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
@@ -105,43 +107,9 @@ impl Plugin for ConsoleAiPlugin {
 
 // ── Shields AI ───────────────────────────────────────────────────────────────
 
-/// Validate-and-enqueue one shield-focus AI decision into this ship's own
-/// `AdmittedCommands` (issue #826, mirroring `ship::helm_ai::
-/// emit_helm_ai_command` from #824): the AI's `ai:` token flows through the
-/// same `validate_and_admit` seam network commands do, checked against this
-/// entity's own `ControlSourceResolver` (`operate_ai` must hold on the
-/// targeted arc). The write happens in the same tick —
-/// `ship::shields::handle_shields_messages` applies it later this frame — so
-/// there is no one-tick queue lag on the AI shields path.
-fn emit_shield_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
-    sources: &crate::ship_plugin::ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut crate::messages::AdmittedCommands,
-) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    crate::command_admission::validate_and_admit(
-        &token, target, payload, sources, sessions, config, admitted,
-    )
-}
+// The shield-focus AI's private `emit_shield_ai_command` (issue #826) is gone:
+// it was one of seven byte-identical copies, all now routed through the shared
+// `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
 /// AI shield-focus decision system (issue #692).
 ///
@@ -191,7 +159,6 @@ fn emit_shield_ai_command(
 /// (`None`) — not used here, since the live component is fresher anyway.
 pub(crate) fn ai_shield_focus(
     time: Res<Time>,
-    global_ai_config: Res<crate::ship::shields::ShieldsAiConfigResource>,
     world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
@@ -239,7 +206,7 @@ pub(crate) fn ai_shield_focus(
             else {
                 return;
             };
-            emit_shield_ai_command(
+            emit_ai_command(
                 entity_uuid,
                 sid,
                 crate::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
@@ -291,8 +258,21 @@ pub(crate) fn ai_shield_focus(
             continue; // Threat bearing takes priority over damage analysis
         }
 
-        let ai_cfg: &crate::ship::shields::ShieldsAiConfigResource =
-            ai_config_comp.unwrap_or(&*global_ai_config);
+        // Per-ship tuning only (issue #738). This used to fall back to the
+        // global `ShieldsAiConfigResource` Resource, which `server_app` writes
+        // from the PLAYER ship's `[shields_console.ai]` TOML — so an NPC with
+        // no `[shields_console.ai]` section silently inherited the player
+        // ship's shield-AI tuning. The fallback is now the serde-side default
+        // (the same values `ShieldsAiConfigResource::default()` supplies while
+        // parsing a ship TOML that omits the section).
+        let default_ai_cfg;
+        let ai_cfg: &crate::ship::shields::ShieldsAiConfigResource = match ai_config_comp {
+            Some(c) => c,
+            None => {
+                default_ai_cfg = crate::ship::shields::ShieldsAiConfigResource::default();
+                &default_ai_cfg
+            }
+        };
         let facings = &shields.0.facings;
 
         // Single-arc ships have nothing to focus.
@@ -357,7 +337,7 @@ pub(crate) fn ai_shield_focus(
                         .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
                 });
                 if let Some(sid) = current_sid {
-                    emit_shield_ai_command(
+                    emit_ai_command(
                         entity_uuid,
                         sid,
                         crate::messages::SystemControlPayload::SetShieldArcFocus { focused: false },
@@ -380,43 +360,8 @@ pub(crate) fn ai_shield_focus(
 
 // ── Power AI ─────────────────────────────────────────────────────────────────
 
-/// Validate-and-enqueue one power-allocation AI decision into this ship's own
-/// `AdmittedCommands` (issue #831, mirroring `emit_shield_ai_command` from
-/// #826): the AI's `ai:` token flows through the same `validate_and_admit`
-/// seam network commands do, checked against this entity's own
-/// `ControlSourceResolver` (`operate_ai` must hold on the power reactor). The
-/// write happens in the same tick — `ship::power::handle_power_messages`
-/// applies it later this frame — so there is no one-tick queue lag on the AI
-/// power path.
-fn emit_power_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
-    sources: &crate::ship_plugin::ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut crate::messages::AdmittedCommands,
-) -> bool {
-    let token = entity_uuid
-        .map(|u| format!("ai:{}", u.0))
-        .unwrap_or_else(|| "ai:backfill".to_string());
-    let default_config;
-    let config = match ship_config {
-        Some(c) => &c.0,
-        None => {
-            default_config = crate::ship::config::ShipConfig {
-                stations: vec![],
-                systems: vec![],
-                power_groups: std::collections::HashMap::new(),
-                coordination_lag_secs: 0.0,
-            };
-            &default_config
-        }
-    };
-    crate::command_admission::validate_and_admit(
-        &token, target, payload, sources, sessions, config, admitted,
-    )
-}
+// `emit_power_ai_command` (issue #831) likewise collapsed into the shared
+// `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
 /// AI power-allocation decision system (issue #693, admitted transport #831).
 ///
@@ -473,8 +418,6 @@ fn emit_power_ai_command(
 /// - `dt` from `Time::delta_secs()`.
 fn ai_power_allocation(
     time: Res<Time>,
-    ai_config_res: Res<crate::ship::power::PowerAiConfigResource>,
-    config_res: Res<crate::ship::power::PowerConfigResource>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
@@ -521,13 +464,30 @@ fn ai_power_allocation(
             continue;
         }
 
-        // Per-entity config component if present, else the global Resource
-        // (init_resource'd by `ShipPowerPlugin`). The former standalone
-        // shadow-default `Option<Res>` ladders retired with the intent
-        // transport (issue #831).
-        let cfg: &crate::ship::power::PowerConfigResource = cfg_comp.unwrap_or(&config_res);
-        let ai_cfg: &crate::ship::power::PowerAiConfigResource =
-            ai_cfg_comp.unwrap_or(&ai_config_res);
+        // Per-entity config components only (issue #738). These used to fall
+        // back to the global `PowerConfigResource` / `PowerAiConfigResource`
+        // Resources, which `server_app` writes from the PLAYER ship's `[power]`
+        // TOML — so an NPC spawned without those components ran its reactor AI
+        // against the player ship's capacity and thresholds. The fallback is
+        // now the parse-time default each type already supplies for a ship TOML
+        // with no `[power]` block (see `entity_spawner`, which inserts exactly
+        // those defaults on every spawned ship).
+        let cfg_default;
+        let cfg: &crate::ship::power::PowerConfigResource = match cfg_comp {
+            Some(c) => c,
+            None => {
+                cfg_default = crate::ship::power::PowerConfigResource::default();
+                &cfg_default
+            }
+        };
+        let ai_cfg_default;
+        let ai_cfg: &crate::ship::power::PowerAiConfigResource = match ai_cfg_comp {
+            Some(c) => c,
+            None => {
+                ai_cfg_default = crate::ship::power::PowerAiConfigResource::default();
+                &ai_cfg_default
+            }
+        };
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
@@ -558,7 +518,7 @@ fn ai_power_allocation(
                 if target == current {
                     return;
                 }
-                emit_power_ai_command(
+                emit_ai_command(
                     entity_uuid,
                     crate::system_registry::power_reactor_system_id(),
                     crate::messages::SystemControlPayload::SetPowerGroupAllocation {
@@ -695,7 +655,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             With<crate::server_app::Ship>,
         ),
     >,
-    torpedo_sys_res: Res<crate::weapons_plugin::TorpedoSystemResource>,
     asteroid_q: Query<
         (&crate::simulation::AsteroidUuid, &Transform),
         With<crate::simulation::Asteroid>,
@@ -801,12 +760,15 @@ pub(crate) fn ai_torpedo_auto_fire(
         let world_bearing = dx.atan2(-dz);
         let bearing = world_bearing - physics.yaw;
 
-        // Prefer per-entity component; fall back to global resource for
-        // legacy test paths that only set up the Resource.
-        let torpedo_sys: &crate::torpedo::TorpedoSystem = match torpedo_sys_comp {
-            Some(c) => &c.0,
-            None => &torpedo_sys_res.0,
+        // Per-entity component only (issue #738). This used to fall back to
+        // the global `TorpedoSystemResource` Resource, which mirrors the
+        // LOCAL ship's magazine and tube state — so an NPC with no `[torpedoes]`
+        // block decided its auto-fire from the player's tubes. A ship with no
+        // torpedo system has nothing to fire.
+        let Some(torpedo_sys_comp) = torpedo_sys_comp else {
+            continue;
         };
+        let torpedo_sys: &crate::torpedo::TorpedoSystem = &torpedo_sys_comp.0;
         let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
             .tubes
             .iter()
@@ -871,7 +833,7 @@ pub(crate) fn ai_torpedo_auto_fire(
 /// these conditions, so the two systems never double-emit for the same ship.
 fn ai_frequency_hint(
     time: Res<Time>,
-    global_ai_config: Res<crate::ship::sensors::SensorsAiConfigResource>,
+
     sessions: Option<Res<crate::lobby::Sessions>>,
     mut ships: Query<
         (
@@ -964,8 +926,23 @@ fn ai_frequency_hint(
             })
             .unwrap_or(0.5);
 
-        let ai_cfg: &crate::ship::sensors::SensorsAiConfigResource =
-            ai_config_comp.unwrap_or(&*global_ai_config);
+        // Per-ship tuning only (issue #738). This used to fall back to the
+        // global `SensorsAiConfigResource` Resource while iterating every ship,
+        // so whatever last wrote that Resource applied fleet-wide. Nothing in
+        // the shipped app writes it — unlike the shields Resource, which
+        // `server_app` dual-writes from the PLAYER ship's TOML — so the leak
+        // was latent rather than live: it is registered purely for structural
+        // symmetry with shields/power, and never seeded. The fallback is now
+        // the parse-time default the type already supplies for a ship TOML that
+        // omits the section.
+        let default_ai_cfg;
+        let ai_cfg: &crate::ship::sensors::SensorsAiConfigResource = match ai_config_comp {
+            Some(c) => c,
+            None => {
+                default_ai_cfg = crate::ship::sensors::SensorsAiConfigResource::default();
+                &default_ai_cfg
+            }
+        };
 
         let input = crate::console_ai::FrequencyHintInput {
             locked_target,
@@ -1168,6 +1145,71 @@ mod tests {
             focused_facing(&app, b),
             None,
             "the undamaged NPC must not be contaminated by another ship's AI command"
+        );
+    }
+
+    #[test]
+    fn npc_shield_ai_reads_its_own_tuning_not_the_player_ships_global_resource() {
+        // Issue #738 isolation: `ai_shield_focus` used to resolve its tuning as
+        // `per_entity_component.unwrap_or(&*global_resource)`, and `server_app`
+        // writes that global Resource from the PLAYER ship's
+        // `[shields_console.ai]` TOML. An NPC without the component therefore
+        // ran the player's thresholds.
+        //
+        // Here the global Resource carries a permissive 90% health-ratio rule
+        // and the per-entity components carry the parse-time default (50%). One
+        // arc sits at 60/100 with the rest full: 0.6 < 0.9 focuses, 0.6 < 0.5
+        // does not. So the global tuning is observable — and must not be what
+        // the NPC uses.
+        let mut app = shield_test_app();
+        let npc = ship_entity(&mut app);
+        app.insert_resource(ShieldsAiConfigResource {
+            health_ratio_threshold: 90.0,
+            ..Default::default()
+        });
+
+        // A second ship that DOES carry the permissive tuning as its own
+        // per-entity component, proving the 60/100 arc is focusable at all.
+        let config = crate::shield::ShieldConfig {
+            num_facings: 4,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        };
+        let tuned = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShieldsDamageHistory::default(),
+                PendingShieldsThreatBearing::default(),
+                ai_shield_control_sources(),
+                AdmittedCommands::default(),
+                AiHighFidelity,
+                ShieldsAiConfigResource {
+                    health_ratio_threshold: 90.0,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        for e in [npc, tuned] {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 60;
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, tuned),
+            Some(0),
+            "a ship carrying the permissive tuning on its own entity must focus the weak arc"
+        );
+        assert_eq!(
+            focused_facing(&app, npc),
+            None,
+            "an NPC without its own shields-AI tuning must fall back to the parse-time \
+             default, never to the global Resource holding the player ship's tuning"
         );
     }
 
@@ -1438,6 +1480,64 @@ mod tests {
     }
 
     #[test]
+    fn npc_frequency_hint_reads_its_own_tuning_not_the_global_resource() {
+        // Issue #738 isolation, mirroring the shields case: `ai_frequency_hint`
+        // used to resolve its delay as
+        // `per_entity_component.unwrap_or(&*global_resource)` while iterating
+        // every ship, so any write to that Resource would have applied
+        // fleet-wide. Nothing writes it today (unlike the shields Resource,
+        // which `server_app` dual-writes from the player ship) — this test
+        // seeds it by hand so the leak stays closed if anything ever does.
+        //
+        // The global Resource here carries an eager 0.5s delay; one tick of
+        // 1.0s therefore fires under the global tuning but not under the
+        // parse-time default (3.0s).
+        let mut app = freq_hint_test_app();
+        let npc = app.world().resource::<SourceShip>().0;
+        app.insert_resource(crate::ship::sensors::SensorsAiConfigResource {
+            frequency_hint_delay_secs: 0.5,
+        });
+
+        let mut tuned_sources = ShipSystemControlSources::default();
+        tuned_sources.0.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Ai,
+        );
+        let tuned = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                tuned_sources,
+                crate::server_app::ShipSystemBlackboards::default(),
+                TacticalRadarSelection(Some("target-1".into())),
+                ShipFrequencyHintState::default(),
+                AiHighFidelity,
+                crate::ship::sensors::SensorsAiConfigResource {
+                    frequency_hint_delay_secs: 0.5,
+                },
+            ))
+            .id();
+
+        tick_with_dt(&mut app, 1.0);
+
+        let coord = &app.world().resource::<CoordBox>().0;
+        let hinting_ships: Vec<Entity> = coord
+            .iter()
+            .filter(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. }))
+            .map(|m| m.source_entity)
+            .collect();
+        assert!(
+            hinting_ships.contains(&tuned),
+            "a ship carrying the eager 0.5s delay on its own entity must hint after 1.0s"
+        );
+        assert!(
+            !hinting_ships.contains(&npc),
+            "an NPC without its own sensors-AI tuning must fall back to the parse-time \
+             3.0s default, never to the global Resource holding the player ship's tuning"
+        );
+    }
+
+    #[test]
     fn ai_frequency_hint_skips_ships_where_sensors_are_not_ai_operated() {
         let mut app = freq_hint_test_app();
         let source = app.world().resource::<SourceShip>().0;
@@ -1676,6 +1776,89 @@ station = "sensors"
         assert!(
             after > before,
             "weapons power should increase under sustained red alert (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn npc_power_ai_reads_its_own_tuning_not_the_player_ships_global_resource() {
+        // Issue #738 isolation: `ai_power_allocation` used to resolve both its
+        // reactor config and its AI tuning as
+        // `per_entity_component.unwrap_or(&*global_resource)`, and `server_app`
+        // writes those Resources from the PLAYER ship's `[power]` TOML. An NPC
+        // spawned without the components therefore ran the player's thresholds.
+        //
+        // The global `PowerAiConfigResource` here carries an eager 0.5s
+        // red-alert delay, so a single 1.0s tick engages under the global
+        // tuning but not under the parse-time 3.0s default.
+        let mut app = power_test_app();
+        let npc = power_ship_entity(&mut app);
+        app.insert_resource(crate::ship::power::PowerAiConfigResource {
+            red_alert_engage_delay_secs: 0.5,
+            ..Default::default()
+        });
+
+        let mut tuned_sources = ShipSystemControlSources::default();
+        tuned_sources.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let tuned = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                tuned_sources,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::default(),
+                ),
+                crate::ship_state::ShipRedAlert(true),
+                crate::ship_plugin::LastHelmInput::default(),
+                crate::ship::power::ShipPowerAiState::default(),
+                crate::messages::AdmittedCommands::default(),
+                AiHighFidelity,
+                crate::ship::power::PowerAiConfigResource {
+                    red_alert_engage_delay_secs: 0.5,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .entity_mut(npc)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        let npc_before = power_level(
+            &app,
+            npc,
+            crate::modifiers::power_system::WEAPONS_POWER_GROUP,
+        );
+        let tuned_before = power_level(
+            &app,
+            tuned,
+            crate::modifiers::power_system::WEAPONS_POWER_GROUP,
+        );
+
+        power_tick_with_dt(&mut app, 1.0);
+
+        assert!(
+            power_level(
+                &app,
+                tuned,
+                crate::modifiers::power_system::WEAPONS_POWER_GROUP
+            ) > tuned_before,
+            "a ship carrying the eager 0.5s red-alert delay on its own entity must engage \
+             after 1.0s"
+        );
+        assert_eq!(
+            power_level(
+                &app,
+                npc,
+                crate::modifiers::power_system::WEAPONS_POWER_GROUP
+            ),
+            npc_before,
+            "an NPC without its own power-AI tuning must fall back to the parse-time 3.0s \
+             default, never to the global Resource holding the player ship's tuning"
         );
     }
 

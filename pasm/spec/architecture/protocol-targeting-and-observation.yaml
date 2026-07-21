@@ -159,7 +159,8 @@ entities:
       summary: Registers the console AI decide systems that wire previously-orphaned pure helpers in console_ai::core into active Bevy systems for shields focus, power allocation, torpedo auto-fire, and delayed sensors frequency hinting.
       rationale:
         - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/integrate_torpedo_intents, and ai_frequency_hint into ConsoleAiPlugin's Update schedule, so the plugin is no longer inactive and the prior removal-or-replace exception no longer applies. Issue #698 then moved the torpedo apply half out again: integrate_torpedo_intents was folded into console::weapons::integrate_weapons_state, which WeaponsPlugin registers because it also serves ships that never reach AiHighFidelity. ConsoleAiPlugin retains ai_torpedo_auto_fire (decide)."
-        - "Issue #826 (admission symmetry): ai_shield_focus no longer writes an intent component — it emits admitted SetShieldArcFocus payloads through command_admission::validate_and_admit with its ship's own ai:<uuid> token, and ship::shields::handle_shields_messages (registered by ShipShieldsPlugin, same SimSet::Physics, one explicit before-edge from the emit) is the single applier for human and AI alike; integrate_shield_state and ShieldArcIntents are deleted. The remaining decide systems (power, torpedo) still write per-ship intent components (PowerReactorIntents, TorpedoIntents) drained by their paired appliers via the same mutation primitive the human admitted-command path uses."
+        - "Issue #826 (admission symmetry): ai_shield_focus no longer writes an intent component — it emits admitted SetShieldArcFocus payloads through command_admission::validate_and_admit with its ship's own ai:<uuid> token, and ship::shields::handle_shields_messages (registered by ShipShieldsPlugin, same SimSet::Physics, one explicit before-edge from the emit) is the single applier for human and AI alike; integrate_shield_state and ShieldArcIntents are deleted."
+        - "Issue #831 (admission symmetry, power): ai_power_allocation follows the same pattern — it emits admitted SetPowerGroupAllocation payloads targeting POWER_REACTOR_SYSTEM_ID (on-change vs. the current allocation) through validate_and_admit, and ship::power::handle_power_messages (registered by ShipPowerPlugin, moved to SimSet::Physics with one explicit before-edge from the emit) is the single applier for human and AI alike; integrate_power_state, PowerReactorIntents, and PowerReactorCommand are deleted. Only ai_torpedo_auto_fire (TorpedoIntents) retains the older intent-component transport."
     architecture:
       kind: service
       authority: authoritative
@@ -167,5 +168,5 @@ entities:
     implementation:
       status: declared
       paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app.rs]
-      symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, integrate_power_state, ai_torpedo_auto_fire, ai_frequency_hint]
+      symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, ai_frequency_hint]
       tests: [cargo test]

@@ -17,7 +17,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power AI Operator
-      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve.
+      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve. Since issue #831 it emits its reallocation as an admitted SetPowerGroupAllocation command through the shared admission seam (the same surface a human uses), rather than through a private intent component.
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
 

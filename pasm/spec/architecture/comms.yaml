@@ -84,7 +84,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Comms Blackboard Publisher
-      summary: Projects messages, contacts, urgency, reachability, and objective snapshots to the local ship's Comms surface.
+      summary: Projects messages, contacts, urgency, reachability, and objective snapshots to the local ship's Comms surface. Since issue #831 it publishes per-Ship (With<Ship>): the shared player-channel content is gated on Has<LocalShip> and written to the local ship, while every NPC ship receives an empty Comms blackboard entry for architectural consistency (comms is fundamentally a player channel, so NPC entries carry no messages, objectives, or contacts).
     architecture:
       kind: blackboard-publisher
       authority: authoritative

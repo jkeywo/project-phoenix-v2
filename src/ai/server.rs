@@ -697,9 +697,6 @@ fn lod_ai_ships(
                         .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
                     commands
                         .entity(entity)
-                        .insert(crate::ship::power::PowerReactorIntents::default());
-                    commands
-                        .entity(entity)
                         .insert(crate::ship::power::ShipPowerAiState::default());
                     commands
                         .entity(entity)
@@ -718,9 +715,6 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
-                    commands
-                        .entity(entity)
-                        .remove::<crate::ship::power::PowerReactorIntents>();
                     commands
                         .entity(entity)
                         .remove::<crate::ship::power::ShipPowerAiState>();
@@ -1940,7 +1934,6 @@ mod tests {
                 ShipPhysics::default(),
                 AiHighFidelity,
                 crate::console_ai_plugin::ShipFrequencyHintState::default(),
-                crate::ship::power::PowerReactorIntents::default(),
                 crate::ship::power::ShipPowerAiState::default(),
                 crate::weapons_plugin::TorpedoIntents::default(),
                 crate::ship::helm::ThrustInput::default(),

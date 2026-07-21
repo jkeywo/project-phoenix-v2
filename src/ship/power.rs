@@ -107,36 +107,25 @@ impl Default for PowerAiConfigResource {
     }
 }
 
-// ── AI intent/state (issue #693) ─────────────────────────────────────────────
-
-/// A single power-reallocation command emitted by the AI decision system
-/// (`console_ai::server::ai_power_allocation`) for `console_ai::server::
-/// integrate_power_state` to apply the same tick. Carries the target power
-/// group and the absolute level to set via `PowerSystem::set_group_allocation`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PowerReactorCommand {
-    pub group: PowerGroupId,
-    pub level: u8,
-}
-
-/// Per-ship queue of pending power-reallocation intents. Written by
-/// `ai_power_allocation`, drained and applied by `integrate_power_state` in
-/// the same tick.
-///
-/// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site (see `ai::server::lod_ai_ships`
-/// and the `AiHighFidelity` spawn sites in `server_app.rs` /
-/// `ship_plugin.rs` / `ai/server.rs`).
-#[derive(Component, Default, Clone, Debug)]
-pub struct PowerReactorIntents(pub Vec<PowerReactorCommand>);
+// ── AI state (issue #693; intent transport retired in #831) ──────────────────
+//
+// `PowerReactorCommand` / `PowerReactorIntents` (the private intent component
+// written by `ai_power_allocation` and drained by the paired
+// `integrate_power_state`) were deleted by issue #831: the AI now emits an
+// admitted `SetPowerGroupAllocation` that `handle_power_messages` (below)
+// applies, the single applier for human and AI commands alike — mirroring the
+// shields #826 retirement of `ShieldArcIntents` / `integrate_shield_state`.
 
 /// Per-ship persistent state for the two timer/hysteresis-based power AI
 /// rules. `tick_power_movement_rule` and `tick_power_red_alert_rule` each
 /// need their own independent `EngageState` (confirmed by `console_ai::core`'s
 /// own tests, which use two separate local `state` variables).
 ///
-/// Present only while the ship carries `AiHighFidelity`, matching
-/// `PowerReactorIntents`'s scoping.
+/// Present only while the ship carries `AiHighFidelity` — bundled alongside
+/// that marker at every spawn/promote site (see `ai::server::lod_ai_ships`
+/// and the `AiHighFidelity` spawn sites in `server_app.rs` /
+/// `ship_plugin.rs` / `ai/server.rs`). It is the surviving power-AI decision
+/// state after the intent transport retired in issue #831.
 #[derive(Component, Default, Clone, Debug)]
 pub struct ShipPowerAiState {
     pub movement: crate::console_ai::EngageState,
@@ -191,7 +180,28 @@ impl Plugin for ShipPowerPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
+                    // In `SimSet::Physics`, not Input (issue #831, mirroring
+                    // shields #826): `admit_system_commands` clears every
+                    // ship's `AdmittedCommands` before Input each tick, and the
+                    // AI decide system (`console_ai::server::ai_power_allocation`,
+                    // Physics) refills it same-tick via `validate_and_admit` —
+                    // so the applier must consume in Physics *after* the AI emit
+                    // or AI power commands would be silently lost. `ConsoleAiPlugin`
+                    // declares the explicit
+                    // `ai_power_allocation.before(handle_power_messages)` edge.
+                    //
+                    // `tick_power_system` is ALSO in Physics and also takes
+                    // `&mut ShipPowerSystem`, so set membership alone leaves
+                    // their order unspecified. The explicit
+                    // `.before(tick_power_system)` edge restores the guarantee
+                    // the old Input placement gave for free: a same-tick
+                    // reallocation is applied before this tick's battery
+                    // integration reads `total()`. (Unlike shields, whose
+                    // `tick_shields` lives in the later `Modifiers` set, so set
+                    // ordering sufficed there.)
+                    handle_power_messages
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .before(tick_power_system),
                     tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
                     handle_power_inter_system.in_set(crate::sim_sets::SimSet::Modifiers),
                     tick_power_brownout_advisory.in_set(crate::sim_sets::SimSet::Modifiers),
@@ -268,12 +278,13 @@ pub fn handle_power_messages(
     power_res: Option<ResMut<ShipPowerSystem>>,
 ) {
     let mut power_res = power_res;
-    // Iterate every ship (player + NPC) so the player's Power console
-    // commands re-allocate that ship's own power grid. NPC AI reallocation
-    // goes through a separate path — `console_ai::server::ai_power_allocation`
-    // / `integrate_power_state` — which mutates `ShipPowerSystem` directly
-    // via `set_group_allocation`, mirroring this handler's mutation
-    // primitive without routing through `AdmittedCommands`.
+    // Iterate every ship (player + NPC) so the player's Power console commands
+    // AND NPC AI reallocation both re-allocate that ship's own power grid
+    // through the one applier. Since issue #831 the NPC AI path emits an
+    // admitted `SetPowerGroupAllocation` (from
+    // `console_ai::server::ai_power_allocation`) that lands in this same
+    // `AdmittedCommands` queue — there is no longer a separate
+    // `integrate_power_state` adapter mutating `ShipPowerSystem` directly.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
         let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
         for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
@@ -497,10 +508,10 @@ pub fn tick_power_system(
 //
 // The old fused `operate_power_ai` (absolute-set, non-timer, non-
 // AiHighFidelity-gated) was removed in issue #693. It is replaced by
-// `console_ai::server::ai_power_allocation` (decision, writes
-// `PowerReactorIntents`) + `console_ai::server::integrate_power_state`
-// (adapter — applies intents via `set_group_allocation`, the same mutation
-// primitive `handle_power_messages` above uses for the human path).
+// `console_ai::server::ai_power_allocation`, which since issue #831 emits an
+// admitted `SetPowerGroupAllocation` applied by `handle_power_messages` above
+// — the single applier for the human and AI paths alike (the intermediate
+// `PowerReactorIntents` + `integrate_power_state` adapter has been retired).
 
 /// Map a power group id string to the target `SystemId` for coordination.
 fn system_id_for_power_group(group: &str) -> Option<SystemId> {
@@ -760,6 +771,25 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
+            // Chain the SimSet phases so admission (before Input) → the applier
+            // `handle_power_messages` (moved to Physics in issue #831) → battery
+            // tick → publish run in order. Without this, `handle_power_messages`
+            // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
+            // so it can run before the command is admitted and the allocation
+            // never applies (mirrors the navigation test harness's #830 chain).
+            .configure_sets(
+                Update,
+                (
+                    crate::sim_sets::SimSet::Input,
+                    crate::sim_sets::SimSet::Physics,
+                    crate::sim_sets::SimSet::Damage,
+                    crate::sim_sets::SimSet::Modifiers,
+                    crate::sim_sets::SimSet::Publish,
+                    crate::sim_sets::SimSet::PublishAggregate,
+                    crate::sim_sets::SimSet::Broadcast,
+                )
+                    .chain(),
+            )
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
@@ -1236,8 +1266,9 @@ mod tests {
     //
     // `operate_power_ai`'s tests were removed in issue #693 along with the
     // system itself. System-level coverage for the replacement
-    // `ai_power_allocation` / `integrate_power_state` lives in
-    // `console_ai::server`'s test module.
+    // `ai_power_allocation` (which since issue #831 emits admitted commands
+    // applied by `handle_power_messages`) lives in `console_ai::server`'s test
+    // module.
     //
     // These tests exercise the full weapons→power inter-system drain flow.
     // A minimal combined app registers both `drain_power_for_active_beam`
@@ -1426,6 +1457,25 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(200),
             ))
+            // Chain the SimSet phases so admission (before Input) → the applier
+            // `handle_power_messages` (moved to Physics in issue #831) → battery
+            // tick → publish run in order. Without this, `handle_power_messages`
+            // in Physics has no ordering vs. the `.before(Input)` AdmissionSet,
+            // so it can run before the command is admitted and the allocation
+            // never applies (mirrors the navigation test harness's #830 chain).
+            .configure_sets(
+                Update,
+                (
+                    crate::sim_sets::SimSet::Input,
+                    crate::sim_sets::SimSet::Physics,
+                    crate::sim_sets::SimSet::Damage,
+                    crate::sim_sets::SimSet::Modifiers,
+                    crate::sim_sets::SimSet::Publish,
+                    crate::sim_sets::SimSet::PublishAggregate,
+                    crate::sim_sets::SimSet::Broadcast,
+                )
+                    .chain(),
+            )
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()

@@ -78,7 +78,6 @@ pub fn test_app() -> App {
         ShipBoost::default(),
         crate::ai_plugin::AiHighFidelity,
         crate::console_ai_plugin::ShipFrequencyHintState::default(),
-        crate::ship::power::PowerReactorIntents::default(),
         crate::ship::power::ShipPowerAiState::default(),
         crate::weapons_plugin::TorpedoIntents::default(),
     ));

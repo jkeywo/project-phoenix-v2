@@ -52,7 +52,7 @@ pub const AI_RULE_RED_ALERT_RULE: &str = "red_alert_rule";
 /// Bevy-facing wrapper around `console_ai::FrequencyHintState`.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site (mirrors `PowerReactorIntents`'s
+/// that marker at every spawn/promote site (mirrors `ShipPowerAiState`'s
 /// scoping; see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn
 /// sites in `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
 #[derive(Component, Default, Clone, Debug)]
@@ -77,12 +77,17 @@ impl Plugin for ConsoleAiPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::shields::handle_shields_messages),
+                // Decide only (issue #831, mirroring shields #826): emits
+                // admitted SetPowerGroupAllocation payloads; the single applier
+                // is `ship::power::handle_power_messages` (registered by
+                // ShipPowerPlugin in this same Physics set). The `.before` edge
+                // is the one explicit ordering between them — admission clears
+                // AdmittedCommands before Input each tick, so the applier must
+                // consume same-tick after this emit.
                 ai_power_allocation
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel),
-                integrate_power_state
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(ai_power_allocation),
+                    .after(crate::sim_sets::AiTickLabel)
+                    .before(crate::ship::power::handle_power_messages),
                 // Decide only. The apply half is
                 // `console::weapons::integrate_weapons_state`
                 // (issue #698), which drains `TorpedoIntents` and
@@ -375,15 +380,55 @@ pub(crate) fn ai_shield_focus(
 
 // ── Power AI ─────────────────────────────────────────────────────────────────
 
-/// AI power-allocation decision system (issue #693).
+/// Validate-and-enqueue one power-allocation AI decision into this ship's own
+/// `AdmittedCommands` (issue #831, mirroring `emit_shield_ai_command` from
+/// #826): the AI's `ai:` token flows through the same `validate_and_admit`
+/// seam network commands do, checked against this entity's own
+/// `ControlSourceResolver` (`operate_ai` must hold on the power reactor). The
+/// write happens in the same tick — `ship::power::handle_power_messages`
+/// applies it later this frame — so there is no one-tick queue lag on the AI
+/// power path.
+fn emit_power_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    target: crate::messages::SystemId,
+    payload: crate::messages::SystemControlPayload,
+    sources: &crate::ship_plugin::ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    admitted: &mut crate::messages::AdmittedCommands,
+) -> bool {
+    let token = entity_uuid
+        .map(|u| format!("ai:{}", u.0))
+        .unwrap_or_else(|| "ai:backfill".to_string());
+    let default_config;
+    let config = match ship_config {
+        Some(c) => &c.0,
+        None => {
+            default_config = crate::ship::config::ShipConfig {
+                stations: vec![],
+                systems: vec![],
+                power_groups: std::collections::HashMap::new(),
+                coordination_lag_secs: 0.0,
+            };
+            &default_config
+        }
+    };
+    crate::command_admission::validate_and_admit(
+        &token, target, payload, sources, sessions, config, admitted,
+    )
+}
+
+/// AI power-allocation decision system (issue #693, admitted transport #831).
 ///
 /// Wires the previously-orphaned `console_ai::tick_power_movement_rule` and
 /// `console_ai::tick_power_red_alert_rule` pure functions: sustained thrust
 /// nudges the helm power group +1 (and drops it -1 once battery/thrust
 /// conditions lapse); sustained red alert does the same to the weapons power
-/// group. Writes the decision into `PowerReactorIntents` for
-/// `integrate_power_state` to apply, rather than mutating `ShipPowerSystem`
-/// directly.
+/// group. Emits the decision as an admitted `SetPowerGroupAllocation` payload
+/// targeted at `POWER_REACTOR_SYSTEM_ID` (issue #831 — previously a
+/// `PowerReactorIntents` write drained by a paired `integrate_power_state`
+/// adapter), for `ship::power::handle_power_messages` to apply later this tick,
+/// rather than mutating `ShipPowerSystem` directly.
 ///
 /// Replaces the old fused `ship::power::operate_power_ai` (absolute-set,
 /// non-timer, non-`AiHighFidelity`-gated) entirely — see that module's
@@ -407,9 +452,13 @@ pub(crate) fn ai_shield_focus(
 /// # ±1 level semantics
 /// `PowerEngageOutput::Engage` adds +1 to the target group (helm for the
 /// movement rule, weapons for the red-alert rule); `Disengage` subtracts 1;
-/// `NoChange` emits no intent. `PowerSystem::set_group_allocation` clamps to
-/// `[1, 4]` and enforces the total<=8 cap in `integrate_power_state`, so
-/// passing a saturated/clamped-ish value through here is safe regardless.
+/// `NoChange` emits nothing. The target level is clamped to `[1, 4]` (the same
+/// per-group range `PowerSystem::set_group_allocation` enforces), and a command
+/// is emitted **only when that clamped level differs from the current
+/// allocation** — a saturated Engage at level 4 (or Disengage at level 1) is a
+/// no-op and is skipped so admission is not spammed every tick. The applier
+/// (`handle_power_messages`) additionally re-clamps and enforces the total<=8
+/// cap, so the emitted value is safe regardless.
 ///
 /// # Data sources
 /// - `red_alert` from `ShipRedAlert`, default `false` if absent.
@@ -424,18 +473,21 @@ pub(crate) fn ai_shield_focus(
 /// - `dt` from `Time::delta_secs()`.
 fn ai_power_allocation(
     time: Res<Time>,
-    ai_config_res: Option<Res<crate::ship::power::PowerAiConfigResource>>,
-    config_res: Option<Res<crate::ship::power::PowerConfigResource>>,
+    ai_config_res: Res<crate::ship::power::PowerAiConfigResource>,
+    config_res: Res<crate::ship::power::PowerConfigResource>,
+    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::power::ShipPowerSystem,
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::ship_plugin::LastHelmInput>,
             Option<&crate::ship::power::PowerConfigResource>,
             Option<&crate::ship::power::PowerAiConfigResource>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             &mut crate::ship::power::ShipPowerAiState,
-            &mut crate::ship::power::PowerReactorIntents,
+            &mut crate::messages::AdmittedCommands,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -445,41 +497,19 @@ fn ai_power_allocation(
 ) {
     let dt = time.delta_secs();
 
-    // Three-step "shadow default, deref-or-fallback" idiom — copied verbatim
-    // from the deleted `operate_power_ai` for both config reads.
-    let ai_cfg_default;
-    let ai_cfg_fallback: &crate::ship::power::PowerAiConfigResource = match ai_config_res.as_deref()
-    {
-        Some(c) => c,
-        None => {
-            ai_cfg_default = crate::ship::power::PowerAiConfigResource::default();
-            &ai_cfg_default
-        }
-    };
-    let cfg_default;
-    let cfg_fallback: &crate::ship::power::PowerConfigResource = match config_res.as_deref() {
-        Some(c) => c,
-        None => {
-            cfg_default = crate::ship::power::PowerConfigResource::default();
-            &cfg_default
-        }
-    };
-
     for (
+        entity_uuid,
         control_sources,
         power,
         red_alert_comp,
         last_helm_comp,
         cfg_comp,
         ai_cfg_comp,
+        ship_config,
         mut ai_state,
-        mut intents,
+        mut admitted,
     ) in ships.iter_mut()
     {
-        // Clear last tick's intents unconditionally — a stale intent must
-        // never survive into a tick where the decision didn't run.
-        intents.0.clear();
-
         let policy = control_sources
             .0
             .policy_for(&crate::system_registry::power_reactor_system_id());
@@ -491,9 +521,13 @@ fn ai_power_allocation(
             continue;
         }
 
-        let cfg: &crate::ship::power::PowerConfigResource = cfg_comp.unwrap_or(cfg_fallback);
+        // Per-entity config component if present, else the global Resource
+        // (init_resource'd by `ShipPowerPlugin`). The former standalone
+        // shadow-default `Option<Res>` ladders retired with the intent
+        // transport (issue #831).
+        let cfg: &crate::ship::power::PowerConfigResource = cfg_comp.unwrap_or(&config_res);
         let ai_cfg: &crate::ship::power::PowerAiConfigResource =
-            ai_cfg_comp.unwrap_or(ai_cfg_fallback);
+            ai_cfg_comp.unwrap_or(&ai_config_res);
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
@@ -511,6 +545,33 @@ fn ai_power_allocation(
             crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
         );
 
+        // Emit an admitted `SetPowerGroupAllocation` toward the reactor for a
+        // ±1 nudge on `group`, but only when the clamped target level actually
+        // differs from the current allocation (skip saturated no-ops so a held
+        // Engage/Disengage doesn't spam admission every tick — issue #831).
+        let emit_delta =
+            |group: &crate::messages::PowerGroupId,
+             delta: i16,
+             admitted: &mut crate::messages::AdmittedCommands| {
+                let current = power.0.level_for(group);
+                let target = (current as i16 + delta).clamp(1, 4) as u8;
+                if target == current {
+                    return;
+                }
+                emit_power_ai_command(
+                    entity_uuid,
+                    crate::system_registry::power_reactor_system_id(),
+                    crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                        group: group.clone(),
+                        level: target,
+                    },
+                    control_sources,
+                    &sessions,
+                    ship_config,
+                    admitted,
+                );
+            };
+
         // ── Movement rule → helm group ───────────────────────────────────
         let movement_input = crate::console_ai::PowerMovementInput {
             thrust,
@@ -526,18 +587,10 @@ fn ai_power_allocation(
             crate::console_ai::tick_power_movement_rule(&mut ai_state.movement, &movement_input);
         match movement_output {
             crate::console_ai::PowerEngageOutput::Engage => {
-                let current = power.0.level_for(&helm_id);
-                intents.0.push(crate::ship::power::PowerReactorCommand {
-                    group: helm_id.clone(),
-                    level: current.saturating_add(1),
-                });
+                emit_delta(&helm_id, 1, &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::Disengage => {
-                let current = power.0.level_for(&helm_id);
-                intents.0.push(crate::ship::power::PowerReactorCommand {
-                    group: helm_id.clone(),
-                    level: current.saturating_sub(1),
-                });
+                emit_delta(&helm_id, -1, &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::NoChange => {}
         }
@@ -556,63 +609,21 @@ fn ai_power_allocation(
             crate::console_ai::tick_power_red_alert_rule(&mut ai_state.red_alert, &red_alert_input);
         match red_alert_output {
             crate::console_ai::PowerEngageOutput::Engage => {
-                let current = power.0.level_for(&weapons_id);
-                intents.0.push(crate::ship::power::PowerReactorCommand {
-                    group: weapons_id.clone(),
-                    level: current.saturating_add(1),
-                });
+                emit_delta(&weapons_id, 1, &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::Disengage => {
-                let current = power.0.level_for(&weapons_id);
-                intents.0.push(crate::ship::power::PowerReactorCommand {
-                    group: weapons_id.clone(),
-                    level: current.saturating_sub(1),
-                });
+                emit_delta(&weapons_id, -1, &mut admitted);
             }
             crate::console_ai::PowerEngageOutput::NoChange => {}
         }
     }
 }
 
-/// Adapter: applies `PowerReactorIntents` written by `ai_power_allocation`
-/// to `ShipPowerSystem::set_group_allocation` — the same mutation primitive
-/// `ship::power::handle_power_messages` (the human path) uses. Runs
-/// immediately after `ai_power_allocation` in the same tick so the
-/// reallocation is visible to `tick_power_system` /
-/// `publish_power_blackboard` this frame.
-///
-/// **Dual-write.** Mirrors `handle_power_messages`'s `Has<LocalShip>` +
-/// Resource-sync pattern: when the mutated entity is the `LocalShip`, also
-/// snapshot the updated per-entity Component into the global `ShipPowerSystem`
-/// Resource (legacy Resource path for tests). This matters because a
-/// disconnected player's Power station can flip to Backfill AI (AGENTS.md
-/// rule 5), so `ai_power_allocation` / `integrate_power_state` can
-/// legitimately be the system driving the player's own ship's power grid.
-fn integrate_power_state(
-    mut ships: Query<(
-        &mut crate::ship::power::ShipPowerSystem,
-        &mut crate::ship::power::PowerReactorIntents,
-        Has<crate::server_app::LocalShip>,
-    )>,
-    power_res: Option<ResMut<crate::ship::power::ShipPowerSystem>>,
-) {
-    let mut power_res = power_res;
-    for (mut power, mut intents, is_local) in ships.iter_mut() {
-        if intents.0.is_empty() {
-            continue;
-        }
-        for cmd in intents.0.drain(..) {
-            let _ = power.0.set_group_allocation(&cmd.group, cmd.level);
-        }
-        // Dual-write: keep the Resource in sync with the LocalShip's
-        // Component (legacy Resource path for tests).
-        if is_local {
-            if let Some(pr) = power_res.as_deref_mut() {
-                pr.0 = power.0.clone();
-            }
-        }
-    }
-}
+// `integrate_power_state` (issue #693's mutate-only adapter) was deleted by
+// issue #831: truth-integration for power lives in
+// `ship::power::handle_power_messages`, the single admitted-command applier
+// for human and AI commands alike (mirroring the shields #826 retirement of
+// `integrate_shield_state`).
 
 // ── Torpedo AI (issue #694, completed by #698) ──────────────────────────────
 
@@ -1573,8 +1584,13 @@ station = "sensors"
         );
     }
 
-    // ── ai_power_allocation / integrate_power_state ─────────────────────────
+    // ── ai_power_allocation (emit → admit → apply) ──────────────────────────
 
+    /// Wires the real production pair: the AI decide system
+    /// (`ai_power_allocation`, emit) `.before` the single applier
+    /// (`ship::power::handle_power_messages`, issue #831), minus the
+    /// `AdmissionPlugin` per-tick clear these single-shot scenarios don't need
+    /// (mirrors `shield_test_app`).
     fn power_test_app() -> App {
         let mut app = App::new();
         // Manual `Time::advance_by` (mirroring `ai_frequency_hint`'s test
@@ -1582,11 +1598,14 @@ station = "sensors"
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .init_resource::<crate::ship::power::PowerAiConfigResource>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
             .add_systems(
                 Update,
                 (
-                    ai_power_allocation.before(integrate_power_state),
-                    integrate_power_state,
+                    ai_power_allocation.before(crate::ship::power::handle_power_messages),
+                    crate::ship::power::handle_power_messages,
                 ),
             );
 
@@ -1605,7 +1624,7 @@ station = "sensors"
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_plugin::LastHelmInput::default(),
             crate::ship::power::ShipPowerAiState::default(),
-            crate::ship::power::PowerReactorIntents::default(),
+            crate::messages::AdmittedCommands::default(),
             AiHighFidelity,
         ));
 
@@ -1736,13 +1755,15 @@ station = "sensors"
     }
 
     #[test]
-    fn integrate_power_state_dual_writes_resource_for_local_ship() {
-        // Issue #693 review finding: when the AI path reallocates power for
-        // the LocalShip (e.g. a disconnected player's station backfilled to
-        // AI per AGENTS.md rule 5), `integrate_power_state` must dual-write
-        // the legacy global `ShipPowerSystem` Resource, mirroring
-        // `ship::power::handle_power_messages`'s dual-write for the human
-        // path — not just the per-entity Component.
+    fn ai_power_reallocation_dual_writes_resource_for_local_ship() {
+        // Issue #693 review finding, rewired for issue #831: when the AI path
+        // reallocates power for the LocalShip (e.g. a disconnected player's
+        // station backfilled to AI per AGENTS.md rule 5), the admitted
+        // `SetPowerGroupAllocation` must flow through
+        // `ship::power::handle_power_messages` — the single applier — which
+        // dual-writes the legacy global `ShipPowerSystem` Resource, not just
+        // the per-entity Component. (Previously asserted against the retired
+        // `integrate_power_state` adapter.)
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
@@ -1780,6 +1801,157 @@ station = "sensors"
             resource_level > 1,
             "expected the AI-driven weapons reallocation to be reflected in \
              the dual-written Resource (resource_level={resource_level})"
+        );
+    }
+
+    #[test]
+    fn ai_power_allocation_emits_admitted_set_power_group_allocation() {
+        // The decide system emits its reallocation as an admitted
+        // `SetPowerGroupAllocation` targeting the reactor (issue #831), rather
+        // than writing a private `PowerReactorIntents` component. A saturated
+        // no-op must NOT be admitted every tick.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        // Run just the emit half so AdmittedCommands is observable before the
+        // applier drains it: a fresh app whose only system is the decide one.
+        let mut emit_app = App::new();
+        emit_app
+            .insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .init_resource::<crate::ship::power::PowerAiConfigResource>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(Update, ai_power_allocation);
+        let mut cs = ShipSystemControlSources::default();
+        cs.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let ee = emit_app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                cs,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::default(),
+                ),
+                crate::ship_state::ShipRedAlert(true),
+                crate::ship_plugin::LastHelmInput::default(),
+                crate::ship::power::ShipPowerAiState::default(),
+                crate::messages::AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+        {
+            let mut time = emit_app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(4.0));
+        }
+        emit_app.update();
+
+        let admitted = emit_app
+            .world()
+            .entity(ee)
+            .get::<crate::messages::AdmittedCommands>()
+            .unwrap();
+        let has_weapons_alloc = admitted.0.iter().any(|c| {
+            c.target == crate::system_registry::power_reactor_system_id()
+                && matches!(
+                    &c.payload,
+                    crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
+                        if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
+                )
+        });
+        assert!(
+            has_weapons_alloc,
+            "sustained red alert must admit a SetPowerGroupAllocation for weapons"
+        );
+
+        // No-op guard: with weapons now saturated at 4, a further sustained
+        // engage produces the same target level and must NOT be re-admitted.
+        {
+            let mut ent = emit_app.world_mut().entity_mut(ee);
+            let mut ps = ent
+                .get_mut::<crate::ship::power::ShipPowerSystem>()
+                .unwrap();
+            ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                ),
+                4,
+            )
+            .unwrap();
+            let mut ac = ent.get_mut::<crate::messages::AdmittedCommands>().unwrap();
+            ac.0.clear();
+        }
+        {
+            let mut time = emit_app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(4.0));
+        }
+        emit_app.update();
+        let admitted = emit_app
+            .world()
+            .entity(ee)
+            .get::<crate::messages::AdmittedCommands>()
+            .unwrap();
+        assert!(
+            !admitted.0.iter().any(|c| matches!(
+                &c.payload,
+                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
+                    if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
+            )),
+            "a saturated weapons allocation (already at 4) must not re-admit a no-op"
+        );
+    }
+
+    #[test]
+    fn human_held_power_reactor_rejects_ai_emission() {
+        // A human holds the Power reactor. Unlike shields (coarse system vs.
+        // per-arc fine systems), power's decide gate and admission target the
+        // SAME system — the reactor — so `operate_ai` being false stops the
+        // AI at the decide gate, and `validate_and_admit` would independently
+        // refuse the same `ai:` token were it reached. Either way no admitted
+        // command exists and the allocation never changes — the refusal the
+        // retired `integrate_power_state` adapter could not express (it applied
+        // intents unconditionally).
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<ShipSystemControlSources>()
+            .unwrap()
+            .0
+            .set(
+                crate::system_registry::power_reactor_system_id(),
+                ControlSource::Human,
+            );
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        power_tick_with_dt(&mut app, 4.0);
+        let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        assert_eq!(
+            before, after,
+            "an ai: emission targeting a human-held power reactor must be refused at admission"
+        );
+        assert!(
+            app.world()
+                .entity(e)
+                .get::<crate::messages::AdmittedCommands>()
+                .unwrap()
+                .0
+                .is_empty(),
+            "the refused command must never reach AdmittedCommands"
         );
     }
 }

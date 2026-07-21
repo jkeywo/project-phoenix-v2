@@ -2072,7 +2072,6 @@ fn spawn_game_start_entities(
                 .insert(LocalShip)
                 .insert(crate::ai_plugin::AiHighFidelity)
                 .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
-                .insert(crate::ship::power::PowerReactorIntents::default())
                 .insert(crate::ship::power::ShipPowerAiState::default())
                 .insert(crate::weapons_plugin::TorpedoIntents::default())
                 .insert(crate::ship::helm::ThrustInput::default())

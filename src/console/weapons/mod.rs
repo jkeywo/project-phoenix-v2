@@ -35,7 +35,7 @@ pub struct TorpedoCmd {
 /// in the same tick.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site, mirroring `PowerReactorIntents`'s
+/// that marker at every spawn/promote site, mirroring `ShipPowerAiState`'s
 /// scoping (see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn
 /// sites in `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
 #[derive(Component, Default, Clone, Debug)]
@@ -344,7 +344,8 @@ pub(crate) use blackboard::{
 /// deliberately stays in `Input` so it keeps reading pre-physics `Transform`s
 /// exactly as the fused system did.
 ///
-/// **Torpedo dual-write.** Mirrors `integrate_power_state`'s `Has<LocalShip>` +
+/// **Torpedo dual-write.** Mirrors `ship::power::handle_power_messages`'s
+/// `Has<LocalShip>` +
 /// Resource-sync pattern: when the entity carries its own per-entity
 /// `TorpedoSystemResource` Component and is the `LocalShip`, also snapshot the
 /// updated Component into the global `TorpedoSystemResource` Resource (legacy

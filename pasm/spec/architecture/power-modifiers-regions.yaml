@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Ship Power Controller
-      summary: Owns power-group allocation, reactor availability, battery reserves, brownout behavior, and the authoritative power blackboard.
+      summary: Owns power-group allocation, reactor availability, battery reserves, brownout behavior, and the authoritative power blackboard. Since issue #831 handle_power_messages is the single applier of admitted SetPowerGroupAllocation commands for the human and AI paths alike (the AI decide system emits admitted commands rather than writing a private intent component).
     architecture:
       kind: subsystem
       authority: authoritative
@@ -57,14 +57,15 @@ entities:
       status: proposed
       confidence: confirmed
       title: Authored Power AI Rule Evaluator
-      summary: Future per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule carries its own minimum permitted battery reserve, so allocation planning avoids avoidable brownouts without a fixed global emergency mode.
+      summary: Future per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule carries its own minimum permitted battery reserve, so allocation planning avoids avoidable brownouts without a fixed global emergency mode. The current precursor (ai_power_allocation) emits an admitted SetPowerGroupAllocation system-control-command rather than mutating power state directly.
       rationale:
         - "Issue #693 implemented a narrower precursor, ai_power_allocation (src/console_ai/server.rs), rather than this fully generic evaluator: it runs exactly two hardcoded rules (a movement rule reallocating to the helm group, and a red-alert rule reallocating to the weapons group), each with its own timer/hysteresis config, not an arbitrary per-authored-group rule set. This entity remains the target design for the generalized version."
+        - "Issue #831 (admission symmetry): ai_power_allocation no longer writes ship-power-state through a private PowerReactorIntents component drained by a paired integrate_power_state adapter. It now emits an admitted SetPowerGroupAllocation system-control-command through command_admission::validate_and_admit (its ship's own ai:<uuid> token, checked against operate_ai on the reactor), which ship-power-controller's handle_power_messages applies. The evaluator therefore sends a command; it does not mutate power state directly."
     architecture:
       kind: ai-operator
       authority: authoritative
       reads: [ship-power-state, system-control-source-state, ship-system-blackboards-state]
-      writes: [ship-power-state]
+      sends: [system-control-command]
       runs_in: [host-browser-runtime]
 
   - state: ship-modifier-state

@@ -40,11 +40,28 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
-    mut ship_bbs_q: Query<
-        &mut crate::server_app::ShipSystemBlackboards,
-        With<crate::server_app::LocalShip>,
+    mut ship_q: Query<
+        (
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            &mut crate::server_app::ShipSystemBlackboards,
+        ),
+        With<crate::server_app::Ship>,
     >,
 ) {
+    // Comms is fundamentally a player channel: the inbox, runtime, and
+    // objective managers are singleton, player-session-scoped resources. The
+    // shared content is therefore built ONCE from those singletons and
+    // published into the LocalShip's blackboard. Every NPC ship still receives
+    // a comms blackboard entry (AC #831: "NPC ships have comms blackboards")
+    // for architectural consistency with the other per-entity systems, but it
+    // is empty — an NPC carries no player messages, objectives, or contacts.
+    // (Mirrors #830 navigation's `is_local`-gated per-Ship publish.)
+    //
+    // The three `Option<Res>` fallbacks are retained deliberately (issue #831
+    // conservative prune): `ObjectiveManagerRes` is world-load-gated (only
+    // inserted on world load, never `init_resource`d), and the console test
+    // harness exercises the inbox/runtime paths without the full comms server
+    // plugin — matching the #830 precedent that kept `ObjectiveManagerRes`.
     let mut messages = inbox.as_ref().map(|r| r.0.messages()).unwrap_or_default();
 
     if let Some(rt) = runtime.as_ref() {
@@ -72,17 +89,20 @@ fn publish_comms_blackboard(
             .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
     }
 
-    let bb = CommsBlackboard {
+    let local_bb = CommsBlackboard {
         messages,
         objectives: objectives_snap,
         contacts,
     };
 
-    if let Some(mut bbs) = ship_bbs_q.iter_mut().next() {
-        bbs.0.insert(
-            SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string()),
-            SystemBlackboard::Comms(bb),
-        );
+    let comms_key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
+    for (is_local, mut bbs) in ship_q.iter_mut() {
+        let bb = if is_local {
+            local_bb.clone()
+        } else {
+            CommsBlackboard::default()
+        };
+        bbs.0.insert(comms_key.clone(), SystemBlackboard::Comms(bb));
     }
 }
 
@@ -567,7 +587,7 @@ mod tests {
     use super::*;
     use crate::comms::server::CommsInboxRes;
     use crate::messages::CommsMessage;
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
+    use crate::server_app::{LocalShip, Ship, ShipSystemBlackboards};
 
     fn msg(id: &str) -> CommsMessage {
         CommsMessage {
@@ -591,9 +611,11 @@ mod tests {
         app.insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
             .insert_resource(CommsRuntime::default())
             .add_systems(Update, publish_comms_blackboard);
-        // Spawn a LocalShip entity so the query in publish_comms_blackboard resolves.
+        // Spawn a LocalShip entity so the query in publish_comms_blackboard
+        // resolves. The `Ship` marker is required now that the publish iterates
+        // `With<Ship>` per-entity (issue #831).
         app.world_mut()
-            .spawn((LocalShip, ShipSystemBlackboards::default()));
+            .spawn((Ship, LocalShip, ShipSystemBlackboards::default()));
         app
     }
 
@@ -625,6 +647,46 @@ mod tests {
         let bb = comms_bb(&mut app);
         assert_eq!(bb.messages.len(), 1);
         assert_eq!(bb.messages[0].id, "m1");
+    }
+
+    #[test]
+    fn npc_ship_gets_empty_comms_blackboard() {
+        // AC #831: NPC ships have comms blackboards. Comms is a player channel,
+        // so the local ship carries the shared inbox content while an NPC ship
+        // gets an entry that is present but empty.
+        let mut app = test_app();
+        let npc = app
+            .world_mut()
+            .spawn((Ship, ShipSystemBlackboards::default()))
+            .id();
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(msg("m1"));
+        app.update();
+
+        let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
+        let npc_bbs = app
+            .world()
+            .entity(npc)
+            .get::<ShipSystemBlackboards>()
+            .unwrap();
+        let SystemBlackboard::Comms(npc_bb) = npc_bbs
+            .0
+            .get(&key)
+            .expect("NPC ship must have a comms blackboard entry")
+            .clone()
+        else {
+            panic!("wrong blackboard variant");
+        };
+        assert!(
+            npc_bb.messages.is_empty(),
+            "an NPC ship's comms blackboard must carry no player messages"
+        );
+
+        // The local ship still gets the shared player-channel content.
+        let local_bb = comms_bb(&mut app);
+        assert_eq!(local_bb.messages.len(), 1);
     }
 
     /// Verifies operate_comms_ai runs per-entity for AI-controlled ships (issue #593 AC).

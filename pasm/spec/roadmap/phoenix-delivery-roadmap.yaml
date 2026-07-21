@@ -1,0 +1,229 @@
+entities:
+  - component: phoenix-delivery-sequence
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Phoenix Delivery Sequence
+      summary: "The roadmap is intentionally sequenced: #848 authoritative snapshots; #849 deterministic lockstep foundation; #774 data-driven AI plus #850 demo readiness; #851 reusable Falling Skyway foundation; #852 Falling Skyway content; #853 limited demo release; #854 P2P delivery; #855 native/cloud delivery; #856 mod content packs; #858 Borrowed Sun; #859 Narrow Season; #860 The Broken Tithe; #861 The Silent Corridor. Completed #835 remains the balance and optimisation foundation throughout."
+      rationale:
+        - The snapshot and determinism contracts must shape scenario, native, and P2P work before those product surfaces become expensive to revise.
+        - The demo is a release checkpoint after foundational correctness, not a prerequisite for eventual persistence or P2P architecture.
+    architecture:
+      kind: roadmap-sequence
+      authority: non-authoritative
+      coordinates:
+        - roadmap-authoritative-snapshots
+        - roadmap-deterministic-simulation-foundation
+        - roadmap-demo-combat-readiness
+        - roadmap-falling-skyway-foundation
+        - roadmap-falling-skyway-content
+        - roadmap-demo-release
+        - roadmap-p2p-multiship-delivery
+        - roadmap-native-and-cloud-delivery
+        - roadmap-mod-content-packs
+        - roadmap-borrowed-sun-content
+        - roadmap-narrow-season-content
+        - roadmap-broken-tithe-content
+        - roadmap-silent-corridor-content
+
+  - component: roadmap-authoritative-snapshots
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Authoritative Snapshots and Persistence
+      summary: Replaces the browser-local save-slot plan with a versioned portable snapshot of authoritative world state, used first for save/load and later for campaign continuity, native hosting, and multiplayer transfer.
+      rationale:
+        - Persistence, multiplayer recovery, and native hosting must not each invent an incompatible representation of a running world.
+        - Scenario runtime state must be portable before Falling Skyway introduces schedules, civilian operations, commitments, and evidence.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      owns: [world-snapshot-artifact]
+      reads: [world-configuration-state, spawned-entity-state, asteroid-window-state]
+      produces: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-deterministic-simulation-foundation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Deterministic Simulation and Lockstep Foundation
+      summary: Extracts the fixed logical tick, ordered command log, canonical state hash, replay harness, and multi-instance verification required by P2P lockstep, without yet delivering the host mesh.
+      rationale:
+        - The P2P design must constrain simulation work now, while its transport and join UX must not delay the demo.
+        - The completed headless balance telemetry and seeded simulation RNG are adopted as foundations rather than duplicated.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [sim-rng-state, spawned-entity-state, world-configuration-state]
+      produces: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-demo-combat-readiness
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Demo Combat Readiness
+      summary: Delivers data-driven fine-system AI for NPCs and Backfill, a player-ship combat pass, measured Combat Test rebalance, a weighted asteroid density field, sidecar-owned mesh LOD generation, and contextual tutorial overlays.
+      rationale:
+        - Combat Test must demonstrate legible doctrine and a well-tuned player experience rather than acting as a technical test scene.
+        - Asset and terrain contracts must settle before public demo content becomes costly to revise.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [fine-system-ai-policy-runtime, asteroid-field-lifecycle, entity-template-schema-validator]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-falling-skyway-foundation
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Falling Skyway Scenario Foundation
+      summary: Adds reusable world-clock, scheduled task, civilian traffic, external-operation, infrastructure-condition, basic commitment, and entity-dossier capabilities needed by the first Thin Margin scenario.
+      rationale:
+        - Scenario content must compose reusable actors, assets, schedules, infrastructure, hazards, objectives, evidence, and commitments rather than introduce bespoke station minigames.
+        - "Falling Skyway introduces only the first three campaign layers: schedules and traffic, rescue operations, and infrastructure condition."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-falling-skyway-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Falling Skyway Scenario Content
+      summary: "Authors the first Thin Margin mission: a damaged skyhook, fuel depots, labour strike, corporate security, radiation storm, constrained transfer window, and consequential safe-passage decision."
+      rationale:
+        - The first scenario must prove the reusable crisis toolkit in a standalone 30–60 minute mission before the campaign expands its complexity.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-content-pack-state, world-configuration-state]
+      coordinates: [roadmap-falling-skyway-foundation, world-content-pack-catalog]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-demo-release
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Demo Release
+      summary: Publishes a limited, fast, reliable demo containing Combat Test and Falling Skyway with production build checks, scenario selection, onboarding, and release playtest gates.
+      rationale:
+        - A small public release validates the core bridge experience before platform expansion adds operational complexity.
+    architecture:
+      kind: roadmap-milestone
+      authority: non-authoritative
+      reads: [world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-p2p-multiship-delivery
+    core:
+      status: proposed
+      confidence: confirmed
+      title: P2P Multi-Ship Delivery
+      summary: Completes the host-to-host PeerJS mesh, delayed lockstep exchange, snapshot join and recovery, leader handling, and distributed NPC ownership after deterministic foundations and the demo are proven.
+      rationale:
+        - Full P2P is a distinct product surface whose transport, join, and recovery behaviour should build on tested snapshots rather than delay initial public play.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-native-and-cloud-delivery
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Native Host and Cloud Delivery
+      summary: Provides a native PC authoritative host that can serve its own client assets or use hosted ones, plus a Cloudflare-cached limited public deployment; worker-thread adoption remains an evidence-led optional optimisation.
+      rationale:
+        - Native, hosted, and browser deployment modes must consume the same content and snapshot contracts instead of becoming separate games.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-mod-content-packs
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Mod Content Packs
+      summary: Defines validated mod content packs and an editor MOD mode that emits a ZIP patch applied to a host session, after entity TOML and model-sidecar contracts have stabilised.
+      rationale:
+        - Mods must patch declared content through one validation and precedence model rather than mutate arbitrary runtime files.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [entity-template-state, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-borrowed-sun-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Borrowed Sun Scenario Content
+      summary: Second Thin Margin mission, adding evidence confidence and provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors.
+      rationale:
+        - Mission two develops investigation and infrastructure pressure while remaining a standalone scenario.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-narrow-season-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Narrow Season Scenario Content
+      summary: Third Thin Margin mission, adding civilian response profiles, emergency authority, traffic priority orders, and cascading congestion/panic/coercion incidents.
+      rationale:
+        - Mission three turns prior conduct into operational constraints without introducing a scenario-specific traffic minigame.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-broken-tithe-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: The Broken Tithe Scenario Content
+      summary: Fourth Thin Margin mission, adding hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority.
+      rationale:
+        - Mission four makes earlier relationships and commitments materially constrain dangerous operations.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-silent-corridor-content
+    core:
+      status: proposed
+      confidence: confirmed
+      title: The Silent Corridor Scenario Content
+      summary: Fifth Thin Margin mission, combining schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale.
+      rationale:
+        - The final scenario must demonstrate the accumulated reusable toolkit rather than create a separate finale-only system.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact, world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
+  - state: world-snapshot-artifact
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Authoritative World Snapshot
+      summary: Versioned portable representation of all authoritative simulation state and its content compatibility manifest, excluding transport sessions, browser UI, renderer state, and other derived presentation state.
+    architecture:
+      classification: authoritative
+      owner: roadmap-authoritative-snapshots
+      writers: [roadmap-authoritative-snapshots]
+      readers: [roadmap-deterministic-simulation-foundation, roadmap-p2p-multiship-delivery, roadmap-native-and-cloud-delivery, roadmap-borrowed-sun-content, roadmap-narrow-season-content, roadmap-broken-tithe-content, roadmap-silent-corridor-content]

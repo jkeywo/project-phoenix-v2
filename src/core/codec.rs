@@ -256,31 +256,6 @@ mod tests {
                 ClientMessage::SetReady { ready: true },
             ),
             (
-                ClientMessageDiscriminants::FirePhaser,
-                ClientMessage::FirePhaser {
-                    bank: "port".to_string(),
-                },
-            ),
-            (
-                ClientMessageDiscriminants::FireTorpedo,
-                ClientMessage::FireTorpedo {
-                    tube: "fore_port".to_string(),
-                    target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-                },
-            ),
-            (
-                ClientMessageDiscriminants::LoadTube,
-                ClientMessage::LoadTube {
-                    tube: "fore_port".to_string(),
-                },
-            ),
-            (
-                ClientMessageDiscriminants::UnloadTube,
-                ClientMessage::UnloadTube {
-                    tube: "aft".to_string(),
-                },
-            ),
-            (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
                     target: crate::system_registry::helm_thrust_system_id(),
@@ -909,6 +884,80 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"blaster-fore","payload":{"type":"ChargeBlasterCancel"}}}"#,
             "ChargeBlasterCancel wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// Phaser fire as a ControlSystem payload (issue #846).
+    #[test]
+    fn fire_phaser_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("phaser-fore".into()),
+            payload: SystemControlPayload::FirePhaser,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"phaser-fore","payload":{"type":"FirePhaser"}}}"#,
+            "FirePhaser wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// Torpedo fire as a ControlSystem payload (issue #846).
+    #[test]
+    fn fire_torpedo_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo {
+                target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"FireTorpedo","data":{"target_uuid":"550e8400-e29b-41d4-a716-446655440000"}}}}"#,
+            "FireTorpedo wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// Load tube as a ControlSystem payload (issue #846).
+    #[test]
+    fn load_tube_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"LoadTube"}}}"#,
+            "LoadTube wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// Unload tube as a ControlSystem payload (issue #846).
+    #[test]
+    fn unload_tube_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-aft".into()),
+            payload: SystemControlPayload::UnloadTube,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-aft","payload":{"type":"UnloadTube"}}}"#,
+            "UnloadTube wire shape must match what action-map.js sends"
         );
     }
 

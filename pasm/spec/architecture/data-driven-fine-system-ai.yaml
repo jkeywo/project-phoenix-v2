@@ -9,10 +9,11 @@ entities:
         - AI behaviour belongs to the fine system that owns the operated capability rather than a ship-wide combat controller.
         - Stateless systems should not acquire artificial lifecycle states merely to use the common evaluator.
         - Designer-tunable behaviour values belong in entity TOML rather than Rust branches or hidden runtime defaults.
+        - Reusable behaviour fragments may compose into entity TOML before validation, but the runtime receives only the owning system's fully resolved inline policy.
     architecture:
       kind: configuration-schema
       authority: authoritative
-      reads: [ship-station-system-topology-state]
+      reads: [resolved-entity-template-state, ship-station-system-topology-state]
       produces: [fine-system-ai-policy-state]
       runs_in: [host-browser-runtime]
 

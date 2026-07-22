@@ -59,18 +59,13 @@ Preserved decisions (not re-litigated):
   `PowerReactorIntents` (#831), and their paired `integrate_*` systems, are
   retired into each system's normal admitted-command application. This supersedes
   the transport shape wired by issues #692–#698, not the decision logic.
-- **Deferred exception — the weapons fire/load channel.** `FirePhaser`,
-  `FireTorpedo`, `LoadTube`, and `UnloadTube` remain top-level `ClientMessage`
-  variants carrying no `SystemId`, authorized inline (`tactical_authorized`)
-  rather than through admission. Because they are not `ControlSystem` messages,
-  `TorpedoIntents` and `PhaserIntents` — with `integrate_weapons_state` as their
-  paired applier — **survive as the AI transport for those weapons**. This is a
-  known gap, not an oversight: the intent components cannot retire until the
-  fire/load messages become admitted `ControlSystem` payloads, so **the two
-  halves must land together**. Recorded in
-  `protocol-targeting-and-observation.yaml` and in `command_admission/router.rs`'s
-  module header. Until then, §2's "no private intent components" rule holds for
-  every system *except* weapons fire/load.
+- The weapons fire/load channel was the last system outside this rule.
+  `FirePhaser`, `FireTorpedo`, `LoadTube`, and `UnloadTube` were retired as
+  top-level `ClientMessage` variants in issue #846 and now travel as admitted
+  `SystemControlPayload`s. `TorpedoIntents`, `PhaserIntents`, and their paired
+  `integrate_weapons_state` were deleted alongside them. Every AI path now emits
+  through the shared `emit_ai_command` seam — no private intent components
+  survive anywhere in the codebase.
 - The host page keeps its dedicated `LOCAL_CONSOLE_TOKEN` identity and its
   recorded trust boundary: host-page actions may only address the local ship and
   never constitute a session or station claim. Host-page consoles route through

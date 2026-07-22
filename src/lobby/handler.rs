@@ -757,19 +757,16 @@ mod tests {
             ClientMessage::SetStationRating { rating_name } => {
                 handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
             }
-            // The six runtime variants are no-ops in the lobby — handled by the
+            // The runtime variants are no-ops in the lobby — handled by the
             // console server plugins, not the lobby handler.
-            ClientMessage::FirePhaser { .. }
-            | ClientMessage::FireTorpedo { .. }
-            | ClientMessage::ControlSystem { .. }
-            | ClientMessage::SendCoordination { .. }
-            | ClientMessage::LoadTube { .. }
-            | ClientMessage::UnloadTube { .. } => LobbyHandlerResult {
-                new_phase: None,
-                outbound: Vec::new(),
-                station_rating_update: None,
-                countdown_action: None,
-            },
+            ClientMessage::ControlSystem { .. } | ClientMessage::SendCoordination { .. } => {
+                LobbyHandlerResult {
+                    new_phase: None,
+                    outbound: Vec::new(),
+                    station_rating_update: None,
+                    countdown_action: None,
+                }
+            }
         }
     }
 

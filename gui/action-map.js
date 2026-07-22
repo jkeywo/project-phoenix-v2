@@ -19,9 +19,13 @@
 import { dispatchRepairTeam } from './repair-dispatch.js';
 
 export const ACTION_MAP = Object.freeze({
-  /** Fire a specific phaser bank. */
+  /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
-    if (a.bank) send('FirePhaser', { bank: a.bank });
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `phaser-${a.bank}`,
+      payload: { type: 'FirePhaser' },
+    });
   },
 
   /** Fire a specific blaster bank (issue #631). */
@@ -63,19 +67,34 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Fire a torpedo from a tube, optionally targeting a UUID. */
+  /** Fire a torpedo from a tube, optionally targeting a UUID (issue #846: via ControlSystem envelope). */
   fire_torpedo: (a, send) => {
-    send('FireTorpedo', { tube: a.tube || 'fore', target_uuid: a.target_uuid || null });
+    var tube = a.tube || 'fore';
+    var sysId = 'torpedo-tube-' + String(tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'FireTorpedo', data: { target_uuid: a.target_uuid || null } },
+    });
   },
 
-  /** Begin loading a torpedo tube. */
+  /** Begin loading a torpedo tube (issue #846: via ControlSystem envelope). */
   load_tube: (a, send) => {
-    if (a.tube) send('LoadTube', { tube: a.tube });
+    if (!a.tube) return;
+    var sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'LoadTube' },
+    });
   },
 
-  /** Unload (or cancel loading of) a torpedo tube. */
+  /** Unload (or cancel loading of) a torpedo tube (issue #846: via ControlSystem envelope). */
   unload_tube: (a, send) => {
-    if (a.tube) send('UnloadTube', { tube: a.tube });
+    if (!a.tube) return;
+    var sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'UnloadTube' },
+    });
   },
 
   /** Set the volley target count for a torpedo tube (issue #632).

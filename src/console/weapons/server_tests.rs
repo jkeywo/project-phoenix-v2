@@ -53,12 +53,12 @@ automated_systems = []
 torpedo_auto_fire = {}
 
 [[system]]
-id = "phaser-fore"
+id = "phaser-port"
 kind = "phaser_bank"
 station = "tactical"
 
 [[system]]
-id = "phaser-aft"
+id = "phaser-starboard"
 kind = "phaser_bank"
 station = "tactical"
 
@@ -221,24 +221,6 @@ fn test_app() -> App {
             ],
         },
     ))
-    .add_systems(
-        Update,
-        (
-            // The three beam-tick phases (issue #723) share the one-tick
-            // BeamContext resource, so they must run in order — a bare
-            // tuple is unordered in Bevy, hence the .chain().
-            (
-                tick_beams_prepare,
-                tick_beams_apply_damage,
-                tick_beams_tick_lifetimes,
-            )
-                .chain(),
-            // The two torpedo-tick phases (issue #724) share the
-            // one-tick TorpedoTargetSnapshot resource, so they must
-            // run in order too.
-            (build_torpedo_target_snapshot, tick_torpedo_lifecycle).chain(),
-        ),
-    )
     .add_systems(
         Update,
         seed_viewscreen_from_selection.before(crate::sim_sets::SimSet::Input),
@@ -576,6 +558,33 @@ fn start_game_with_weapons(app: &mut App) {
     push(app, "captain", ClientMessage::SetReady { ready: true });
     push(app, "weapons", ClientMessage::SetReady { ready: true });
     tick(app);
+    // Apply the human rating for Tactical's weapons systems so
+    // `admit_system_commands` (which checks ShipSystemControlSources)
+    // authorizes human ControlSystem messages for phasers, torpedoes, etc.
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    if let Ok(mut cs) = q.single_mut(app.world_mut()) {
+        use crate::ship::control_source::ControlSource;
+        cs.0.set(SystemId("phaser-port".into()), ControlSource::Human);
+        cs.0.set(SystemId("phaser-starboard".into()), ControlSource::Human);
+        cs.0.set(
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            ControlSource::Human,
+        );
+        cs.0.set(
+            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            ControlSource::Human,
+        );
+        cs.0.set(
+            crate::system_registry::torpedo_tube_aft_system_id(),
+            ControlSource::Human,
+        );
+        cs.0.set(
+            crate::system_registry::torpedo_magazine_system_id(),
+            ControlSource::Human,
+        );
+    }
 }
 
 fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
@@ -595,8 +604,9 @@ fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<Outboun
     push(
         app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(app)
@@ -814,8 +824,9 @@ fn fire_phaser_rejected_during_cooldown() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -836,8 +847,9 @@ fn fire_phaser_ignored_from_non_weapons_player() {
     push(
         &mut app,
         "captain",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -870,8 +882,9 @@ fn fire_phaser_rejected_when_target_outside_bank_arc() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -1096,8 +1109,9 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let _ = tick(&mut app);
@@ -1123,8 +1137,9 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -1207,9 +1222,9 @@ fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1272,10 +1287,13 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(npc_ai_sources),
+            crate::ship_plugin::ShipConfigComponent::default(),
             ShipPhysics::default(),
             TacticalRadarSelection::default(),
             TorpedoSystemResource(npc_torpedo_sys),
             crate::server_app::WeaponFiredThisTick::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
             bevy::prelude::Transform::default(),
         ))
         .id();
@@ -1332,9 +1350,9 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1374,9 +1392,9 @@ fn local_console_token_can_fire_torpedo() {
     push(
         &mut app,
         crate::console_bridge::LOCAL_CONSOLE_TOKEN,
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1462,9 +1480,9 @@ fn non_tactical_player_cannot_fire_torpedo() {
     push(
         &mut app,
         "captain",
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1503,9 +1521,9 @@ fn fire_torpedo_during_lobby_fires_when_no_simset_gate() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "aft".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-aft".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1526,9 +1544,9 @@ fn torpedo_launched_is_broadcast_to_all() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "fore_starboard".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-starboard".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -1617,9 +1635,9 @@ fn torpedo_does_not_detonate_on_asteroid_field_anchor_entity() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     // First tick processes the FireTorpedo; second tick is where
@@ -1673,8 +1691,9 @@ fn empty_modifier_table_reproduces_base_phaser_damage() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -1724,8 +1743,9 @@ fn phaser_damage_modifier_doubles_kill_rate() {
     push(
         &mut app_fast,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app_fast);
@@ -1762,8 +1782,9 @@ fn phaser_damage_modifier_doubles_kill_rate() {
     push(
         &mut app_base,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app_base);
@@ -1997,8 +2018,9 @@ fn phaser_beam_damages_npc_entity_hull() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2044,8 +2066,9 @@ fn phaser_beam_destroys_npc_entity_when_hull_reaches_zero() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2142,8 +2165,9 @@ fn phaser_beam_damages_shielded_npc_routes_through_shield_first() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2199,8 +2223,9 @@ fn phaser_beam_breaks_shield_then_leaks_to_hull() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2272,8 +2297,9 @@ fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2378,8 +2404,9 @@ fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2449,8 +2476,9 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2534,8 +2562,9 @@ fn phaser_beam_post_break_skips_shield_routing_entirely() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2918,8 +2947,9 @@ fn phaser_beam_emits_ai_entity_destroyed_on_npc_kill() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -2975,8 +3005,9 @@ fn phaser_beam_emits_ship_destroyed_vfx_on_npc_kill() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -3201,10 +3232,36 @@ fn setup_npc_shooter(
         );
     }
 
+    // Minimal ShipConfigComponent so admission's ship_query resolves this NPC.
+    let npc_config = crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::parse_and_validate(
+            r#"
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Dummy"
+rank = "Ltn."
+
+[[system]]
+id = "phaser-port"
+kind = "phaser_bank"
+station = "tactical"
+
+[[system]]
+id = "phaser-starboard"
+kind = "phaser_bank"
+station = "tactical"
+"#,
+            &["phaser_bank"],
+        )
+        .expect("NPC ship config must be valid"),
+    );
+
     let npc_entity = app
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            npc_config,
             EntityUuid(npc_uuid.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
@@ -3213,6 +3270,7 @@ fn setup_npc_shooter(
             PhaserCooldown::default(),
             ShipPhysics::default(),
             Transform::from_xyz(0.0, 0.0, 0.0),
+            crate::messages::AdmittedCommands::default(),
         ))
         .id();
 
@@ -3259,8 +3317,9 @@ fn npc_fire_phaser_activates_entity_phaser_state() {
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     app.update();
@@ -3822,6 +3881,25 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
         crate::system_registry::phaser_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
+    // Minimal ShipConfigComponent so admission's ship_query resolves this NPC.
+    let npc_config = crate::ship_plugin::ShipConfigComponent(
+        crate::ship::config::parse_and_validate(
+            r#"
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+station = "tactical"
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Dummy"
+rank = "Ltn."
+"#,
+            &["phaser_bank"],
+        )
+        .expect("NPC ship config must be valid"),
+    );
     let npc_entity = app
         .world_mut()
         .spawn((
@@ -3829,6 +3907,7 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
             crate::entity_spawner::BehaviourSection(behaviour),
             EntityUuid(npc_uuid_str.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
+            npc_config,
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection::default(),
             ActiveBeam::default(),
@@ -3857,6 +3936,7 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
                 SystemId("captain".into()),
                 100.0,
             )])),
+            AdmittedCommands::default(),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ))
         .id();
@@ -3905,8 +3985,9 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FirePhaser {
-            bank: "fore".into(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-fore".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
 
@@ -3989,8 +4070,8 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
     );
 }
 
-/// Regression test for the unified phaser auto-fire path (post-#698:
-/// `ai_phaser_auto_fire` -> `integrate_weapons_state`).
+/// Regression test for the unified phaser auto-fire path (post-#846:
+/// `ai_phaser_auto_fire` -> `AdmittedCommands` -> `handle_fire_phaser`).
 ///
 /// Before unification, `tick_phaser_auto_fire` iterated only `LocalShip`,
 /// so NPCs had to route through the (now-deleted) `handle_npc_beam_fire`
@@ -4041,11 +4122,12 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
                     marker: None,
                 }],
             }),
+            AdmittedCommands::default(),
             Transform::default(),
         ))
         .id();
 
-    // Spawn target directly ahead (in-arc, in-range).
+    // Spawn target
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
         EntitySystemHull(crate::damage::SystemHull::from_config(&[(
@@ -4063,7 +4145,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
         .expect("NPC entity must have ActiveBeam component");
     assert!(
         beam.target_uuid.is_some(),
-        "the ai_phaser_auto_fire -> integrate_weapons_state pair must activate the \
+        "ai_phaser_auto_fire -> handle_fire_phaser must activate the \
          NPC's ActiveBeam when Tactical is AI-controlled"
     );
     assert_eq!(
@@ -4117,6 +4199,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
                     marker: None,
                 }],
             }),
+            AdmittedCommands::default(),
             Transform::default(),
         ))
         .id();
@@ -4132,12 +4215,12 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
     npc
 }
 
-/// `ai_phaser_auto_fire` is a *decider*: it must publish its choice to
-/// `PhaserIntents` and leave `ActiveBeam` alone. Running it in isolation
-/// (without `integrate_weapons_state`) is what proves the two halves are
-/// genuinely separated rather than merely renamed.
+/// `ai_phaser_auto_fire` is a *decider*: it publishes its choice to
+/// `AdmittedCommands` (via `emit_ai_command`) and leaves `ActiveBeam`
+/// alone. Running it in isolation proves the two halves are genuinely
+/// separated.
 #[test]
-fn ai_phaser_auto_fire_writes_intent_without_touching_the_beam() {
+fn ai_phaser_auto_fire_writes_admitted_command_without_touching_the_beam() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut app = test_app();
@@ -4156,20 +4239,23 @@ fn ai_phaser_auto_fire_writes_intent_without_touching_the_beam() {
         .run_system_once(ai_phaser_auto_fire)
         .expect("ai_phaser_auto_fire should run");
 
-    let intents = app
+    let admitted = app
         .world()
-        .get::<PhaserIntents>(npc)
-        .expect("ActiveBeam requires PhaserIntents, so every ship with a beam has one");
+        .get::<AdmittedCommands>(npc)
+        .expect("every ship has AdmittedCommands");
     assert_eq!(
-        intents.0,
-        vec![PhaserCmd {
-            bank: "fore".into(),
-            target_uuid: "bb000000-0000-0000-0000-000000000002".into(),
-            // The bank's TOML-authored beam_duration_secs, resolved by the
-            // decider so the integrator never re-reads the config.
-            beam_duration_secs: 3.0,
-        }],
-        "the decider must publish the chosen bank, target and beam duration"
+        admitted.0.len(),
+        1,
+        "the decider must emit exactly one FirePhaser command"
+    );
+    assert_eq!(
+        admitted.0[0].target,
+        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        "the decider must target the chosen bank"
+    );
+    assert!(
+        matches!(&admitted.0[0].payload, SystemControlPayload::FirePhaser),
+        "the payload must be FirePhaser"
     );
     assert!(
         app.world()
@@ -4178,52 +4264,7 @@ fn ai_phaser_auto_fire_writes_intent_without_touching_the_beam() {
             .target_uuid
             .is_none(),
         "ai_phaser_auto_fire must not mutate ActiveBeam — that is \
-         integrate_weapons_state's job"
-    );
-}
-
-/// `integrate_weapons_state` is the *adapter*: given an intent and nothing
-/// else, it must advance the beam state machine. Written by hand rather
-/// than by the decider so the adapter is pinned independently of it.
-#[test]
-fn integrate_weapons_state_advances_beam_from_phaser_intent() {
-    use bevy::ecs::system::RunSystemOnce;
-
-    let mut app = test_app();
-    let npc = spawn_ai_phaser_npc(
-        &mut app,
-        "bb000000-0000-0000-0000-000000000003",
-        "bb000000-0000-0000-0000-000000000004",
-    );
-
-    app.world_mut()
-        .entity_mut(npc)
-        .insert(PhaserIntents(vec![PhaserCmd {
-            bank: "fore".into(),
-            target_uuid: "bb000000-0000-0000-0000-000000000004".into(),
-            beam_duration_secs: 4.5,
-        }]));
-
-    app.world_mut()
-        .run_system_once(integrate_weapons_state)
-        .expect("integrate_weapons_state should run");
-
-    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
-    assert_eq!(
-        beam.target_uuid.as_deref(),
-        Some("bb000000-0000-0000-0000-000000000004"),
-        "the adapter must arm the beam at the intent's target"
-    );
-    assert_eq!(beam.bank.as_deref(), Some("fore"));
-    assert_eq!(
-        beam.remaining_secs, 4.5,
-        "the adapter must burn for the duration the decider resolved, not a \
-         duration of its own"
-    );
-    assert!(
-        app.world().get::<PhaserIntents>(npc).unwrap().0.is_empty(),
-        "the adapter must drain the buffer so a stale intent cannot re-fire \
-         the beam next tick"
+         handle_fire_phaser's job"
     );
 }
 
@@ -4238,9 +4279,9 @@ fn integrate_weapons_state_advances_beam_from_phaser_intent() {
 /// `CurrentPhaserMode::Auto` leg of this system isn't AI at all, so the
 /// filter would be wrong on its own terms as well.
 ///
-/// If a future slice does decide to gate phasers on LOD, `PhaserIntents`
+/// If a future slice does decide to gate phasers on LOD, `AdmittedCommands`
 /// must move into `lod_ai_ships`' promote/demote bundle at the same time —
-/// see `ActiveBeam`'s `#[require(PhaserIntents)]`.
+/// see `ActiveBeam`'s `#[require(AdmittedCommands)]`.
 #[test]
 fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
     let mut app = test_app();
@@ -4524,8 +4565,9 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     app.update();
@@ -4668,6 +4710,7 @@ fn spawn_asteroid_target(app: &mut App, uuid: &str, x: f32, z: f32) {
 fn spawn_entity_target(app: &mut App, uuid: &str, x: f32, z: f32) {
     app.world_mut().spawn((
         crate::entity_spawner::EntityUuid(uuid.into()),
+        AdmittedCommands::default(),
         Transform::from_xyz(x, 0.0, z),
     ));
 }
@@ -5961,21 +6004,14 @@ fn npc_and_local_ship_select_targets_independently() {
 
 /// Builds on `test_app()` (LocalShip + `WeaponsPlugin` + `LobbyPlugin`) by
 /// wiring in `ai_torpedo_auto_fire` (issue #694) and giving the LocalShip
-/// the two components it requires: `AiHighFidelity` and `TorpedoIntents`.
-/// `test_app()` itself stays unchanged (it's shared by ~200 unrelated tests
-/// in this module) — this is a dedicated extension, mirroring how
-/// `combined_test_app()` layers `AiPlugin` on top of `test_app()` for its
-/// own end-to-end tests.
-///
-/// Only the *decide* half needs adding: since issue #698 the apply half is
-/// `integrate_weapons_state`, which `WeaponsPlugin` already registers with
-/// its `.after(ai_torpedo_auto_fire)` edge — and that edge starts binding
-/// the moment this helper registers the decider.
+/// `AiHighFidelity` so the decider runs for it.
 fn torpedo_ai_test_app() -> App {
     let mut app = test_app();
     app.add_systems(
         Update,
-        crate::console_ai_plugin::ai_torpedo_auto_fire.in_set(crate::sim_sets::SimSet::Physics),
+        crate::console_ai_plugin::ai_torpedo_auto_fire
+            .in_set(crate::sim_sets::SimSet::Physics)
+            .before(crate::console::weapons::handle_fire_torpedo),
     );
     let ship = {
         let mut q = app
@@ -5986,7 +6022,7 @@ fn torpedo_ai_test_app() -> App {
     };
     app.world_mut()
         .entity_mut(ship)
-        .insert((crate::ai_plugin::AiHighFidelity, TorpedoIntents::default()));
+        .insert(crate::ai_plugin::AiHighFidelity);
     app
 }
 
@@ -6019,7 +6055,7 @@ fn ai_torpedo_auto_fire_fires_when_ai_controls_unclaimed_station() {
 /// tube/magazine state as `per_entity_component.unwrap_or(&global_resource)`,
 /// and the global `TorpedoSystemResource` mirrors the PLAYER ship. An NPC with
 /// no `[torpedoes]` block therefore decided its auto-fire from the player's
-/// tubes — and would publish an intent naming a tube it does not own.
+/// tubes — and would publish a command naming a tube it does not own.
 ///
 /// Two NPCs here: one with its own loaded tube (which must still fire) and one
 /// with no torpedo system at all (which must stay silent even though the
@@ -6043,6 +6079,18 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             crate::system_registry::torpedo_magazine_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
+        s.set(
+            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        s.set(
+            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        s.set(
+            crate::system_registry::torpedo_tube_aft_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
         crate::ship_plugin::ShipSystemControlSources(s)
     };
 
@@ -6062,7 +6110,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some("npc-target".into())),
             TorpedoSystemResource(armed_sys),
-            TorpedoIntents::default(),
+            AdmittedCommands::default(),
             crate::ai_plugin::AiHighFidelity,
             bevy::prelude::Transform::default(),
         ))
@@ -6079,7 +6127,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             ShipPhysics::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some("npc-target".into())),
-            TorpedoIntents::default(),
+            AdmittedCommands::default(),
             crate::ai_plugin::AiHighFidelity,
             bevy::prelude::Transform::default(),
         ))
@@ -6094,27 +6142,26 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
 
     assert!(
         !app.world()
-            .get::<TorpedoIntents>(armed)
-            .expect("intents")
+            .get::<AdmittedCommands>(armed)
+            .expect("admitted commands")
             .0
             .is_empty(),
         "an NPC with its own loaded tube must still decide to fire"
     );
     assert!(
         app.world()
-            .get::<TorpedoIntents>(bare)
-            .expect("intents")
+            .get::<AdmittedCommands>(bare)
+            .expect("admitted commands")
             .0
             .is_empty(),
-        "an NPC with no torpedo system of its own must not decide from the player          ship's global TorpedoSystemResource"
+        "an NPC with no torpedo system of its own must not decide from the player ship's global TorpedoSystemResource"
     );
 }
 
-/// `ai_torpedo_auto_fire` is a *decider*: it must publish to
-/// `TorpedoIntents` and leave the `TorpedoSystem` alone. Mirrors
-/// `ai_phaser_auto_fire_writes_intent_without_touching_the_beam`.
+/// `ai_torpedo_auto_fire` is a *decider*: it publishes to `AdmittedCommands`
+/// (via `emit_ai_command`) and leaves the `TorpedoSystem` alone.
 #[test]
-fn ai_torpedo_auto_fire_writes_intent_without_launching() {
+fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut app = torpedo_ai_test_app();
@@ -6133,17 +6180,18 @@ fn ai_torpedo_auto_fire_writes_intent_without_launching() {
         .expect("ai_torpedo_auto_fire should run");
 
     let ship = local_ship(&mut app);
-    let intents = app
+    let admitted = app
         .world()
-        .get::<TorpedoIntents>(ship)
-        .expect("torpedo_ai_test_app inserts TorpedoIntents");
+        .get::<AdmittedCommands>(ship)
+        .expect("every ship has AdmittedCommands");
+    assert!(
+        !admitted.0.is_empty(),
+        "the decider must publish at least one command"
+    );
     assert_eq!(
-        intents.0,
-        vec![TorpedoCmd {
-            tube_id: "fore_port".into(),
-            target_uuid: "target-uuid".into(),
-        }],
-        "the decider must publish the loaded, in-arc tube and the locked target"
+        admitted.0[0].target,
+        SystemId("torpedo-tube-fore-port".into()),
+        "the decider must target the loaded, in-arc tube"
     );
     assert!(
         app.world()
@@ -6151,16 +6199,16 @@ fn ai_torpedo_auto_fire_writes_intent_without_launching() {
             .0
             .iter()
             .all(|(_, m)| !matches!(m, ServerMessage::TorpedoLaunched { .. })),
-        "ai_torpedo_auto_fire must not launch — that is integrate_weapons_state's job"
+        "ai_torpedo_auto_fire must not launch — that is handle_fire_torpedo's job"
     );
 }
 
-/// `integrate_weapons_state` drains `TorpedoIntents` as well as
-/// `PhaserIntents` (issue #698 folded the former
-/// `integrate_torpedo_intents` into it). Pins the torpedo half of the
-/// adapter from a hand-written intent, independently of the decider.
+/// `handle_fire_torpedo` (the consumer) reads `AdmittedCommands` and fires
+/// a torpedo. Pins the consumer from a hand-written command, independently
+/// of the AI decider. (The admitted buffer is cleared each tick by
+/// `admit_system_commands`, not by the consumer.)
 #[test]
-fn integrate_weapons_state_launches_from_torpedo_intent() {
+fn handle_fire_torpedo_launches_from_admitted_command() {
     use bevy::ecs::system::RunSystemOnce;
 
     let mut app = torpedo_ai_test_app();
@@ -6168,14 +6216,20 @@ fn integrate_weapons_state_launches_from_torpedo_intent() {
     let ship = local_ship(&mut app);
     app.world_mut()
         .entity_mut(ship)
-        .insert(TorpedoIntents(vec![TorpedoCmd {
-            tube_id: "fore_port".into(),
-            target_uuid: "target-uuid".into(),
-        }]));
+        .get_mut::<AdmittedCommands>()
+        .unwrap()
+        .0
+        .push(AdmittedCommand {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo {
+                target_uuid: Some("target-uuid".into()),
+            },
+            response_token: None,
+        });
 
     app.world_mut()
-        .run_system_once(integrate_weapons_state)
-        .expect("integrate_weapons_state should run");
+        .run_system_once(handle_fire_torpedo)
+        .expect("handle_fire_torpedo should run");
 
     assert!(
         app.world()
@@ -6183,15 +6237,7 @@ fn integrate_weapons_state_launches_from_torpedo_intent() {
             .0
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. })),
-        "the adapter must advance the torpedo state machine from the intent"
-    );
-    assert!(
-        app.world()
-            .get::<TorpedoIntents>(ship)
-            .unwrap()
-            .0
-            .is_empty(),
-        "the adapter must drain the buffer so a stale intent cannot re-launch"
+        "the consumer must advance the torpedo state machine from the admitted command"
     );
 }
 
@@ -6502,8 +6548,9 @@ fn fire_phaser_refused_when_bank_fine_system_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -6528,8 +6575,9 @@ fn fire_phaser_allowed_when_other_bank_offline_but_this_one_online() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     let out = tick(&mut app);
@@ -6550,8 +6598,9 @@ fn load_tube_emits_claim_torpedo_round_via_channel_2() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::LoadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
         },
     );
     // Run one tick to admit the command → handle_load_tube emits the claim.
@@ -6752,8 +6801,9 @@ fn load_tube_refused_when_tube_fine_system_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::LoadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
         },
     );
     tick(&mut app);
@@ -6795,8 +6845,9 @@ fn magazine_claim_decrements_counter_by_one_when_online() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::LoadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
         },
     );
     let _ = tick(&mut app);
@@ -6860,8 +6911,9 @@ fn magazine_claim_refused_when_magazine_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::LoadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
         },
     );
     let _ = tick(&mut app);
@@ -6895,8 +6947,9 @@ fn magazine_claim_refused_when_empty() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::LoadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::LoadTube,
         },
     );
     let _ = tick(&mut app);
@@ -6938,9 +6991,9 @@ fn fire_torpedo_refused_when_magazine_offline_even_if_tube_loaded() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -6964,9 +7017,9 @@ fn fire_torpedo_refused_when_tube_fine_system_offline() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -6985,12 +7038,12 @@ fn set_target_refused_when_all_banks_offline() {
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
     // The updated `test_ship_config()` declares two fine phaser banks
-    // ("phaser-fore", "phaser-aft"). `any_bank_accepts_human_input`
+    // ("phaser-port", "phaser-starboard"). `any_bank_accepts_human_input`
     // iterates them and returns true if ANY bank accepts human input.
     // So to refuse SetTarget, EVERY fine bank must be offline.
     // Mark both fine banks offline.
-    mark_system_offline(&mut app, crate::system_registry::phaser_fore_system_id());
-    mark_system_offline(&mut app, crate::system_registry::phaser_aft_system_id());
+    mark_system_offline(&mut app, SystemId("phaser-port".into()));
+    mark_system_offline(&mut app, SystemId("phaser-starboard".into()));
 
     push(
         &mut app,
@@ -7193,6 +7246,7 @@ ai_only = true
                 }],
             }),
             Transform::default(),
+            crate::messages::AdmittedCommands::default(),
         ))
         .id();
 
@@ -7563,8 +7617,9 @@ fn unload_tube_mutates_the_ships_own_component_and_never_the_global_resource() {
     push(
         &mut app,
         crate::console_bridge::LOCAL_CONSOLE_TOKEN,
-        ClientMessage::UnloadTube {
-            tube: "fore_port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::UnloadTube,
         },
     );
     tick(&mut app);
@@ -7663,9 +7718,9 @@ fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
+        ClientMessage::ControlSystem {
+            target: SystemId("torpedo-tube-fore-port".into()),
+            payload: SystemControlPayload::FireTorpedo { target_uuid: None },
         },
     );
     let out = tick(&mut app);
@@ -8639,8 +8694,9 @@ fn npc_beam_fire_emits_weapon_fired_for_the_non_local_shooter() {
     push(
         &mut app,
         &ai_token,
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     app.update();
@@ -8690,8 +8746,9 @@ fn beam_collapsing_a_non_local_shield_facing_emits_shield_arc_collapsed() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);
@@ -8744,8 +8801,9 @@ fn beam_kill_of_a_non_local_ship_emits_entity_destroyed_with_killer_credit() {
     push(
         &mut app,
         "weapons",
-        ClientMessage::FirePhaser {
-            bank: "port".to_string(),
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
         },
     );
     tick(&mut app);

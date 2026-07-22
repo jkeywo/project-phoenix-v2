@@ -7,13 +7,11 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
-use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::{EntitySystemHull, FactionComponent};
-use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{Target, WorldResource};
 use crate::messages::{
-    AdmittedCommands, ClientMessage, GamePhase, InterSystemMsg, InterSystemPayload,
-    InterSystemQueue, ModifierSlot, PhaserBank, PhaserMode, ServerMessage, SystemBlackboard,
-    SystemControlPayload,
+    AdmittedCommands, GamePhase, InterSystemMsg, InterSystemPayload, InterSystemQueue,
+    ModifierSlot, PhaserBank, PhaserMode, ServerMessage, SystemBlackboard, SystemControlPayload,
 };
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::ship_state::ShipPhysics;
@@ -21,7 +19,7 @@ use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 
 use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
-    tactical_authorized, BeamContext, ShooterState,
+    BeamContext, ShooterState,
 };
 use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
 
@@ -46,36 +44,6 @@ pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 /// removed the dual `Resource` derive — every ship has its own weapons target.
 #[derive(Component, Default, Clone, Debug)]
 pub struct TacticalRadarSelection(pub Option<String>);
-
-/// A single phaser-fire command decided by [`ai_phaser_auto_fire`] (issue
-/// #698) for [`integrate_weapons_state`] to apply the same tick.
-///
-/// Carries everything the beam mutation needs, so the integrator never has to
-/// re-read `PhaserCombatConfigResource`: which bank fires, what it fires at,
-/// and how long the beam burns. `beam_duration_secs` is a TOML-authored value
-/// resolved by the decider (bank `beam_duration_secs`, falling back to
-/// `PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS`), not a hardcode.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PhaserCmd {
-    pub bank: PhaserBank,
-    pub target_uuid: String,
-    pub beam_duration_secs: f32,
-}
-
-/// Per-ship queue of pending phaser-fire intents. Written by
-/// [`ai_phaser_auto_fire`], drained and applied by [`integrate_weapons_state`]
-/// in the same tick.
-///
-/// Unlike [`TorpedoIntents`], this component is **not** `AiHighFidelity`-scoped
-/// and is therefore not part of the LOD promote/demote bundle in
-/// `ai::server::lod_ai_ships`. `ai_phaser_auto_fire` runs for every ship with
-/// an [`ActiveBeam`] — low-LOD NPCs included (see that system's `# Gating`
-/// docs for why) — so the intent buffer has to exist for the same population.
-/// That is guaranteed structurally by `ActiveBeam`'s `#[require(PhaserIntents)]`
-/// rather than by enumerating spawn sites, which is what keeps ad-hoc test and
-/// legacy spawns from silently losing phaser auto-fire.
-#[derive(Component, Default, Clone, Debug)]
-pub struct PhaserIntents(pub Vec<PhaserCmd>);
 
 /// UUID of the last entity that attacked this ship. Written by the unified
 /// `tick_beams` in the Damage phase on the targeted ship's entity;
@@ -102,14 +70,10 @@ pub struct LastShipAttacker(pub Option<String>);
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own beam state.
 ///
-/// `#[require(PhaserIntents)]` (issue #698): beam activation moved out of
-/// `ai_phaser_auto_fire` into `integrate_weapons_state`, which reads the
-/// decision from [`PhaserIntents`]. Since phaser auto-fire is deliberately
-/// *not* `AiHighFidelity`-scoped, that buffer must exist wherever `ActiveBeam`
-/// does — including legacy/test spawns that predate the split. Requiring it
-/// here makes that structural instead of a checklist of spawn sites.
+/// After issue #846, phaser fire commands arrive as admitted `ControlSystem`
+/// payloads rather than through `PhaserIntents` — the `#[require]` was deleted
+/// alongside the intents component.
 #[derive(Component, Default, Clone, Debug)]
-#[require(PhaserIntents)]
 pub struct ActiveBeam {
     pub target_uuid: Option<String>,
     pub remaining_secs: f32,
@@ -353,35 +317,22 @@ pub(crate) fn handle_set_target(
     }
 }
 
-/// Unified `FirePhaser` handler for every ship (player + NPC).
+/// Admitted-command consumer for `FirePhaser` (issue #846).
 ///
-/// Iterates `InboundMessage::FirePhaser` events and resolves each to a single
-/// shooter ship entity by token:
-/// - `"ai:<uuid>"` tokens are resolved through [`AiTokenRegistry`] to the
-///   registered NPC entity.
-/// - Human network tokens and `LOCAL_CONSOLE_TOKEN` route to the `LocalShip`,
-///   gated by [`tactical_authorized`] (holds the Tactical console or is the
-///   local operator).
+/// Reads each ship's own `AdmittedCommands` for `FirePhaser` payloads,
+/// resolves the bank from the target `SystemId`, verifies arc/range and
+/// cooldowns, then activates the ship's `ActiveBeam` + triggers
+/// `BeamStartedEvent`.
 ///
-/// After resolution the same per-ship code path runs for both: read the
-/// shooter's [`TacticalRadarSelection`], verify the requested bank is in-arc using the
-/// shooter's own [`PhaserCombatConfigResource`], and activate its
-/// [`ActiveBeam`] + trigger [`BeamStartedEvent`].
+/// Runs in `SimSet::Physics` — after the AI decider (`ai_phaser_auto_fire`,
+/// `SimSet::Input`) has emitted its admitted command, but still within the
+/// same tick so the beam starts without a tick of queue lag.
 ///
-/// Merges the former `handle_npc_beam_fire` (NPC-only activation) into this
-/// system — final divergence closed. All target-marking (`ShipAttackedThisTick`
-/// / `LastShipAttacker`) happens later in `tick_beams`.
+/// No `InboundMessage` / token resolution: admission stripped the source
+/// identity. No human-vs-AI branch below this point.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_fire_phaser(
     mut commands: Commands,
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ai_registry: Option<Res<AiTokenRegistry>>,
-    localship_q: Query<
-        (Entity, &crate::ship_plugin::ShipConfigComponent),
-        With<crate::server_app::LocalShip>,
-    >,
-    // Per-ship state read for every candidate shooter (player + NPC).
     mut ship_q: Query<
         (
             Entity,
@@ -390,6 +341,7 @@ pub(crate) fn handle_fire_phaser(
             &crate::server_app::ShipSystemBlackboards,
             &mut ActiveBeam,
             &PhaserCooldown,
+            &AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
         ),
@@ -400,200 +352,167 @@ pub(crate) fn handle_fire_phaser(
 ) {
     use crate::entity_config::PhaserCombatConfig;
 
-    // Snapshot LocalShip identity for human-token routing. `None` when the
-    // test/plugin harness has no player ship spawned.
-    let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
-        localship_q.single().ok();
+    for (
+        ship_entity,
+        control_sources,
+        physics,
+        blackboards,
+        mut beam,
+        cooldown,
+        admitted,
+        combat_config_opt,
+        modifiers_opt,
+    ) in ship_q.iter_mut()
+    {
+        for cmd in admitted.0.iter() {
+            let SystemControlPayload::FirePhaser = &cmd.payload else {
+                continue;
+            };
 
-    for ev in reader.read() {
-        let ClientMessage::FirePhaser { bank } = &ev.msg else {
-            continue;
-        };
-
-        // ── Resolve the shooter ship entity ─────────────────────────────────
-        let shooter_entity: Entity = if ev.token.starts_with("ai:") {
-            match ai_registry
-                .as_deref()
-                .and_then(|r| r.bevy_entity_for_token(&ev.token))
-            {
-                Some(e) => e,
-                None => continue,
-            }
-        } else {
-            // Human network token or LOCAL_CONSOLE_TOKEN — must be the
-            // LocalShip and satisfy the Tactical authorization gate.
-            match local_ship {
-                Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
-                _ => continue,
-            }
-        };
-
-        // ── Pull per-ship state for the resolved shooter ────────────────────
-        let Ok((
-            _entity,
-            control_sources,
-            physics,
-            blackboards,
-            mut beam,
-            cooldown,
-            combat_config_opt,
-            modifiers_opt,
-        )) = ship_q.get_mut(shooter_entity)
-        else {
-            continue;
-        };
-
-        // Authorize the shooter per its own ControlSource. Human tokens
-        // require `accept_human_input`; `ai:` tokens require `operate_ai`.
-        // Per-bank gate (issue #512): resolve the SystemId for this bank's
-        // fine system and gate on its own policy. An unresolved or
-        // unregistered bank id gets the default-source policy (issue #801 —
-        // no coarse fallback; production ships register a fine system for
-        // every declared bank).
-        let bank_system_id = crate::system_registry::phaser_bank_system_id(bank)
-            .filter(|id| system_is_registered(control_sources, id));
-        let policy = match &bank_system_id {
-            Some(id) => control_sources.0.policy_for(id),
-            // Unregistered fine system: the default-source policy — exactly
-            // what `policy_for` returns for any unknown id. No coarse
-            // `tactical` fallback (issue #801).
-            None => crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            ),
-        };
-        let is_ai_token = ev.token.starts_with("ai:");
-        let authorized = if is_ai_token {
-            policy.operate_ai
-        } else {
-            policy.accept_human_input
-        };
-        if !authorized {
-            continue;
-        }
-
-        if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
-            continue;
-        }
-
-        // Target selection: the **Combat Lock** from this ship's frozen
-        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag at 30Hz
-        // is accepted for firing. The tactical radar owns the live selection;
-        // firing — a cross-system consumer — reads the aggregated viewscreen
-        // fact, never the radar's live component. No AI-only fallback and no
-        // human-vs-AI branch below admission.
-        let Some(target_uuid) = (match blackboards
-            .0
-            .get(&crate::system_registry::viewscreen_system_id())
-        {
-            Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
-        }) else {
-            continue;
-        };
-        let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-            continue;
-        };
-
-        // Per-entity component path (preferred). Fallback: default combat
-        // config.
-        let combat_config_default = PhaserCombatConfigResource::default();
-        let combat_config: &PhaserCombatConfigResource =
-            combat_config_opt.unwrap_or(&combat_config_default);
-
-        let modifiers_default = crate::modifiers::ShipModifiers::new();
-        let modifiers: &crate::modifiers::ShipModifiers =
-            modifiers_opt.unwrap_or(&modifiers_default);
-
-        let bank_cfg = combat_config.0.bank_by_id(bank);
-        let bank_in_arc = if combat_config.0.banks.is_empty() {
-            let effective_phaser_range =
-                PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-            crate::radar::is_fire_ready_with_range(
-                tx,
-                tz,
-                physics.x,
-                physics.z,
-                physics.yaw,
-                effective_phaser_range,
-            )
-        } else {
-            bank_cfg
-                .map(|bank_cfg| {
-                    let bank_base_range = if bank_cfg.beam_range > 0.0 {
-                        bank_cfg.beam_range
-                    } else {
-                        PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                    };
-                    let effective_bank_range =
-                        bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-                    let (rx, ry) = crate::weapons::phaser::ship_local(
-                        tx,
-                        tz,
-                        physics.x,
-                        physics.z,
-                        physics.yaw,
-                    );
-                    let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                        <= effective_bank_range * effective_bank_range;
-                    range_ok
-                        && crate::weapons::phaser::in_arc(
-                            rx,
-                            ry,
-                            bank_cfg.facing_deg,
-                            bank_cfg.fire_arc_deg,
-                        )
+            // Resolve the bank id from the target SystemId by running the
+            // canonical forward mapping over each authored bank and comparing.
+            let combat_config_default = PhaserCombatConfigResource::default();
+            let combat_config: &PhaserCombatConfigResource =
+                combat_config_opt.unwrap_or(&combat_config_default);
+            let Some(bank_id) = (if combat_config.0.banks.is_empty() {
+                // No banks in config: try the raw target string as bank id.
+                let raw = cmd.target.0.strip_prefix("phaser-").map(|s| s.to_string());
+                raw
+            } else {
+                combat_config.0.banks.iter().find_map(|b| {
+                    crate::system_registry::phaser_bank_system_id(&b.id)
+                        .filter(|id| id == &cmd.target)
+                        .map(|_| b.id.clone())
                 })
-                .unwrap_or(false)
-        };
-        if !bank_in_arc {
-            continue;
-        }
+            }) else {
+                continue;
+            };
 
-        // Cancel any active beam on this shooter before starting the new one.
-        // (In practice the `beam.target_uuid.is_some()` guard above already
-        // short-circuits, but we keep the branch for defensive consistency.)
-        if let Some(old_uuid) = beam.target_uuid.take() {
-            let old_bank = beam.bank.clone().unwrap_or_default();
-            beam.remaining_secs = 0.0;
+            // Verify the bank is registered and operable.
+            let bank_system_id = crate::system_registry::phaser_bank_system_id(&bank_id)
+                .filter(|id| system_is_registered(control_sources, id));
+            let policy = match &bank_system_id {
+                Some(id) => control_sources.0.policy_for(id),
+                None => crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                ),
+            };
+            // Admission already gated the token. This is a system-state gate:
+            // the bank must be operable (not Offline).
+            if !policy.accept_human_input && !policy.operate_ai {
+                continue;
+            }
+
+            if cooldown.is_bank_active(&bank_id) || beam.target_uuid.is_some() {
+                continue;
+            }
+
+            // Target: the combat lock from the ship's viewscreen blackboard.
+            let Some(target_uuid) = (match blackboards
+                .0
+                .get(&crate::system_registry::viewscreen_system_id())
+            {
+                Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                continue;
+            };
+
+            let modifiers_default = crate::modifiers::ShipModifiers::new();
+            let modifiers: &crate::modifiers::ShipModifiers =
+                modifiers_opt.unwrap_or(&modifiers_default);
+
+            let bank_cfg = combat_config.0.bank_by_id(&bank_id);
+            let bank_in_arc = if combat_config.0.banks.is_empty() {
+                let effective_phaser_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    * modifiers.get(&ModifierSlot::RadarRange);
+                crate::radar::is_fire_ready_with_range(
+                    tx,
+                    tz,
+                    physics.x,
+                    physics.z,
+                    physics.yaw,
+                    effective_phaser_range,
+                )
+            } else {
+                bank_cfg
+                    .map(|bank_cfg| {
+                        let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                            bank_cfg.beam_range
+                        } else {
+                            PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let effective_bank_range =
+                            bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                            tx,
+                            tz,
+                            physics.x,
+                            physics.z,
+                            physics.yaw,
+                        );
+                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok
+                            && crate::weapons::phaser::in_arc(
+                                rx,
+                                ry,
+                                bank_cfg.facing_deg,
+                                bank_cfg.fire_arc_deg,
+                            )
+                    })
+                    .unwrap_or(false)
+            };
+            if !bank_in_arc {
+                continue;
+            }
+
+            // Cancel any active beam before starting the new one.
+            if let Some(old_uuid) = beam.target_uuid.take() {
+                let old_bank = beam.bank.clone().unwrap_or_default();
+                beam.remaining_secs = 0.0;
+                beam.damage_accumulator = 0.0;
+                commands.trigger(BeamEndedEvent {
+                    bank: old_bank,
+                    target_uuid: old_uuid,
+                    source_entity: ship_entity,
+                });
+            }
+
+            let beam_duration_secs = bank_cfg
+                .map(|b| {
+                    if b.beam_duration_secs > 0.0 {
+                        b.beam_duration_secs
+                    } else {
+                        PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
+                    }
+                })
+                .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
+            beam.target_uuid = Some(target_uuid.clone());
+            beam.remaining_secs = beam_duration_secs;
             beam.damage_accumulator = 0.0;
-            commands.trigger(BeamEndedEvent {
-                bank: old_bank,
-                target_uuid: old_uuid,
-                source_entity: shooter_entity,
+            beam.bank = Some(bank_id.clone());
+
+            commands.trigger(BeamStartedEvent {
+                bank: bank_id,
+                target_uuid: target_uuid.clone(),
+                source_entity: ship_entity,
             });
         }
-
-        let beam_duration_secs = bank_cfg
-            .map(|b| {
-                if b.beam_duration_secs > 0.0 {
-                    b.beam_duration_secs
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
-                }
-            })
-            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
-        beam.target_uuid = Some(target_uuid.clone());
-        beam.remaining_secs = beam_duration_secs;
-        beam.damage_accumulator = 0.0;
-        beam.bank = Some(bank.clone());
-
-        commands.trigger(BeamStartedEvent {
-            bank: bank.clone(),
-            target_uuid: target_uuid.clone(),
-            source_entity: shooter_entity,
-        });
     }
 }
 
 /// Decide which in-arc phaser bank each ship should fire at its locked target
-/// this tick, and record it in [`PhaserIntents`] (issue #698).
+/// this tick, and emit into the ship's own `AdmittedCommands` (issue #846).
 ///
-/// The decide half of the phaser auto-fire pair split out of the pre-#698
-/// `tick_phaser_auto_fire`, which fused this decision with the `ActiveBeam`
-/// mutation. [`integrate_weapons_state`] now owns the mutation; this system is
-/// read-only apart from its own intent buffer, mirroring
-/// `ai_torpedo_auto_fire` → `integrate_weapons_state` (the shields pair
-/// retired its intent transport for admitted emissions in issue #826).
+/// Retired `PhaserIntents` in favour of the standard `ControlSystem` →
+/// `AdmittedCommands` seam: the decision logic is unchanged, but instead of
+/// writing a private intent component it now calls `emit_ai_command` to push
+/// a `FirePhaser` payload into the ship's admitted set. The paired applier
+/// (`handle_fire_phaser`) reads that set in `SimSet::Physics`.
 ///
 /// Iterates every ship (`With<Ship>`) — player + NPC — and auto-fires when
 /// either:
@@ -613,32 +532,23 @@ pub(crate) fn handle_fire_phaser(
 /// to a fight. `phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity`
 /// pins this.
 ///
-/// Target selection: reads the ship's [`TacticalRadarSelection`] — the one authoritative
-/// lock, written by `handle_set_target` for humans and by
-/// [`ai_target_selection`] (issue #697) for AI-operated tactical systems, so
-/// one surface serves both. The legacy `ShipAiMemory::target` fallback was
-/// deleted by #702, having been redundant for every production NPC since #703
-/// gave `ai_target_selection` its own nearest-hostile tier. Arc/range checks mirror
-/// [`handle_fire_phaser`], but use each bank's `auto_arc_deg` (looser cone
-/// than `fire_arc_deg`) so AI is less trigger-happy on peripheral targets.
+/// Target selection: reads the ship's `combat_lock` from the viewscreen
+/// blackboard — same surface `handle_fire_phaser` reads (issue #829, spec §3).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_phaser_auto_fire(
     phaser_mode: Res<CurrentPhaserMode>,
-    // Every ship with weapons state. Components are `Option` because
-    // pre-`AiPlugin` test apps may spawn ships without it. `ShipConfigComponent`
-    // is `Option` for the same reason — some legacy tests spawn NPCs without
-    // a ship config; those ships fall back to the coarse `tactical.operate_ai`
-    // gate (preserving pre-#512 behaviour).
+    sessions: Res<crate::lobby::Sessions>,
     mut ship_q: Query<
         (
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
+            Option<&crate::entity_spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             &ActiveBeam,
-            &mut PhaserIntents,
             &PhaserCooldown,
+            &mut AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
         ),
@@ -651,22 +561,18 @@ pub(crate) fn ai_phaser_auto_fire(
 
     for (
         is_local,
+        entity_uuid,
         control_sources,
         ship_config_opt,
         physics,
         blackboards,
         beam,
-        mut intents,
         cooldown,
+        mut admitted,
         combat_config_opt,
         modifiers_opt,
     ) in ship_q.iter_mut()
     {
-        // Clear last tick's intent unconditionally — a stale intent must never
-        // survive into a tick where the decision didn't run. Mirrors
-        // `ai_torpedo_auto_fire`.
-        intents.0.clear();
-
         // Gate: auto-fire only when at least one phaser bank on this ship is
         // AI-driven (per its own fine-system policy — issue #512), OR the
         // player globally toggled phaser mode to Auto (LocalShip-only signal
@@ -769,22 +675,20 @@ pub(crate) fn ai_phaser_auto_fire(
         let Some(bank_id) = bank_id else {
             continue;
         };
-        let bank_cfg = combat_config.0.bank_by_id(&bank_id);
-        let beam_duration_secs = bank_cfg
-            .map(|b| {
-                if b.beam_duration_secs > 0.0 {
-                    b.beam_duration_secs
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS
-                }
-            })
-            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
 
-        intents.0.push(PhaserCmd {
-            bank: bank_id,
-            target_uuid,
-            beam_duration_secs,
-        });
+        // Emit as an admitted command through the shared AI seam.
+        let Some(target) = crate::system_registry::phaser_bank_system_id(&bank_id) else {
+            continue;
+        };
+        crate::command_admission::ai_emit::emit_ai_command(
+            entity_uuid,
+            target,
+            crate::messages::SystemControlPayload::FirePhaser,
+            control_sources,
+            &sessions,
+            ship_config_opt,
+            &mut admitted,
+        );
     }
 }
 

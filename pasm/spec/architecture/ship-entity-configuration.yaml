@@ -31,6 +31,35 @@ entities:
       paths: [src/entities/config.rs, assets/entities]
       symbols: [EntityConfig]
 
+  - component: entity-template-composition-resolver
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Entity Template Composition Resolver
+      summary: Resolves ordered relative entity-TOML includes depth-first, merges fragments and declaring-template overrides through the established entity merge contract, and returns one fully resolved template with source provenance before validation or spawning.
+      rationale:
+        - Reusable entity and fine-system behaviour fragments must be authoring-time composition rather than a second runtime inheritance or policy-lookup model.
+        - Deterministic merge order, include-chain diagnostics, and cycle rejection prevent content composition from becoming hidden behaviour.
+    architecture:
+      kind: configuration-transform
+      authority: authoritative
+      owns: [resolved-entity-template-state]
+      reads: [entity-template-state]
+      produces: [resolved-entity-template-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - state: resolved-entity-template-state
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Resolved Entity Template State
+      summary: One validated EntityConfig plus include-chain provenance, after all declared entity-TOML fragments and declaring-template overrides have been deterministically composed.
+    architecture:
+      classification: authoritative
+      owner: entity-template-composition-resolver
+      writers: [entity-template-composition-resolver]
+      readers: [ship-config-loader, entity-spawn-orchestrator, entity-template-schema-validator]
+
   - component: ship-config-loader
     core:
       status: implemented

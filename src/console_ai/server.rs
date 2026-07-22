@@ -696,13 +696,14 @@ pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship_plugin::ActiveStationRatings,
             &crate::ship_state::ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::weapons_plugin::TorpedoSystemResource>,
-            &mut crate::weapons_plugin::TorpedoIntents,
+            &mut crate::messages::AdmittedCommands,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -726,19 +727,16 @@ pub(crate) fn ai_torpedo_auto_fire(
     let policy_sid = crate::system_registry::torpedo_magazine_system_id();
 
     for (
+        entity_uuid,
         ship_config,
         control_sources,
         active_ratings,
         physics,
         blackboards,
         torpedo_sys_comp,
-        mut intents,
+        mut admitted,
     ) in ships.iter_mut()
     {
-        // Clear last tick's intents unconditionally — a stale intent must
-        // never survive into a tick where the decision didn't run.
-        intents.0.clear();
-
         let policy = control_sources.0.policy_for(&policy_sid);
         if !policy.operate_ai {
             continue;
@@ -860,10 +858,22 @@ pub(crate) fn ai_torpedo_auto_fire(
 
         let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
         for tube_id in tubes_to_fire {
-            intents.0.push(crate::weapons_plugin::TorpedoCmd {
-                tube_id,
-                target_uuid: target_uuid.clone(),
-            });
+            // Emit as an admitted command through the shared AI seam (issue
+            // #846), instead of the retired `TorpedoIntents` buffer.
+            let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
+                continue;
+            };
+            crate::command_admission::ai_emit::emit_ai_command(
+                entity_uuid,
+                target,
+                crate::messages::SystemControlPayload::FireTorpedo {
+                    target_uuid: Some(target_uuid.clone()),
+                },
+                control_sources,
+                &sessions,
+                Some(ship_config),
+                &mut admitted,
+            );
         }
     }
 }

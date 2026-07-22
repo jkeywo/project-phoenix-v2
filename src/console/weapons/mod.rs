@@ -20,27 +20,6 @@ const NPC_FREQ_MATCH_DELAY: f32 = 2.0;
 
 // ── Resources ─────────────────────────────────────────────────────────────
 
-/// A single torpedo-fire command decided by `console_ai::server::
-/// ai_torpedo_auto_fire` (issue #694) for `console_ai::server::
-/// integrate_torpedo_intents` to apply the same tick. Carries the tube to
-/// fire and the locked target UUID `TorpedoSystem::launch` needs.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TorpedoCmd {
-    pub tube_id: crate::torpedo::TorpedoTubeId,
-    pub target_uuid: String,
-}
-
-/// Per-ship queue of pending torpedo-fire intents. Written by
-/// `ai_torpedo_auto_fire`, drained and applied by `integrate_weapons_state`
-/// in the same tick.
-///
-/// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site, mirroring `ShipPowerAiState`'s
-/// scoping (see `ai::server::lod_ai_ships` and the `AiHighFidelity` spawn
-/// sites in `server_app.rs` / `ship_plugin.rs` / `ai/server.rs`).
-#[derive(Component, Default, Clone, Debug)]
-pub struct TorpedoIntents(pub Vec<TorpedoCmd>);
-
 /// Rendering config for the phaser beam (colour, max range).
 /// Populated from ship entity TOML during world setup; defaults are used if
 /// the TOML is absent.
@@ -96,37 +75,21 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // Admitted-command consumers (issue #833): the tactical-radar selection
-        // handler (`tactical-radar`) and the phaser-mode/control handlers
-        // (`phaser-control`).
-        //
-        // NOTE: the weapons FIRE handlers (`handle_fire_phaser` /
-        // `handle_fire_torpedo` / `handle_fire_blaster` / `handle_load_tube` /
-        // `handle_unload_tube`) are NOT admitted-command consumers — they read
-        // `MessageReader<InboundMessage>` for dedicated top-level
-        // `ClientMessage` variants that carry no `SystemId` target. That is a
-        // separate client→host channel outside admitted routing (a possible
-        // future migration, not #833), so `phaser-fore` and `blaster-*` are
-        // deliberately not registered here.
-        //
-        // `torpedo-tube-*` IS registered, and is the exception #833 scoped out.
-        // `handle_set_torpedo_volley_target` was migrated to read per-ship
-        // `AdmittedCommands` over `With<Ship>` because it had to: the volley
-        // order is the only way a tube ever loads, and as an
-        // `InboundMessage` + `With<LocalShip>` handler it was unreachable for
-        // every NPC — so AI crews never loaded a torpedo and no NPC ever fired
-        // one. `ai_torpedo_load` now issues that order through
-        // `emit_ai_command`, the same seam and the same `SystemId` a human's
-        // `ControlSystem` command travels, which is exactly the symmetry
-        // admitted routing exists to express. A prefix matcher covers the
-        // per-hull tube ids (`torpedo-tube-fore-port`, …).
+        // Admitted-command consumers (issue #833, expanded by #846): every
+        // weapons command — fire, load, unload, target selection, phaser
+        // control — now travels as a `ControlSystem` envelope through the
+        // admission seam. Each phaser bank (`phaser-{bank}`), torpedo tube
+        // (`torpedo-tube-{id}`), and blaster bank (`blaster-{bank}`) is a
+        // routed admitted consumer. The `torpedo-tube-*` prefix also covers
+        // `SetTorpedoVolleyTarget`.
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::TACTICAL_RADAR_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::PHASER_CONTROL_SYSTEM_ID,
         ))
-        .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"));
+        .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"))
+        .register_admitted_consumer(ConsumerMatcher::prefix("phaser-"));
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
@@ -175,21 +138,13 @@ impl Plugin for WeaponsPlugin {
                     handle_set_target
                         .in_set(crate::sim_sets::SimSet::Input)
                         .before(ai_target_selection),
-                    handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
-                    // Phaser auto-fire DECIDE half (issue #698). Stays in
-                    // `Input`, where the pre-split `tick_phaser_auto_fire` ran,
-                    // so it keeps reading pre-`sync_ship_position` `Transform`s
-                    // and pre-physics `ShipPhysics` — moving it to `Physics`
-                    // alongside `ai_torpedo_auto_fire` would leave it racing
-                    // `sync_ship_position` for target positions. Its apply half
-                    // is `integrate_weapons_state`, in `Physics` below.
+                    // Phaser auto-fire DECIDE (issue #846): emits to
+                    // AdmittedCommands through the shared AI seam. Stays in
+                    // `Input` so it keeps reading pre-physics `Transform`s.
                     ai_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
                     tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
-                    handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
-                    handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
-                    handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
                     // Tactical AI target selection (issues #697, #700).
                     //
@@ -234,26 +189,19 @@ impl Plugin for WeaponsPlugin {
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Damage),
                     handle_blaster_hits.in_set(crate::sim_sets::SimSet::Damage),
-                    // Weapons AI APPLY half (issue #698): drains both
-                    // `PhaserIntents` (written in `Input`) and `TorpedoIntents`
-                    // (written in `Physics` by `ConsoleAiPlugin`). Registered
-                    // here rather than in `ConsoleAiPlugin` because the phaser
-                    // half must run for ships that never reach high-fidelity
-                    // AI — see `ai_phaser_auto_fire`'s gating docs. The
-                    // `.after` is a no-op when `ConsoleAiPlugin` is absent
-                    // (test apps), which is exactly what we want: phasers still
-                    // integrate, torpedoes have no producer.
-                    integrate_weapons_state
-                        .in_set(crate::sim_sets::SimSet::Physics)
-                        .after(crate::console_ai_plugin::ai_torpedo_auto_fire),
-                    // Beam activation moved from `Input` to `Physics` with the
-                    // #698 split, so this drain — which used to be guaranteed
-                    // to see a beam started one whole phase earlier — needs an
-                    // explicit edge to keep draining power on the beam's first
-                    // tick rather than one tick late.
+                    // Weapons fire/load consumers (issue #846): read per-ship
+                    // `AdmittedCommands` that the AI deciders (SimSet::Input)
+                    // wrote this tick. Running here in Physics means admission's
+                    // `clear_before_input` has already run, and the AI deciders
+                    // (Input) have already emitted — so commands from either
+                    // origin survive the tick.
+                    handle_fire_phaser.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_load_tube.in_set(crate::sim_sets::SimSet::Physics),
+                    handle_unload_tube.in_set(crate::sim_sets::SimSet::Physics),
                     drain_power_for_active_beam
                         .in_set(crate::sim_sets::SimSet::Physics)
-                        .after(integrate_weapons_state),
+                        .after(handle_fire_phaser),
                     // Torpedo tick split into two phases (issue #724),
                     // connected by the one-tick `TorpedoTargetSnapshot`
                     // resource: the builder writes it, the lifecycle reads
@@ -265,11 +213,13 @@ impl Plugin for WeaponsPlugin {
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Physics),
                     // Magazine consumer runs in Physics — reads channel-2 claims
-                    // that handle_load_tube emitted in Input this tick, so the
-                    // load starts same-tick (issue #512). Ordered after
-                    // build_torpedo_target_snapshot / tick_torpedo_lifecycle
-                    // so its own state mutations are seen.
-                    handle_torpedo_magazine_inter_system.in_set(crate::sim_sets::SimSet::Physics),
+                    // that handle_load_tube emitted this tick (both now in
+                    // Physics, issue #846). Ordered after handle_load_tube and
+                    // build_torpedo_target_snapshot / tick_torpedo_lifecycle so
+                    // its own state mutations are seen.
+                    handle_torpedo_magazine_inter_system
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(handle_load_tube),
                     tick_blaster_system.in_set(crate::sim_sets::SimSet::Physics),
                 ),
             )
@@ -319,8 +269,8 @@ pub(crate) use beam::{
 };
 pub use beam::{
     drain_power_for_active_beam, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
-    LastShipAttacker, PhaserCmd, PhaserCombatConfigResource, PhaserCooldown, PhaserIntents,
-    TacticalRadarSelection, BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
+    LastShipAttacker, PhaserCombatConfigResource, PhaserCooldown, TacticalRadarSelection,
+    BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -349,183 +299,6 @@ pub(crate) use blackboard::{
     publish_torpedo_magazine_blackboard, publish_torpedo_tube_blackboards,
     publish_weapons_core_blackboard, WeaponsUpdateFirstTick,
 };
-
-/// Adapter: applies the weapons AI's decisions to authoritative weapons state
-/// (issue #698).
-///
-/// Reads [`PhaserIntents`] (written by [`ai_phaser_auto_fire`], `SimSet::Input`)
-/// and [`TorpedoIntents`] (written by `console_ai::server::ai_torpedo_auto_fire`,
-/// `SimSet::Physics`) and drives the two weapons state machines: `ActiveBeam`
-/// activation + `BeamStartedEvent`, and `TorpedoSystem::launch` +
-/// `TorpedoLaunched`. It is the single owner of both mutations — no other
-/// system drains either buffer.
-///
-/// This absorbs the former `console_ai::server::integrate_torpedo_intents`
-/// wholesale rather than sitting alongside it: two systems both draining
-/// `TorpedoIntents` would race, and the AC's "reads both" only means anything
-/// if one system owns the drain.
-///
-/// # Scheduling
-/// Runs in `SimSet::Physics`, ordered `.after(ai_torpedo_auto_fire)` — the
-/// later of its two producers, and the constraint that forces it out of
-/// `Input` where `tick_phaser_auto_fire` used to apply beams. That move is
-/// invisible to every `ActiveBeam` reader: `drain_power_for_active_beam` is
-/// explicitly ordered `.after` this system (see `WeaponsPlugin::build`), `pfx`
-/// runs `.after(SimSet::Physics)` wholesale, and `tick_beams` /
-/// `weapons_update_broadcaster` are in `Damage` / `Publish`. The decider
-/// deliberately stays in `Input` so it keeps reading pre-physics `Transform`s
-/// exactly as the fused system did.
-///
-/// **Torpedo dual-write.** Mirrors `ship::power::handle_power_messages`'s
-/// `Has<LocalShip>` +
-/// Resource-sync pattern: when the entity carries its own per-entity
-/// `TorpedoSystemResource` Component and is the `LocalShip`, also snapshot the
-/// updated Component into the global `TorpedoSystemResource` Resource (legacy
-/// Resource path for tests). This matters because a disconnected player's
-/// Tactical station can flip to Backfill AI (AGENTS.md rule 5), so the AI path
-/// can legitimately be what drives the player's own ship's torpedoes.
-///
-/// Every component is `Option` on purpose. `ActiveBeam`/`PhaserIntents` are
-/// present on every ship but `TorpedoIntents` is `AiHighFidelity`-scoped, and
-/// legacy spawns exist without `EntityUuid`/`ShipPhysics`; requiring any of
-/// them would silently drop ships the pre-#698 systems served.
-pub(crate) fn integrate_weapons_state(
-    mut commands: Commands,
-    mut ships: Query<
-        (
-            Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
-            Option<&ShipPhysics>,
-            Option<&mut ActiveBeam>,
-            Option<&mut PhaserIntents>,
-            Option<&mut TorpedoIntents>,
-            Option<&mut TorpedoSystemResource>,
-            Has<crate::server_app::LocalShip>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
-    mut outbox: ResMut<crate::simulation::SimOutbox>,
-    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
-    // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
-) {
-    for (
-        ship_entity,
-        ship_uuid,
-        physics,
-        beam,
-        phaser_intents,
-        torpedo_intents,
-        mut torpedo_sys_comp,
-        is_local,
-    ) in ships.iter_mut()
-    {
-        // ── Phasers ──────────────────────────────────────────────────────────
-        if let (Some(mut beam), Some(mut intents)) = (beam, phaser_intents) {
-            for cmd in intents.0.drain(..) {
-                // The decider only proposes a bank while the beam is idle, but
-                // `handle_fire_phaser` (SimSet::Input) can start a beam after
-                // the decision was taken. Never stomp a live beam.
-                if beam.target_uuid.is_some() {
-                    continue;
-                }
-                beam.target_uuid = Some(cmd.target_uuid.clone());
-                beam.remaining_secs = cmd.beam_duration_secs;
-                beam.damage_accumulator = 0.0;
-                beam.bank = Some(cmd.bank.clone());
-
-                commands.trigger(BeamStartedEvent {
-                    bank: cmd.bank,
-                    target_uuid: cmd.target_uuid,
-                    source_entity: ship_entity,
-                });
-            }
-        }
-
-        // ── Torpedoes ────────────────────────────────────────────────────────
-        let Some(mut intents) = torpedo_intents else {
-            continue;
-        };
-        if intents.0.is_empty() {
-            continue;
-        }
-        let Some(physics) = physics else {
-            continue;
-        };
-        let source_uuid = ship_uuid.map(|u| u.0.clone());
-
-        {
-            // Prefer per-entity component; fall back to global resource for
-            // legacy test paths that only set up the Resource.
-            let torpedo_sys: &mut crate::torpedo::TorpedoSystem =
-                match torpedo_sys_comp.as_deref_mut() {
-                    Some(c) => &mut c.0,
-                    None => &mut torpedo_sys_res.0,
-                };
-
-            for cmd in intents.0.drain(..) {
-                let torpedo_uuid = uuid::Uuid::new_v4().to_string();
-                let tube_facing_rad = torpedo_sys
-                    .tube(cmd.tube_id.as_str())
-                    .map(|t| t.facing_deg.to_radians())
-                    .unwrap_or(0.0);
-                let launch_heading = physics.yaw + tube_facing_rad;
-                use crate::torpedo::LaunchResult;
-                let result = torpedo_sys.launch(
-                    cmd.tube_id.as_str(),
-                    torpedo_uuid.clone(),
-                    physics.x,
-                    physics.z,
-                    launch_heading,
-                    Some(cmd.target_uuid.clone()),
-                    source_uuid.clone(),
-                );
-                match result {
-                    LaunchResult::Launched {
-                        uuid: launched_uuid,
-                        ..
-                    } => {
-                        // Balance tracer: the torpedo left the tube. The human
-                        // path (`handle_fire_torpedo`) has always written this;
-                        // this AI path did not, so every AI-launched torpedo
-                        // was invisible in `shots_fired` while its damage still
-                        // showed up in `by_weapon`. Now that AI crews actually
-                        // load and fire tubes, that gap made the ledger lie.
-                        if let Some(ref mut msgs) = balance_events {
-                            msgs.write(crate::balance::BalanceEvent::WeaponFired {
-                                shooter: source_uuid.clone().filter(|u| !u.is_empty()),
-                                weapon: cmd.tube_id.clone(),
-                                kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
-                            });
-                        }
-                        outbox.0.push((
-                            crate::lobby::Target::All,
-                            crate::messages::ServerMessage::TorpedoLaunched {
-                                uuid: launched_uuid,
-                                tube: cmd.tube_id,
-                                x: physics.x,
-                                z: physics.z,
-                                heading: launch_heading,
-                            },
-                        ));
-                    }
-                    LaunchResult::TubeNotLoaded
-                    | LaunchResult::NoTorpedoes
-                    | LaunchResult::UnknownTube => {}
-                }
-            }
-        }
-
-        // Dual-write: keep the Resource in sync with the LocalShip's
-        // per-entity Component (legacy Resource path for tests).
-        if is_local {
-            if let Some(c) = torpedo_sys_comp.as_deref() {
-                torpedo_sys_res.0 = c.0.clone();
-            }
-        }
-    }
-}
 
 /// Tracks the last target for which Weapons asked Helm to bring the phaser
 /// arc to bear, so the channel-3 request only fires on a new/changed arc
@@ -696,11 +469,11 @@ fn tick_weapons_arc_request(
 // other `Input` writer of `TacticalRadarSelection` (`handle_set_target`), which is what
 // the `.before` edge existed to enforce. See `WeaponsPlugin::build`.
 //
-// This system does not fire weapons. Issue #698 split firing itself into a
-// decide/integrate pair that *does* straddle sim sets: `ai_phaser_auto_fire` /
-// `ai_torpedo_auto_fire` decide and write `PhaserIntents` / `TorpedoIntents`;
-// `integrate_weapons_state` is the sole system that mutates `ActiveBeam` and
-// `TorpedoSystem` from those intents.
+// This system does not fire weapons. Issue #846 migrated the decide/integrate
+// pair off private intent components: `ai_phaser_auto_fire` /
+// `ai_torpedo_auto_fire` now emit admitted `ControlSystem` payloads via
+// `emit_ai_command`; the weapons handlers consume via `AdmittedCommands`
+// in `SimSet::Physics`.
 
 /// Publish `ai_target_selection`'s decision on a ship's blackboards, creating
 /// the Weapons entry if the ship has none yet.

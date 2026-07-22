@@ -6,15 +6,14 @@
 
 use bevy::prelude::*;
 
-use super::shared::{system_is_registered, tactical_authorized, TorpedoTargetSnapshot};
+use super::shared::{system_is_registered, TorpedoTargetSnapshot};
 use super::{
     AsteroidDestroyedVfx, ShipDestroyedVfx, TacticalRadarSelection, DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
-use crate::ai_plugin::AiTokenRegistry;
 use crate::entity_spawner::EntitySystemHull;
-use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{Target, WorldResource};
 use crate::messages::{
-    ClientMessage, InterSystemMsg, InterSystemPayload, InterSystemQueue, ServerMessage,
+    AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, ServerMessage,
     SystemControlPayload,
 };
 use crate::ship_plugin::ShipSystemControlSources;
@@ -29,107 +28,124 @@ use crate::torpedo::TorpedoSystem;
 #[derive(Resource, Component, Clone)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
 
+/// Admitted-command consumer for `LoadTube` (issue #846).
+///
+/// Reads each ship's own `AdmittedCommands` for `LoadTube` payloads targeting
+/// `torpedo-tube-<id>`, resolves the tube from the target `SystemId`, gates
+/// on the tube's fine-system policy, and emits a channel-2
+/// `ClaimTorpedoRound` to the magazine. The magazine consumer
+/// (`handle_torpedo_magazine_inter_system`) decides whether to grant the
+/// round and start loading.
+///
+/// Runs in `SimSet::Physics` — after AI emitters have written their admitted
+/// commands, so AI load orders are not silently dropped.
 pub(crate) fn handle_load_tube(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<
-        (
-            Entity,
-            &crate::ship_plugin::ShipConfigComponent,
-            &ShipSystemControlSources,
-        ),
-        With<crate::server_app::LocalShip>,
+    mut ship_query: Query<
+        (Entity, &ShipSystemControlSources, &AdmittedCommands),
+        With<crate::server_app::Ship>,
     >,
     mut inter_system: ResMut<InterSystemQueue>,
 ) {
-    let Some((ship_entity, ship_config, control_sources)) = ship_query.iter().next() else {
-        return;
-    };
-    for ev in reader.read() {
-        let ClientMessage::LoadTube { tube } = &ev.msg else {
-            continue;
-        };
-        // Per-tube gate (issue #512): the tube's own fine-system policy
-        // decides whether human input can trigger a load. An unresolved or
-        // unregistered tube id gets the default-source policy (issue #801 —
-        // no coarse fallback).
-        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
-            .filter(|id| system_is_registered(control_sources, id));
-        let tube_policy = match &tube_system_id {
-            Some(id) => control_sources.0.policy_for(id),
-            // Unregistered fine system → default-source policy (issue #801).
-            None => crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            ),
-        };
-        if !tube_policy.accept_human_input {
-            continue;
+    for (ship_entity, control_sources, admitted) in ship_query.iter_mut() {
+        for cmd in admitted.0.iter() {
+            let SystemControlPayload::LoadTube = &cmd.payload else {
+                continue;
+            };
+            // The target SystemId must be a known torpedo-tube-* id.
+            // Resolve by stripping the prefix — the tube id is the suffix.
+            let tube_id = cmd.target.0.strip_prefix("torpedo-tube-").map(|s| {
+                // Restore underscores that were folded to hyphens.
+                s.replace('-', "_")
+            });
+            let Some(tube_id) = tube_id else {
+                continue;
+            };
+
+            // Gate on the tube's fine-system policy (default-source policy
+            // for unregistered ids — issue #801). Admission already gated
+            // the token; this is a system-state gate.
+            let tube_system_id = crate::system_registry::torpedo_tube_system_id(&tube_id)
+                .filter(|id| system_is_registered(control_sources, id));
+            let tube_policy = match &tube_system_id {
+                Some(id) => control_sources.0.policy_for(id),
+                None => crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                ),
+            };
+            if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                continue;
+            }
+
+            inter_system.0.push(InterSystemMsg {
+                target: crate::system_registry::torpedo_magazine_system_id(),
+                payload: InterSystemPayload::ClaimTorpedoRound { tube: tube_id },
+                source_entity: Some(ship_entity),
+            });
         }
-        if !tactical_authorized(&sessions, ship_config, &ev.token) {
-            continue;
-        }
-        // Emit a channel-2 claim to the magazine. The magazine consumer
-        // (handle_torpedo_magazine_inter_system) decides whether to grant
-        // the round (magazine online + stock available) and, if so, begins
-        // the tube's loading via `start_load_reserved`. Sending the message
-        // is the only action the tube system takes here — the magazine owns
-        // both the counter mutation and the tube state transition.
-        //
-        // `source_entity: Some(ship_entity)` routes the claim to THIS
-        // ship's magazine — required by `handle_torpedo_magazine_inter_system`
-        // when multiple ships have magazines (mirrors the
-        // `handle_power_inter_system` pattern in `src/ship/power.rs`).
-        inter_system.0.push(InterSystemMsg {
-            target: crate::system_registry::torpedo_magazine_system_id(),
-            payload: InterSystemPayload::ClaimTorpedoRound { tube: tube.clone() },
-            source_entity: Some(ship_entity),
-        });
     }
 }
 
+/// Admitted-command consumer for `UnloadTube` (issue #846).
+///
+/// Reads each ship's own `AdmittedCommands` for `UnloadTube` payloads,
+/// resolves the tube from the target `SystemId`, gates on the tube's
+/// fine-system policy, then calls [`TorpedoSystem::start_unload`] on the
+/// ship's own `TorpedoSystemResource` component.
+///
+/// Runs in `SimSet::Physics` — after AI emitters have written their admitted
+/// commands.
 pub(crate) fn handle_unload_tube(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ship_query: Query<
+    mut ship_query: Query<
         (
-            &crate::ship_plugin::ShipConfigComponent,
             &ShipSystemControlSources,
+            &AdmittedCommands,
+            Option<&mut TorpedoSystemResource>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
-    mut torpedo_sys_q: Query<&mut TorpedoSystemResource, With<crate::server_app::LocalShip>>,
+    mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
-    let Some((ship_config, control_sources)) = ship_query.iter().next() else {
-        return;
-    };
-    for ev in reader.read() {
-        let ClientMessage::UnloadTube { tube } = &ev.msg else {
-            continue;
+    for (control_sources, admitted, torpedo_sys_comp) in ship_query.iter_mut() {
+        let mut torpedo_sys_comp = torpedo_sys_comp;
+        let torpedo_sys: &mut TorpedoSystem = match torpedo_sys_comp.as_deref_mut() {
+            Some(c) => &mut c.0,
+            None => &mut torpedo_sys_res.0,
         };
-        // Per-tube gate (issue #512): the tube's own fine-system policy
-        // decides whether human input can trigger an unload. An unregistered
-        // tube id gets the default-source policy (issue #801).
-        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
-            .filter(|id| system_is_registered(control_sources, id));
-        let tube_policy = match &tube_system_id {
-            Some(id) => control_sources.0.policy_for(id),
-            // Unregistered fine system → default-source policy (issue #801).
-            None => crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            ),
-        };
-        if !tube_policy.accept_human_input {
-            continue;
-        }
-        if !tactical_authorized(&sessions, ship_config, &ev.token) {
-            continue;
-        }
-        // The LocalShip's own component, never the global Resource (issue
-        // #738): the Resource is a shared singleton, so the retired
-        // "fall back for test compat" branch let a console command mutate
-        // magazine state that no longer belongs to any particular ship.
-        if let Some(mut ts) = torpedo_sys_q.iter_mut().next() {
-            ts.0.start_unload(tube.as_str());
+
+        for cmd in admitted.0.iter() {
+            let SystemControlPayload::UnloadTube = &cmd.payload else {
+                continue;
+            };
+
+            // Resolve the command's target to one of THIS ship's tubes by
+            // running the canonical forward mapping and comparing.
+            let Some(tube_id) = torpedo_sys
+                .tubes
+                .iter()
+                .find(|t| {
+                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                        == Some(&cmd.target)
+                })
+                .map(|t| t.id.clone())
+            else {
+                continue;
+            };
+
+            // Gate on the tube's fine-system policy (default-source policy
+            // for unregistered ids — issue #801). Both origins allowed.
+            let is_registered = system_is_registered(control_sources, &cmd.target);
+            let tube_policy = if is_registered {
+                control_sources.0.policy_for(&cmd.target)
+            } else {
+                crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                )
+            };
+            if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                continue;
+            }
+
+            torpedo_sys.start_unload(&tube_id);
         }
     }
 }
@@ -229,39 +245,27 @@ pub(crate) fn handle_set_torpedo_volley_target(
     }
 }
 
+/// Admitted-command consumer for `FireTorpedo` (issue #846).
 ///
-/// Iterates `InboundMessage::FireTorpedo` events and resolves each to a
-/// shooter ship entity by token:
-/// - `"ai:<uuid>"` tokens are resolved through [`AiTokenRegistry`] to the
-///   registered NPC entity.
-/// - Human network tokens and `LOCAL_CONSOLE_TOKEN` route to the `LocalShip`,
-///   gated by [`tactical_authorized`] (holds the Tactical console or is the
-///   local operator).
+/// Reads each ship's own `AdmittedCommands` for `FireTorpedo` payloads,
+/// resolves the tube id from the target `SystemId`, gates on the tube's
+/// fine-system policy and the magazine's policy, then calls
+/// [`TorpedoSystem::launch`].
 ///
-/// After resolution the same per-ship code path runs for both: use the
-/// shooter's own `TorpedoSystemResource` component (falling back to the
-/// global `TorpedoSystemResource` resource only when no ship carries the
-/// component — legacy test paths).
+/// Runs in `SimSet::Physics` — after the AI decider (`ai_torpedo_auto_fire`,
+/// in `SimSet::Physics` via `ConsoleAiPlugin`) has emitted its admitted
+/// commands, but within the same tick so torpedoes launch without a tick of
+/// queue lag.
 ///
-/// After PRD #597 gap-3 closure: NPC ships with a `[torpedoes]` TOML block
-/// now spawn with their own `TorpedoSystemResource` (see
-/// `src/entities/spawner.rs`) and can fire torpedoes via the same code path
-/// as the player ship.
+/// No `InboundMessage` / token resolution: admission stripped the source
+/// identity. No human-vs-AI branch below this point.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_fire_torpedo(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ai_registry: Option<Res<AiTokenRegistry>>,
-    localship_q: Query<
-        (Entity, &crate::ship_plugin::ShipConfigComponent),
-        With<crate::server_app::LocalShip>,
-    >,
-    // Per-ship state read for every candidate shooter (player + NPC).
     mut ship_q: Query<
         (
-            Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
+            &AdmittedCommands,
             Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&mut TorpedoSystemResource>,
@@ -271,161 +275,142 @@ pub(crate) fn handle_fire_torpedo(
     >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
-    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
-    // registered the message still pass Bevy's parameter validation.
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
 ) {
-    // Snapshot LocalShip identity for human-token routing. `None` when the
-    // test/plugin harness has no player ship spawned.
-    let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
-        localship_q.single().ok();
-
-    for ev in reader.read() {
-        let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else {
-            continue;
-        };
-
-        // ── Resolve the shooter ship entity ─────────────────────────────────
-        let shooter_entity: Entity = if ev.token.starts_with("ai:") {
-            match ai_registry
-                .as_deref()
-                .and_then(|r| r.bevy_entity_for_token(&ev.token))
-            {
-                Some(e) => e,
-                None => continue,
-            }
-        } else {
-            match local_ship {
-                Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
-                _ => continue,
-            }
-        };
-
-        // ── Pull per-ship state for the resolved shooter ────────────────────
-        let Ok((
-            _entity,
-            control_sources,
-            physics,
-            blackboards_opt,
-            source_uuid_opt,
-            torpedo_sys_comp,
-            weapon_fired_comp,
-        )) = ship_q.get_mut(shooter_entity)
-        else {
-            continue;
-        };
-
-        // Authorize per the shooter's own ControlSource: human tokens need
-        // `accept_human_input`; `ai:` tokens need `operate_ai`.
-        // Per-tube gate (issue #512): resolve the fine SystemId for this tube
-        // and gate on its own policy. An unresolved or unregistered tube id
-        // gets the default-source policy (issue #801 — no coarse fallback).
-        let tube_system_id = crate::system_registry::torpedo_tube_system_id(tube)
-            .filter(|id| system_is_registered(control_sources, id));
-        let policy = match &tube_system_id {
-            Some(id) => control_sources.0.policy_for(id),
-            // Unregistered fine system → default-source policy (issue #801).
-            None => crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            ),
-        };
-        let is_ai_token = ev.token.starts_with("ai:");
-        let authorized = if is_ai_token {
-            policy.operate_ai
-        } else {
-            policy.accept_human_input
-        };
-        if !authorized {
-            continue;
-        }
-        // Magazine-online gate (issue #512): a Disabled/Destroyed magazine
-        // blocks fire even when the tube is loaded. Only enforced when the
-        // ship actually declares a torpedo magazine fine system (player
-        // ship path). NPCs without a magazine system are unaffected.
-        let magazine_id = crate::system_registry::torpedo_magazine_system_id();
-        let magazine_declared = control_sources
-            .0
-            .entries()
-            .any(|(id, _)| id == &magazine_id)
-            || control_sources.0.is_offline(&magazine_id);
-        if magazine_declared {
-            let magazine_policy = control_sources.0.policy_for(&magazine_id);
-            if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
-                continue;
-            }
-        }
-
-        // Per-entity `TorpedoSystemResource` first; the global Resource is a
-        // fallback ONLY for the LocalShip, so legacy tests that insert just the
-        // Resource still work. Issue #738 made that restriction real: it was
-        // only a comment before, so an NPC shooter with no component fired out
-        // of — and decremented — the PLAYER ship's magazine. An NPC that lacks
-        // the component simply has no torpedo tubes and cannot fire.
-        let shooter_is_local = local_ship.map(|(e, _)| e) == Some(shooter_entity);
+    for (
+        control_sources,
+        physics,
+        admitted,
+        blackboards_opt,
+        source_uuid_opt,
+        torpedo_sys_comp,
+        weapon_fired_comp,
+    ) in ship_q.iter_mut()
+    {
+        // Per-entity component first; global Resource fallback for legacy tests.
         let mut torpedo_sys_comp = torpedo_sys_comp;
         let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp.as_deref_mut()
         {
             Some(c) => &mut c.0,
-            None if shooter_is_local => &mut torpedo_sys_res.0,
-            None => continue,
+            None => &mut torpedo_sys_res.0,
         };
 
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let tube_facing_rad = torpedo_sys
-            .tube(tube.as_str())
-            .map(|t| t.facing_deg.to_radians())
-            .unwrap_or(0.0);
-        let launch_heading = physics.yaw + tube_facing_rad;
-        let source_uuid = source_uuid_opt.map(|u| u.0.clone());
-        // Homing target: the ship's frozen Combat Lock (issue #829), else the
-        // explicit target carried on the FireTorpedo message. In-flight
-        // torpedoes keep their own `TorpedoTargetSnapshot` latch (spec §1).
-        let combat_lock = match blackboards_opt
-            .and_then(|bbs| bbs.0.get(&crate::system_registry::viewscreen_system_id()))
-        {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
-        };
-        let homing_uuid = combat_lock.or_else(|| target_uuid.clone());
-        use crate::torpedo::LaunchResult;
-        let result = torpedo_sys.launch(
-            tube.as_str(),
-            uuid.clone(),
-            physics.x,
-            physics.z,
-            launch_heading,
-            homing_uuid.clone(),
-            source_uuid.clone(),
-        );
-        match result {
-            LaunchResult::Launched {
-                uuid: launched_uuid,
-                ..
-            } => {
-                if let Some(mut wf) = weapon_fired_comp {
-                    wf.0 = true;
-                }
-                // Balance tracer: the torpedo left the tube. Unconditional —
-                // all ships, all builds. Blank uuid → `None`.
-                if let Some(ref mut msgs) = balance_events {
-                    msgs.write(crate::balance::BalanceEvent::WeaponFired {
-                        shooter: source_uuid.clone().filter(|u| !u.is_empty()),
-                        weapon: tube.clone(),
-                        kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
-                    });
-                }
-                outbox.0.push((
-                    Target::All,
-                    ServerMessage::TorpedoLaunched {
-                        uuid: launched_uuid,
-                        tube: tube.clone(),
-                        x: physics.x,
-                        z: physics.z,
-                        heading: launch_heading,
-                    },
-                ));
+        // Track whether any command in this ship's admitted set fired a torpedo,
+        // so the WeaponFiredThisTick component (Mut<T>, not Copy) is only set
+        // once, outside the inner loop.
+        let mut any_fired = false;
+
+        for cmd in admitted.0.iter() {
+            let SystemControlPayload::FireTorpedo { target_uuid } = &cmd.payload else {
+                continue;
+            };
+
+            // Resolve the command's target to one of THIS ship's tubes by
+            // running the canonical forward mapping and comparing.
+            let Some(tube_id) = torpedo_sys
+                .tubes
+                .iter()
+                .find(|t| {
+                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                        == Some(&cmd.target)
+                })
+                .map(|t| t.id.clone())
+            else {
+                continue;
+            };
+
+            // Gate on the tube's fine-system policy (default-source policy
+            // for unregistered ids — issue #801). Admission gated the token;
+            // this is a system-state gate.
+            let is_registered = system_is_registered(control_sources, &cmd.target);
+            let tube_policy = if is_registered {
+                control_sources.0.policy_for(&cmd.target)
+            } else {
+                crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                )
+            };
+            if !tube_policy.accept_human_input && !tube_policy.operate_ai {
+                continue;
             }
-            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes | LaunchResult::UnknownTube => {
+
+            // Magazine-online gate: a Disabled/Destroyed magazine blocks fire.
+            let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+            let magazine_declared = control_sources
+                .0
+                .entries()
+                .any(|(id, _)| id == &magazine_id)
+                || control_sources.0.is_offline(&magazine_id);
+            if magazine_declared {
+                let magazine_policy = control_sources.0.policy_for(&magazine_id);
+                if !magazine_policy.accept_human_input && !magazine_policy.operate_ai {
+                    continue;
+                }
+            }
+
+            let uuid = uuid::Uuid::new_v4().to_string();
+            let tube_facing_rad = torpedo_sys
+                .tube(tube_id.as_str())
+                .map(|t| t.facing_deg.to_radians())
+                .unwrap_or(0.0);
+            let launch_heading = physics.yaw + tube_facing_rad;
+            let source_uuid = source_uuid_opt.map(|u| u.0.clone());
+            // Homing target: the ship's frozen Combat Lock (issue #829),
+            // else the explicit target on the FireTorpedo payload.
+            let combat_lock = match blackboards_opt
+                .as_ref()
+                .and_then(|bbs| bbs.0.get(&crate::system_registry::viewscreen_system_id()))
+            {
+                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+                _ => None,
+            };
+            let homing_uuid: Option<String> = combat_lock.or_else(|| target_uuid.clone());
+            use crate::torpedo::LaunchResult;
+            let result = torpedo_sys.launch(
+                tube_id.as_str(),
+                uuid.clone(),
+                physics.x,
+                physics.z,
+                launch_heading,
+                homing_uuid.clone(),
+                source_uuid.clone(),
+            );
+            match result {
+                LaunchResult::Launched {
+                    uuid: launched_uuid,
+                    ..
+                } => {
+                    any_fired = true;
+                    if let Some(ref mut msgs) = balance_events {
+                        msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                            shooter: source_uuid.clone().filter(|u| !u.is_empty()),
+                            weapon: tube_id.clone(),
+                            kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
+                        });
+                    }
+                    outbox.0.push((
+                        Target::All,
+                        ServerMessage::TorpedoLaunched {
+                            uuid: launched_uuid,
+                            tube: tube_id.clone(),
+                            x: physics.x,
+                            z: physics.z,
+                            heading: launch_heading,
+                        },
+                    ));
+                }
+                LaunchResult::TubeNotLoaded
+                | LaunchResult::NoTorpedoes
+                | LaunchResult::UnknownTube => {}
+            }
+        }
+
+        // Set WeaponFiredThisTick once if any command in this ship's admitted
+        // set resulted in a successful launch (Mut<T> is not Copy, so avoid
+        // repeated moves inside the inner loop).
+        if any_fired {
+            if let Some(mut wf) = weapon_fired_comp {
+                wf.0 = true;
             }
         }
     }

@@ -4,7 +4,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: Phoenix Delivery Sequence
-      summary: "The roadmap is intentionally sequenced: #848 authoritative snapshots; #849 deterministic lockstep foundation; #774 data-driven AI plus #850 demo readiness; #851 reusable Falling Skyway foundation; #852 Falling Skyway content; #853 limited demo release; #854 P2P delivery; #855 native/cloud delivery; #856 mod content packs; #858 Borrowed Sun; #859 Narrow Season; #860 The Broken Tithe; #861 The Silent Corridor. Completed #835 remains the balance and optimisation foundation throughout."
+      summary: "The roadmap is intentionally sequenced: #848 authoritative snapshots; #849 deterministic lockstep foundation; #868 cross-runtime performance workflow; #869 composable entity TOML; #774 data-driven AI plus #850 demo readiness; #851 reusable Falling Skyway foundation; #852 Falling Skyway content; #853 limited demo release; #854 P2P delivery; #855 native/cloud delivery; #856 mod content packs; #858 Borrowed Sun; #859 Narrow Season; #860 The Broken Tithe; #861 The Silent Corridor. Completed #835 remains the balance and optimisation foundation throughout."
       rationale:
         - The snapshot and determinism contracts must shape scenario, native, and P2P work before those product surfaces become expensive to revise.
         - The demo is a release checkpoint after foundational correctness, not a prerequisite for eventual persistence or P2P architecture.
@@ -14,6 +14,8 @@ entities:
       coordinates:
         - roadmap-authoritative-snapshots
         - roadmap-deterministic-simulation-foundation
+        - roadmap-performance-optimisation-workflow
+        - roadmap-composable-entity-templates
         - roadmap-demo-combat-readiness
         - roadmap-falling-skyway-foundation
         - roadmap-falling-skyway-content
@@ -72,6 +74,36 @@ entities:
       kind: roadmap-milestone
       authority: authoritative
       coordinates: [fine-system-ai-policy-runtime, asteroid-field-lifecycle, entity-template-schema-validator]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-performance-optimisation-workflow
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Cross-Runtime Performance Optimisation Workflow
+      summary: Establishes repeatable scenario benchmarks, build and asset budgets, capture artifacts, baseline comparison, and initially non-blocking regression reports across browser and native Phoenix runtimes.
+      rationale:
+        - Performance work needs shared evidence and reproducibility instead of isolated optimisation efforts and subjective playtest impressions.
+        - Stable measurement precedes any automatic performance gate, Cloudflare rollout, or worker-thread adoption decision.
+    architecture:
+      kind: roadmap-milestone
+      authority: observational
+      reads: [world-content-pack-state, sim-rng-state]
+      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
+
+  - component: roadmap-composable-entity-templates
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Composable Entity TOML Templates
+      summary: Adds deterministic ordered entity-TOML includes that resolve reusable fragments into one validated template before spawning, including generic fine-system behaviour fragments.
+      rationale:
+        - World content already composes through extra_worlds; entity authors need the corresponding data-driven composition boundary for reusable hull and AI behaviour.
+        - Pre-runtime composition avoids duplicating generic behaviour without introducing runtime policy assets or inheritance.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [entity-template-state]
       runs_in: [host-browser-runtime, headless-runtime]
 
   - component: roadmap-falling-skyway-foundation

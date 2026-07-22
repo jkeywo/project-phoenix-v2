@@ -1123,27 +1123,11 @@ pub enum ClientMessage {
     SetReady {
         ready: bool,
     },
-    FirePhaser {
-        bank: PhaserBank,
-    },
-    /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
-    FireTorpedo {
-        tube: TorpedoTube,
-        target_uuid: Option<String>,
-    },
-    /// Manually start loading a torpedo into the specified tube.
-    LoadTube {
-        tube: TorpedoTube,
-    },
-    /// Manually unload (or cancel loading of) the specified tube.
-    UnloadTube {
-        tube: TorpedoTube,
-    },
     /// Primary station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed
     /// payload for that system kind. Runtime handlers across every console
-    /// consume this variant; only a few weapons messages remain as legacy
-    /// top-level variants (see `SystemControlPayload`).
+    /// consume this variant (issue #846: all weapons fire/load commands
+    /// are now `ControlSystem` messages).
     ControlSystem {
         target: SystemId,
         payload: SystemControlPayload,

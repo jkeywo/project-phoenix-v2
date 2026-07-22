@@ -59,7 +59,10 @@ describe('fire_phaser', () => {
   it('calls send FirePhaser with bank when bank is provided', () => {
     const send = mkSend();
     ACTION_MAP.fire_phaser({ action: 'fire_phaser', bank: 1 }, send);
-    expect(send).toHaveBeenCalledWith('FirePhaser', { bank: 1 });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'phaser-1',
+      payload: { type: 'FirePhaser' },
+    });
   });
 
   it('does nothing when bank is absent', () => {
@@ -124,13 +127,19 @@ describe('fire_torpedo', () => {
   it('calls send FireTorpedo with tube and target_uuid', () => {
     const send = mkSend();
     ACTION_MAP.fire_torpedo({ action: 'fire_torpedo', tube: 'port', target_uuid: 'u1' }, send);
-    expect(send).toHaveBeenCalledWith('FireTorpedo', { tube: 'port', target_uuid: 'u1' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-port',
+      payload: { type: 'FireTorpedo', data: { target_uuid: 'u1' } },
+    });
   });
 
   it('defaults tube to fore and target_uuid to null', () => {
     const send = mkSend();
     ACTION_MAP.fire_torpedo({ action: 'fire_torpedo' }, send);
-    expect(send).toHaveBeenCalledWith('FireTorpedo', { tube: 'fore', target_uuid: null });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-fore',
+      payload: { type: 'FireTorpedo', data: { target_uuid: null } },
+    });
   });
 });
 
@@ -138,7 +147,10 @@ describe('load_tube', () => {
   it('calls send LoadTube with tube', () => {
     const send = mkSend();
     ACTION_MAP.load_tube({ action: 'load_tube', tube: 'fore_port' }, send);
-    expect(send).toHaveBeenCalledWith('LoadTube', { tube: 'fore_port' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-fore-port',
+      payload: { type: 'LoadTube' },
+    });
   });
 
   it('does nothing when tube is absent', () => {
@@ -152,7 +164,10 @@ describe('unload_tube', () => {
   it('calls send UnloadTube with tube', () => {
     const send = mkSend();
     ACTION_MAP.unload_tube({ action: 'unload_tube', tube: 'aft' }, send);
-    expect(send).toHaveBeenCalledWith('UnloadTube', { tube: 'aft' });
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'torpedo-tube-aft',
+      payload: { type: 'UnloadTube' },
+    });
   });
 
   it('does nothing when tube is absent', () => {

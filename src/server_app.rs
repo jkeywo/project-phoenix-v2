@@ -2383,7 +2383,6 @@ fn spawn_game_start_entities(
                 .insert(crate::ai_plugin::AiHighFidelity)
                 .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
                 .insert(crate::ship::power::ShipPowerAiState::default())
-                .insert(crate::weapons_plugin::TorpedoIntents::default())
                 .insert(crate::ship::helm::ThrustInput::default())
                 .insert(crate::ship::helm::SteeringInput::default())
                 .insert(crate::ship::helm::LateralThrustInput::default())
@@ -4812,6 +4811,39 @@ station = "pilot"
         fast_forward_countdown(app);
         tick(app);
         tick(app);
+        // Apply the human rating for Tactical's weapons systems so
+        // `admit_system_commands` (which checks ShipSystemControlSources)
+        // authorizes human ControlSystem messages for phasers, torpedoes, etc.
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
+        if let Ok(mut cs) = q.single_mut(app.world_mut()) {
+            use crate::ship::control_source::ControlSource;
+            cs.0.set(
+                crate::system_registry::phaser_fore_system_id(),
+                ControlSource::Human,
+            );
+            cs.0.set(
+                crate::system_registry::phaser_aft_system_id(),
+                ControlSource::Human,
+            );
+            cs.0.set(
+                crate::system_registry::torpedo_tube_fore_port_system_id(),
+                ControlSource::Human,
+            );
+            cs.0.set(
+                crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+                ControlSource::Human,
+            );
+            cs.0.set(
+                crate::system_registry::torpedo_tube_aft_system_id(),
+                ControlSource::Human,
+            );
+            cs.0.set(
+                crate::system_registry::torpedo_magazine_system_id(),
+                ControlSource::Human,
+            );
+        }
     }
 
     #[test]
@@ -5012,8 +5044,9 @@ station = "pilot"
         push(
             app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         tick(app)
@@ -5059,13 +5092,14 @@ station = "pilot"
 
         // Manually put the cooldown into active state (simulating a beam just ended).
         set_active_beam_target(&mut app, None);
-        start_phaser_cooldown(&mut app, "port", 3.0);
+        start_phaser_cooldown(&mut app, "fore", 3.0);
 
         push(
             &mut app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         let out = tick(&mut app);
@@ -5087,8 +5121,9 @@ station = "pilot"
         push(
             &mut app,
             "captain",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         let out = tick(&mut app);
@@ -5123,8 +5158,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         let out = tick(&mut app);
@@ -5206,7 +5242,7 @@ station = "pilot"
 
         // Cooldown started.
         assert!(
-            phaser_bank_is_active(&mut app, "port"),
+            phaser_bank_is_active(&mut app, "fore"),
             "cooldown should start after beam end"
         );
 
@@ -5240,7 +5276,7 @@ station = "pilot"
             "beam should be cleared after sever-by-arc"
         );
         assert!(
-            phaser_bank_is_active(&mut app, "port"),
+            phaser_bank_is_active(&mut app, "fore"),
             "cooldown should start after arc sever"
         );
     }
@@ -5275,7 +5311,7 @@ station = "pilot"
             "beam should be cleared after sever-by-range"
         );
         assert!(
-            phaser_bank_is_active(&mut app, "port"),
+            phaser_bank_is_active(&mut app, "fore"),
             "cooldown should start after range sever"
         );
     }
@@ -5366,8 +5402,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         let _ = tick(&mut app);
@@ -5380,10 +5417,10 @@ station = "pilot"
         let _ = tick(&mut app); // beam ends, cooldown starts
 
         // Cooldown should be active.
-        assert!(phaser_bank_is_active(&mut app, "port"));
+        assert!(phaser_bank_is_active(&mut app, "fore"));
 
         // Force cooldown to expire.
-        start_phaser_cooldown(&mut app, "port", 0.0);
+        start_phaser_cooldown(&mut app, "fore", 0.0);
 
         // Lock and fire at t2.
         push(
@@ -5398,8 +5435,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         let out = tick(&mut app);
@@ -5750,9 +5788,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FireTorpedo {
-                tube: "fore_port".to_string(),
-                target_uuid: None,
+            ClientMessage::ControlSystem {
+                target: SystemId("torpedo-tube-fore-port".into()),
+                payload: SystemControlPayload::FireTorpedo { target_uuid: None },
             },
         );
         let out = tick(&mut app);
@@ -5775,9 +5813,9 @@ station = "pilot"
         push(
             &mut app,
             "captain",
-            ClientMessage::FireTorpedo {
-                tube: "fore_port".to_string(),
-                target_uuid: None,
+            ClientMessage::ControlSystem {
+                target: SystemId("torpedo-tube-fore-port".into()),
+                payload: SystemControlPayload::FireTorpedo { target_uuid: None },
             },
         );
         let out = tick(&mut app);
@@ -5794,7 +5832,7 @@ station = "pilot"
         // Note: The Lobby gate is now at the SimSet chain level.
         // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
-        load_tube_now(&mut app, "aft");
+        load_tube_now(&mut app, "fore_port");
         push(
             &mut app,
             "weapons",
@@ -5816,9 +5854,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FireTorpedo {
-                tube: "aft".to_string(),
-                target_uuid: None,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::torpedo_tube_fore_port_system_id(),
+                payload: SystemControlPayload::FireTorpedo { target_uuid: None },
             },
         );
         let out = tick(&mut app);
@@ -5839,9 +5877,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FireTorpedo {
-                tube: "fore_starboard".to_string(),
-                target_uuid: None,
+            ClientMessage::ControlSystem {
+                target: SystemId("torpedo-tube-fore-starboard".into()),
+                payload: SystemControlPayload::FireTorpedo { target_uuid: None },
             },
         );
         let out = tick(&mut app);
@@ -5883,8 +5921,9 @@ station = "pilot"
         push(
             &mut app,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         tick(&mut app);
@@ -5947,8 +5986,9 @@ station = "pilot"
         push(
             &mut app_fast,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
@@ -5987,8 +6027,9 @@ station = "pilot"
         push(
             &mut app_base,
             "weapons",
-            ClientMessage::FirePhaser {
-                bank: "port".to_string(),
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::phaser_fore_system_id(),
+                payload: SystemControlPayload::FirePhaser,
             },
         );
         tick(&mut app_base); // processes FirePhaser, beam becomes active

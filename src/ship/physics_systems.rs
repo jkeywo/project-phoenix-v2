@@ -203,10 +203,11 @@ pub(crate) fn integrate_ship_physics(
         let impulse_active = impulse.map(|i| i.0.is_active()).unwrap_or(false);
 
         let input = if impulse_active {
-            // Autopilot: full forward thrust, zero steering. Helm input is ignored.
+            // Autopilot: full forward thrust, steering scaled by authored multiplier.
+            let impulse_cfg_for_steering = impulse_cfg.cloned().unwrap_or_default();
             ShipPhysicsInput {
                 thrust: 1.0,
-                steering: 0.0,
+                steering: steering_in.0 * impulse_cfg_for_steering.steering_multiplier,
                 lateral: 0.0,
             }
         } else {
@@ -608,6 +609,13 @@ mod tests {
         app.world_mut()
             .entity_mut(impulsing)
             .insert(ShipImpulse(active));
+        // Use a zero steering_multiplier to preserve the "impulse zeroes steering" assertion.
+        app.world_mut()
+            .entity_mut(impulsing)
+            .insert(ImpulseConfigResource {
+                steering_multiplier: 0.0,
+                ..ImpulseConfigResource::default()
+            });
 
         for _ in 0..5 {
             tick(&mut app);

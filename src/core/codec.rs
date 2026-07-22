@@ -2418,4 +2418,45 @@ mod tests {
             panic!("expected Welcome");
         }
     }
+
+    #[test]
+    fn ship_client_config_helm_capability_round_trips() {
+        // Build a config that carries helm capability fields.
+        let config = ShipClientConfig {
+            helm_systems: vec![
+                "helm-thrust".to_string(),
+                "helm-steering".to_string(),
+                "helm-impulse".to_string(),
+                "helm-boost".to_string(),
+                "helm-lateral-thrust".to_string(),
+            ],
+            vertical_movement_mode: "bounded".to_string(),
+            impulse_steering_multiplier: 0.1,
+            ..ShipClientConfig::default()
+        };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: config.clone(),
+            station_ratings: HashMap::new(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        // Verify the helm capability fields survive the round-trip.
+        let json = JsonCodec.encode_server(&msg).unwrap();
+        let decoded = JsonCodec.decode_server(&json).unwrap();
+        if let ServerMessage::Welcome { ship_config, .. } = decoded {
+            assert_eq!(ship_config.helm_systems, config.helm_systems);
+            assert_eq!(
+                ship_config.vertical_movement_mode,
+                config.vertical_movement_mode
+            );
+            assert_eq!(
+                ship_config.impulse_steering_multiplier,
+                config.impulse_steering_multiplier
+            );
+        } else {
+            panic!("expected Welcome");
+        }
+    }
 }

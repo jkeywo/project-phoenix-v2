@@ -725,6 +725,7 @@ mod tests {
                 acceleration_multiplier: 1.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
+                steering_multiplier: 0.0,
             });
 
         app.add_systems(Update, translate_impulse_modifiers);

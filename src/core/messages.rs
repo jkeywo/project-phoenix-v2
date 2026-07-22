@@ -678,6 +678,23 @@ pub struct ShipClientConfig {
     /// A change smaller than this is considered unchanged and won't re-trigger.
     #[serde(default = "default_threat_bearing_epsilon_rad")]
     pub threat_bearing_epsilon_rad: f32,
+    /// List of system IDs for helm-related systems (thrust, steering, impulse,
+    /// boost, lateral-thrust). Sourced from the ship's `[[system]]` entries that
+    /// belong to the helm station. Used by the client to know which systems
+    /// are helm-axis systems for UI grouping.
+    #[serde(default)]
+    pub helm_systems: Vec<String>,
+    /// Vertical movement mode for this ship. Sourced from
+    /// `[helm_capability] vertical_movement_mode` in the ship TOML.
+    /// "planar" = no vertical movement, "bounded" = AI-only collision avoidance,
+    /// "full_3d" = full six-degree-of-freedom flight.
+    #[serde(default = "default_vertical_movement_mode")]
+    pub vertical_movement_mode: String,
+    /// Steering multiplier applied while impulse drive is active.
+    /// 0.0 = no steering, 0.1 = harsh but possible, 1.0 = full steering.
+    /// Sourced from `[helm_capability.impulse] steering_multiplier` in the ship TOML.
+    #[serde(default = "default_impulse_steering_multiplier")]
+    pub impulse_steering_multiplier: f32,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -714,6 +731,14 @@ fn default_impulse_charge_duration() -> f32 {
 
 fn default_threat_bearing_epsilon_rad() -> f32 {
     0.175
+}
+
+fn default_vertical_movement_mode() -> String {
+    "planar".to_string()
+}
+
+fn default_impulse_steering_multiplier() -> f32 {
+    0.1
 }
 
 fn default_phaser_beam_color() -> [f32; 4] {
@@ -753,6 +778,9 @@ impl Default for ShipClientConfig {
             ship_css: None,
             station_systems: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
+            helm_systems: Vec::new(),
+            vertical_movement_mode: default_vertical_movement_mode(),
+            impulse_steering_multiplier: default_impulse_steering_multiplier(),
         }
     }
 }

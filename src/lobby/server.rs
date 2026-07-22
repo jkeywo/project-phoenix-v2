@@ -402,6 +402,23 @@ fn update_session_with_config(
                 })
                 .collect();
         }
+        // Helm capability fields — sourced from [helm_capability] if present.
+        // helm_systems: all system ids owned by the helm station.
+        if let Some(sc) = ship_config.ship_config.as_ref() {
+            let helm_station_id = crate::messages::StationId("helm".into());
+            next.helm_systems = sc
+                .systems_for_station(&helm_station_id)
+                .map(|sys| sys.id.0.clone())
+                .collect();
+        }
+        if let Some(cap) = &ship_config.helm_capability {
+            next.vertical_movement_mode = match cap.vertical_movement_mode {
+                crate::entity_config::VerticalMovementMode::Planar => "planar".to_string(),
+                crate::entity_config::VerticalMovementMode::Bounded => "bounded".to_string(),
+                crate::entity_config::VerticalMovementMode::Full3D => "full_3d".to_string(),
+            };
+            next.impulse_steering_multiplier = cap.impulse.steering_multiplier;
+        }
         ship_client_config.0 = next;
     }
 }

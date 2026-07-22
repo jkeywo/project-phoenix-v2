@@ -86,6 +86,11 @@ pub struct WeaponsConsoleSection(pub crate::entity_config::WeaponsConsoleConfig)
 #[derive(Component, Clone, Debug)]
 pub struct HelmConsoleSection(pub crate::entity_config::HelmConsoleConfig);
 
+/// Present when the EntityConfig has a `[helm_capability]` section.
+/// Describes vertical movement mode and impulse steering policy.
+#[derive(Component, Clone, Debug)]
+pub struct HelmCapabilitySection(pub crate::entity_config::HelmCapabilityConfig);
+
 /// Present when the EntityConfig had a [radar_appearance] section.
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
@@ -638,12 +643,20 @@ pub fn spawn_entity(
             },
         ));
         // Impulse config
+        // Impulse config — steering_multiplier from [helm_capability] when present,
+        // falling back to the const default (0.1) when absent.
+        let impulse_steering = config
+            .helm_capability
+            .as_ref()
+            .map(|cap| cap.impulse.steering_multiplier)
+            .unwrap_or(crate::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT);
         entity_commands.insert(crate::ship_plugin::ImpulseConfigResource {
             charge_duration: hc.impulse_charge_duration,
             speed_multiplier: hc.impulse_speed_multiplier,
             acceleration_multiplier: hc.impulse_acceleration_multiplier,
             engage_distance: hc.impulse_engage_distance,
             cancel_distance: hc.impulse_cancel_distance,
+            steering_multiplier: impulse_steering,
         });
         // Boost config (disabled when [helm_console.boost] is absent)
         let boost_cfg = hc
@@ -663,6 +676,11 @@ pub fn spawn_entity(
             max_bank_deg: hc.max_bank_deg,
             bank_lerp_rate: hc.bank_lerp_rate,
         });
+    }
+
+    // HelmCapability — attach when [helm_capability] is present.
+    if let Some(cap) = &config.helm_capability {
+        entity_commands.insert(HelmCapabilitySection(cap.clone()));
     }
 
     // Comms range - attach CommsRange component when [comms] is present.
@@ -848,6 +866,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -898,6 +917,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -945,6 +965,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -997,6 +1018,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1052,6 +1074,7 @@ mod tests {
             hull: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1114,6 +1137,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1187,6 +1211,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1242,6 +1267,7 @@ mod tests {
             hull: None,
             collider: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1336,6 +1362,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1399,6 +1426,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1455,6 +1483,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1538,6 +1567,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -1658,6 +1688,7 @@ hull_integrity = 60.0
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,

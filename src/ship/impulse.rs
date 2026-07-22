@@ -13,6 +13,12 @@ pub const IMPULSE_SPEED_MULTIPLIER: f32 = 10.0;
 /// quickly without rewriting the steady-state acceleration curve.
 pub const IMPULSE_ACCELERATION_MULTIPLIER: f32 = 5.0;
 
+/// Default steering multiplier applied while impulse is active.
+/// 0.0 = no steering, 0.1 = harsh but possible, 1.0 = full steering.
+/// Ships can override this via `[helm_capability.impulse] steering_multiplier`
+/// in their entity TOML.
+pub const IMPULSE_STEERING_MULTIPLIER_DEFAULT: f32 = 0.1;
+
 /// State of the impulse drive.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ImpulsePhase {
@@ -79,7 +85,7 @@ impl ImpulseState {
     ///
     /// During impulse:
     /// - `max_speed` is multiplied by `speed_multiplier`
-    /// - `steering` input is forced to 0.0 (ignored)
+    /// - `steering` is scaled by `steering_multiplier` (harsh but not zero)
     ///
     /// Returns `(effective_max_speed, effective_steering)`.
     pub fn apply_to_physics(
@@ -87,6 +93,7 @@ impl ImpulseState {
         base_max_speed: f32,
         steering: f32,
         speed_multiplier: f32,
+        steering_multiplier: f32,
     ) -> (f32, f32) {
         if self.is_active() {
             let mult = if speed_multiplier > 0.0 {
@@ -94,7 +101,7 @@ impl ImpulseState {
             } else {
                 IMPULSE_SPEED_MULTIPLIER
             };
-            (base_max_speed * mult, 0.0)
+            (base_max_speed * mult, steering * steering_multiplier)
         } else {
             (base_max_speed, steering)
         }
@@ -209,7 +216,7 @@ mod tests {
     #[test]
     fn apply_to_physics_returns_base_values_when_idle() {
         let s = ImpulseState::new();
-        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER);
+        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER, 1.0);
         assert!((max_speed - 25.0).abs() < f32::EPSILON);
         assert!((steering - 0.8).abs() < f32::EPSILON);
     }
@@ -219,7 +226,7 @@ mod tests {
         let mut s = ImpulseState::new();
         s.start_charge();
         s.tick(1.0, IMPULSE_CHARGE_DURATION);
-        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER);
+        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER, 1.0);
         assert!((max_speed - 25.0).abs() < f32::EPSILON);
         assert!((steering - 0.8).abs() < f32::EPSILON);
     }
@@ -229,7 +236,7 @@ mod tests {
         let mut s = ImpulseState::new();
         s.start_charge();
         s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, IMPULSE_SPEED_MULTIPLIER);
+        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, IMPULSE_SPEED_MULTIPLIER, 1.0);
         assert!((max_speed - 25.0 * IMPULSE_SPEED_MULTIPLIER).abs() < f32::EPSILON);
     }
 
@@ -238,7 +245,7 @@ mod tests {
         let mut s = ImpulseState::new();
         s.start_charge();
         s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-        let (_, steering) = s.apply_to_physics(25.0, 0.9, IMPULSE_SPEED_MULTIPLIER);
+        let (_, steering) = s.apply_to_physics(25.0, 0.9, IMPULSE_SPEED_MULTIPLIER, 0.0);
         assert!((steering).abs() < f32::EPSILON);
     }
 
@@ -248,7 +255,7 @@ mod tests {
         let mut s = ImpulseState::new();
         s.start_charge();
         s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, custom_mult);
+        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, custom_mult, 1.0);
         assert!((max_speed - 25.0 * custom_mult).abs() < f32::EPSILON);
     }
 }

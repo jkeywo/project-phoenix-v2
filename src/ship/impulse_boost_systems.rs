@@ -424,6 +424,7 @@ mod tests {
             collider: None,
             appearance: None,
             helm_console: None,
+            helm_capability: None,
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
@@ -532,6 +533,7 @@ mod tests {
                 acceleration_multiplier: 5.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
+                steering_multiplier: 0.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -594,6 +596,7 @@ mod tests {
                 acceleration_multiplier: 5.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
+                steering_multiplier: 0.0,
             });
         start_game_with_helm_and_science(&mut app);
 
@@ -643,6 +646,7 @@ mod tests {
                 acceleration_multiplier: 0.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
+                steering_multiplier: 0.0,
             });
         start_game_with_helm_and_science(&mut app);
 

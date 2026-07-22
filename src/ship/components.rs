@@ -161,6 +161,9 @@ pub struct ImpulseConfigResource {
     pub acceleration_multiplier: f32,
     pub engage_distance: f32,
     pub cancel_distance: f32,
+    /// Steering multiplier applied while impulse is active.
+    /// 0.0 = no steering, 0.1 = harsh but possible, 1.0 = full steering.
+    pub steering_multiplier: f32,
 }
 
 impl Default for ImpulseConfigResource {
@@ -171,6 +174,7 @@ impl Default for ImpulseConfigResource {
             acceleration_multiplier: crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
             engage_distance: 200.0,
             cancel_distance: 40.0,
+            steering_multiplier: 0.1,
         }
     }
 }

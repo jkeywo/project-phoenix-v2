@@ -1572,6 +1572,7 @@ mod tests {
             weapons_console: Some(make_weapons_console_config(80.0)),
             behaviour: None,
             helm_console: None,
+            helm_capability: None,
             engineering_console: None,
             captain_console: None,
             collider: None,

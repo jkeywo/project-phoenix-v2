@@ -35,7 +35,7 @@ uv run pytest -q
 - Once ship Y separation becomes real simulation truth, torpedoes should move in full 3D as well.
 - Helm AI is intended to select the same typed actuator inputs as a player, with no human-versus-AI branch after input arbitration. The current direct-write helm AI remains an explicitly temporary implementation shape.
 - Arc-bearing requests control facing, not translational drift. Docking is a separate future motion intent that may legitimately request slow reverse and lateral movement.
-- Impulse steering should use an authored harsh multiplier (standard `0.1`) rather than a total steering lockout; boost is disabled while impulse is active.
+- Impulse steering uses an authored harsh multiplier (standard `0.1`) rather than a total steering lockout; boost is disabled while impulse is active (issue #740).
 - Central hazard assessment should publish 3D force contributions as well as `movable`, `dangerous`, and `size_rating`. A ship ignores hazards smaller than itself, and each actuator's authored sensitivity to those forces determines its response priority.
 - The Helm shared-motion migration deliberately uses symbol-removal conditions, not a legacy-caller allowlist. Phase 5 observes whole files and cannot attribute references within shared `src/ship_plugin.rs` to individual PASM entities; caller findings there would be noise. The remaining pending removal conditions still expose the real unfinished migration.
 - TOML observation is deliberately narrow: PASM inventories authored TOML and resolves only explicit template/world path keys. It does not pretend to execute arbitrary authoring semantics, but it supplies evidence for content-pack and template composition references.

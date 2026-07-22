@@ -2811,6 +2811,11 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(physics_cfg_resource);
 
             // Impulse config from [helm_console] TOML, or default
+            let impulse_steering = config
+                .helm_capability
+                .as_ref()
+                .map(|cap| cap.impulse.steering_multiplier)
+                .unwrap_or(0.0);
             let impulse_cfg = config
                 .helm_console
                 .as_ref()
@@ -2820,6 +2825,7 @@ fn spawn_game_start_entities(
                     acceleration_multiplier: hc.impulse_acceleration_multiplier,
                     engage_distance: hc.impulse_engage_distance,
                     cancel_distance: hc.impulse_cancel_distance,
+                    steering_multiplier: impulse_steering,
                 })
                 .unwrap_or_default();
             commands.entity(spawned).insert(impulse_cfg);

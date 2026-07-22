@@ -754,6 +754,56 @@ pub struct HelmConsoleConfig {
     pub lateral_thrust: Option<LateralThrustConfig>,
 }
 
+/// What vertical movement capability the ship has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VerticalMovementMode {
+    /// No vertical movement — planar-only flight (current default).
+    #[default]
+    Planar,
+    /// AI-only bounded vertical motion for collision avoidance.
+    Bounded,
+    /// Full 3D six-degree-of-freedom flight.
+    Full3D,
+}
+
+/// Impulse capability tuning loaded from `[helm_capability.impulse]`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImpulseCapabilityConfig {
+    /// Steering multiplier applied while impulse is active.
+    /// 0.0 = no steering, 0.1 = harsh but possible, 1.0 = full steering.
+    #[serde(default = "default_impulse_steering_multiplier")]
+    pub steering_multiplier: f32,
+}
+
+fn default_impulse_steering_multiplier() -> f32 {
+    0.1
+}
+
+impl Default for ImpulseCapabilityConfig {
+    fn default() -> Self {
+        Self {
+            steering_multiplier: default_impulse_steering_multiplier(),
+        }
+    }
+}
+
+/// Optional helm capability declaration for an entity (`[helm_capability]`).
+///
+/// When absent, the ship has no special helm capability and operates at the
+/// default planar mode with full steering during impulse.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelmCapabilityConfig {
+    /// Vertical movement mode. Defaults to `Planar`.
+    #[serde(default)]
+    pub vertical_movement_mode: VerticalMovementMode,
+    /// Impulse capability tuning.
+    #[serde(default)]
+    pub impulse: ImpulseCapabilityConfig,
+}
+
 /// Procedural engine trail tuning, from `[helm_console.engine_pfx]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -1847,6 +1897,10 @@ pub struct EntityConfig {
     pub collider: Option<ColliderConfig>,
     pub appearance: Option<AppearanceConfig>,
     pub helm_console: Option<HelmConsoleConfig>,
+    /// Optional helm capability declaration (`[helm_capability]`).
+    /// Describes vertical movement mode and impulse steering policy.
+    #[serde(default)]
+    pub helm_capability: Option<HelmCapabilityConfig>,
     pub weapons_console: Option<WeaponsConsoleConfig>,
     pub engineering_console: Option<EngineeringConsoleConfig>,
     pub captain_console: Option<CaptainConsoleConfig>,

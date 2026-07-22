@@ -865,6 +865,7 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         status: 'travelling',
         target: data.display_name || data.system_id || '',
         progress_pct: Math.min(elapsed / dur, 1),
+        priority: data.priority != null ? data.priority : null,
       };
     }
     case 'Repairing': {
@@ -874,6 +875,7 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         status: 'repairing',
         target: data.display_name || data.system_id || '',
         progress_pct: 1.0,
+        priority: data.priority != null ? data.priority : null,
       };
     }
     case 'Returning': {

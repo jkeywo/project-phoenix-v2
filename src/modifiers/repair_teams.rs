@@ -123,6 +123,7 @@ impl RepairTeams {
                     system_id: Some(new_system),
                     display_name: Some(new_label),
                     elapsed: 0.0,
+                    priority: None,
                 };
             }
             TeamSlot::Travelling {
@@ -180,6 +181,23 @@ impl RepairTeams {
                     queued_display_name: queued_label,
                 };
             }
+        }
+    }
+
+    /// Set the priority for the team at `team_idx`. Only takes effect when the
+    /// team is in `Repairing` state. Returns `true` if the priority was set,
+    /// `false` if the team is not in `Repairing` state (or the index is out of
+    /// range).
+    pub fn set_priority(&mut self, team_idx: usize, priority: u8) -> bool {
+        let Some(slot) = self.slots.get_mut(team_idx) else {
+            return false;
+        };
+        match slot {
+            TeamSlot::Repairing { priority: p, .. } => {
+                *p = Some(priority);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -241,6 +259,7 @@ impl RepairTeams {
                             *slot = TeamSlot::Repairing {
                                 system_id: Some(sid),
                                 display_name: label,
+                                priority: None,
                             };
                         }
                     }
@@ -248,7 +267,7 @@ impl RepairTeams {
                 TeamSlot::Repairing {
                     system_id,
                     display_name,
-                    ..
+                    priority: _,
                 } => {
                     let Some(sid) = system_id.clone() else {
                         *slot = TeamSlot::Returning {
@@ -302,6 +321,7 @@ impl RepairTeams {
                                 system_id: Some(sid),
                                 display_name: Some(label),
                                 elapsed: 0.0,
+                                priority: None,
                             };
                         } else {
                             *slot = TeamSlot::Idle;
@@ -785,6 +805,54 @@ mod tests {
             ),
             "team 0 must be Travelling with display_name = Some(\"Helm\"), got {slot:?}"
         );
+    }
+
+    // ── set_priority ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn set_priority_repairing_team_sets_priority() {
+        let mut teams = RepairTeams::new(2);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, sid("helm"), "Helm".to_string());
+        teams.tick(5.0, &mut hull); // travel → Repairing
+        assert!(teams.set_priority(0, 3));
+        let slot = &teams.slots()[0];
+        assert!(matches!(
+            slot,
+            TeamSlot::Repairing {
+                priority: Some(3),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn set_priority_idle_team_returns_false() {
+        let mut teams = RepairTeams::new(2);
+        assert!(!teams.set_priority(0, 3));
+    }
+
+    #[test]
+    fn set_priority_out_of_range_index_returns_false() {
+        let mut teams = RepairTeams::new(1);
+        assert!(!teams.set_priority(5, 3));
+    }
+
+    #[test]
+    fn set_priority_travelling_team_returns_false() {
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, sid("helm"), "Helm".to_string());
+        assert!(!teams.set_priority(0, 3));
+    }
+
+    #[test]
+    fn set_priority_returning_team_returns_false() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_full();
+        teams.dispatch(0, sid("helm"), "Helm".to_string());
+        teams.tick(5.0, &mut hull);
+        // After arriving at full hull the team becomes Returning.
+        assert!(!teams.set_priority(0, 3));
     }
 
     /// The caller-supplied display name must survive the

@@ -341,6 +341,11 @@ pub enum TeamSlot {
         #[serde(default)]
         display_name: Option<String>,
         elapsed: f32,
+        /// On-site repair priority (0 = default, higher = preferred). Only
+        /// meaningful when the team is `Repairing`; set via
+        /// `SetRepairPriority` command.
+        #[serde(default)]
+        priority: Option<u8>,
     },
     /// Team is at the system performing repairs.
     Repairing {
@@ -348,6 +353,10 @@ pub enum TeamSlot {
         system_id: Option<SystemId>,
         #[serde(default)]
         display_name: Option<String>,
+        /// On-site repair priority (0 = default, higher = preferred). Set
+        /// via `SetRepairPriority` command while the team is on site.
+        #[serde(default)]
+        priority: Option<u8>,
     },
     /// Team has finished and is returning to engineering.
     /// `remaining` counts down from the travel duration.
@@ -1096,6 +1105,14 @@ pub enum SystemControlPayload {
     /// `[0, tube.volley_max]` server-side.
     SetTorpedoVolleyTarget {
         count: u32,
+    },
+    /// Set the on-site repair priority for a specific repair team (issue #739).
+    /// Only takes effect when the team is in `Repairing` state. `priority`
+    /// is a `u8` interpreted as higher = more urgent; the host validates
+    /// through normal admission and the repair AI ignores it.
+    SetRepairPriority {
+        team_idx: u8,
+        priority: u8,
     },
 }
 

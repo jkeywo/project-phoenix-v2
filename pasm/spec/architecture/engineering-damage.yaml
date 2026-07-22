@@ -323,9 +323,11 @@ entities:
         - src/console/repair/dispatch.rs
       symbols:
         - handle_dispatch_repair_team
+        - handle_set_repair_priority
         - register_repair_dispatch
       messages:
         - DispatchRepairTeam
+        - SetRepairPriority
       tests:
         - cargo test
     evidence:
@@ -774,8 +776,8 @@ entities:
 
   - message: onsite-repair-priority-command
     core:
-      status: proposed
-      confidence: provisional
+      status: accepted
+      confidence: confirmed
       title: On-Site Repair Priority Command
       summary: Engineering command that prioritizes which internal subsystem a team repairs first after arriving on site.
       rationale:
@@ -791,6 +793,17 @@ entities:
         - host-command-admission
       trust_boundary: client-to-host
       payload: onsite-repair-priority
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - gui/action-map.js
+        - gui/repair-dispatch.js
+      messages:
+        - SetRepairPriority
+      tests:
+        - tests/client/action-map.test.js
 
   - message: ai-repair-request-signal
     core:

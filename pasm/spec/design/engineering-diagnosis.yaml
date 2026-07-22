@@ -84,7 +84,7 @@ entities:
 
   - verb: prioritise-onsite-repair
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Prioritise On-Site Repair
       summary: Engineering chooses which internal subsystem an already-arrived team repairs first.

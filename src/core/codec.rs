@@ -450,10 +450,12 @@ mod tests {
                             system_id: Some(SystemId("helm".into())),
                             display_name: Some("Helm".into()),
                             elapsed: 2.5,
+                            priority: None,
                         },
                         TeamSlot::Repairing {
                             system_id: Some(SystemId("tactical".into())),
                             display_name: Some("Tactical".into()),
+                            priority: None,
                         },
                         TeamSlot::Returning {
                             remaining: 3.0,
@@ -1205,6 +1207,28 @@ mod tests {
             encoded,
             r#"{"type":"ControlSystem","data":{"target":"torpedo-tube-fore-port","payload":{"type":"SetTorpedoVolleyTarget","data":{"count":3}}}}"#,
             "SetTorpedoVolleyTarget wire shape must match what action-map.js sends"
+        );
+    }
+
+    /// SetRepairPriority command round-trip (issue #739).
+    #[test]
+    fn set_repair_priority_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("repair".into()),
+            payload: SystemControlPayload::SetRepairPriority {
+                team_idx: 1,
+                priority: 2,
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        // Pin the on-the-wire JSON shape — action-map.js depends on this.
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"SetRepairPriority","data":{"team_idx":1,"priority":2}}}}"#,
+            "SetRepairPriority wire shape must match what action-map.js sends"
         );
     }
 
@@ -2213,6 +2237,7 @@ mod tests {
                     TeamSlot::Repairing {
                         system_id,
                         display_name,
+                        priority: _,
                     } => {
                         assert_eq!(*system_id, Some(SystemId("phaser-fore".into())));
                         assert_eq!(display_name.as_deref(), Some("Phaser Bank (Fore)"));

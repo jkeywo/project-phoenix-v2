@@ -1425,4 +1425,108 @@ mod tests {
             "no command may be admitted for a human-held repair system"
         );
     }
+
+    /// SetRepairPriority is ignored when the team is not in Repairing state
+    /// (e.g. idle). The handler runs but `RepairTeams::set_priority` returns
+    /// false and the slot stays unaffected.
+    #[test]
+    fn set_repair_priority_on_idle_team_is_ignored() {
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app);
+
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairPriority {
+                    team_idx: 0,
+                    priority: 3,
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = local_teams(&mut app);
+        assert!(
+            team_is_idle(&teams, 0),
+            "team 0 should remain idle after SetRepairPriority on idle team"
+        );
+    }
+
+    /// SetRepairPriority sets the team's priority when the team is actually
+    /// in Repairing state. First dispatch the team, wait for it to arrive,
+    /// then set priority.
+    #[test]
+    fn set_repair_priority_on_repairing_team_sets_priority() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // Use the hull with helm at reduced HP so the team doesn't immediately
+        // leave when it arrives.
+        {
+            let mut q = app.world_mut().query_filtered::<
+                &mut crate::entity_spawner::EntitySystemHull,
+                With<crate::simulation::LocalShip>,
+            >();
+            if let Ok(mut hull) = q.single_mut(app.world_mut()) {
+                hull.0
+                    .set_hp(&crate::messages::SystemId("helm".into()), 10.0);
+            }
+        }
+
+        // Dispatch team 0 to helm.
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::DispatchRepairTeam {
+                    team_idx: 0,
+                    target: RepairTarget::Station(StationId("helm".into())),
+                },
+            },
+        );
+        // Tick past travel time (5s default) so team arrives and enters Repairing.
+        for _ in 0..30 {
+            tick(&mut app);
+        }
+
+        // Verify team is Repairing.
+        {
+            let teams = local_teams(&mut app);
+            assert!(
+                matches!(&teams.0.slots()[0], TeamSlot::Repairing { .. }),
+                "team 0 should be Repairing after travel, got {:?}",
+                teams.0.slots()[0]
+            );
+        }
+
+        // Now send SetRepairPriority.
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::ControlSystem {
+                target: SystemId("repair".into()),
+                payload: SystemControlPayload::SetRepairPriority {
+                    team_idx: 0,
+                    priority: 2,
+                },
+            },
+        );
+        tick(&mut app);
+
+        let teams = local_teams(&mut app);
+        assert!(
+            matches!(
+                &teams.0.slots()[0],
+                TeamSlot::Repairing {
+                    priority: Some(2),
+                    ..
+                }
+            ),
+            "team 0 should have priority=2 after SetRepairPriority, got {:?}",
+            teams.0.slots()[0]
+        );
+    }
 }

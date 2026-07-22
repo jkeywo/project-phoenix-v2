@@ -16,7 +16,7 @@
  *   window.ACTION_MAP  (for inspection / extension)
  */
 
-import { dispatchRepairTeam } from './repair-dispatch.js';
+import { dispatchRepairTeam, setRepairPriority } from './repair-dispatch.js';
 
 export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
@@ -252,6 +252,16 @@ export const ACTION_MAP = Object.freeze({
    */
   dispatch_repair_team: (a, send) => {
     dispatchRepairTeam(a.team_idx, a.target, send);
+  },
+
+  /**
+   * Set on-site repair priority for a team (issue #739). Only takes effect
+   * when the team is in `Repairing` state. Requires a team_idx and priority.
+   */
+  set_repair_priority: (a, send) => {
+    if (a.team_idx != null && a.priority != null) {
+      setRepairPriority(a.team_idx, a.priority, send);
+    }
   },
 
   /**

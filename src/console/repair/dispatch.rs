@@ -37,7 +37,7 @@ pub fn register_repair_dispatch(app: &mut App) {
     app.register_admitted_consumer(ConsumerMatcher::exact(REPAIR_SYSTEM_ID));
     app.add_systems(
         Update,
-        handle_dispatch_repair_team
+        (handle_dispatch_repair_team, handle_set_repair_priority)
             .in_set(crate::sim_sets::SimSet::Physics)
             .after(super::server::operate_repair_ai)
             .after(AdmissionSet),
@@ -99,6 +99,25 @@ pub fn handle_dispatch_repair_team(
                 let sid = resolve_repair_target(repair_target, ship_config, hull_ref);
                 let display = display_name_for(&sid);
                 teams.0.dispatch(*team_idx as usize, sid, display);
+            }
+        }
+    }
+}
+
+/// Handle `SetRepairPriority` messages from the Repair console.
+///
+/// Reads `ClientMessage::ControlSystem { target: "repair", payload:
+/// SetRepairPriority { team_idx, priority } }` messages from
+/// `AdmittedCommands`. Admission upstream has already validated that the
+/// sender holds the repair station. The priority only applies when the team
+/// is in `Repairing` state (gated by `RepairTeams::set_priority`).
+pub fn handle_set_repair_priority(
+    mut ship_query: Query<(&AdmittedCommands, &mut ShipRepairTeams), With<crate::server_app::Ship>>,
+) {
+    for (admitted, mut teams) in ship_query.iter_mut() {
+        for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
+            if let SystemControlPayload::SetRepairPriority { team_idx, priority } = &cmd.payload {
+                teams.0.set_priority(*team_idx as usize, *priority);
             }
         }
     }

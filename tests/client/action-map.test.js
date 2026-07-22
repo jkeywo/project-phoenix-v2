@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 36 expected action keys', () => {
+  it('contains exactly the 37 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -36,6 +36,7 @@ describe('ACTION_MAP', () => {
       'set_phaser_mode',
       'set_power',
       'set_radar_view',
+      'set_repair_priority',
       'set_sensors_target',
       'set_shield_focus',
       'set_target',
@@ -391,6 +392,41 @@ describe('dispatch_repair_team', () => {
         data: { team_idx: 1, target: { type: 'Core' } },
       },
     });
+  });
+});
+
+describe('set_repair_priority', () => {
+  it('sends ControlSystem SetRepairPriority with team_idx and priority', () => {
+    const send = mkSend();
+    ACTION_MAP.set_repair_priority(
+      { action: 'set_repair_priority', team_idx: 1, priority: 2 },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'repair',
+      payload: {
+        type: 'SetRepairPriority',
+        data: { team_idx: 1, priority: 2 },
+      },
+    });
+  });
+
+  it('does nothing when team_idx is missing', () => {
+    const send = mkSend();
+    ACTION_MAP.set_repair_priority(
+      { action: 'set_repair_priority', priority: 2 },
+      send,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when priority is missing', () => {
+    const send = mkSend();
+    ACTION_MAP.set_repair_priority(
+      { action: 'set_repair_priority', team_idx: 0 },
+      send,
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

@@ -444,6 +444,7 @@ component.repair_teams.status.idle,"Repair team status badge: waiting for dispat
 component.repair_teams.status.travelling,"Repair team status badge: moving to its target","[TRAVELLING]"
 component.repair_teams.status.repairing,"Repair team status badge: actively repairing","[REPAIRING]"
 component.repair_teams.status.returning,"Repair team status badge: returning to standby","[RETURNING]"
+component.repair_teams.priority,"Repair team priority label for onsite-repair priority buttons","[Priority]"
 console.comms.doc_title,Browser-tab title of the comms console page,[Project Phoenix - Comms Console]
 console.comms.screen_label,Phone-frame screen label of the comms console,[Comms Console]
 console.comms.title,comms console — main hero heading,[COMMS]

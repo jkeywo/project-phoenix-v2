@@ -603,7 +603,6 @@ power_group = "ops"
 id = "shields-system"
 kind = "shields"
 station = "engineering"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

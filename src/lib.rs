@@ -46,6 +46,7 @@ pub mod ship;
 pub use entities::config as entity_config;
 pub use entities::entity_override;
 pub use entities::loader as entity_loader;
+pub use entities::marker_validate;
 pub use entities::model_rig;
 pub use entities::planet as entity_planet;
 pub use entities::spawner as entity_spawner;

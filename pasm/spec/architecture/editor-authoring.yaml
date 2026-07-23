@@ -165,22 +165,45 @@ entities:
       writers: [editor-validation-service]
     implementation:
       status: declared
-      paths: [editor/validation.js, editor/validation-badge.js]
+      paths: [editor/validation.js, editor/validation-badge.js, editor/marker-validate.js]
 
   - component: editor-model-marker-inspector
     core:
       status: implemented
       confidence: confirmed
       title: Editor Model and Marker Inspector
-      summary: Local Models and Entity previews inspect model-rig sidecars, extents, marker points, entity shapes, and component configuration for authored templates.
+      summary: Local Models and Entity previews inspect model-rig sidecars, extents, marker points, entity shapes, and component configuration for authored templates, and resolve every authored marker reference against the selected rig before an attachment is created or saved.
     architecture:
       kind: authoring-inspector
       authority: local
       reads: [editor-draft-state]
+      produces: [editor-validation-state]
+      depends_on: [editor-runtime-reload-boundary]
     implementation:
-      status: declared
-      paths: [editor/models-rig.js, editor/models-mode-view.js, editor/entity-preview.js, editor/entity-preview-view.js]
+      status: confirmed
+      paths:
+        - editor/models-rig.js
+        - editor/models-mode-view.js
+        - editor/marker-validate.js
+        - editor/entity-preview.js
+        - editor/entity-preview-view.js
       tests: [npm run test:editor]
+    evidence:
+      - kind: test
+        reference: reports an unresolved marker when a rig index is supplied
+        summary: The entity-side marker field resolves cross-file against the rig its mesh selects and reports an unresolved name as an error.
+      - kind: test
+        reference: blocks an entity save whose marker does not resolve
+        summary: An unresolved marker blocks the save through the shared admission gate, so no invalid attachment is written to disk.
+      - kind: test
+        reference: blocks a Models-mode save whose sidecar redeclares a marker
+        summary: Models Mode no longer bypasses validation; a duplicate marker declaration refuses the write.
+      - kind: test
+        reference: accepts the entity save after the marker is added to the rig IN THE SAME SESSION
+        summary: A marker added in Models Mode is visible to the very next entity save, so the cross-file check cannot refuse a legitimate write until the editor is reloaded.
+      - kind: test
+        reference: a gate-blocked "Save as new variant" does not register the variant
+        summary: A rig write the gate refuses is reported as a failure rather than being adopted as a saved variant.
 
   - component: editor-runtime-reload-boundary
     core:

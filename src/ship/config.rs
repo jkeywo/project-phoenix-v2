@@ -69,6 +69,16 @@ pub struct SystemInstanceConfig {
     pub ai_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_group: Option<PowerGroupId>,
+    /// Optional rig-marker name for this system instance.
+    ///
+    /// **Declared but unread**: no runtime path resolves this against a model
+    /// rig, so `crate::marker_validate` deliberately excludes it from the
+    /// model-marker contract (issue #758) — validating a field nothing
+    /// consumes would invent a contract rather than check one. The shipped
+    /// hulls carried a placeholder `marker = "ship"` here that named no rig
+    /// marker at all; those entries were removed. When a consumer lands, add
+    /// these references to `marker_validate::collect_marker_refs` and the
+    /// missing/incompatible checks apply for free.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub marker: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

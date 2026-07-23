@@ -31,9 +31,11 @@ import {
   buildSidecarName,
   groupModelFiles,
   validateVariantName,
+  validateRigSidecarText,
   DEFAULT_VARIANT,
   FORWARD,
 } from './models-rig.js';
+import { isValidMarkerName, validateRigMarkerNames } from './marker-validate.js';
 
 const MODELS_DIR = 'assets/models';
 const MODE = 'Models';
@@ -49,9 +51,20 @@ const MODE = 'Models';
  *   verbatim (through the registered passthrough 'models' stringifier)
  *   instead of mis-routing or no-op'ing. Models' own Save buttons still
  *   write directly via `io.writeFile`.
+ * @param {import('./invalidation-bus.js').InvalidationBus} [opts.invalidationBus]
+ *   Optional. Notified with `fireModelSaved(sidecarPath, tomlText)` after
+ *   every successful rig write so the cross-file `RigIndex` entity saves
+ *   validate against is re-seeded in the same session (issue #758).
  * @param {object} [opts.deps]  test seam: { createRigScene }
  */
-export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {} }) {
+export function mountModelsMode({
+  host,
+  modeShell,
+  saveFlow = null,
+  invalidationBus = null,
+  io,
+  deps = {},
+}) {
   if (!host) return null;
 
   const createScene = deps.createRigScene || null; // lazy-imported below
@@ -91,7 +104,10 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
 
   const canvasHost = el('div', 'models-rig-canvas');
   const extentsDisplay = el('div', 'models-extents-display');
-  viewportPane.append(canvasHost, extentsDisplay);
+  // Model-marker contract feedback (issue #758). Kept OUTSIDE renderCenter's
+  // innerHTML reset so a finding stays on screen while the author edits.
+  const findingsDisplay = el('div', 'models-marker-findings');
+  viewportPane.append(canvasHost, extentsDisplay, findingsDisplay);
 
   // ── Path helpers ──────────────────────────────────────────────────────
   const sidecarPath = (stem, variant) => `${MODELS_DIR}/${buildSidecarName(stem, variant)}`;
@@ -308,6 +324,7 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
     renderLeft();
     renderCenter();
     renderExtents();
+    renderFindings();
   }
 
   // ── Edit pipeline ─────────────────────────────────────────────────────
@@ -347,8 +364,42 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
     renderCenter();
   }
 
+  /**
+   * Model-marker contract findings for the rig as it stands: unusable marker
+   * names (which would make the whole sidecar unparseable and silently drop
+   * EVERY marker) plus duplicate `[markers.<name>]` tables in the serialized
+   * text. Returned so callers can both display and gate on them.
+   *
+   * Runs the SHARED rule set (`validateRigSidecarText`) over the serialized
+   * form, so what the panel shows is exactly what either write path enforces.
+   */
+  function rigMarkerFindings() {
+    let serialized = '';
+    try {
+      serialized = buildRigToml(rig);
+    } catch {
+      serialized = '';
+    }
+    return validateRigSidecarText(serialized);
+  }
+
+  function renderFindings(findings = rigMarkerFindings()) {
+    findingsDisplay.innerHTML = '';
+    for (const f of findings) {
+      const row = el('div', `models-marker-finding models-marker-finding-${f.severity}`);
+      row.textContent = f.message;
+      findingsDisplay.appendChild(row);
+    }
+  }
+
   function handleAddMarker(name) {
     if (rig.markers[name]) return;
+    // Refuse to create a marker the sidecar cannot round-trip: an invalid
+    // attachment is never made in the first place.
+    if (!isValidMarkerName(name)) {
+      renderFindings(validateRigMarkerNames({ markers: { [name]: {} } }));
+      return;
+    }
     rigAddMarker(rig, name, { position: [0, 0, 0], direction: [...FORWARD] });
     scene?.addMarker(name, rig.markers[name]);
     markCurrentDirty();
@@ -365,6 +416,10 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
   }
 
   function handleRenameMarker(from, to) {
+    if (!isValidMarkerName(to)) {
+      renderFindings(validateRigMarkerNames({ markers: { [to]: {} } }));
+      return;
+    }
     try {
       rigRenameMarker(rig, from, to);
     } catch (err) {
@@ -511,8 +566,8 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
   // ── Save ──────────────────────────────────────────────────────────────
   async function saveCurrent() {
     const model = activeModel();
-    if (!model || !activeVariant) return;
-    await writeRig(model.stem, activeVariant);
+    if (!model || !activeVariant) return false;
+    return writeRig(model.stem, activeVariant);
   }
 
   async function saveAsVariant(name) {
@@ -540,7 +595,9 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
     }
     name = verdict.variant;
 
-    await writeRig(model.stem, name);
+    // Only adopt the new variant if the bytes actually landed — a blocked or
+    // failed write must not leave the UI pointing at a file that isn't there.
+    if (!(await writeRig(model.stem, name))) return;
     // Register the new variant and switch to it.
     if (!model.variants.includes(name)) {
       model.variants = [...model.variants, name].sort((a, b) => {
@@ -555,22 +612,47 @@ export function mountModelsMode({ host, modeShell, saveFlow = null, io, deps = {
     renderAll();
   }
 
+  /**
+   * Serialize + write the active rig. Returns `true` only when the bytes
+   * actually reached disk — a validation block or a failed write returns
+   * `false` so callers (`saveAsVariant`) do not register a variant or mark
+   * the file clean for a save that never landed.
+   *
+   * @returns {Promise<boolean>}
+   */
   async function writeRig(stem, variant) {
     // Refresh cached extents from the live scene before serializing.
     if (scene) rig.extents = computeExtents(scene.getExtents());
     const text = buildRigToml(rig);
     const path = sidecarPath(stem, variant);
+    // Model-marker contract gate (issue #758): never persist a sidecar whose
+    // markers cannot be resolved by the engine. Shared with the SaveFlow
+    // 'Models' branch so both write paths apply the same rule set.
+    const findings = validateRigSidecarText(text);
+    const errors = findings.filter((f) => f.severity === 'error');
+    if (errors.length > 0) {
+      renderFindings(findings);
+      console.warn(`[models-mode] save blocked for ${path}:`, errors.map((f) => f.message).join('; '));
+      return false;
+    }
     try {
       await writeFile(path, text);
     } catch (err) {
       console.warn(`[models-mode] save failed for ${path}:`, err?.message || err);
-      return;
+      return false;
     }
     modeShell.markDirty(MODE, path, false);
+    // Re-seed the cross-file rig index (issue #758): a marker added here must
+    // be visible to the very next entity save in the SAME session, otherwise
+    // a legitimate entity save is refused until the editor reloads.
+    if (invalidationBus && typeof invalidationBus.fireModelSaved === 'function') {
+      invalidationBus.fireModelSaved(path, text);
+    }
     refreshUnsavedIndicator();
     refreshOpenFiles();
     renderLeft();
     renderCenter();
+    return true;
   }
 
   // ── Discovery ─────────────────────────────────────────────────────────

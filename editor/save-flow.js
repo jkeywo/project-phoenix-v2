@@ -1,4 +1,5 @@
 import { validateFile, partitionFindings } from './validation.js';
+import { validateRigSidecarText } from './models-rig.js';
 
 export class SaveFlow {
   /**
@@ -38,6 +39,22 @@ export class SaveFlow {
      * Set via `setSessionOnlyChecker`.
      */
     this._isSessionOnly = null;
+    /**
+     * Optional cross-file rig index (issue #758). When set, entity saves
+     * resolve every authored marker reference against the rig sidecar the
+     * entity's `[mesh]` selects; unresolved references are errors and block
+     * the write, so no invalid attachment is ever persisted. Set via
+     * `setRigIndex`.
+     */
+    this._rigIndex = null;
+  }
+
+  /**
+   * Register the `RigIndex` (see `marker-validate.js`) used for cross-file
+   * model-marker validation. Without one, marker checks are skipped.
+   */
+  setRigIndex(rigIndex) {
+    this._rigIndex = rigIndex && typeof rigIndex.forEntity === 'function' ? rigIndex : null;
   }
 
   /**
@@ -122,10 +139,17 @@ export class SaveFlow {
       return { ok: false, errors: [e.message], warnings: [] };
     }
 
-    // Models mode caches a ready-made TOML *string* (not a parsed object),
-    // so validateFile would emit a junk "Root value must be an object"
-    // warning. Skip validation for Models; other modes are unchanged.
-    const validationResults = mode === 'Models' ? [] : validateFile(path, parsedContent);
+    // Models mode caches a ready-made TOML *string* (not a parsed object), so
+    // validateFile would emit a junk "Root value must be an object" warning.
+    // It gets the rig-sidecar validator instead (issue #758) — a rig that
+    // declares the same marker twice would silently last-wins on load, so the
+    // duplicate blocks the save rather than shipping a broken mount point.
+    // `validateRigSidecarText` is the SAME rule set Models Mode's own Save
+    // button applies, so neither write path is a way around the other.
+    const validationResults =
+      mode === 'Models'
+        ? validateRigSidecarText(content)
+        : validateFile(path, parsedContent, { rigIndex: this._rigIndex });
     // Split findings by severity (issue #757). Warnings stay visible and flow
     // through untouched on every path; definite errors BLOCK the save before
     // anything is written and before any cache/undo/invalidation fires, so a
@@ -174,6 +198,11 @@ export class SaveFlow {
         typeof this._invalidationBus.fireFactionSaved === 'function'
       ) {
         this._invalidationBus.fireFactionSaved(path);
+      } else if (mode === 'Models' && typeof this._invalidationBus.fireModelSaved === 'function') {
+        // Re-seed the cross-file rig index (issue #758). Without this, a
+        // marker added in Models Mode stays invisible to entity saves until
+        // the editor reloads, and a legitimate entity save is refused.
+        this._invalidationBus.fireModelSaved(path, content);
       }
     }
 

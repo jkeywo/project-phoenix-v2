@@ -4,6 +4,7 @@ pub mod config_cache;
 pub mod entity_override;
 pub mod glb_visual;
 pub mod loader;
+pub mod marker_validate;
 pub mod model_rig;
 pub mod planet;
 pub mod spawner;

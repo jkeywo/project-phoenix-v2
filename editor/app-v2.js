@@ -11,6 +11,8 @@ import { mountScenarioMode } from './scenario-mode.js';
 import { mountEntityMode } from './entity-mode-view.js';
 import { mountDefinitionsMode } from './definitions-mode-view.js';
 import { mountModelsMode } from './models-mode-view.js';
+import { RigIndex } from './marker-validate.js';
+import { parseRigToml, wireRigIndexToSaves } from './models-rig.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +49,47 @@ const saveFlow = new SaveFlow(
   (content) => confirmSaveIfCommented(content),
   readFile,
 );
+
+// Cross-file model-marker index (issue #758). Entity saves resolve every
+// authored `marker` / `markers` reference against the rig sidecar the entity's
+// `[mesh]` selects; a reference that names no marker in that sidecar is an
+// error and blocks the write, so an invalid attachment never reaches disk.
+// Seeded per project root — `validateFile` is synchronous, so the sidecars
+// have to be in memory before it runs — and re-seeded on every rig write (see
+// `onModelSaved` below), so a marker an author adds in Models Mode is visible
+// to the very next entity save without reloading the editor.
+const rigIndex = new RigIndex();
+saveFlow.setRigIndex(rigIndex);
+
+// Keep the index in step with Models-Mode writes. Both write paths — Models'
+// own Save button and the SaveFlow 'Models' branch — fire `fireModelSaved`
+// with the exact text they wrote, so no re-read (and no async window) is
+// involved.
+wireRigIndexToSaves(rigIndex, invalidationBus);
+
+async function loadRigIndex() {
+  // Evict first: sidecars from a previous root share relative paths with the
+  // new one, so a survivor would judge this root's entities against old markers.
+  rigIndex.clear();
+  let entries = [];
+  try {
+    entries = await listDirectory('assets/models');
+  } catch {
+    return; // No root yet / no models dir — marker checks stay skipped.
+  }
+  for (const entry of entries || []) {
+    if (!entry || entry.kind !== 'file' || typeof entry.name !== 'string') continue;
+    if (!entry.name.endsWith('.toml')) continue;
+    const path = `assets/models/${entry.name}`;
+    try {
+      rigIndex.set(path, parseRigToml(await readFile(path)));
+    } catch {
+      // Unparseable sidecar: leave it unindexed so entity marker checks are
+      // skipped rather than reporting every marker as missing. Models Mode
+      // surfaces the sidecar's own problem.
+    }
+  }
+}
 
 // Per-mode restore callbacks. Each mode registers a `(path, snapshot)`
 // handler that knows how to apply a snapshot back to that mode's state.
@@ -109,12 +152,17 @@ async function init() {
       host: modelsHost,
       modeShell,
       saveFlow,
+      invalidationBus,
       io: { readFile, writeFile, listDirectory, readBinaryFile, onRootChanged },
     });
   }
 
   // Make the persisted root handle available for FSA reads/writes.
   await getProjectRoot();
+
+  // Sidecars must be in memory before any entity save validates markers.
+  await loadRigIndex();
+  if (typeof onRootChanged === 'function') onRootChanged(() => { loadRigIndex(); });
 }
 
 function showBanner() {

@@ -752,7 +752,6 @@ power_group = "sensors"
 id = "shields-system"
 kind = "shields"
 station = "shields"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

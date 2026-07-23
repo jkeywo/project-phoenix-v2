@@ -116,20 +116,53 @@ entities:
 
   - component: model-marker-contract
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Model Marker Contract
-      summary: Connects authored model rigs and named marker points to ship systems, weapon origins, engine effects, cameras, and other presentation/runtime attachments.
+      summary: Connects authored model rigs and named marker points to ship systems, weapon origins, engine effects, cameras, and other presentation/runtime attachments. Every reference is validated against the selected rig at authoring time in the editor, in CI over the shipped templates, and at native/headless startup before any entity spawns; the browser host does not yet run the gate because its rig sidecars arrive asynchronously.
     architecture:
       kind: configuration-contract
       authority: authoritative
       reads: [entity-template-state, ship-station-system-topology-state]
       runs_in: [host-browser-runtime]
     implementation:
-      status: declared
-      paths: [src/entities/model_rig.rs, src/entities/config.rs, src/server/pfx.rs]
-      symbols: [ModelRig]
+      status: confirmed
+      paths:
+        - src/entities/model_rig.rs
+        - src/entities/marker_validate.rs
+        - src/entities/config.rs
+        - src/server/pfx.rs
+        - src/headless/app.rs
+      symbols: [ModelRig, MarkerFinding, MarkerRole, validate_entity_markers, duplicate_marker_findings]
       tests: [cargo test]
+    exceptions:
+      - rule: every-marker-reference-is-validated-before-attachment
+        scope:
+          - host-browser-runtime
+        rationale: >-
+          The gate runs at authoring time in the editor, in CI over every shipped template, and at
+          native/headless startup before App::new. It does not run in the browser host: there rig
+          sidecars are fetched asynchronously by JS (wasm_push_sidecar_toml) some frames after the
+          entity template is parsed, so no point in the boot sequence knows the full set of rigs
+          before glb_visual attaches. A hand-edited template that bypassed both the editor and CI
+          would therefore still fall back silently in the browser.
+        temporary: true
+        removal_condition:
+          - browser-host-validates-marker-references-once-sidecar-fetches-settle
+        approval_status: accepted
+    evidence:
+      - kind: test
+        reference: phaser_bank_missing_marker_is_located_error
+        summary: An unresolved weapon marker is a source-located error finding rather than a silent fall back to the ship centre.
+      - kind: test
+        reference: weapon_referencing_camera_marker_is_incompatible
+        summary: The reserved camera_ marker namespace is enforced in both directions, so a weapon cannot claim a viewpoint.
+      - kind: test
+        reference: duplicate_marker_declaration_is_located
+        summary: A rig that declares the same marker twice is reported with its line rather than being silently deduplicated.
+      - kind: test
+        reference: every_shipped_entity_marker_reference_resolves
+        summary: Every marker reference in the shipped entity templates resolves against the rig its mesh selects.
 
   - component: entity-override-resolver
     core:

@@ -3,7 +3,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mountModelsMode } from '../models-mode-view.js';
 import { ModeShell } from '../mode-shell.js';
 import { SaveFlow } from '../save-flow.js';
-import { parseSidecarName } from '../models-rig.js';
+import { parseSidecarName, wireRigIndexToSaves } from '../models-rig.js';
+import { InvalidationBus } from '../invalidation-bus.js';
+import { RigIndex } from '../marker-validate.js';
 
 /**
  * A stub rig-view controller (no Three/WebGL). Records calls and returns
@@ -335,5 +337,109 @@ describe('mountModelsMode (jsdom)', () => {
 
     await view._internal.saveCurrent();
     expect(indicator.textContent).toBe('');
+  });
+  // ── Model-marker contract (issue #758) ──────────────────────────────
+  it('refuses to create a marker whose name cannot round-trip as a rig key', async () => {
+    const stub = makeSceneStub();
+    const { io } = makeIo();
+    const view = mountModelsMode({
+      host, modeShell, io,
+      deps: { createRigScene: () => stub },
+    });
+    await flush();
+    await view._internal.selectModel('ship_b');
+
+    view._internal.handleAddMarker('fore emitter');
+    // No attachment is created: not in the rig, not in the 3D view, not dirty.
+    expect(view._internal.getRig().markers['fore emitter']).toBeUndefined();
+    expect(stub._calls.addMarker.map((c) => c[0])).not.toContain('fore emitter');
+    expect(modeShell.isDirty('Models', 'assets/models/ship_b.model.toml')).toBe(false);
+    // The failure is presented, not swallowed.
+    expect(host.textContent).toContain('is not a valid rig key');
+  });
+
+  it('refuses a rename to an invalid marker name and keeps the original', async () => {
+    const stub = makeSceneStub();
+    const { io } = makeIo();
+    const view = mountModelsMode({
+      host, modeShell, io,
+      deps: { createRigScene: () => stub },
+    });
+    await flush();
+    await view._internal.selectModel('ship_b');
+
+    view._internal.handleAddMarker('aft');
+    view._internal.handleRenameMarker('aft', 'aft.port');
+    expect(view._internal.getRig().markers.aft).toBeDefined();
+    expect(view._internal.getRig().markers['aft.port']).toBeUndefined();
+    expect(host.textContent).toContain('is not a valid rig key');
+  });
+
+  // ── Blocked / failed writes must not be reported as success (issue #758) ──
+
+  it('a gate-blocked "Save as new variant" does not register the variant', async () => {
+    const stub = makeSceneStub();
+    const { io, writes } = makeIo();
+    const view = mountModelsMode({
+      host, modeShell, io,
+      deps: { createRigScene: () => stub },
+    });
+    await flush();
+    await view._internal.selectModel('ship_b');
+
+    // Force a rig the sidecar gate refuses (a name the CRUD path would have
+    // rejected up front, e.g. from a hand-edited file loaded into the view).
+    view._internal.getRig().markers['engine port'] = {
+      position: [0, 0, 0], direction: [0, 0, -1],
+    };
+
+    await view._internal.saveAsVariant('weathered');
+
+    expect(writes['assets/models/ship_b.weathered.toml']).toBeUndefined();
+    const model = view._internal.getModels().find((m) => m.stem === 'ship_b');
+    expect(model.variants).not.toContain('weathered');
+    expect(modeShell.getActiveFile('Models')).not.toBe('assets/models/ship_b.weathered.toml');
+    expect(host.textContent).toContain('is not a valid rig key');
+  });
+
+  it('a failed write leaves the file dirty and the variant unregistered', async () => {
+    const stub = makeSceneStub();
+    const { io } = makeIo();
+    io.writeFile = async () => { throw new Error('disk full'); };
+    const view = mountModelsMode({
+      host, modeShell, io,
+      deps: { createRigScene: () => stub },
+    });
+    await flush();
+    await view._internal.selectModel('ship_b');
+    view._internal.handleAddMarker('aft');
+    expect(modeShell.isDirty('Models', 'assets/models/ship_b.model.toml')).toBe(true);
+
+    expect(await view._internal.saveCurrent()).toBe(false);
+    expect(modeShell.isDirty('Models', 'assets/models/ship_b.model.toml')).toBe(true);
+
+    await view._internal.saveAsVariant('weathered');
+    const model = view._internal.getModels().find((m) => m.stem === 'ship_b');
+    expect(model.variants).not.toContain('weathered');
+  });
+
+  it('a successful rig write re-seeds the cross-file rig index via the bus', async () => {
+    const stub = makeSceneStub();
+    const { io } = makeIo();
+    const bus = new InvalidationBus();
+    const rigIndex = new RigIndex();
+    wireRigIndexToSaves(rigIndex, bus);
+    const view = mountModelsMode({
+      host, modeShell, io, invalidationBus: bus,
+      deps: { createRigScene: () => stub },
+    });
+    await flush();
+    await view._internal.selectModel('ship_b');
+    view._internal.handleAddMarker('torpedo_dorsal');
+
+    expect(await view._internal.saveCurrent()).toBe(true);
+    // The very next entity save — no reload — can already see the marker.
+    const rig = rigIndex.get('assets/models/ship_b.model.toml');
+    expect(Object.keys(rig.markers)).toContain('torpedo_dorsal');
   });
 });

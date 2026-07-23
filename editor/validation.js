@@ -4,6 +4,7 @@ import { validateStations } from './stations-validate.js';
 import { validateTriggerActions } from './action-schema.js';
 import { validateWorldReferences } from './world-references.js';
 import { validateWorldReferencesIndexed } from './world-references-indexed.js';
+import { validateEntityMarkers } from './marker-validate.js';
 
 /**
  * Pure admission primitive (issue #757). Mirrors the Rust atomic-activation
@@ -157,7 +158,17 @@ function validateBehaviourBlock(behaviour) {
   return results;
 }
 
-export function validateFile(filePath, parsedContent) {
+/**
+ * @param {string} filePath
+ * @param {object} parsedContent
+ * @param {{ rigIndex?: import('./marker-validate.js').RigIndex }} [context]
+ *   Optional cross-file context. When a `rigIndex` is supplied, entity marker
+ *   references are resolved against the model rig the entity's `[mesh]`
+ *   selects (issue #758). Without it — older callers, tests that only care
+ *   about single-file checks — marker validation is skipped rather than
+ *   reporting every marker as missing.
+ */
+export function validateFile(filePath, parsedContent, context = null) {
   if (!parsedContent || typeof parsedContent !== 'object' || Array.isArray(parsedContent)) {
     return [{ path: '', severity: 'error', message: 'Root value must be an object' }];
   }
@@ -187,6 +198,18 @@ export function validateFile(filePath, parsedContent) {
     if (parsedContent.behaviour) {
       const behaviourResults = validateBehaviourBlock(parsedContent.behaviour);
       results.push(...behaviourResults);
+    }
+
+    // Model-marker contract (issue #758). Cross-file: the entity's `[mesh]`
+    // picks a rig sidecar, and every authored `marker` / `markers` entry must
+    // name a marker that sidecar declares. Only runs when the caller supplied
+    // a rig index — see the `context` parameter.
+    const rigIndex = context?.rigIndex;
+    if (rigIndex && typeof rigIndex.forEntity === 'function') {
+      const rig = rigIndex.forEntity(parsedContent);
+      if (rig !== undefined) {
+        results.push(...validateEntityMarkers(parsedContent, rig));
+      }
     }
   }
 

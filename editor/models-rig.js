@@ -34,6 +34,7 @@
  * dropped: only the resulting forward direction is serialized.
  */
 import { parse, stringify } from 'smol-toml';
+import { validateRigMarkerNames, validateRigSidecarToml } from './marker-validate.js';
 
 /** Reserved variant name for the default/base sidecar. */
 export const DEFAULT_VARIANT = 'model';
@@ -357,4 +358,62 @@ export function validateVariantName(name, existingVariants = []) {
     return { ok: true, variant: trimmed, requiresConfirm: true };
   }
   return { ok: true, variant: trimmed };
+}
+
+/**
+ * The complete rig-sidecar rule set for a serialized sidecar (issue #758).
+ *
+ * Both write paths call THIS — Models Mode's own Save button
+ * (`models-mode-view.js` `writeRig`) and the global Save All route
+ * (`save-flow.js`, mode `Models`) — so a sidecar one path refuses can never be
+ * written through the other.
+ *
+ * Combines the object-level marker-name check (`validateRigMarkerNames`, which
+ * needs the parsed keys) with the raw-text scan (`validateRigSidecarToml`,
+ * which catches duplicate/empty `[markers.<name>]` headers that parsing
+ * destroys).
+ *
+ * @param {string} tomlText  Serialized sidecar.
+ * @returns {Array<{path, severity, category, message}>}
+ */
+export function validateRigSidecarText(tomlText) {
+  let rig = null;
+  try {
+    rig = parseRigToml(tomlText);
+  } catch {
+    // Unparseable text has no marker keys to name-check; the text scan below
+    // still reports the located problems it can see.
+    rig = null;
+  }
+  return [...validateRigMarkerNames(rig), ...validateRigSidecarToml(tomlText)];
+}
+
+/**
+ * Keep a cross-file `RigIndex` in step with rig-sidecar writes (issue #758).
+ *
+ * The index is seeded once per project root, but entity saves validate marker
+ * references against it synchronously. Without this subscription a marker an
+ * author adds in Models Mode is invisible until the editor reloads, and the
+ * entity save that references it is refused — a false positive blocking a
+ * legitimate save.
+ *
+ * Both write paths fire `fireModelSaved(path, tomlText)` with the exact text
+ * they wrote, so the index is refreshed from memory with no async window.
+ *
+ * @param {import('./marker-validate.js').RigIndex} rigIndex
+ * @param {{ onModelSaved: (cb: (path: string, tomlText: string) => void) => object }} invalidationBus
+ * @returns {object|null} the subscription handle, or null if not wired.
+ */
+export function wireRigIndexToSaves(rigIndex, invalidationBus) {
+  if (!rigIndex || typeof invalidationBus?.onModelSaved !== 'function') return null;
+  return invalidationBus.onModelSaved((path, tomlText) => {
+    if (typeof path !== 'string' || typeof tomlText !== 'string') return;
+    try {
+      rigIndex.set(path, parseRigToml(tomlText));
+    } catch {
+      // A just-written sidecar that no longer parses: drop the entry so entity
+      // marker checks are SKIPPED rather than judged against a stale rig.
+      rigIndex.delete(path);
+    }
+  });
 }

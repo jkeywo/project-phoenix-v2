@@ -1641,3 +1641,14 @@ form {
   border-top: 1px solid #2f323a;
 }
 .models-extents-row { line-height: 1.5; }
+
+/* Model-marker contract findings (issue #758). Empty unless the rig breaks
+   the contract, so it costs no vertical space in the normal case. */
+.models-marker-findings {
+  flex-shrink: 0;
+  font-size: 11px; font-family: monospace;
+}
+.models-marker-findings:not(:empty) { padding: 6px 8px; border-top: 1px solid #2f323a; }
+.models-marker-finding { line-height: 1.5; }
+.models-marker-finding-error { background: rgba(120,20,20,0.6); color: #ffb4b4; }
+.models-marker-finding-warning { background: rgba(120,90,20,0.5); color: #ffe0a0; }

@@ -25,6 +25,7 @@ use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
 use crate::entity_config::EntityConfig;
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
+use crate::marker_validate::MarkerFinding;
 use crate::messages::{GamePhase, ServerMessage};
 use crate::modifier_coordination::ModifierCoordinationPlugin;
 use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
@@ -62,10 +63,22 @@ fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
 /// Templates that fail to parse are reported and skipped rather than aborting
 /// the run — `assets/entities/` holds a lot of files and one bad cosmetic
 /// asteroid should not stop a combat test.
-fn preload_entity_templates(dir: &str) -> Result<usize, BuildError> {
+///
+/// Every template that *does* parse is also checked against the model-marker
+/// contract (issue #758): each authored `marker` / `markers` reference must
+/// resolve in the rig sidecar the template's `[mesh]` selects. The findings are
+/// returned rather than logged here so the caller can gate on them before
+/// anything spawns — an unresolved marker would otherwise attach a beam,
+/// exhaust plume, or camera to the ship's centre with no diagnostic at all.
+/// Note the deliberate asymmetry with the parse-skip policy above: a marker
+/// error in ANY discovered template aborts the run, because unlike a parse
+/// failure it is silent and would corrupt the run's numbers rather than stop
+/// it. See the gate in [`build_headless_app`].
+fn preload_entity_templates(dir: &str) -> Result<(usize, Vec<MarkerFinding>), BuildError> {
     let entries =
         std::fs::read_dir(dir).map_err(|e| BuildError(format!("could not list {dir:?}: {e}")))?;
     let mut loaded = 0;
+    let mut findings: Vec<MarkerFinding> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
@@ -85,13 +98,44 @@ fn preload_entity_templates(dir: &str) -> Result<usize, BuildError> {
         };
         match EntityConfig::from_toml(&toml) {
             Ok(cfg) => {
+                findings.extend(validate_template_markers(&key, &toml, &cfg));
                 crate::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
             }
             Err(e) => warn!(target: "config", "template failed to parse, skipping: {key}: {e}"),
         }
     }
-    Ok(loaded)
+    Ok((loaded, findings))
+}
+
+/// Model-marker contract check for one parsed template: resolve its rig
+/// sidecar off disk (identity rig when genuinely absent, mirroring
+/// `glb_visual::resolve_sidecar_rig` on native) and validate every authored
+/// marker reference against it, plus the sidecar's own duplicate declarations.
+fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<MarkerFinding> {
+    let mut findings = Vec::new();
+    let rig = cfg.mesh.as_ref().and_then(|mesh| {
+        let model = mesh.model.as_deref()?;
+        let path = crate::model_rig::sidecar_path(model, mesh.variant.as_deref());
+        let sidecar = std::fs::read_to_string(&path).unwrap_or_default();
+        findings.extend(crate::marker_validate::duplicate_marker_findings(
+            &path, &sidecar,
+        ));
+        match crate::model_rig::ModelRig::from_toml(&sidecar) {
+            Ok(rig) => Some(rig),
+            Err(e) => {
+                warn!(target: "config", "rig sidecar {path} failed to parse: {e}");
+                None
+            }
+        }
+    });
+    findings.extend(crate::marker_validate::validate_entity_markers(
+        key,
+        toml,
+        cfg,
+        rig.as_ref(),
+    ));
+    findings
 }
 
 /// Assemble the headless app. Does not run it — see [`run`].
@@ -113,7 +157,38 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| "assets/entities".to_string());
-    let loaded = preload_entity_templates(&template_dir)?;
+    let (loaded, marker_findings) = preload_entity_templates(&template_dir)?;
+
+    // Model-marker contract gate (issue #758). This validates EVERY template
+    // discovered in `template_dir` — not just the ones this run will actually
+    // spawn — and a single error aborts the whole build before `App::new()`.
+    //
+    // That is deliberately stricter than the parse-skip policy above (a
+    // template that fails to *parse* is skipped so one bad cosmetic asteroid
+    // cannot stop a combat test). The asymmetry is the point: a parse failure
+    // is loud and self-limiting — the template simply isn't in the cache, so
+    // anything that needs it fails visibly — whereas an unresolved marker is
+    // silent by construction. It attaches the beam, exhaust, or camera to the
+    // ship's centre and produces a plausible-looking run whose numbers are
+    // wrong. Since the run's spawn set is not known until the world and the
+    // AI have had their say, "every discovered template" is the only scope
+    // that can be checked before anything spawns.
+    //
+    // Errors are folded into the returned `BuildError`; warnings are reported
+    // below, after `LogPlugin` installs a subscriber (before it, every
+    // `tracing` line goes nowhere).
+    if crate::marker_validate::has_error(&marker_findings) {
+        let errors: Vec<String> = marker_findings
+            .iter()
+            .filter(|f| f.is_error())
+            .map(MarkerFinding::describe)
+            .collect();
+        return Err(BuildError(format!(
+            "model-marker contract violated; spawning blocked ({} error(s)): {}",
+            errors.len(),
+            errors.join("; ")
+        )));
+    }
 
     let mut app = App::new();
 
@@ -167,6 +242,16 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         ScenePlugin,
         StatesPlugin,
     ));
+
+    // Marker-contract warnings (issue #758). Reported HERE, not next to the
+    // error gate above: `LogPlugin::build` has only just installed the global
+    // `tracing` subscriber, and anything emitted before it is silently
+    // dropped. `warn!` rather than `info!` so the default "warn" filter above
+    // still lets these through — an unresolved default camera marker is the
+    // kind of thing a run should say out loud.
+    for f in marker_findings.iter().filter(|f| !f.is_error()) {
+        warn!(target: "assets", "marker validation [warn] {}", f.describe());
+    }
 
     // Asset types and messages that `RenderPlugin` / `ViewscreenBorderPlugin`
     // would otherwise register. Simulation systems name these types even when

@@ -854,6 +854,27 @@ mod tests {
         );
     }
 
+    /// `SystemAffinity` round-trips including the `Comms` variant (issue #753).
+    ///
+    /// `SystemAffinity` is replicated inside `ScoredObjective` on the viewscreen
+    /// blackboard, so the new `Comms` variant must survive the wire codec.
+    #[test]
+    fn system_affinity_comms_variant_round_trips() {
+        let affinities = vec![
+            SystemAffinity::Helm,
+            SystemAffinity::Weapons,
+            SystemAffinity::Captain,
+            SystemAffinity::Comms,
+        ];
+        let encoded = serde_json::to_string(&affinities).unwrap();
+        let decoded: Vec<SystemAffinity> = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, affinities);
+        assert!(
+            encoded.contains("Comms"),
+            "the Comms affinity variant must serialize by name"
+        );
+    }
+
     /// ChargeBlasterStart / ChargeBlasterCancel codec round-trips (issue #636).
     #[test]
     fn charge_blaster_start_control_system_round_trips() {

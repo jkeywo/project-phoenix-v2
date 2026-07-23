@@ -100,15 +100,16 @@ entities:
       status: partially-implemented
       confidence: confirmed
       title: Comms AI Operator
-      summary: Applies per-ship AI control gating but currently has no autonomous hail or dialogue policy; complete hail behavior remains future Comms AI work.
+      summary: Backfill Comms autonomously hails from relevant Hail-directive objectives via the shared AI-emit seam; autonomous dialogue-response policy remains future work.
     architecture:
       kind: ai-operator
       authority: authoritative
-      reads: [system-control-source-state]
+      reads: [system-control-source-state, scored-objective-pool-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/console/comms/server.rs]
+      symbols: [operate_comms_ai]
       tests: [cargo test]
 
   - component: important-comms-decision-presentation

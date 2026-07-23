@@ -28,7 +28,13 @@ impl Plugin for CommsConsolePlugin {
             Update,
             (
                 publish_comms_blackboard.in_set(crate::sim_sets::SimSet::Publish),
-                operate_comms_ai.in_set(crate::sim_sets::SimSet::Physics),
+                // `Input`, not `Physics`, and explicitly before `handle_hail`:
+                // the `Hail` command the Comms AI emits must be consumed in the
+                // SAME tick, exactly as `ai_torpedo_load` is ordered before
+                // `handle_set_torpedo_volley_target` (issue #753).
+                operate_comms_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .before(handle_hail),
             ),
         );
     }
@@ -612,23 +618,213 @@ pub(crate) fn handle_comms_channel2(
     }
 }
 
-// ── AI controller stub ─────────────────────────────────────────────────────────
+// ── Backfill Comms AI (issue #753) ──────────────────────────────────────────
 
-/// Per-entity AI loop for comms. Loops over ALL ship entities (player and NPC)
-/// where the Comms system is `ControlSource::Ai`.
+/// Per-ship AI hail memory: the last target the Backfill Comms AI hailed.
 ///
-/// Currently a compile-verified stub — Comms AI auto-responds to hails
-/// and processes inbox messages (deferred to later fine-grained decomposition).
-pub fn operate_comms_ai(ships: Query<&ShipSystemControlSources>) {
-    for sources in &ships {
+/// A standing `Hail` directive stays in the scored pool every tick until its
+/// objective completes. Without this guard the AI would re-emit the same
+/// `Hail` — and `handle_hail` would re-push a `WorldEvent::Hailed`, re-firing
+/// `on_hailed` triggers — on every tick. Storing the last target makes a
+/// standing directive produce a single hail attempt (the other AI operators
+/// guard emission on-change the same way). It resets to `None` when no
+/// relevant, in-range Hail target is selectable, so a target that leaves and
+/// later re-enters range is hailed afresh.
+#[derive(Component, Default)]
+pub struct CommsAiHailState {
+    last_hailed: Option<String>,
+}
+
+/// Backfill Comms AI: hail from Hail-directive objectives (issue #753).
+///
+/// Comms is a player channel — the inbox, contacts, range flags, and objective
+/// pool are player-session-scoped singletons published onto the `LocalShip`
+/// (`publish_comms_blackboard`). This operator therefore runs only for the
+/// `LocalShip` and only when its Comms system is `ControlSource::Ai` (the
+/// unmanned-player-ship Backfill case). It scores the same objective pool
+/// `publish_comms_blackboard` renders, selects the highest-scoring relevant
+/// Hail directive that is score > 0.0, resolvable to a UUID, and in range, and
+/// emits the SAME `Hail { target_uuid }` payload a human Comms officer sends —
+/// through the shared `emit_ai_command` seam into this ship's own
+/// `AdmittedCommands`, for `handle_hail` to drain the same tick. No bespoke AI
+/// path, no branch on actor downstream of admission (AGENTS.md #6).
+///
+/// No action is taken for a pool with no relevant Hail directive, a zero-score
+/// directive, an unresolvable name, or an out-of-range target (mirroring
+/// `handle_hail`'s server-side range gate so "unavailable" produces no hail
+/// rather than relying on the server to drop it).
+#[allow(clippy::too_many_arguments)]
+pub fn operate_comms_ai(
+    objectives: Option<Res<ObjectiveManagerRes>>,
+    runtime: Option<Res<WorldContentRuntime>>,
+    comms: Option<Res<CommsRuntime>>,
+    sessions: Res<crate::lobby::Sessions>,
+    // `Option<Res<_>>`, never bare — bare-`App` fixtures never insert it.
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    mut commands: Commands,
+    mut ships: Query<
+        (
+            Entity,
+            Option<&EntityUuid>,
+            &ShipSystemControlSources,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&mut CommsAiHailState>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+) {
+    for (entity, entity_uuid, sources, ship_config, mut admitted, red_alert, hull, hail_state) in
+        ships.iter_mut()
+    {
         let policy = sources
             .0
             .policy_for(&crate::system_registry::comms_system_id());
         if !policy.operate_ai {
             continue;
         }
-        // TODO: implement comms AI logic (auto-response, inbox processing)
+
+        // Score the objective pool against the same conditions
+        // `publish_comms_blackboard` uses (red alert + hull fraction).
+        let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
+        let hull_fraction = hull
+            .map(|h| {
+                let max = h.0.total_max();
+                if max > 0.0 {
+                    (h.0.total_current() / max).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                }
+            })
+            .unwrap_or(1.0);
+        let conditions = crate::objectives::WorldConditions {
+            red_alert,
+            hull_fraction,
+            attacked: false,
+        };
+
+        // Highest-scoring relevant Hail directive that resolves to a UUID and,
+        // when range tracking is active, is currently in range. `scored_pool`
+        // is sorted descending, so `find_map` picks the best usable target and
+        // falls through past higher-scored ones that don't resolve or sit out
+        // of range (mirrors `ship::sensors`' Destroy-target fall-through).
+        let selected = objectives.as_ref().and_then(|mgr| {
+            mgr.0
+                .scored_pool(&conditions)
+                .into_iter()
+                .filter(|s| {
+                    s.score > 0.0
+                        && s.relevance
+                            .contains(&crate::messages::SystemAffinity::Comms)
+                        && matches!(s.directive, crate::messages::AiDirective::Hail { .. })
+                })
+                .find_map(|s| {
+                    let crate::messages::AiDirective::Hail { target } = &s.directive else {
+                        return None;
+                    };
+                    let target_uuid =
+                        resolve_hail_target(target, runtime.as_deref(), comms.as_deref())?;
+                    // Range gate: mirror `handle_hail`'s server-side check so an
+                    // out-of-range target produces no hail attempt at all.
+                    if let Some(rt) = comms.as_deref() {
+                        if rt.range_active
+                            && rt.range_flags.get(&target_uuid).copied() != Some(true)
+                        {
+                            return None;
+                        }
+                    }
+                    Some(target_uuid)
+                })
+        });
+
+        let Some(target_uuid) = selected else {
+            // Nothing hailable this tick — forget the last target so a
+            // re-appearing opportunity is hailed afresh next time.
+            if let Some(mut st) = hail_state {
+                st.last_hailed = None;
+            }
+            continue;
+        };
+
+        // On-change guard: don't re-hail a target already hailed for this
+        // standing directive (would spam `on_hailed` triggers every tick).
+        if hail_state.as_ref().and_then(|s| s.last_hailed.as_deref()) == Some(target_uuid.as_str())
+        {
+            continue;
+        }
+
+        let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
+            entity_uuid,
+            crate::system_registry::comms_system_id(),
+            crate::messages::SystemControlPayload::Hail {
+                target_uuid: target_uuid.clone(),
+            },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
+
+        if admitted_ok {
+            match hail_state {
+                Some(mut st) => st.last_hailed = Some(target_uuid.clone()),
+                None => {
+                    commands.entity(entity).insert(CommsAiHailState {
+                        last_hailed: Some(target_uuid.clone()),
+                    });
+                }
+            }
+            crate::pdebug!(
+                log,
+                crate::logging::LogCat::Comms,
+                entity = entity,
+                "backfill comms AI hailed {target_uuid}"
+            );
+        } else {
+            // Refused at admission: the comms system's `ai:` token was not
+            // admitted despite `operate_ai` — the coarse gate above and the
+            // admission gate are reading different control sources. Warn.
+            crate::pwarn!(
+                log,
+                crate::logging::LogCat::Comms,
+                entity = entity,
+                "backfill comms AI hail for {target_uuid} refused at admission"
+            );
+        }
     }
+}
+
+/// Resolve a Hail directive's target NAME to an entity UUID.
+///
+/// `AiDirective::Hail` carries an authored entity NAME while
+/// `SystemControlPayload::Hail` needs a UUID. Resolution order: the world's
+/// `name_to_uuid` map (authoritative, matches `ship::sensors`' Destroy-target
+/// resolution), then a comms contact whose display name matches, then the
+/// target string itself if it is already a valid UUID (authors may target by
+/// UUID directly). Returns `None` when the name cannot be resolved — the
+/// caller then issues no hail (AC: "no action for unresolvable directives").
+fn resolve_hail_target(
+    target: &str,
+    runtime: Option<&WorldContentRuntime>,
+    comms: Option<&CommsRuntime>,
+) -> Option<String> {
+    if let Some(uuid) = runtime.and_then(|rt| rt.name_to_uuid.get(target).cloned()) {
+        return Some(uuid);
+    }
+    if let Some(uuid) = comms.and_then(|c| {
+        c.contacts
+            .iter()
+            .find(|contact| contact.name == target)
+            .map(|contact| contact.uuid.clone())
+    }) {
+        return Some(uuid);
+    }
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return Some(target.to_string());
+    }
+    None
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -816,6 +1012,361 @@ mod tests {
             .0
             .policy_for(&crate::system_registry::comms_system_id());
         assert!(!human_policy.operate_ai, "Human Comms must not operate AI");
+    }
+
+    // ── Backfill Comms AI hail execution (issue #753) ──────────────────────
+
+    use crate::messages::{AdmittedCommands, AiDirective, ObjectiveSource, SystemControlPayload};
+    use crate::objectives::{ObjectiveManager, UtilityConfig, ZeroGateCondition};
+    use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+    /// Minimal app that runs ONLY `operate_comms_ai` (no `handle_hail`, no
+    /// AdmissionPlugin clear) so a test can inspect the `Hail` command the AI
+    /// leaves in the ship's own `AdmittedCommands`. Spawns one `LocalShip`
+    /// whose Comms system carries `comms_source`.
+    fn comms_ai_app(comms_source: ControlSource) -> App {
+        let mut app = App::new();
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ))
+        .insert_resource(WorldContentRuntime::default())
+        .insert_resource(CommsRuntime::default())
+        .add_systems(Update, operate_comms_ai);
+
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(crate::system_registry::comms_system_id(), comms_source);
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
+            ShipSystemControlSources(resolver),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            AdmittedCommands::default(),
+        ));
+        app
+    }
+
+    /// Register `name → uuid` in the world runtime so a Hail directive naming
+    /// `name` resolves to `uuid`.
+    fn register_name(app: &mut App, name: &str, uuid: &str) {
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert(name.into(), uuid.into());
+    }
+
+    /// Insert an `ObjectiveManagerRes` carrying a single objective.
+    fn set_objective(
+        app: &mut App,
+        id: &str,
+        directive: AiDirective,
+        utility: UtilityConfig,
+        source: ObjectiveSource,
+    ) {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(id, "text", false, vec![], directive, utility, source);
+        app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
+    }
+
+    /// Collect the `target_uuid`s of every `Hail` admitted to the Comms system
+    /// on the (sole) `LocalShip`.
+    fn admitted_hail_targets(app: &mut App) -> Vec<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q.single(app.world()).expect("LocalShip admitted commands");
+        admitted
+            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .filter_map(|cmd| match &cmd.payload {
+                SystemControlPayload::Hail { target_uuid } => Some(target_uuid.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn comms_ai_hails_from_relevant_hail_directive() {
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert_eq!(
+            admitted_hail_targets(&mut app),
+            vec!["station-alpha-uuid".to_string()],
+            "a relevant, in-range Hail directive must produce a Hail attempt to the resolved UUID"
+        );
+    }
+
+    #[test]
+    fn comms_ai_emits_the_same_hail_payload_a_human_sends() {
+        // AI/human symmetry (AGENTS.md #6): the AI emits the SAME typed
+        // `SystemControlPayload::Hail` a human Comms officer's
+        // `ControlSystem { target: comms, payload: Hail { .. } }` carries — no
+        // bespoke AI payload. Assert the admitted command is byte-identical to
+        // the human payload.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        let human_payload = SystemControlPayload::Hail {
+            target_uuid: "station-alpha-uuid".into(),
+        };
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
+        let admitted = q.single(app.world()).unwrap();
+        let ai_payloads: Vec<_> = admitted
+            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .map(|cmd| cmd.payload.clone())
+            .collect();
+        assert_eq!(
+            ai_payloads,
+            vec![human_payload],
+            "AI-emitted comms payload must equal the payload a human ControlSystem sends"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_hail_when_human_operated() {
+        // Gate: a human-held Comms console must refuse AI emission entirely.
+        let mut app = comms_ai_app(ControlSource::Human);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "a human-operated Comms console must not emit an AI hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_hail_zero_score_directive() {
+        // A doctrine Hail gated on red_alert scores 0 while not at red alert
+        // (the test ship has no ShipRedAlert). No hail must occur.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                zero_gates: vec![ZeroGateCondition {
+                    condition: "red_alert".into(),
+                    threshold: None,
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        app.update();
+
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "a zero-score Hail directive must produce no hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_hail_irrelevant_directive() {
+        // A Destroy directive is Helm/Weapons-relevant, not Comms-relevant.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "destroy-alpha",
+            AiDirective::Destroy {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "a non-Hail (Comms-irrelevant) directive must produce no hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_hail_out_of_range_target() {
+        // Range tracking active and the target flagged out of range: mirror
+        // handle_hail's server-side gate so no hail attempt is emitted.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        {
+            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+            comms.range_active = true;
+            comms.range_flags.insert("station-alpha-uuid".into(), false);
+        }
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "an out-of-range Hail target must produce no hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_hail_unresolvable_name() {
+        // No name_to_uuid entry and the target is not itself a UUID.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        set_objective(
+            &mut app,
+            "hail-ghost",
+            AiDirective::Hail {
+                target: "Ghost Station".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "an unresolvable Hail target name must produce no hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_hail_is_isolated_to_the_local_ship() {
+        // Per-ship isolation: a second, non-local AI-comms ship must never gain
+        // the hail — comms is a player channel scoped to the LocalShip.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+
+        let mut npc_resolver = ControlSourceResolver::new();
+        npc_resolver.set(crate::system_registry::comms_system_id(), ControlSource::Ai);
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                ShipSystemControlSources(npc_resolver),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                AdmittedCommands::default(),
+            ))
+            .id();
+
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+
+        assert_eq!(
+            admitted_hail_targets(&mut app),
+            vec!["station-alpha-uuid".to_string()],
+            "the local ship must gain the AI hail"
+        );
+        let npc_admitted = app.world().entity(npc).get::<AdmittedCommands>().unwrap();
+        assert_eq!(
+            npc_admitted
+                .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                .count(),
+            0,
+            "a non-local ship must not be contaminated by the local ship's comms hail"
+        );
+    }
+
+    #[test]
+    fn comms_ai_does_not_respam_a_standing_hail() {
+        // A standing Hail directive stays in the pool every tick. The AI must
+        // hail once, then stay quiet (no re-firing on_hailed triggers). Emulate
+        // AdmissionPlugin's per-tick clear between updates and assert the second
+        // tick emits nothing.
+        let mut app = comms_ai_app(ControlSource::Ai);
+        register_name(&mut app, "Station Alpha", "station-alpha-uuid");
+        set_objective(
+            &mut app,
+            "hail-alpha",
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 20.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        app.update();
+        assert_eq!(admitted_hail_targets(&mut app).len(), 1, "first tick hails");
+
+        // Clear admitted (as AdmissionPlugin does each tick) and run again.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut AdmittedCommands, With<crate::server_app::LocalShip>>();
+            q.single_mut(app.world_mut()).unwrap().0.clear();
+        }
+        app.update();
+        assert!(
+            admitted_hail_targets(&mut app).is_empty(),
+            "a standing Hail already hailed must not be re-emitted every tick"
+        );
     }
 
     // -- handle_respond_to_message: comms-response action dispatch parity ---

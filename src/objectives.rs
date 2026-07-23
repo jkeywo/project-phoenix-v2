@@ -120,7 +120,11 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         AiDirective::Patrol { .. } | AiDirective::Reach { .. } | AiDirective::Retreat { .. } => {
             vec![SystemAffinity::Helm]
         }
-        AiDirective::Hail { .. } => vec![SystemAffinity::Captain],
+        // Hail is a Comms action: the Backfill Comms AI (issue #753) consumes
+        // these from its local scored pool and issues the same typed `Hail`
+        // command a human Comms officer sends. No consumer filters Hail on
+        // `Captain`, so Comms is the sole relevant affinity.
+        AiDirective::Hail { .. } => vec![SystemAffinity::Comms],
     }
 }
 
@@ -814,6 +818,29 @@ mod tests {
         mgr.add("obj", "No directive", false, vec![]);
         let pool = mgr.scored_pool(&WorldConditions::default());
         assert!(pool[0].relevance.is_empty());
+    }
+
+    #[test]
+    fn hail_directive_has_comms_relevance() {
+        // Issue #753: Hail is a Comms action, so the Backfill Comms AI can
+        // consume it from the scored pool by affinity.
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            "h",
+            "Hail",
+            false,
+            vec![],
+            AiDirective::Hail {
+                target: "Station Alpha".into(),
+            },
+            UtilityConfig {
+                base_priority: 1.0,
+                ..Default::default()
+            },
+            ObjectiveSource::Mission,
+        );
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(pool[0].relevance, vec![SystemAffinity::Comms]);
     }
 
     // ── remove clears runtime record (issue #751/#752) ─────────────────────

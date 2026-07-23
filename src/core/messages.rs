@@ -2528,6 +2528,10 @@ pub enum SystemAffinity {
     Helm,
     Weapons,
     Captain,
+    /// Comms cares about `Hail` directives (issue #753): the Backfill Comms
+    /// AI consumes them from its local scored-objective pool and issues the
+    /// same `Hail` action a human Comms officer sends.
+    Comms,
 }
 
 /// An objective with its computed utility score, published on the Viewscreen

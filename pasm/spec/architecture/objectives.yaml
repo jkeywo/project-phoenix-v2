@@ -330,7 +330,7 @@ entities:
 
   - component: comms-objective-ai
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Comms Objective AI
       summary: Backfill Comms consumes relevant Hail directives from its local scored objective pool and issues the same Comms actions as a player.
@@ -339,6 +339,11 @@ entities:
       authority: authoritative
       reads: [scored-objective-pool-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs, src/objectives.rs]
+      symbols: [operate_comms_ai, directive_relevance]
+      tests: [cargo test]
 
   - component: objective-comms-consequence-router
     core:

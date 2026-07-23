@@ -50,7 +50,7 @@ entities:
       enforcement_links: [comms-dialogue-controller]
       owner_role: comms-operator
       protected: true
-      must_not_be: [auto-selected by a non-existent Comms AI policy, silently reversed after acceptance, committed by another bridge station]
+      must_not_be: [auto-selected by the Backfill Comms AI hail policy, silently reversed after acceptance, committed by another bridge station]
 
   - information: ship-comms-channel-information
     core:

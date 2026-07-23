@@ -629,7 +629,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 
 #### Inbound (`ClientMessage`)
 - Identity / lobby: `Identify`, `SetName`, `SelectStation`, `ReleaseStation`, `StartGame`, `SetComplexity`.
-- Viewscreen / captain: `SetView`, `ToggleRedAlert`.
+- Viewscreen / captain: `SetView`, `SetRedAlert { active }`.
 - Helm: `ControlSystem` with `SetThrust { value }` → `helm-thrust` / `SetSteering { value }` → `helm-steering` (per-axis wire, issue #801), `StartImpulseCharge`, `CancelImpulse` (note: `CancelImpulse` is sent by the Navigation operator, not Helm).
 - Tactical / weapons: `SetTarget`, `FirePhaser`, `SetPhaserMode { mode }`, `SetPhaserFrequency { frequency }`, `FireTorpedo { tube, target_uuid? }`.
 - Sensors: `SetSensorsTarget { uuid }` (current) and `SetScienceTarget { uuid }` (legacy, retained).

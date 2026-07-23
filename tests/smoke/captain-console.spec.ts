@@ -89,7 +89,7 @@ test('captain console: camera-select and red alert call __sendAction with correc
   expect(JSON.parse(sent[0])).toEqual({ action: 'set_view', console: 'captain', direction: 'Port' });
   expect(JSON.parse(sent[1])).toEqual({ action: 'set_view', console: 'captain', direction: 'Starboard' });
   expect(JSON.parse(sent[2])).toEqual({ action: 'set_view', console: 'captain', direction: 'Fore' });
-  expect(JSON.parse(sent[3])).toEqual({ action: 'toggle_red_alert', console: 'captain' });
+  expect(JSON.parse(sent[3])).toEqual({ action: 'set_red_alert', console: 'captain', active: true });
 });
 
 test('captain console: AI-run Red Alert renders read-only with AUTO badge', async ({ page }) => {

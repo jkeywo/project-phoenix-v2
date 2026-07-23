@@ -1028,7 +1028,14 @@ pub enum RepairTarget {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
-    ToggleRedAlert,
+    /// Set the ship's Red Alert state to an explicit desired value (issue
+    /// #748). Targets `red-alert`. Replaces the former `ToggleRedAlert`: the
+    /// captain UI and the Captain AI both send the desired end state, so a
+    /// retried, duplicated, or stale-UI command is idempotent (the handler
+    /// assigns, it does not invert).
+    SetRedAlert {
+        active: bool,
+    },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
         value: f32,

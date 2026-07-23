@@ -16,7 +16,7 @@ pub struct CaptainPlugin;
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // Admitted-command consumers (issue #833): `handle_toggle_red_alert`
+        // Admitted-command consumers (issue #833): `handle_set_red_alert`
         // (red-alert), `handle_set_objective_priority` (captain), and
         // `handle_set_view` (viewscreen SetView).
         app.register_admitted_consumer(ConsumerMatcher::exact(
@@ -34,8 +34,8 @@ impl Plugin for CaptainPlugin {
             (
                 operate_captain_ai
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .before(handle_toggle_red_alert),
-                handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
+                    .before(handle_set_red_alert),
+                handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
                 crate::ship::combat_activity::update_combat_activity
@@ -48,14 +48,19 @@ impl Plugin for CaptainPlugin {
 
 // ── Input handlers ───────────────────────────────────────────────────────────
 
-/// Applies `ToggleRedAlert` commands from every ship's own
-/// `AdmittedCommands` to that ship's own `ShipRedAlert`.
+/// Applies `SetRedAlert { active }` commands from every ship's own
+/// `AdmittedCommands` to that ship's own `ShipRedAlert` (issue #748).
+///
+/// The command carries the desired end state, so the handler **assigns**
+/// `ra.0 = active` rather than inverting. Retried, duplicated, or stale-UI
+/// commands are therefore idempotent: setting `active: true` twice leaves the
+/// ship at true; a stale `active: false` when already false is a no-op.
 ///
 /// Iterates every ship (player + NPC) because `operate_captain_ai` writes
-/// `ToggleRedAlert` into each ship's own `AdmittedCommands` when its
-/// Captain system is AI-controlled. Without per-entity dispatch, NPC
-/// captain-AI red-alert toggles would be silently dropped.
-fn handle_toggle_red_alert(
+/// `SetRedAlert` into each ship's own `AdmittedCommands` when its Captain
+/// system is AI-controlled. Without per-entity dispatch, NPC captain-AI
+/// red-alert changes would be silently dropped.
+fn handle_set_red_alert(
     mut ship_query: Query<
         (
             &AdmittedCommands,
@@ -70,9 +75,15 @@ fn handle_toggle_red_alert(
 ) {
     for (admitted, mut ra, ship_uuid) in ship_query.iter_mut() {
         for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
-            if matches!(cmd.payload, SystemControlPayload::ToggleRedAlert) {
-                ra.toggle();
-                // Balance tracer: every red-alert toggle, human or AI (both
+            if let SystemControlPayload::SetRedAlert { active } = cmd.payload {
+                // Assign, don't invert — the whole point of the set command
+                // (issue #748). Only emit the balance tracer when the value
+                // actually changes so idempotent retries don't spam telemetry.
+                if ra.0 == active {
+                    continue;
+                }
+                ra.0 = active;
+                // Balance tracer: every red-alert change, human or AI (both
                 // route through this same command), on every ship. Skipped
                 // for a ship with no uuid to key it on.
                 if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
@@ -156,9 +167,13 @@ fn handle_set_objective_priority(
 }
 
 /// AI system: if the captain system is AI-controlled, run `CaptainAi::operate`
-/// and emit `ToggleRedAlert` into `AdmittedCommands` when the desired state
-/// differs from the current state. Runs before `handle_toggle_red_alert` so
-/// the command is visible to the handler in the same tick.
+/// and emit `SetRedAlert { active }` into `AdmittedCommands` with the desired
+/// state (issue #748). Runs before `handle_set_red_alert` so the command is
+/// visible to the handler in the same tick.
+///
+/// The emit is guarded on a state change purely to avoid admission spam — the
+/// set command is idempotent, so a re-emit every tick would be harmless but
+/// wasteful. Correctness does not depend on the guard.
 ///
 /// After PRD #597 PR 10: reads combat timers from each ship's own
 /// per-entity `RecentCombatActivity` component — no global resource. Loops over
@@ -200,11 +215,14 @@ fn operate_captain_ai(
                 // Route through the shared admission seam with this ship's own
                 // `ai:<uuid>` token (issue #830) rather than pushing straight
                 // into `AdmittedCommands` — true AI/human symmetry, mirroring
-                // `emit_sensors_ai_command`. The decision above (CaptainAi, 10s
-                // window) and its change-guard are unchanged.
+                // `emit_sensors_ai_command`. Emits the same idempotent
+                // `SetRedAlert` command a human captain sends (issue #748); the
+                // on-change guard only avoids admission spam.
                 emit_captain_ai_command(
                     entity_uuid,
-                    SystemControlPayload::ToggleRedAlert,
+                    SystemControlPayload::SetRedAlert {
+                        active: should_be_red_alert,
+                    },
                     control_sources,
                     &sessions,
                     ship_config,
@@ -527,10 +545,10 @@ mod tests {
         tick(app);
     }
 
-    // ── ToggleRedAlert tests ────────────────────────────────────────────────
+    // ── SetRedAlert tests ───────────────────────────────────────────────────
 
     #[test]
-    fn toggle_red_alert_during_lobby_is_processed_when_no_simset_gate() {
+    fn set_red_alert_during_lobby_is_processed_when_no_simset_gate() {
         // Note: The Lobby gate is now at the SimSet chain level (`.run_if(in_state(GamePhase::InProgress))`).
         // In test configurations without SimSet, the system processes messages during Lobby.
         // The production gate is enforced by the SimSet chain, not individual system logic.
@@ -557,7 +575,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -565,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn non_captain_toggle_red_alert_is_ignored() {
+    fn non_captain_set_red_alert_is_ignored() {
         let mut app = test_app();
         start_game(&mut app);
         push(
@@ -582,7 +600,7 @@ mod tests {
             "crew",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -590,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn captain_toggle_red_alert_works() {
+    fn captain_set_red_alert_works() {
         let mut app = test_app();
         start_game(&mut app);
         push(
@@ -598,7 +616,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -614,7 +632,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -622,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_controlled_red_alert_ignores_human_control_system_toggle() {
+    fn ai_controlled_red_alert_ignores_human_control_system_set() {
         let mut app = test_app();
         // Set both the captain system and the red-alert system to AI control.
         // In a real game, the TOML sets every system under a console to the same
@@ -644,7 +662,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -660,7 +678,7 @@ mod tests {
             "crew",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -679,7 +697,7 @@ mod tests {
             "rando",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -757,19 +775,19 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
         assert!(get_red_alert(&mut app), "captain should control red-alert");
 
-        // Toggle back off.
+        // Set back off with an explicit inactive request.
         push(
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: false },
             },
         );
         tick(&mut app);
@@ -781,7 +799,7 @@ mod tests {
             "rando",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -809,7 +827,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::messages::SystemId("foobar".into()),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -827,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn wrong_control_system_target_does_not_toggle_red_alert() {
+    fn wrong_control_system_target_does_not_set_red_alert() {
         let mut app = test_app();
         start_game(&mut app);
         push(
@@ -835,7 +853,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::messages::SystemId("not-red-alert".into()),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -843,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn captain_toggle_red_alert_twice_returns_to_off() {
+    fn captain_set_red_alert_false_turns_off() {
         let mut app = test_app();
         start_game(&mut app);
         push(
@@ -851,7 +869,7 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -861,11 +879,59 @@ mod tests {
             "captain",
             ClientMessage::ControlSystem {
                 target: crate::system_registry::red_alert_system_id(),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: false },
             },
         );
         tick(&mut app);
         assert!(!get_red_alert(&mut app));
+    }
+
+    // ── Idempotency: the whole point of the set command (issue #748) ──────────
+
+    #[test]
+    fn captain_set_red_alert_true_twice_is_idempotent() {
+        // A retried / duplicated activate must not flip the state back off —
+        // this is the failure mode a toggle command has and a set command
+        // fixes.
+        let mut app = test_app();
+        start_game(&mut app);
+        for _ in 0..2 {
+            push(
+                &mut app,
+                "captain",
+                ClientMessage::ControlSystem {
+                    target: crate::system_registry::red_alert_system_id(),
+                    payload: SystemControlPayload::SetRedAlert { active: true },
+                },
+            );
+            tick(&mut app);
+            assert!(
+                get_red_alert(&mut app),
+                "repeated SetRedAlert{{active:true}} must remain active"
+            );
+        }
+    }
+
+    #[test]
+    fn captain_stale_set_red_alert_false_when_already_off_is_noop() {
+        // A stale UI that still believes the ship is at red alert sends
+        // active:false; the ship is already off, so the assignment is a no-op.
+        let mut app = test_app();
+        start_game(&mut app);
+        assert!(!get_red_alert(&mut app));
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::red_alert_system_id(),
+                payload: SystemControlPayload::SetRedAlert { active: false },
+            },
+        );
+        tick(&mut app);
+        assert!(
+            !get_red_alert(&mut app),
+            "SetRedAlert{{active:false}} on an already-off ship must stay off"
+        );
     }
 
     // ── SetView tests ───────────────────────────────────────────────────────
@@ -1574,15 +1640,15 @@ mod tests {
     // ── NPC red-alert parity regression (audit follow-up) ─────────────────
     //
     // Regression test for the audit-report bug: `operate_captain_ai` iterates
-    // every ship (player + NPC) and pushes `ToggleRedAlert` into each ship's
-    // own `AdmittedCommands`, but `handle_toggle_red_alert` previously read
-    // only the LocalShip's `AdmittedCommands`, so NPC red-alert toggles were
+    // every ship (player + NPC) and pushes `SetRedAlert` into each ship's
+    // own `AdmittedCommands`, but `handle_set_red_alert` previously read
+    // only the LocalShip's `AdmittedCommands`, so NPC red-alert changes were
     // silently dropped. This test spawns an NPC ship with AI-controlled
     // red-alert, gives it recent combat activity, and asserts the NPC's own
     // `ShipRedAlert` flips while the LocalShip's does not.
 
     #[test]
-    fn npc_captain_ai_toggles_own_red_alert_via_admitted_commands() {
+    fn npc_captain_ai_sets_own_red_alert_via_admitted_commands() {
         let mut app = test_app();
         start_game(&mut app);
 
@@ -1637,17 +1703,17 @@ mod tests {
         );
         assert!(
             !get_red_alert(&mut app),
-            "player's red-alert must be unaffected by NPC captain-AI toggle"
+            "player's red-alert must be unaffected by NPC captain-AI set"
         );
     }
 
     #[test]
-    fn handle_toggle_red_alert_applies_admitted_commands_per_entity() {
+    fn handle_set_red_alert_applies_admitted_commands_per_entity() {
         let mut app = test_app();
         start_game(&mut app);
 
         // Spawn an NPC ship without LocalShip whose red-alert system is
-        // AI-held, register its `ai:` token, and send a `ToggleRedAlert`
+        // AI-held, register its `ai:` token, and send a `SetRedAlert`
         // through the inbound queue. Since #824 admission is ship-aware —
         // `AdmittedCommands` is cleared per-entity every tick and a
         // registered `ai:` token routes to its own ship's queue — so a
@@ -1691,7 +1757,7 @@ mod tests {
             &format!("ai:{npc_uuid}"),
             ClientMessage::ControlSystem {
                 target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
-                payload: SystemControlPayload::ToggleRedAlert,
+                payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
         tick(&mut app);
@@ -1704,11 +1770,11 @@ mod tests {
             .0;
         assert!(
             npc_red_alert,
-            "handle_toggle_red_alert must apply ToggleRedAlert from the NPC's own AdmittedCommands"
+            "handle_set_red_alert must apply SetRedAlert from the NPC's own AdmittedCommands"
         );
         assert!(
             !get_red_alert(&mut app),
-            "handle_toggle_red_alert must not touch the LocalShip when an NPC's AdmittedCommands drives the toggle"
+            "handle_set_red_alert must not touch the LocalShip when an NPC's AdmittedCommands drives the set"
         );
     }
 }

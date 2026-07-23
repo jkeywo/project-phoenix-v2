@@ -840,11 +840,11 @@ fn clear_last_attacker_on_death(
 /// record — the threat has passed and the old attacker is no longer relevant.
 ///
 /// Covers every ship (player + NPC), not just `LocalShip`: NPC captain-AI can
-/// toggle its own `ShipRedAlert` (`handle_toggle_red_alert` in
-/// `console::captain::server` dispatches `ToggleRedAlert` per-ship), and an
+/// set its own `ShipRedAlert` (`handle_set_red_alert` in
+/// `console::captain::server` dispatches `SetRedAlert` per-ship), and an
 /// NPC that stands down should stop retaliating just like the player does.
 ///
-/// `ShipRedAlert` only changes via an explicit toggle/assignment (never a
+/// `ShipRedAlert` only changes via an explicit assignment (never a
 /// same-value rewrite in production), so `Changed<ShipRedAlert>` combined
 /// with a boolean component reduces to exactly the on→off edge: the only way
 /// a two-valued component both changes and reads `false` is if it was `true`
@@ -7815,7 +7815,7 @@ station = "pilot"
     /// Regression test: `clear_last_attacker_on_red_alert_off` used to be
     /// filtered `With<LocalShip>`, so an NPC whose red alert stood down kept
     /// retaliating against a stale attacker forever. NPC captain-AI can
-    /// toggle its own `ShipRedAlert` (`handle_toggle_red_alert` dispatches
+    /// set its own `ShipRedAlert` (`handle_set_red_alert` dispatches
     /// per-ship), so the clear handler must cover NPCs too.
     #[test]
     fn clear_on_red_alert_off_clears_for_an_npc_not_just_local_ship() {

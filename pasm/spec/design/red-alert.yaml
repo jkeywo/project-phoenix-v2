@@ -45,7 +45,7 @@ entities:
 
   - verb: set-red-alert
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Set Red Alert
       summary: Captain requests a specific active or inactive Red Alert state instead of toggling it.
@@ -64,7 +64,7 @@ entities:
 
   - decision: player-ship-red-alert-state
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Player Ship Red Alert State
       summary: The Captain chooses the Red Alert state for a human-controlled ship.
@@ -82,7 +82,7 @@ entities:
 
   - decision: ai-ship-red-alert-state
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: AI Ship Red Alert State
       summary: Red Alert AI decides the state for a behaviour-driven ship when its fine system is AI-controlled.
@@ -112,7 +112,7 @@ entities:
 
   - mechanic: explicit-red-alert-state-setting
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Explicit Red Alert State Setting
       summary: Human and AI operators submit the desired state; the authoritative router assigns that state to the addressed ship.

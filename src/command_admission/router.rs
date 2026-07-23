@@ -188,7 +188,7 @@ mod tests {
                 .iter()
                 .map(|t| AdmittedCommand {
                     target: SystemId((*t).into()),
-                    payload: SystemControlPayload::ToggleRedAlert,
+                    payload: SystemControlPayload::SetRedAlert { active: true },
                     response_token: None,
                 })
                 .collect(),
@@ -270,7 +270,7 @@ mod tests {
 
         // One representative admitted target per consumer.
         let expected: &[&str] = &[
-            sr::RED_ALERT_SYSTEM_ID,      // captain: handle_toggle_red_alert
+            sr::RED_ALERT_SYSTEM_ID,      // captain: handle_set_red_alert
             sr::CAPTAIN_SYSTEM_ID,        // captain: handle_set_objective_priority
             sr::VIEWSCREEN_SYSTEM_ID,     // captain: handle_set_view
             sr::COMMS_SYSTEM_ID,          // comms: handle_hail/respond/clear

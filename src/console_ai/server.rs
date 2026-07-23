@@ -104,7 +104,7 @@ impl Plugin for ConsoleAiPlugin {
                 // and explicitly before the volley-target handler: the command
                 // it emits has to be consumed in the SAME tick, exactly as
                 // `operate_captain_ai` is ordered before
-                // `handle_toggle_red_alert`. That also puts `target_count` in
+                // `handle_set_red_alert`. That also puts `target_count` in
                 // place before `tick_torpedo_lifecycle` (Physics) runs its
                 // auto-load block, so a tube starts loading the tick the order
                 // is given rather than the tick after.
@@ -912,7 +912,7 @@ pub(crate) fn ai_torpedo_auto_fire(
 /// `from_configs` — would silently pre-load every *human* player's tubes and
 /// drain their magazine with no order given.
 ///
-/// This is the `operate_captain_ai` → `handle_toggle_red_alert` pattern: push
+/// This is the `operate_captain_ai` → `handle_set_red_alert` pattern: push
 /// into each ship's own `AdmittedCommands` in `SimSet::Input`, ordered before
 /// the handler that drains it, and let the handler iterate every ship so NPC
 /// commands are not dropped.

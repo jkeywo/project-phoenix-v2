@@ -62,7 +62,7 @@ capability is being addressed" address. Both are just lowercase-kebab strings.
 ## Console invariants
 
 1. **One player per station.** Server enforces in `SessionManager`.
-2. **Captain authority is checked server-side.** `ToggleRedAlert` and
+2. **Captain authority is checked server-side.** `SetRedAlert` and
    `SetViewMode` are no-ops unless the sender holds `"captain"`.
 3. **Helm is the only station that can move the ship.** `SetThrust`/`SetSteering` from any
    other token is silently dropped (also gated per axis by the `helm-thrust` /

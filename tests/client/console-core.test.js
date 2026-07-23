@@ -89,14 +89,14 @@ describe('sendAction — transport selection', () => {
     // alongside wasmBindings; the ladder must hand the raw envelope to it.
     const sendActionFn = vi.fn();
     setup({ wasmBindings: { wasm_receive_message: vi.fn() }, __sendAction: sendActionFn });
-    sendAction('toggle_red_alert', {});
-    const expected = JSON.stringify({ action: 'toggle_red_alert', console: 'Test' });
+    sendAction('set_red_alert', {});
+    const expected = JSON.stringify({ action: 'set_red_alert', console: 'Test' });
     expect(sendActionFn).toHaveBeenCalledWith(expected);
   });
 
   it('falls through to BroadcastChannel when wasmBindings exist without __sendAction', () => {
     const { bc } = setup({ wasmBindings: { wasm_receive_message: 'not-a-function' } });
-    sendAction('toggle_red_alert', {});
+    sendAction('set_red_alert', {});
     // Falls through to BroadcastChannel
     expect(bc.instance.postMessage).toHaveBeenCalled();
   });
@@ -104,8 +104,8 @@ describe('sendAction — transport selection', () => {
   it('calls window.__sendAction when present (host page / test transport)', () => {
     const sendActionFn = vi.fn();
     setup({ __sendAction: sendActionFn });
-    sendAction('toggle_red_alert', {});
-    const expected = JSON.stringify({ action: 'toggle_red_alert', console: 'Test' });
+    sendAction('set_red_alert', {});
+    const expected = JSON.stringify({ action: 'set_red_alert', console: 'Test' });
     expect(sendActionFn).toHaveBeenCalledWith(expected);
   });
 

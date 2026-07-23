@@ -67,12 +67,6 @@ pub struct ShipPhysics {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ShipRedAlert(pub bool);
 
-impl ShipRedAlert {
-    pub fn toggle(&mut self) {
-        self.0 = !self.0;
-    }
-}
-
 /// Per-entity viewscreen mode state for every ship entity (player and NPC).
 ///
 /// Replaces the `view_mode` field that was previously on the singleton
@@ -140,16 +134,6 @@ impl Default for ShipPhaserFrequency {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ship_red_alert_toggle() {
-        let mut ra = ShipRedAlert(false);
-        assert!(!ra.0);
-        ra.toggle();
-        assert!(ra.0);
-        ra.toggle();
-        assert!(!ra.0);
-    }
 
     #[test]
     fn ship_view_mode_defaults_to_camera() {

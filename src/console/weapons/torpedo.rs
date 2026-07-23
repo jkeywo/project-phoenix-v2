@@ -162,7 +162,7 @@ pub(crate) fn handle_unload_tube(
 /// which meant an NPC could never receive the command — so when
 /// `console_ai::server::ai_torpedo_load` started issuing volley orders for
 /// AI-crewed ships, they would have been dropped on the floor. Same shape and
-/// same reason as [`crate::console::captain::handle_toggle_red_alert`]: the AI
+/// same reason as [`crate::console::captain::handle_set_red_alert`]: the AI
 /// pushes into each ship's own `AdmittedCommands`, so the consumer has to
 /// iterate every ship (`With<Ship>`), not just the player's.
 ///

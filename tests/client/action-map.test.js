@@ -36,6 +36,7 @@ describe('ACTION_MAP', () => {
       'set_phaser_mode',
       'set_power',
       'set_radar_view',
+      'set_red_alert',
       'set_repair_priority',
       'set_sensors_target',
       'set_shield_focus',
@@ -45,7 +46,6 @@ describe('ACTION_MAP', () => {
       'show_on_screen',
       'start_impulse_charge',
       'toggle_boost',
-      'toggle_red_alert',
       'unload_tube',
     ]);
   });
@@ -242,15 +242,33 @@ describe('set_view', () => {
   });
 });
 
-describe('toggle_red_alert', () => {
-  it('calls send ControlSystem targeting the Red Alert system', () => {
+describe('set_red_alert', () => {
+  it('sends ControlSystem with the explicit desired active=true state', () => {
     const send = mkSend();
-    ACTION_MAP.toggle_red_alert({ action: 'toggle_red_alert' }, send);
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: true }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'red-alert',
-      payload: { type: 'ToggleRedAlert' },
+      payload: { type: 'SetRedAlert', data: { active: true } },
     });
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the explicit desired active=false state', () => {
+    const send = mkSend();
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert', active: false }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetRedAlert', data: { active: false } },
+    });
+  });
+
+  it('coerces a missing active flag to false (never inverts)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_red_alert({ action: 'set_red_alert' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'red-alert',
+      payload: { type: 'SetRedAlert', data: { active: false } },
+    });
   });
 });
 
@@ -722,10 +740,10 @@ describe('set_objective_priority', () => {
 describe('dispatchConsoleAction', () => {
   it('routes a known action to its handler', () => {
     const send = mkSend();
-    dispatchConsoleAction({ action: 'toggle_red_alert' }, send);
+    dispatchConsoleAction({ action: 'set_red_alert', active: true }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'red-alert',
-      payload: { type: 'ToggleRedAlert' },
+      payload: { type: 'SetRedAlert', data: { active: true } },
     });
   });
 

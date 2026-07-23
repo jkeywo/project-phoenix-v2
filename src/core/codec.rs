@@ -1210,6 +1210,38 @@ mod tests {
         );
     }
 
+    /// SetRedAlert command round-trip (issue #748).
+    ///
+    /// `SetRedAlert { active }` is a `SystemControlPayload` variant carried by
+    /// `ClientMessage::ControlSystem` targeting `red-alert`. Both the captain
+    /// UI and the Captain AI send the desired end state, so the wire shape must
+    /// match what `gui/action-map.js` sends.
+    #[test]
+    fn set_red_alert_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("red-alert".into()),
+            payload: SystemControlPayload::SetRedAlert { active: true },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        // Pin the on-the-wire JSON shape — action-map.js depends on this.
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"red-alert","payload":{"type":"SetRedAlert","data":{"active":true}}}}"#,
+            "SetRedAlert wire shape must match what action-map.js sends"
+        );
+
+        // The inactive request must round-trip identically.
+        let off = ClientMessage::ControlSystem {
+            target: SystemId("red-alert".into()),
+            payload: SystemControlPayload::SetRedAlert { active: false },
+        };
+        assert_client_roundtrip(&JsonCodec, off.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, off);
+    }
+
     /// SetRepairPriority command round-trip (issue #739).
     #[test]
     fn set_repair_priority_control_system_round_trips() {

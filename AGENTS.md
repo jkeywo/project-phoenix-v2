@@ -168,7 +168,7 @@ docs/           — Draft design notes (numbered).
 1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: `save.rs`, PRD #116.)
 2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens (UUIDv4 in `localStorage`) are the identity system — peer IDs are ephemeral.
 3. **Client is pure JS.** No client-side Rust/WASM, no new Rust glue for the client. Client state is built by pure `gui/*.js` modules (Vitest-tested); console UIs are per-console HTML iframes.
-4. **Captain authority.** Only the player at `CaptainChair` can `ToggleRedAlert`. Game start is collective `SetReady` auto-start, not a captain-only command.
+4. **Captain authority.** Only the player at `CaptainChair` can set Red Alert (`SetRedAlert { active }`). Game start is collective `SetReady` auto-start, not a captain-only command.
 5. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console access derives from the station + `ShipConfig`. On disconnect the station keeps its holder and flips to the `Backfill` rating (AI operates its systems) until reconnect or a new claim.
 6. **Humans and AI are symmetric.** Both issue `ControlSystem { target: SystemId, payload }`; admission strips source identity. Never branch on human-vs-AI downstream of admission.
 7. **Helm decisions run on fixed ticks, not frames.** Helm commands apply the tick they are admitted (`AdmittedCommands` is cleared and refilled at admission each tick); AI helm decisions run on the shared sim tick (`[global] ai_helm_tick_hz` in the world TOML, default 30Hz) — never once per rendered frame.

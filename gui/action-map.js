@@ -156,11 +156,14 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Toggle red alert status. */
-  toggle_red_alert: (a, send) => {
+  /** Set the ship's Red Alert to an explicit desired state (issue #748).
+   *  The button computes `active` = !currentDisplayedActive, so a stale,
+   *  duplicated, or retried command is idempotent (the host assigns, it does
+   *  not invert). */
+  set_red_alert: (a, send) => {
     send('ControlSystem', {
       target: 'red-alert',
-      payload: { type: 'ToggleRedAlert' },
+      payload: { type: 'SetRedAlert', data: { active: !!a.active } },
     });
   },
 

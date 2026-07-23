@@ -1141,7 +1141,7 @@ mod tests {
         {
             let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
             if let Ok(mut ra) = q.single_mut(app.world_mut()) {
-                ra.toggle();
+                ra.0 = true;
             }
         }
 
@@ -1258,11 +1258,7 @@ mod tests {
             );
             cs
         };
-        let red_alert = || {
-            let mut ra = crate::ship_state::ShipRedAlert::default();
-            ra.toggle();
-            ra
-        };
+        let red_alert = || crate::ship_state::ShipRedAlert(true);
 
         // An NPC with no shields-AI component of its own.
         let npc = app

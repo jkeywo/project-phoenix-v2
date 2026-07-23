@@ -23,7 +23,12 @@ def test_authored_design_slices_have_traceability_rows() -> None:
     # its admission-ordered registration now live.
     assert rows["dispatch-repair-team"].implementation_status == "mixed"
     assert "src/console/repair/dispatch.rs" in rows["dispatch-repair-team"].implementation_paths
-    assert rows["set-red-alert"].implementation_status == "declared-design-only"
+    # Issue #748 landed the ToggleRedAlert→SetRedAlert migration: the
+    # `set-red-alert` verb's realizing architecture entities
+    # (`red-alert-console-interface`, `set-red-alert-command`) flipped from
+    # proposed to implemented with declared implementation mappings, so the
+    # traceability roll-up is now `declared` rather than `declared-design-only`.
+    assert rows["set-red-alert"].implementation_status == "declared"
     assert rows["set-helm-actuator-input"].architecture_links
 
 

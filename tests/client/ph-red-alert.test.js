@@ -61,14 +61,26 @@ describe('PhRedAlert', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('clicking button calls sendAction with toggle_red_alert', () => {
+  it('clicking while inactive requests the explicit active state', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });
     el.state = { system_id: 'red-alert', active: false, auto: false };
     const btn = el.shadowRoot.getElementById('alert-btn');
     btn.click();
     expect(sendAction).toHaveBeenCalledTimes(1);
-    expect(sendAction).toHaveBeenCalledWith('toggle_red_alert', {});
+    expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: true });
+  });
+
+  it('clicking while active requests the explicit inactive state', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    el.state = { system_id: 'red-alert', active: true, auto: false };
+    const btn = el.shadowRoot.getElementById('alert-btn');
+    btn.click();
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    // Desired = opposite of displayed; the host assigns, so a stale/duplicate
+    // click stays idempotent rather than flipping.
+    expect(sendAction).toHaveBeenCalledWith('set_red_alert', { active: false });
   });
 
   it('clicking button when auto=true does not dispatch action', () => {

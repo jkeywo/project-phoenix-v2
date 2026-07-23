@@ -3,7 +3,7 @@ import {
   ClientSimState, simState, modifierKey,
   helmRadarConfig, weaponsRadarConfig, scienceRadarConfig, systemChartConfig,
   HELM_RADAR_RANGE, WEAPONS_RADAR_RANGE, SCIENCE_RADAR_RANGE, SYSTEM_CHART_RANGE,
-  redAlertToggleMessage, firePhaserMessage, fireTorpedoMessage,
+  redAlertSetMessage, firePhaserMessage, fireTorpedoMessage,
   setTargetMessage, setScienceTargetMessage,
   setSensorsTargetMessage, setPhaserModeMessage, togglePhaserModeMessage,
   setPhaserFrequencyMessage,
@@ -398,11 +398,18 @@ describe('radar configs', () => {
 
 describe('message builders', () => {
   it('build serde tag/content wire objects', () => {
-    expect(redAlertToggleMessage()).toEqual({
+    expect(redAlertSetMessage(true)).toEqual({
       type: 'ControlSystem',
       data: {
         target: 'red-alert',
-        payload: { type: 'ToggleRedAlert' },
+        payload: { type: 'SetRedAlert', data: { active: true } },
+      },
+    });
+    expect(redAlertSetMessage(false)).toEqual({
+      type: 'ControlSystem',
+      data: {
+        target: 'red-alert',
+        payload: { type: 'SetRedAlert', data: { active: false } },
       },
     });
     expect(firePhaserMessage('port')).toEqual({ type: 'FirePhaser', data: { bank: 'port' } });

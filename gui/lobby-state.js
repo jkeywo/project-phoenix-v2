@@ -71,6 +71,15 @@ export class LobbyState {
     /** True when the host has returned to scenario selection after GameOver
      *  and clients should show a waiting screen instead of the lobby. */
     this.waitingForScenario = false;
+    /** QR-first pre-scenario catalog (issue #755): an array of
+     *  `{ id, world, label, description, ships:[{template_path,label}] }`
+     *  while the phone can make a selection, else `null`. Set from the host's
+     *  synthesized `ScenarioCatalog` message; cleared on `Welcome` (the world
+     *  has loaded and the normal lobby takes over). */
+    this.scenarioCatalog = null;
+    /** The authoritative first-valid-wins lock reflected to phones:
+     *  `{ scenario_id: string|null, template_path: string|null }`. */
+    this.selectionLocked = { scenario_id: null, template_path: null };
   }
 
   /**
@@ -97,6 +106,18 @@ export class LobbyState {
       case 'Welcome':
         this.replaceFrom(d.state || {}, d.ship_stations, d.ship_config);
         this.waitingForScenario = false;
+        // The world has loaded — the QR-first picker is done; the normal lobby
+        // takes over (issue #755).
+        this.scenarioCatalog = null;
+        break;
+      case 'ScenarioCatalog':
+        // QR-first pre-scenario catalog + current lock state, synthesized by
+        // the host before world load (issue #755).
+        this.scenarioCatalog = Array.isArray(d.scenarios) ? d.scenarios : [];
+        this.selectionLocked = {
+          scenario_id: d.locked_scenario != null ? d.locked_scenario : null,
+          template_path: d.locked_ship != null ? d.locked_ship : null,
+        };
         break;
       case 'PlayerJoined': {
         const player = normalisePlayer(d.player || {});
@@ -182,6 +203,13 @@ export class LobbyState {
   /** True if the local player is a spectator (no station assigned). */
   isSpectator(myToken) {
     return this.playerStation(myToken) == null;
+  }
+
+  /** True when the phone should show the QR-first scenario/ship picker
+   *  instead of the lobby (issue #755): a catalog has been delivered and no
+   *  world has loaded yet (cleared on Welcome). */
+  showScenarioPicker() {
+    return this.scenarioCatalog != null;
   }
 
   /** True when the lobby panel should be visible. */

@@ -759,14 +759,23 @@ mod tests {
             }
             // The runtime variants are no-ops in the lobby — handled by the
             // console server plugins, not the lobby handler.
-            ClientMessage::ControlSystem { .. } | ClientMessage::SendCoordination { .. } => {
-                LobbyHandlerResult {
-                    new_phase: None,
-                    outbound: Vec::new(),
-                    station_rating_update: None,
-                    countdown_action: None,
-                }
-            }
+            //
+            // `SelectScenario` / `SelectPlayerShip` (issue #755) are resolved
+            // *before* any world is loaded by the host-runtime arbiter (server
+            // .html + gui/scenario-arbiter.js), which intercepts them on the
+            // datachannel and the local-console path and never forwards them to
+            // WASM. Should one ever reach the running Bevy app (e.g. a late
+            // phone message after the world is already loading), the selection
+            // is already settled — so it is a deliberate no-op here.
+            ClientMessage::ControlSystem { .. }
+            | ClientMessage::SendCoordination { .. }
+            | ClientMessage::SelectScenario { .. }
+            | ClientMessage::SelectPlayerShip { .. } => LobbyHandlerResult {
+                new_phase: None,
+                outbound: Vec::new(),
+                station_rating_update: None,
+                countdown_action: None,
+            },
         }
     }
 

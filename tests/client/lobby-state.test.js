@@ -199,6 +199,64 @@ describe('apply phase transitions', () => {
   });
 });
 
+describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
+  const catalogMsg = (locked_scenario = null, locked_ship = null) => ({
+    type: 'ScenarioCatalog',
+    data: {
+      scenarios: [
+        {
+          id: 'default',
+          world: 'assets/worlds/default.toml',
+          label: 'Starbase Alpha',
+          ships: [{ template_path: 'assets/entities/alliance_cruiser.toml', label: 'Cruiser' }],
+        },
+      ],
+      locked_scenario,
+      locked_ship,
+    },
+  });
+
+  it('defaults to no picker (scenarioCatalog null)', () => {
+    const s = new LobbyState();
+    expect(s.scenarioCatalog).toBeNull();
+    expect(s.showScenarioPicker()).toBe(false);
+  });
+
+  it('applies the catalog and lock state, enabling the picker', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg());
+    expect(s.showScenarioPicker()).toBe(true);
+    expect(s.scenarioCatalog).toHaveLength(1);
+    expect(s.scenarioCatalog[0].id).toBe('default');
+    expect(s.selectionLocked).toEqual({ scenario_id: null, template_path: null });
+  });
+
+  it('reflects the locked selection from the host', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg('default', 'assets/entities/alliance_cruiser.toml'));
+    expect(s.selectionLocked).toEqual({
+      scenario_id: 'default',
+      template_path: 'assets/entities/alliance_cruiser.toml',
+    });
+  });
+
+  it('Welcome clears the picker once the world has loaded', () => {
+    const s = new LobbyState();
+    s.apply(catalogMsg());
+    expect(s.showScenarioPicker()).toBe(true);
+    s.apply({
+      type: 'Welcome',
+      data: {
+        state: { phase: 'Lobby', players: [], world: null },
+        ship_stations: { stations: [] },
+        ship_config: {},
+      },
+    });
+    expect(s.scenarioCatalog).toBeNull();
+    expect(s.showScenarioPicker()).toBe(false);
+  });
+});
+
 describe('ComplexityChanged is ignored (retired message)', () => {
   it('does not crash and does not mutate state', () => {
     const s = new LobbyState();

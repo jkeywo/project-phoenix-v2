@@ -1,7 +1,7 @@
 entities:
   - component: pre-scenario-lobby-surface
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Pre-Scenario Lobby Surface
       summary: Shared server-screen and connected-client selection surface available before any scenario world is loaded; the server QR code is visible from this state.
@@ -13,10 +13,15 @@ entities:
       reads: [pre-scenario-selection-state, scenario-ship-catalog-state]
       sends: [select-scenario-command, select-player-ship-command]
       runs_in: [host-browser-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [server.html, client.html, gui/scenario-arbiter.js, gui/action-map.js, gui/lobby-state.js, gui/components/ph-ship-picker.js]
+      messages: [SelectScenario, SelectPlayerShip, ScenarioCatalog]
+      tests: [npx vitest run]
 
   - state: pre-scenario-selection-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Pre-Scenario Selection State
       summary: Authoritative round-setup state containing no selection or the first accepted scenario and player-ship choices for the next game.
@@ -25,6 +30,11 @@ entities:
       owner: scenario-ship-selection-arbiter
       writers: [scenario-ship-selection-arbiter]
       replicas: [lobby-session-replica]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, server.html, gui/scenario-arbiter.js, gui/lobby-state.js]
+      symbols: [ScenarioCatalogWire]
+      tests: [npx vitest run]
 
   - state: scenario-ship-catalog-state
     core:
@@ -45,10 +55,10 @@ entities:
 
   - component: scenario-ship-selection-arbiter
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Scenario and Ship Selection Arbiter
-      summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client.
+      summary: Authoritative first-writer-wins arbiter for scenario and player-ship selection from either the server screen or a connected client. Realized in the host browser runtime (issue 755, Option A) rather than a pre-world Bevy system, because Bevy only starts after the world is loaded; it validates each request against the pre-load catalog and drives the existing world-load path once scenario and ship are both locked.
       rationale:
         - Selection is deliberately not a vote and does not require a special captain role before the ship topology exists.
     architecture:
@@ -59,10 +69,15 @@ entities:
       consumes: [select-scenario-command, select-player-ship-command]
       produces: [world-load-request-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/scenario-arbiter.js, server.html, src/world/manifest.rs]
+      symbols: [build_catalog, ScenarioCatalog]
+      tests: [npx vitest run, cargo test]
 
   - message: select-scenario-command
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Select Scenario Command
       summary: Client or server-screen request naming one offered scenario; the first valid request locks the next round's scenario selection.
@@ -73,10 +88,15 @@ entities:
       validator: [scenario-ship-selection-arbiter]
       trust_boundary: client-to-host
       payload: SelectScenario
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, server.html]
+      messages: [SelectScenario]
+      tests: [cargo test, npx vitest run]
 
   - message: select-player-ship-command
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Select Player Ship Command
       summary: Client or server-screen request naming one ship offered by the selected scenario; the first valid request locks the next round's player ship.
@@ -87,10 +107,15 @@ entities:
       validator: [scenario-ship-selection-arbiter]
       trust_boundary: client-to-host
       payload: SelectPlayerShip
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, server.html]
+      messages: [SelectPlayerShip]
+      tests: [cargo test, npx vitest run]
 
   - state: world-load-request-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: World Load Request State
       summary: Authoritative selected scenario and ship inputs awaiting validation, asset discovery, and world activation for the next round.
@@ -98,6 +123,11 @@ entities:
       classification: authoritative
       owner: scenario-ship-selection-arbiter
       writers: [scenario-ship-selection-arbiter]
+    implementation:
+      status: declared
+      paths: [server.html, src/server/bridge.rs]
+      symbols: [wasm_select_ship, wasm_load_world]
+      tests: [cargo test]
 
   - component: game-flow-controller
     core:

@@ -1215,6 +1215,23 @@ pub enum ClientMessage {
     /// Only the host's scenario panel sends this, so the handler accepts it
     /// solely from `console_bridge::LOCAL_CONSOLE_TOKEN` (issue #822).
     ConfirmScenario,
+    /// Pre-scenario selection request: the sender proposes a scenario by its
+    /// stable catalog id (issue #755). Any participant — the host page's own
+    /// UI *or* a connected phone — may send it; the host-runtime arbiter
+    /// applies first-valid-wins against the pre-load catalog and ignores it
+    /// once a scenario is already locked. Deliberately NOT gated to the host
+    /// token (unlike `ConfirmScenario`): both server and phone participants
+    /// can make the first valid selection (no voting, no captain authority).
+    SelectScenario {
+        scenario_id: String,
+    },
+    /// Pre-scenario selection request: the sender proposes a player ship by
+    /// its template path (issue #755). Validated by the host-runtime arbiter
+    /// against the *locked scenario's* offered ships, first-valid-wins. Like
+    /// `SelectScenario`, accepted from any participant token.
+    SelectPlayerShip {
+        template_path: String,
+    },
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).
@@ -1296,6 +1313,24 @@ pub enum CoordinationPayload {
     },
     /// Sensors warns Shields of an incoming threat (hostile closing or torpedo).
     ThreatBearing { bearing_rad: f32, label: String },
+}
+
+/// One selectable scenario in the pre-load catalog as delivered to phones
+/// over the wire (issue #755). Mirrors `world::manifest::ScenarioCatalogEntry`
+/// but lives here as a serde wire type so it can ride inside
+/// [`ServerMessage::ScenarioCatalog`]. `ships` reuses the world's
+/// [`AvailableShipEntry`] shape so the phone picker presents ships identically
+/// to the host page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioCatalogWire {
+    pub id: String,
+    pub world: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub ships: Vec<crate::world::config::AvailableShipEntry>,
 }
 
 /// `ServerMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -1557,6 +1592,18 @@ pub enum ServerMessage {
     /// Broadcast when the host selects a scenario from the scenario selection
     /// screen. Clients should transition from waiting to the lobby view.
     ScenarioLoaded,
+    /// Pre-scenario catalog + current lock state, delivered to connected
+    /// phones before any world is loaded (issue #755). Phones have no WASM
+    /// accessor, so the host-runtime arbiter synthesizes this message: it is
+    /// sent when a phone connects and re-broadcast on every lock change so
+    /// every phone can render the scenario/ship picker and reflect the
+    /// first-valid-wins outcome. `locked_scenario` / `locked_ship` are `None`
+    /// until a participant's selection is accepted.
+    ScenarioCatalog {
+        scenarios: Vec<ScenarioCatalogWire>,
+        locked_scenario: Option<String>,
+        locked_ship: Option<String>,
+    },
     /// Broadcast to all when a station's active rating changes.
     /// Clients use this to update AUTO/read-only badges for system fragments
     /// belonging to the affected station.

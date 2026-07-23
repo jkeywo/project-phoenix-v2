@@ -292,6 +292,18 @@ mod tests {
                 ClientMessageDiscriminants::ConfirmScenario,
                 ClientMessage::ConfirmScenario,
             ),
+            (
+                ClientMessageDiscriminants::SelectScenario,
+                ClientMessage::SelectScenario {
+                    scenario_id: "default".into(),
+                },
+            ),
+            (
+                ClientMessageDiscriminants::SelectPlayerShip,
+                ClientMessage::SelectPlayerShip {
+                    template_path: "assets/entities/alliance_cruiser.toml".into(),
+                },
+            ),
         ]
     }
 
@@ -647,6 +659,23 @@ mod tests {
             (
                 ServerMessageDiscriminants::ScenarioLoaded,
                 ServerMessage::ScenarioLoaded,
+            ),
+            (
+                ServerMessageDiscriminants::ScenarioCatalog,
+                ServerMessage::ScenarioCatalog {
+                    scenarios: vec![crate::core::messages::ScenarioCatalogWire {
+                        id: "default".into(),
+                        world: "assets/worlds/default.toml".into(),
+                        label: Some("Starbase Alpha".into()),
+                        description: None,
+                        ships: vec![crate::world::config::AvailableShipEntry {
+                            template_path: "assets/entities/alliance_cruiser.toml".into(),
+                            label: Some("Cruiser".into()),
+                        }],
+                    }],
+                    locked_scenario: None,
+                    locked_ship: None,
+                },
             ),
             (
                 ServerMessageDiscriminants::RatingChanged,

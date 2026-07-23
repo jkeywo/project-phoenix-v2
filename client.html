@@ -304,6 +304,42 @@
       animation: spin 0.8s linear infinite;
     }
 
+    /* QR-first scenario/ship picker overlay (issue #755). */
+    #scenario-picker-overlay {
+      display: none;
+      position: fixed; inset: 0; z-index: 186;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      background: rgba(0, 0, 0, 0.94);
+      color: #9ab;
+      font-family: 'Chakra Petch', monospace;
+      padding: 24px 18px;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    #scenario-picker-heading {
+      text-align: center;
+      font-size: clamp(1rem, 3vw, 1.3rem);
+      letter-spacing: 0.08em;
+      color: #cde;
+      text-transform: uppercase;
+    }
+    #scenario-picker-body { display: flex; flex-direction: column; gap: 12px; }
+    #scenario-picker-body .scenario-btn {
+      display: block; width: 100%;
+      padding: 16px 18px;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 1rem; letter-spacing: 0.06em;
+      color: #d8e2ff; text-align: left;
+      background: rgba(140, 180, 220, 0.1);
+      border: 1px solid #558; border-radius: 6px;
+      cursor: pointer;
+    }
+    #scenario-picker-body .scenario-btn:active { background: rgba(140, 180, 220, 0.22); }
+    #scenario-picker-body .scenario-desc { font-size: 0.75rem; color: #8a98c4; margin-top: 6px; letter-spacing: 0.02em; }
+    #scenario-picker-body .scenario-locked-note { text-align: center; color: #8a98c4; font-size: 0.85rem; letter-spacing: 0.05em; }
+
 
     /* Console title label — fixed strip at the top center of the game
        shell (issue #827: the tab bar that used to host it is gone). */
@@ -689,6 +725,14 @@
     <span data-i18n="client.waiting_scenario">Waiting for host to select a scenario&hellip;</span>
   </div>
 
+  <!-- QR-first scenario/ship picker overlay (issue #755): before any world is
+       loaded, the host broadcasts the pre-load catalog and any connected phone
+       can make the first valid selection (first-valid-wins, no voting). -->
+  <div id="scenario-picker-overlay">
+    <div id="scenario-picker-heading" data-i18n="client.select_scenario">Select a scenario</div>
+    <div id="scenario-picker-body"></div>
+  </div>
+
   <!-- Coordination popup overlay (issue #494). Shown for AI-to-human
        coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
   <div id="coordination-popup" onclick="dismissCoordinationPopup()">
@@ -976,7 +1020,102 @@
     // re-render through the same rAF scheduler (issue #462).
     window.scheduleRender = scheduleRender;
 
+    // QR-first scenario/ship picker rendering (issue #755). Keyed on the
+    // current stage so the DOM (and the ph-ship-picker web component) is only
+    // rebuilt when the stage actually changes — the render loop runs at rAF
+    // cadence and must not tear down a half-tapped picker.
+    let _pickerStageKey = null;
+    function renderScenarioPicker() {
+      const ls = window.lobbyState;
+      const body = document.getElementById('scenario-picker-body');
+      const heading = document.getElementById('scenario-picker-heading');
+      if (!ls || !body) return;
+      const catalog = ls.scenarioCatalog || [];
+      const locked = ls.selectionLocked || { scenario_id: null, template_path: null };
+
+      let stage;
+      if (locked.scenario_id == null) stage = 'scenario';
+      else if (locked.template_path == null) stage = 'ship:' + locked.scenario_id;
+      else stage = 'locked';
+      const key = stage + '|' + catalog.length;
+      if (key === _pickerStageKey) return;
+      _pickerStageKey = key;
+
+      body.innerHTML = '';
+      if (stage === 'scenario') {
+        if (heading) heading.textContent = t('client.select_scenario');
+        if (catalog.length === 0) {
+          const note = document.createElement('div');
+          note.className = 'scenario-locked-note';
+          note.textContent = t('client.waiting_scenario');
+          body.appendChild(note);
+          return;
+        }
+        for (const sc of catalog) {
+          const btn = document.createElement('button');
+          btn.className = 'scenario-btn';
+          btn.dataset.scenarioId = sc.id;
+          const title = document.createElement('div');
+          title.textContent = sc.label || sc.id;
+          btn.appendChild(title);
+          if (sc.description) {
+            const desc = document.createElement('div');
+            desc.className = 'scenario-desc';
+            desc.textContent = sc.description;
+            btn.appendChild(desc);
+          }
+          btn.addEventListener('click', () => {
+            // Same action map as the host page — two transports (issue #755).
+            if (typeof window.dispatchConsoleAction === 'function') {
+              window.dispatchConsoleAction({ action: 'select_scenario', scenario_id: sc.id }, send);
+            } else {
+              send('SelectScenario', { scenario_id: sc.id });
+            }
+          });
+          body.appendChild(btn);
+        }
+      } else if (stage.startsWith('ship:')) {
+        if (heading) heading.textContent = t('client.select_ship');
+        const entry = catalog.find(s => s && s.id === locked.scenario_id);
+        const ships = (entry && entry.ships) || [];
+        import('./gui/components/ph-ship-picker.js').then(() => {
+          if (_pickerStageKey !== key) return; // stage changed meanwhile
+          const picker = document.createElement('ph-ship-picker');
+          body.appendChild(picker);
+          picker.state = { ships };
+          picker.addEventListener('ship-selected', (e) => {
+            const tp = e.detail.template_path;
+            if (typeof window.dispatchConsoleAction === 'function') {
+              window.dispatchConsoleAction({ action: 'select_player_ship', template_path: tp }, send);
+            } else {
+              send('SelectPlayerShip', { template_path: tp });
+            }
+          });
+        });
+      } else {
+        if (heading) heading.textContent = t('client.select_ship');
+        const note = document.createElement('div');
+        note.className = 'scenario-locked-note';
+        note.textContent = t('client.scenario_locked');
+        body.appendChild(note);
+      }
+    }
+
     function render(s) {
+      // QR-first pre-scenario picker (issue #755): before any world loads, the
+      // host delivers the catalog and this phone can make the first valid
+      // selection. Short-circuit the normal lobby/game render while active.
+      const pickerEl = document.getElementById('scenario-picker-overlay');
+      const pickingScenario = !!(window.lobbyState && window.lobbyState.showScenarioPicker());
+      if (pickerEl) pickerEl.style.display = pickingScenario ? 'flex' : 'none';
+      if (pickingScenario) {
+        $('lobby-ui').className = '';
+        const bezel0 = $('phone-bezel');
+        if (bezel0) bezel0.setAttribute('aria-hidden', 'true');
+        renderScenarioPicker();
+        return;
+      }
+
       // Phase ? section visibility (pure JS module, gui/phase-toggle.js).
       // Falls back to a local check if the module hasn't loaded yet so the
       // first paint isn't blank � module load races init on slow networks.
@@ -1534,6 +1673,9 @@
       if (window.lobbyState)      window.lobbyState.apply(msg);
       if (window.simState)        window.simState.apply(msg);
       if (window.commsState)      window.commsState.apply(msg);
+      // The QR-first ScenarioCatalog message (issue #755) is not part of the
+      // client-router case table, so force a render to (re)draw the picker.
+      if (msg && msg.type === 'ScenarioCatalog') scheduleRender();
       // Declarative iframe fan-out (#823): gui/dirty-consoles.js maps the
       // message to the console names to re-push. Runs after the state applies
       // above so every push carries fresh data. On Welcome the consoles are

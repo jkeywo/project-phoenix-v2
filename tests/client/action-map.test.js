@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 37 expected action keys', () => {
+  it('contains exactly the 39 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -26,6 +26,8 @@ describe('ACTION_MAP', () => {
       'respond_to_message',
       'return_to_lobby',
       'select_comms_message',
+      'select_player_ship',
+      'select_scenario',
       'set_boost',
       'set_helm',
       'set_lateral_thrust',
@@ -713,6 +715,43 @@ describe('confirm_scenario', () => {
     ACTION_MAP.confirm_scenario({ action: 'confirm_scenario' }, send);
     expect(send).toHaveBeenCalledWith('ConfirmScenario');
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── select_scenario / select_player_ship (issue #755) ─────────────────────────
+// QR-first pre-scenario selection: both the host page and phones emit these via
+// the same action map (two transports), fed to the host-runtime arbiter.
+
+describe('select_scenario', () => {
+  it('sends SelectScenario with the scenario id', () => {
+    const send = mkSend();
+    ACTION_MAP.select_scenario({ action: 'select_scenario', scenario_id: 'combat_test' }, send);
+    expect(send).toHaveBeenCalledWith('SelectScenario', { scenario_id: 'combat_test' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it('ignores a request with no scenario id', () => {
+    const send = mkSend();
+    ACTION_MAP.select_scenario({ action: 'select_scenario' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('select_player_ship', () => {
+  it('sends SelectPlayerShip with the template path', () => {
+    const send = mkSend();
+    ACTION_MAP.select_player_ship(
+      { action: 'select_player_ship', template_path: 'assets/entities/alliance_cruiser.toml' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('SelectPlayerShip', {
+      template_path: 'assets/entities/alliance_cruiser.toml',
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it('ignores a request with no template path', () => {
+    const send = mkSend();
+    ACTION_MAP.select_player_ship({ action: 'select_player_ship' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

@@ -12,7 +12,7 @@ entities:
 
   - verb: select-next-scenario-or-ship
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Select Next Scenario or Ship
       summary: A connected player may make the first valid scenario or player-ship choice from the shared pre-scenario lobby.

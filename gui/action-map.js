@@ -433,6 +433,30 @@ export const ACTION_MAP = Object.freeze({
   confirm_scenario: (a, send) => {
     send('ConfirmScenario');
   },
+
+  /**
+   * Propose a scenario in the QR-first pre-scenario flow (issue #755).
+   *
+   * Sent by BOTH the host page's own selection UI and connected phones over
+   * the same action map. The host-runtime arbiter applies first-valid-wins
+   * against the pre-load catalog; there is no token gate (unlike
+   * confirm_scenario) so server or phone participants alike can make the
+   * first valid selection.
+   */
+  select_scenario: (a, send) => {
+    if (!a.scenario_id) return;
+    send('SelectScenario', { scenario_id: a.scenario_id });
+  },
+
+  /**
+   * Propose a player ship in the QR-first pre-scenario flow (issue #755).
+   *
+   * Validated by the arbiter against the locked scenario's offered ships.
+   */
+  select_player_ship: (a, send) => {
+    if (!a.template_path) return;
+    send('SelectPlayerShip', { template_path: a.template_path });
+  },
 });
 
 /**

@@ -2147,7 +2147,10 @@ impl EntityConfig {
         // If the ship declares `[[shield_arc]]` blocks, they auto-generate
         // matching `[[system]]` entries with `kind = "shield_arc"` — appended
         // to whatever the ship's TOML already declared before we re-validate.
-        if !config.shield_arcs.is_empty() || ship_config_toml.is_some() {
+        if !config.shield_arcs.is_empty()
+            || ship_config_toml.is_some()
+            || config.behaviour.is_some()
+        {
             let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
                 .map_err(|e| {
                     serde::de::Error::custom(format!("system registry init failed: {e:?}"))
@@ -2248,6 +2251,40 @@ impl EntityConfig {
                         },
                         marker: None,
                         config: Some(toml::Value::Table(synthesised_config)),
+                    });
+            }
+
+            // Provision a mandatory AI-only Red Alert capability for every
+            // behaviour-driven NPC ship (issue #749). Behaviour-driven ships run
+            // an `operate_captain_ai` loop that can raise its own Red Alert, but
+            // only when the Red Alert system's control source resolves to `Ai` —
+            // which requires the system to be *listed* on the ship. Authors who
+            // omit an explicit `[[system]] kind = "red_alert"` block (every Harrow
+            // and pirate NPC) would otherwise leave it defaulting to `Human`,
+            // silently blocking the AI captain from ever going to Red Alert.
+            //
+            // Ownerless (`station = None`) + `ai_only = true`, mirroring how NPC
+            // shield-arc / phaser / reactor systems are synthesised above and
+            // satisfying `OwnerlessSystemWithoutAiOnly`. Idempotent: an explicit
+            // authored red_alert system (the Alliance ships) is left untouched.
+            if config.behaviour.is_some()
+                && !ship_config
+                    .systems
+                    .iter()
+                    .any(|s| s.kind == crate::system_registry::RED_ALERT_KIND)
+            {
+                ship_config
+                    .systems
+                    .push(crate::ship::config::SystemInstanceConfig {
+                        id: crate::messages::SystemId(
+                            crate::system_registry::RED_ALERT_SYSTEM_ID.into(),
+                        ),
+                        kind: crate::system_registry::RED_ALERT_KIND.into(),
+                        station: None,
+                        ai_only: true,
+                        power_group: None,
+                        marker: None,
+                        config: None,
                     });
             }
 
@@ -5086,6 +5123,94 @@ colour = [0.5, 0.5, 0.5]
         assert_eq!(mesh.lod[0].variant.as_deref(), Some("small"));
         assert_eq!(mesh.lod[1].max_distance, None);
         assert_eq!(mesh.lod[1].shape, Some(MeshShape::Sphere));
+    }
+
+    // ── NPC red-alert provisioning (issue #749) ─────────────────────────────────
+
+    fn red_alert_systems(config: &EntityConfig) -> Vec<&crate::ship::config::SystemInstanceConfig> {
+        config
+            .ship_config
+            .as_ref()
+            .map(|sc| {
+                sc.systems
+                    .iter()
+                    .filter(|s| s.kind == crate::system_registry::RED_ALERT_KIND)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn behaviour_npc_without_red_alert_gets_ai_only_ownerless_provision() {
+        // The Harrow Lancer authors [behaviour] and shield arcs but no
+        // red_alert system. Spawn provisioning must add exactly one AI-only,
+        // ownerless red_alert capability so the AI captain can raise it.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_lancer.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("harrow lancer must parse");
+        let reds = red_alert_systems(&config);
+        assert_eq!(
+            reds.len(),
+            1,
+            "behaviour NPC must be provisioned exactly one red_alert system"
+        );
+        let sys = reds[0];
+        assert_eq!(sys.id.0, crate::system_registry::RED_ALERT_SYSTEM_ID);
+        assert!(sys.ai_only, "provisioned red_alert must be ai_only");
+        assert!(
+            sys.station.is_none(),
+            "provisioned red_alert must be ownerless"
+        );
+    }
+
+    #[test]
+    fn pirate_raider_gets_red_alert_provision() {
+        // A second behaviour NPC to confirm the provisioning is not lancer-specific.
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate raider must parse");
+        let reds = red_alert_systems(&config);
+        assert_eq!(reds.len(), 1, "behaviour NPC provisioned one red_alert");
+        assert!(reds[0].ai_only && reds[0].station.is_none());
+    }
+
+    #[test]
+    fn explicit_red_alert_is_left_untouched() {
+        // The Alliance Destroyer authors an explicit red_alert system owned by
+        // the captain station. Provisioning must be idempotent: no second
+        // system, and the authored ownership survives (AC4).
+        let toml_str = include_str!("../../assets/entities/alliance_destroyer.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("alliance destroyer must parse");
+        let reds = red_alert_systems(&config);
+        assert_eq!(
+            reds.len(),
+            1,
+            "authored red_alert must not be double-provisioned"
+        );
+        assert_eq!(
+            reds[0].station,
+            Some(crate::messages::StationId("captain".into())),
+            "authored captain ownership must survive provisioning"
+        );
+        assert!(
+            !reds[0].ai_only,
+            "authored player red_alert must remain non-ai_only"
+        );
+    }
+
+    #[test]
+    fn non_behaviour_entity_gets_no_red_alert_provision() {
+        // An asteroid has no [behaviour] block → no ship capabilities at all.
+        let toml_str = r#"
+tags = ["asteroid"]
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("asteroid must parse");
+        assert!(
+            config.ship_config.is_none(),
+            "non-behaviour entity must not synthesise a ship_config"
+        );
+        assert!(
+            red_alert_systems(&config).is_empty(),
+            "non-behaviour entity must get no red_alert system"
+        );
     }
 }
 

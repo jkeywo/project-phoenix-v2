@@ -1142,6 +1142,54 @@ describe('buildSensorsConsoleState', () => {
     const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
     expect(parse(buildSensorsConsoleState(state)).target_shield_fraction).toBeNull();
   });
+
+  // ── target_alert (#749) — read only from the sensor-radar blackboard ──────
+
+  it('target_alert threads true from the sensor-radar blackboard', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_alert: true } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_alert).toBe(true);
+  });
+
+  it('target_alert threads false (capable but calm) from the blackboard', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'e1', selected_target_alert: false } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_alert).toBe(false);
+  });
+
+  it('target_alert is null when the blackboard omits selected_target_alert', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'a1',
+      asteroids: [{ uuid: 'a1', x: 0, z: 0, tags: ['asteroid'] }],
+      blackboards: { 'sensor-radar': { selected_target: 'a1' } },
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+  });
+
+  it('target_alert is null when there is no sensor-radar blackboard', () => {
+    const state = { shipX: 0, shipZ: 0, shipYaw: 0 };
+    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+  });
+
+  it('target_alert never derives from the entity snapshot (no-leak boundary)', () => {
+    // Even if a leaked red_alert field rode in on the entity snapshot, the
+    // scan card must ignore it and read only the per-ship blackboard.
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      sensorsTarget: 'e1',
+      asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], red_alert: true }],
+    };
+    expect(parse(buildSensorsConsoleState(state)).target_alert).toBeNull();
+  });
 });
 
 // ── science station (generic system-id-keyed payload, issue #825) ─────────────

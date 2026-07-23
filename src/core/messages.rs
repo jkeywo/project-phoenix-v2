@@ -1775,6 +1775,15 @@ pub struct SensorRadarBlackboard {
     /// The Science Target: the sensor radar's currently selected target UUID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_target: Option<String>,
+    /// Authoritative Red Alert state of the selected target, replicated onto the
+    /// Sensors scan surface only (issue #749). `Some(true)`/`Some(false)` when the
+    /// selected target is a Red-Alert-capable ship; `None` when there is no
+    /// selection, the target is a non-ship contact (asteroid/star/planet/region),
+    /// or the target is otherwise incapable of Red Alert. `None` renders as no
+    /// alert field at all on the scan card — the visibility boundary that keeps
+    /// this intelligence to the Sensors operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target_alert: Option<bool>,
 }
 
 /// Raw sim truth for the Captain system, published each tick into the ship

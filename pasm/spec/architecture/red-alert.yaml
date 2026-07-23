@@ -131,8 +131,8 @@ entities:
 
   - state: selected-target-alert-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Selected Sensor Target Alert State
       summary: Read-only alert state for the contact selected on the Sensors radar, absent for targets without a Red Alert capability.
       rationale:
@@ -143,11 +143,15 @@ entities:
       derived_from:
         - authoritative-red-alert-state
       owner: sensor-target-alert-publisher
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/ship/sensors.rs]
+      tests: [cargo test]
 
   - component: sensor-target-alert-publisher
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Sensor Target Alert Publisher
       summary: Host publication path that resolves the current Sensors target to a ship and replicates only that ship's alert state to the Sensors scan card.
     architecture:
@@ -159,11 +163,15 @@ entities:
         - selected-target-alert-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, gui/console-state.js, gui/components/ph-sensor-panel.js]
+      tests: [cargo test, npx vitest run]
 
   - component: npc-red-alert-capability-provisioner
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: NPC Red Alert Capability Provisioner
       summary: NPC ship-spawn rule that ensures every behaviour-driven ship has an AI-only red-alert system, adding it when its authored ship configuration omits one.
       rationale:
@@ -176,6 +184,10 @@ entities:
         - authoritative-red-alert-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs]
+      tests: [cargo test]
 
   - component: red-alert-presentation
     core:

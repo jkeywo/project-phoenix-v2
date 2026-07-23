@@ -135,6 +135,9 @@ export class PhSensorPanel extends HTMLElement {
     if (s.target_heading != null) scanRows.push({ k: t('component.sensor_panel.heading'), v: s.target_heading.toFixed(0) + '°' });
     if (s.target_speed != null) scanRows.push({ k: t('component.sensor_panel.speed'), v: s.target_speed.toFixed(1) + ' kn' });
     if (s.target_threat) scanRows.push({ k: t('component.sensor_panel.threat'), v: s.target_threat.toUpperCase() });
+    // Selected-target red alert (issue #749). Only present for Red-Alert-capable
+    // ship targets; `null` (non-ship/incapable/no selection) hides the row.
+    if (s.target_alert != null) scanRows.push({ k: t('component.sensor_panel.alert'), v: s.target_alert ? t('component.sensor_panel.alert_active') : t('component.sensor_panel.alert_standby') });
 
     if (scanRows.length > 0) {
       const live = new Set(scanRows.map(r => r.k));

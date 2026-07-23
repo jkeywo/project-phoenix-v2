@@ -95,7 +95,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensor Radar Blackboard State
-      summary: Per-ship sensor-radar blackboard carrying the Science Target (selected_target), mirrored from SensorRadarSelection and lifted by the viewscreen aggregator into science_target (issue #829).
+      summary: Per-ship sensor-radar blackboard carrying the Science Target (selected_target), mirrored from SensorRadarSelection and lifted by the viewscreen aggregator into science_target (issue #829). Also carries selected_target_alert, an optional replica of the selected target's authoritative Red Alert state, present only when that target is a Red-Alert-capable ship (issue #749).
     architecture:
       classification: derived
       owner: sensors-target-controller

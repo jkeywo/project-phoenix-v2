@@ -550,12 +550,34 @@ pub fn publish_sensor_radar_blackboard(
         ),
         With<crate::server_app::Ship>,
     >,
+    // Read-only lookup of Red-Alert-capable ships by uuid. `ShipRedAlert` is a
+    // ship-only capability (attached inside the `[behaviour]`/player spawn gate),
+    // so non-ship contacts (asteroid/star/planet/region) never appear here and a
+    // selection that names one resolves to `None` → no alert field (issue #749).
+    alert_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &crate::ship_state::ShipRedAlert,
+        ),
+        With<crate::server_app::Ship>,
+    >,
 ) {
     for (sensors_target, mut bbs) in ships_q.iter_mut() {
+        let selected_target = sensors_target.and_then(|st| st.0.clone());
+        // Resolve the selected target's authoritative Red Alert state. `Some(..)`
+        // only when the selection names a Red-Alert-capable ship; `None` for no
+        // selection, a non-ship contact, or an incapable target.
+        let selected_target_alert = selected_target.as_deref().and_then(|selected| {
+            alert_q
+                .iter()
+                .find(|(uuid, _)| uuid.0 == selected)
+                .map(|(_, red_alert)| red_alert.0)
+        });
         bbs.0.insert(
             crate::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::messages::SensorRadarBlackboard {
-                selected_target: sensors_target.and_then(|st| st.0.clone()),
+                selected_target,
+                selected_target_alert,
             }),
         );
     }
@@ -2307,6 +2329,112 @@ mod tests {
             selection_of(&mut app, &ship_b_uuid).as_deref(),
             Some(enemy_b.as_str()),
             "ship B must pick its own hostile — no cross-ship leakage"
+        );
+    }
+
+    // ── publish_sensor_radar_blackboard: selected-target alert (issue #749) ──────
+
+    /// Minimal app that runs only `publish_sensor_radar_blackboard`, plus a
+    /// scanning ship whose `SensorRadarSelection` we drive directly. Returns the
+    /// scanning ship's `Entity` so the caller can read back its blackboard.
+    fn alert_publisher_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_systems(Update, publish_sensor_radar_blackboard);
+        let scanner = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::server_app::ShipSystemBlackboards::default(),
+                SensorRadarSelection::default(),
+            ))
+            .id();
+        (app, scanner)
+    }
+
+    /// Read the `selected_target_alert` replica off a ship's sensor-radar blackboard.
+    fn published_alert(app: &App, ship: Entity) -> Option<bool> {
+        match app
+            .world()
+            .entity(ship)
+            .get::<crate::server_app::ShipSystemBlackboards>()
+            .and_then(|bbs| {
+                bbs.0
+                    .get(&crate::system_registry::sensor_radar_system_id())
+                    .cloned()
+            }) {
+            Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target_alert,
+            _ => panic!("sensor-radar blackboard missing"),
+        }
+    }
+
+    fn set_selection(app: &mut App, ship: Entity, uuid: Option<&str>) {
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<SensorRadarSelection>()
+            .unwrap()
+            .0 = uuid.map(|s| s.to_string());
+    }
+
+    #[test]
+    fn sensor_radar_alert_none_when_no_selection() {
+        let (mut app, scanner) = alert_publisher_app();
+        app.update();
+        assert_eq!(
+            published_alert(&app, scanner),
+            None,
+            "no selection → no alert field"
+        );
+    }
+
+    #[test]
+    fn sensor_radar_alert_reports_selected_ship_red_alert() {
+        let (mut app, scanner) = alert_publisher_app();
+        // A capable ship target, currently at red alert.
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entity_spawner::EntityUuid("enemy-1".into()),
+            crate::ship_state::ShipRedAlert(true),
+        ));
+        set_selection(&mut app, scanner, Some("enemy-1"));
+        app.update();
+        assert_eq!(
+            published_alert(&app, scanner),
+            Some(true),
+            "selected capable ship at red alert → Some(true)"
+        );
+    }
+
+    #[test]
+    fn sensor_radar_alert_reports_capable_but_calm_ship() {
+        let (mut app, scanner) = alert_publisher_app();
+        // Capable but not alerted — the distinct Some(false) case.
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entity_spawner::EntityUuid("enemy-2".into()),
+            crate::ship_state::ShipRedAlert(false),
+        ));
+        set_selection(&mut app, scanner, Some("enemy-2"));
+        app.update();
+        assert_eq!(
+            published_alert(&app, scanner),
+            Some(false),
+            "selected capable ship not at red alert → Some(false)"
+        );
+    }
+
+    #[test]
+    fn sensor_radar_alert_none_for_non_ship_target() {
+        let (mut app, scanner) = alert_publisher_app();
+        // An asteroid: carries a uuid but NOT ShipRedAlert and NOT the Ship
+        // marker → no capability → no alert field (the no-leak boundary).
+        app.world_mut()
+            .spawn(crate::entity_spawner::EntityUuid("asteroid-9".into()));
+        set_selection(&mut app, scanner, Some("asteroid-9"));
+        app.update();
+        assert_eq!(
+            published_alert(&app, scanner),
+            None,
+            "non-ship contact has no red-alert capability → no alert field"
         );
     }
 }

@@ -97,7 +97,7 @@ entities:
 
   - information: selected-target-red-alert-information
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Selected Target Red Alert Information
       summary: Sensors sees the current alert state only for its selected radar target, and no value for contacts without Red Alert capability.
@@ -132,7 +132,7 @@ entities:
 
   - coordination: sensors-captain-alert-intelligence
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Sensors Captain Alert Intelligence
       summary: Sensors can report the selected contact's alert state to inform Captain decisions without creating a global radar marker system.
@@ -148,7 +148,7 @@ entities:
 
   - failure: unavailable-npc-red-alert-capability
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Unavailable NPC Red Alert Capability
       summary: A behaviour-driven NPC cannot enter or leave Red Alert if its ship lacks an AI-only Red Alert system.
@@ -167,7 +167,7 @@ entities:
 
   - playtest-claim: explicit-red-alert-remains-legible
     core:
-      status: proposed
+      status: accepted
       confidence: provisional
       title: Explicit Red Alert Remains Legible
       summary: Explicit state setting and selected-target alert intelligence should make alert changes reliable and understandable.

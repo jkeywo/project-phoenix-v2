@@ -63,6 +63,38 @@ describe('PhSensorPanel', () => {
     expect(el.shadowRoot.textContent).toContain('HOSTILE');
   });
 
+  it('shows a red-alert scan row when target_alert is true', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_alert: true,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.alert'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.alert_active'));
+  });
+
+  it('shows a standby scan row when target_alert is false', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_alert: false,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).toContain(t('component.sensor_panel.alert'));
+    expect(sd.textContent).toContain(t('component.sensor_panel.alert_standby'));
+  });
+
+  it('hides the alert scan row when target_alert is null', () => {
+    const { el } = setup();
+    el.state = {
+      scan_range: 300, blips: [], target_uuid: 'abc', target_kind: 'ship',
+      target_class: "B'REL", target_alert: null,
+    };
+    const sd = el.shadowRoot.querySelector('#scan-data');
+    expect(sd.textContent).not.toContain(t('component.sensor_panel.alert'));
+  });
+
   it('updates when state changes', () => {
     const { el } = setup();
     el.state = { scan_range: 100 };

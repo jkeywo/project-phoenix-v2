@@ -1856,10 +1856,18 @@ ai_only = true
             "EntityConfig.ship_config must be populated from [[system]] blocks"
         );
         let sc = config.ship_config.as_ref().unwrap();
+        // Two authored systems plus the AI-only red-alert capability that issue
+        // #749 provisions for every behaviour-driven NPC that omits one.
         assert_eq!(
             sc.systems.len(),
-            2,
-            "expected two systems (helm-thrust, tactical-radar)"
+            3,
+            "expected two authored systems + provisioned red-alert"
+        );
+        assert!(
+            sc.systems
+                .iter()
+                .any(|s| s.kind == crate::system_registry::RED_ALERT_KIND && s.ai_only),
+            "behaviour NPC must be provisioned an ai_only red-alert system (#749)"
         );
         assert_eq!(sc.stations.len(), 0, "NPCs have no stations");
 
@@ -1881,8 +1889,8 @@ ai_only = true
             .expect("NPC ship must have ShipConfigComponent");
         assert_eq!(
             comp.0.systems.len(),
-            2,
-            "spawned NPC entity carries its two declared systems"
+            3,
+            "spawned NPC entity carries its two declared systems + provisioned red-alert"
         );
         let system_ids: Vec<&str> = comp.0.systems.iter().map(|s| s.id.0.as_str()).collect();
         assert!(
@@ -1940,6 +1948,42 @@ ai_only = true
             radar.0.icon.as_deref(),
             Some("ship"),
             "world-spawned hull shows the ordinary ship icon, not playerShip"
+        );
+    }
+
+    /// Issue #749: a behaviour NPC that omits an explicit red_alert system must
+    /// still spawn with the provisioned red_alert control source resolving to
+    /// `Ai` — the causal link that lets `operate_captain_ai` raise its Red
+    /// Alert. The Harrow Lancer authors [behaviour] but no red_alert block.
+    #[test]
+    fn spawned_behaviour_npc_red_alert_is_ai_operated() {
+        use crate::entity_config::EntityConfig;
+        use bevy::prelude::*;
+
+        let toml = include_str!("../../assets/entities/ship_harrow_lancer.toml");
+        let config = EntityConfig::from_toml(toml).expect("harrow lancer must parse");
+
+        let mut app = test_app();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let entity = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let sources = app
+            .world()
+            .get::<crate::ship_plugin::ShipSystemControlSources>(entity)
+            .expect("behaviour NPC must carry ShipSystemControlSources");
+        assert!(
+            sources
+                .0
+                .policy_for(&crate::system_registry::red_alert_system_id())
+                .operate_ai,
+            "provisioned red_alert must resolve to Ai so operate_captain_ai can raise it"
+        );
+        // And the ship carries the Red Alert capability component.
+        assert!(
+            app.world()
+                .get::<crate::ship_state::ShipRedAlert>(entity)
+                .is_some(),
+            "behaviour NPC must carry the ShipRedAlert capability"
         );
     }
 }

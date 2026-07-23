@@ -23,7 +23,7 @@ entities:
 
   - verb: save-authored-content
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Save Authored Content
       summary: Save an edited authored file only when local validation has no definite errors; warnings remain visible but do not prevent deliberate authoring work.
@@ -74,7 +74,7 @@ entities:
 
   - mechanic: blocking-authoring-errors
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Blocking Authoring Errors
       summary: The editor distinguishes definite errors from warnings. Errors block save and export; warnings remain non-blocking so an author can work across related files.

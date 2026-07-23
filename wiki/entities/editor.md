@@ -3,7 +3,7 @@ title: Editor
 type: entity
 tags: [editor, tooling, scenario, entity, definitions, fsa, vitest]
 sources: [editor/app-v2.js, editor/scenario-mode.js, editor/mode-shell.js, editor/project-root.js, editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js, editor/validation.js, editor/action-schema.js, editor/world-toml.js, editor/entity-toml.js]
-updated: 2026-07-16
+updated: 2026-07-23
 ---
 
 # Editor
@@ -76,10 +76,46 @@ Save model: explicit save only. Cmd/Ctrl+S saves the active file; a "Save All" b
 - `validateBehaviourBlock(behaviour)` (`editor/validation.js:53`) — exactly one `initial_state`, no orphan transitions.
 
 All validation surfaces as inline error/warning badges (`editor/validation-badge.js`).
-The current editor permits saving despite errors. The accepted next design changes
-this: definite errors will block save and mod-pack export, while warnings remain
-non-blocking so authors can work across related files in any order. A
-WASM-compiled full Rust pre-save pass remains deferred to a later phase.
+
+### Save admission (issue #757)
+
+`SaveFlow._saveOne` (`editor/save-flow.js`) is the single save chokepoint. It runs
+`validateFile` and splits the findings by severity via the pure admission
+primitive in `editor/validation.js` — `partitionFindings(results)` and
+`hasBlockingErrors(results)`, which mirror the Rust atomic-activation gate
+(`src/world/validate.rs`: `WorldFinding::is_error` / `has_error`). Any
+**error**-severity finding blocks the save: `_saveOne` returns
+`{ ok: false, errors, warnings }` **before** `writeFile` runs and **before** any
+dirty/undo/invalidation state changes, so a blocked save never reaches disk,
+leaves the file dirty, keeps its undo history, and fires no cache invalidation.
+**Warnings** never block — they flow through on every path and are surfaced to
+the author. Blocking errors are shown in the shared `#v2-status` element (not
+only `console.error`). Models Mode is validation-exempt (it caches a ready-made
+TOML string). The mod-pack exporter (issue #759) reuses the same admission
+primitive to block export.
+
+Severity classification is aligned with the host composition validator (#750):
+structural/duplicate/malformed problems are **errors** that block (missing
+`[global]`/`[anchors]`, duplicate station names, empty consoles, dangling
+station next/previous chains, missing/duplicate behaviour states, malformed
+trigger actions), while **dangling entity cross-references** (unknown
+`trigger`/`comms`/action entity names) are **non-blocking warnings** — the Rust
+validator treats a bare unresolved reference as `Severity::Warning` because the
+name may resolve to a runtime-spawned or engine-provided entity, or belong to a
+world still being authored across several files.
+
+A WASM-compiled full Rust pre-save pass remains deferred to a later phase.
+
+### No live host reload (implemented boundary)
+
+A save does **not** hot-reload a running host simulation. `writeFile`
+(`editor/project-root.js`) only touches disk within the granted project root,
+and `InvalidationBus` (`editor/invalidation-bus.js`) only notifies **editor-local**
+subscribers (the entity cache, open canvases, file lists) — it never crosses the
+wire codec and there is no host/runtime reload channel. Saved authored content is
+picked up the **next** time a runtime loads those files; an already-running host
+is unaffected. This boundary is modelled by the `editor-runtime-reload-boundary`
+PASM component and covered by tests in `editor/tests/save-admission.test.js`.
 
 ## Planned Mod-Pack Export
 

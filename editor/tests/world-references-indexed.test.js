@@ -18,7 +18,9 @@ describe('validateWorldReferencesIndexed', () => {
     const out = validateWorldReferencesIndexed(world);
     expect(out.length).toBe(1);
     expect(out[0].path).toBe('trigger[1].entity');
-    expect(out[0].severity).toBe('error');
+    // Dangling cross-references are NON-BLOCKING warnings (issue #757),
+    // matching the Rust composition validator's Severity::Warning.
+    expect(out[0].severity).toBe('warning');
     expect(out[0].message).toMatch(/phantom/);
   });
 

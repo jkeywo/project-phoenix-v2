@@ -55,9 +55,15 @@ export function validateWorldReferences(worldObj) {
     const key = `${targetName}::${context}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // Dangling entity cross-references are NON-BLOCKING warnings (issue #757),
+    // matching the Rust composition validator (`src/world/validate.rs`), which
+    // reports a bare unresolved reference as `Severity::Warning`: the name may
+    // resolve to a runtime-spawned or engine-provided entity, or belong to a
+    // world still being authored across several files. Keeping it a warning
+    // holds the editor consistent with the host's atomic-activation gate.
     results.push({
       path: context,
-      severity: 'error',
+      severity: 'warning',
       message: `Reference to unknown entity "${targetName}" (${context})`,
     });
   }

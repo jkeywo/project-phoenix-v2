@@ -5,6 +5,42 @@ import { validateTriggerActions } from './action-schema.js';
 import { validateWorldReferences } from './world-references.js';
 import { validateWorldReferencesIndexed } from './world-references-indexed.js';
 
+/**
+ * Pure admission primitive (issue #757). Mirrors the Rust atomic-activation
+ * gate (`src/world/validate.rs`: `WorldFinding::is_error` / `has_error`).
+ *
+ * A validation record blocks a save/export iff its `severity === 'error'`.
+ * `'warning'` (and any unrecognised severity) is non-blocking — it stays
+ * visible but never refuses the write.
+ *
+ * @param {Array<{ severity?: string }>} results  Findings from `validateFile`.
+ * @returns {boolean} true when at least one finding is a definite error.
+ */
+export function hasBlockingErrors(results) {
+  if (!Array.isArray(results)) return false;
+  return results.some((r) => r && r.severity === 'error');
+}
+
+/**
+ * Split validation findings into blocking errors and non-blocking warnings.
+ * The reusable admission primitive `SaveFlow` (and, later, the mod-pack
+ * exporter, issue #759) consume this at the save/export chokepoint.
+ *
+ * @param {Array<{ severity?: string }>} results  Findings from `validateFile`.
+ * @returns {{ errors: Array, warnings: Array }}
+ */
+export function partitionFindings(results) {
+  const errors = [];
+  const warnings = [];
+  if (Array.isArray(results)) {
+    for (const r of results) {
+      if (r && r.severity === 'error') errors.push(r);
+      else if (r) warnings.push(r);
+    }
+  }
+  return { errors, warnings };
+}
+
 function isEntityFile(filePath, parsed) {
   if (filePath && filePath.includes('assets/entities/')) return true;
   if (parsed && 'tags' in parsed) return true;

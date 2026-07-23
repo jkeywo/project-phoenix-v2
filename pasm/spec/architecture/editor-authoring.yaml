@@ -51,7 +51,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Editor Validation Service
-      summary: Runs local TOML, component, station, trigger-action, reference, and behavior checks and surfaces inline errors and warnings. A future save gate will block definite errors while keeping warnings non-blocking.
+      summary: Runs local TOML, component, station, trigger-action, reference, and behavior checks and surfaces inline errors and warnings. The save gate blocks definite errors while keeping warnings non-blocking.
     architecture:
       kind: authoring-validator
       authority: local
@@ -65,7 +65,7 @@ entities:
 
   - component: editor-save-admission
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Editor Save Admission
       summary: Local save gate that prevents writing authored TOML when validation reports definite errors, while allowing warnings and clearly presenting them to the author.
@@ -74,6 +74,10 @@ entities:
       authority: local
       reads: [editor-draft-state, editor-validation-state]
       validates: [editor-draft-state]
+    implementation:
+      status: declared
+      paths: [editor/save-flow.js, editor/validation.js]
+      tests: [npm run test:editor]
 
   - component: editor-mod-pack-exporter
     core:
@@ -180,7 +184,7 @@ entities:
 
   - component: editor-runtime-reload-boundary
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Editor Runtime Reload Boundary
       summary: Saves authored TOML and locally invalidates editor caches, but does not hot-reload an already-running host simulation; a new runtime load consumes the saved authored files.
@@ -193,3 +197,4 @@ entities:
     implementation:
       status: declared
       paths: [editor/save-flow.js, editor/invalidation-bus.js, editor/entity-cache.js]
+      tests: [npm run test:editor]

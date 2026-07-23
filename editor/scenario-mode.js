@@ -98,6 +98,13 @@ export function mountScenarioMode({
     (host && typeof host.querySelector === 'function'
       ? host.querySelector(`#${id}`)
       : null) || document.getElementById(id);
+
+  // Surface save outcomes to the shared #v2-status element so a blocked save
+  // (issue #757) is visible to the author instead of only console.error.
+  const setStatus = (msg) => {
+    const el = typeof document !== 'undefined' ? document.getElementById('v2-status') : null;
+    if (el) el.textContent = msg;
+  };
   const ioDeps = {
     readFile:       io?.readFile       || defaultReadFile,
     writeFile:      io?.writeFile      || defaultWriteFile,
@@ -342,13 +349,23 @@ export function mountScenarioMode({
           return;
         }
         const results = await saveFlow.saveAll();
+        const blocked = [];
         for (const r of (results || [])) {
           if (!r.ok) {
             console.error(`Save failed for ${r.path}:`, r.errors);
+            blocked.push(r);
           } else {
             const layer = layerManager.getLayers().find((l) => l.filename === r.path);
             if (layer) layer.isDirty = false;
           }
+        }
+        if (blocked.length > 0) {
+          const first = blocked[0];
+          setStatus(
+            `Save blocked: ${first.path} has ${first.errors.length} error(s) — ${first.errors[0]}`,
+          );
+        } else {
+          setStatus('Saved');
         }
         renderAll();
       });
@@ -366,7 +383,12 @@ export function mountScenarioMode({
           : 'World';
         if (currentMode === 'Entity') {
           const result = await saveFlow.saveActive();
-          if (!result.ok) console.error('Entity save failed:', result.errors);
+          if (!result.ok) {
+            console.error('Entity save failed:', result.errors);
+            setStatus(`Save blocked: ${result.errors.length} error(s) — ${result.errors[0]}`);
+          } else {
+            setStatus('Saved');
+          }
           return;
         }
 
@@ -380,8 +402,12 @@ export function mountScenarioMode({
         const result = await saveFlow.saveActive();
         if (!result.ok) {
           console.error(`Save failed for ${activeLayer.filename}:`, result.errors);
+          setStatus(
+            `Save blocked: ${activeLayer.filename} has ${result.errors.length} error(s) — ${result.errors[0]}`,
+          );
         } else {
           activeLayer.isDirty = false;
+          setStatus('Saved');
           renderAll();
         }
       });

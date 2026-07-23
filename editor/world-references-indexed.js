@@ -25,7 +25,7 @@
 
 /**
  * @param {object} worldObj  Parsed world TOML.
- * @returns {Array<{ path: string, severity: 'error', message: string }>}
+ * @returns {Array<{ path: string, severity: 'warning', message: string }>}
  */
 export function validateWorldReferencesIndexed(worldObj) {
   const results = [];
@@ -39,9 +39,12 @@ export function validateWorldReferencesIndexed(worldObj) {
   }
 
   const emit = (path, name) => {
+    // Non-blocking warning — see world-references.js (issue #757): dangling
+    // entity cross-references mirror the Rust validator's `Severity::Warning`
+    // for bare unresolved references and must not refuse a save.
     results.push({
       path,
-      severity: 'error',
+      severity: 'warning',
       message: `Reference to unknown entity "${name}" (${path})`,
     });
   };

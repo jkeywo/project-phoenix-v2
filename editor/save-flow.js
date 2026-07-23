@@ -1,4 +1,4 @@
-import { validateFile } from './validation.js';
+import { validateFile, partitionFindings } from './validation.js';
 
 export class SaveFlow {
   /**
@@ -126,7 +126,17 @@ export class SaveFlow {
     // so validateFile would emit a junk "Root value must be an object"
     // warning. Skip validation for Models; other modes are unchanged.
     const validationResults = mode === 'Models' ? [] : validateFile(path, parsedContent);
-    const warnings = validationResults.map((r) => r.message);
+    // Split findings by severity (issue #757). Warnings stay visible and flow
+    // through untouched on every path; definite errors BLOCK the save before
+    // anything is written and before any cache/undo/invalidation fires, so a
+    // blocked save leaves the file dirty and the editor caches intact.
+    const { errors: errorFindings, warnings: warningFindings } =
+      partitionFindings(validationResults);
+    const warnings = warningFindings.map((r) => r.message);
+
+    if (errorFindings.length > 0) {
+      return { ok: false, errors: errorFindings.map((r) => r.message), warnings };
+    }
 
     if (this._commentConfirm && this._readFile) {
       let onDisk = null;

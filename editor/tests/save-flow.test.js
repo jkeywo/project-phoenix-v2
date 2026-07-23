@@ -55,26 +55,32 @@ describe('SaveFlow', () => {
       expect(result.errors[0]).toContain('failed');
     });
 
-    it('returns warnings for validation errors but does not block', async () => {
+    it('BLOCKS save when validation reports definite errors (issue #757)', async () => {
+      // A world missing [global] and [anchors] produces error-severity
+      // findings, which must now block the write (never reach disk) and
+      // leave the file dirty.
       const modeShell = new ModeShell();
       modeShell.setOpenFiles('World', ['assets/worlds/invalid.toml']);
       modeShell.setActiveFile('World', 'assets/worlds/invalid.toml');
       modeShell.markDirty('World', 'assets/worlds/invalid.toml', true);
 
+      const writeFile = vi.fn(async () => {});
       const stringifyFns = {
-        world: (obj) => 'serialized content',
+        world: () => 'serialized content',
         entity: () => '',
       };
 
-      const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
       saveFlow.setContent('World', 'assets/worlds/invalid.toml', {
         name: 'Bad World',
       });
 
       const result = await saveFlow.saveActive();
-      expect(result.ok).toBe(true);
-      expect(result.errors).toEqual([]);
-      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      // Not written; still dirty.
+      expect(writeFile).not.toHaveBeenCalled();
+      expect(modeShell.isDirty('World', 'assets/worlds/invalid.toml')).toBe(true);
     });
 
     it('marks file as clean after successful save', async () => {
@@ -210,19 +216,32 @@ describe('SaveFlow', () => {
   });
 
   describe('cross-reference warnings', () => {
-    it('do not block save (never-refuse-valid-TOML)', async () => {
+    it('do not block save (dangling reference is a warning, issue #757)', async () => {
+      // Structurally valid world ([global] + [anchors] present) with a
+      // trigger pointing at an entity that is not declared. That dangling
+      // cross-reference is a NON-BLOCKING warning — the save proceeds and
+      // the warning is surfaced.
       const modeShell = new ModeShell();
       modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
       modeShell.setActiveFile('World', 'assets/worlds/test.toml');
       modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
+      const writeFile = vi.fn(async () => {});
       const stringifyFns = { world: () => 'content', entity: () => '' };
-      const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {
+        global: {},
+        anchors: {},
+        entity: [{ name: 'real' }],
+        trigger: [{ condition: 'on_destroyed', entity: 'phantom' }],
+      });
 
       const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
-      expect(result.warnings).toBeDefined();
+      expect(writeFile).toHaveBeenCalledTimes(1);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings.length).toBeGreaterThan(0);
+      expect(result.warnings.some((w) => w.includes('phantom'))).toBe(true);
     });
   });
 
@@ -240,7 +259,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', { global: {}, anchors: {} });
 
       await saveFlow.saveActive();
       expect(writeFile).toHaveBeenCalledTimes(1);
@@ -256,7 +275,7 @@ describe('SaveFlow', () => {
       const writeFile = async () => { throw new Error('disk full'); };
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', { global: {}, anchors: {} });
 
       const result = await saveFlow.saveActive();
       expect(result.ok).toBe(false);
@@ -298,7 +317,7 @@ describe('SaveFlow', () => {
 
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', { global: {}, anchors: {} });
 
       await saveFlow.saveActive();
       expect(modeShell.getUndoHistory('World', 'assets/worlds/test.toml')).toEqual([]);
@@ -316,7 +335,7 @@ describe('SaveFlow', () => {
 
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
-      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', { global: {}, anchors: {} });
 
       await saveFlow.saveActive();
       expect(fired).toEqual(['assets/worlds/test.toml']);
@@ -335,7 +354,7 @@ describe('SaveFlow', () => {
 
       const stringifyFns = { world: () => '', entity: () => 'E' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
-      saveFlow.setContent('Entity', 'assets/entities/a.toml', {});
+      saveFlow.setContent('Entity', 'assets/entities/a.toml', { tags: ['ship'] });
 
       await saveFlow.saveActive();
       expect(fired).toEqual(['assets/entities/a.toml']);

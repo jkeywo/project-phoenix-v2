@@ -1209,19 +1209,15 @@ pub enum ClientMessage {
     /// client's game-over overlay (`client.html`) sends it as well as the
     /// host page, so it is deliberately NOT gated to the host token.
     ReturnToLobby,
-    /// Sent from the server UI when the host selects a scenario after
-    /// returning to scenario selection from GameOver. Tells the server
-    /// to finalize the selection and broadcast lobby state to clients.
-    /// Only the host's scenario panel sends this, so the handler accepts it
-    /// solely from `console_bridge::LOCAL_CONSOLE_TOKEN` (issue #822).
-    ConfirmScenario,
     /// Pre-scenario selection request: the sender proposes a scenario by its
     /// stable catalog id (issue #755). Any participant — the host page's own
     /// UI *or* a connected phone — may send it; the host-runtime arbiter
     /// applies first-valid-wins against the pre-load catalog and ignores it
-    /// once a scenario is already locked. Deliberately NOT gated to the host
-    /// token (unlike `ConfirmScenario`): both server and phone participants
-    /// can make the first valid selection (no voting, no captain authority).
+    /// once a scenario is already locked. Deliberately NOT gated to any single
+    /// token: both server and phone participants can make the first valid
+    /// selection (no voting, no captain authority). Also drives the second
+    /// round after Game Over — the return re-enters this same arbiter flow
+    /// (issue #756).
     SelectScenario {
         scenario_id: String,
     },
@@ -1587,11 +1583,11 @@ pub enum ServerMessage {
         reason: String,
     },
     /// Broadcast when all players return to the lobby from the GameOver screen.
-    /// Clients should switch back to the lobby panel.
+    /// Clients should switch back to the lobby panel. Station claims and ready
+    /// state are cleared for every player (issue #756); the accompanying
+    /// per-player `StationAssigned { station: None }` broadcasts carry the
+    /// cleared seats.
     ReturnedToLobby,
-    /// Broadcast when the host selects a scenario from the scenario selection
-    /// screen. Clients should transition from waiting to the lobby view.
-    ScenarioLoaded,
     /// Pre-scenario catalog + current lock state, delivered to connected
     /// phones before any world is loaded (issue #755). Phones have no WASM
     /// accessor, so the host-runtime arbiter synthesizes this message: it is

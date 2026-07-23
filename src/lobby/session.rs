@@ -213,6 +213,16 @@ impl SessionManager {
             p.ready = false;
         }
     }
+
+    /// Clear every player's held station (e.g. on `ReturnToLobby` for a fresh
+    /// round, issue #756). Identity fields (token / name / connected /
+    /// last_rating) are untouched — only the seat claim is released so the
+    /// next round starts from an empty roster.
+    pub fn clear_all_stations(&mut self) {
+        for p in &mut self.players {
+            p.station = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -651,6 +661,24 @@ mod tests {
         sm.reset_ready();
         assert!(!sm.players()[0].ready);
         assert!(!sm.players()[1].ready);
+    }
+
+    #[test]
+    fn clear_all_stations_releases_every_seat_but_keeps_identity() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.set_station("t1", Some(StationId("captain".into())));
+        sm.set_station("t2", Some(StationId("helm".into())));
+        sm.clear_all_stations();
+        assert_eq!(sm.station_for_token("t1"), None);
+        assert_eq!(sm.station_for_token("t2"), None);
+        // Identity preserved: both players still registered and connected.
+        assert_eq!(sm.players().len(), 2);
+        assert_eq!(sm.players()[0].name, "Alice");
+        assert!(sm.players()[0].connected);
+        assert_eq!(sm.players()[1].name, "Bob");
+        assert!(sm.players()[1].connected);
     }
 
     #[test]

@@ -289,10 +289,6 @@ mod tests {
                 ClientMessage::ReturnToLobby,
             ),
             (
-                ClientMessageDiscriminants::ConfirmScenario,
-                ClientMessage::ConfirmScenario,
-            ),
-            (
                 ClientMessageDiscriminants::SelectScenario,
                 ClientMessage::SelectScenario {
                     scenario_id: "default".into(),
@@ -655,10 +651,6 @@ mod tests {
             (
                 ServerMessageDiscriminants::ReturnedToLobby,
                 ServerMessage::ReturnedToLobby,
-            ),
-            (
-                ServerMessageDiscriminants::ScenarioLoaded,
-                ServerMessage::ScenarioLoaded,
             ),
             (
                 ServerMessageDiscriminants::ScenarioCatalog,

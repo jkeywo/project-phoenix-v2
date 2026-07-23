@@ -425,23 +425,13 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /**
-   * Confirm the scenario re-selection after ReturnToLobby (issue #822).
-   *
-   * Only the host page's scenario panel sends this; the server additionally
-   * gates it to the host local-console token.
-   */
-  confirm_scenario: (a, send) => {
-    send('ConfirmScenario');
-  },
-
-  /**
    * Propose a scenario in the QR-first pre-scenario flow (issue #755).
    *
    * Sent by BOTH the host page's own selection UI and connected phones over
    * the same action map. The host-runtime arbiter applies first-valid-wins
-   * against the pre-load catalog; there is no token gate (unlike
-   * confirm_scenario) so server or phone participants alike can make the
-   * first valid selection.
+   * against the pre-load catalog; there is no token gate so server or phone
+   * participants alike can make the first valid selection. After Game Over the
+   * return re-enters this same flow for the second round (issue #756).
    */
   select_scenario: (a, send) => {
     if (!a.scenario_id) return;

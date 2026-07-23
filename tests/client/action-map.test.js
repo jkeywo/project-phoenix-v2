@@ -8,14 +8,13 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 39 expected action keys', () => {
+  it('contains exactly the 38 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'charge_blaster_cancel',
       'charge_blaster_start',
       'clear_comms',
       'clear_navigation_waypoint',
-      'confirm_scenario',
       'dispatch_repair_team',
       'fire_blaster',
       'fire_phaser',
@@ -696,24 +695,15 @@ describe('clear_navigation_waypoint', () => {
   });
 });
 
-// ── return_to_lobby / confirm_scenario (issue #822) ───────────────────────────
-// Host-page lobby actions now route through the same action map as everything
-// else; each maps to its bare ClientMessage variant.
+// ── return_to_lobby (issue #822 / #756) ───────────────────────────────────────
+// Host-page lobby actions route through the same action map as everything else;
+// each maps to its bare ClientMessage variant.
 
 describe('return_to_lobby', () => {
   it('sends the bare ReturnToLobby client message', () => {
     const send = mkSend();
     ACTION_MAP.return_to_lobby({ action: 'return_to_lobby' }, send);
     expect(send).toHaveBeenCalledWith('ReturnToLobby');
-    expect(send).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('confirm_scenario', () => {
-  it('sends the bare ConfirmScenario client message', () => {
-    const send = mkSend();
-    ACTION_MAP.confirm_scenario({ action: 'confirm_scenario' }, send);
-    expect(send).toHaveBeenCalledWith('ConfirmScenario');
     expect(send).toHaveBeenCalledTimes(1);
   });
 });

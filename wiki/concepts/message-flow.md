@@ -59,7 +59,6 @@ cursor and calling the matching pure handler in `src/lobby/handler.rs`:
 | `handle_identify_system` | `Identify` | Lobby / Loading / InProgress (mid-game reconnect) |
 | `handle_set_name_system` | `SetName` | Lobby / Loading |
 | `handle_return_to_lobby_system` | `ReturnToLobby` | GameOver |
-| `handle_confirm_scenario_system` | `ConfirmScenario` | Lobby |
 | `handle_select_station_system` | `SelectStation` | Lobby / Loading / InProgress |
 | `handle_release_station_system` | `ReleaseStation` | Lobby / Loading / InProgress |
 | `handle_set_ready_system` | `SetReady` | Lobby / Loading / InProgress |

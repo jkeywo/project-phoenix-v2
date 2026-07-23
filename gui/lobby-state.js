@@ -110,15 +110,28 @@ export class LobbyState {
         // takes over (issue #755).
         this.scenarioCatalog = null;
         break;
-      case 'ScenarioCatalog':
+      case 'ScenarioCatalog': {
         // QR-first pre-scenario catalog + current lock state, synthesized by
         // the host before world load (issue #755).
-        this.scenarioCatalog = Array.isArray(d.scenarios) ? d.scenarios : [];
         this.selectionLocked = {
           scenario_id: d.locked_scenario != null ? d.locked_scenario : null,
           template_path: d.locked_ship != null ? d.locked_ship : null,
         };
+        const bothLocked =
+          this.selectionLocked.scenario_id != null &&
+          this.selectionLocked.template_path != null;
+        if (bothLocked) {
+          // Second-round selection is complete and the host is reusing the
+          // already-loaded world (issue #756): no fresh Welcome will reach an
+          // already-connected phone, so this fully-locked catalog is the
+          // "selection done" signal — leave the picker and resume the lobby.
+          this.scenarioCatalog = null;
+          this.waitingForScenario = false;
+        } else {
+          this.scenarioCatalog = Array.isArray(d.scenarios) ? d.scenarios : [];
+        }
         break;
+      }
       case 'PlayerJoined': {
         const player = normalisePlayer(d.player || {});
         const idx = this.players.findIndex(p => p.token === player.token);
@@ -174,9 +187,6 @@ export class LobbyState {
         this.gameOverReason = null;
         this.countdownSecs = 0;
         this.waitingForScenario = true;
-        break;
-      case 'ScenarioLoaded':
-        this.waitingForScenario = false;
         break;
       default:
         // Not relevant to the lobby model.

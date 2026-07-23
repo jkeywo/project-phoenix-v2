@@ -176,14 +176,6 @@ describe('apply phase transitions', () => {
     expect(s.waitingForScenario).toBe(true);
   });
 
-  it('ScenarioLoaded clears waitingForScenario', () => {
-    const s = new LobbyState();
-    s.waitingForScenario = true;
-    s.apply({ type: 'ScenarioLoaded' });
-    expect(s.waitingForScenario).toBe(false);
-    expect(s.phase).toBe('Lobby');
-  });
-
   it('Welcome clears waitingForScenario via replaceFrom', () => {
     const s = new LobbyState();
     s.waitingForScenario = true;
@@ -254,6 +246,37 @@ describe('ScenarioCatalog (QR-first pre-scenario picker, issue #755)', () => {
     });
     expect(s.scenarioCatalog).toBeNull();
     expect(s.showScenarioPicker()).toBe(false);
+  });
+
+  // Second round after Game Over (issue #756): ReturnedToLobby re-shows the
+  // picker via a re-broadcast catalog, then a fully-locked catalog is the
+  // "selection done" signal that resumes the lobby (replacing ScenarioLoaded)
+  // for phones reusing the already-loaded world — no fresh Welcome arrives.
+  it('second round: ReturnedToLobby then re-broadcast catalog re-renders the picker', () => {
+    const s = new LobbyState();
+    s.phase = 'GameOver';
+    s.apply({ type: 'ReturnedToLobby' });
+    expect(s.waitingForScenario).toBe(true);
+    expect(s.showScenarioPicker()).toBe(false);
+    // Host re-broadcasts the (unlocked) catalog after the return.
+    s.apply(catalogMsg());
+    expect(s.showScenarioPicker()).toBe(true);
+    expect(s.scenarioCatalog).toHaveLength(1);
+  });
+
+  it('second round: a fully-locked catalog resumes the lobby (no Welcome needed)', () => {
+    const s = new LobbyState();
+    s.phase = 'GameOver';
+    s.apply({ type: 'ReturnedToLobby' });
+    s.apply(catalogMsg());
+    expect(s.showScenarioPicker()).toBe(true);
+    // driveWorldLoad broadcasts the completed lock → phone leaves the picker
+    // and the waiting overlay, resuming the lobby to re-crew for the round.
+    s.apply(catalogMsg('default', 'assets/entities/alliance_cruiser.toml'));
+    expect(s.scenarioCatalog).toBeNull();
+    expect(s.showScenarioPicker()).toBe(false);
+    expect(s.waitingForScenario).toBe(false);
+    expect(s.phase).toBe('Lobby');
   });
 });
 

@@ -1914,10 +1914,6 @@
 
     let selectedScenario = null;
     let wasmReady = false;
-    /** True after ReturnToLobby from GameOver shows the scenario panel
-     *  for re-selection. Scenario button clicks re-confirm instead of
-     *  starting a new server (host-only ConfirmScenario path, issue #822). */
-    let _returnedToSelection = false;
 
     /** Player-ship template locked pre-load by the arbiter — finishInit uses it
      *  directly instead of showing the post-load ship picker (issue #755). */
@@ -1928,6 +1924,12 @@
     let _preSelection = { scenario_id: null, template_path: null };
     let _catalogBuilt = false;
     let _worldLoadStarted = false;
+    /** True once the world has been loaded into the running Bevy/WASM instance
+     *  (set in finishInit). wasm_init throws-to-unwind and runs exactly once, so
+     *  a second round reuses the already-loaded world rather than reloading it
+     *  (issue #756). driveWorldLoad checks this to route round 2 without a page
+     *  reload and without re-running the one-shot preload. */
+    let _worldLoadedIntoBevy = false;
 
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
@@ -1980,10 +1982,21 @@
         if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
       }
     }
+    // Second-round resume signal (issue #756): broadcast the fully-locked
+    // catalog even after _worldLoadStarted latches. lobby-state.js treats a
+    // catalog whose scenario AND ship are both locked as "selection done" and
+    // resumes the lobby — the replacement for the retired ScenarioLoaded signal
+    // for already-connected phones reusing the loaded world.
+    function broadcastSelectionComplete() {
+      const json = JSON.stringify(scenarioCatalogMessage());
+      for (const [, c] of tokenConns) {
+        if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
+      }
+    }
 
     // ── Arbiter entry points (first-valid-wins) ───────────────────────────
     function arbiterSelectScenario(scenarioId) {
-      if (_returnedToSelection || _worldLoadStarted || !scenarioId) return;
+      if (_worldLoadStarted || !scenarioId) return;
       const r = window.scenarioArbiter.selectScenario(_preSelection, _scenarioCatalog, scenarioId);
       if (r.outcome !== 'accepted') return;
       _preSelection = r.selection;
@@ -1991,13 +2004,19 @@
       broadcastScenarioCatalog();
     }
     function arbiterSelectShip(templatePath) {
-      if (_returnedToSelection || _worldLoadStarted || !templatePath) return;
+      if (_worldLoadStarted || !templatePath) return;
       const r = window.scenarioArbiter.selectPlayerShip(_preSelection, _scenarioCatalog, templatePath);
       if (r.outcome !== 'accepted') return;
       _preSelection = r.selection;
       renderScenarioLockState();
-      broadcastScenarioCatalog();
-      if (window.scenarioArbiter.isComplete(_preSelection)) driveWorldLoad();
+      // When the selection completes, driveWorldLoad() (for round 1) or
+      // broadcastSelectionComplete() inside it (round 2) informs phones — so
+      // don't also broadcast an intermediate fully-locked catalog here.
+      if (window.scenarioArbiter.isComplete(_preSelection)) {
+        driveWorldLoad();
+      } else {
+        broadcastScenarioCatalog();
+      }
     }
     // Published for the earlier-script __localConsoleSend shim (host's own UI
     // routes select_scenario/select_player_ship through the same action map).
@@ -2015,6 +2034,16 @@
       resetJoinQrLayer(); // panel gone — drop the QR back to its normal layer
       showLobbyPanel();
       startMenuMusic();
+      if (_worldLoadedIntoBevy) {
+        // Second round after Game Over (issue #756): wasm_init already ran (it
+        // throws-to-unwind and only runs once), and ReturnToLobby already put
+        // the running Bevy back into the Lobby phase. Reuse the loaded world —
+        // no page reload, no re-preload. Just tell already-connected phones the
+        // selection is locked so they leave the picker/waiting overlay and
+        // resume the lobby to re-crew for the next round.
+        broadcastSelectionComplete();
+        return;
+      }
       if (wasmReady) startPhoenix();
     }
 
@@ -2043,19 +2072,11 @@
           btn.dataset.scenarioId = sc.id;
           btn.textContent = sc.label || sc.id;
           btn.addEventListener('click', function () {
-            if (_returnedToSelection) {
-              // Re-selection after GameOver: host-only confirm, reuse the loaded
-              // world (issue #822 path preserved). No fresh world load.
-              selectedScenario = sc.world;
-              _returnedToSelection = false;
-              document.getElementById('scenario-panel').style.display = 'none';
-              resetJoinQrLayer(); // panel gone — drop the QR back to its normal layer
-              showLobbyPanel();
-              startMenuMusic();
-              window.__sendAction(JSON.stringify({ action: 'confirm_scenario' }));
-            } else {
-              window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
-            }
+            // Round 1 and every subsequent round after Game Over route through
+            // the same arbiter (issue #756): the second round re-enters
+            // select_scenario → arbiter → driveWorldLoad, reusing the loaded
+            // world without a page reload.
+            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
           });
           worldList.appendChild(btn);
         });
@@ -2463,6 +2484,10 @@ function handleConfigRequest(path) {
 function finishInit() {
   if (_finishInitCalled) return;
   _finishInitCalled = true;
+  // The world is now being loaded into the (one-shot) WASM/Bevy instance.
+  // A later Game Over → return re-enters driveWorldLoad, which checks this to
+  // reuse the running instance for the second round (issue #756).
+  _worldLoadedIntoBevy = true;
   const spinner = document.getElementById('wasm-spinner');
   
   window.wasm_init = wasmBindings.wasm_init;
@@ -2498,21 +2523,22 @@ function finishInit() {
   // ── Return to Lobby (GameOver overlay button) ─────────────────────────
   document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
     window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
-    // Show the scenario selection panel so the host can pick a new (or same)
-    // scenario. The lobby panel stays hidden until the host confirms.
+    // Return the server screen to the shared pre-scenario selection (issue
+    // #756): show the scenario panel again; the lobby panel stays hidden until
+    // the (re)selection completes and driveWorldLoad reuses the loaded world.
     document.getElementById('scenario-panel').style.display = '';
     document.getElementById('lobby-panel').style.display = 'none';
-    _returnedToSelection = true;
-    // Reset the pre-load selection to its initial (empty) shape and clear the
+    // Reset the first-valid-wins selection to its empty shape and clear the
     // world-load latch so renderScenarioLockState() rebuilds the scenario-stage
     // buttons. The finished round left _preSelection fully locked and the
-    // "both locked" branch removed every .world-btn, so without this reset the
-    // re-shown panel would carry no clickable scenarios and the #822
-    // re-selection (confirm_scenario) path could never fire. The buttons honour
-    // _returnedToSelection to send confirm_scenario instead of a fresh load.
+    // "both locked" branch removed every .world-btn. Round 2 now re-enters the
+    // SAME arbiter flow as round 1 — no legacy confirm bypass.
     _preSelection = { scenario_id: null, template_path: null };
     _worldLoadStarted = false;
     renderScenarioLockState();
+    // Re-broadcast the (now-unlocked) catalog so already-connected phones
+    // return to the shared pre-scenario picker for the next round (issue #756).
+    broadcastScenarioCatalog();
     // Re-lift the join QR above the freshly re-shown scenario panel (AC1).
     showJoinQrOverPanel();
     startMenuMusic();

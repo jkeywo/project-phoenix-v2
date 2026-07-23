@@ -182,10 +182,10 @@ entities:
 
   - component: round-return-controller
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Round Return Controller
-      summary: Returns every connected player and the server screen from GameOver to the common pre-scenario selection lobby. Connection and name persist, while station claims and ready state clear before the next selection; prior round selection clears only when return is complete.
+      summary: Returns every connected player and the server screen from GameOver to the common pre-scenario selection lobby. Connection and name persist, while station claims and ready state clear before the next selection; the second round re-enters the shared scenario-ship-selection-arbiter flow, reusing the already-loaded world without a page reload.
     architecture:
       kind: lifecycle-controller
       authority: authoritative
@@ -194,34 +194,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/handler.rs, client.html, server.html]
-      messages: [ReturnToLobby, ReturnedToLobby]
-      tests: [cargo test]
-
-  - component: legacy-scenario-confirmation-signal
-    core:
-      status: partially-implemented
-      confidence: confirmed
-      title: Legacy Scenario Confirmation Signal
-      summary: Current Lobby signal that broadcasts ScenarioLoaded without carrying a scenario identifier because the host has already loaded the world.
-    architecture:
-      kind: compatibility-adapter
-      authority: authoritative
-      reads: [game-phase-state]
-      produces: [lobby-session-replica]
-      runs_in: [host-browser-runtime]
-    implementation:
-      status: declared
-      paths: [src/lobby/handler.rs, src/server/bridge.rs, server.html]
-      messages: [ConfirmScenario, ScenarioLoaded]
-      tests: [cargo test]
-    exceptions:
-      - rule: scenario-selection-must-be-explicit
-        scope: [legacy-scenario-confirmation-signal]
-        rationale: Current host-page loading predates the shared pre-scenario selection flow.
-        temporary: true
-        removal_condition: [SelectScenario and SelectPlayerShip are admitted by scenario-ship-selection-arbiter.]
-        approval_status: accepted
+      paths: [src/lobby/handler.rs, src/lobby/session.rs, client.html, server.html]
+      messages: [ReturnToLobby, ReturnedToLobby, StationAssigned]
+      tests: [cargo test, npx vitest run]
 
   - component: game-start-entity-lifecycle
     core:

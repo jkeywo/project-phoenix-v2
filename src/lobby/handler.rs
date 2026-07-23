@@ -483,9 +483,13 @@ pub(crate) fn handle_set_ready(
     }
 }
 
-/// Handle `ReturnToLobby`: from `GameOver`, reset ready flags + pending ratings,
-/// broadcast the cleared readies and `ReturnedToLobby`, and transition to
-/// `Lobby`. No-op in any other phase.
+/// Handle `ReturnToLobby`: from `GameOver`, return every participant to shared
+/// pre-scenario selection for another round (issue #756). Clears each player's
+/// station claim and ready flag plus all pending ratings, broadcasts the
+/// cleared seats (`StationAssigned { station: None }`) and readies
+/// (`ReadyChanged { ready: false }`) per player, emits `ReturnedToLobby`, and
+/// transitions to `Lobby`. Player identity — token, name, connection, and
+/// `last_rating` — is preserved. No-op in any other phase.
 pub(crate) fn handle_return_to_lobby(
     sessions: &mut SessionManager,
     phase: GamePhase,
@@ -494,13 +498,36 @@ pub(crate) fn handle_return_to_lobby(
     let mut new_phase: Option<GamePhase> = None;
 
     if phase == GamePhase::GameOver {
+        // Capture the roster (token + whether it held a seat) before mutating,
+        // so we broadcast a station-release only for players who actually held
+        // a station this round.
+        let roster: Vec<(String, bool)> = sessions
+            .players()
+            .iter()
+            .map(|p| (p.token.clone(), p.station.is_some()))
+            .collect();
+
         sessions.reset_ready();
+        sessions.clear_all_stations();
         sessions.clear_all_pending_ratings();
-        for p in sessions.players() {
+
+        for (token, had_station) in &roster {
+            if *had_station {
+                // Authoritative seat release (AGENTS.md #5): clients follow the
+                // server's cleared roster. Mirrors `handle_release_station`.
+                outbound.push((
+                    Target::All,
+                    ServerMessage::StationAssigned {
+                        token: token.clone(),
+                        station: None,
+                        station_id: None,
+                    },
+                ));
+            }
             outbound.push((
                 Target::All,
                 ServerMessage::ReadyChanged {
-                    token: p.token.clone(),
+                    token: token.clone(),
                     ready: false,
                 },
             ));
@@ -511,24 +538,6 @@ pub(crate) fn handle_return_to_lobby(
 
     LobbyHandlerResult {
         new_phase,
-        outbound,
-        station_rating_update: None,
-        countdown_action: None,
-    }
-}
-
-/// Handle `ConfirmScenario`: broadcast `ScenarioLoaded` during Lobby.
-///
-/// Token-gated to the host page (issue #822): the scenario re-selection panel
-/// on `server.html` is the only sender, so the message is only honoured from
-/// `console_bridge::LOCAL_CONSOLE_TOKEN`. Any network token is ignored.
-pub(crate) fn handle_confirm_scenario(token: &str, phase: GamePhase) -> LobbyHandlerResult {
-    let mut outbound = Vec::new();
-    if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN && phase == GamePhase::Lobby {
-        outbound.push((Target::All, ServerMessage::ScenarioLoaded));
-    }
-    LobbyHandlerResult {
-        new_phase: None,
         outbound,
         station_rating_update: None,
         countdown_action: None,
@@ -753,7 +762,6 @@ mod tests {
                 ship_stations,
             ),
             ClientMessage::ReturnToLobby => handle_return_to_lobby(sessions, phase),
-            ClientMessage::ConfirmScenario => handle_confirm_scenario(token, phase),
             ClientMessage::SetStationRating { rating_name } => {
                 handle_set_station_rating(token, rating_name, sessions, phase, ship_stations)
             }
@@ -1802,6 +1810,9 @@ max_level = 4
         sessions.register("t2".into(), "Bob".into()).unwrap();
         sessions.set_ready("t1", true);
         sessions.set_ready("t2", true);
+        // Both players held a station this round; the return must release them.
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_station("t2", Some(StationId("helm".into())));
 
         let result = pm(
             "t1",
@@ -1816,6 +1827,17 @@ max_level = 4
             !sessions.players().iter().any(|p| p.ready),
             "ready flags must be cleared on return to lobby"
         );
+        // Station claims must be cleared for every player (issue #756).
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            None,
+            "t1's station must be cleared on return to lobby"
+        );
+        assert_eq!(
+            sessions.station_for_token("t2"),
+            None,
+            "t2's station must be cleared on return to lobby"
+        );
         for token in ["t1", "t2"] {
             assert!(
                 result.outbound.iter().any(|(target, m)| {
@@ -1824,12 +1846,60 @@ max_level = 4
                 }),
                 "expected ReadyChanged(false) broadcast for {token}"
             );
+            assert!(
+                result.outbound.iter().any(|(target, m)| {
+                    matches!(target, Target::All)
+                        && matches!(
+                            m,
+                            ServerMessage::StationAssigned { token: t, station: None, station_id: None }
+                            if t == token
+                        )
+                }),
+                "expected StationAssigned(None) broadcast for {token}"
+            );
         }
         assert!(
             result.outbound.iter().any(|(target, m)| {
                 matches!(target, Target::All) && matches!(m, ServerMessage::ReturnedToLobby)
             }),
             "expected ReturnedToLobby broadcast"
+        );
+    }
+
+    /// Player identity (token / name / connection) survives the return so the
+    /// second round starts with the same roster — only seats + ready clear
+    /// (issue #756).
+    #[test]
+    fn return_to_lobby_preserves_player_identity() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_station("t1", Some(StationId("captain".into())));
+
+        let result = pm(
+            "t1",
+            &ClientMessage::ReturnToLobby,
+            &mut sessions,
+            GamePhase::GameOver,
+            None,
+        );
+
+        assert_eq!(result.new_phase, Some(GamePhase::Lobby));
+        assert_eq!(sessions.players().len(), 2, "roster must be preserved");
+        let alice = sessions
+            .players()
+            .iter()
+            .find(|p| p.token == "t1")
+            .expect("t1 must still be registered");
+        assert_eq!(alice.name, "Alice", "name must be preserved");
+        assert!(alice.connected, "connection must be preserved");
+        assert_eq!(alice.station, None, "seat must be cleared");
+        // A player who held no seat gets no StationAssigned release.
+        assert!(
+            !result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::StationAssigned { token, .. } if token == "t2"
+            )),
+            "seatless player must not receive a StationAssigned release"
         );
     }
 
@@ -1854,68 +1924,9 @@ max_level = 4
         );
     }
 
-    #[test]
-    fn confirm_scenario_from_host_token_during_lobby_broadcasts_scenario_loaded() {
-        let mut sessions = sessions_with("t1", "Alice");
-        let result = pm(
-            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
-            &ClientMessage::ConfirmScenario,
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        assert!(result.new_phase.is_none());
-        assert!(result.outbound.iter().any(|(target, m)| {
-            matches!(target, Target::All) && matches!(m, ServerMessage::ScenarioLoaded)
-        }));
-    }
-
-    /// Token gate (issue #822): only the host page's scenario panel sends
-    /// `ConfirmScenario`, so a network player token must be ignored.
-    #[test]
-    fn confirm_scenario_from_network_token_is_rejected() {
-        let mut sessions = sessions_with("t1", "Alice");
-        let result = pm(
-            "t1",
-            &ClientMessage::ConfirmScenario,
-            &mut sessions,
-            GamePhase::Lobby,
-            None,
-        );
-        assert!(result.new_phase.is_none());
-        assert!(
-            result.outbound.is_empty(),
-            "ConfirmScenario from a non-host token must be a no-op"
-        );
-    }
-
-    #[test]
-    fn confirm_scenario_outside_lobby_is_noop() {
-        let mut sessions = sessions_with("t1", "Alice");
-        for phase in [
-            GamePhase::Loading,
-            GamePhase::InProgress,
-            GamePhase::GameOver,
-        ] {
-            let phase_copy = phase.clone();
-            let result = pm(
-                crate::console_bridge::LOCAL_CONSOLE_TOKEN,
-                &ClientMessage::ConfirmScenario,
-                &mut sessions,
-                phase,
-                None,
-            );
-            assert!(
-                result.outbound.is_empty(),
-                "no outbound for phase {phase_copy:?}"
-            );
-        }
-    }
-
     /// The phone client's game-over overlay sends `ReturnToLobby`
-    /// (`client.html` `initReturnToLobby`), so unlike `ConfirmScenario` it is
-    /// deliberately NOT gated to the host token — any connected player may
-    /// trigger the return.
+    /// (`client.html` `initReturnToLobby`), so it is deliberately NOT gated to
+    /// the host token — any connected player may trigger the return.
     #[test]
     fn return_to_lobby_from_network_token_is_accepted() {
         let mut sessions = sessions_with("t1", "Alice");

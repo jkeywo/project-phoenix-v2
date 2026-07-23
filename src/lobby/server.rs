@@ -102,9 +102,9 @@ pub struct OutboundMessage {
 // ── System set ─────────────────────────────────────────────────────────────
 
 /// Ordering anchor for every lobby `Update` system: `handle_disconnect` runs
-/// first, then the eight per-variant message systems (Identify / SetName /
-/// ReturnToLobby / ConfirmScenario plus the four station-management systems),
-/// then `tick_countdown → update_game_state_cache`. Downstream systems that must
+/// first, then the per-variant message systems (Identify / SetName /
+/// ReturnToLobby plus the four station-management systems), then
+/// `tick_countdown → update_game_state_cache`. Downstream systems that must
 /// observe the post-lobby world state order themselves with
 /// `.after(LobbySystemSet)`.
 #[derive(bevy::ecs::schedule::SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -193,16 +193,6 @@ impl Plugin for LobbyPlugin {
                     .after(handle_disconnect)
                     .before(tick_countdown)
                     .run_if(in_state(GamePhase::GameOver)),
-            )
-            // ConfirmScenario gates on Lobby (scenario picker confirmation)
-            // and on the host local-console token (issue #822).
-            .add_systems(
-                Update,
-                handle_confirm_scenario_system
-                    .in_set(LobbySystemSet)
-                    .after(handle_disconnect)
-                    .before(tick_countdown)
-                    .run_if(in_state(GamePhase::Lobby)),
             );
     }
 }
@@ -617,59 +607,6 @@ pub fn handle_return_to_lobby_system(
             );
         } else {
             let result = lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone());
-            let mut fallback_ratings = ActiveStationRatings::default();
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                None,
-                None,
-                &mut fallback_ratings,
-                countdown.as_deref_mut(),
-            );
-        }
-    }
-}
-
-/// Per-variant system for `ClientMessage::ConfirmScenario` (issue #734). Gated
-/// on Lobby. Needs almost nothing, but still routes its outbound
-/// (`ScenarioLoaded`) through `apply_result`. The pure handler additionally
-/// gates on the sender token (issue #822): only the host page's
-/// `LOCAL_CONSOLE_TOKEN` may confirm a scenario.
-pub fn handle_confirm_scenario_system(
-    mut inbound: MessageReader<InboundMessage>,
-    state: Res<State<GamePhase>>,
-    mut next_state: ResMut<NextState<GamePhase>>,
-    mut outbox: ResMut<LobbyOutbox>,
-    mut ship_query: Query<
-        (
-            &ShipConfigComponent,
-            &mut ShipSystemControlSources,
-            &mut ActiveStationRatings,
-        ),
-        With<crate::server_app::LocalShip>,
-    >,
-    mut countdown: Option<ResMut<CountdownTimer>>,
-) {
-    let phase = state.get().clone();
-    let events: Vec<_> = inbound.read().cloned().collect();
-    for ev in events {
-        let ClientMessage::ConfirmScenario = &ev.msg else {
-            continue;
-        };
-        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_confirm_scenario(&ev.token, phase.clone());
-            apply_result(
-                result,
-                &mut outbox,
-                &mut next_state,
-                Some(cfg),
-                Some(&mut cs),
-                &mut active_ratings,
-                countdown.as_deref_mut(),
-            );
-        } else {
-            let result = lobby_handler::handle_confirm_scenario(&ev.token, phase.clone());
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,

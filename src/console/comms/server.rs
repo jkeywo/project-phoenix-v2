@@ -863,6 +863,7 @@ mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             });
@@ -1326,6 +1327,7 @@ mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             });
@@ -1518,7 +1520,8 @@ mod tests {
                     | TriggerAction::SpawnEntity { .. }
                     | TriggerAction::DestroyEntity { .. }
                     | TriggerAction::AddFactionEnemy { .. }
-                    | TriggerAction::RemoveFactionEnemy { .. } => {}
+                    | TriggerAction::RemoveFactionEnemy { .. }
+                    | TriggerAction::ResetTrigger { .. } => {}
                 }
             }
             variants
@@ -1680,6 +1683,7 @@ mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             });
@@ -2455,6 +2459,7 @@ mod tests {
                     speaker: Some("Dr. Myst".into()),
                     trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
                 }),
+                display_name: None,
             },
             fired: false,
         });
@@ -2489,6 +2494,7 @@ mod tests {
                 thread_id: None,
                 urgent: false,
                 root_follow_up: None,
+                display_name: None,
             },
             fired: false,
         });

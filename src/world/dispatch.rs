@@ -183,9 +183,15 @@ pub enum ActionCmd {
         directive: AiDirective,
         utility: UtilityConfig,
         source: ObjectiveSource,
+        /// Sub-world layer that authored the trigger adding this objective, or
+        /// `None` for base-world triggers (issue #751). The applier records
+        /// layer-owned objective ids so `UnloadWorld` removes them.
+        origin_layer: Option<String>,
     },
     /// Mark an objective complete. A no-op for unknown / non-Active ids.
     CompleteObjective { id: String },
+    /// Re-arm the trigger(s) with the given authored id (issue #751).
+    ResetTrigger { id: String },
     /// Mark an objective failed. A no-op for unknown / non-Active ids.
     FailObjective { id: String },
     /// Add or update a float modifier on the entity with `uuid`.
@@ -387,6 +393,11 @@ pub fn dispatch_action(action: &TriggerAction, context: &DispatchContext) -> Dis
                 .push(ActionCmd::UnloadWorld { path: path.clone() });
         }
 
+        TriggerAction::ResetTrigger { id } => {
+            out.commands
+                .push(ActionCmd::ResetTrigger { id: id.clone() });
+        }
+
         // World-flag actions — the four mutations of a named flag in a
         // layer-resolved store — are handled by `dispatch_world_flag_action`
         // (issue #713). Same routing shape as the mission-state arm above.
@@ -456,6 +467,7 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
                 directive: directive.clone(),
                 utility: utility.clone(),
                 source: source.clone(),
+                origin_layer: context.origin_layer.clone(),
             });
         }
 
@@ -1216,6 +1228,7 @@ mod tests {
                 directive: AiDirective::default(),
                 utility: UtilityConfig::default(),
                 source: ObjectiveSource::default(),
+                origin_layer: None,
             }]
         );
         assert!(out.warnings.is_empty());
@@ -2460,6 +2473,7 @@ mod tests {
                 directive: AiDirective::default(),
                 utility: UtilityConfig::default(),
                 source: ObjectiveSource::default(),
+                origin_layer: None,
             }]
         );
         assert!(out.warnings.is_empty());

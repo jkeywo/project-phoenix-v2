@@ -39,8 +39,12 @@ pub struct CommsTemplateState {
 /// A comms template that fired in response to world events.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredCommsTemplate {
-    /// The sender entity name from the template.
+    /// The sender entity **reference id** from the template (resolved to the
+    /// sender UUID; used for hailing/range/contact lookup).
     pub from: String,
+    /// Optional player-facing sender display text, independent of `from`
+    /// (issue #751). `None` falls back to `from` at injection time.
+    pub display_name: Option<String>,
     /// The root dialogue node to inject into the inbox.
     pub node: CommsDialogueNode,
     /// Thread_id from the template, if set. When absent a UUID is generated
@@ -131,6 +135,7 @@ pub fn evaluate_comms_templates(
             state.fired = true;
             results.push(FiredCommsTemplate {
                 from: state.template.from.clone(),
+                display_name: state.template.display_name.clone(),
                 node: state.template.node.clone(),
                 thread_id: state.template.thread_id.clone(),
                 urgent: state.template.urgent,
@@ -313,6 +318,7 @@ mod tests {
             thread_id: None,
             urgent: false,
             root_follow_up: None,
+            display_name: None,
         });
         let states = comms_template_states_from_world(&world);
         assert_eq!(states.len(), 1);
@@ -338,6 +344,7 @@ mod tests {
                 thread_id: None,
                 urgent: false,
                 root_follow_up: None,
+                display_name: None,
             },
             fired: false,
         }];
@@ -369,6 +376,7 @@ mod tests {
                 thread_id: None,
                 urgent: false,
                 root_follow_up: None,
+                display_name: None,
             },
             fired: false,
         }];
@@ -401,6 +409,7 @@ mod tests {
                 thread_id: None,
                 urgent: false,
                 root_follow_up: None,
+                display_name: None,
             },
             fired: false,
         }];

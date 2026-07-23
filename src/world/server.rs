@@ -105,6 +105,14 @@ pub struct WorldRuntime {
     /// `parent:` from this layer walks straight to the base
     /// `WorldContentRuntime.flags` store.
     pub loader_path: Option<String>,
+    /// Objective ids added by this layer's triggers (issue #751). Recorded as
+    /// `AddObjective` commands are applied so `UnloadWorld` removes exactly
+    /// this layer's objectives from the shared `ObjectiveManager`.
+    pub owned_objective_ids: Vec<String>,
+    /// Authored policy for this layer's in-flight delayed actions on unload
+    /// (issue #751). `true` = resolve (dispatch immediately), `false` =
+    /// cancel (drop). Snapshotted from the layer's `WorldConfig` at load.
+    pub delayed_unload_resolve: bool,
 }
 
 /// Map of `path ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ WorldRuntime` for sub-worlds loaded via `LoadWorld` / `extra_worlds`.
@@ -1177,10 +1185,38 @@ pub(crate) fn apply_dispatch_result(
                 directive,
                 utility,
                 source,
+                origin_layer,
             } => {
-                objectives
-                    .0
-                    .add_full(id, text, mandatory, targets, directive, utility, source);
+                let added = objectives.0.add_full(
+                    id.clone(),
+                    text,
+                    mandatory,
+                    targets,
+                    directive,
+                    utility,
+                    source,
+                );
+                // Record layer ownership (issue #751) so UnloadWorld removes
+                // exactly the objectives this layer's triggers added. Only on
+                // a genuinely new insert, and only for layer-authored
+                // triggers with a live layer-map entry.
+                if added {
+                    if let (Some(path), Some(lm)) = (origin_layer, layer_map.as_deref_mut()) {
+                        if let Some(layer) = lm.0.get_mut(&path) {
+                            layer.owned_objective_ids.push(id);
+                        }
+                    }
+                }
+            }
+
+            ActionCmd::ResetTrigger { id } => {
+                let n =
+                    crate::world::content::reset_triggers_by_id(&mut runtime.trigger_states, &id);
+                if n == 0 {
+                    bevy::log::warn!(
+                        "{log_ctx}: ResetTrigger('{id}') matched no trigger with that id"
+                    );
+                }
             }
 
             ActionCmd::CompleteObjective { id } => {
@@ -1866,6 +1902,9 @@ fn apply_world_layer_changes(
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // Layer-owned objective cleanup on unload (issue #751). `Option` so bare
+    // `App` fixtures without an `ObjectiveManagerRes` still run the loader.
+    mut objectives: Option<ResMut<ObjectiveManagerRes>>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -1955,6 +1994,10 @@ fn apply_world_layer_changes(
                             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
                         }
 
+                        let delayed_unload_resolve = matches!(
+                            scenario_config.delayed_unload_policy,
+                            crate::world::config::DelayedUnloadPolicy::Resolve
+                        );
                         layer_map.0.insert(
                             path,
                             WorldRuntime {
@@ -1964,6 +2007,8 @@ fn apply_world_layer_changes(
                                 anchors: scenario_config.anchors.clone(),
                                 flags: crate::world::flags::FlagStore::new(),
                                 loader_path,
+                                owned_objective_ids: Vec::new(),
+                                delayed_unload_resolve,
                             },
                         );
                     }
@@ -1993,6 +2038,25 @@ fn apply_world_layer_changes(
 
                 // Remove comms template states belonging to this layer.
                 crate::comms::server::remove_layer_comms(&mut comms, &layer.comms_template_states);
+
+                // Remove objectives this layer's triggers added (issue #751).
+                if let Some(obj) = objectives.as_deref_mut() {
+                    for id in &layer.owned_objective_ids {
+                        obj.0.remove(id);
+                    }
+                }
+
+                // Cancel or resolve this layer's pending delayed actions by
+                // the authored policy (issue #751). Pure partition; the
+                // resolved actions are pulled to fire immediately on the next
+                // `tick_delayed_actions`.
+                let queued = std::mem::take(&mut runtime.pending_delayed_actions);
+                runtime.pending_delayed_actions =
+                    crate::world::delayed::partition_delayed_actions_on_unload(
+                        queued,
+                        &path,
+                        layer.delayed_unload_resolve,
+                    );
             }
         }
     }
@@ -2094,10 +2158,14 @@ pub(crate) mod tests {
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             };
             runtime.trigger_states = vec![
                 mk(
@@ -2224,10 +2292,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         app.world_mut()
@@ -2279,10 +2351,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         app.world_mut()
@@ -2334,10 +2410,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         app.world_mut()
@@ -2390,10 +2470,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         app.world_mut()
@@ -2442,10 +2526,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         // Emit the AiEntityDestroyed message.
@@ -2521,10 +2609,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
@@ -2873,10 +2965,14 @@ pub(crate) mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
 
         // Tick 1: only wave_a dies. Trigger must NOT fire yet.
@@ -2945,10 +3041,14 @@ pub(crate) mod tests {
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
         // First firing: flag unset ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no objective.
@@ -3007,10 +3107,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3027,10 +3131,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
         }
@@ -3079,10 +3187,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3099,10 +3211,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
         }
@@ -3147,10 +3263,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3169,10 +3289,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
         }
@@ -3242,10 +3366,14 @@ pub(crate) mod tests {
                     when: Some(crate::world::flags::parse_predicate("flag(parent:armed)").unwrap()),
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
         app.world_mut()
@@ -3302,10 +3430,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: Some(layer_path.clone()),
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 // Base-world watcher: on_flag_set armed.
                 TriggerState {
@@ -3325,10 +3457,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
         }
@@ -3384,10 +3520,14 @@ pub(crate) mod tests {
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
         app.world_mut()
@@ -3437,10 +3577,14 @@ pub(crate) mod tests {
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -3504,10 +3648,14 @@ pub(crate) mod tests {
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -3546,10 +3694,14 @@ pub(crate) mod tests {
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
@@ -3744,10 +3896,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3761,10 +3917,14 @@ pub(crate) mod tests {
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
@@ -4439,10 +4599,14 @@ base_priority = 35.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -4486,10 +4650,14 @@ base_priority = 35.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -4628,6 +4796,147 @@ base_priority = 35.0
         assert!(
             !layer_map.0.contains_key("assets/worlds/patrol.toml"),
             "WorldLayerMap must no longer contain the unloaded path"
+        );
+    }
+
+    /// Issue #751: unloading a layer removes exactly the objectives its
+    /// triggers added (tracked in `WorldRuntime.owned_objective_ids`), leaving
+    /// base-world objectives untouched.
+    #[test]
+    fn unload_world_removes_layer_owned_objectives() {
+        let mut app = layer_test_app();
+        app.init_resource::<ObjectiveManagerRes>();
+
+        {
+            let mut obj = app.world_mut().resource_mut::<ObjectiveManagerRes>();
+            obj.0.add("base-obj", "Base objective", false, vec![]);
+            obj.0.add("layer-obj", "Layer objective", false, vec![]);
+        }
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            lm.0.insert(
+                "sub.toml".to_string(),
+                WorldRuntime {
+                    owned_objective_ids: vec!["layer-obj".to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("sub.toml".to_string()));
+        app.update();
+
+        let ids: Vec<String> = app
+            .world()
+            .resource::<ObjectiveManagerRes>()
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["base-obj".to_string()],
+            "only the layer's objective is removed; the base objective survives"
+        );
+    }
+
+    /// Issue #751: with the default (`Cancel`) policy, unloading a layer drops
+    /// its pending delayed actions and leaves other layers' actions intact.
+    #[test]
+    fn unload_world_cancels_layer_delayed_actions_by_default() {
+        let mut app = layer_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.pending_delayed_actions = vec![
+                DelayedAction {
+                    action: TriggerAction::SetWorldFlag {
+                        name: "base".into(),
+                    },
+                    origin_layer: None,
+                    entity_name: None,
+                    fire_at_elapsed: 5.0,
+                },
+                DelayedAction {
+                    action: TriggerAction::SetWorldFlag { name: "sub".into() },
+                    origin_layer: Some("sub.toml".into()),
+                    entity_name: None,
+                    fire_at_elapsed: 5.0,
+                },
+            ];
+        }
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            lm.0.insert(
+                "sub.toml".to_string(),
+                WorldRuntime {
+                    delayed_unload_resolve: false,
+                    ..Default::default()
+                },
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("sub.toml".to_string()));
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.pending_delayed_actions.len(),
+            1,
+            "the layer's delayed action is cancelled; the base action remains"
+        );
+        assert!(runtime.pending_delayed_actions[0].origin_layer.is_none());
+    }
+
+    /// Issue #751: with the `Resolve` policy, unloading a layer keeps its
+    /// pending delayed actions but pulls their fire time to 0 so the next
+    /// delayed-action tick dispatches them immediately.
+    #[test]
+    fn unload_world_resolves_layer_delayed_actions_when_policy_is_resolve() {
+        let mut app = layer_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.pending_delayed_actions = vec![DelayedAction {
+                action: TriggerAction::SetWorldFlag { name: "sub".into() },
+                origin_layer: Some("sub.toml".into()),
+                entity_name: None,
+                fire_at_elapsed: 100.0,
+            }];
+        }
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            lm.0.insert(
+                "sub.toml".to_string(),
+                WorldRuntime {
+                    delayed_unload_resolve: true,
+                    ..Default::default()
+                },
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("sub.toml".to_string()));
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.pending_delayed_actions.len(),
+            1,
+            "resolved actions are kept, not cancelled"
+        );
+        assert_eq!(
+            runtime.pending_delayed_actions[0].fire_at_elapsed, 0.0,
+            "resolved actions fire immediately on the next tick"
         );
     }
 
@@ -5029,10 +5338,14 @@ entity = "layer_npc"
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             };
             let mut states = vec![mk(TriggerCondition::OnWorldLoaded, "chain_1".to_string())];
             for i in 1..chain_len {
@@ -5115,12 +5428,16 @@ entity = "layer_npc"
                     when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 // Not present in WorldLayerMap — e.g. state surviving an
                 // unload. The chain builder must treat it as the base world.
                 origin_layer: Some("assets/worlds/ghost.toml".to_string()),
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
@@ -5310,10 +5627,14 @@ entity = "layer_npc"
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 // Chained witness: fires only if the pipeline emitted
                 // FlagSet("ordered") followed by FlagCleared("ordered").
@@ -5334,10 +5655,14 @@ entity = "layer_npc"
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
@@ -5489,10 +5814,14 @@ entity = "layer_npc"
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
@@ -5579,6 +5908,9 @@ entity = "layer_npc"
             when: None,
             action_predicates: vec![],
             action_delays: vec![],
+            id: None,
+            repeat: false,
+            cooldown_secs: None,
         });
         app.insert_resource(cfg);
 
@@ -5880,10 +6212,14 @@ condition = "on_world_loaded"
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         });
     }
 
@@ -6182,10 +6518,14 @@ condition = "on_world_loaded"
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             });
         }
 
@@ -6277,10 +6617,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6357,10 +6701,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6445,10 +6793,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6543,10 +6895,14 @@ size_max = 2.0
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -6565,10 +6921,14 @@ size_max = 2.0
                         when: None,
                         action_predicates: vec![],
                         action_delays: vec![],
+                        id: None,
+                        repeat: false,
+                        cooldown_secs: None,
                     },
                     fired: false,
                     origin_layer: None,
                     seen_destroyed: HashSet::new(),
+                    last_fired_elapsed: None,
                 },
             ];
         }
@@ -6634,10 +6994,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
         app.world_mut()
@@ -6692,10 +7056,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6770,10 +7138,14 @@ size_max = 2.0
                     }),
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6832,10 +7204,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6928,10 +7304,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -6992,10 +7372,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 
@@ -7048,10 +7432,14 @@ size_max = 2.0
                     when: None,
                     action_predicates: vec![],
                     action_delays: vec![],
+                    id: None,
+                    repeat: false,
+                    cooldown_secs: None,
                 },
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: std::collections::HashSet::new(),
+                last_fired_elapsed: None,
             }];
         }
 

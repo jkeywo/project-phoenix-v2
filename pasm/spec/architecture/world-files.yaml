@@ -274,7 +274,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Load Lifecycle Contract
-      summary: Defines load, deferred activation, unload, cleanup, and reload semantics for base and child worlds, and activates a root world only after its full composition validates.
+      summary: Defines load, deferred activation, unload, cleanup, and reload semantics for base and child worlds, and activates a root world only after its full composition validates. Unload removes each layer's owned runtime content (entities, triggers, comms, objectives) and cancels or resolves its pending delayed actions by authored policy.
     architecture:
       kind: lifecycle-policy
       authority: authoritative
@@ -285,7 +285,7 @@ entities:
     implementation:
       status: declared
       paths: [src/headless/app.rs, src/world/server.rs, src/world/validate.rs]
-      symbols: [validate_composition, has_error, spawn_immediate_entities_internal]
+      symbols: [validate_composition, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
       tests: [cargo test]
 
   - state: world-content-lifecycle-state
@@ -293,7 +293,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Content Lifecycle State
-      summary: The authoritative activation state of each world layer and its owned runtime content. Failed validation leaves no partial root-world content active.
+      summary: The authoritative activation state of each world layer and its owned runtime content (spawned entities, triggers, comms, objectives, pending delayed actions). Failed validation leaves no partial root-world content active; unload removes exactly the layer's owned content.
     architecture:
       classification: authoritative
       owner: world-load-lifecycle-contract
@@ -301,43 +301,58 @@ entities:
     implementation:
       status: declared
       paths: [src/headless/app.rs, src/world/server.rs]
-      symbols: [spawn_immediate_entities_internal]
+      symbols: [spawn_immediate_entities_internal, WorldRuntime, apply_world_layer_changes]
 
   - component: world-objective-contract
     core:
       status: proposed
       confidence: confirmed
       title: World Objective Contract
-      summary: Defines objective identifiers, display text, ownership, transition rules, and cleanup when the world layer that authored an objective unloads.
+      summary: Defines objective identifiers, display text, ownership, transition rules, and cleanup when the world layer that authored an objective unloads. Layer ownership and unload cleanup are implemented (issue #751); identifier/reference validation, visibility, and priority remain proposed (issue #752).
     architecture:
       kind: configuration-schema
       authority: authoritative
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/world/dispatch.rs, src/world/server.rs]
+      symbols: [ObjectiveManager, apply_world_layer_changes]
+      tests: [cargo test]
 
   - component: world-trigger-lifecycle-contract
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: World Trigger Lifecycle Contract
-      summary: Defines whether each authored trigger is once-only or repeatable, its reset and cooldown rules, and what happens to pending delayed actions when its world unloads.
+      summary: Defines whether each authored trigger is once-only (default) or repeatable, its reset and cooldown rules, and whether a world's pending delayed actions are cancelled or resolved when it unloads.
     architecture:
       kind: lifecycle-policy
       authority: authoritative
       reads: [world-content-lifecycle-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/content.rs, src/world/config.rs, src/world/delayed.rs, src/world/server.rs]
+      symbols: [Trigger, TriggerState, cooldown_elapsed, reset_triggers_by_id, DelayedUnloadPolicy, partition_delayed_actions_on_unload]
+      tests: [cargo test]
 
   - component: world-comms-identity-contract
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: World Comms Identity Contract
-      summary: Resolves each authored comms sender reference to its world entity identity while carrying separate sender display text. All world comms deliver to the ship Comms system, not role-specific inboxes.
+      summary: Resolves each authored comms sender reference (`from`) to its world entity identity for the sender UUID while carrying separate, independent sender display text. All world comms deliver to the ship Comms system, not role-specific inboxes.
     architecture:
       kind: configuration-schema
       authority: authoritative
       reads: [world-entity-identity-state, world-name-binding-state]
       coordinates: [world-comms-runtime]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/comms/content.rs, src/comms/server.rs]
+      symbols: [CommsTemplate, FiredCommsTemplate, inject_comms_templates, merge_world_comms]
+      tests: [cargo test]
 
   - component: world-layer-runtime
     core:
@@ -412,14 +427,15 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Unload Cleanup Controller
-      summary: Removes unloaded-layer entities, triggers, generated spawn results, and layer-owned runtime records; reloading reconstructs those layer-local contracts.
+      summary: Removes unloaded-layer entities, triggers, comms templates, layer-owned objectives, and generated spawn results, and cancels or resolves the layer's pending delayed actions by authored policy; reloading reconstructs those layer-local contracts.
     architecture:
       kind: lifecycle-controller
       authority: authoritative
       reads: [world-layer-runtime-state]
-      writes: [world-layer-runtime-state, spawned-entity-state]
+      writes: [world-layer-runtime-state, spawned-entity-state, objective-runtime-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/layers.rs]
+      paths: [src/world/server.rs, src/world/layers.rs, src/world/delayed.rs, src/objectives.rs]
+      symbols: [apply_world_layer_changes, evaluate_layer_unload, partition_delayed_actions_on_unload]
       tests: [cargo test]

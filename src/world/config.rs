@@ -344,6 +344,17 @@ struct RawTriggerEntry {
     name: Option<String>,
     #[serde(default)]
     when: Option<String>,
+    /// Optional authored trigger id (issue #751), targetable by
+    /// `reset_trigger` actions.
+    #[serde(default)]
+    id: Option<String>,
+    /// Trigger lifecycle policy (issue #751): `true` = repeatable, `false`
+    /// (default) = once-only single-shot.
+    #[serde(default)]
+    repeat: bool,
+    /// Minimum seconds between repeatable-trigger fires (issue #751).
+    #[serde(default)]
+    cooldown_secs: Option<f32>,
     #[serde(default, rename = "action")]
     actions: Vec<RawActionEntry>,
 }
@@ -539,6 +550,12 @@ struct RawCommsEntry {
     /// range, and contact lookup.
     #[serde(default)]
     speaker: Option<String>,
+    /// Optional player-facing sender display text (issue #751), separate from
+    /// the `from` reference id. `from` stays the physical/synthetic comms
+    /// endpoint used for hailing, range, and contact lookup; `display_name`
+    /// is what the crew sees as the sender label.
+    #[serde(default)]
+    display_name: Option<String>,
     #[serde(default)]
     entity: Option<String>,
     /// Entity list for `on_all_destroyed` root triggers.
@@ -601,6 +618,11 @@ pub struct RawWorld {
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
+    /// Policy for pending delayed actions when this world layer unloads
+    /// (issue #751): `"cancel"` (default) drops them, `"resolve"` dispatches
+    /// them immediately. Case-insensitive; unknown values fall back to cancel.
+    #[serde(default)]
+    pub delayed_unload_policy: Option<String>,
     /// Optional world-level ambient light override.
     #[serde(default)]
     pub ambient_light: Option<AmbientLightConfig>,
@@ -620,6 +642,25 @@ pub struct RawWorld {
 }
 
 // -- Trigger / comms pure config types --------------------------------------
+
+/// Authored policy for what happens to a world layer's pending delayed
+/// actions when the layer is unloaded (issue #751).
+///
+/// Delayed actions queued by a layer's triggers (`action_delays > 0.0`) may
+/// still be in flight when the layer unloads. This policy decides their fate.
+/// The default is [`DelayedUnloadPolicy::Cancel`] so existing worlds — which
+/// never authored the field — drop in-flight work on unload, matching the
+/// "owned content is removed" lifecycle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DelayedUnloadPolicy {
+    /// Drop the layer's pending delayed actions (default).
+    #[default]
+    Cancel,
+    /// Resolve the layer's pending delayed actions immediately on unload
+    /// (dispatch them on the next delayed-action tick instead of waiting for
+    /// their scheduled fire time).
+    Resolve,
+}
 
 /// A condition that a trigger can check against incoming world events.
 #[derive(Clone, Debug, PartialEq)]
@@ -817,6 +858,13 @@ pub enum TriggerAction {
         faction: String,
         enemy: String,
     },
+    /// Re-arm a previously-fired trigger identified by its authored `id`
+    /// (issue #751). Clears the target trigger's `fired` flag (and its
+    /// `seen_destroyed` accumulation / cooldown clock) so it can fire again.
+    /// Unknown ids are a no-op.
+    ResetTrigger {
+        id: String,
+    },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -835,6 +883,21 @@ pub struct Trigger {
     /// Per-action delays in seconds, parallel to `actions`. `0.0` means
     /// immediate dispatch. `> 0.0` queues the action for deferred dispatch.
     pub action_delays: Vec<f32>,
+    /// Optional authored id (issue #751). Anonymous triggers leave this
+    /// `None`; a named trigger can be re-armed by a `ResetTrigger { id }`
+    /// action referencing this id.
+    pub id: Option<String>,
+    /// Trigger lifecycle policy (issue #751). `false` (default) = once-only
+    /// single-shot: the trigger fires at most once. `true` = repeatable: the
+    /// trigger re-arms after firing and fires again whenever its condition
+    /// holds, subject to `cooldown_secs`. Backward compatible — existing
+    /// worlds omit the field and stay single-shot.
+    pub repeat: bool,
+    /// Minimum seconds between successive fires of a `repeat` trigger,
+    /// measured on the world-elapsed clock (issue #751). `None` = no cooldown
+    /// (may re-fire every tick its condition holds). Ignored for once-only
+    /// triggers.
+    pub cooldown_secs: Option<f32>,
 }
 
 /// A single response option within a comms dialogue node.
@@ -874,8 +937,17 @@ pub struct CommsDialogueNode {
 /// A comms template: a root dialogue node associated with a trigger condition.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommsTemplate {
-    /// Entity name whose UUID is the sender of the comms message.
+    /// Entity name whose UUID is the sender of the comms message. This is the
+    /// authored **reference id** — resolved to the sender UUID via
+    /// `name_to_uuid`, and used for hailing, range, and contact lookup. It is
+    /// NOT the player-facing sender label; use [`CommsTemplate::display_name`]
+    /// / per-node `speaker` for that (issue #751).
     pub from: String,
+    /// Optional player-facing sender display text, independent of the `from`
+    /// reference id (issue #751, mirrors [`WorldEntity::display_name`]). When
+    /// absent the delivered sender name falls back to `from`. Authored data,
+    /// not a code string — no `strings.csv` entry required.
+    pub display_name: Option<String>,
     /// The trigger condition that fires this template.
     pub trigger: TriggerCondition,
     /// The root dialogue node.
@@ -1167,6 +1239,11 @@ fn parse_raw_actions(
                         "Action 'unload_world' requires a 'path' field".to_string()
                     })?,
                 },
+                "reset_trigger" => TriggerAction::ResetTrigger {
+                    id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'reset_trigger' requires an 'id' field".to_string()
+                    })?,
+                },
                 "set_flag" => TriggerAction::SetWorldFlag {
                     name: raw_action
                         .name
@@ -1384,6 +1461,8 @@ pub struct WorldConfig {
     /// Paths of additional world TOML files to load additively at startup
     /// (issue #352 — `extra_worlds` field).
     pub extra_worlds: Vec<String>,
+    /// Policy for this layer's pending delayed actions on unload (issue #751).
+    pub delayed_unload_policy: DelayedUnloadPolicy,
     /// Optional world-level ambient light override; `None` means the
     /// renderer falls back to its built-in constants.
     pub ambient_light: Option<AmbientLightConfig>,
@@ -1488,6 +1567,9 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             when,
             action_predicates,
             action_delays,
+            id: raw_trigger.id,
+            repeat: raw_trigger.repeat,
+            cooldown_secs: raw_trigger.cooldown_secs,
         });
     }
 
@@ -1528,6 +1610,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         };
         comms.push(CommsTemplate {
             from: raw_comms.from,
+            display_name: raw_comms.display_name,
             trigger,
             node,
             thread_id: raw_comms.thread_id,
@@ -1561,6 +1644,17 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         }
     }
 
+    let delayed_unload_policy = match raw
+        .delayed_unload_policy
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("resolve") => DelayedUnloadPolicy::Resolve,
+        _ => DelayedUnloadPolicy::Cancel,
+    };
+
     Ok(WorldConfig {
         global: raw.global,
         anchors,
@@ -1569,6 +1663,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         comms,
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
+        delayed_unload_policy,
         ambient_light: raw.ambient_light,
         audio: raw.audio,
         dust: raw.dust,

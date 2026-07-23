@@ -209,7 +209,13 @@ pub(crate) fn init_comms_runtime(
         if !contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
             contacts.push(CommsContact {
                 uuid,
-                name: tmpl.from.clone(),
+                // Player-facing contact label uses the sender display text
+                // when authored, falling back to the `from` reference id
+                // (issue #751).
+                name: tmpl
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| tmpl.from.clone()),
                 in_range: true,
                 is_urgent: false,
             });
@@ -249,7 +255,12 @@ pub(crate) fn merge_world_comms(
         if !comms.contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
             comms.contacts.push(CommsContact {
                 uuid,
-                name: tmpl.from.clone(),
+                // Display text over reference id (issue #751), matching
+                // `init_comms_runtime`.
+                name: tmpl
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| tmpl.from.clone()),
                 in_range: true,
                 is_urgent: false,
             });
@@ -710,7 +721,14 @@ pub(crate) fn inject_comms_templates(
         } else {
             fc.from.clone()
         };
-        let sender_name = fc.node.speaker.clone().unwrap_or(channel_name);
+        // Sender identity (issue #751): the UUID resolves from the `from`
+        // reference id (below), while the player-facing display name resolves
+        // independently. Precedence: per-node `speaker` override (most
+        // specific) → template `display_name` → the `from`-derived channel
+        // name. Backward compatible: a template with neither renders `from`
+        // exactly as before.
+        let base_sender_name = fc.display_name.clone().unwrap_or(channel_name);
+        let sender_name = fc.node.speaker.clone().unwrap_or(base_sender_name);
         // Keyed on the RAW `fc.from` (not the mapped display name): a
         // synthetic sender like `_self` deliberately falls through to the
         // name itself, which `current_sender_in_range` treats as
@@ -936,6 +954,7 @@ pub(crate) mod tests {
                 thread_id: None,
                 urgent: false,
                 root_follow_up: None,
+                display_name: None,
             },
             fired: false,
         });
@@ -975,6 +994,7 @@ pub(crate) mod tests {
                     thread_id: Some("research-scholar".to_string()),
                     urgent: true,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             }];
@@ -1048,6 +1068,7 @@ pub(crate) mod tests {
                         speaker: Some("Dr. Myst".to_string()),
                         trigger: Some(TriggerCondition::OnTimer { after_secs: 2.0 }),
                     }),
+                    display_name: None,
                 },
                 fired: false,
             }];
@@ -1111,6 +1132,7 @@ pub(crate) mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             }];
@@ -1137,6 +1159,67 @@ pub(crate) mod tests {
             messages[0].responses.len(),
             0,
             "broadcast message should have no responses"
+        );
+    }
+
+    /// Sender identity (issue #751): the `from` reference id resolves the
+    /// message's `sender_uuid` (used for range/contact lookup), while the
+    /// authored `display_name` resolves the player-facing `sender_name`
+    /// independently. Delivery still targets the ship Comms system
+    /// (`CommsInboxRes` via `CommsChannel2Event`).
+    #[test]
+    fn sender_identity_resolves_from_reference_while_display_is_independent() {
+        let mut app = ai_trigger_test_app();
+
+        let raider_uuid = "raider-uuid-identity-751";
+        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000751").unwrap();
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert("raider".to_string(), raider_uuid.to_string());
+        {
+            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+            comms.comms_template_states = vec![CommsTemplateState {
+                template: CommsTemplate {
+                    // Reference id used to resolve the sender UUID …
+                    from: "raider".to_string(),
+                    // … but the crew sees this label instead.
+                    display_name: Some("Unknown Contact".to_string()),
+                    trigger: TriggerCondition::OnAttacked {
+                        entity_name: "raider".to_string(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Back off!".to_string(),
+                        responses: vec![],
+                        speaker: None,
+                        trigger: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
+                    root_follow_up: None,
+                },
+                fired: false,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: raider_uuid.to_string(),
+                attacker_uuid,
+            });
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1, "delivery must still reach ship Comms");
+        assert_eq!(
+            messages[0].sender_uuid, raider_uuid,
+            "sender_uuid resolves from the `from` reference id"
+        );
+        assert_eq!(
+            messages[0].sender_name, "Unknown Contact",
+            "sender_name resolves from display_name, independent of `from`"
         );
     }
 
@@ -1168,6 +1251,7 @@ pub(crate) mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             }];
@@ -1868,6 +1952,7 @@ pub(crate) mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             });
@@ -1932,6 +2017,7 @@ pub(crate) mod tests {
                     thread_id: None,
                     urgent: false,
                     root_follow_up: None,
+                    display_name: None,
                 },
                 fired: false,
             });

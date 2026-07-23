@@ -56,6 +56,42 @@ pub fn partition_delayed_actions(
     schedule
 }
 
+/// Rewrite the pending delayed-action queue when the layer at `path` unloads
+/// (issue #751).
+///
+/// Actions owned by other layers (or the base world) are kept untouched, in
+/// original order. Actions whose `origin_layer` equals `Some(path)` are
+/// handled by the authored `resolve` policy:
+///
+/// * `resolve == false` (Cancel) — dropped from the queue (cancelled).
+/// * `resolve == true` (Resolve) — kept, with `fire_at_elapsed` pulled to
+///   `0.0` so the next delayed-action tick dispatches them immediately rather
+///   than waiting for their original scheduled time.
+///
+/// Pure: no clock, no dispatch — the applier feeds the result back into
+/// `pending_delayed_actions`.
+pub fn partition_delayed_actions_on_unload(
+    actions: Vec<DelayedAction>,
+    path: &str,
+    resolve: bool,
+) -> Vec<DelayedAction> {
+    actions
+        .into_iter()
+        .filter_map(|mut pda| {
+            if pda.origin_layer.as_deref() == Some(path) {
+                if resolve {
+                    pda.fire_at_elapsed = 0.0;
+                    Some(pda)
+                } else {
+                    None
+                }
+            } else {
+                Some(pda)
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +112,68 @@ mod tests {
             TriggerAction::SetWorldFlag { name } => name,
             other => panic!("test fixture only queues SetWorldFlag, got {other:?}"),
         }
+    }
+
+    fn delayed_in_layer(name: &str, fire_at: f32, layer: Option<&str>) -> DelayedAction {
+        DelayedAction {
+            action: TriggerAction::SetWorldFlag {
+                name: name.to_string(),
+            },
+            origin_layer: layer.map(str::to_string),
+            entity_name: None,
+            fire_at_elapsed: fire_at,
+        }
+    }
+
+    #[test]
+    fn unload_cancel_drops_only_the_layers_actions() {
+        let queue = vec![
+            delayed_in_layer("base", 5.0, None),
+            delayed_in_layer("sub_a", 8.0, Some("sub.toml")),
+            delayed_in_layer("other", 9.0, Some("other.toml")),
+            delayed_in_layer("sub_b", 3.0, Some("sub.toml")),
+        ];
+        let out = partition_delayed_actions_on_unload(queue, "sub.toml", false);
+        let names: Vec<&str> = out.iter().map(flag_name).collect();
+        assert_eq!(
+            names,
+            vec!["base", "other"],
+            "cancel drops exactly the unloaded layer's actions, preserving order"
+        );
+    }
+
+    #[test]
+    fn unload_resolve_keeps_layer_actions_and_pulls_fire_time_to_zero() {
+        let queue = vec![
+            delayed_in_layer("base", 5.0, None),
+            delayed_in_layer("sub_a", 8.0, Some("sub.toml")),
+            delayed_in_layer("sub_b", 3.0, Some("sub.toml")),
+        ];
+        let out = partition_delayed_actions_on_unload(queue, "sub.toml", true);
+        let names: Vec<&str> = out.iter().map(flag_name).collect();
+        assert_eq!(names, vec!["base", "sub_a", "sub_b"]);
+        // The layer's actions are now immediately ready; the base action is
+        // untouched.
+        for pda in &out {
+            if pda.origin_layer.as_deref() == Some("sub.toml") {
+                assert_eq!(
+                    pda.fire_at_elapsed, 0.0,
+                    "resolved actions fire immediately"
+                );
+            } else {
+                assert_eq!(pda.fire_at_elapsed, 5.0, "other layers untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn unload_unknown_path_is_a_noop() {
+        let queue = vec![
+            delayed_in_layer("base", 5.0, None),
+            delayed_in_layer("sub_a", 8.0, Some("sub.toml")),
+        ];
+        let out = partition_delayed_actions_on_unload(queue, "ghost.toml", false);
+        assert_eq!(out.len(), 2, "unloading an unrelated path changes nothing");
     }
 
     #[test]

@@ -90,6 +90,10 @@ pub struct TriggerState {
     /// every name in the condition's `entity_names`. (#470)
     #[doc(hidden)]
     pub seen_destroyed: HashSet<String>,
+    /// World-elapsed seconds at which this trigger last fired, or `None` if it
+    /// has never fired (issue #751). Used to gate `repeat` re-fires by
+    /// `Trigger::cooldown_secs`. Reset to `None` by a `ResetTrigger` action.
+    pub last_fired_elapsed: Option<f32>,
 }
 
 /// Result of evaluating triggers against a batch of world events.
@@ -110,6 +114,37 @@ pub struct FiredTrigger {
 }
 
 // ── Evaluators ────────────────────────────────────────────────────────────
+
+/// Whether a trigger's cooldown has elapsed and it may fire at
+/// `current_elapsed` (issue #751).
+///
+/// Returns `true` (fire allowed) when the trigger has no cooldown, has never
+/// fired, or enough world-elapsed seconds have passed since its last fire.
+/// A never-fired trigger (`last_fired_elapsed == None`) is always allowed, so
+/// the very first fire is never blocked.
+fn cooldown_elapsed(state: &TriggerState, current_elapsed: f32) -> bool {
+    match (state.trigger.cooldown_secs, state.last_fired_elapsed) {
+        (Some(cd), Some(last)) => current_elapsed - last >= cd,
+        _ => true,
+    }
+}
+
+/// Re-arm every trigger in `states` whose authored `id` equals `id`
+/// (issue #751): clear `fired`, the `seen_destroyed` accumulation, and the
+/// cooldown clock so the trigger behaves as freshly loaded. Returns the number
+/// of trigger states re-armed (0 = unknown id, a no-op).
+pub fn reset_triggers_by_id(states: &mut [TriggerState], id: &str) -> usize {
+    let mut count = 0;
+    for state in states.iter_mut() {
+        if state.trigger.id.as_deref() == Some(id) {
+            state.fired = false;
+            state.seen_destroyed.clear();
+            state.last_fired_elapsed = None;
+            count += 1;
+        }
+    }
+    count
+}
 
 /// Extract the entity name from a `TriggerCondition`, if the variant carries one.
 pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String> {
@@ -166,7 +201,10 @@ pub fn evaluate_triggers_with_flags(
 ) -> Vec<FiredTrigger> {
     let mut results = Vec::new();
     for state in states.iter_mut() {
-        if state.fired {
+        // Once-only triggers (the default) never fire twice. Repeatable
+        // triggers fall through and re-evaluate their condition each tick
+        // (issue #751).
+        if state.fired && !state.trigger.repeat {
             continue;
         }
         let layer_chain: [Option<String>; 1] = [state.origin_layer.clone()];
@@ -186,6 +224,14 @@ pub fn evaluate_triggers_with_flags(
             if !pred.evaluate(flag_chain) {
                 continue;
             }
+        }
+        // Cooldown gate (issue #751): a repeatable trigger cannot re-fire
+        // until at least `cooldown_secs` have elapsed since its last fire.
+        // The first fire has `last_fired_elapsed == None`, so the gate never
+        // blocks it. Determinism: compares against the injected
+        // `current_elapsed`, never a wall clock.
+        if !cooldown_elapsed(state, current_elapsed) {
+            continue;
         }
         let filtered: Vec<(usize, TriggerAction)> = state
             .trigger
@@ -210,6 +256,7 @@ pub fn evaluate_triggers_with_flags(
             .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
             .collect();
         state.fired = true;
+        state.last_fired_elapsed = Some(current_elapsed);
         results.push(FiredTrigger {
             actions: filtered_actions,
             action_delays: filtered_delays,
@@ -245,7 +292,9 @@ pub fn evaluate_single_trigger(
     entity_groups: &HashMap<String, HashSet<String>>,
     current_elapsed: f32,
 ) -> Option<FiredTrigger> {
-    if state.fired {
+    // Once-only triggers (the default) never fire twice; repeatable triggers
+    // re-evaluate each tick (issue #751).
+    if state.fired && !state.trigger.repeat {
         return None;
     }
     let fires = trigger_fires_for_events(
@@ -264,6 +313,10 @@ pub fn evaluate_single_trigger(
         if !pred.evaluate(flag_chain) {
             return None;
         }
+    }
+    // Cooldown gate (issue #751) — see `evaluate_triggers_with_flags`.
+    if !cooldown_elapsed(state, current_elapsed) {
+        return None;
     }
     let filtered: Vec<(usize, TriggerAction)> = state
         .trigger
@@ -287,6 +340,7 @@ pub fn evaluate_single_trigger(
         .map(|(i, _)| state.trigger.action_delays.get(*i).copied().unwrap_or(0.0))
         .collect();
     state.fired = true;
+    state.last_fired_elapsed = Some(current_elapsed);
     Some(FiredTrigger {
         actions: filtered_actions,
         action_delays: filtered_delays,
@@ -478,6 +532,7 @@ pub fn trigger_states_from_world(world: &crate::world::config::WorldConfig) -> V
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         })
         .collect()
 }
@@ -498,6 +553,9 @@ mod tests {
             when: None,
             action_predicates: vec![],
             action_delays: vec![],
+            id: None,
+            repeat: false,
+            cooldown_secs: None,
         }
     }
 
@@ -522,6 +580,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -541,6 +600,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -560,6 +620,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -570,6 +631,160 @@ mod tests {
         let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired1.len(), 1);
         assert!(fired2.is_empty());
+    }
+
+    // ── Trigger lifecycle: once (default) / repeat / cooldown / reset ──────
+
+    /// A repeatable `on_timer` trigger with an optional cooldown.
+    fn repeat_timer_trigger(cooldown_secs: Option<f32>) -> Trigger {
+        Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 0.0 },
+            actions: vec![add_obj("obj-repeat")],
+            when: None,
+            action_predicates: vec![],
+            action_delays: vec![],
+            id: Some("pulse".into()),
+            repeat: true,
+            cooldown_secs,
+        }
+    }
+
+    #[test]
+    fn repeat_trigger_re_fires_each_time_condition_holds() {
+        let mut states = vec![TriggerState {
+            trigger: repeat_timer_trigger(None),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
+        }];
+        let name_to_uuid = HashMap::new();
+        let ev = vec![WorldEvent::TimerElapsed { elapsed_secs: 5.0 }];
+        // Same condition holds on two consecutive evaluations — a repeat
+        // trigger fires both times (a once-only trigger would fire only once).
+        let f1 = evaluate_triggers_with_flags(
+            &mut states,
+            &ev,
+            &name_to_uuid,
+            &[],
+            &HashMap::new(),
+            5.0,
+        );
+        let f2 = evaluate_triggers_with_flags(
+            &mut states,
+            &ev,
+            &name_to_uuid,
+            &[],
+            &HashMap::new(),
+            6.0,
+        );
+        assert_eq!(f1.len(), 1, "first fire");
+        assert_eq!(f2.len(), 1, "repeat trigger re-fires while condition holds");
+    }
+
+    #[test]
+    fn cooldown_gates_repeat_until_enough_time_elapses() {
+        let mut states = vec![TriggerState {
+            trigger: repeat_timer_trigger(Some(10.0)),
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
+        }];
+        let name_to_uuid = HashMap::new();
+        let ev = vec![WorldEvent::TimerElapsed { elapsed_secs: 0.0 }];
+
+        // First fire at elapsed = 0.0.
+        let f0 = evaluate_triggers_with_flags(
+            &mut states,
+            &ev,
+            &name_to_uuid,
+            &[],
+            &HashMap::new(),
+            0.0,
+        );
+        assert_eq!(f0.len(), 1);
+        assert_eq!(states[0].last_fired_elapsed, Some(0.0));
+
+        // Elapsed = 5.0 < cooldown 10.0 → still cooling down, must NOT fire.
+        let f5 = evaluate_triggers_with_flags(
+            &mut states,
+            &ev,
+            &name_to_uuid,
+            &[],
+            &HashMap::new(),
+            5.0,
+        );
+        assert!(f5.is_empty(), "cooldown gates the re-fire");
+
+        // Elapsed = 10.0 ≥ last(0.0) + cooldown(10.0) → re-fires.
+        let f10 = evaluate_triggers_with_flags(
+            &mut states,
+            &ev,
+            &name_to_uuid,
+            &[],
+            &HashMap::new(),
+            10.0,
+        );
+        assert_eq!(f10.len(), 1, "re-fires once cooldown elapses");
+        assert_eq!(states[0].last_fired_elapsed, Some(10.0));
+    }
+
+    #[test]
+    fn reset_re_arms_a_fired_once_only_trigger() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnDestroyed {
+                    entity_name: "raider".into(),
+                },
+                actions: vec![add_obj("obj-1")],
+                when: None,
+                action_predicates: vec![],
+                action_delays: vec![],
+                id: Some("kill_watch".into()),
+                repeat: false,
+                cooldown_secs: None,
+            },
+            fired: false,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider".into(), "uuid-1".into());
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-1".into(),
+        }];
+
+        let f1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(f1.len(), 1);
+        assert!(states[0].fired);
+
+        // Without reset the once-only trigger stays fired.
+        let f2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(f2.is_empty());
+
+        // Reset by id re-arms it; it fires again on the next matching event.
+        let n = reset_triggers_by_id(&mut states, "kill_watch");
+        assert_eq!(n, 1);
+        assert!(!states[0].fired);
+        assert_eq!(states[0].last_fired_elapsed, None);
+        let f3 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(f3.len(), 1, "re-armed trigger fires again");
+    }
+
+    #[test]
+    fn reset_unknown_id_is_a_noop() {
+        let mut states = vec![TriggerState {
+            trigger: dest_trigger("raider", add_obj("obj-1")),
+            fired: true,
+            origin_layer: None,
+            seen_destroyed: HashSet::new(),
+            last_fired_elapsed: Some(3.0),
+        }];
+        let n = reset_triggers_by_id(&mut states, "nonexistent");
+        assert_eq!(n, 0);
+        assert!(states[0].fired, "unknown id must not touch any trigger");
     }
 
     // ── OnAllDestroyed ─────────────────────────────────────────────────────
@@ -584,6 +799,9 @@ mod tests {
             when: None,
             action_predicates: vec![],
             action_delays: vec![],
+            id: None,
+            repeat: false,
+            cooldown_secs: None,
         }
     }
 
@@ -594,6 +812,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -648,6 +867,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -670,6 +890,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -716,6 +937,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -745,6 +967,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -780,10 +1003,14 @@ mod tests {
                 when: Some(predicate),
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("a".into(), "uuid-a".into());
@@ -852,10 +1079,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -909,10 +1140,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new();
         let before = vec![WorldEvent::TimerElapsed { elapsed_secs: 10.0 }];
@@ -934,10 +1169,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -960,10 +1199,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("starbase".into(), "uuid-sb".into());
@@ -982,12 +1225,14 @@ mod tests {
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             },
             TriggerState {
                 trigger: dest_trigger("station", add_obj("obj-s")),
                 fired: false,
                 origin_layer: None,
                 seen_destroyed: HashSet::new(),
+                last_fired_elapsed: None,
             },
         ];
         let mut name_to_uuid = HashMap::new();
@@ -1016,10 +1261,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![None, Some(pred_armed)],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -1074,10 +1323,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![0.0, 10.0],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -1097,6 +1350,7 @@ mod tests {
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::Destroyed {
@@ -1149,10 +1403,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -1170,10 +1428,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![
@@ -1198,10 +1460,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -1224,10 +1490,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -1250,10 +1520,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -1276,10 +1550,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -1301,10 +1579,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -1326,10 +1608,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         }];
         let name_to_uuid = HashMap::new(); // empty — name does not resolve
         let events = vec![WorldEvent::EnteredRegion {
@@ -1355,10 +1641,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         };
         let layer_chain = vec![Some("child.toml".into()), None];
         let events = vec![WorldEvent::FlagSet {
@@ -1394,10 +1684,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: Some("child.toml".into()),
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         };
         let layer_chain = vec![Some("child.toml".into()), None];
         // Event originated in a DIFFERENT layer (the base / None layer).
@@ -1434,10 +1728,14 @@ mod tests {
                 when: None,
                 action_predicates: vec![],
                 action_delays: vec![],
+                id: None,
+                repeat: false,
+                cooldown_secs: None,
             },
             fired: false,
             origin_layer: None,
             seen_destroyed: HashSet::new(),
+            last_fired_elapsed: None,
         };
         let layer_chain = vec![None];
         let events = vec![WorldEvent::FlagSet {

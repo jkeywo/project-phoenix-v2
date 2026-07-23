@@ -247,6 +247,21 @@ impl ObjectiveManager {
         }
     }
 
+    /// Remove the objective with `id` entirely (issue #751).
+    ///
+    /// Unlike `fail`/`complete` (which transition status but keep the record),
+    /// this drops the record so a world layer's objectives disappear when the
+    /// layer unloads. Returns `true` if a record was removed.
+    pub fn remove(&mut self, id: &str) -> bool {
+        let before = self.objectives.len();
+        self.objectives.retain(|o| o.id != id);
+        let removed = self.objectives.len() != before;
+        if removed {
+            self.dirty = true;
+        }
+        removed
+    }
+
     /// Returns a sorted snapshot of all objectives: mandatory first (in
     /// insertion order), then optional (in insertion order).
     ///

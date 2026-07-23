@@ -167,6 +167,8 @@ entities:
       confidence: confirmed
       title: Tactical Arc Request Information
       summary: Helm receives a temporary facing request from Tactical, distinct from a docking movement request.
+      rationale:
+        - "Issue #742: the arc-bearing request is folded into steering (desired facing) only by apply_arc_bearing_request; it never writes the desired-motion travel axes, so it cannot command reverse or lateral drift. The distinct docking-motion-intent-state is the sole path that may translate the hull at low speed."
     game_design:
       enforcement_links:
         - helm-console-interface

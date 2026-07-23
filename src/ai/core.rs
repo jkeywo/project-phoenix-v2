@@ -30,6 +30,15 @@ pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
 /// [`crate::entity_config::BehaviourConfig::nav_handoff_speed`], whose serde
 /// default reads this constant so the two cannot drift apart.
 pub const NAV_HANDOFF_SPEED: f32 = 0.6;
+/// Distance (world units) within which a docking intent switches from normal
+/// objective approach to the close-quarters [`docking_close_manoeuvre`].
+/// Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::docking_engage_distance`].
+pub const DOCKING_ENGAGE_DISTANCE: f32 = 40.0;
+/// Speed fraction `[0, 1]` capping the low-speed reverse / lateral translation
+/// of a docking close manoeuvre. Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::docking_approach_speed`].
+pub const DOCKING_APPROACH_SPEED: f32 = 0.3;
 const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
@@ -1042,6 +1051,54 @@ pub fn encode_local_facing(steering: f32) -> [f32; 3] {
 /// point for the representable `[-1, 1]` range.
 pub fn decode_steering_from_facing(facing_local: [f32; 3]) -> f32 {
     (facing_local[0].atan2(-facing_local[2]) / PATROL_FULL_STEER_RAD).clamp(-1.0, 1.0)
+}
+
+/// Close-quarters docking manoeuvre (issue #742).
+///
+/// Given the ship's world pose and a dock target's world position, returns a
+/// ship-local *translation* velocity intent `[starboard, aft]` — both in
+/// `[-1, 1]` — that slides the hull straight onto the dock. This is the
+/// sanctioned home for the two motions arc-bearing must never command:
+/// `starboard != 0` is lateral translation, and `aft > 0` is controlled
+/// reverse (the dock is behind the current facing). Facing is left untouched:
+/// docking translates, it does not turn, so a ship can back into a berth
+/// without spinning to point at it.
+///
+/// Returns `None` when the dock is farther than `engage_distance` (the ship is
+/// still in normal objective approach, not yet at close-manoeuvre range) or
+/// coincident with the ship (nothing to translate toward). `approach_speed`
+/// caps the intent magnitude so close manoeuvres stay low-speed; both tunables
+/// are authored per hull in `[behaviour]` TOML.
+///
+/// The ship-local transform matches [`crate::weapons::phaser::ship_local`]:
+/// `starboard = dx·cos + dz·sin`, forward (`+` = ahead) `= dx·sin − dz·cos`,
+/// with forward travel along local `-Z` so an ahead dock yields `aft < 0`.
+pub fn docking_close_manoeuvre(
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    dock_x: f32,
+    dock_z: f32,
+    engage_distance: f32,
+    approach_speed: f32,
+) -> Option<[f32; 2]> {
+    let dx = dock_x - ship_x;
+    let dz = dock_z - ship_z;
+    let dist = (dx * dx + dz * dz).sqrt();
+    if dist > engage_distance || dist < 1e-3 {
+        return None;
+    }
+    let cos_y = ship_yaw.cos();
+    let sin_y = ship_yaw.sin();
+    let starboard = dx * cos_y + dz * sin_y;
+    let forward = dx * sin_y - dz * cos_y;
+    let inv = 1.0 / dist;
+    let speed = approach_speed.clamp(0.0, 1.0);
+    let lateral = (starboard * inv * speed).clamp(-1.0, 1.0);
+    // Forward component points to the dock; a dock behind the hull (forward < 0)
+    // becomes positive `aft`, i.e. controlled reverse.
+    let aft = (-forward * inv * speed).clamp(-1.0, 1.0);
+    Some([lateral, aft])
 }
 
 /// A ship-level hazard assessment: a repulsion force (ship-local), the peak
@@ -2881,6 +2938,52 @@ mod tests {
         assert_eq!(decode_steering_from_facing(encode_local_facing(0.0)), 0.0);
         // Starboard steering points the facing to +X.
         assert!(encode_local_facing(0.5)[0] > 0.0);
+    }
+
+    // ── Docking close manoeuvre (issue #742) ──────────────────────────────
+
+    #[test]
+    fn docking_reverses_for_a_dock_directly_astern() {
+        // Ship at origin facing -Z (forward). A dock at +Z is dead astern.
+        let m = docking_close_manoeuvre(0.0, 0.0, 0.0, 0.0, 10.0, 40.0, 0.3)
+            .expect("dock inside engage distance must yield a close manoeuvre");
+        assert!(
+            m[1] > 0.0,
+            "an astern dock must command controlled reverse (aft > 0); got {m:?}"
+        );
+        assert!(
+            m[0].abs() < 1e-6,
+            "a dock straight astern needs no lateral translation; got {m:?}"
+        );
+        assert!(
+            m[1] <= 0.3 + 1e-6,
+            "reverse must be capped by approach_speed"
+        );
+    }
+
+    #[test]
+    fn docking_translates_laterally_for_a_dock_abeam() {
+        // Ship at origin facing -Z; a dock at +X is off the starboard beam.
+        let m = docking_close_manoeuvre(0.0, 0.0, 0.0, 10.0, 0.0, 40.0, 0.3)
+            .expect("dock inside engage distance must yield a close manoeuvre");
+        assert!(
+            m[0] > 0.0,
+            "a starboard-beam dock must command starboard lateral translation; got {m:?}"
+        );
+        assert!(
+            m[1].abs() < 1e-6,
+            "a dock straight abeam needs no fore/aft translation; got {m:?}"
+        );
+    }
+
+    #[test]
+    fn docking_holds_off_beyond_engage_distance() {
+        // Dock 100 units away, engage distance 40 — still normal approach.
+        assert_eq!(
+            docking_close_manoeuvre(0.0, 0.0, 0.0, 0.0, 100.0, 40.0, 0.3),
+            None,
+            "a dock beyond engage distance must not trigger a close manoeuvre"
+        );
     }
 
     #[test]

@@ -55,6 +55,24 @@ pub struct CoordinationQueue(pub CoordinationLagQueue);
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingArcBearingRequest(pub Option<uuid::Uuid>);
 
+/// A distinct docking intent (issue #742): the UUID of the dock the Helm AI is
+/// closing on, or `None` when not docking.
+///
+/// Unlike [`PendingArcBearingRequest`] — which biases *facing only* so weapons
+/// can bear — a docking intent is the sanctioned request for controlled
+/// *translation*: the [`helm-motion-planner`](crate::ship::helm_planner) reads
+/// it and, once the dock is within the hull's authored
+/// `docking_engage_distance`, folds a low-speed reverse / lateral close
+/// manoeuvre ([`crate::ai::docking_close_manoeuvre`]) into the ship's
+/// desired-motion contract — the reverse and lateral drift arc-bearing must
+/// never command.
+///
+/// Expires the same way arc-bearing does: the planner clears it to `None` the
+/// moment its dock target is no longer visible in the ship's merged view
+/// (despawned, out of radar range). `None` = not docking.
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct DockingMotionIntent(pub Option<uuid::Uuid>);
+
 /// Which generation of this ship's [`NavigationWaypoint`] the AI Helm is
 /// cleared to follow (issue #702).
 ///

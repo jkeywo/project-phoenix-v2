@@ -98,13 +98,24 @@ entities:
 
   - component: helm-shared-waypoint-consumer
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Helm Shared Waypoint Consumer
-      summary: Future Helm AI destination input that reads the authoritative shared waypoint no matter whether a human Navigation operator or Navigation AI wrote it.
+      summary: Helm AI destination input that reads the authoritative shared waypoint no matter whether a human Navigation operator or Navigation AI wrote it.
+      rationale:
+        - "Issue #742: both the human console and navigation-ai-operator emit the same admitted SetNavigationWaypoint into the shared NavigationWaypoint, latched for the Helm through the one HelmWaypointClearance generation (rule 6 symmetry), so the consumer reads the authoritative waypoint without branching on origin. cleared_nav_waypoint withholds the waypoint until the Channel-3 clearance latches its generation; build_helm_ai_surfaces_frame carries the cleared waypoint into the per-ship frame; helm_motion_planner turns it into the desired-motion contract's forward travel via helm_ai_decision."
     architecture:
       kind: ai-input-adapter
       authority: authoritative
       reads: [navigation-waypoint-state, system-control-source-state]
       writes: [desired-motion-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/helm_ai.rs, src/ship/helm_planner.rs]
+      symbols:
+        - cleared_nav_waypoint
+        - build_helm_ai_surfaces_frame
+        - helm_ai_decision
+        - helm_motion_planner
+      tests: [cargo test]

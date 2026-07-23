@@ -5,9 +5,10 @@ use crate::console_bridge::AiChatterEvent;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
-    CoordinationQueue, HelmWaypointClearance, ImpulseConfigResource, LastHelmInput,
-    LastSystemTiers, PendingArcBearingRequest, PendingShipConfig, RepairHumanAlerted,
-    ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources, BANK_LERP_RATE,
+    CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, ImpulseConfigResource,
+    LastHelmInput, LastSystemTiers, PendingArcBearingRequest, PendingShipConfig,
+    RepairHumanAlerted, ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources,
+    BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
     handle_coordination_enqueue, handle_coordination_messages, process_coordination_lag,
@@ -99,14 +100,18 @@ impl Plugin for ShipPlugin {
                         .run_if(ai_helm_tick_ready),
                     // Shared desired-motion + hazard planner (issue #741). Runs
                     // between the decision-surface assembly it reads and the
-                    // per-axis thrust/steering systems that consume its
-                    // `HelmMotionPlan` output; it declares `.before` both of them
-                    // here (they are registered in a separate tuple below).
+                    // per-axis systems that consume its `HelmMotionPlan` output;
+                    // it declares `.before` them here (they are registered in a
+                    // separate tuple below). `ai_helm_lateral_thrust` reads the
+                    // plan's docking lateral (issue #742), so it must run after
+                    // the planner too — else it observes the previous tick's plan
+                    // (empty on the first tick) and drops the docking translation.
                     helm_motion_planner
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(crate::sim_sets::AiTickLabel)
                         .before(ai_helm_thrust)
                         .before(ai_helm_steering)
+                        .before(ai_helm_lateral_thrust)
                         .run_if(ai_helm_tick_ready),
                     // `.after(AiTickLabel)`: this system reads the frame built
                     // from the viewscreen blackboard's scored objectives.

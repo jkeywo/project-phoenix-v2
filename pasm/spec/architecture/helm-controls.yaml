@@ -504,10 +504,12 @@ entities:
         - helm-objective-state
         - world-snapshot-state
         - authoritative-ship-motion-state
+        - docking-motion-intent-state
       produces:
         - desired-motion-state
         - hazard-assessment-state
         - helm-motion-blackboard-state
+        - docking-motion-intent-state
       runs_in:
         - host-browser-runtime
     implementation:
@@ -710,19 +712,39 @@ entities:
 
   - state: docking-motion-intent-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Docking Motion Intent State
       summary: Docking-specific desired-motion request that may use controlled reverse and lateral translation for close manoeuvres.
       rationale:
         - Arc-bearing requests affect desired facing only; they must not ask slow lateral or reverse thrust to drift into a better firing arc.
-        - Docking is the distinct future concern that may legitimately need low-speed lateral and reverse movement, so it receives its own intent now.
+        - Docking is the distinct concern that may legitimately need low-speed lateral and reverse movement, so it receives its own intent separate from the facing-only arc-bearing request.
+        - "Issue #742: the DockingMotionIntent component names the dock the Helm AI is closing on; helm-motion-planner reads it and, once the dock is within the hull's authored docking_engage_distance, folds docking_close_manoeuvre's controlled reverse (+z) and lateral (x) translation into the desired-motion contract, which helm-lateral-thrust-ai-operator and the engine axis then actuate. The planner clears the intent the moment its dock target leaves the merged view, so the manoeuvre never outlives its target."
     architecture:
       classification: authoritative
       owner: helm-motion-planner
+      writers:
+        - helm-motion-planner
       readers:
-        - helm-input-arbiter
+        - helm-motion-planner
         - helm-lateral-thrust-ai-operator
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+        - src/ship/helm_ai.rs
+        - src/ai/core.rs
+      symbols:
+        # DockingMotionIntent (the component carrying the dock uuid) is defined
+        # in src/ship/components.rs and re-exported via ship_plugin; the scanner
+        # indexes it there. These three are the behaviour it drives: the pure
+        # close-manoeuvre codec, the planner that folds it into desired-motion,
+        # and the lateral-thrust operator that actuates the resulting translation.
+        - docking_close_manoeuvre
+        - helm_motion_planner
+        - ai_helm_lateral_thrust
+      tests:
+        - cargo test
 
   - state: helm-ai-surfaces-frame-state
     core:

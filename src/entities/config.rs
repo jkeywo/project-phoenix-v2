@@ -131,6 +131,17 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::NAV_HANDOFF_SPEED`] when absent.
     #[serde(default = "default_nav_handoff_speed")]
     pub nav_handoff_speed: f32,
+    /// Distance (world units) within which a docking intent switches from
+    /// normal objective approach to the close-quarters docking manoeuvre
+    /// (controlled reverse / lateral translation). Issue #742.
+    /// Defaults to [`crate::ai::DOCKING_ENGAGE_DISTANCE`] when absent.
+    #[serde(default = "default_docking_engage_distance")]
+    pub docking_engage_distance: f32,
+    /// Speed fraction `[0, 1]` capping the low-speed reverse / lateral
+    /// translation of a docking close manoeuvre. Issue #742.
+    /// Defaults to [`crate::ai::DOCKING_APPROACH_SPEED`] when absent.
+    #[serde(default = "default_docking_approach_speed")]
+    pub docking_approach_speed: f32,
     // `retreat_hull_threshold` lived here until issue #702. It fed a synthetic
     // hull-triggered Retreat that could never win (0..1 score against doctrine's
     // tens) and always steered to world origin (its anchor was empty and the
@@ -160,6 +171,8 @@ impl Default for BehaviourConfig {
             avoidance_buffer: default_avoidance_buffer(),
             avoidance_look_ahead_secs: default_avoidance_look_ahead_secs(),
             nav_handoff_speed: default_nav_handoff_speed(),
+            docking_engage_distance: default_docking_engage_distance(),
+            docking_approach_speed: default_docking_approach_speed(),
         }
     }
 }
@@ -178,6 +191,14 @@ fn default_nav_handoff_speed() -> f32 {
 
 fn default_avoidance_look_ahead_secs() -> f32 {
     crate::ai::AVOIDANCE_LOOK_AHEAD_SECS
+}
+
+fn default_docking_engage_distance() -> f32 {
+    crate::ai::DOCKING_ENGAGE_DISTANCE
+}
+
+fn default_docking_approach_speed() -> f32 {
+    crate::ai::DOCKING_APPROACH_SPEED
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.

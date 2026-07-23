@@ -2394,6 +2394,7 @@ fn spawn_game_start_entities(
                 .insert(initial_active_ratings)
                 .insert(crate::ship_plugin::CoordinationQueue::default())
                 .insert(crate::ship_plugin::PendingArcBearingRequest::default())
+                .insert(crate::ship_plugin::DockingMotionIntent::default())
                 .insert(crate::ship::shields::PendingShieldsThreatBearing::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {

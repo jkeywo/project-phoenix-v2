@@ -1282,6 +1282,7 @@ pub(crate) fn ai_helm_impulse(
 /// rocks it cannot see) — via the pure `crate::ai::operate_lateral_thrust`.
 pub(crate) fn ai_helm_lateral_thrust(
     frame: Res<HelmAiSurfacesFrame>,
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
@@ -1313,7 +1314,21 @@ pub(crate) fn ai_helm_lateral_thrust(
             continue;
         };
 
-        let lateral = if !sf.has_objective {
+        // A docking close manoeuvre (issue #742), when the planner engaged one
+        // this tick, owns the lateral axis: its controlled translation is the
+        // sanctioned use of lateral thrust, distinct from the avoidance dodge
+        // below and from the facing-only arc-bearing request. Read straight off
+        // the shared desired-motion contract's `x` (the planner is the single
+        // writer), so the human and AI paths stay symmetric downstream.
+        let docking_lateral = plan
+            .ships
+            .get(&entity)
+            .filter(|sp| sp.docking_active)
+            .map(|sp| sp.motion.desired_velocity_local.x);
+
+        let lateral = if let Some(docking_lateral) = docking_lateral {
+            docking_lateral
+        } else if !sf.has_objective {
             // No objectives → zero the dodge rather than latch the last one,
             // matching what the monolith did for the axis.
             0.0
@@ -3247,6 +3262,261 @@ mod tests {
         assert_eq!(
             pending.0, None,
             "a pending request for a no-longer-visible target must be cleared, not stuck forever"
+        );
+    }
+
+    /// AC2 (issue #742): an arc-bearing request is *facing-only*. It biases
+    /// steering to bring a bank onto the target, but must never leak into the
+    /// travel axes — no reverse, no lateral drift. The distinction is what keeps
+    /// arc-bearing separate from the docking intent, which alone may translate.
+    #[test]
+    fn arc_bearing_request_never_commands_reverse_or_lateral() {
+        use crate::ship::helm_planner::HelmMotionPlan;
+
+        let mut app = test_app();
+        // Destroy target directly ahead and far away → baseline steering ~0 and
+        // steady forward throttle, so any change is attributable to the request.
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -1000.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        let destroy_uuid_str = destroy_uuid.clone();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // A hostile well off to starboard is the arc-bearing target.
+        let bearing_uuid = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityName("Bearing Contact".into()),
+            Transform::from_xyz(200.0, 0.0, -1.0),
+        ));
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest(Some(bearing_uuid)));
+
+        set_ship_weapons_target(&mut app, &destroy_uuid_str);
+        tick(&mut app);
+
+        // Facing did move (the request was folded into steering)...
+        let last = get_last_helm_input(&mut app);
+        assert!(
+            last.steering.abs() > 0.01,
+            "arc-bearing must bias steering toward the requested bearing; got {last:?}"
+        );
+        // ...but the travel axes are untouched: forward throttle held, no
+        // reverse, and crucially no lateral drift.
+        assert!(
+            last.thrust > 0.0,
+            "arc-bearing must not command reverse; thrust must stay forward; got {last:?}"
+        );
+        assert_eq!(
+            last.lateral, 0.0,
+            "arc-bearing is facing-only: it must never command lateral thrust; got {last:?}"
+        );
+
+        // The shared desired-motion contract confirms it at the source: the
+        // planner never marked docking active and never wrote a lateral (`x`)
+        // component — arc-bearing lives entirely in the facing field.
+        let sp = *app
+            .world()
+            .resource::<HelmMotionPlan>()
+            .ships
+            .get(&ship)
+            .expect("planner must publish a plan for the AI-helmed ship");
+        assert!(
+            !sp.docking_active,
+            "an arc-bearing request must not engage the docking manoeuvre"
+        );
+        assert_eq!(
+            sp.motion.desired_velocity_local.x, 0.0,
+            "arc-bearing must leave the lateral travel component at zero; got {:?}",
+            sp.motion.desired_velocity_local
+        );
+        assert!(
+            sp.motion.desired_velocity_local.z < 0.0,
+            "arc-bearing must leave forward travel forward (local -Z), not reverse; got {:?}",
+            sp.motion.desired_velocity_local
+        );
+    }
+
+    // ── #742: distinct docking motion intent ─────────────────────────────────
+
+    /// Build an AI-helmed ship with a Destroy objective on a far-ahead target
+    /// (so baseline travel is steady forward) plus a spawned dock contact within
+    /// radar range at `dock_pos`. Returns the app and the dock's UUID so the
+    /// caller can set (or mis-set) the `DockingMotionIntent`.
+    fn docking_app(dock_pos: [f32; 3]) -> (App, uuid::Uuid) {
+        let mut app = test_app();
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -4000.0),
+        ));
+        let dock_uuid = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(dock_uuid.to_string()),
+            crate::entities::spawner::EntityName("Axiom Station Dock".into()),
+            Transform::from_xyz(dock_pos[0], dock_pos[1], dock_pos[2]),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        let destroy_uuid_str = destroy_uuid.clone();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        set_ship_weapons_target(&mut app, &destroy_uuid_str);
+        (app, dock_uuid)
+    }
+
+    /// AC3 (issue #742): an active docking intent, once the dock is within
+    /// engage distance, drives a controlled *translation* — reverse and lateral
+    /// — through the shared motion path. These are exactly the motions
+    /// arc-bearing (facing-only) must never command, proving the two intents are
+    /// distinct.
+    #[test]
+    fn docking_intent_commands_controlled_reverse_and_lateral() {
+        use crate::ship::helm_planner::HelmMotionPlan;
+
+        // Dock 20 units astern (+Z) and to starboard (+X) of a ship at the
+        // origin facing -Z — well inside the default 40-unit engage distance.
+        let (mut app, dock_uuid) = docking_app([10.0, 0.0, 20.0]);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship_plugin::DockingMotionIntent(Some(dock_uuid)));
+
+        tick(&mut app);
+
+        let sp = *app
+            .world()
+            .resource::<HelmMotionPlan>()
+            .ships
+            .get(&ship)
+            .expect("planner must publish a plan for the AI-helmed ship");
+        assert!(
+            sp.docking_active,
+            "a dock within engage distance must engage the docking manoeuvre"
+        );
+        assert!(
+            sp.motion.desired_velocity_local.z > 0.0,
+            "an astern dock must command controlled reverse (local +Z); got {:?}",
+            sp.motion.desired_velocity_local
+        );
+        assert!(
+            sp.motion.desired_velocity_local.x > 0.0,
+            "a starboard dock must command starboard lateral translation; got {:?}",
+            sp.motion.desired_velocity_local
+        );
+
+        // The shared actuator path carried it: reverse thrust and lateral thrust
+        // both landed on the ship's admitted inputs.
+        let last = get_last_helm_input(&mut app);
+        assert!(
+            last.thrust < 0.0,
+            "docking reverse must reach the thrust actuator as negative thrust; got {last:?}"
+        );
+        assert!(
+            last.lateral.abs() > 0.0,
+            "docking lateral must reach the lateral-thrust actuator; got {last:?}"
+        );
+    }
+
+    /// AC4 (issue #742): a docking intent expires the instant its dock target is
+    /// no longer visible — the planner clears it rather than leaving the ship
+    /// manoeuvring toward a ghost. Mirrors arc-bearing's target-not-visible
+    /// clear.
+    #[test]
+    fn docking_intent_expires_when_target_not_visible() {
+        use crate::ship::helm_planner::HelmMotionPlan;
+
+        // Dock exists but the intent names a UUID that was never spawned.
+        let (mut app, _dock_uuid) = docking_app([10.0, 0.0, 20.0]);
+        let ghost = uuid::Uuid::new_v4();
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship_plugin::DockingMotionIntent(Some(ghost)));
+
+        tick(&mut app);
+
+        let intent = app
+            .world()
+            .get::<crate::ship_plugin::DockingMotionIntent>(ship)
+            .expect("ship must carry DockingMotionIntent");
+        assert_eq!(
+            intent.0, None,
+            "a docking intent for a no-longer-visible dock must be cleared, not stuck forever"
+        );
+        let sp = *app
+            .world()
+            .resource::<HelmMotionPlan>()
+            .ships
+            .get(&ship)
+            .expect("planner must publish a plan");
+        assert!(
+            !sp.docking_active,
+            "an expired docking intent must not leave the manoeuvre engaged"
+        );
+    }
+
+    /// AC1 (issue #742): the Helm AI consumes the authoritative Navigation
+    /// waypoint through the shared motion path — the planner's DesiredMotion
+    /// steers toward it — regardless of whether a human officer or the
+    /// Navigation AI wrote it. Both sources converge on the same
+    /// `NavigationWaypoint` + `HelmWaypointClearance` latch
+    /// (`human_set_nav_waypoint_eventually_clears_and_the_ai_helm_flies_it`
+    /// pins the human wire path; `operate_navigation_ai` emits the identical
+    /// admitted command), so asserting the planner consumes that latch covers
+    /// both origins.
+    #[test]
+    fn cleared_nav_waypoint_reaches_the_motion_planner_regardless_of_source() {
+        use crate::ship::helm_planner::HelmMotionPlan;
+
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        // A Helm-relevant objective that cannot resolve, so the only thing left
+        // to fly is the Navigation waypoint reaching the planner.
+        set_ship_blackboard_objectives(
+            &mut app,
+            vec![reach_scored_objective("anchor-not-in-world-config", 8.0)],
+        );
+        // Waypoint dead ahead (local -Z) with the clearance latched — the shared
+        // state both the human and AI Navigation sources write.
+        set_cleared_nav_waypoint(&mut app, 0.0, -900.0);
+
+        tick(&mut app);
+
+        let ship = find_ship_entity(&mut app);
+        let sp = *app
+            .world()
+            .resource::<HelmMotionPlan>()
+            .ships
+            .get(&ship)
+            .expect("planner must publish a plan for the AI-helmed ship");
+        assert!(
+            sp.motion.desired_velocity_local.z < 0.0,
+            "the planner must turn the cleared nav waypoint into forward desired travel; got {:?}",
+            sp.motion.desired_velocity_local
         );
     }
 

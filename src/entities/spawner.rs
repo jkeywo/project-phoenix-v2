@@ -328,6 +328,10 @@ pub fn spawn_entity(
         // AI folds into its steering once the request is consumed.
         entity_commands.insert(crate::weapons_plugin::WeaponsArcRequestState::default());
         entity_commands.insert(crate::ship_plugin::PendingArcBearingRequest::default());
+        // Distinct docking intent (issue #742): the sanctioned home for
+        // controlled reverse / lateral close manoeuvres, kept separate from the
+        // facing-only arc-bearing request above.
+        entity_commands.insert(crate::ship_plugin::DockingMotionIntent::default());
         entity_commands.insert(crate::ship::shields::PendingShieldsThreatBearing::default());
         entity_commands.insert(crate::ship_plugin::LastSystemTiers::default());
         entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());

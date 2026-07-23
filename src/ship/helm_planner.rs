@@ -59,6 +59,12 @@ pub struct HazardAssessment {
 pub struct ShipMotionPlan {
     pub motion: DesiredMotion,
     pub hazard: HazardAssessment,
+    /// True when a docking close manoeuvre (issue #742) authored this tick's
+    /// `desired_velocity_local` — its lateral (`x`) and reverse (`+z`)
+    /// components are a sanctioned docking translation, not objective travel.
+    /// The lateral-thrust AI reads it to know the plan owns the lateral axis
+    /// this tick (the controlled drift arc-bearing may never command).
+    pub docking_active: bool,
 }
 
 /// Per-tick shared desired-motion + hazard surface, keyed by ship entity.
@@ -84,20 +90,27 @@ pub(crate) fn helm_motion_planner(
     frame: Res<HelmAiSurfacesFrame>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
     mut plan: ResMut<HelmMotionPlan>,
-    ships: Query<
+    mut ships: Query<
         (
             Entity,
             &ShipPhysics,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::ai_plugin::ObjectiveCursors>,
             Option<&crate::entities::spawner::HelmCapabilitySection>,
+            // Docking intent (issue #742). Mutable because the planner — which
+            // owns docking-motion-intent-state — clears it the moment its dock
+            // target leaves the merged view (expiry), mirroring how
+            // arc-bearing self-clears.
+            Option<&mut crate::ship::components::DockingMotionIntent>,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
     plan.ships.clear();
 
-    for (entity, physics, behaviour_section, cursors, capability) in ships.iter() {
+    for (entity, physics, behaviour_section, cursors, capability, mut docking_intent) in
+        ships.iter_mut()
+    {
         // Only ships some helm axis is actually flying carry a frame entry;
         // the frame is the shared decision surface built this same tick.
         let Some(sf) = frame.ships.get(&entity) else {
@@ -153,12 +166,55 @@ pub(crate) fn helm_motion_planner(
             }
         };
 
-        let motion = DesiredMotion {
+        let mut motion = DesiredMotion {
             desired_velocity_local: Vec3::from_array(crate::ai::encode_local_velocity(
                 thrust, vertical,
             )),
             desired_facing_local: Vec3::from_array(crate::ai::encode_local_facing(steering)),
         };
+
+        // ── Docking close manoeuvre (issue #742) ─────────────────────────────
+        // A distinct intent from arc-bearing: it may translate the hull with
+        // controlled reverse (`+z`) and lateral (`x`) — the motions arc-bearing
+        // (facing-only) must never command. Gated on a live objective like
+        // arc-bearing (the merged view is only built then), and cleared here
+        // the moment its dock target is no longer visible (AC4 expiry).
+        let mut docking_active = false;
+        if sf.has_objective {
+            if let Some(intent) = docking_intent.as_deref_mut() {
+                if let Some(dock_uuid) = intent.0 {
+                    match sf.merged_view.entities.iter().find(|e| e.uuid == dock_uuid) {
+                        Some(dock) => {
+                            let engage = behaviour_section
+                                .map(|b| b.0.docking_engage_distance)
+                                .unwrap_or(crate::ai::DOCKING_ENGAGE_DISTANCE);
+                            let speed = behaviour_section
+                                .map(|b| b.0.docking_approach_speed)
+                                .unwrap_or(crate::ai::DOCKING_APPROACH_SPEED);
+                            if let Some([lateral, aft]) = crate::ai::docking_close_manoeuvre(
+                                physics.x,
+                                physics.z,
+                                physics.yaw,
+                                dock.position[0],
+                                dock.position[2],
+                                engage,
+                                speed,
+                            ) {
+                                // Overwrite the travel axes (facing untouched):
+                                // docking translates the hull onto the berth.
+                                motion.desired_velocity_local.x = lateral;
+                                motion.desired_velocity_local.z = aft;
+                                docking_active = true;
+                            }
+                        }
+                        // Dock target gone (despawned / out of radar): expire the
+                        // intent so the manoeuvre never outlives its target.
+                        None => intent.0 = None,
+                    }
+                }
+            }
+        }
+
         let hazard = HazardAssessment {
             hazard_forces: Vec3::from_array(hazard_raw.forces_local),
             urgency: hazard_raw.urgency,
@@ -176,7 +232,14 @@ pub(crate) fn helm_motion_planner(
             );
         }
 
-        plan.ships.insert(entity, ShipMotionPlan { motion, hazard });
+        plan.ships.insert(
+            entity,
+            ShipMotionPlan {
+                motion,
+                hazard,
+                docking_active,
+            },
+        );
     }
 }
 

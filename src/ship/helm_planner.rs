@@ -2,7 +2,7 @@
 //!
 //! The planner is the single ship-level planning pass that sits **in front of**
 //! the per-axis helm AI. Once per shared AI-helm sim tick it turns a ship's
-//! objective travel decision (`operate_helm`, via `helm_ai_decision`) plus its
+//! objective travel decision (`plan_helm_travel`, via `helm_ai_decision`) plus its
 //! world hazards into a 3D **desired-motion contract** — a desired velocity and
 //! a desired *facing*, kept separate so orientation can diverge from travel —
 //! and a **hazard assessment** (repulsion force, urgency, primary hazard).
@@ -127,7 +127,7 @@ pub(crate) fn helm_motion_planner(
             .map(|c| c.0.vertical_movement_mode)
             .unwrap_or_default();
 
-        // Objective travel decision: the same pure `operate_helm` call the
+        // Objective travel decision: the same pure `plan_helm_travel` call the
         // per-axis systems used to each make, made once here. No objective ->
         // hold (zero throttle, face forward), exactly as the per-axis
         // no-objective branch did.

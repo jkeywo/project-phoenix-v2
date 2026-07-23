@@ -12,7 +12,7 @@ entities:
       writes: [authoritative-ship-motion-state, authoritative-damage-state]
       runs_in: [host-browser-runtime]
     implementation:
-      status: declared
+      status: observed
       paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app.rs]
       symbols: [compute_physics]
       tests: [cargo test]
@@ -49,9 +49,10 @@ entities:
       runs_in:
         - phone-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - gui/action-map.js
+        - gui/helm-dispatch.js
         - gui/console-state.js
         - gui/battleship/helm.html
         - gui/cruiser/helm.html
@@ -62,6 +63,7 @@ entities:
         - gui/components/ph-boost-btn.js
       symbols:
         - buildHelmConsoleState
+        - sendHelmInput
         - PhHelmJoystick
         - PhLateralThrustJoystick
         - PhImpulseBtn
@@ -69,6 +71,7 @@ entities:
       tests:
         - tests/client/console-state.test.js
         - tests/client/action-map.test.js
+        - tests/client/helm-dispatch.test.js
         - tests/client/ph-helm-joystick.test.js
         - tests/client/ph-lateral-thrust-joystick.test.js
         - tests/client/ph-impulse-btn.test.js
@@ -84,7 +87,7 @@ entities:
       classification: local-view
       owner: helm-console-interface
     implementation:
-      status: declared
+      status: observed
       paths:
         - gui/console-state.js
         - gui/battleship/helm.html
@@ -134,8 +137,9 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
+        - src/console/helm/dispatch.rs
         - src/ship_plugin.rs
         - src/ship/helm_admission.rs
         - src/ship/impulse_boost_systems.rs
@@ -143,6 +147,7 @@ entities:
         - src/ship/physics.rs
         - src/ship/helm.rs
       symbols:
+        - register_helm_dispatch
         - process_helm_inputs
         - handle_impulse_messages
         - handle_boost_messages
@@ -183,8 +188,9 @@ entities:
         - helm-lateral-thrust-blackboard-state
         - helm-engine-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
+        - src/ship/components.rs
         - src/ship_plugin.rs
       symbols:
         - LastHelmInput
@@ -203,9 +209,10 @@ entities:
       replicas:
         - helm-status-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/state.rs
+        - src/ship/physics_systems.rs
         - src/ship_plugin.rs
       symbols:
         - ShipPhysics
@@ -234,7 +241,7 @@ entities:
       replicas:
         - helm-motion-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
         - src/ai/core.rs
@@ -270,7 +277,7 @@ entities:
       replicas:
         - helm-motion-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
         - src/ai/core.rs
@@ -299,10 +306,11 @@ entities:
       replicas:
         - helm-status-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/server_app.rs
         - src/ship/impulse.rs
+        - src/ship/impulse_boost_systems.rs
         - src/ship_plugin.rs
       symbols:
         - ShipImpulse
@@ -346,10 +354,11 @@ entities:
       replicas:
         - helm-status-blackboard-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/server_app.rs
         - src/ship/boost.rs
+        - src/ship/impulse_boost_systems.rs
         - src/ship_plugin.rs
       symbols:
         - ShipBoost
@@ -382,7 +391,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/console/helm/server.rs
       symbols:
@@ -404,7 +413,7 @@ entities:
         - impulse-drive-state
         - boost-drive-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/console/helm/server.rs
@@ -430,7 +439,7 @@ entities:
         - desired-motion-state
         - hazard-assessment-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
       symbols:
@@ -451,7 +460,7 @@ entities:
       derived_from:
         - last-helm-input-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/console/helm/server.rs
@@ -476,7 +485,7 @@ entities:
         - last-helm-input-state
         - authoritative-ship-motion-state
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/console/helm/server.rs
@@ -514,7 +523,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
         - src/ship_plugin.rs
@@ -526,14 +535,14 @@ entities:
 
   - migration: helm-shared-motion-planner-rollout
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Helm Shared Motion Planner Rollout
-      summary: Planned migration from direct-write helm avoidance helpers toward a shared desired-motion and hazard-assessment planning surface.
+      summary: Completed migration (issue #745) from direct-write helm avoidance helpers to a shared desired-motion and hazard-assessment planning surface — both legacy doctrine symbols (operate_helm, operate_lateral_thrust) are retired and the shared planner is the sole doctrine consumer.
       rationale:
-        - Current helm AI computes steering and lateral avoidance inside separate operators.
-        - Intended helm design centralises planning and lets fine systems consume shared movement and hazard intent.
-        - Current repository observation is file-level, and several PASM entities share src/ship_plugin.rs. It cannot truthfully attribute helper references inside that file to a specific architectural entity, so this migration retains explicit removal conditions rather than an imprecise caller allowlist.
+        - "Helm AI used to compute steering and lateral avoidance inside separate per-axis operators, each calling the legacy operate_helm / operate_lateral_thrust doctrine directly."
+        - "The shipped helm design centralises planning — helm_motion_planner (via helm_ai_decision) is now the single caller of the pure travel doctrine, renamed plan_helm_travel in #745, and the per-axis fine systems decode their own actuator scalar from the shared desired-motion contract."
+        - "Repository observation is file-level and several PASM entities share src/ship_plugin.rs, so this migration used explicit symbol-does-not-exist removal conditions rather than an imprecise caller allowlist; both conditions now hold."
     migration_plan:
       legacy_entities:
         - helm-ai-operator
@@ -553,12 +562,13 @@ entities:
         - predicate: symbol-does-not-exist
           subject: operate_lateral_thrust
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
         - src/ai/core.rs
       symbols:
         - helm_motion_planner
+        - plan_helm_travel
         - DesiredMotion
         - HazardAssessment
       tests:
@@ -581,7 +591,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ai/server.rs
       symbols:
@@ -599,7 +609,7 @@ entities:
       classification: replicated
       owner: helm-objective-aggregator
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ai/server.rs
         - src/core/messages.rs
@@ -624,7 +634,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ai/server.rs
       symbols:
@@ -651,7 +661,7 @@ entities:
         - helm-vertical-thrust-ai-operator
         - helm-ai-operator
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/entities/config.rs
         - src/entities/spawner.rs
@@ -681,7 +691,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/entities/config.rs
         - src/entities/spawner.rs
@@ -701,7 +711,7 @@ entities:
       classification: authoritative
       owner: ai-world-snapshot-builder
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ai/server.rs
         - src/ai/core.rs
@@ -726,8 +736,9 @@ entities:
       writers:
         - helm-ai-operator
     implementation:
-      status: declared
+      status: observed
       paths:
+        - src/ship/components.rs
         - src/ship_plugin.rs
       symbols:
         - PendingArcBearingRequest
@@ -751,7 +762,7 @@ entities:
         - helm-motion-planner
         - helm-lateral-thrust-ai-operator
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_planner.rs
         - src/ship/helm_ai.rs
@@ -785,7 +796,7 @@ entities:
         - helm-ai-operator
         - helm-lateral-thrust-ai-operator
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
       symbols:
@@ -826,9 +837,10 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
+        - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
       symbols:
         - build_helm_ai_surfaces_frame
@@ -836,7 +848,8 @@ entities:
         - ai_helm_steering
         - ai_helm_impulse
         - helm_axes_operate_ai
-        - operate_helm
+        - emit_helm_ai_command
+        - plan_helm_travel
         - decide_impulse
         - steer_toward
       tests:
@@ -866,12 +879,14 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
+        - src/ship/helm_lateral_emit.rs
         - src/ai/core.rs
       symbols:
         - ai_helm_lateral_thrust
+        - emit_helm_lateral_command
       tests:
         - cargo test
 
@@ -894,8 +909,9 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
+        - src/ship/helm_ai.rs
         - src/ship_plugin.rs
         - src/world/config.rs
         - assets/worlds/default.toml
@@ -928,7 +944,7 @@ entities:
         - helm-lateral-thrust-ai-operator
         - helm-vertical-thrust-ai-operator
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm.rs
         - src/ship/helm_admission.rs
@@ -960,7 +976,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
         - src/ship/physics_systems.rs
@@ -990,7 +1006,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
         - src/ship/physics_systems.rs
@@ -1021,7 +1037,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_admission.rs
       symbols:
@@ -1052,7 +1068,7 @@ entities:
       runs_in:
         - host-browser-runtime
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/ship/helm_ai.rs
         - src/ship/helm_planner.rs
@@ -1098,7 +1114,7 @@ entities:
       trust_boundary: client-to-host
       payload: helm-input
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs
@@ -1128,7 +1144,7 @@ entities:
       trust_boundary: client-to-host
       payload: lateral-thrust-input
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs
@@ -1157,7 +1173,7 @@ entities:
       trust_boundary: client-to-host
       payload: start-impulse-charge
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs
@@ -1186,7 +1202,7 @@ entities:
       trust_boundary: client-to-host
       payload: cancel-impulse
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs
@@ -1215,7 +1231,7 @@ entities:
       trust_boundary: client-to-host
       payload: toggle-boost
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs
@@ -1244,7 +1260,7 @@ entities:
       trust_boundary: client-to-host
       payload: set-boost
     implementation:
-      status: declared
+      status: observed
       paths:
         - src/core/messages.rs
         - src/core/codec.rs

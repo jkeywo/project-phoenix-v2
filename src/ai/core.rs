@@ -459,9 +459,15 @@ fn parse_doctrine_directive(
     }
 }
 
-// ── operate_helm ─────────────────────────────────────────────────────────────
+// ── plan_helm_travel ──────────────────────────────────────────────────────────
 
-/// Per-system operate function for the Helm.
+/// Shared pure Helm travel doctrine, consumed by the motion planner.
+///
+/// Renamed from `operate_helm` in issue #745: the legacy per-axis operators no
+/// longer each call it — the shared `helm_motion_planner` (via `helm_ai_decision`)
+/// is now its sole caller, folding the doctrine decision into the desired-motion
+/// contract the per-axis systems decode. The `operate_helm` symbol is retired so
+/// the helm-shared-motion-planner-rollout migration's removal condition holds.
 ///
 /// Reads the scored objective pool, selects the top-scoring directive the Helm
 /// can serve (Destroy, Patrol, Reach, Retreat), and returns `(thrust, steering)`.
@@ -496,7 +502,7 @@ fn parse_doctrine_directive(
 /// - `nav_waypoint` — Navigation's waypoint, `Some` only once the caller has
 ///   confirmed the Channel-3 clearance matches its generation.
 #[allow(clippy::too_many_arguments)]
-pub fn operate_helm(
+pub fn plan_helm_travel(
     world_view: &WorldView,
     scored_pool: &[crate::messages::ScoredObjective],
     doctrine: &[crate::entity_config::DoctrineObjective],
@@ -1548,7 +1554,7 @@ mod tests {
         let doctrine = patrol_doctrine();
         let anchors = anchors_with_alpha();
 
-        let (thrust, _steering) = operate_helm(
+        let (thrust, _steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -1568,7 +1574,7 @@ mod tests {
     #[test]
     fn operate_helm_empty_pool_returns_zero() {
         let world = world_at_origin();
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &[],
             &[],
@@ -1594,7 +1600,7 @@ mod tests {
         let doctrine = patrol_doctrine();
         let anchors = anchors_with_alpha();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -1641,7 +1647,7 @@ mod tests {
         );
         assert_eq!(cursor.index(), 1, "precondition: cursor must be on wp1");
 
-        let (_thrust, steering) = operate_helm(
+        let (_thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -1674,7 +1680,7 @@ mod tests {
         let (pool, doctrine) = two_waypoint_patrol();
         let world = world_at_origin();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -1723,7 +1729,7 @@ mod tests {
         }
         assert!(cursor.index() >= 2, "precondition: cursor must be terminal");
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -1807,7 +1813,7 @@ mod tests {
         let anchors = anchors_with_alpha();
         let pool = destroy_then_patrol_pool(&anchors);
 
-        let (thrust, _steering) = operate_helm(
+        let (thrust, _steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -1845,7 +1851,7 @@ mod tests {
     fn operate_helm_destroy_pursues_the_weapons_target() {
         let (world, pool, anchors, target_uuid) = destroy_vs_patrol_scene();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -1876,7 +1882,7 @@ mod tests {
     fn operate_helm_destroy_without_a_weapons_target_falls_through() {
         let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -1914,7 +1920,7 @@ mod tests {
 
         // Patrol anchor alpha is at [100, 0, 0] — to starboard. Put Navigation's
         // waypoint to *port* so the two are unambiguously distinguishable.
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -1942,7 +1948,7 @@ mod tests {
     fn operate_helm_destroy_still_yields_to_patrol_without_a_nav_waypoint() {
         let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
 
-        let (_thrust, steering) = operate_helm(
+        let (_thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -1970,7 +1976,7 @@ mod tests {
     fn operate_helm_destroy_ignores_a_target_outside_its_world_view() {
         let (world, pool, anchors, _target_uuid) = destroy_vs_patrol_scene();
 
-        let (_thrust, steering) = operate_helm(
+        let (_thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2076,7 +2082,7 @@ mod tests {
         anchors.insert("rally".to_string(), [100.0, 0.0, 0.0]);
         let pool = retreat_pool("rally", 50.0);
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2119,7 +2125,7 @@ mod tests {
         pool.extend(patrol_pool());
         let doctrine = patrol_doctrine();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2151,7 +2157,7 @@ mod tests {
         let anchors = std::collections::HashMap::new();
         let pool = retreat_pool("", 50.0);
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2235,7 +2241,7 @@ mod tests {
             ..Default::default()
         };
         let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
-        let (thrust, _) = operate_helm(
+        let (thrust, _) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2276,7 +2282,7 @@ mod tests {
             ..Default::default()
         };
         let (pool, doctrine) = destroy_pool_for("enemy", target_speed, maintain_range);
-        let (thrust, _) = operate_helm(
+        let (thrust, _) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2317,7 +2323,7 @@ mod tests {
             ..Default::default()
         };
         let (pool, doctrine) = destroy_pool_for("enemy", 0.8, maintain_range);
-        let (thrust, _) = operate_helm(
+        let (thrust, _) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2356,7 +2362,7 @@ mod tests {
         };
         let (pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2414,7 +2420,7 @@ mod tests {
         });
         let anchors = anchors_with_alpha();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2766,7 +2772,7 @@ mod tests {
         let world = world_at_origin(); // entities list empty, anchors empty
         let pool: Vec<crate::messages::ScoredObjective> = vec![];
 
-        let (thrust, _steering) = operate_helm(
+        let (thrust, _steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2795,7 +2801,7 @@ mod tests {
         let world = world_at_origin();
         let pool: Vec<crate::messages::ScoredObjective> = vec![];
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2826,7 +2832,7 @@ mod tests {
         let world = world_at_origin();
         let pool = vec![];
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2856,7 +2862,7 @@ mod tests {
         let doctrine = patrol_doctrine();
         let anchors = anchors_with_alpha();
 
-        let (thrust, steering) = operate_helm(
+        let (thrust, steering) = plan_helm_travel(
             &world,
             &pool,
             &doctrine,
@@ -2889,7 +2895,7 @@ mod tests {
                                        // Patrol cannot resolve either, so both fall through.
         let pool = destroy_then_patrol_pool(&std::collections::HashMap::new());
 
-        let (thrust, _steering) = operate_helm(
+        let (thrust, _steering) = plan_helm_travel(
             &world,
             &pool,
             &[],
@@ -2919,7 +2925,7 @@ mod tests {
 
         // Phase 1: no objective resolves (no anchors for the Patrol, no lock for
         // the Destroy) -> fly the waypoint, which sits to starboard.
-        let (thrust1, steering1) = operate_helm(
+        let (thrust1, steering1) = plan_helm_travel(
             &world,
             &[],
             &[],
@@ -2940,7 +2946,7 @@ mod tests {
 
         // Phase 2: Tactical locks the hostile, which is dead ahead -> Destroy
         // resolves and outranks the waypoint.
-        let (thrust2, steering2) = operate_helm(
+        let (thrust2, steering2) = plan_helm_travel(
             &world,
             &pool,
             &[],

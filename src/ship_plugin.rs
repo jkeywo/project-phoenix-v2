@@ -37,28 +37,12 @@ pub struct ShipPlugin;
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
-        use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-        // Admitted-command consumers (issue #833) owned by this plugin:
-        // `process_helm_inputs` applies the four per-axis helm ids in one
-        // applier, and `handle_boost_messages` applies `helm-boost`.
-        app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::HELM_THRUST_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::HELM_STEERING_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::HELM_IMPULSE_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::LATERAL_THRUST_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::VERTICAL_THRUST_SYSTEM_ID,
-        ))
-        .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::HELM_BOOST_SYSTEM_ID,
-        ));
+        // Admitted-command consumers (issues #833, #745) for the per-axis Helm
+        // wire targets are declared by the host-helm-control-router's own
+        // dispatch module, so the router's dependency on the command-admission
+        // seam is a real, observed code edge rather than an inline block shared
+        // with dozens of other entities in this plugin file.
+        crate::console::helm::dispatch::register_helm_dispatch(app);
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
             .add_message::<AiChatterEvent>();

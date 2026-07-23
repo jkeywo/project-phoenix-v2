@@ -179,7 +179,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
-      symbols: [score_doctrine_pool, operate_helm, directive_relevance]
+      symbols: [score_doctrine_pool, plan_helm_travel, directive_relevance]
       tests: [cargo test]
 
   - component: captain-objective-priority

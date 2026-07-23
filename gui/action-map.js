@@ -17,6 +17,13 @@
  */
 
 import { dispatchRepairTeam, setRepairPriority } from './repair-dispatch.js';
+import {
+  sendHelmInput,
+  startImpulseCharge,
+  cancelImpulse,
+  toggleBoost,
+  setBoost,
+} from './helm-dispatch.js';
 
 export const ACTION_MAP = Object.freeze({
   /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
@@ -175,63 +182,34 @@ export const ACTION_MAP = Object.freeze({
    *  human owns. Component emitters (ph-helm-joystick) are unchanged.
    */
   helm_input: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-thrust',
-      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
-    });
-    send('ControlSystem', {
-      target: 'helm-steering',
-      payload: { type: 'SetSteering', data: { value: a.steering || 0 } },
-    });
+    sendHelmInput(a.thrust, a.steering, send);
   },
 
   /** Set helm via analog joystick (ph-helm-joystick component).
    *  Same per-axis fan-out as helm_input (issue #801); the joystick's yaw
    *  maps to the steering axis. */
   set_helm: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-thrust',
-      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
-    });
-    send('ControlSystem', {
-      target: 'helm-steering',
-      payload: { type: 'SetSteering', data: { value: a.yaw || 0 } },
-    });
+    sendHelmInput(a.thrust, a.yaw, send);
   },
 
   /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */
   start_impulse_charge: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-impulse',
-      payload: { type: 'StartImpulseCharge' },
-    });
+    startImpulseCharge(send);
   },
 
   /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
   cancel_impulse: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-impulse',
-      payload: { type: 'CancelImpulse' },
-    });
+    cancelImpulse(send);
   },
 
   /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
   toggle_boost: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-boost',
-      payload: { type: 'ToggleBoost' },
-    });
+    toggleBoost(send);
   },
 
   /** Explicitly set boost on or off (hold-to-boost). Targets 'helm-boost'. */
   set_boost: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-boost',
-      payload: {
-        type: 'SetBoost',
-        data: { active: !!a.active },
-      },
-    });
+    setBoost(a.active, send);
   },
 
   /** Switch the view-screen to the radar mode. */

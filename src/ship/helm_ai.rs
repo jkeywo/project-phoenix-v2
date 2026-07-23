@@ -1,5 +1,10 @@
 use bevy::prelude::*;
 
+// Vertical thrust (the AI-only fourth axis, not one of the migration's
+// dependency-modelled operators) still emits directly through the shared
+// arbiter. The player-facing per-axis operators route through their own
+// single-owner seams (`helm_ai_emit` / `helm_lateral_emit`, issue #745) so each
+// operator's command-admission dependency is a per-entity observed code edge.
 use crate::command_admission::ai_emit::emit_ai_command;
 #[cfg(test)]
 use crate::ship::components::LastHelmInput;
@@ -11,6 +16,8 @@ use crate::ship::components::{
 use crate::ship::helm::{
     ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
 };
+use crate::ship::helm_ai_emit::emit_helm_ai_command;
+use crate::ship::helm_lateral_emit::emit_helm_lateral_command;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::ShipImpulse;
 
@@ -633,10 +640,13 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 // first of the seven identical copies) is gone: every AI operator now emits
 // through `command_admission::ai_emit::emit_ai_command` (issue #738).
 
-/// Call the pure `crate::ai::operate_helm` with this ship's TOML-authored
-/// behaviour tuning, returning `(thrust, steering)`.
+/// Call the pure `crate::ai::plan_helm_travel` (renamed from `operate_helm`,
+/// issue #745) with this ship's TOML-authored behaviour tuning, returning
+/// `(thrust, steering)`.
 ///
-/// Both per-axis systems call this and keep only their own axis (see the
+/// The shared `helm_motion_planner` is this function's sole caller; it
+/// publishes the resulting decision to the shared motion plan, and the
+/// per-axis systems decode only their own axis from that plan (see the
 /// module note on `ai_helm_thrust`). Every tunable it passes down — arrival
 /// radius, avoidance buffer, avoidance look-ahead, nav-handoff speed — comes
 /// from the entity's `[behaviour]` TOML section. The `crate::ai::*` constants
@@ -645,7 +655,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 /// matching serde `default =` fn supplies, so an entity that omits the field
 /// and an entity that omits the whole section behave identically.
 ///
-/// Takes everything by shared reference: `operate_helm` has been pure since
+/// Takes everything by shared reference: `plan_helm_travel` has been pure since
 /// #702, so calling this twice in a tick (once per axis) is safe by
 /// construction rather than by scheduling.
 #[allow(clippy::too_many_arguments)]
@@ -661,7 +671,7 @@ pub(crate) fn helm_ai_decision(
     forward_speed: f32,
 ) -> (f32, f32) {
     const NO_CURSORS: &[crate::ai::patrol_cursor::PatrolCursor] = &[];
-    crate::ai::operate_helm(
+    crate::ai::plan_helm_travel(
         world_view,
         scored,
         behaviour_section
@@ -989,9 +999,9 @@ pub(crate) fn detect_reached_objective_completion(
 /// marker, and the intent components the admitted command lands on only
 /// exist there (`lod_ai_ships` inserts/removes them with the marker).
 ///
-/// Consumes the shared `HelmAiSurfacesFrame` (built this tick, see the
-/// module note) and keeps only its own axis of the pure `operate_helm`
-/// decision.
+/// Decodes only its own axis from the shared motion plan (built this tick by
+/// `helm_motion_planner` from the pure `plan_helm_travel` decision, see the
+/// module note).
 pub(crate) fn ai_helm_thrust(
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -1026,7 +1036,7 @@ pub(crate) fn ai_helm_thrust(
         let thrust =
             crate::ai::decode_thrust_from_velocity(sp.motion.desired_velocity_local.to_array());
 
-        emit_ai_command(
+        emit_helm_ai_command(
             entity_uuid,
             crate::system_registry::helm_thrust_system_id(),
             crate::messages::SystemControlPayload::SetThrust { value: thrust },
@@ -1113,7 +1123,7 @@ pub(crate) fn ai_helm_steering(
             );
         }
 
-        emit_ai_command(
+        emit_helm_ai_command(
             entity_uuid,
             crate::system_registry::helm_steering_system_id(),
             crate::messages::SystemControlPayload::SetSteering { value: steering },
@@ -1251,7 +1261,7 @@ pub(crate) fn ai_helm_impulse(
             }
             crate::ai::ImpulseDecision::NoChange => continue,
         };
-        emit_ai_command(
+        emit_helm_ai_command(
             entity_uuid,
             crate::system_registry::helm_impulse_system_id(),
             payload,
@@ -1370,7 +1380,7 @@ pub(crate) fn ai_helm_lateral_thrust(
                 .unwrap_or(0.0)
         };
 
-        emit_ai_command(
+        emit_helm_lateral_command(
             entity_uuid,
             crate::system_registry::lateral_thrust_system_id(),
             crate::messages::SystemControlPayload::LateralThrustInput { lateral },

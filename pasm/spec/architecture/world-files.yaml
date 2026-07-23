@@ -305,18 +305,18 @@ entities:
 
   - component: world-objective-contract
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: World Objective Contract
-      summary: Defines objective identifiers, display text, ownership, transition rules, and cleanup when the world layer that authored an objective unloads. Layer ownership and unload cleanup are implemented (issue #751); identifier/reference validation, visibility, and priority remain proposed (issue #752).
+      summary: Defines objective identifiers, display text, ownership, transition rules, and cleanup when the world layer that authored an objective unloads. Layer ownership and unload cleanup (issue #751) plus identifier/reference validation, visibility, and scoped priority (issue #752) are implemented.
     architecture:
       kind: configuration-schema
       authority: authoritative
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/world/dispatch.rs, src/world/server.rs]
-      symbols: [ObjectiveManager, apply_world_layer_changes]
+      paths: [src/objectives.rs, src/world/dispatch.rs, src/world/server.rs, src/world/validate.rs]
+      symbols: [ObjectiveManager, apply_world_layer_changes, validate_objectives]
       tests: [cargo test]
 
   - component: world-trigger-lifecycle-contract

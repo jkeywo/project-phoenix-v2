@@ -50,7 +50,7 @@ entities:
 
   - component: objective-target-name-resolver
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Objective Target Name Resolver
       summary: Resolves objective target names through the active world name-to-UUID table and ignores unresolved targets rather than substituting arbitrary entities.
@@ -63,14 +63,15 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/core.rs, src/world/server.rs, src/objectives.rs]
+      symbols: [resolve_objective_target]
       tests: [cargo test]
 
   - state: objective-target-resolution-state
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Objective Target Resolution State
-      summary: Derived per-objective result identifying resolved targets, unresolved directives, and intentional hold-station outcomes.
+      summary: Derived per-objective result identifying resolved targets, unresolved directives that fall through to the next objective, and intentional hold-station outcomes that do not fall through.
     architecture:
       classification: derived
       owner: objective-target-name-resolver
@@ -78,10 +79,11 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/core.rs, src/world/server.rs]
+      symbols: [plan_helm_travel, resolve_objective_target]
 
   - component: objective-outcome-controller
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Objective Outcome Controller
       summary: Transitions objectives between Active, Completed, and Failed from authored trigger, Comms, and entity-destruction outcomes and feeds the resulting game flow.
@@ -94,6 +96,7 @@ entities:
     implementation:
       status: declared
       paths: [src/objectives.rs, src/world/server.rs, src/console/comms/server.rs]
+      symbols: [ObjectiveManager]
       tests: [cargo test]
 
   - component: objective-authoring-actions
@@ -206,7 +209,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Captain Objective Priority State
-      summary: Optional globally boosted objective ID. It is not scoped to a ship, AI controller, or individual objective consumer.
+      summary: Boosted objective ID keyed by the captain's own ship scope (issue #752). A boost only reorders that ship's own objective consumers; see scoped-objective-priority-state.
     architecture:
       classification: authoritative
       owner: captain-objective-priority
@@ -239,10 +242,10 @@ entities:
 
   - component: scoped-objective-priority
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Scoped Objective Priority
-      summary: Captain priority selection applies only to the intended local ship or system AI consumer, never every objective consumer in the session.
+      summary: Captain priority selection applies only to the captain's own ship scope, never every objective consumer in the session. The command handler derives the scope from the captain's own ship and toggles the boost within that scope alone.
     architecture:
       kind: control-policy
       authority: authoritative
@@ -250,55 +253,80 @@ entities:
       reads: [objective-runtime-state]
       produces: [scoped-objective-priority-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/server_app.rs]
+      symbols: [handle_set_objective_priority, CaptainPriorityBoost]
+      tests: [cargo test]
 
   - state: scoped-objective-priority-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Scoped Objective Priority State
-      summary: Objective boost selections keyed by their explicitly declared local scope rather than one global objective ID.
+      summary: Objective boost selections keyed by their declared local scope (the captain's own ship) rather than one global objective ID; a boost in one scope is invisible to every other scope and to another ship's consumers.
     architecture:
       classification: authoritative
       owner: scoped-objective-priority
       writers: [scoped-objective-priority]
+    implementation:
+      status: declared
+      paths: [src/server_app.rs]
+      symbols: [CaptainPriorityBoost]
+      tests: [cargo test]
 
   - component: objective-visibility-policy
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Objective Visibility Policy
-      summary: Comms and Captain both hide doctrine objectives whose current utility score is zero, while mission objectives remain visible.
+      summary: Comms and Captain both hide doctrine objectives whose current utility score is zero, while mission objectives remain visible. Both projections apply the one shared visibility filter over the scored pool.
     architecture:
       kind: projection-policy
       authority: authoritative
       reads: [objective-runtime-state, scored-objective-pool-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/objectives.rs, src/console/captain/server.rs, src/console/comms/server.rs]
+      symbols: [is_visible_objective, publish_captain_blackboard, publish_comms_blackboard]
+      tests: [cargo test]
 
   - component: objective-authoring-validation
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Objective Authoring Validation
-      summary: World composition validation resolves objective IDs and rejects duplicate objective declarations or references before the root world activates.
+      summary: World composition validation rejects duplicate objective declarations within a single action list and complete/fail references to objectives no add_objective declares, before the root world activates. Both activation gates run it.
     architecture:
       kind: configuration-validator
       authority: authoritative
       reads: [world-authoring-validation-state, world-composition-state]
       coordinates: [objective-manager]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/validate.rs, src/headless/app.rs, src/world/server.rs]
+      symbols: [validate_objectives, validate_composition]
+      tests: [cargo test]
 
   - component: objective-world-lifecycle
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Objective World Lifecycle
-      summary: Objectives are owned by their authoring world layer and are removed when that layer unloads.
+      summary: Objectives are owned by their authoring world layer and are removed when that layer unloads, along with the runtime state that referenced them — a captain priority boost pointing at a removed objective and any per-ship route cursor keyed to it.
     architecture:
       kind: lifecycle-policy
       authority: authoritative
       reads: [world-content-lifecycle-state, objective-runtime-state]
       coordinates: [objective-manager]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/server.rs, src/objectives.rs]
+      symbols: [apply_world_layer_changes]
+      tests: [cargo test]
 
   - component: comms-objective-ai
     core:

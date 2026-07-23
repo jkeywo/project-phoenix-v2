@@ -40,6 +40,16 @@ fn publish_comms_blackboard(
     inbox: Option<Res<CommsInboxRes>>,
     runtime: Option<Res<CommsRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    // Local-ship world conditions for scoring the objective pool (issue #752):
+    // comms hides zero-score doctrine objectives exactly as the captain panel
+    // does, so it needs red-alert + hull to evaluate zero-gates / modifiers.
+    local_conditions_q: Query<
+        (
+            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::entity_spawner::EntitySystemHull>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut ship_q: Query<
         (
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
@@ -74,9 +84,44 @@ fn publish_comms_blackboard(
         }
     }
 
+    // Score the active objective pool against the local ship's conditions and
+    // apply the shared player-facing visibility filter (issue #752): mission
+    // objectives are always shown; doctrine objectives are hidden while their
+    // utility score is zero. Comms does not apply the captain boost — that is a
+    // captain-scoped mechanism — so a zero-gated doctrine objective stays hidden
+    // in comms until its own conditions lift it.
+    let (red_alert, hull_fraction) = local_conditions_q
+        .single()
+        .ok()
+        .map(|(ra, hull)| {
+            let red_alert = ra.map(|r| r.0).unwrap_or(false);
+            let hull_fraction = hull
+                .map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 {
+                        (h.0.total_current() / max).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    }
+                })
+                .unwrap_or(1.0);
+            (red_alert, hull_fraction)
+        })
+        .unwrap_or((false, 1.0));
+    let conditions = crate::objectives::WorldConditions {
+        red_alert,
+        hull_fraction,
+        attacked: false,
+    };
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
-        .map(|o| o.0.sorted_snapshots())
+        .map(|o| {
+            o.0.scored_pool(&conditions)
+                .into_iter()
+                .filter(crate::objectives::is_visible_objective)
+                .map(|s| s.snapshot)
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut contacts = runtime
@@ -639,6 +684,55 @@ mod tests {
             panic!("wrong blackboard variant");
         };
         bb
+    }
+
+    // ── comms objective visibility (issue #752, objective-visibility-policy) ──
+
+    #[test]
+    fn comms_bb_hides_zero_score_doctrine_objective() {
+        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::objectives::{ObjectiveManager, UtilityConfig, ZeroGateCondition};
+        let mut app = test_app();
+        let mut mgr = ObjectiveManager::new();
+        // Doctrine objective gated on red_alert — score 0 while not at red alert
+        // (the test LocalShip has no ShipRedAlert, so conditions.red_alert=false).
+        mgr.add_full(
+            "doctrine-hidden",
+            "Hidden doctrine",
+            false,
+            vec![],
+            AiDirective::None,
+            UtilityConfig {
+                base_priority: 30.0,
+                zero_gates: vec![ZeroGateCondition {
+                    condition: "red_alert".into(),
+                    threshold: None,
+                }],
+                ..Default::default()
+            },
+            ObjectiveSource::Doctrine,
+        );
+        app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
+        app.update();
+
+        assert!(
+            comms_bb(&mut app).objectives.is_empty(),
+            "a zero-score doctrine objective must be hidden from the comms panel"
+        );
+    }
+
+    #[test]
+    fn comms_bb_shows_mission_objective_regardless_of_score() {
+        use crate::objectives::ObjectiveManager;
+        let mut app = test_app();
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("mission-1", "Reach the station", true, vec![]);
+        app.world_mut().insert_resource(ObjectiveManagerRes(mgr));
+        app.update();
+
+        let bb = comms_bb(&mut app);
+        assert_eq!(bb.objectives.len(), 1);
+        assert_eq!(bb.objectives[0].id, "mission-1");
     }
 
     #[test]

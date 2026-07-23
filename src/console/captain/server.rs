@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::messages::{
-    AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, ObjectiveSource,
-    SystemBlackboard, SystemControlPayload, SystemId, ViewMode,
+    AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard,
+    SystemControlPayload, SystemId, ViewMode,
 };
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
@@ -149,19 +149,25 @@ fn handle_set_view(
 /// Toggle the captain's priority boost for a doctrine objective.
 /// Sending the same id twice clears the boost.
 fn handle_set_objective_priority(
-    ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
+    ship_query: Query<
+        (
+            &AdmittedCommands,
+            Option<&crate::entity_spawner::EntityUuid>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     mut boost: ResMut<crate::server_app::CaptainPriorityBoost>,
 ) {
-    let Some(admitted) = ship_query.iter().next() else {
+    let Some((admitted, uuid)) = ship_query.iter().next() else {
         return;
     };
+    // Scope the boost to this captain's own ship (issue #752): the toggle
+    // writes into the local ship's scope only, never a session-global slot.
+    let scope =
+        crate::server_app::CaptainPriorityBoost::scope_key(uuid.map(|u| u.0.as_str())).to_string();
     for cmd in admitted.for_target(crate::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
-            if boost.boosted_id.as_deref() == Some(id.as_str()) {
-                boost.boosted_id = None;
-            } else {
-                boost.boosted_id = Some(id.clone());
-            }
+            boost.toggle(&scope, id);
         }
     }
 }
@@ -289,13 +295,14 @@ fn publish_captain_blackboard(
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::ship_state::ShipViewMode>,
             Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entity_spawner::EntityUuid>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (control_sources, red_alert_comp, view_mode_comp, hull_opt, is_local, mut bbs) in
+    for (control_sources, red_alert_comp, view_mode_comp, hull_opt, uuid_opt, is_local, mut bbs) in
         ship_query.iter_mut()
     {
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
@@ -362,22 +369,23 @@ fn publish_captain_blackboard(
                 hull_fraction,
                 attacked: false,
             };
-            let captain_boost = boost
-                .boosted_id
-                .as_deref()
-                .map(|id| (id, crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT));
+            // Scope the boost to this ship (issue #752): a captain's priority
+            // pick only reorders its own ship's objective consumers.
+            let scope =
+                crate::server_app::CaptainPriorityBoost::scope_key(uuid_opt.map(|u| u.0.as_str()));
+            let captain_boost = boost.boost_arg(scope);
             objectives_snap = objectives
                 .as_ref()
                 .map(|obj| {
                     let scored = obj.0.scored_pool_with_boost(&conditions, captain_boost);
                     scored
                         .into_iter()
-                        .filter(|o| o.source == ObjectiveSource::Mission || o.score > 0.0)
+                        .filter(crate::objectives::is_visible_objective)
                         .map(|o| o.snapshot)
                         .collect()
                 })
                 .unwrap_or_default();
-            boosted_objective_id = boost.boosted_id.clone();
+            boosted_objective_id = boost.boosted_for(scope).map(str::to_string);
         }
 
         let game_status = if red_alert {
@@ -1522,13 +1530,19 @@ mod tests {
         assert_eq!(bb.objectives[0].source, ObjectiveSource::Mission);
     }
 
+    /// Build a boost resource with `id` boosted in the bb test app's local
+    /// (uuid-less) scope.
+    fn local_boost(id: &str) -> crate::server_app::CaptainPriorityBoost {
+        let mut b = crate::server_app::CaptainPriorityBoost::default();
+        b.toggle(crate::server_app::CaptainPriorityBoost::LOCAL_SCOPE, id);
+        b
+    }
+
     #[test]
     fn boosted_objective_id_propagates_to_captain_bb() {
         let mut app = bb_test_app();
         app.world_mut()
-            .insert_resource(crate::server_app::CaptainPriorityBoost {
-                boosted_id: Some("destroy-hostiles".into()),
-            });
+            .insert_resource(local_boost("destroy-hostiles"));
         app.update();
 
         assert_eq!(
@@ -1545,9 +1559,7 @@ mod tests {
         app.world_mut()
             .insert_resource(ObjectiveManagerRes(doctrine_objective_manager()));
         app.world_mut()
-            .insert_resource(crate::server_app::CaptainPriorityBoost {
-                boosted_id: Some("destroy-hostiles".into()),
-            });
+            .insert_resource(local_boost("destroy-hostiles"));
         app.update();
 
         let bb = captain_bb(&mut app);
@@ -1557,6 +1569,47 @@ mod tests {
             "boosted objective must appear despite zero-gate"
         );
         assert_eq!(bb.objectives[0].id, "destroy-hostiles");
+    }
+
+    #[test]
+    fn captain_boost_does_not_leak_to_another_ships_scope() {
+        // A boost set in one ship's scope must never appear in another ship's
+        // scope (issue #752 scoped-objective-priority, no-leak proof).
+        let mut boost = crate::server_app::CaptainPriorityBoost::default();
+        boost.toggle("ship-a", "destroy-hostiles");
+        assert_eq!(boost.boosted_for("ship-a"), Some("destroy-hostiles"));
+        assert_eq!(
+            boost.boosted_for("ship-b"),
+            None,
+            "ship-a's boost must not bleed into ship-b's scope"
+        );
+        assert!(boost.boost_arg("ship-b").is_none());
+        // ...and ship-a's own consumer still sees it.
+        assert_eq!(
+            boost.boost_arg("ship-a"),
+            Some((
+                "destroy-hostiles",
+                crate::server_app::CaptainPriorityBoost::BOOST_AMOUNT
+            ))
+        );
+    }
+
+    #[test]
+    fn captain_boost_prune_objective_clears_matching_scopes_only() {
+        let mut boost = crate::server_app::CaptainPriorityBoost::default();
+        boost.toggle("ship-a", "gone");
+        boost.toggle("ship-b", "stays");
+        boost.prune_objective("gone");
+        assert_eq!(
+            boost.boosted_for("ship-a"),
+            None,
+            "removed objective pruned"
+        );
+        assert_eq!(
+            boost.boosted_for("ship-b"),
+            Some("stays"),
+            "unrelated scope's boost is untouched"
+        );
     }
 
     #[test]
@@ -1576,12 +1629,11 @@ mod tests {
             },
         );
         tick(&mut app);
-        assert_eq!(
+        assert!(
             app.world()
                 .resource::<crate::server_app::CaptainPriorityBoost>()
-                .boosted_id
-                .as_deref(),
-            Some("destroy-hostiles"),
+                .contains_objective("destroy-hostiles"),
+            "the command must boost the objective in the captain's ship scope",
         );
     }
 
@@ -1589,26 +1641,27 @@ mod tests {
     fn set_objective_priority_command_toggles_off_when_same_id() {
         let mut app = test_app();
         app.world_mut()
-            .insert_resource(crate::server_app::CaptainPriorityBoost {
-                boosted_id: Some("destroy-hostiles".into()),
-            });
+            .insert_resource(crate::server_app::CaptainPriorityBoost::default());
         start_game(&mut app);
-        push(
-            &mut app,
-            "captain",
-            ClientMessage::ControlSystem {
-                target: crate::system_registry::captain_system_id(),
-                payload: SystemControlPayload::SetObjectivePriority {
-                    id: "destroy-hostiles".into(),
-                },
+        let set_priority = || ClientMessage::ControlSystem {
+            target: crate::system_registry::captain_system_id(),
+            payload: SystemControlPayload::SetObjectivePriority {
+                id: "destroy-hostiles".into(),
             },
-        );
+        };
+        // First send sets the boost, second send toggles it back off.
+        push(&mut app, "captain", set_priority());
         tick(&mut app);
-        assert_eq!(
+        assert!(app
+            .world()
+            .resource::<crate::server_app::CaptainPriorityBoost>()
+            .contains_objective("destroy-hostiles"));
+        push(&mut app, "captain", set_priority());
+        tick(&mut app);
+        assert!(
             app.world()
                 .resource::<crate::server_app::CaptainPriorityBoost>()
-                .boosted_id,
-            None,
+                .is_empty(),
             "sending the same id again should clear the boost"
         );
     }

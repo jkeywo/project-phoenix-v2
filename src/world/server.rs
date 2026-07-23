@@ -426,11 +426,20 @@ pub fn spawn_immediate_entities_internal(
     // error must never leave partial root-world content active. The headless
     // build path aborts earlier on the full composition; this seam is the
     // last-resort gate for the Bevy `Startup` spawn.
-    let identity = crate::world::validate::validate_entity_identity("", "", &world_config.entities);
+    let mut identity =
+        crate::world::validate::validate_entity_identity("", "", &world_config.entities);
+    // Objective authoring validation (issue #752): duplicate declarations within
+    // a single action list, or complete/fail references to objectives no
+    // add_objective declares, also block activation so nothing spawns partially.
+    identity.extend(crate::world::validate::validate_objectives(
+        "",
+        "",
+        world_config,
+    ));
     if crate::world::validate::has_error(&identity) {
         bevy::log::error!(
             target: "world",
-            "spawn blocked: world entity identity invalid ({} error(s)); spawning zero entities",
+            "spawn blocked: world composition invalid ({} error(s)); spawning zero entities",
             identity.iter().filter(|f| f.is_error()).count()
         );
         return Vec::new();
@@ -1905,6 +1914,11 @@ fn apply_world_layer_changes(
     // Layer-owned objective cleanup on unload (issue #751). `Option` so bare
     // `App` fixtures without an `ObjectiveManagerRes` still run the loader.
     mut objectives: Option<ResMut<ObjectiveManagerRes>>,
+    // Related runtime state to prune when a layer's objectives are removed
+    // (issue #752): a captain priority boost pointing at a removed objective,
+    // and any per-ship route cursor keyed to it.
+    mut captain_boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
+    mut objective_cursors_q: Query<&mut crate::ai::server::ObjectiveCursors>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -2039,10 +2053,21 @@ fn apply_world_layer_changes(
                 // Remove comms template states belonging to this layer.
                 crate::comms::server::remove_layer_comms(&mut comms, &layer.comms_template_states);
 
-                // Remove objectives this layer's triggers added (issue #751).
-                if let Some(obj) = objectives.as_deref_mut() {
-                    for id in &layer.owned_objective_ids {
+                // Remove objectives this layer's triggers added (issue #751)
+                // and prune the runtime state that referenced them (issue #752):
+                // a captain priority boost pointing at a removed objective, and
+                // any per-ship route cursor keyed to it. Otherwise a stale boost
+                // would keep re-scoring a gone objective and a re-added same-id
+                // objective would inherit the old cursor's waypoint index.
+                for id in &layer.owned_objective_ids {
+                    if let Some(obj) = objectives.as_deref_mut() {
                         obj.0.remove(id);
+                    }
+                    if let Some(boost) = captain_boost.as_deref_mut() {
+                        boost.prune_objective(id);
+                    }
+                    for mut cursors in objective_cursors_q.iter_mut() {
+                        cursors.0.retain(|c| &c.objective_id != id);
                     }
                 }
 
@@ -4841,6 +4866,82 @@ base_priority = 35.0
             ids,
             vec!["base-obj".to_string()],
             "only the layer's objective is removed; the base objective survives"
+        );
+    }
+
+    /// Issue #752: unloading a layer also prunes the runtime state that
+    /// referenced its objectives — a captain priority boost pointing at a
+    /// removed objective, and any per-ship route cursor keyed to it — while
+    /// leaving unrelated boosts and cursors intact.
+    #[test]
+    fn unload_world_prunes_boost_and_cursor_for_removed_objectives() {
+        use crate::ai::patrol_cursor::PatrolCursor;
+        use crate::ai::server::ObjectiveCursors;
+        use crate::server_app::CaptainPriorityBoost;
+
+        let mut app = layer_test_app();
+        app.init_resource::<ObjectiveManagerRes>();
+        app.init_resource::<CaptainPriorityBoost>();
+
+        {
+            let mut obj = app.world_mut().resource_mut::<ObjectiveManagerRes>();
+            obj.0.add("base-obj", "Base objective", false, vec![]);
+            obj.0.add("layer-obj", "Layer objective", false, vec![]);
+        }
+        {
+            let mut boost = app.world_mut().resource_mut::<CaptainPriorityBoost>();
+            // A boost on the layer's objective (to be pruned) and one on the
+            // base objective (must survive), in different ship scopes.
+            boost.toggle("ship-a", "layer-obj");
+            boost.toggle("ship-b", "base-obj");
+        }
+        // A ship carrying cursors for both objectives.
+        app.world_mut().spawn(ObjectiveCursors(vec![
+            PatrolCursor::new("layer-obj"),
+            PatrolCursor::new("base-obj"),
+        ]));
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            lm.0.insert(
+                "sub.toml".to_string(),
+                WorldRuntime {
+                    owned_objective_ids: vec!["layer-obj".to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("sub.toml".to_string()));
+        app.update();
+
+        let boost = app.world().resource::<CaptainPriorityBoost>();
+        assert_eq!(
+            boost.boosted_for("ship-a"),
+            None,
+            "the boost on the removed objective must be pruned"
+        );
+        assert_eq!(
+            boost.boosted_for("ship-b"),
+            Some("base-obj"),
+            "the boost on the surviving objective is untouched"
+        );
+
+        let cursor_ids: Vec<String> = {
+            let mut q = app.world_mut().query::<&ObjectiveCursors>();
+            q.single(app.world())
+                .unwrap()
+                .0
+                .iter()
+                .map(|c| c.objective_id.clone())
+                .collect()
+        };
+        assert_eq!(
+            cursor_ids,
+            vec!["base-obj".to_string()],
+            "the cursor keyed to the removed objective is pruned; the other survives"
         );
     }
 

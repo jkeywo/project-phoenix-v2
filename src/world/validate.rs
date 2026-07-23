@@ -31,9 +31,11 @@
 // Flags live in a layered `FlagStore`; entity names live in per-world
 // namespaces — different resolution domains, different syntaxes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig, WorldEntity};
+use crate::world::config::{
+    CommsDialogueNode, TriggerAction, TriggerCondition, WorldConfig, WorldEntity,
+};
 
 /// Severity of a [`WorldFinding`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,6 +315,143 @@ pub fn validate_entity_identity(
     findings
 }
 
+/// Every action list authored in a world config, in a stable order: each
+/// trigger's action list, then every comms dialogue node's response action
+/// lists (recursing through follow-ups and the template root follow-up).
+///
+/// Objective declarations and references live in these lists whether they were
+/// authored on a world trigger or a comms response, so the objective validator
+/// walks all of them in one place.
+fn collect_action_lists(config: &WorldConfig) -> Vec<&[TriggerAction]> {
+    let mut lists: Vec<&[TriggerAction]> = Vec::new();
+    for trigger in &config.triggers {
+        lists.push(&trigger.actions);
+    }
+    for template in &config.comms {
+        collect_comms_node_action_lists(&template.node, &mut lists);
+        if let Some(root_fu) = &template.root_follow_up {
+            collect_comms_node_action_lists(root_fu, &mut lists);
+        }
+    }
+    lists
+}
+
+fn collect_comms_node_action_lists<'a>(
+    node: &'a CommsDialogueNode,
+    lists: &mut Vec<&'a [TriggerAction]>,
+) {
+    for response in &node.responses {
+        lists.push(&response.actions);
+        if let Some(follow_up) = &response.follow_up {
+            collect_comms_node_action_lists(follow_up, lists);
+        }
+    }
+}
+
+/// Collect every objective id declared via `add_objective` across all of a
+/// world config's action lists (triggers + comms).
+fn collect_objective_declarations(config: &WorldConfig) -> HashSet<&str> {
+    let mut declared = HashSet::new();
+    for actions in collect_action_lists(config) {
+        for action in actions {
+            if let TriggerAction::AddObjective { id, .. } = action {
+                declared.insert(id.as_str());
+            }
+        }
+    }
+    declared
+}
+
+/// Validate objective declarations and references for one world config against
+/// the set of objective ids declared across the whole effective composition
+/// (`objective-authoring-validation`, issue #752).
+///
+/// Two error rules, both deliberately **precise** so every shipped world keeps
+/// validating clean:
+///
+/// * **Duplicate declaration** — the same objective id declared more than once
+///   within a *single* action list (one trigger's actions, or one comms
+///   response's actions). Both would run on a single fire, so the second is a
+///   guaranteed dead no-op (`ObjectiveManager::add` silently ignores a repeated
+///   id). Re-declaring an id across *separate*, mutually-exclusive branches —
+///   e.g. `btf_path_a`'s two `obj-rescue-varen` arms, or an objective offered by
+///   two alternative comms responses — is legitimate authoring and is NOT
+///   flagged.
+/// * **Unresolved reference** — a `complete_objective` / `fail_objective` id
+///   that no `add_objective` anywhere in the composition declares. The
+///   transition targets an objective that can never exist.
+///
+/// Objective *targets* are entity references, not objective ids; they are
+/// resolved (as warnings for unresolved bare names) by `collect_entity_references`
+/// and are deliberately not escalated to errors here — shipped worlds legitimately
+/// target localization-key names and runtime-spawned entities.
+pub fn validate_objectives_in(
+    path: &str,
+    source_text: &str,
+    config: &WorldConfig,
+    composition_declared: &HashSet<&str>,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let action_lists = collect_action_lists(config);
+
+    // Duplicate declaration within a single action list.
+    for actions in &action_lists {
+        let mut seen_here: HashSet<&str> = HashSet::new();
+        for action in *actions {
+            if let TriggerAction::AddObjective { id, .. } = action {
+                if !seen_here.insert(id.as_str()) {
+                    findings.push(WorldFinding::error(
+                        "duplicate-objective-id",
+                        path,
+                        source_text,
+                        id,
+                        format!(
+                            "objective id '{id}' is declared more than once in a single \
+                             action list in '{path}'; the repeat is a dead no-op"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Unresolved complete/fail reference to an undeclared objective.
+    for actions in &action_lists {
+        for action in *actions {
+            if let TriggerAction::CompleteObjective { id } | TriggerAction::FailObjective { id } =
+                action
+            {
+                if !composition_declared.contains(id.as_str()) {
+                    findings.push(WorldFinding::error(
+                        "unresolved-objective-reference",
+                        path,
+                        source_text,
+                        id,
+                        format!(
+                            "objective transition references id '{id}' which no \
+                             add_objective declares, in '{path}'"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    findings
+}
+
+/// Convenience wrapper validating a single world config in isolation (the
+/// Bevy `Startup` spawn gate): objective references resolve against that world's
+/// own declarations only.
+pub fn validate_objectives(
+    path: &str,
+    source_text: &str,
+    config: &WorldConfig,
+) -> Vec<WorldFinding> {
+    let declared = collect_objective_declarations(config);
+    validate_objectives_in(path, source_text, config, &declared)
+}
+
 /// Validate the effective composition (`world-authoring-validation-state`).
 ///
 /// Runs per-world identity checks, then resolves every authored entity
@@ -464,6 +603,28 @@ pub fn validate_composition(root: &WorldSource, children: &[WorldSource]) -> Vec
         }
         out
     };
+
+    // Objective declarations/references (issue #752). Resolve `complete`/`fail`
+    // references against the union of objectives declared anywhere in the
+    // effective composition, since they share a single `ObjectiveManager`.
+    let mut composition_declared = collect_objective_declarations(root.config);
+    for child in children {
+        composition_declared.extend(collect_objective_declarations(child.config));
+    }
+    findings.extend(validate_objectives_in(
+        &root.path,
+        root.toml,
+        root.config,
+        &composition_declared,
+    ));
+    for child in children {
+        findings.extend(validate_objectives_in(
+            &child.path,
+            child.toml,
+            child.config,
+            &composition_declared,
+        ));
+    }
 
     // Root references: ancestor chain is just [root].
     let root_ancestors: Vec<&[String]> = vec![root_names.as_slice()];
@@ -725,6 +886,168 @@ entity = "phantom"
         assert!(findings
             .iter()
             .any(|f| f.severity == Severity::Warning && f.source.reference == "phantom"));
+    }
+
+    // ── objective authoring validation (AC2, issue #752) ─────────────────────
+
+    #[test]
+    fn duplicate_objective_id_in_one_action_list_is_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-dup"
+  text = "First"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-dup"
+  text = "Second"
+"#;
+        let c = cfg(toml);
+        let findings = validate_objectives("root.toml", toml, &c);
+        let err = findings
+            .iter()
+            .find(|f| f.category == "duplicate-objective-id")
+            .expect("duplicate id in one action list must error");
+        assert!(err.is_error());
+        assert_eq!(err.source.reference, "obj-dup");
+    }
+
+    #[test]
+    fn same_objective_id_across_separate_triggers_is_allowed() {
+        // Mutually-exclusive branches re-declaring the same id (the shipped
+        // `btf_path_a` pattern) must NOT be flagged.
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-rescue"
+  text = "Case A"
+
+[[trigger]]
+condition = "on_flag_set"
+name      = "ready"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-rescue"
+  text = "Case B"
+"#;
+        let c = cfg(toml);
+        let findings = validate_objectives("root.toml", toml, &c);
+        assert!(
+            !has_error(&findings),
+            "cross-branch id reuse must not error: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn complete_objective_referencing_undeclared_id_is_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-ghost"
+"#;
+        let c = cfg(toml);
+        let findings = validate_objectives("root.toml", toml, &c);
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-objective-reference")
+            .expect("complete of an undeclared objective must error");
+        assert!(err.is_error());
+        assert_eq!(err.source.reference, "obj-ghost");
+    }
+
+    #[test]
+    fn complete_objective_referencing_declared_id_resolves() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-1"
+  text = "Do it"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-1"
+"#;
+        let c = cfg(toml);
+        let findings = validate_objectives("root.toml", toml, &c);
+        assert!(
+            !has_error(&findings),
+            "complete of a declared objective must resolve: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn objective_declared_in_root_resolves_a_child_reference() {
+        // Composition-wide resolution: a child's complete_objective resolves
+        // against an objective the root declares (one shared ObjectiveManager).
+        let root = cfg(r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-shared"
+  text = "Shared"
+"#);
+        let child = cfg(r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-shared"
+"#);
+        let root_src = WorldSource::new("root.toml", "", &root);
+        let child_src = WorldSource::new("assets/worlds/child.toml", "", &child);
+        let findings = validate_composition(&root_src, &[child_src]);
+        assert!(
+            !has_error(&findings),
+            "child complete resolves against root declaration: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_objective_id_blocks_composition_activation() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "dup"
+  text = "One"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "dup"
+  text = "Two"
+"#;
+        let c = cfg(toml);
+        let src = WorldSource::new("root.toml", toml, &c);
+        let findings = validate_composition(&src, &[]);
+        assert!(
+            has_error(&findings),
+            "a duplicate objective declaration must block activation"
+        );
     }
 
     // ── shipped worlds validate clean (regression guard) ─────────────────────

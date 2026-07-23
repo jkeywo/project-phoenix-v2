@@ -124,6 +124,22 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
     }
 }
 
+/// Shared player-facing visibility filter (`objective-visibility-policy`, #752).
+///
+/// A scored objective is shown on a **player-facing** panel (Captain, Comms)
+/// when it is a mission objective — always visible regardless of score — or when
+/// it is a doctrine objective with a currently positive utility score. Doctrine
+/// objectives sitting at score 0 (e.g. an unmet zero-gate) are hidden until
+/// conditions or a Captain boost lift them above zero.
+///
+/// This is deliberately NOT used by the AI-facing pool: the AI keeps zero-score
+/// objectives in view and skips them at consumption time (`plan_helm_travel`
+/// filters `score > 0.0`), so a boost or a changed condition can re-activate a
+/// directive without re-publishing the pool.
+pub fn is_visible_objective(o: &ScoredObjective) -> bool {
+    o.source == ObjectiveSource::Mission || o.score > 0.0
+}
+
 // ── Internal record ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -321,11 +337,12 @@ impl ObjectiveManager {
                 }
             })
             .collect();
-        pool.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // `total_cmp` gives a total, deterministic order (no `NaN`-dependent
+        // `Equal` fallback). Player-facing panels (captain, comms) filter this
+        // pool through `is_visible_objective`, and the AI-facing viewscreen pool
+        // re-sorts the unioned result with `total_cmp` too — the rng-determinism
+        // guard depends on every scoring path being totally ordered (#752).
+        pool.sort_by(|a, b| b.score.total_cmp(&a.score));
         pool
     }
 
@@ -797,5 +814,90 @@ mod tests {
         mgr.add("obj", "No directive", false, vec![]);
         let pool = mgr.scored_pool(&WorldConditions::default());
         assert!(pool[0].relevance.is_empty());
+    }
+
+    // ── remove clears runtime record (issue #751/#752) ─────────────────────
+
+    #[test]
+    fn remove_drops_record_and_marks_dirty() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "Text", true, vec![]);
+        mgr.mark_clean();
+        assert!(mgr.remove("obj-1"));
+        assert!(mgr.sorted_snapshots().is_empty());
+        assert!(mgr.scored_pool(&WorldConditions::default()).is_empty());
+        assert!(mgr.is_dirty());
+    }
+
+    #[test]
+    fn remove_unknown_id_is_noop() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "Text", true, vec![]);
+        mgr.mark_clean();
+        assert!(!mgr.remove("ghost"));
+        assert!(!mgr.is_dirty());
+    }
+
+    #[test]
+    fn removed_id_can_be_re_added_fresh() {
+        // After removal the id is free again: a re-add is a genuine insert, not
+        // a dedup no-op — so an unloaded-then-reloaded layer re-registers its
+        // objective cleanly (#752 lifecycle).
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "First", true, vec![]);
+        mgr.remove("obj-1");
+        assert!(mgr.add("obj-1", "Second", false, vec![]));
+        let snaps = mgr.sorted_snapshots();
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].text, "Second");
+    }
+
+    // ── is_visible_objective (objective-visibility-policy, #752) ────────────
+
+    fn scored(id: &str, source: ObjectiveSource, base: f32) -> ScoredObjective {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add_full(
+            id,
+            "text",
+            false,
+            vec![],
+            AiDirective::None,
+            UtilityConfig {
+                base_priority: base,
+                ..Default::default()
+            },
+            source,
+        );
+        mgr.scored_pool(&WorldConditions::default())
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn mission_objective_is_visible_even_at_zero_score() {
+        let o = scored("m", ObjectiveSource::Mission, 0.0);
+        assert_eq!(o.score, 0.0);
+        assert!(is_visible_objective(&o));
+    }
+
+    #[test]
+    fn doctrine_objective_hidden_at_zero_score_visible_when_positive() {
+        let zero = scored("d0", ObjectiveSource::Doctrine, 0.0);
+        assert!(!is_visible_objective(&zero));
+        let positive = scored("d1", ObjectiveSource::Doctrine, 5.0);
+        assert!(is_visible_objective(&positive));
+    }
+
+    #[test]
+    fn scored_pool_is_total_ordered_on_equal_scores_by_insertion() {
+        // Equal scores keep insertion order under the stable `total_cmp` sort,
+        // giving a deterministic tiebreak the consumers rely on.
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("first", "A", false, vec![]);
+        mgr.add("second", "B", false, vec![]);
+        let pool = mgr.scored_pool(&WorldConditions::default());
+        assert_eq!(pool[0].id, "first");
+        assert_eq!(pool[1].id, "second");
     }
 }

@@ -133,18 +133,77 @@ pub struct WeaponFiredThisTick(pub bool);
 #[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ShipAttackedThisTick(pub bool);
 
-/// Tracks the objective id the captain has chosen to prioritize.
-/// Applied as a score bonus in `publish_viewscreen_blackboard` so the AI
-/// immediately sees the updated priority ordering.
+/// Tracks the objective id each captain has chosen to prioritize, **scoped to
+/// that captain's own ship** (issue #752 `scoped-objective-priority-state`).
+///
+/// Before #752 this held a single global `boosted_id`, so one captain's pick
+/// bled into every ship and system-AI consumer in the session. It is now keyed
+/// by local consumer scope — the captain's own ship identity — so a boost only
+/// ever reorders that ship's own objective consumers (its Helm/Tactical/Nav AI
+/// via the viewscreen pool, and its Captain panel). A boost set in one scope is
+/// structurally invisible to every other scope.
+///
+/// Applied as a score bonus in `publish_viewscreen_blackboard` /
+/// `publish_captain_blackboard` so the AI and the captain panel immediately see
+/// the updated priority ordering for that ship.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CaptainPriorityBoost {
-    /// The objective currently boosted. `None` when no boost is set.
-    pub boosted_id: Option<String>,
+    /// scope key (the captain's ship identity) -> currently boosted objective id.
+    boosts: std::collections::HashMap<String, String>,
 }
 
 impl CaptainPriorityBoost {
     /// Score bonus added to the boosted objective's utility score.
     pub const BOOST_AMOUNT: f32 = 15.0;
+
+    /// Scope key for a ship that has no assigned UUID (single-ship sessions and
+    /// bare test fixtures). A real multi-ship session keys every ship by its own
+    /// UUID, so boosts never collide across ships.
+    pub const LOCAL_SCOPE: &'static str = "local";
+
+    /// The scope key for a ship, given its optional UUID string.
+    pub fn scope_key(ship_uuid: Option<&str>) -> &str {
+        ship_uuid.unwrap_or(Self::LOCAL_SCOPE)
+    }
+
+    /// The objective boosted within `scope`, if any.
+    pub fn boosted_for(&self, scope: &str) -> Option<&str> {
+        self.boosts.get(scope).map(String::as_str)
+    }
+
+    /// Toggle `id` as the boosted objective within `scope`. Selecting the id
+    /// already boosted in that scope clears it (same toggle semantics as the
+    /// pre-#752 global boost, now per scope).
+    pub fn toggle(&mut self, scope: &str, id: &str) {
+        if self.boosts.get(scope).map(String::as_str) == Some(id) {
+            self.boosts.remove(scope);
+        } else {
+            self.boosts.insert(scope.to_string(), id.to_string());
+        }
+    }
+
+    /// The `(id, bonus)` argument to pass to `scored_pool_with_boost` for
+    /// `scope`, or `None` when nothing is boosted in that scope.
+    pub fn boost_arg<'a>(&'a self, scope: &str) -> Option<(&'a str, f32)> {
+        self.boosted_for(scope).map(|id| (id, Self::BOOST_AMOUNT))
+    }
+
+    /// Remove any boost (in any scope) that points at objective `id` — called
+    /// when a layer unload removes the objective, so a stale boost can never
+    /// keep re-scoring a record that no longer exists (issue #752 lifecycle).
+    pub fn prune_objective(&mut self, id: &str) {
+        self.boosts.retain(|_, boosted| boosted != id);
+    }
+
+    /// True when no scope has a boost set.
+    pub fn is_empty(&self) -> bool {
+        self.boosts.is_empty()
+    }
+
+    /// True when any scope currently boosts `id`.
+    pub fn contains_objective(&self, id: &str) -> bool {
+        self.boosts.values().any(|v| v == id)
+    }
 }
 
 /// Carries the reason string — and, since #843, the structured
@@ -902,6 +961,7 @@ fn clear_last_attacker_on_red_alert_off(
 /// doctrine pool — i.e. behaves exactly as before.
 fn publish_viewscreen_blackboard(
     hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
+    local_uuid_q: Query<&crate::entity_spawner::EntityUuid, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     mut ship_blackboards_q: Query<
@@ -972,11 +1032,11 @@ fn publish_viewscreen_blackboard(
         hull_fraction: hull_integrity_pct / 100.0,
         attacked: false,
     };
-    let captain_boost = boost.as_ref().and_then(|b| {
-        b.boosted_id
-            .as_deref()
-            .map(|id| (id, CaptainPriorityBoost::BOOST_AMOUNT))
-    });
+    // Scope the captain boost to this (local) ship, so a boost only ever
+    // reorders this ship's own objective consumers (issue #752).
+    let local_uuid = local_uuid_q.single().ok().map(|u| u.0.clone());
+    let scope = CaptainPriorityBoost::scope_key(local_uuid.as_deref());
+    let captain_boost = boost.as_ref().and_then(|b| b.boost_arg(scope));
     let mut scored_objectives = objectives
         .as_ref()
         .map(|o| o.0.scored_pool_with_boost(&conditions, captain_boost))

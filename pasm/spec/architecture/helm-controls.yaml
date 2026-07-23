@@ -277,6 +277,7 @@ entities:
       symbols:
         - HazardAssessment
         - HazardAssessmentRaw
+        - HazardContribution
         - assess_hazards
       tests:
         - cargo test
@@ -674,7 +675,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Snapshot State
-      summary: AI-facing 3D snapshot of nearby entities, positions, radii, factions, and motion used by helm steering, avoidance, collision checks, and range evaluation.
+      summary: AI-facing 3D snapshot of nearby entities — positions, radii, factions, motion, and per-entity hazard facts (movable, dangerous, size_rating) — used by helm steering, avoidance, collision checks, and range evaluation.
     architecture:
       classification: authoritative
       owner: ai-world-snapshot-builder
@@ -825,10 +826,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Lateral Thrust AI Operator
-      summary: Per-axis lateral-thrust decide system that consumes the shared helm decision surface's radar-gated view and emits its dodge as an admitted LateralThrustInput command into its own ship's AdmittedCommands.
+      summary: Per-axis lateral-thrust decide system that reads the shared hazard-assessment surface, weights it by the hull's authored lateral sensitivity, and emits its dodge as an admitted LateralThrustInput command into its own ship's AdmittedCommands.
       rationale:
         - This is distinct from full helm Backfill AI.
-        - "Issue #824: like its three siblings it no longer writes the intent component directly — it emits through the shared validate_and_admit seam and consumes the frame's radar-gated visible view instead of rebuilding its own (the avoidance inputs are shared ship-level state at last, though not yet the intended hazard-assessment surface)."
+        - "Issue #824: like its three siblings it no longer writes the intent component directly — it emits through the shared validate_and_admit seam."
+        - "Issue #743: horizontal collision avoidance moved into the shared hazard-assessment surface. This operator no longer re-derives the projected-collision geometry; it reads HazardAssessment.hazard_forces from the planner's HelmMotionPlan and weights the starboard repulsion by the hull's authored lateral_hazard_sensitivity. The docking translation still overrides it (issue #742) and the emit → admit → apply arbiter path is unchanged."
         - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
     architecture:
       kind: service
@@ -849,7 +851,6 @@ entities:
         - src/ai/core.rs
       symbols:
         - ai_helm_lateral_thrust
-        - operate_lateral_thrust
       tests:
         - cargo test
 

@@ -142,6 +142,19 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::DOCKING_APPROACH_SPEED`] when absent.
     #[serde(default = "default_docking_approach_speed")]
     pub docking_approach_speed: f32,
+    /// Authored ignore-smaller rule (issue #743): the shared hazard assessment
+    /// skips a hazard whose `size_rating` is below this ship's own scaled by
+    /// this ratio. `0.0` (the default) disables the rule so every dangerous
+    /// hazard is assessed; `1.0` ignores any hazard strictly smaller than self.
+    /// Defaults to [`crate::ai::HAZARD_IGNORE_SIZE_RATIO`] when absent.
+    #[serde(default = "default_hazard_ignore_size_ratio")]
+    pub hazard_ignore_size_ratio: f32,
+    /// Authored lateral-thrust sensitivity to the shared hazard surface (issue
+    /// #743): the multiplier the fine lateral-thrust actuator applies to the
+    /// hazard assessment's starboard repulsion before clamping to `[-1, 1]`.
+    /// Defaults to [`crate::ai::LATERAL_HAZARD_SENSITIVITY`] when absent.
+    #[serde(default = "default_lateral_hazard_sensitivity")]
+    pub lateral_hazard_sensitivity: f32,
     // `retreat_hull_threshold` lived here until issue #702. It fed a synthetic
     // hull-triggered Retreat that could never win (0..1 score against doctrine's
     // tens) and always steered to world origin (its anchor was empty and the
@@ -173,6 +186,8 @@ impl Default for BehaviourConfig {
             nav_handoff_speed: default_nav_handoff_speed(),
             docking_engage_distance: default_docking_engage_distance(),
             docking_approach_speed: default_docking_approach_speed(),
+            hazard_ignore_size_ratio: default_hazard_ignore_size_ratio(),
+            lateral_hazard_sensitivity: default_lateral_hazard_sensitivity(),
         }
     }
 }
@@ -199,6 +214,14 @@ fn default_docking_engage_distance() -> f32 {
 
 fn default_docking_approach_speed() -> f32 {
     crate::ai::DOCKING_APPROACH_SPEED
+}
+
+fn default_hazard_ignore_size_ratio() -> f32 {
+    crate::ai::HAZARD_IGNORE_SIZE_RATIO
+}
+
+fn default_lateral_hazard_sensitivity() -> f32 {
+    crate::ai::LATERAL_HAZARD_SENSITIVITY
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.

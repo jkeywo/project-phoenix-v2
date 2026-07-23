@@ -148,11 +148,18 @@ pub(crate) fn helm_motion_planner(
         let avoidance_look_ahead = behaviour_section
             .map(|b| b.0.avoidance_look_ahead_secs)
             .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS);
+        // Authored ignore-smaller rule (issue #743): a ship ignores hazards
+        // below its own size rating, scaled by this ratio. `0.0` (the serde
+        // default) leaves every dangerous hazard in the picture.
+        let hazard_ignore_size_ratio = behaviour_section
+            .map(|b| b.0.hazard_ignore_size_ratio)
+            .unwrap_or(crate::ai::HAZARD_IGNORE_SIZE_RATIO);
         let hazard_raw = crate::ai::assess_hazards(
             &sf.merged_view,
             physics.forward_speed,
             avoidance_buffer,
             avoidance_look_ahead,
+            hazard_ignore_size_ratio,
         );
 
         // Vertical intent is gated on the ship's authored movement mode: a

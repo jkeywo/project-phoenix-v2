@@ -81,7 +81,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
-      symbols: [operate_helm, operate_weapons, operate_lateral_thrust]
+      symbols: [operate_helm, operate_weapons]
       tests: [cargo test]
 
   - component: per-system-ai-operator-suite

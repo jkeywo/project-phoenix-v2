@@ -352,6 +352,12 @@ fn build_world_snapshot(
                     radius,
                     forward_speed,
                     shields: None,
+                    // Ships move under their own power and are dangerous
+                    // collision hazards; size rating tracks the collision
+                    // radius (issue #743).
+                    movable: true,
+                    dangerous: true,
+                    size_rating: radius,
                 }
             },
         )
@@ -379,6 +385,12 @@ fn build_world_snapshot(
                     radius: collider.0.radius,
                     forward_speed: 0.0,
                     shields: None,
+                    // Asteroids are static (do not move) but are still dangerous
+                    // collision hazards; size rating tracks the collision radius
+                    // (issue #743).
+                    movable: false,
+                    dangerous: true,
+                    size_rating: collider.0.radius,
                 }),
         );
 }

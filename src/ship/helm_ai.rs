@@ -194,6 +194,11 @@ fn helm_ai_snapshot_entities(
                 hull_fraction,
                 yaw: Some(transform.rotation.to_euler(EulerRot::YXZ).0),
                 radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                // Ships are movable, dangerous collision hazards; size rating
+                // tracks the collision radius (issue #743).
+                movable: true,
+                dangerous: true,
+                size_rating: collider.map(|c| c.0.radius).unwrap_or(0.0),
                 ..Default::default()
             }
         })
@@ -290,6 +295,10 @@ fn helm_ai_world_view(
         entities,
         self_faction: faction.map(|f| f.0),
         self_radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+        // Size rating drives the authored ignore-smaller rule (issue #743);
+        // populated from the collision radius, the same measure used for
+        // published hazard `size_rating`.
+        self_size_rating: collider.map(|c| c.0.radius).unwrap_or(0.0),
         ..crate::ai::WorldView::default()
     }
 }
@@ -422,10 +431,10 @@ fn helm_weapons_target(combat_lock: Option<&str>) -> Option<uuid::Uuid> {
 // AI-helm sim tick by `build_helm_ai_surfaces_frame`, which runs
 // `.after(AiTickLabel)` and `.before` all four per-axis systems. The per-axis
 // systems consume it via `Res<_>` (immutable by construction), each still
-// making its own pure per-axis decision (`operate_helm` /
-// `operate_lateral_thrust` / `decide_impulse`) — so per-axis decision
-// ownership is preserved and the seam never becomes a coarse helm controller
-// (#801 constraint).
+// making its own pure per-axis decision (`operate_helm` / `decide_impulse`, or
+// reading the shared hazard surface for lateral thrust, issue #743) — so
+// per-axis decision ownership is preserved and the seam never becomes a coarse
+// helm controller (#801 constraint).
 //
 // Why this does not violate the module's recorded owner ruling ("no shared
 // cached `HelmDecision`", see the per-axis module note below): the frame
@@ -1277,9 +1286,12 @@ pub(crate) fn ai_helm_impulse(
 /// `LateralThrustInput` into the ship's own `AdmittedCommands` (issues #703,
 /// #704, #824).
 ///
-/// Consumes the frame's radar-gated `visible_view` — the same view #703
-/// aligned this axis to (a cruiser with a shot-up helm radar must not dodge
-/// rocks it cannot see) — via the pure `crate::ai::operate_lateral_thrust`.
+/// Since #743 the dodge is no longer re-derived here: it reads the shared
+/// hazard assessment the planner published in `HelmMotionPlan` (the ship-level
+/// `assess_hazards` surface built from the hull's authored avoidance tuning)
+/// and weights its starboard repulsion by this hull's authored
+/// `lateral_hazard_sensitivity`. Docking translation still overrides it (issue
+/// #742), and the emit → admit → apply arbiter path is unchanged.
 pub(crate) fn ai_helm_lateral_thrust(
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
@@ -1314,15 +1326,18 @@ pub(crate) fn ai_helm_lateral_thrust(
             continue;
         };
 
+        // The ship's plan for this tick: both the docking translation (issue
+        // #742) and the shared hazard surface (issue #743) are read off it, so
+        // the human and AI paths stay symmetric downstream (the planner is the
+        // single writer of both).
+        let ship_plan = plan.ships.get(&entity);
+
         // A docking close manoeuvre (issue #742), when the planner engaged one
         // this tick, owns the lateral axis: its controlled translation is the
         // sanctioned use of lateral thrust, distinct from the avoidance dodge
         // below and from the facing-only arc-bearing request. Read straight off
-        // the shared desired-motion contract's `x` (the planner is the single
-        // writer), so the human and AI paths stay symmetric downstream.
-        let docking_lateral = plan
-            .ships
-            .get(&entity)
+        // the shared desired-motion contract's `x`.
+        let docking_lateral = ship_plan
             .filter(|sp| sp.docking_active)
             .map(|sp| sp.motion.desired_velocity_local.x);
 
@@ -1333,23 +1348,23 @@ pub(crate) fn ai_helm_lateral_thrust(
             // matching what the monolith did for the axis.
             0.0
         } else {
-            // TOML-authored avoidance tuning, same as `helm_ai_decision` uses: how
-            // much clearance this hull wants is a property of the hull, not of which
-            // system happens to be automated. The dodge and the yaw must agree, or
-            // the ship sidesteps an obstacle its steering has already dismissed.
-            // `full_ai_helm_honours_toml_authored_avoidance_buffer` /
-            // `..._look_ahead` pin this site against the constants (commit 7f4e2661).
-            crate::ai::operate_lateral_thrust(
-                &sf.visible_view,
-                &sf.scored,
-                behaviour_section
-                    .map(|b| b.0.avoidance_buffer)
-                    .unwrap_or(crate::ai::AVOIDANCE_BUFFER),
-                behaviour_section
-                    .map(|b| b.0.avoidance_look_ahead_secs)
-                    .unwrap_or(crate::ai::AVOIDANCE_LOOK_AHEAD_SECS),
-                sf.forward_speed,
-            )
+            // Horizontal collision avoidance now flows from the shared hazard
+            // assessment (issue #743): the planner's `assess_hazards` publishes a
+            // ship-local repulsion, and this actuator responds through its own
+            // authored `lateral_hazard_sensitivity` rather than re-deriving the
+            // projected-collision geometry in a separate helper. The dodge and
+            // the yaw agree because both read the one hazard surface the planner
+            // built from the hull's authored avoidance tuning.
+            // `lateral_thrust_ai_honours_toml_authored_avoidance_buffer` /
+            // `..._look_ahead` pin the buffer/look-ahead reaching that surface;
+            // `lateral_thrust_ai_responds_to_shared_hazard_surface` pins the
+            // sensitivity weighting.
+            let sensitivity = behaviour_section
+                .map(|b| b.0.lateral_hazard_sensitivity)
+                .unwrap_or(crate::ai::LATERAL_HAZARD_SENSITIVITY);
+            ship_plan
+                .map(|sp| (sp.hazard.hazard_forces.x * sensitivity).clamp(-1.0, 1.0))
+                .unwrap_or(0.0)
         };
 
         emit_ai_command(
@@ -4223,6 +4238,11 @@ mod tests {
                 yaw: None,
                 radius,
                 forward_speed: 0.0,
+                // A static rock: not movable, but a dangerous collision hazard;
+                // size rating tracks its radius (issue #743).
+                movable: false,
+                dangerous: true,
+                size_rating: radius,
             }],
         });
     }
@@ -4348,6 +4368,182 @@ mod tests {
         );
     }
 
+    /// Seeds a `WorldSnapshot` holding a single *moving* obstacle: a ship with
+    /// its own `yaw`/`forward_speed`, so the predictive projection folds the
+    /// obstacle's motion into the collision test (issue #743). `movable` is set
+    /// so the published fact matches a real moving hull.
+    fn snapshot_with_moving_obstacle(
+        app: &mut App,
+        position: [f32; 3],
+        radius: f32,
+        yaw: f32,
+        forward_speed: f32,
+    ) {
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid: uuid::Uuid::new_v4(),
+                name: Some("raider".into()),
+                position,
+                faction: None,
+                shields: None,
+                hull_fraction: None,
+                yaw: Some(yaw),
+                radius,
+                forward_speed,
+                movable: true,
+                dangerous: true,
+                size_rating: radius,
+            }],
+        });
+    }
+
+    /// Give the subject ship a collision radius, so its `self_size_rating` is
+    /// nonzero and the authored ignore-smaller rule has a size to compare a
+    /// hazard against (issue #743). Without a collider the test ship rates 0 and
+    /// the rule can never fire.
+    fn set_ship_collider(app: &mut App, radius: f32) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entities::spawner::ColliderSection(
+                crate::entity_config::ColliderConfig {
+                    shape: crate::entity_config::ColliderShape::Ball,
+                    radius,
+                    length: 0.0,
+                },
+            ));
+    }
+
+    /// A static hazard on the starboard bow must push the lateral dodge to port
+    /// (negative): the shared hazard assessment's repulsion points away from the
+    /// obstacle, and the actuator follows it (issue #743). The obstacle sits
+    /// inside an authored 60-unit buffer.
+    #[test]
+    fn lateral_thrust_ai_dodges_static_hazard() {
+        // Starboard bow (+X), dead-ahead-ish down -Z. Stationary ship, so the
+        // obstacle's own (absent) motion cannot confound the sign.
+        let obstacle = [4.0, 0.0, -40.0];
+        let mut app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut app, obstacle, 1.0);
+        tick_twice(&mut app);
+        assert!(
+            lateral_intent(&mut app) < 0.0,
+            "a starboard-bow hazard must dodge to port (negative lateral); got {}",
+            lateral_intent(&mut app)
+        );
+    }
+
+    /// A moving hazard is handled through the same shared surface: an obstacle
+    /// that is out of range when static becomes a threat once its own forward
+    /// motion is projected into the collision test, and the lateral dodge fires
+    /// (issue #743).
+    #[test]
+    fn lateral_thrust_ai_dodges_moving_hazard() {
+        // Stationary self at origin (its projection is fixed), obstacle 50 units
+        // ahead on the starboard bow. Static, it is far outside the default
+        // ~7-unit dodge radius; closing at 16 u/s (yaw = PI faces +Z, back
+        // toward us) its 3 s projection lands ~2 units ahead — a real threat.
+        let obstacle = [2.0, 0.0, -50.0];
+
+        let mut static_app = lateral_thrust_ai_app(None);
+        snapshot_with_obstacle(&mut static_app, obstacle, 1.0);
+        tick_twice(&mut static_app);
+        assert_eq!(
+            lateral_intent(&mut static_app),
+            0.0,
+            "a static obstacle 50 units off is outside the default dodge radius"
+        );
+
+        let mut moving_app = lateral_thrust_ai_app(None);
+        snapshot_with_moving_obstacle(&mut moving_app, obstacle, 1.0, std::f32::consts::PI, 16.0);
+        tick_twice(&mut moving_app);
+        assert!(
+            lateral_intent(&mut moving_app) < 0.0,
+            "the obstacle's own motion must bring it into collision and dodge to \
+             port; got {}",
+            lateral_intent(&mut moving_app)
+        );
+    }
+
+    /// The authored `lateral_hazard_sensitivity` gates the response to the
+    /// shared hazard surface: an obstacle that dodges at the default sensitivity
+    /// produces no lateral thrust when the hull authors sensitivity 0, and a
+    /// wider authored sensitivity does not zero it (issue #743). This pins that
+    /// the actuator reads the shared surface scaled by its own authored weight.
+    #[test]
+    fn lateral_thrust_ai_responds_to_shared_hazard_surface() {
+        let obstacle = [4.0, 0.0, -40.0];
+
+        // Default sensitivity (1.0): the in-range obstacle dodges.
+        let mut responsive = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut responsive, obstacle, 1.0);
+        tick_twice(&mut responsive);
+        assert!(
+            lateral_intent(&mut responsive).abs() > 0.0,
+            "the shared hazard force must drive a dodge at the default sensitivity"
+        );
+
+        // Sensitivity 0: the same shared hazard force is weighted to nothing.
+        let mut muted = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            lateral_hazard_sensitivity: 0.0,
+            ..Default::default()
+        }));
+        snapshot_with_obstacle(&mut muted, obstacle, 1.0);
+        tick_twice(&mut muted);
+        assert_eq!(
+            lateral_intent(&mut muted),
+            0.0,
+            "an authored zero sensitivity must mute the response to the shared \
+             hazard surface"
+        );
+    }
+
+    /// The authored ignore-smaller rule reaches the lateral dodge: a large ship
+    /// ignores a hazard below its own size rating entirely, so the same obstacle
+    /// that would otherwise dodge produces zero lateral thrust (issue #743).
+    #[test]
+    fn lateral_thrust_ai_ignores_hazard_smaller_than_self() {
+        // Obstacle inside an authored 60-unit buffer so it *is* a threat when
+        // the ignore rule is off. Self rates size 10 (collider radius); the
+        // obstacle rates 1.
+        let obstacle = [4.0, 0.0, -40.0];
+
+        let mut dodges = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        }));
+        set_ship_collider(&mut dodges, 10.0);
+        snapshot_with_obstacle(&mut dodges, obstacle, 1.0);
+        tick_twice(&mut dodges);
+        assert!(
+            lateral_intent(&mut dodges).abs() > 0.0,
+            "with the ignore rule off, the in-range obstacle must dodge"
+        );
+
+        let mut ignores = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            // Ignore any hazard whose size rating is below self's (10 × 1.0 = 10);
+            // the obstacle rates 1, so it is skipped.
+            hazard_ignore_size_ratio: 1.0,
+            ..Default::default()
+        }));
+        set_ship_collider(&mut ignores, 10.0);
+        snapshot_with_obstacle(&mut ignores, obstacle, 1.0);
+        tick_twice(&mut ignores);
+        assert_eq!(
+            lateral_intent(&mut ignores),
+            0.0,
+            "a hazard smaller than self must be ignored under the authored rule"
+        );
+    }
+
     /// Drives the `helm_ai_decision` → `operate_helm` → `avoidance_steering`
     /// path: a Reach anchor dead ahead down -Z, so the base steer sits in the
     /// deadband at zero and any nonzero `SteeringInput` is avoidance and
@@ -4445,15 +4641,15 @@ mod tests {
     /// Drives the full-AI helm's dodge — every helm axis on AI, the shape an
     /// unmanned Helm station or an NPC hull comes up in.
     ///
-    /// Until #704 the subject here was `operate_helm_ai`, which called
-    /// `operate_lateral_thrust` itself; the dodge now comes from
-    /// `ai_helm_lateral_thrust` like every other lateral write. The fixture
-    /// still earns its place next to `lateral_thrust_ai_app`: that one pins the
-    /// same tunables under the *Simplified* rating (coarse helm human, lateral
-    /// automated — what the cruiser and destroyer ship), this one under a
-    /// fully-AI helm. Same system, the two gate shapes real content deploys.
+    /// Until #704 the subject here was `operate_helm_ai`, which derived the
+    /// dodge itself; it now comes from `ai_helm_lateral_thrust` like every other
+    /// lateral write, reading the shared hazard surface (issue #743). The
+    /// fixture still earns its place next to `lateral_thrust_ai_app`: that one
+    /// pins the same tunables under the *Simplified* rating (coarse helm human,
+    /// lateral automated — what the cruiser and destroyer ship), this one under
+    /// a fully-AI helm. Same system, the two gate shapes real content deploys.
     ///
-    /// Forward speed is not optional scaffolding — `operate_lateral_thrust`
+    /// Forward speed is not optional scaffolding — the shared `assess_hazards`
     /// projects the ship by `forward_speed * avoidance_look_ahead_secs`, so a
     /// stationary ship collapses that projection onto its own position and makes
     /// the look-ahead term unobservable no matter what value is passed.
@@ -4480,11 +4676,10 @@ mod tests {
     /// dodge. The dodge and the steering must agree about clearance, so this
     /// site must read the same TOML the steering does.
     ///
-    /// Ported in #704: the subject was `operate_helm_ai`'s own
-    /// `operate_lateral_thrust` call and is now `ai_helm_lateral_thrust`, the
-    /// only remaining caller. Faithful because the property under test is
-    /// unchanged — a TOML-authored `avoidance_buffer` must reach
-    /// `operate_lateral_thrust` on a fully-AI helm rather than the
+    /// Ported in #704, then rewired in #743: the dodge is now the shared
+    /// hazard surface read by `ai_helm_lateral_thrust`. Faithful because the
+    /// property under test is unchanged — a TOML-authored `avoidance_buffer`
+    /// must reach the shared `assess_hazards` on a fully-AI helm rather than the
     /// `crate::ai::AVOIDANCE_BUFFER` constant — and it is asserted on the same
     /// hull, obstacle and geometry as before. What the delete changed is only
     /// *which* system performs the write, and hence the tick count: the
@@ -4517,19 +4712,19 @@ mod tests {
         assert!(
             lateral_intent(&mut authored_app).abs() > 0.0,
             "the full-AI helm must pass the TOML-authored avoidance_buffer to \
-             operate_lateral_thrust, not crate::ai::AVOIDANCE_BUFFER"
+             the shared assess_hazards, not crate::ai::AVOIDANCE_BUFFER"
         );
     }
 
-    /// The sixth wired argument: the full-AI helm must pass the TOML-authored
-    /// `avoidance_look_ahead_secs` to `operate_lateral_thrust`, which uses it to
-    /// project the ship forward before testing for a threat. Mirrors
+    /// The full-AI helm must pass the TOML-authored `avoidance_look_ahead_secs`
+    /// to the shared `assess_hazards`, which uses it to project the ship forward
+    /// before testing for a threat. Mirrors
     /// `lateral_thrust_ai_honours_toml_authored_avoidance_look_ahead`, but with
     /// every helm axis on AI rather than the Simplified rating's lateral-only.
     ///
-    /// Ported in #704 exactly as its `avoidance_buffer` sibling above was — same
-    /// property, same geometry, new writer, hence `tick_twice` for the shared
-    /// AI-helm sim tick. See that test's note.
+    /// Ported in #704, rewired in #743 to the shared hazard surface — same
+    /// property, same geometry, hence `tick_twice` for the shared AI-helm sim
+    /// tick. See that test's note.
     #[test]
     fn full_ai_helm_honours_toml_authored_avoidance_look_ahead() {
         // Forward at yaw 0 is -Z. At 10 u/s the default 3 s horizon projects
@@ -4557,8 +4752,8 @@ mod tests {
         tick_twice(&mut authored_app);
         assert!(
             lateral_intent(&mut authored_app).abs() > 0.0,
-            "the full-AI helm must pass the TOML-authored avoidance_look_ahead_secs to \
-             operate_lateral_thrust, not crate::ai::AVOIDANCE_LOOK_AHEAD_SECS"
+            "the full-AI helm must pass the TOML-authored avoidance_look_ahead_secs to the \
+             shared assess_hazards, not crate::ai::AVOIDANCE_LOOK_AHEAD_SECS"
         );
     }
 

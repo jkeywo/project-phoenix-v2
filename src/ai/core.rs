@@ -1,8 +1,9 @@
 /// Pure AI module — no Bevy imports.
 ///
 /// Contains navigation utilities (`steer_toward`, `avoidance_steering`),
-/// per-system operate functions (`operate_helm`, `operate_lateral_thrust`),
-/// and the `CaptainAi` helper. The operate functions are pure: issue #702
+/// per-system operate functions (`operate_helm`), the shared
+/// [`assess_hazards`] collision surface (issue #743), and the `CaptainAi`
+/// helper. The operate functions are pure: issue #702
 /// deleted the `AiMemory` private-reasoning state they used to mutate, so all
 /// per-ship AI state now lives in ECS components.
 ///
@@ -40,6 +41,20 @@ pub const DOCKING_ENGAGE_DISTANCE: f32 = 40.0;
 /// [`crate::entity_config::BehaviourConfig::docking_approach_speed`].
 pub const DOCKING_APPROACH_SPEED: f32 = 0.3;
 const AVOIDANCE_MIN_SPEED: f32 = 0.25;
+/// Authored size-ignore ratio default: a ship ignores a hazard whose
+/// `size_rating` is below `self_size_rating * ratio`. `0.0` disables the rule
+/// (every dangerous hazard is assessed regardless of size), which is the
+/// backward-compatible default. Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::hazard_ignore_size_ratio`], whose
+/// serde default reads this constant so the two cannot drift apart.
+pub const HAZARD_IGNORE_SIZE_RATIO: f32 = 0.0;
+/// Authored lateral-thrust hazard sensitivity default: the multiplier a fine
+/// lateral-thrust actuator applies to the shared hazard assessment's starboard
+/// (local `+X`) repulsion component before clamping to `[-1, 1]`. `1.0` passes
+/// the boids-style repulsion through unweighted. Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::lateral_hazard_sensitivity`], whose
+/// serde default reads this constant so the two cannot drift apart.
+pub const LATERAL_HAZARD_SENSITIVITY: f32 = 1.0;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
 /// At 1.5× the stop threshold the ship starts slowing; at the threshold it
@@ -130,7 +145,7 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
 // ── WorldView ─────────────────────────────────────────────────────────────────
 
 /// A visible entity in the AI's world view.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AiWorldEntity {
     /// Stable UUID of the entity.
     pub uuid: Uuid,
@@ -150,6 +165,46 @@ pub struct AiWorldEntity {
     pub radius: f32,
     /// Current forward speed of the entity (world units/s) used for predictive avoidance.
     pub forward_speed: f32,
+    /// Hazard fact: whether this entity can move under its own power (a ship)
+    /// versus being a static obstacle (an asteroid). Published so fine helm
+    /// systems can apply their own policy — e.g. a bounded vertical thruster
+    /// dodging only moving hazards while engines still brake for static ones
+    /// (issue #743).
+    pub movable: bool,
+    /// Hazard fact: whether this entity is a collision hazard worth avoiding at
+    /// all. `false` entities are skipped by [`assess_hazards`]. All physical
+    /// obstacles (ships and asteroids) are dangerous today; the fact exists so
+    /// non-hazard entities can be published without being dodged (issue #743).
+    pub dangerous: bool,
+    /// Hazard fact: this entity's authored size rating, used by the
+    /// ignore-smaller rule ([`assess_hazards`] skips a hazard whose rating is
+    /// below the assessing ship's own, scaled by an authored ratio). Populated
+    /// from the collision radius today (issue #743).
+    pub size_rating: f32,
+}
+
+/// Hand-written so a bare `AiWorldEntity { ..Default::default() }` is a
+/// *dangerous* obstacle: collision avoidance is the default posture, so a test
+/// or caller that omits `dangerous` still gets an entity the hazard assessment
+/// reasons about. A derived `Default` would zero `dangerous` to `false` and
+/// silently drop every such entity from the avoidance surface.
+impl Default for AiWorldEntity {
+    fn default() -> Self {
+        Self {
+            uuid: Uuid::default(),
+            name: None,
+            position: [0.0; 3],
+            faction: None,
+            shields: None,
+            hull_fraction: None,
+            yaw: None,
+            radius: 0.0,
+            forward_speed: 0.0,
+            movable: false,
+            dangerous: true,
+            size_rating: 0.0,
+        }
+    }
 }
 
 /// A read-only snapshot of world state visible to the AI.
@@ -181,6 +236,10 @@ pub struct WorldView {
     pub scenario_unloaded: bool,
     /// Physical radius of this AI entity (world units), used for collision avoidance.
     pub self_radius: f32,
+    /// This AI entity's own size rating, compared against each hazard's
+    /// `size_rating` by the authored ignore-smaller rule (issue #743).
+    /// Populated from the ship's collision radius today.
+    pub self_size_rating: f32,
 }
 
 // ── steer_toward ─────────────────────────────────────────────────────────────
@@ -927,90 +986,6 @@ impl CaptainAi {
     pub fn coordinate(&self) {}
 }
 
-// ── operate_lateral_thrust ────────────────────────────────────────────────────
-
-/// Per-system operate function for the Helm Lateral Thrust system.
-///
-/// Returns a lateral input value in `[-1.0, 1.0]` for obstacle avoidance.
-/// A positive value pushes the ship to starboard; a negative value pushes to port.
-/// The AI checks all visible entities in `world_view` for potential collisions
-/// and applies lateral thrust to dodge the nearest threat.
-///
-/// Returns `0.0` when no avoidance is needed or no suitable objective is active.
-pub fn operate_lateral_thrust(
-    world_view: &WorldView,
-    scored_pool: &[crate::messages::ScoredObjective],
-    avoidance_buffer: f32,
-    avoidance_look_ahead_secs: f32,
-    forward_speed: f32,
-) -> f32 {
-    use crate::messages::SystemAffinity;
-
-    // Only dodge when a helm-relevant objective is active.
-    let has_helm_objective = scored_pool
-        .iter()
-        .any(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm));
-    if !has_helm_objective {
-        return 0.0;
-    }
-
-    if world_view.entities.is_empty() {
-        return 0.0;
-    }
-
-    let self_pos = world_view.entity_pos;
-    let self_yaw = world_view.entity_yaw;
-    let self_radius = world_view.self_radius;
-
-    // Find the nearest threat within avoidance range.
-    // A "threat" is any entity with a nonzero radius that could collide.
-    let fwd_x = self_yaw.sin();
-    let fwd_z = -self_yaw.cos();
-
-    let mut best_threat = 0.0_f32;
-    let mut best_sign = 0.0_f32;
-
-    for entity in &world_view.entities {
-        let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
-
-        // Project both entities forward.
-        let proj_self_x = self_pos[0] + fwd_x * forward_speed * avoidance_look_ahead_secs;
-        let proj_self_z = self_pos[2] + fwd_z * forward_speed * avoidance_look_ahead_secs;
-
-        let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
-            let ent_fwd_x = ent_yaw.sin();
-            let ent_fwd_z = -ent_yaw.cos();
-            (
-                entity.position[0] + ent_fwd_x * entity.forward_speed * avoidance_look_ahead_secs,
-                entity.position[2] + ent_fwd_z * entity.forward_speed * avoidance_look_ahead_secs,
-            )
-        } else {
-            (entity.position[0], entity.position[2])
-        };
-
-        let ddx = proj_self_x - ent_proj_x;
-        let ddz = proj_self_z - ent_proj_z;
-        let proj_dist = (ddx * ddx + ddz * ddz).sqrt();
-
-        if proj_dist < avoidance_radius && proj_dist > 0.01 {
-            let threat_fraction = 1.0 - (proj_dist / avoidance_radius);
-            let to_x = ent_proj_x - proj_self_x;
-            let to_z = ent_proj_z - proj_self_z;
-            let cross = fwd_x * to_z - fwd_z * to_x;
-
-            // Cross product sign: positive = threat is to the left → dodge right (+).
-            let sign = if cross >= 0.0 { 1.0 } else { -1.0 };
-
-            if threat_fraction > best_threat {
-                best_threat = threat_fraction;
-                best_sign = sign;
-            }
-        }
-    }
-
-    best_sign * best_threat
-}
-
 // ── Shared desired-motion contract (issue #741) ───────────────────────────────
 //
 // The shared motion planner (`helm_motion_planner`, `src/ship/helm_planner.rs`)
@@ -1101,8 +1076,36 @@ pub fn docking_close_manoeuvre(
     Some([lateral, aft])
 }
 
+/// One hazard's contribution to a [`HazardAssessmentRaw`]: the entity's
+/// published facts alongside the ship-local repulsion force it added and the
+/// threat fraction it registered (issue #743).
+///
+/// Recorded per contributing hazard so a fine actuator — or a test — can see
+/// *which* hazards drove the aggregate force and reason about them by fact
+/// (movable / dangerous / size) rather than re-deriving the geometry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HazardContribution {
+    /// The contributing hazard's UUID.
+    pub uuid: Uuid,
+    /// Whether the hazard can move under its own power (a ship) versus a static
+    /// obstacle (an asteroid).
+    pub movable: bool,
+    /// Whether the hazard is a collision danger. Always `true` here — a
+    /// non-dangerous entity never contributes — but carried so consumers read
+    /// facts, not categories.
+    pub dangerous: bool,
+    /// The hazard's authored size rating.
+    pub size_rating: f32,
+    /// This hazard's ship-local repulsion contribution (`x` = starboard,
+    /// `y` = up, `z` = aft).
+    pub force_local: [f32; 3],
+    /// This hazard's threat fraction `[0, 1]` (`1 - dist / avoidance_radius`).
+    pub threat_fraction: f32,
+}
+
 /// A ship-level hazard assessment: a repulsion force (ship-local), the peak
-/// avoidance urgency `[0, 1]`, and the identity of the strongest threat.
+/// avoidance urgency `[0, 1]`, the identity of the strongest threat, and the
+/// per-hazard force contributions that produced them.
 ///
 /// Computed centrally for the whole ship rather than re-derived inside each fine
 /// helm operator (issue #741). It is a *published* boids-style contribution —
@@ -1117,12 +1120,23 @@ pub struct HazardAssessmentRaw {
     pub urgency: f32,
     /// The strongest threat's UUID, if any.
     pub primary: Option<Uuid>,
+    /// Per-hazard force contributions, one per hazard that registered a threat
+    /// (issue #743). Exposes each contributor's movable / dangerous / size-rating
+    /// facts alongside the force it added.
+    pub contributions: Vec<HazardContribution>,
 }
 
 /// Assess collision hazards for one ship over its visible world view, using the
-/// same forward-projection model as [`avoidance_steering`] /
-/// [`operate_lateral_thrust`]. Returns a ship-local repulsion vector, the peak
-/// urgency, and the primary hazard.
+/// same forward-projection model as [`avoidance_steering`]. Returns a ship-local
+/// repulsion vector, the peak urgency, the primary hazard, and the per-hazard
+/// force contributions.
+///
+/// Two authored policies filter the hazard picture (issue #743), applied to the
+/// published facts rather than hard-coded object categories:
+/// - a non-`dangerous` entity is never a hazard and is skipped;
+/// - the ignore-smaller rule skips a hazard whose `size_rating` is below
+///   `self_size_rating * hazard_ignore_size_ratio` — a ratio of `0.0` disables
+///   the rule (every dangerous hazard is assessed).
 ///
 /// Pure: no ECS, no Bevy. The planner converts the local force array to the
 /// engine's vector type.
@@ -1131,10 +1145,12 @@ pub fn assess_hazards(
     forward_speed: f32,
     avoidance_buffer: f32,
     avoidance_look_ahead_secs: f32,
+    hazard_ignore_size_ratio: f32,
 ) -> HazardAssessmentRaw {
     let self_pos = world_view.entity_pos;
     let self_yaw = world_view.entity_yaw;
     let self_radius = world_view.self_radius;
+    let self_size_rating = world_view.self_size_rating;
 
     let fwd_x = self_yaw.sin();
     let fwd_z = -self_yaw.cos();
@@ -1148,8 +1164,20 @@ pub fn assess_hazards(
     let mut force = [0.0_f32; 3];
     let mut urgency = 0.0_f32;
     let mut primary = None;
+    let mut contributions: Vec<HazardContribution> = Vec::new();
 
     for entity in &world_view.entities {
+        // Fact-driven policy, not category branches (issue #743): skip anything
+        // published as not-dangerous, and apply the authored ignore-smaller rule
+        // against the entity's size rating.
+        if !entity.dangerous {
+            continue;
+        }
+        if hazard_ignore_size_ratio > 0.0
+            && entity.size_rating < self_size_rating * hazard_ignore_size_ratio
+        {
+            continue;
+        }
         let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
         let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
             (
@@ -1172,8 +1200,17 @@ pub fn assess_hazards(
             let rx = ddx * inv;
             let rz = ddz * inv;
             // Rotate into the ship-local frame (x = starboard, z = aft).
-            force[0] += rx * stbd_x + rz * stbd_z;
-            force[2] += -(rx * fwd_x + rz * fwd_z);
+            let contribution = [rx * stbd_x + rz * stbd_z, 0.0, -(rx * fwd_x + rz * fwd_z)];
+            force[0] += contribution[0];
+            force[2] += contribution[2];
+            contributions.push(HazardContribution {
+                uuid: entity.uuid,
+                movable: entity.movable,
+                dangerous: entity.dangerous,
+                size_rating: entity.size_rating,
+                force_local: contribution,
+                threat_fraction,
+            });
             if threat_fraction > urgency {
                 urgency = threat_fraction;
                 primary = Some(entity.uuid);
@@ -1185,6 +1222,7 @@ pub fn assess_hazards(
         forces_local: force,
         urgency: urgency.clamp(0.0, 1.0),
         primary,
+        contributions,
     }
 }
 
@@ -3003,7 +3041,13 @@ mod tests {
         };
         // Speed 3 over the 3 s look-ahead projects the ship to z=-9, right up
         // against the obstacle at z=-10 (projected distance 1 < radius 12).
-        let hz = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS);
+        let hz = assess_hazards(
+            &view,
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
         assert!(
             hz.urgency > 0.0,
             "an imminent head-on must register urgency"
@@ -3015,6 +3059,22 @@ mod tests {
             "expected an aft-pushing repulsion, got {:?}",
             hz.forces_local
         );
+        // The contributing hazard is exposed with its published facts and the
+        // force it added (issue #743).
+        assert_eq!(hz.contributions.len(), 1);
+        let c = &hz.contributions[0];
+        assert_eq!(c.uuid, Uuid::from_u128(9));
+        assert_eq!(c.size_rating, 0.0);
+        assert!(
+            c.dangerous,
+            "a contributing hazard is dangerous by definition"
+        );
+        assert!(
+            c.force_local[2] > 0.0,
+            "the contribution's own force must push aft, got {:?}",
+            c.force_local
+        );
+        assert!((c.threat_fraction - hz.urgency).abs() < 1e-6);
     }
 
     #[test]
@@ -3024,7 +3084,104 @@ mod tests {
             self_radius: 2.0,
             ..Default::default()
         };
-        let hz = assess_hazards(&view, 10.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS);
+        let hz = assess_hazards(
+            &view,
+            10.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
         assert_eq!(hz, HazardAssessmentRaw::default());
+    }
+
+    #[test]
+    fn assess_hazards_skips_non_dangerous_entities() {
+        // A non-dangerous entity dead ahead must not register as a hazard: the
+        // published `dangerous` fact, not the geometry, decides (issue #743).
+        let view = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            self_size_rating: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: Uuid::from_u128(9),
+                position: [0.0, 0.0, -10.0],
+                radius: 5.0,
+                dangerous: false,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let hz = assess_hazards(
+            &view,
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
+        assert_eq!(
+            hz,
+            HazardAssessmentRaw::default(),
+            "a non-dangerous entity must contribute no force"
+        );
+    }
+
+    #[test]
+    fn assess_hazards_ignores_hazards_smaller_than_self_when_authored() {
+        // Large self (size_rating 10) versus a small obstacle (size_rating 1)
+        // dead ahead. With the ignore rule authored on (ratio 1.0), a hazard
+        // strictly smaller than self is skipped entirely — "large ships do not
+        // avoid smaller ships at all" (issue #743).
+        let small_obstacle = AiWorldEntity {
+            uuid: Uuid::from_u128(9),
+            position: [0.0, 0.0, -10.0],
+            radius: 1.0,
+            size_rating: 1.0,
+            dangerous: true,
+            ..Default::default()
+        };
+        let view = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            self_size_rating: 10.0,
+            entities: vec![small_obstacle.clone()],
+            ..Default::default()
+        };
+
+        // Rule off (ratio 0.0, the default): the small obstacle is a hazard.
+        let assessed = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 0.0);
+        assert!(
+            assessed.urgency > 0.0,
+            "with the ignore rule off, even a small obstacle is a hazard"
+        );
+
+        // Rule on (ratio 1.0): the smaller hazard is ignored → no force at all.
+        let ignored = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS, 1.0);
+        assert_eq!(
+            ignored,
+            HazardAssessmentRaw::default(),
+            "an authored ignore-smaller rule must skip a hazard below self's size rating"
+        );
+
+        // A same-or-larger hazard is still assessed under the same ratio.
+        let big_view = WorldView {
+            entities: vec![AiWorldEntity {
+                size_rating: 10.0,
+                ..small_obstacle
+            }],
+            ..view
+        };
+        let big = assess_hazards(
+            &big_view,
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            1.0,
+        );
+        assert!(
+            big.urgency > 0.0,
+            "a hazard at or above self's size rating is never ignored"
+        );
     }
 }

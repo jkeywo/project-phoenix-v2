@@ -591,20 +591,33 @@ fn emit_sensors_ai_command(
 /// Per-entity AI decide loop for the Sensors system. Loops over all ship
 /// entities where the Sensors system is `ControlSource::Ai`.
 ///
-/// Selection priority (decision logic unchanged since #700/#703):
+/// Selection priority:
 ///   1. Combat target — mirror the ship's `TacticalRadarSelection` (set by
 ///      `ai_target_selection`) so the Sensors console shows what Tactical is
 ///      engaging.
 ///   2. Objective entity — scan scored objectives for a `Destroy` directive
 ///      with a named target (not the `""` engage-any sentinel), resolve the
 ///      name to an entity UUID, and select it on the Sensors console.
+///   3. Nearest hostile — independent horizon-limited hostile selection
+///      (issue #746). When neither Tactical's combat lock nor an objective
+///      names a detectable target, Sensors picks the nearest faction-hostile
+///      contact ([`crate::ai::find_nearest_hostile`]) inside this ship's own
+///      live sensor horizon and designates it to Tactical as advisory
+///      intelligence. This is *advice*, not authority: the designation flows
+///      through the same [`emit_sensors_ai_command`] → `handle_sensors_messages`
+///      applier a human selection does, which never mutates
+///      `TacticalRadarSelection`. Tactical keeps final firing-target authority.
 ///
-/// Both tiers are gated on this ship's own sensor horizon
-/// ([`effective_sensor_range`]). Tier 1 inherited a range check from
-/// `ai_target_selection` upstream, but tier 2 had none at all: it resolved a
-/// name straight to a UUID and locked it at any distance, which is why AI ships
-/// tracked contacts far outside their range. Naming a target in an objective
-/// says who to engage, not that the ship can already see them.
+/// All three tiers are gated on this ship's own sensor horizon
+/// ([`effective_sensor_range`]), which collapses as the sensor-radar hull
+/// system takes damage (`apply_radar_damage_modifiers` shrinks the
+/// `SensorRadarRange` modifier). A target that falls outside the shrunken
+/// horizon — moved away, or the horizon itself damaged inward — yields no tier
+/// and is dropped via an admitted `ClearScienceTarget`. Tier 1 inherited a
+/// range check from `ai_target_selection` upstream, but tier 2 had none at all:
+/// it resolved a name straight to a UUID and locked it at any distance, which
+/// is why AI ships tracked contacts far outside their range. Naming a target in
+/// an objective says who to engage, not that the ship can already see them.
 ///
 /// Decide-and-emit (issue #828): instead of writing [`SensorRadarSelection`]
 /// directly, the decision is emitted as an admitted `SetScienceTarget` /
@@ -627,6 +640,7 @@ pub fn operate_sensors_ai(
             &crate::modifiers::ShipModifiers,
             Option<&crate::ai::server::AiProfile>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::entity_spawner::FactionComponent>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -643,8 +657,48 @@ pub fn operate_sensors_ai(
         Option<&crate::entities::spawner::EntityName>,
         &Transform,
     )>,
+    // Independent nearest-hostile tier (issue #746). Faction verdicts need the
+    // registry; absent (tests without world setup), tier 3 is simply skipped.
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    // Candidate contacts for the hostile scan, split the same way
+    // `tick_sensors_threat_warning` splits them: ships carry their live
+    // position on `ShipPhysics` (the spawn `Transform` goes stale), non-ship
+    // entities carry it on `Transform`. Both read-only, disjoint from the
+    // mutable `AdmittedCommands` in `ships`, so no borrow conflict.
+    hostile_ship_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &crate::ship_state::ShipPhysics,
+            &crate::entity_spawner::FactionComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    hostile_entity_q: Query<
+        (
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entity_spawner::FactionComponent>,
+        ),
+        Without<crate::server_app::Ship>,
+    >,
 ) {
     let console_range = ship_config.0.sensors_radar_range;
+
+    // Build the shared candidate snapshot once (world state is the same for
+    // every ship this tick). Each entry: (uuid, [x, y, z], faction).
+    let hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
+        .iter()
+        .map(|(uuid, physics, faction)| {
+            (uuid.0.clone(), [physics.x, 0.0, physics.z], Some(faction.0))
+        })
+        .chain(hostile_entity_q.iter().map(|(uuid, tf, faction)| {
+            (
+                uuid.0.clone(),
+                [tf.translation.x, tf.translation.y, tf.translation.z],
+                faction.map(|f| f.0),
+            )
+        }))
+        .collect();
     for (
         entity_uuid,
         sources,
@@ -654,6 +708,7 @@ pub fn operate_sensors_ai(
         modifiers,
         ai_profile,
         ship_config_comp,
+        self_faction,
         mut admitted,
     ) in &mut ships
     {
@@ -671,6 +726,13 @@ pub fn operate_sensors_ai(
             let dz = tf.translation.z - physics.z;
             dx * dx + dz * dz <= range_sq
         };
+        // Same horizon test over a bare `[x, y, z]` (the nearest-hostile tier
+        // works from position tuples, not `Transform`s).
+        let in_range_pos = |pos: [f32; 3]| {
+            let dx = pos[0] - physics.x;
+            let dz = pos[2] - physics.z;
+            dx * dx + dz * dz <= range_sq
+        };
 
         // ── Decide (logic unchanged; Combat Lock now read from the frozen
         // viewscreen blackboard rather than the retired TacticalRadarSelection — #829) ──
@@ -678,57 +740,93 @@ pub fn operate_sensors_ai(
             .0
             .get(&crate::system_registry::viewscreen_system_id());
         let decided: Option<String> = 'decide: {
-            // Priority 1: mirror the combat target (frozen Combat Lock).
-            let combat_lock = match viewscreen_bb {
-                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
-                    bb.combat_lock.as_deref()
-                }
-                _ => None,
-            };
-            if let Some(target_uuid) = combat_lock {
-                if entity_q
-                    .iter()
-                    .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
-                {
-                    break 'decide Some(target_uuid.to_string());
-                }
-            }
-
-            // Priority 2: scan scored objectives for a named Destroy target.
-            let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb else {
-                break 'decide None;
-            };
-            let mut selected: Option<String> = None;
-            for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
-                if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
-                    if target.is_empty() {
-                        continue;
+            // Priorities 1 & 2 both read the frozen viewscreen blackboard; when
+            // it is absent the ship falls straight through to the independent
+            // nearest-hostile tier below rather than deciding `None`.
+            if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+                // Priority 1: mirror the combat target (frozen Combat Lock).
+                if let Some(target_uuid) = bb.combat_lock.as_deref() {
+                    if entity_q
+                        .iter()
+                        .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
+                    {
+                        break 'decide Some(target_uuid.to_string());
                     }
-                    let uuid = runtime
-                        .as_ref()
-                        .and_then(|rt| rt.name_to_uuid.get(target).cloned())
-                        .or_else(|| {
-                            entity_q.iter().find_map(|(u, name, _)| {
-                                (u.0 == *target || name.is_some_and(|n| n.0 == *target))
-                                    .then(|| u.0.clone())
-                            })
-                        });
-                    // Resolving the name is not the same as seeing the ship.
-                    // A target that exists but sits beyond this hull's sensor
-                    // range stays unlocked, and we keep scanning lower-scored
-                    // objectives for something actually detectable.
-                    if let Some(uuid) = uuid {
-                        let detectable = entity_q
-                            .iter()
-                            .any(|(u, _, tf)| u.0 == uuid && in_range(tf));
-                        if detectable {
-                            selected = Some(uuid);
-                            break;
+                }
+
+                // Priority 2: scan scored objectives for a named Destroy target.
+                for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
+                    if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
+                        if target.is_empty() {
+                            continue;
+                        }
+                        let uuid = runtime
+                            .as_ref()
+                            .and_then(|rt| rt.name_to_uuid.get(target).cloned())
+                            .or_else(|| {
+                                entity_q.iter().find_map(|(u, name, _)| {
+                                    (u.0 == *target || name.is_some_and(|n| n.0 == *target))
+                                        .then(|| u.0.clone())
+                                })
+                            });
+                        // Resolving the name is not the same as seeing the ship.
+                        // A target that exists but sits beyond this hull's sensor
+                        // range stays unlocked, and we keep scanning lower-scored
+                        // objectives for something actually detectable.
+                        if let Some(uuid) = uuid {
+                            let detectable = entity_q
+                                .iter()
+                                .any(|(u, _, tf)| u.0 == uuid && in_range(tf));
+                            if detectable {
+                                break 'decide Some(uuid);
+                            }
                         }
                     }
                 }
             }
-            selected
+
+            // Priority 3: independent nearest-hostile selection (issue #746).
+            // Needs this ship's own faction and a registry to judge hostility;
+            // without either there is nothing to select. `find_nearest_hostile`
+            // returns the globally-nearest enemy, so a single range check on its
+            // result is sufficient — if the closest hostile is beyond the
+            // horizon, every hostile is.
+            let (Some(self_faction), Some(registry)) = (self_faction, faction_registry.as_ref())
+            else {
+                break 'decide None;
+            };
+            let self_faction_uuid = self_faction.0;
+            let self_uuid = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
+            let entities: Vec<crate::ai::AiWorldEntity> = hostile_candidates
+                .iter()
+                .filter(|(u, _, _)| u != self_uuid)
+                .filter_map(|(u, pos, faction)| {
+                    Some(crate::ai::AiWorldEntity {
+                        uuid: uuid::Uuid::parse_str(u).ok()?,
+                        position: *pos,
+                        faction: *faction,
+                        ..Default::default()
+                    })
+                })
+                .collect();
+            let world_view = crate::ai::WorldView {
+                entity_pos: [physics.x, 0.0, physics.z],
+                entity_yaw: physics.yaw,
+                entities,
+                self_faction: Some(self_faction_uuid),
+                ..crate::ai::WorldView::default()
+            };
+            let Some(found) = crate::ai::find_nearest_hostile(&world_view, &registry.0) else {
+                break 'decide None;
+            };
+            // Map the parsed UUID back to the candidate's own id string and
+            // gate on the damage-scaled horizon before designating it.
+            hostile_candidates
+                .iter()
+                .find(|(u, pos, _)| {
+                    uuid::Uuid::parse_str(u).ok() == Some(found) && in_range_pos(*pos)
+                })
+                .map(|(u, _, _)| u.clone())
         };
 
         // ── Emit on change only ────────────────────────────────────────────
@@ -1925,6 +2023,290 @@ mod tests {
         assert_eq!(
             npc_bb.science_target_uuid, None,
             "missing SensorRadarSelection publishes as no selection"
+        );
+    }
+
+    // ── Issue #746 tests: independent horizon-limited hostile selection ──────
+
+    /// Build on `sensors_ai_test_app` with a Federation/Harrow faction registry
+    /// and give the single test ship the Federation faction, so the tier-3
+    /// nearest-hostile selector can judge who is an enemy.
+    fn sensors_ai_test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
+        let mut app = sensors_ai_test_app();
+
+        let fed = uuid::Uuid::new_v4();
+        let harrow = uuid::Uuid::new_v4();
+        let mut reg = crate::faction::FactionRegistry::new();
+        reg.insert(crate::faction::FactionConfig {
+            uuid: fed,
+            name: "Federation".into(),
+            enemies: vec![harrow],
+        });
+        reg.insert(crate::faction::FactionConfig {
+            uuid: harrow,
+            name: "Harrow".into(),
+            enemies: vec![fed],
+        });
+        app.insert_resource(crate::entities::config_cache::FactionRegistryResource(reg));
+
+        let ship = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            q.single(app.world()).unwrap()
+        };
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entity_spawner::FactionComponent(fed));
+
+        (app, fed, harrow)
+    }
+
+    /// Spawn a faction-bearing, targetable contact with a *parseable* UUID (the
+    /// nearest-hostile scan filters out ids that are not canonical UUIDs).
+    fn spawn_faction_contact(app: &mut App, uuid: &str, x: f32, z: f32, faction: uuid::Uuid) {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            Transform::from_xyz(x, 0.0, z),
+            crate::entity_spawner::FactionComponent(faction),
+        ));
+    }
+
+    /// Fetch a specific ship's science selection by entity UUID (the single-ship
+    /// `get_sensors_target` helper cannot disambiguate a two-ship world).
+    fn selection_of(app: &mut App, uuid: &str) -> Option<String> {
+        let mut q = app
+            .world_mut()
+            .query::<(&crate::entity_spawner::EntityUuid, &SensorRadarSelection)>();
+        q.iter(app.world())
+            .find(|(u, _)| u.0 == uuid)
+            .and_then(|(_, s)| s.0.clone())
+    }
+
+    /// Tier 3 selects a hostile only — a closer ally or neutral contact is never
+    /// designated. AC: hostility.
+    #[test]
+    fn ai_sensors_independently_selects_nearest_hostile_only() {
+        let (mut app, fed, harrow) = sensors_ai_test_app_with_factions();
+        let neutral_faction = uuid::Uuid::new_v4(); // not an enemy of Federation
+
+        let ally = uuid::Uuid::new_v4().to_string();
+        let neutral = uuid::Uuid::new_v4().to_string();
+        let enemy = uuid::Uuid::new_v4().to_string();
+        // Ally and neutral are *closer* than the enemy: proximity must not win
+        // over hostility.
+        spawn_faction_contact(&mut app, &ally, 10.0, 0.0, fed);
+        spawn_faction_contact(&mut app, &neutral, 20.0, 0.0, neutral_faction);
+        spawn_faction_contact(&mut app, &enemy, 60.0, 0.0, harrow);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(enemy.as_str()),
+            "sensors AI must independently pick the hostile, not the closer ally/neutral"
+        );
+        // And the selection reaches Tactical through the normal admitted path.
+        assert!(
+            admitted_sensors_payloads(&mut app).iter().any(|p| matches!(
+                p,
+                SystemControlPayload::SetScienceTarget { uuid } if uuid == &enemy
+            )),
+            "the independent selection must flow through an admitted SetScienceTarget"
+        );
+    }
+
+    /// The independent tier is the *fallback*: an in-range combat lock (tier 1)
+    /// still wins over a nearest hostile. Tactical authority is not displaced —
+    /// Sensors mirrors what Tactical designates.
+    #[test]
+    fn ai_sensors_combat_lock_outranks_independent_hostile() {
+        let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
+        let locked = uuid::Uuid::new_v4().to_string();
+        let nearer_hostile = uuid::Uuid::new_v4().to_string();
+
+        // A nearer hostile the independent tier would otherwise choose…
+        spawn_faction_contact(&mut app, &nearer_hostile, 15.0, 0.0, harrow);
+        // …and a farther hostile that Tactical has locked.
+        spawn_faction_contact(&mut app, &locked, 80.0, 0.0, harrow);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0 = Some(locked.clone());
+        }
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(locked.as_str()),
+            "combat-lock mirror must outrank the independent nearest-hostile fallback"
+        );
+    }
+
+    /// Damaging the sensor-radar hull system shrinks the `SensorRadarRange`
+    /// modifier, collapsing the horizon inward until a previously-visible
+    /// hostile falls outside it and is dropped. AC: horizon damage scaling.
+    #[test]
+    fn ai_sensors_drops_hostile_when_sensor_radar_damage_shrinks_horizon() {
+        use crate::damage::{ConsoleTierConfig, SystemHull};
+        use crate::entity_spawner::EntitySystemHull;
+        use crate::system_registry::sensor_radar_system_id;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
+        let enemy = uuid::Uuid::new_v4().to_string();
+        // Inside the healthy ~500 console horizon, but beyond the ~417 horizon a
+        // Damaged sensor-radar leaves (500 × 1/1.2 ≈ 417).
+        spawn_faction_contact(&mut app, &enemy, 450.0, 0.0, harrow);
+
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(enemy.as_str()),
+            "a hostile at 450 is inside the undamaged horizon"
+        );
+
+        // Damage the sensor-radar to the Damaged tier (10/20 HP, below the 75%
+        // threshold) and re-run the real damage→modifier translator.
+        let tier_config = ConsoleTierConfig {
+            damaged_threshold_pct: 0.75,
+            disabled_threshold_pct: 0.25,
+            debuff_magnitude: 0.20,
+        };
+        let ship = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            q.single(app.world()).unwrap()
+        };
+        let mut hull =
+            SystemHull::from_config_with_tiers(&[(sensor_radar_system_id(), 20.0, tier_config)]);
+        hull.set_hp(&sensor_radar_system_id(), 10.0);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(EntitySystemHull(hull));
+        app.world_mut()
+            .run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers)
+            .unwrap();
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "the damage-shrunken horizon must drop the now-out-of-range hostile"
+        );
+        assert!(
+            admitted_sensors_payloads(&mut app)
+                .iter()
+                .any(|p| matches!(p, SystemControlPayload::ClearScienceTarget)),
+            "the drop must flow through an admitted ClearScienceTarget"
+        );
+    }
+
+    /// A designated hostile that despawns is dropped via an admitted
+    /// `ClearScienceTarget`. AC: target loss.
+    #[test]
+    fn ai_sensors_clears_when_selected_hostile_despawns() {
+        let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
+        let enemy = uuid::Uuid::new_v4().to_string();
+        spawn_faction_contact(&mut app, &enemy, 100.0, 0.0, harrow);
+
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(enemy.as_str())
+        );
+
+        // Despawn the hostile.
+        let hostile_entity = {
+            let mut q = app
+                .world_mut()
+                .query::<(Entity, &crate::entity_spawner::EntityUuid)>();
+            q.iter(app.world())
+                .find(|(_, u)| u.0 == enemy)
+                .map(|(e, _)| e)
+                .unwrap()
+        };
+        app.world_mut().entity_mut(hostile_entity).despawn();
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "a despawned hostile must be cleared"
+        );
+        assert!(
+            admitted_sensors_payloads(&mut app)
+                .iter()
+                .any(|p| matches!(p, SystemControlPayload::ClearScienceTarget)),
+            "target loss must flow through an admitted ClearScienceTarget"
+        );
+    }
+
+    /// Two AI Sensors ships each select their own nearest hostile, gated by
+    /// their own position and horizon — no cross-ship leakage. AC: per-ship
+    /// isolation.
+    #[test]
+    fn ai_sensors_two_ships_select_their_own_hostiles() {
+        let (mut app, fed, harrow) = sensors_ai_test_app_with_factions();
+
+        // Ship A is the helper's ship, sitting at the origin. Give it an id.
+        let ship_a_uuid = uuid::Uuid::new_v4().to_string();
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            let ship_a = q.single(app.world()).unwrap();
+            app.world_mut()
+                .entity_mut(ship_a)
+                .insert(crate::entity_spawner::EntityUuid(ship_a_uuid.clone()));
+        }
+
+        // Ship B, same faction, 1000 units away on +X.
+        let ship_b_uuid = uuid::Uuid::new_v4().to_string();
+        let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
+        control_sources.0.set(
+            crate::system_registry::sensors_system_id(),
+            ControlSource::Ai,
+        );
+        app.world_mut().spawn((
+            crate::server_app::Ship,
+            crate::entity_spawner::EntityUuid(ship_b_uuid.clone()),
+            control_sources,
+            crate::server_app::ShipSystemBlackboards::default(),
+            SensorRadarSelection::default(),
+            crate::simulation::TacticalRadarSelection::default(),
+            crate::ship_state::ShipPhysics {
+                x: 1000.0,
+                ..Default::default()
+            },
+            crate::modifiers::ShipModifiers::default(),
+            crate::messages::AdmittedCommands::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::entity_spawner::FactionComponent(fed),
+        ));
+
+        // A hostile beside each ship; each lies far outside the other's horizon.
+        let enemy_a = uuid::Uuid::new_v4().to_string();
+        let enemy_b = uuid::Uuid::new_v4().to_string();
+        spawn_faction_contact(&mut app, &enemy_a, 50.0, 0.0, harrow);
+        spawn_faction_contact(&mut app, &enemy_b, 1050.0, 0.0, harrow);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            selection_of(&mut app, &ship_a_uuid).as_deref(),
+            Some(enemy_a.as_str()),
+            "ship A must pick the hostile inside its own horizon"
+        );
+        assert_eq!(
+            selection_of(&mut app, &ship_b_uuid).as_deref(),
+            Some(enemy_b.as_str()),
+            "ship B must pick its own hostile — no cross-ship leakage"
         );
     }
 }

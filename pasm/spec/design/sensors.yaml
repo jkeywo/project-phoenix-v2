@@ -34,7 +34,7 @@ entities:
 
   - mechanic: ai-sensors-tactical-intelligence
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: AI Sensors Tactical Intelligence
       summary: Backfill Sensors selects an appropriate hostile inside its effective horizon, then uses the existing designation and frequency-intelligence paths to advise Tactical.
@@ -44,3 +44,8 @@ entities:
       reads: [sensors-target-intelligence]
       resolution: host-authoritative
       outputs: [advisory target designation, shield frequency hint]
+    implementation:
+      status: declared
+      paths: [src/ship/sensors.rs, src/ai/core.rs]
+      symbols: [operate_sensors_ai, find_nearest_hostile, effective_sensor_range]
+      tests: [cargo test]

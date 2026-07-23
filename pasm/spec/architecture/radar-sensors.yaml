@@ -183,9 +183,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Sensors AI Operator
-      summary: Per-ship decide-and-emit Sensors AI that mirrors the ship's combat lock or resolves a named Destroy objective within the ship's own damage-scaled sensor horizon, and emits the decision as an admitted SetScienceTarget/ClearScienceTarget command on change only.
+      summary: Per-ship decide-and-emit Sensors AI with three priority tiers — mirror the ship's combat lock, resolve a named Destroy objective, or independently select the nearest faction-hostile — all bounded by the ship's own damage-scaled sensor horizon, emitting the decision as an admitted SetScienceTarget/ClearScienceTarget command on change only.
       rationale:
-        - "Issue #828 (admission symmetry, following the #824 helm / #826 shields precedent): operate_sensors_ai keeps its selection logic (WeaponsTarget mirror tier, scored Destroy-objective tier, both range-gated via effective_sensor_range) but no longer writes sensors-target-state directly. It emits through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold); sensors-target-controller applies it later the same tick. Emit-on-change means an AI selection now produces exactly one channel-3 target designation per change — previously the AI bypassed the applier and produced none."
+        - "Issue #828 (admission symmetry, following the #824 helm / #826 shields precedent): operate_sensors_ai keeps its selection logic but no longer writes sensors-target-state directly. It emits through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold); sensors-target-controller applies it later the same tick. Emit-on-change means an AI selection now produces exactly one channel-3 target designation per change — previously the AI bypassed the applier and produced none."
+        - "Issue #746 added the independent horizon-limited hostile-selection tier (priority 3, the fallback below the combat-lock mirror and Destroy-objective tiers). When neither higher tier yields a detectable target, operate_sensors_ai builds a WorldView over the ship's own faction/position snapshot and calls ai::core::find_nearest_hostile, gating the result on the same damage-scaled effective_sensor_range as the other tiers. The pick is advisory only — it flows through the same SetScienceTarget path a human uses and never mutates weapons-target-state, so Tactical keeps firing-target authority. A selected hostile that leaves the (possibly damage-shrunken) horizon or despawns yields no tier and is dropped via ClearScienceTarget."
         - "This entity absorbs the formerly separate sensors-target-selection-ai proposal: gating, horizon, selection, and emission are all one system (operate_sensors_ai)."
     architecture:
       kind: ai-operator
@@ -195,8 +196,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs]
-      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range]
+      paths: [src/ship/sensors.rs, src/ai/core.rs]
+      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range, find_nearest_hostile]
       tests: [cargo test]
 
   - component: sensors-target-selection-ai
@@ -207,6 +208,7 @@ entities:
       summary: Per-ship AI selection policy that chooses an appropriate hostile within the Sensors system's own damage-scaled horizon and lets the existing advisory paths inform Tactical; realized by the same operate_sensors_ai system as sensors-ai-operator.
       rationale:
         - "Issue #828 folded this proposal into sensors-ai-operator: one system (operate_sensors_ai) carries the gating, the horizon, and the selection, and it emits admitted commands through host-command-admission rather than writing sensors-target-state directly — sensors-target-controller performs the write and sends the target designation when the admitted set applies. Kept as a named entity because design-slice links (sensors.yaml roles/decisions) reference it."
+        - "Issue #746 realized the independent selection this policy names: the operate_sensors_ai priority-3 tier calls ai::core::find_nearest_hostile over the ship's own faction/position snapshot and gates the winner on effective_sensor_range, so the ship picks its own nearest in-horizon enemy rather than only echoing Tactical's lock or an objective name. The choice is designated to Tactical as advisory intelligence and never becomes a firing lock (weapons-target-state is untouched). Tests cover horizon damage scaling, hostility, target loss, and per-ship isolation."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -215,6 +217,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs]
-      symbols: [operate_sensors_ai]
+      paths: [src/ship/sensors.rs, src/ai/core.rs]
+      symbols: [operate_sensors_ai, find_nearest_hostile]
       tests: [cargo test]

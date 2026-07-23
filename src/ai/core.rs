@@ -1002,6 +1002,135 @@ pub fn operate_lateral_thrust(
     best_sign * best_threat
 }
 
+// ── Shared desired-motion contract (issue #741) ───────────────────────────────
+//
+// The shared motion planner (`helm_motion_planner`, `src/ship/helm_planner.rs`)
+// turns a ship's objective travel decision into a 3D desired-motion contract —
+// a desired velocity and a desired *facing*, kept separate so orientation can
+// diverge from travel (arc-bearing, docking) — plus a hazard assessment. These
+// pure helpers are the lossless codec between the per-axis actuator scalars a
+// human or the fine helm AI would set (`thrust`/`steering`, each `[-1, 1]`) and
+// that ship-local 3D contract. Keeping the contract 3D now (a `[f32; 3]` local
+// vector) avoids baking planar assumptions in before bounded / full-3D craft
+// arrive; the vertical axis stays 0 while physics is planar.
+
+/// Encode a normalized forward-thrust intent (`[-1, 1]`) as a ship-local
+/// desired-velocity vector. Local forward is `-Z`; `vertical` is the local `+Y`
+/// (up) component, always 0 in the planar tracer but carried so bounded /
+/// full-3D craft can fill it later.
+pub fn encode_local_velocity(thrust: f32, vertical: f32) -> [f32; 3] {
+    [0.0, vertical, -thrust.clamp(-1.0, 1.0)]
+}
+
+/// Recover the forward-thrust intent (`[-1, 1]`) from a ship-local desired
+/// velocity. Exact inverse of [`encode_local_velocity`]'s forward axis.
+pub fn decode_thrust_from_velocity(velocity_local: [f32; 3]) -> f32 {
+    (-velocity_local[2]).clamp(-1.0, 1.0)
+}
+
+/// Encode a yaw-steering intent (`[-1, 1]`) as a ship-local desired-facing unit
+/// vector. Steering is proportional to yaw error via [`PATROL_FULL_STEER_RAD`],
+/// so the desired facing is that error rotated off local forward (`-Z`) toward
+/// starboard (`+X`).
+pub fn encode_local_facing(steering: f32) -> [f32; 3] {
+    let theta = steering.clamp(-1.0, 1.0) * PATROL_FULL_STEER_RAD;
+    [theta.sin(), 0.0, -theta.cos()]
+}
+
+/// Recover the yaw-steering intent (`[-1, 1]`) from a ship-local desired facing.
+/// Inverse of [`encode_local_facing`]; sign-preserving and exact up to floating
+/// point for the representable `[-1, 1]` range.
+pub fn decode_steering_from_facing(facing_local: [f32; 3]) -> f32 {
+    (facing_local[0].atan2(-facing_local[2]) / PATROL_FULL_STEER_RAD).clamp(-1.0, 1.0)
+}
+
+/// A ship-level hazard assessment: a repulsion force (ship-local), the peak
+/// avoidance urgency `[0, 1]`, and the identity of the strongest threat.
+///
+/// Computed centrally for the whole ship rather than re-derived inside each fine
+/// helm operator (issue #741). It is a *published* boids-style contribution —
+/// consumers may weight it by their own sensitivity — not a direct actuator
+/// order.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HazardAssessmentRaw {
+    /// Aggregate repulsion in the ship's local frame (`x` = starboard,
+    /// `y` = up, `z` = aft). Points away from projected collisions.
+    pub forces_local: [f32; 3],
+    /// Peak threat fraction across all hazards, `[0, 1]`.
+    pub urgency: f32,
+    /// The strongest threat's UUID, if any.
+    pub primary: Option<Uuid>,
+}
+
+/// Assess collision hazards for one ship over its visible world view, using the
+/// same forward-projection model as [`avoidance_steering`] /
+/// [`operate_lateral_thrust`]. Returns a ship-local repulsion vector, the peak
+/// urgency, and the primary hazard.
+///
+/// Pure: no ECS, no Bevy. The planner converts the local force array to the
+/// engine's vector type.
+pub fn assess_hazards(
+    world_view: &WorldView,
+    forward_speed: f32,
+    avoidance_buffer: f32,
+    avoidance_look_ahead_secs: f32,
+) -> HazardAssessmentRaw {
+    let self_pos = world_view.entity_pos;
+    let self_yaw = world_view.entity_yaw;
+    let self_radius = world_view.self_radius;
+
+    let fwd_x = self_yaw.sin();
+    let fwd_z = -self_yaw.cos();
+    // Starboard (local +X): forward rotated +90° in the XZ plane.
+    let stbd_x = -fwd_z;
+    let stbd_z = fwd_x;
+
+    let proj_self_x = self_pos[0] + fwd_x * forward_speed * avoidance_look_ahead_secs;
+    let proj_self_z = self_pos[2] + fwd_z * forward_speed * avoidance_look_ahead_secs;
+
+    let mut force = [0.0_f32; 3];
+    let mut urgency = 0.0_f32;
+    let mut primary = None;
+
+    for entity in &world_view.entities {
+        let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
+        let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
+            (
+                entity.position[0]
+                    + ent_yaw.sin() * entity.forward_speed * avoidance_look_ahead_secs,
+                entity.position[2]
+                    + (-ent_yaw.cos()) * entity.forward_speed * avoidance_look_ahead_secs,
+            )
+        } else {
+            (entity.position[0], entity.position[2])
+        };
+
+        let ddx = proj_self_x - ent_proj_x;
+        let ddz = proj_self_z - ent_proj_z;
+        let dist = (ddx * ddx + ddz * ddz).sqrt();
+        if dist < avoidance_radius && dist > 0.01 {
+            let threat_fraction = 1.0 - (dist / avoidance_radius);
+            // World-space repulsion: away from the threat, scaled by severity.
+            let inv = threat_fraction / dist;
+            let rx = ddx * inv;
+            let rz = ddz * inv;
+            // Rotate into the ship-local frame (x = starboard, z = aft).
+            force[0] += rx * stbd_x + rz * stbd_z;
+            force[2] += -(rx * fwd_x + rz * fwd_z);
+            if threat_fraction > urgency {
+                urgency = threat_fraction;
+                primary = Some(entity.uuid);
+            }
+        }
+    }
+
+    HazardAssessmentRaw {
+        forces_local: force,
+        urgency: urgency.clamp(0.0, 1.0),
+        primary,
+    }
+}
+
 // ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2720,5 +2849,79 @@ mod tests {
              target is dead ahead (~0 steering), the waypoint to starboard; \
              got steering={steering2}"
         );
+    }
+
+    // ── Desired-motion codec (issue #741) ─────────────────────────────────
+
+    #[test]
+    fn thrust_velocity_codec_round_trips() {
+        for thrust in [-1.0, -0.37, 0.0, 0.42, 1.0] {
+            let v = encode_local_velocity(thrust, 0.0);
+            // Forward is local -Z, no lateral/vertical component.
+            assert_eq!(v[0], 0.0);
+            assert!((decode_thrust_from_velocity(v) - thrust).abs() < 1e-6);
+        }
+        // Forward thrust yields a negative Z (local forward) component.
+        assert!(encode_local_velocity(0.8, 0.0)[2] < 0.0);
+    }
+
+    #[test]
+    fn steering_facing_codec_round_trips_and_preserves_sign() {
+        for steering in [-1.0, -0.5, 0.0, 0.25, 1.0] {
+            let f = encode_local_facing(steering);
+            // Unit-length facing direction.
+            assert!(((f[0] * f[0] + f[2] * f[2]).sqrt() - 1.0).abs() < 1e-6);
+            let decoded = decode_steering_from_facing(f);
+            assert!(
+                (decoded - steering).abs() < 1e-6,
+                "steering {steering} round-tripped to {decoded}"
+            );
+        }
+        // Zero steering faces exactly local forward (-Z); decode is exactly 0.
+        assert_eq!(decode_steering_from_facing(encode_local_facing(0.0)), 0.0);
+        // Starboard steering points the facing to +X.
+        assert!(encode_local_facing(0.5)[0] > 0.0);
+    }
+
+    #[test]
+    fn assess_hazards_flags_a_projected_collision_ahead() {
+        // Ship at origin facing -Z, moving forward; obstacle dead ahead.
+        let view = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: Uuid::from_u128(9),
+                position: [0.0, 0.0, -10.0],
+                radius: 5.0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Speed 3 over the 3 s look-ahead projects the ship to z=-9, right up
+        // against the obstacle at z=-10 (projected distance 1 < radius 12).
+        let hz = assess_hazards(&view, 3.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS);
+        assert!(
+            hz.urgency > 0.0,
+            "an imminent head-on must register urgency"
+        );
+        assert_eq!(hz.primary, Some(Uuid::from_u128(9)));
+        // Repulsion pushes aft (local +Z) to brake off the obstacle ahead.
+        assert!(
+            hz.forces_local[2] > 0.0,
+            "expected an aft-pushing repulsion, got {:?}",
+            hz.forces_local
+        );
+    }
+
+    #[test]
+    fn assess_hazards_is_quiet_with_no_entities() {
+        let view = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            self_radius: 2.0,
+            ..Default::default()
+        };
+        let hz = assess_hazards(&view, 10.0, AVOIDANCE_BUFFER, AVOIDANCE_LOOK_AHEAD_SECS);
+        assert_eq!(hz, HazardAssessmentRaw::default());
     }
 }

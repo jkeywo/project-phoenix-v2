@@ -213,8 +213,8 @@ entities:
 
   - state: desired-motion-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Desired Motion State
       summary: Ship-local 3D desired-motion contract with desired_velocity_local and desired_facing_local, formed by adding hazard forces to objective travel intent before fine helm systems choose how to actuate it.
       rationale:
@@ -233,11 +233,22 @@ entities:
         - helm-vertical-thrust-ai-operator
       replicas:
         - helm-motion-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+        - src/ai/core.rs
+      symbols:
+        - DesiredMotion
+        - encode_local_velocity
+        - encode_local_facing
+      tests:
+        - cargo test
 
   - state: hazard-assessment-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Hazard Assessment State
       summary: Shared per-ship 3D hazard assessment that publishes capability-style hazard facts, force contributions, and per-actuator sensitivity inputs for helm actuation.
       rationale:
@@ -258,6 +269,17 @@ entities:
         - helm-vertical-thrust-ai-operator
       replicas:
         - helm-motion-blackboard-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+        - src/ai/core.rs
+      symbols:
+        - HazardAssessment
+        - HazardAssessmentRaw
+        - assess_hazards
+      tests:
+        - cargo test
 
   - state: impulse-drive-state
     core:
@@ -392,8 +414,8 @@ entities:
 
   - state: helm-motion-blackboard-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Motion Blackboard State
       summary: Replicated or ship-local 3D motion-planning surface exposing objective velocity, desired facing, avoidance velocity, combined desired velocity, avoidance urgency, and primary hazard identity.
       rationale:
@@ -406,6 +428,15 @@ entities:
       derived_from:
         - desired-motion-state
         - hazard-assessment-state
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+      symbols:
+        - HelmMotionPlan
+        - ShipMotionPlan
+      tests:
+        - cargo test
 
   - state: helm-lateral-thrust-blackboard-state
     core:
@@ -455,8 +486,8 @@ entities:
 
   - component: helm-motion-planner
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Motion Planner
       summary: Host-side shared motion planner that turns objectives plus world hazards into a 3D desired-motion and hazard-assessment surface for fine helm systems.
       rationale:
@@ -479,11 +510,21 @@ entities:
         - helm-motion-blackboard-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+        - src/ship_plugin.rs
+      symbols:
+        - helm_motion_planner
+        - HelmMotionPlan
+      tests:
+        - cargo test
 
   - migration: helm-shared-motion-planner-rollout
     core:
-      status: proposed
-      confidence: provisional
+      status: partially-implemented
+      confidence: confirmed
       title: Helm Shared Motion Planner Rollout
       summary: Planned migration from direct-write helm avoidance helpers toward a shared desired-motion and hazard-assessment planning surface.
       rationale:
@@ -508,6 +549,17 @@ entities:
           subject: operate_helm
         - predicate: symbol-does-not-exist
           subject: operate_lateral_thrust
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_planner.rs
+        - src/ai/core.rs
+      symbols:
+        - helm_motion_planner
+        - DesiredMotion
+        - HazardAssessment
+      tests:
+        - cargo test
 
   - component: helm-objective-aggregator
     core:
@@ -813,8 +865,8 @@ entities:
 
   - state: helm-actuator-input-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Actuator Input State
       summary: Authoritative per-ship control inputs for engines, steering, lateral thrust, vertical thrust, impulse, and boost, regardless of whether a human or AI selected them.
       rationale:
@@ -831,11 +883,25 @@ entities:
         - helm-steering-ai-operator
         - helm-lateral-thrust-ai-operator
         - helm-vertical-thrust-ai-operator
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm.rs
+        - src/ship/helm_admission.rs
+        - src/ship/physics_systems.rs
+      symbols:
+        - ThrustInput
+        - SteeringInput
+        - LateralThrustInput
+        - ImpulseCommand
+        - BoostCommand
+      tests:
+        - cargo test
 
   - component: helm-engines-ai-operator
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Engines AI Operator
       summary: Fine-system operator that converts shared actuator input into forward or reverse thrust, slowing for arrival and collision avoidance according to ship capability and sensitivity.
     architecture:
@@ -849,11 +915,23 @@ entities:
         - authoritative-ship-motion-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_ai.rs
+        - src/ship/physics_systems.rs
+        - src/ai/core.rs
+      symbols:
+        - ai_helm_thrust
+        - decode_thrust_from_velocity
+        - integrate_ship_physics
+      tests:
+        - cargo test
 
   - component: helm-steering-ai-operator
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Steering AI Operator
       summary: Fine-system operator that converts shared actuator input and desired facing into ship rotation, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
     architecture:
@@ -867,11 +945,23 @@ entities:
         - authoritative-ship-motion-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_ai.rs
+        - src/ship/physics_systems.rs
+        - src/ai/core.rs
+      symbols:
+        - ai_helm_steering
+        - decode_steering_from_facing
+        - integrate_ship_physics
+      tests:
+        - cargo test
 
   - component: helm-input-arbiter
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Input Arbiter
       summary: Host-side arbiter that turns player commands or AI-selected motion into the same authoritative actuator-input state before physics applies it.
     architecture:
@@ -886,6 +976,14 @@ entities:
         - impulse-manoeuvre-policy-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_admission.rs
+      symbols:
+        - process_helm_inputs
+      tests:
+        - cargo test
 
   - component: helm-vertical-thrust-ai-operator
     core:

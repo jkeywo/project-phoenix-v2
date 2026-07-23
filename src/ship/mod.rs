@@ -10,6 +10,7 @@ pub mod damage_sync;
 pub mod helm;
 pub mod helm_admission;
 pub mod helm_ai;
+pub mod helm_planner;
 pub mod impulse;
 pub mod impulse_boost_systems;
 pub mod lateral_thrust;

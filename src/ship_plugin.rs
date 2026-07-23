@@ -21,6 +21,7 @@ pub(crate) use crate::ship::helm_ai::{
     build_helm_ai_surfaces_frame, detect_reached_objective_completion, helm_axes_operate_ai,
     tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer, HelmAiSurfacesFrame,
 };
+pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::{handle_boost_messages, handle_impulse_messages};
 pub(crate) use crate::ship::impulse_boost_systems::{tick_boost, tick_impulse};
 pub(crate) use crate::ship::physics_systems::{
@@ -67,6 +68,11 @@ impl Plugin for ShipPlugin {
             // AI-helm sim tick by `build_helm_ai_surfaces_frame` and consumed
             // read-only by the four per-axis systems below.
             .init_resource::<HelmAiSurfacesFrame>()
+            // The shared desired-motion + hazard surface (issue #741): rebuilt
+            // once per AI-helm sim tick by `helm_motion_planner` from the
+            // decision surface above, and consumed read-only by the per-axis
+            // helm AI below.
+            .init_resource::<HelmMotionPlan>()
             .add_systems(
                 Update,
                 tick_ai_helm_timer
@@ -87,10 +93,20 @@ impl Plugin for ShipPlugin {
                     build_helm_ai_surfaces_frame
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(crate::sim_sets::AiTickLabel)
-                        .before(ai_helm_thrust)
-                        .before(ai_helm_steering)
+                        .before(helm_motion_planner)
                         .before(ai_helm_lateral_thrust)
                         .before(ai_helm_impulse)
+                        .run_if(ai_helm_tick_ready),
+                    // Shared desired-motion + hazard planner (issue #741). Runs
+                    // between the decision-surface assembly it reads and the
+                    // per-axis thrust/steering systems that consume its
+                    // `HelmMotionPlan` output; it declares `.before` both of them
+                    // here (they are registered in a separate tuple below).
+                    helm_motion_planner
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(crate::sim_sets::AiTickLabel)
+                        .before(ai_helm_thrust)
+                        .before(ai_helm_steering)
                         .run_if(ai_helm_tick_ready),
                     // `.after(AiTickLabel)`: this system reads the frame built
                     // from the viewscreen blackboard's scored objectives.

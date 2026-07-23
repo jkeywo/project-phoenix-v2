@@ -637,7 +637,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 /// #702, so calling this twice in a tick (once per axis) is safe by
 /// construction rather than by scheduling.
 #[allow(clippy::too_many_arguments)]
-fn helm_ai_decision(
+pub(crate) fn helm_ai_decision(
     world_view: &crate::ai::WorldView,
     scored: &[crate::messages::ScoredObjective],
     behaviour_section: Option<&crate::entities::spawner::BehaviourSection>,
@@ -981,24 +981,20 @@ pub(crate) fn detect_reached_objective_completion(
 /// module note) and keeps only its own axis of the pure `operate_helm`
 /// decision.
 pub(crate) fn ai_helm_thrust(
-    frame: Res<HelmAiSurfacesFrame>,
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
             Entity,
             &ShipSystemControlSources,
-            Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            Option<&crate::ai_plugin::ObjectiveCursors>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    for (entity, sources, behaviour_section, entity_uuid, ship_config, cursors, mut admitted) in
-        ships.iter_mut()
-    {
+    for (entity, sources, entity_uuid, ship_config, mut admitted) in ships.iter_mut() {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
             .0
@@ -1007,31 +1003,16 @@ pub(crate) fn ai_helm_thrust(
         {
             continue;
         }
-        let Some(sf) = frame.ships.get(&entity) else {
+        // Consume the shared desired-motion contract published by the motion
+        // planner this tick (issue #741): decode our own axis (forward
+        // throttle) from the ship's 3D desired velocity rather than
+        // re-deriving the decision here. No plan entry (no AI helm axis / no
+        // frame) means nothing to actuate.
+        let Some(sp) = plan.ships.get(&entity) else {
             continue;
         };
-
-        let thrust = if !sf.has_objective {
-            // No objectives → zero throttle (decelerate to stop) via the
-            // shared physics curve rather than coasting on a stale intent.
-            0.0
-        } else {
-            // No commit rule, and no scratch clone to dodge one:
-            // `operate_helm` is pure, so we simply ask it and keep our axis
-            // (issue #702).
-            helm_ai_decision(
-                &sf.merged_view,
-                &sf.scored,
-                behaviour_section,
-                &frame.anchors,
-                cursors,
-                sf.weapons_target,
-                sf.destroy_target,
-                sf.nav_waypoint,
-                sf.forward_speed,
-            )
-            .0
-        };
+        let thrust =
+            crate::ai::decode_thrust_from_velocity(sp.motion.desired_velocity_local.to_array());
 
         emit_ai_command(
             entity_uuid,
@@ -1060,16 +1041,15 @@ pub(crate) fn ai_helm_thrust(
 /// pins the other side of it.
 pub(crate) fn ai_helm_steering(
     frame: Res<HelmAiSurfacesFrame>,
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
-            Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            Option<&crate::ai_plugin::ObjectiveCursors>,
             Option<&mut PendingArcBearingRequest>,
             Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
             &mut crate::messages::AdmittedCommands,
@@ -1081,10 +1061,8 @@ pub(crate) fn ai_helm_steering(
         entity,
         sources,
         physics,
-        behaviour_section,
         entity_uuid,
         ship_config,
-        cursors,
         mut pending_bearing,
         combat_config_opt,
         mut admitted,
@@ -1098,27 +1076,22 @@ pub(crate) fn ai_helm_steering(
         {
             continue;
         }
-        let Some(sf) = frame.ships.get(&entity) else {
+        // Base steering comes from the shared desired-motion contract published
+        // by the motion planner this tick (issue #741): decode the yaw intent
+        // from the ship's 3D desired facing. Arc-bearing (issue #677) is a
+        // facing override this axis still owns, applied on top and resolved
+        // against the frame's merged view.
+        let (Some(sp), Some(sf)) = (plan.ships.get(&entity), frame.ships.get(&entity)) else {
             continue;
         };
 
-        let steering = if !sf.has_objective {
-            0.0
-        } else {
-            // Pure call, no commit — see the module note (issue #702).
-            let (_thrust, mut steering) = helm_ai_decision(
-                &sf.merged_view,
-                &sf.scored,
-                behaviour_section,
-                &frame.anchors,
-                cursors,
-                sf.weapons_target,
-                sf.destroy_target,
-                sf.nav_waypoint,
-                sf.forward_speed,
-            );
+        let mut steering =
+            crate::ai::decode_steering_from_facing(sp.motion.desired_facing_local.to_array());
 
-            // ── Weapons->Helm arc-bearing request (issue #677) ───────────────
+        // ── Weapons->Helm arc-bearing request (issue #677) ───────────────
+        // Gated on a live objective, matching the pre-#741 shape: with nothing
+        // to pursue the ship holds its facing rather than turning to bear.
+        if sf.has_objective {
             apply_arc_bearing_request(
                 &mut steering,
                 pending_bearing.as_deref_mut(),
@@ -1126,8 +1099,7 @@ pub(crate) fn ai_helm_steering(
                 physics,
                 combat_config_opt,
             );
-            steering
-        };
+        }
 
         emit_ai_command(
             entity_uuid,
@@ -2918,6 +2890,70 @@ mod tests {
         assert!(
             last.thrust > 0.0,
             "AI helm must apply positive thrust toward Reach anchor; got {last:?}"
+        );
+    }
+
+    /// AC (issue #741): a ship pursues a test destination through the shared
+    /// motion path — the planner publishes a 3D desired-motion contract, the
+    /// per-axis AI decode it into admitted actuator input, and the shared
+    /// integrator moves the ship — while facing is carried and actuated
+    /// separately from travel.
+    ///
+    /// The anchor sits off the starboard bow, so the ship must simultaneously
+    /// throttle up (travel) and yaw toward it (facing). The two are distinct
+    /// fields of the published `DesiredMotion`, and the integrator turns yaw
+    /// separately from forward travel.
+    #[test]
+    fn helm_motion_planner_drives_ship_to_destination_with_independent_facing() {
+        use crate::ship::helm_planner::HelmMotionPlan;
+
+        let mut app = test_app();
+        let anchor = "test-destination";
+        // Off the starboard bow of a ship at the origin facing -Z: +X is to the
+        // right, so travel wants forward and facing wants to turn to starboard.
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, -50.0]));
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        tick(&mut app);
+
+        // The planner published a 3D desired-motion contract for the ship.
+        let ship = find_ship_entity(&mut app);
+        let plan = app.world().resource::<HelmMotionPlan>();
+        let sp = plan
+            .ships
+            .get(&ship)
+            .copied()
+            .expect("planner must publish a desired-motion plan for the AI-helmed ship");
+        assert!(
+            sp.motion.desired_velocity_local.z < 0.0,
+            "desired velocity must be forward (local -Z); got {:?}",
+            sp.motion.desired_velocity_local
+        );
+        assert!(
+            sp.motion.desired_facing_local.x > 0.0,
+            "desired facing must point to starboard toward the destination; got {:?}",
+            sp.motion.desired_facing_local
+        );
+        // Facing is a separate field from travel — the whole point of the split.
+        assert_ne!(
+            sp.motion.desired_facing_local, sp.motion.desired_velocity_local,
+            "facing must be represented separately from travel"
+        );
+
+        // The shared path actuated it: the ship travels and turns.
+        for _ in 0..6 {
+            tick(&mut app);
+        }
+        let physics = get_ship_physics(&mut app);
+        assert!(
+            physics.forward_speed > 0.0,
+            "the ship must move forward through the shared actuator path; got {physics:?}"
+        );
+        assert!(
+            physics.yaw > 0.0,
+            "the ship must yaw toward the starboard destination, integrated separately \
+             from its forward travel; got {physics:?}"
         );
     }
 

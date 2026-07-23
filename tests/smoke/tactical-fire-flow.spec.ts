@@ -169,7 +169,12 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
   );
 
   // Fire phasers — fore bank is defined first in alliance_cruiser.toml.
-  await tactical.send('FirePhaser', { bank: 'fore' });
+  // FirePhaser routes through the ControlSystem envelope addressed to the
+  // `phaser-{bank}` system (issue #846); the legacy top-level message is gone.
+  await tactical.send('ControlSystem', {
+    target: 'phaser-fore',
+    payload: { type: 'FirePhaser' },
+  });
 
   // BeamStarted must be broadcast to all clients.
   const beamStarted = await tactical.waitForMessage('BeamStarted', 15_000) as any;
@@ -230,8 +235,11 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
     return 1.0;
   }, raiderUuid);
 
-  // Fire phasers.
-  await tactical.send('FirePhaser', { bank: 'fore' });
+  // Fire phasers via the ControlSystem envelope (issue #846).
+  await tactical.send('ControlSystem', {
+    target: 'phaser-fore',
+    payload: { type: 'FirePhaser' },
+  });
   await tactical.waitForMessage('BeamStarted', 15_000);
 
   // Wait for a SimState where the raider's hull_fraction is lower than initial.
@@ -310,7 +318,10 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
         break;
       }
       if (readyBank) {
-        (window as any).__conn.send(JSON.stringify({ type: 'FirePhaser', data: { bank: readyBank } }));
+        (window as any).__conn.send(JSON.stringify({
+          type: 'ControlSystem',
+          data: { target: `phaser-${readyBank}`, payload: { type: 'FirePhaser' } },
+        }));
       }
     }, 200);
   });

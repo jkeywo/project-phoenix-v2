@@ -178,7 +178,10 @@ test('capture torpedo flight and impact on a stationary target', async ({ contex
     { timeout: 15_000 },
   );
 
-  await tactical.send('FireTorpedo', { tube: 'fore_port', target_uuid: raider.uuid });
+  await tactical.send('ControlSystem', {
+    target: 'torpedo-tube-fore-port',
+    payload: { type: 'FireTorpedo', data: { target_uuid: raider.uuid } },
+  });
   await serverPage.bringToFront();
 
   for (let i = 0; i < 24; i++) {

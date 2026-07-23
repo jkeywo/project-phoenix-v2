@@ -179,7 +179,10 @@ test('capture ship death explosion on a one-shot phaser kill', async ({ context 
     { timeout: 15_000 },
   );
 
-  await tactical.send('FirePhaser', { bank: 'fore' });
+  await tactical.send('ControlSystem', {
+    target: 'phaser-fore',
+    payload: { type: 'FirePhaser' },
+  });
   await serverPage.bringToFront();
 
   for (let i = 0; i < 16; i++) {

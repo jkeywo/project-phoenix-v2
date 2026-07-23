@@ -220,6 +220,77 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         "headless: seed={} ({})", sim_rng.seed(), sim_rng.source().as_str()
     );
 
+    // Atomic composition validation (issue #750). Resolve every authored world
+    // reference across the effective composition (root + additive
+    // `extra_worlds`) BEFORE the world config is inserted and anything spawns.
+    // Any error finding aborts the whole build, so a broken composition leaves
+    // zero partial root-world content active.
+    {
+        use crate::world::validate::{has_error, validate_composition, WorldSource};
+        // Own the child TOML sources + parsed configs so the borrowed
+        // `WorldSource`s outlive the validation call.
+        let mut child_owned: Vec<(String, String, crate::world::config::WorldConfig)> = Vec::new();
+        for path in &world_config.extra_worlds {
+            match std::fs::read_to_string(path) {
+                Ok(toml) => match crate::world::config::parse_world(&toml) {
+                    Ok(cfg) => child_owned.push((path.clone(), toml, cfg)),
+                    Err(e) => {
+                        return Err(BuildError(format!(
+                            "world composition: extra_world {path:?} failed to parse: {e}"
+                        )));
+                    }
+                },
+                Err(e) => {
+                    return Err(BuildError(format!(
+                        "world composition: could not read extra_world {path:?}: {e}"
+                    )));
+                }
+            }
+        }
+        let root_src = WorldSource::new(args.world_path.clone(), &world_toml, &world_config);
+        let children: Vec<WorldSource> = child_owned
+            .iter()
+            .map(|(p, t, c)| WorldSource::new(p.clone(), t, c))
+            .collect();
+        let findings = validate_composition(&root_src, &children);
+        for f in &findings {
+            let loc = f
+                .source
+                .line
+                .map(|l| format!("{}:{}", f.source.file, l))
+                .unwrap_or_else(|| f.source.file.clone());
+            info!(
+                target: "world",
+                "world validation [{}] {}: {} ({loc})",
+                match f.severity {
+                    crate::world::validate::Severity::Error => "error",
+                    crate::world::validate::Severity::Warning => "warn",
+                },
+                f.category,
+                f.message
+            );
+        }
+        if has_error(&findings) {
+            let errors: Vec<String> = findings
+                .iter()
+                .filter(|f| f.is_error())
+                .map(|f| {
+                    let loc = f
+                        .source
+                        .line
+                        .map(|l| format!("{}:{}", f.source.file, l))
+                        .unwrap_or_else(|| f.source.file.clone());
+                    format!("[{}] {} ({loc})", f.category, f.message)
+                })
+                .collect();
+            return Err(BuildError(format!(
+                "world composition invalid; activation blocked ({} error(s)): {}",
+                errors.len(),
+                errors.join("; ")
+            )));
+        }
+    }
+
     app.insert_resource(world_config);
 
     // Ship config, before `LobbyPlugin`: the native twin of

@@ -285,8 +285,22 @@ pub struct WorldEntity {
     /// Optional named identity for the entity. When present, the entity
     /// becomes trigger- and comms-eligible: `spawn_world_entities` assigns
     /// it a stable UUID and registers `name ? uuid` in `WorldConfig.name_to_uuid`.
+    ///
+    /// This is the entity's **unique authored reference id**, used only for
+    /// world references (triggers, comms, objectives, and qualified
+    /// parent/child composition references). It is NOT the player-facing
+    /// text — use [`WorldEntity::display_text`] for that. Duplicate `name`s
+    /// within one effective namespace are an authoring error, detected by the
+    /// composition validator (issue #750).
     #[serde(default)]
     pub name: Option<String>,
+    /// Optional player-facing display text, separate from the `name`
+    /// reference id (issue #750). When absent, [`WorldEntity::display_text`]
+    /// falls back to `name` (which is typically a localization key), so
+    /// existing worlds that used `name` for both roles keep working. Authored
+    /// data, not a code string — no `strings.csv` entry required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Positioning, rotation and scale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<TransformConfig>,
@@ -1398,6 +1412,23 @@ impl WorldConfig {
     /// Borrow the unified `[[entity]]` instance list.
     pub fn entities(&self) -> &[WorldEntity] {
         &self.entities
+    }
+}
+
+impl WorldEntity {
+    /// The player-facing display text for this entity (issue #750).
+    ///
+    /// Returns `display_name` when the author supplied one; otherwise falls
+    /// back to the `name` reference id (typically a localization key), and
+    /// finally to the template path when the entity is anonymous. This keeps
+    /// the authoring role (`name` = unique reference id) separate from the
+    /// runtime role (player-facing text) without breaking worlds that used
+    /// `name` for both.
+    pub fn display_text(&self) -> &str {
+        self.display_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or(&self.template_path)
     }
 }
 

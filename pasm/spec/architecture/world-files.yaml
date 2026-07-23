@@ -182,6 +182,11 @@ entities:
       reads: [world-configuration-state, world-composition-state]
       produces: [world-authoring-validation-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/validate.rs, src/headless/app.rs]
+      symbols: [validate_composition, validate_entity_identity, WorldFinding, has_error]
+      tests: [cargo test]
 
   - state: world-authoring-validation-state
     core:
@@ -193,6 +198,10 @@ entities:
       classification: authoritative
       owner: world-authoring-validator
       writers: [world-authoring-validator]
+    implementation:
+      status: declared
+      paths: [src/world/validate.rs]
+      symbols: [WorldFinding, SourceLocation, Severity]
 
   - component: world-identity-contract
     core:
@@ -206,6 +215,11 @@ entities:
       owns: [world-entity-identity-state]
       produces: [world-entity-identity-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/world/validate.rs]
+      symbols: [WorldEntity, validate_entity_identity]
+      tests: [cargo test]
 
   - state: world-entity-identity-state
     core:
@@ -217,6 +231,10 @@ entities:
       classification: authoritative
       owner: world-identity-contract
       writers: [world-identity-contract]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs]
+      symbols: [WorldEntity]
 
   - component: world-composition-contract
     core:
@@ -230,6 +248,11 @@ entities:
       owns: [world-composition-state]
       produces: [world-composition-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/validate.rs]
+      symbols: [parse_qualified_reference, QualifiedRef, validate_composition]
+      tests: [cargo test]
 
   - state: world-composition-state
     core:
@@ -241,6 +264,10 @@ entities:
       classification: authoritative
       owner: world-composition-contract
       writers: [world-composition-contract]
+    implementation:
+      status: declared
+      paths: [src/world/validate.rs]
+      symbols: [WorldSource, QualifiedRef]
 
   - component: world-load-lifecycle-contract
     core:
@@ -255,6 +282,11 @@ entities:
       reads: [world-authoring-validation-state, world-composition-state]
       produces: [world-content-lifecycle-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/headless/app.rs, src/world/server.rs, src/world/validate.rs]
+      symbols: [validate_composition, has_error, spawn_immediate_entities_internal]
+      tests: [cargo test]
 
   - state: world-content-lifecycle-state
     core:
@@ -266,6 +298,10 @@ entities:
       classification: authoritative
       owner: world-load-lifecycle-contract
       writers: [world-load-lifecycle-contract]
+    implementation:
+      status: declared
+      paths: [src/headless/app.rs, src/world/server.rs]
+      symbols: [spawn_immediate_entities_internal]
 
   - component: world-objective-contract
     core:

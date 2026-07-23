@@ -413,6 +413,21 @@ pub fn spawn_immediate_entities_internal(
     flags: Option<&crate::world::flags::FlagStore>,
     sim_rng: Option<&crate::sim_rng::SimRng>,
 ) -> Vec<Entity> {
+    // Atomic-activation guard (issue #750): if this world's entity identity is
+    // invalid (e.g. duplicate reference names), spawn NOTHING. A composition
+    // error must never leave partial root-world content active. The headless
+    // build path aborts earlier on the full composition; this seam is the
+    // last-resort gate for the Bevy `Startup` spawn.
+    let identity = crate::world::validate::validate_entity_identity("", "", &world_config.entities);
+    if crate::world::validate::has_error(&identity) {
+        bevy::log::error!(
+            target: "world",
+            "spawn blocked: world entity identity invalid ({} error(s)); spawning zero entities",
+            identity.iter().filter(|f| f.is_error()).count()
+        );
+        return Vec::new();
+    }
+
     let (fields, named, _anon) =
         crate::world::config::partition_immediate_entities_three_way(world_config, |path| {
             config_cache
@@ -4217,6 +4232,44 @@ base_priority = 35.0
             section.0.anchor.as_deref(),
             Some("belt_origin"),
             "anchor name must be preserved alongside the resolved offset"
+        );
+    }
+
+    #[test]
+    fn duplicate_reference_name_spawns_zero_entities() {
+        // Atomic activation (issue #750): a world whose entity identity is
+        // invalid (two [[entity]] blocks sharing a reference name) must spawn
+        // NOTHING — no partial root-world content.
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
+        use std::collections::HashMap;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/a.toml".into(),
+            name: Some("outpost".into()),
+            ..Default::default()
+        });
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/b.toml".into(),
+            name: Some("outpost".into()),
+            ..Default::default()
+        });
+
+        let cache = crate::config_cache::ConfigCache::from(HashMap::new());
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache, None, None)
+        };
+        app.update();
+
+        assert!(
+            spawned.is_empty(),
+            "a duplicate reference name is a composition error; zero entities must spawn"
         );
     }
 

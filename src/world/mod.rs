@@ -6,4 +6,5 @@ pub mod flags;
 pub mod layers;
 pub mod scenario;
 pub mod server;
+pub mod validate;
 pub use server::WorldPlugin;

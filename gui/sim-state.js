@@ -432,12 +432,12 @@ export class ClientSimState {
 // Each returns a plain `{ type, data? }` object matching the serde wire
 // format; callers JSON.stringify before sending over PeerJS.
 
-export function redAlertToggleMessage() {
+export function redAlertSetMessage(active) {
   return {
     type: 'ControlSystem',
     data: {
       target: 'red-alert',
-      payload: { type: 'ToggleRedAlert' },
+      payload: { type: 'SetRedAlert', data: { active: !!active } },
     },
   };
 }

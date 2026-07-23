@@ -279,8 +279,6 @@ export function routeMessage(msg, ctx) {
       break;
     case 'ObjectiveSummary':
       break; // fall through to the render guard
-    case 'ScenarioLoaded':
-      break; // fall through to the render guard
     default:
       return done(false); // unknown — skip re-render
   }

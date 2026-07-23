@@ -16,12 +16,23 @@
  *   window.ACTION_MAP  (for inspection / extension)
  */
 
-import { dispatchRepairTeam } from './repair-dispatch.js';
+import { dispatchRepairTeam, setRepairPriority } from './repair-dispatch.js';
+import {
+  sendHelmInput,
+  startImpulseCharge,
+  cancelImpulse,
+  toggleBoost,
+  setBoost,
+} from './helm-dispatch.js';
 
 export const ACTION_MAP = Object.freeze({
-  /** Fire a specific phaser bank. */
+  /** Fire a specific phaser bank (issue #846: via ControlSystem envelope). */
   fire_phaser: (a, send) => {
-    if (a.bank) send('FirePhaser', { bank: a.bank });
+    if (!a.bank) return;
+    send('ControlSystem', {
+      target: `phaser-${a.bank}`,
+      payload: { type: 'FirePhaser' },
+    });
   },
 
   /** Fire a specific blaster bank (issue #631). */
@@ -63,19 +74,34 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Fire a torpedo from a tube, optionally targeting a UUID. */
+  /** Fire a torpedo from a tube, optionally targeting a UUID (issue #846: via ControlSystem envelope). */
   fire_torpedo: (a, send) => {
-    send('FireTorpedo', { tube: a.tube || 'fore', target_uuid: a.target_uuid || null });
+    var tube = a.tube || 'fore';
+    var sysId = 'torpedo-tube-' + String(tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'FireTorpedo', data: { target_uuid: a.target_uuid || null } },
+    });
   },
 
-  /** Begin loading a torpedo tube. */
+  /** Begin loading a torpedo tube (issue #846: via ControlSystem envelope). */
   load_tube: (a, send) => {
-    if (a.tube) send('LoadTube', { tube: a.tube });
+    if (!a.tube) return;
+    var sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'LoadTube' },
+    });
   },
 
-  /** Unload (or cancel loading of) a torpedo tube. */
+  /** Unload (or cancel loading of) a torpedo tube (issue #846: via ControlSystem envelope). */
   unload_tube: (a, send) => {
-    if (a.tube) send('UnloadTube', { tube: a.tube });
+    if (!a.tube) return;
+    var sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');
+    send('ControlSystem', {
+      target: sysId,
+      payload: { type: 'UnloadTube' },
+    });
   },
 
   /** Set the volley target count for a torpedo tube (issue #632).
@@ -130,11 +156,14 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
-  /** Toggle red alert status. */
-  toggle_red_alert: (a, send) => {
+  /** Set the ship's Red Alert to an explicit desired state (issue #748).
+   *  The button computes `active` = !currentDisplayedActive, so a stale,
+   *  duplicated, or retried command is idempotent (the host assigns, it does
+   *  not invert). */
+  set_red_alert: (a, send) => {
     send('ControlSystem', {
       target: 'red-alert',
-      payload: { type: 'ToggleRedAlert' },
+      payload: { type: 'SetRedAlert', data: { active: !!a.active } },
     });
   },
 
@@ -156,63 +185,34 @@ export const ACTION_MAP = Object.freeze({
    *  human owns. Component emitters (ph-helm-joystick) are unchanged.
    */
   helm_input: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-thrust',
-      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
-    });
-    send('ControlSystem', {
-      target: 'helm-steering',
-      payload: { type: 'SetSteering', data: { value: a.steering || 0 } },
-    });
+    sendHelmInput(a.thrust, a.steering, send);
   },
 
   /** Set helm via analog joystick (ph-helm-joystick component).
    *  Same per-axis fan-out as helm_input (issue #801); the joystick's yaw
    *  maps to the steering axis. */
   set_helm: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-thrust',
-      payload: { type: 'SetThrust', data: { value: a.thrust || 0 } },
-    });
-    send('ControlSystem', {
-      target: 'helm-steering',
-      payload: { type: 'SetSteering', data: { value: a.yaw || 0 } },
-    });
+    sendHelmInput(a.thrust, a.yaw, send);
   },
 
   /** Begin charging the impulse drive. Targets 'helm-impulse' (issue #801). */
   start_impulse_charge: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-impulse',
-      payload: { type: 'StartImpulseCharge' },
-    });
+    startImpulseCharge(send);
   },
 
   /** Cancel an active impulse charge. Targets 'helm-impulse' (issue #801). */
   cancel_impulse: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-impulse',
-      payload: { type: 'CancelImpulse' },
-    });
+    cancelImpulse(send);
   },
 
   /** Toggle the boost drive on/off. Targets 'helm-boost' (issue #801). */
   toggle_boost: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-boost',
-      payload: { type: 'ToggleBoost' },
-    });
+    toggleBoost(send);
   },
 
   /** Explicitly set boost on or off (hold-to-boost). Targets 'helm-boost'. */
   set_boost: (a, send) => {
-    send('ControlSystem', {
-      target: 'helm-boost',
-      payload: {
-        type: 'SetBoost',
-        data: { active: !!a.active },
-      },
-    });
+    setBoost(a.active, send);
   },
 
   /** Switch the view-screen to the radar mode. */
@@ -233,6 +233,16 @@ export const ACTION_MAP = Object.freeze({
    */
   dispatch_repair_team: (a, send) => {
     dispatchRepairTeam(a.team_idx, a.target, send);
+  },
+
+  /**
+   * Set on-site repair priority for a team (issue #739). Only takes effect
+   * when the team is in `Repairing` state. Requires a team_idx and priority.
+   */
+  set_repair_priority: (a, send) => {
+    if (a.team_idx != null && a.priority != null) {
+      setRepairPriority(a.team_idx, a.priority, send);
+    }
   },
 
   /**
@@ -415,13 +425,27 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /**
-   * Confirm the scenario re-selection after ReturnToLobby (issue #822).
+   * Propose a scenario in the QR-first pre-scenario flow (issue #755).
    *
-   * Only the host page's scenario panel sends this; the server additionally
-   * gates it to the host local-console token.
+   * Sent by BOTH the host page's own selection UI and connected phones over
+   * the same action map. The host-runtime arbiter applies first-valid-wins
+   * against the pre-load catalog; there is no token gate so server or phone
+   * participants alike can make the first valid selection. After Game Over the
+   * return re-enters this same flow for the second round (issue #756).
    */
-  confirm_scenario: (a, send) => {
-    send('ConfirmScenario');
+  select_scenario: (a, send) => {
+    if (!a.scenario_id) return;
+    send('SelectScenario', { scenario_id: a.scenario_id });
+  },
+
+  /**
+   * Propose a player ship in the QR-first pre-scenario flow (issue #755).
+   *
+   * Validated by the arbiter against the locked scenario's offered ships.
+   */
+  select_player_ship: (a, send) => {
+    if (!a.template_path) return;
+    send('SelectPlayerShip', { template_path: a.template_path });
   },
 });
 

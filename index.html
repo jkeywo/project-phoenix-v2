@@ -839,7 +839,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-10905ee33e464d67.js" crossorigin="anonymous" integrity="sha384-z3TGtDe+1xiEDIggbgzLmoh2dcqzcZZyBvjlvbkjGRP/7Sf5bhaqp10yvaXCMaa4"><link rel="preload" href="./project-phoenix-10905ee33e464d67_bg.wasm" crossorigin="anonymous" integrity="sha384-zvmvZfS+Q21pTe8y4d9OBtIZAoZmAuk2HBHp9BRSnhWLTq/Nj40qvHHq52C2TzO0" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-3ff534e8bd216c81.js" crossorigin="anonymous" integrity="sha384-snYeQFpP1qhGs7zvQ6qfpk05/rhgP6gMD8kgsQTSqAT12TNyQTfRiAbymLFz49mt"><link rel="preload" href="./project-phoenix-3ff534e8bd216c81_bg.wasm" crossorigin="anonymous" integrity="sha384-h2uyC7DdKWu2XKgXqh8pE52P14jN/pIthMc9zeaFCbWmODs/ViYjicG88D3QZjlp" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -851,6 +851,23 @@
     // envelope and injects it under the local-console token, exactly like a
     // PeerJS client message would arrive (issue #822).
     window.__localConsoleSend = function(type, data) {
+      // QR-first pre-scenario selections (issue #755) are resolved by the
+      // host-runtime arbiter BEFORE any world is loaded — Bevy isn't running
+      // yet, so they must not be forwarded to WASM. Route the host page's own
+      // UI selections into the same arbiter the phones feed (same action map,
+      // two transports).
+      if (type === 'SelectScenario') {
+        if (typeof window.__arbiterSelectScenario === 'function') {
+          window.__arbiterSelectScenario(data && data.scenario_id);
+        }
+        return;
+      }
+      if (type === 'SelectPlayerShip') {
+        if (typeof window.__arbiterSelectShip === 'function') {
+          window.__arbiterSelectShip(data && data.template_path);
+        }
+        return;
+      }
       var msg = data !== undefined ? { type: type, data: data } : { type: type };
       window.wasmBindings.wasm_receive_message(LOCAL_CONSOLE_TOKEN, JSON.stringify(msg));
     };
@@ -921,13 +938,15 @@
        and arrive via the "audio_config" host channel, so the elements are
        built at runtime by __audioConfig below. -->
 
-  <!-- Scenario selector shown before the server boots -->
+  <!-- Scenario selector shown before the server boots. The scenario buttons
+       are rendered from the #754 pre-load catalog by renderScenarioLockState()
+       once WASM is ready (issue #755) — no hardcoded world list (AGENTS.md #11).
+       The QR (initPeerJS) renders immediately at page load, before any
+       selection, so this panel shows the join code while catalog loads. -->
   <div id="scenario-panel">
     <div id="world-list">
       <div id="world-list-label" data-i18n="server.select_world">Select a world</div>
-      <button class="world-btn" data-path="assets/worlds/default.toml" data-i18n="world.default.global.title">Starbase Alpha</button>
-      <button class="world-btn" data-path="assets/worlds/combat_test.toml" data-i18n="world.combat_test.global.title">Combat Test</button>
-      <button class="world-btn" data-path="assets/worlds/before_the_fire.toml" data-i18n="world.before_the_fire.global.title">Before the Fire</button>
+      <div id="scenario-loading" data-i18n="server.loading">Loading…</div>
     </div>
   </div>
 
@@ -1104,8 +1123,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-10905ee33e464d67.js';
-const wasm = await init({ module_or_path: './project-phoenix-10905ee33e464d67_bg.wasm' });
+import init, * as bindings from './project-phoenix-3ff534e8bd216c81.js';
+const wasm = await init({ module_or_path: './project-phoenix-3ff534e8bd216c81_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1134,6 +1153,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        ClientMessage path the phone clients use. The module publishes
        window.dispatchConsoleAction for the classic-script __sendAction shim. -->
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Pure host-runtime arbiter for the QR-first pre-scenario selection flow
+       (issue #755). Publishes window.scenarioArbiter for the classic-script
+       host logic below. -->
+  <script type="module" src="gui/scenario-arbiter.js"></script>
 
   <script>
     // Resolve a string id via the module bridge; falls back to the raw id
@@ -1811,6 +1834,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                   prior.close();
                 }
                 console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);
+                // Deliver the QR-first scenario catalog to a phone that
+                // connects before the world is loaded (issue #755). Once a
+                // world is loading, phones get Welcome instead (guarded inside).
+                sendCatalogTo(conn);
               }
             } catch (_) { return; }
           }
@@ -1823,6 +1850,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                 qrVisible = !qrVisible;
                 const qrOverlay = document.getElementById('overlay');
                 if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+                return;
+              }
+              // QR-first pre-scenario selections (issue #755): phones send these
+              // over the datachannel before any world is loaded, so Bevy isn't
+              // running to consume them — feed the host-runtime arbiter directly.
+              // No token gate: a phone can make the first valid selection.
+              if (parsed.type === 'SelectScenario') {
+                arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
+                return;
+              }
+              if (parsed.type === 'SelectPlayerShip') {
+                arbiterSelectShip(parsed.data && parsed.data.template_path);
                 return;
               }
             } catch (_) {}
@@ -1863,38 +1902,243 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       });
     }
 
-    // ── Scenario selection ────────────────────────────────────────────────
+    // ── QR-first scenario + ship selection (issue #755) ───────────────────
+    //
+    // Boot-sequence decision: Option A — the arbiter is authoritative in the
+    // HOST RUNTIME (this page), not a pre-world Bevy system. Bevy still starts
+    // AFTER the world is loaded (wasm_init throws to unwind the JS stack, so it
+    // must run last), which means a Bevy lobby cannot exist before world load
+    // without regressing the entire boot. Instead:
+    //   • initPeerJS() is hoisted to page load, so the QR renders on the
+    //     scenario panel BEFORE any selection (AC: QR before selection).
+    //   • This page holds the authoritative first-valid-wins selection and
+    //     validates every request against the #754 pre-load catalog via the
+    //     pure gui/scenario-arbiter.js rules.
+    //   • Requests arrive from BOTH the host page's own UI (__localConsoleSend)
+    //     and connected phones (datachannel), with NO token gate — server or
+    //     phone participants alike can make the first valid selection, and
+    //     there is no voting or pre-ship captain authority.
+    //   • Once scenario + ship are both locked+valid it drives the existing
+    //     preloadAndStart → wasm_select_ship → wasm_init world-load path.
+    // Phones (no WASM accessor) receive the catalog + lock state as a
+    // synthesized ScenarioCatalog ServerMessage.
 
     let selectedScenario = null;
     let wasmReady = false;
-    /** True after ReturnToLobby from GameOver shows the scenario panel
-     *  for re-selection. Scenario button clicks re-confirm instead of
-     *  starting a new server. */
-    let _returnedToSelection = false;
+
+    /** Player-ship template locked pre-load by the arbiter — finishInit uses it
+     *  directly instead of showing the post-load ship picker (issue #755). */
+    let _lockedShipTemplate = null;
+    /** Pre-load catalog: [{ id, world, label, description, ships:[...] }]. */
+    let _scenarioCatalog = [];
+    /** Authoritative first-valid-wins selection. */
+    let _preSelection = { scenario_id: null, template_path: null };
+    let _catalogBuilt = false;
+    let _worldLoadStarted = false;
+    /** True once the world has been loaded into the running Bevy/WASM instance
+     *  (set in finishInit). wasm_init throws-to-unwind and runs exactly once, so
+     *  a second round reuses the already-loaded world rather than reloading it
+     *  (issue #756). driveWorldLoad checks this to route round 2 without a page
+     *  reload and without re-running the one-shot preload. */
+    let _worldLoadedIntoBevy = false;
 
     function showLobbyPanel() {
       const panel = document.getElementById('lobby-panel');
       if (panel) panel.style.display = '';
     }
 
-    document.querySelectorAll('.world-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        selectedScenario = this.dataset.path;
-        document.getElementById('scenario-panel').style.display = 'none';
-        showLobbyPanel();
-        startMenuMusic();
-        if (_returnedToSelection) {
-          // Re-selection flow: server is already running, confirm the scenario.
-          _returnedToSelection = false;
-          window.__sendAction(JSON.stringify({ action: 'confirm_scenario' }));
-        } else {
-          // Initial selection flow: start everything fresh.
-          initPeerJS();
-          acquireWakeLock();
-          if (wasmReady) startPhoenix();
+    // ── Pre-scenario join QR (issue #755, AC1) ────────────────────────────
+    // The #overlay QR lives over the Bevy canvas (z-index 190) and is hidden
+    // (display:none) until the Lobby phase — but that's AFTER world load. The
+    // full-screen #scenario-panel is z-index 200, so during scenario selection
+    // the overlay is both hidden and behind the panel. To make the join code
+    // visible while the host is still choosing a scenario, force the overlay
+    // visible and lift it ABOVE the panel. driveWorldLoad()/the confirm path
+    // revert the z-index so the normal Lobby-phase behaviour is untouched.
+    function showJoinQrOverPanel() {
+      const qrOverlay = document.getElementById('overlay');
+      if (!qrOverlay) return;
+      qrVisible = true;
+      qrOverlay.style.display = 'block';
+      qrOverlay.style.zIndex = '210'; // above #scenario-panel (z-index 200)
+    }
+    function resetJoinQrLayer() {
+      const qrOverlay = document.getElementById('overlay');
+      if (qrOverlay) qrOverlay.style.zIndex = ''; // back to CSS default (190)
+    }
+
+    // ── Pre-world phone messaging ─────────────────────────────────────────
+    // Bevy isn't running before world load, so the host synthesizes the
+    // ScenarioCatalog ServerMessage and delivers it over PeerJS. The wire shape
+    // matches serde `{ type, data }` so the phone's lobby-state applies it
+    // exactly like a Rust-emitted message.
+    function scenarioCatalogMessage() {
+      return {
+        type: 'ScenarioCatalog',
+        data: {
+          scenarios: _scenarioCatalog,
+          locked_scenario: _preSelection.scenario_id,
+          locked_ship: _preSelection.template_path,
+        },
+      };
+    }
+    function sendCatalogTo(conn) {
+      if (!_catalogBuilt || _worldLoadStarted) return;
+      try { conn.send(JSON.stringify(scenarioCatalogMessage())); } catch (_) {}
+    }
+    function broadcastScenarioCatalog() {
+      if (_worldLoadStarted) return;
+      const json = JSON.stringify(scenarioCatalogMessage());
+      for (const [, c] of tokenConns) {
+        if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
+      }
+    }
+    // Second-round resume signal (issue #756): broadcast the fully-locked
+    // catalog even after _worldLoadStarted latches. lobby-state.js treats a
+    // catalog whose scenario AND ship are both locked as "selection done" and
+    // resumes the lobby — the replacement for the retired ScenarioLoaded signal
+    // for already-connected phones reusing the loaded world.
+    function broadcastSelectionComplete() {
+      const json = JSON.stringify(scenarioCatalogMessage());
+      for (const [, c] of tokenConns) {
+        if (c.open || c.readyState === 'open') { try { c.send(json); } catch (_) {} }
+      }
+    }
+
+    // ── Arbiter entry points (first-valid-wins) ───────────────────────────
+    function arbiterSelectScenario(scenarioId) {
+      if (_worldLoadStarted || !scenarioId) return;
+      const r = window.scenarioArbiter.selectScenario(_preSelection, _scenarioCatalog, scenarioId);
+      if (r.outcome !== 'accepted') return;
+      _preSelection = r.selection;
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }
+    function arbiterSelectShip(templatePath) {
+      if (_worldLoadStarted || !templatePath) return;
+      const r = window.scenarioArbiter.selectPlayerShip(_preSelection, _scenarioCatalog, templatePath);
+      if (r.outcome !== 'accepted') return;
+      _preSelection = r.selection;
+      renderScenarioLockState();
+      // When the selection completes, driveWorldLoad() (for round 1) or
+      // broadcastSelectionComplete() inside it (round 2) informs phones — so
+      // don't also broadcast an intermediate fully-locked catalog here.
+      if (window.scenarioArbiter.isComplete(_preSelection)) {
+        driveWorldLoad();
+      } else {
+        broadcastScenarioCatalog();
+      }
+    }
+    // Published for the earlier-script __localConsoleSend shim (host's own UI
+    // routes select_scenario/select_player_ship through the same action map).
+    window.__arbiterSelectScenario = arbiterSelectScenario;
+    window.__arbiterSelectShip = arbiterSelectShip;
+
+    function driveWorldLoad() {
+      if (_worldLoadStarted) return;
+      const worldPath = window.scenarioArbiter.worldPathFor(_scenarioCatalog, _preSelection);
+      if (!worldPath) return;
+      _worldLoadStarted = true;
+      selectedScenario = worldPath;
+      _lockedShipTemplate = _preSelection.template_path;
+      document.getElementById('scenario-panel').style.display = 'none';
+      resetJoinQrLayer(); // panel gone — drop the QR back to its normal layer
+      showLobbyPanel();
+      startMenuMusic();
+      if (_worldLoadedIntoBevy) {
+        // Second round after Game Over (issue #756): wasm_init already ran (it
+        // throws-to-unwind and only runs once), and ReturnToLobby already put
+        // the running Bevy back into the Lobby phase. Reuse the loaded world —
+        // no page reload, no re-preload. Just tell already-connected phones the
+        // selection is locked so they leave the picker/waiting overlay and
+        // resume the lobby to re-crew for the next round.
+        broadcastSelectionComplete();
+        return;
+      }
+      if (wasmReady) startPhoenix();
+    }
+
+    // ── Host-page selection UI (rendered from the catalog) ─────────────────
+    function renderScenarioLockState() {
+      const worldList = document.getElementById('world-list');
+      const label = document.getElementById('world-list-label');
+      if (!worldList) return;
+      if (!_catalogBuilt) return;
+
+      if (_preSelection.scenario_id == null) {
+        // Scenario stage — one button per catalog scenario.
+        if (label) label.textContent = t('server.select_world');
+        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
+        if (_scenarioCatalog.length === 0) {
+          const empty = document.createElement('div');
+          empty.id = 'scenario-loading';
+          empty.textContent = t('server.no_scenarios');
+          worldList.appendChild(empty);
+          return;
         }
-      });
-    });
+        _scenarioCatalog.forEach(function (sc) {
+          const btn = document.createElement('button');
+          btn.className = 'world-btn';
+          btn.dataset.path = sc.world;
+          btn.dataset.scenarioId = sc.id;
+          btn.textContent = sc.label || sc.id;
+          btn.addEventListener('click', function () {
+            // Round 1 and every subsequent round after Game Over route through
+            // the same arbiter (issue #756): the second round re-enters
+            // select_scenario → arbiter → driveWorldLoad, reusing the loaded
+            // world without a page reload.
+            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
+          });
+          worldList.appendChild(btn);
+        });
+      } else if (_preSelection.template_path == null) {
+        // Ship stage — the locked scenario's offered ships via ph-ship-picker.
+        if (label) label.textContent = t('server.select_ship');
+        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
+        const entry = window.scenarioArbiter.findScenario(_scenarioCatalog, _preSelection.scenario_id);
+        const ships = (entry && entry.ships) || [];
+        import('./gui/components/ph-ship-picker.js').then(function () {
+          if (_preSelection.template_path != null) return; // won meanwhile
+          const picker = document.createElement('ph-ship-picker');
+          worldList.appendChild(picker);
+          picker.state = { ships: ships };
+          picker.addEventListener('ship-selected', function (e) {
+            window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: e.detail.template_path }));
+          });
+        });
+      } else {
+        // Both locked — world load is starting.
+        worldList.querySelectorAll('.world-btn, ph-ship-picker').forEach(function (el) { el.remove(); });
+      }
+    }
+
+    // Build the pre-load catalog once WASM is ready: push the base manifest and
+    // each referenced world TOML into Rust so wasm_get_scenario_catalog() (the
+    // #754 authoritative catalog) can resolve titles + per-scenario ships.
+    async function buildScenarioCatalog() {
+      if (_catalogBuilt) return;
+      try {
+        const manifestResp = await fetch('assets/scenarios.toml');
+        if (!manifestResp.ok) throw new Error('manifest HTTP ' + manifestResp.status);
+        const manifestToml = await manifestResp.text();
+        wasmBindings.wasm_push_scenario_manifest(manifestToml);
+        const worldPaths = [...manifestToml.matchAll(/world\s*=\s*"([^"]+)"/g)].map(function (m) { return m[1]; });
+        await Promise.all([...new Set(worldPaths)].map(async function (p) {
+          try {
+            const r = await fetch(p);
+            if (r.ok) wasmBindings.wasm_push_world_toml(p, await r.text());
+          } catch (_) {}
+        }));
+        _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []);
+      } catch (e) {
+        console.error('[Phoenix] scenario catalog build failed:', e);
+        _scenarioCatalog = [];
+      }
+      _catalogBuilt = true;
+      renderScenarioLockState();
+      // Cover phones that connected + identified before the catalog was ready.
+      broadcastScenarioCatalog();
+    }
 
     // Allow automated tests (and quick dev launches) to bypass the picker via
     // ?scenario=<path>, e.g. /?scenario=assets/worlds/default.toml
@@ -1907,6 +2151,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         initPeerJS();
         acquireWakeLock();
       }
+    })();
+
+    // Hoist peer init + wake lock to page load so the QR renders on the
+    // scenario panel BEFORE any selection (issue #755). The ?scenario bypass
+    // above handles its own peer init, so skip when it is active.
+    (function hoistQrToPageLoad() {
+      if (new URLSearchParams(location.search).get('scenario')) return;
+      initPeerJS();
+      // Lift the QR overlay above the scenario panel so the join code is
+      // visible DURING scenario selection, not just after world load (AC1).
+      showJoinQrOverPanel();
+      acquireWakeLock();
     })();
 
     // ── WASM dispatch ─────────────────────────────────────────────────────
@@ -2239,6 +2495,10 @@ function handleConfigRequest(path) {
 function finishInit() {
   if (_finishInitCalled) return;
   _finishInitCalled = true;
+  // The world is now being loaded into the (one-shot) WASM/Bevy instance.
+  // A later Game Over → return re-enters driveWorldLoad, which checks this to
+  // reuse the running instance for the second round (issue #756).
+  _worldLoadedIntoBevy = true;
   const spinner = document.getElementById('wasm-spinner');
   
   window.wasm_init = wasmBindings.wasm_init;
@@ -2274,11 +2534,24 @@ function finishInit() {
   // ── Return to Lobby (GameOver overlay button) ─────────────────────────
   document.getElementById('return-to-lobby-btn').addEventListener('click', function() {
     window.__sendAction(JSON.stringify({ action: 'return_to_lobby' }));
-    // Show the scenario selection panel so the host can pick a new (or same)
-    // scenario. The lobby panel stays hidden until the host confirms.
+    // Return the server screen to the shared pre-scenario selection (issue
+    // #756): show the scenario panel again; the lobby panel stays hidden until
+    // the (re)selection completes and driveWorldLoad reuses the loaded world.
     document.getElementById('scenario-panel').style.display = '';
     document.getElementById('lobby-panel').style.display = 'none';
-    _returnedToSelection = true;
+    // Reset the first-valid-wins selection to its empty shape and clear the
+    // world-load latch so renderScenarioLockState() rebuilds the scenario-stage
+    // buttons. The finished round left _preSelection fully locked and the
+    // "both locked" branch removed every .world-btn. Round 2 now re-enters the
+    // SAME arbiter flow as round 1 — no legacy confirm bypass.
+    _preSelection = { scenario_id: null, template_path: null };
+    _worldLoadStarted = false;
+    renderScenarioLockState();
+    // Re-broadcast the (now-unlocked) catalog so already-connected phones
+    // return to the shared pre-scenario picker for the next round (issue #756).
+    broadcastScenarioCatalog();
+    // Re-lift the join QR above the freshly re-shown scenario panel (AC1).
+    showJoinQrOverPanel();
     startMenuMusic();
   });
 
@@ -2347,6 +2620,25 @@ function finishInit() {
   window.wasm_select_ship = wasmBindings.wasm_select_ship;
 
   const ships = wasm_get_available_ships();
+
+  // QR-first flow (issue #755): the player ship was already locked pre-load by
+  // the arbiter and validated against the selected scenario's catalog ships.
+  // Use it directly instead of re-showing a post-load picker.
+  if (_lockedShipTemplate) {
+    const templatePath = _lockedShipTemplate;
+    wasm_select_ship(templatePath);
+    fetch(templatePath)
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(toml => {
+        try { wasm_validate_stations(toml); } catch (err) {
+          showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+          return;
+        }
+        startServer();
+      })
+      .catch(err => { showFatalError('Failed to load ' + templatePath + ': ' + String(err)); });
+    return;
+  }
 
   const shipResult = resolveShipSelection(ships);
 
@@ -2504,7 +2796,11 @@ function startPhoenix() {
 
 window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
+  // ?scenario bypass (or an arbiter selection that completed before WASM was
+  // ready) sets selectedScenario — start straight into world load. Otherwise
+  // build the #754 catalog and render the QR-first scenario picker (issue #755).
   if (selectedScenario) startPhoenix();
+  else buildScenarioCatalog();
 });
 
     // ── Debug panel (replaces old F-key overlays) ──────────────────────────

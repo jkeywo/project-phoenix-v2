@@ -39,7 +39,11 @@ export class PhRedAlert extends HTMLElement {
     const btn = this.shadowRoot.getElementById('alert-btn');
     btn.addEventListener('click', () => {
       if (this.sendAction && !btn.disabled) {
-        this.sendAction('toggle_red_alert', {});
+        // Send the explicit desired state (issue #748): the opposite of what
+        // is currently displayed. Assigning (not toggling) on the host makes a
+        // stale / duplicated / retried command idempotent.
+        const currentlyActive = !!(this.#state && this.#state.active);
+        this.sendAction('set_red_alert', { active: !currentlyActive });
       }
     });
   }

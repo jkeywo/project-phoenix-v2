@@ -190,6 +190,38 @@ export class PhRepairTeams extends HTMLElement {
         drow.style.display = 'none';
         label.style.display = 'block';
         label.textContent = t('component.repair_teams.target', { target: team.target || '—' });
+
+        // Priority controls only for on-site (repairing) teams (issue #739).
+        const isRepairing = status === 'repairing';
+        let priorityRow = card.querySelector('.priority-row');
+        if (isRepairing) {
+          if (!priorityRow) {
+            priorityRow = document.createElement('div');
+            priorityRow.className = 'priority-row';
+            priorityRow.style.cssText = 'display:flex;gap:0.3rem;align-items:center;margin-top:0.2rem;';
+            priorityRow.innerHTML = `
+              <span style="font-size:0.55rem;letter-spacing:0.15em;color:var(--ink-dim);">${t('component.repair_teams.priority')}</span>
+              <button type="button" class="btn priority-btn" data-priority="0" style="font-size:0.55rem;padding:0.1rem 0.3rem;">1</button>
+              <button type="button" class="btn priority-btn" data-priority="1" style="font-size:0.55rem;padding:0.1rem 0.3rem;">2</button>
+              <button type="button" class="btn priority-btn" data-priority="2" style="font-size:0.55rem;padding:0.1rem 0.3rem;">3</button>
+            `;
+            priorityRow.querySelectorAll('.priority-btn').forEach(btn => {
+              btn.addEventListener('click', () => {
+                if (btn.disabled || auto) return;
+                if (this.sendAction) {
+                  this.sendAction('set_repair_priority', { team_idx: team.id, priority: parseInt(btn.dataset.priority) + 1 });
+                }
+              });
+            });
+            card.appendChild(priorityRow);
+          }
+          priorityRow.style.display = auto ? 'none' : 'flex';
+          priorityRow.querySelectorAll('.priority-btn').forEach(btn => {
+            btn.disabled = auto;
+          });
+        } else if (priorityRow) {
+          priorityRow.style.display = 'none';
+        }
       }
 
       const fill = card.querySelector('.progress-fill');

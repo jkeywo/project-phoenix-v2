@@ -865,6 +865,7 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         status: 'travelling',
         target: data.display_name || data.system_id || '',
         progress_pct: Math.min(elapsed / dur, 1),
+        priority: data.priority != null ? data.priority : null,
       };
     }
     case 'Repairing': {
@@ -874,6 +875,7 @@ function normalizeTeamSlot(slot, idx, travelDurationSecs) {
         status: 'repairing',
         target: data.display_name || data.system_id || '',
         progress_pct: 1.0,
+        priority: data.priority != null ? data.priority : null,
       };
     }
     case 'Returning': {
@@ -1101,6 +1103,7 @@ export function buildShieldsConsoleState(state) {
  *             target_speed: number|null, target_threat: string|null,
  *             target_shield_freq: number|null, target_shields: Array,
  *             target_shield_fraction: number|null,
+ *             target_alert: boolean|null,
  *             own_hull: StationHullAggregate,
  *             sensors_auto: boolean }} SensorsConsolePayload
  */
@@ -1172,6 +1175,14 @@ export function buildSensorsConsoleState(state) {
     }
   }
 
+  // Selected-target Red Alert (issue #749). Authoritative, read ONLY from this
+  // ship's own sensor-radar blackboard — never from the per-entity snapshot —
+  // so the intelligence stays confined to the Sensors scan surface. The host
+  // publishes `Some(bool)` only for a Red-Alert-capable ship it has selected;
+  // absent field (non-ship/incapable/no selection) reads as `null` → no row.
+  const sensorRadarBb = state.blackboards?.['sensor-radar'];
+  const targetAlert = sensorRadarBb?.selected_target_alert ?? null;
+
   // Shared target markers (tactical target + navigation waypoint)
   const shipX = state.shipX || 0, shipZ = state.shipZ || 0, shipYaw = state.shipYaw || 0;
   const tacBb = state.blackboards?.['tactical'];
@@ -1219,6 +1230,7 @@ export function buildSensorsConsoleState(state) {
     target_shield_freq: targetShieldFreq,
     target_shields:     targetShields,
     target_shield_fraction: targetShieldFraction,
+    target_alert:       targetAlert,
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: state.stationRatings?.['sensors'] === 'Backfill',
   });

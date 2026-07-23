@@ -69,3 +69,37 @@ export function dispatchRepairTeamPayload(teamIdx, target) {
 export function dispatchRepairTeam(teamIdx, target, send) {
   return sendControlSystem(REPAIR_SYSTEM_ID, dispatchRepairTeamPayload(teamIdx, target), send);
 }
+
+/**
+ * Build the `SetRepairPriority` payload without sending it. Exposed so tests
+ * can assert on the exact wire shape.
+ *
+ * @param {number} teamIdx repair team slot index
+ * @param {number} priority priority value (higher = more urgent)
+ * @returns {{type: string, data: object}}
+ */
+export function setRepairPriorityPayload(teamIdx, priority) {
+  if (!Number.isInteger(teamIdx) || teamIdx < 0) {
+    throw new TypeError('repair-dispatch: team_idx must be a non-negative integer');
+  }
+  if (!Number.isInteger(priority) || priority < 0 || priority > 255) {
+    throw new TypeError('repair-dispatch: priority must be an integer 0-255');
+  }
+  return {
+    type: 'SetRepairPriority',
+    data: { team_idx: teamIdx, priority },
+  };
+}
+
+/**
+ * Set the on-site repair priority for a team through the explicit command
+ * gateway. Only takes effect when the team is in `Repairing` state.
+ *
+ * @param {number} teamIdx
+ * @param {number} priority
+ * @param {((type: string, data?: object) => void)} [send]
+ * @returns {object|null} the envelope that was sent, or null when offline.
+ */
+export function setRepairPriority(teamIdx, priority, send) {
+  return sendControlSystem(REPAIR_SYSTEM_ID, setRepairPriorityPayload(teamIdx, priority), send);
+}

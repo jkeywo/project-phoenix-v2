@@ -35,6 +35,7 @@
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
+use crate::console_ai::shields_emit::emit_shields_ai_command;
 
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
@@ -217,7 +218,7 @@ pub(crate) fn ai_shield_focus(
             else {
                 return;
             };
-            emit_ai_command(
+            emit_shields_ai_command(
                 entity_uuid,
                 sid,
                 crate::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
@@ -303,8 +304,21 @@ pub(crate) fn ai_shield_focus(
             // is set, which shows as a big jump in offline_remaining — we still
             // want to record that as damage to the arc.
             if facing.hp < prev_hp {
-                let delta = prev_hp - facing.hp;
-                damage_history.record_damage(idx, current_time, delta);
+                // Focus-decay guard (issue #747): while some OTHER arc is
+                // focused, a non-focused arc sitting above its reduced
+                // effective max_hp bleeds toward that cap at
+                // `focus_config.decay_rate` (see `ShieldSystem::tick`). That HP
+                // drop is a focus side effect, not real incoming fire, so it
+                // must not be recorded as concentrated damage. A drop that
+                // leaves the arc at or above its (reduced) max_hp on a
+                // non-focused arc is decay bleeding toward the cap; real damage
+                // pushes an arc below its cap and is still recorded (from the
+                // full prev→current delta).
+                let decay_only = !facing.is_focused && facing.hp >= facing.max_hp;
+                if !decay_only {
+                    let delta = prev_hp - facing.hp;
+                    damage_history.record_damage(idx, current_time, delta);
+                }
             }
             damage_history.observe_hp(idx, facing.hp);
         }
@@ -348,7 +362,7 @@ pub(crate) fn ai_shield_focus(
                         .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
                 });
                 if let Some(sid) = current_sid {
-                    emit_ai_command(
+                    emit_shields_ai_command(
                         entity_uuid,
                         sid,
                         crate::messages::SystemControlPayload::SetShieldArcFocus { focused: false },
@@ -1245,6 +1259,18 @@ mod tests {
         app
     }
 
+    /// Mimics `AdmissionPlugin`'s per-tick clear of every ship's
+    /// `AdmittedCommands` for multi-tick shield scenarios. Production clears
+    /// admitted commands each tick in Input before the AI (Physics) refills
+    /// them; without it, focus/clear commands would pile up across ticks and a
+    /// stale `focused: true` could out-vote a later `focused: false`.
+    /// Scheduled `.before(ai_shield_focus)` so the AI still refills same-tick.
+    fn clear_admitted_each_tick(mut q: Query<&mut AdmittedCommands>) {
+        for mut a in q.iter_mut() {
+            a.0.clear();
+        }
+    }
+
     /// Coarse shields system (the decide gate) + every synthesised
     /// `shield-arc-<id>` fine system (the admission gate) set to Ai —
     /// matching how the entity spawner rosters an NPC's systems (arcs are
@@ -1514,6 +1540,144 @@ mod tests {
             "damage-concentration detection must focus the arc that just took \
              a real hit, even when health imbalance alone would not trigger"
         );
+    }
+
+    #[test]
+    fn ai_shield_focus_accumulates_repeated_hits_on_one_arc_across_ticks() {
+        // Issue #747: repeated hits on the same arc over separate ticks must
+        // accumulate in that arc's damage history (not overwrite), so a stream
+        // of small hits sums to a concentrated signal over the authored window.
+        let mut app = shield_test_app();
+        app.add_systems(Update, clear_admitted_each_tick.before(ai_shield_focus));
+        let e = ship_entity(&mut app);
+
+        // Tick 1: baseline observation (never counts as damage).
+        app.update();
+        assert_eq!(focused_facing(&app, e), None);
+
+        // Tick 2: first small hit on facing 1 (100 -> 97). Health stays
+        // balanced (0.97), so only concentration can drive a focus.
+        {
+            let mut em = app.world_mut().entity_mut(e);
+            em.get_mut::<ShipShields>().unwrap().0.facings[1].hp = 97;
+        }
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "the first recorded hit should focus arc 1 by concentration"
+        );
+
+        // Tick 3: a second small hit on the same arc (97 -> 94). Both hits
+        // must be retained in arc 1's window and keep the arc focused.
+        {
+            let mut em = app.world_mut().entity_mut(e);
+            em.get_mut::<ShipShields>().unwrap().0.facings[1].hp = 94;
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "repeated hits on arc 1 must keep it focused"
+        );
+        let history = app.world().entity(e).get::<ShieldsDamageHistory>().unwrap();
+        assert_eq!(
+            history.arcs[1].len(),
+            2,
+            "both hits on arc 1 must accumulate as separate records in the window"
+        );
+        let arc1_total: i32 = history.arcs[1].iter().map(|r| r.amount).sum();
+        assert_eq!(
+            arc1_total, 6,
+            "accumulated window damage on arc 1 must be 3 + 3"
+        );
+    }
+
+    #[test]
+    fn ai_shield_focus_reverts_when_concentrated_damage_expires() {
+        // Issue #747: once the concentrated hit ages out of the authored
+        // damage window (4s), the concentration signal disappears and, with
+        // health balanced, the AI must clear the focus it took. `tick_shields`
+        // is scheduled so non-focused arcs settle to their reduced cap (the
+        // production steady state) rather than sitting above it forever.
+        let mut app = shield_test_app();
+        app.add_systems(Update, clear_admitted_each_tick.before(ai_shield_focus));
+        app.add_systems(
+            Update,
+            crate::ship::shields::tick_shields.after(crate::ship::shields::handle_shields_messages),
+        );
+        let e = ship_entity(&mut app);
+
+        // Tick 1: baseline.
+        app.update();
+        // Tick 2: one hit on facing 1 (100 -> 90) focuses it by concentration.
+        {
+            let mut em = app.world_mut().entity_mut(e);
+            em.get_mut::<ShipShields>().unwrap().0.facings[1].hp = 90;
+        }
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "the concentrated hit should focus arc 1"
+        );
+
+        // Advance ~5s of ManualDuration(100ms) ticks with no further hits. The
+        // record at ~t=0.2 ages past the 4s window and prunes; the focus must
+        // revert to None once concentration is gone and health is balanced.
+        for _ in 0..50 {
+            app.update();
+        }
+
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "focus must clear once the concentrated damage expires from the window"
+        );
+    }
+
+    #[test]
+    fn ai_shield_focus_ignores_focus_decay_as_incoming_damage() {
+        // Issue #747: focusing one arc reduces the others' effective max_hp, so
+        // `tick_shields` bleeds those non-focused arcs down toward the reduced
+        // cap. That HP drop is a focus side effect, not incoming fire — the
+        // damage detector must NOT record it, or a decaying arc would steal the
+        // focus. Here only arc 1 is ever hit; the decaying arcs must stay
+        // record-free and never take the focus.
+        let mut app = shield_test_app();
+        app.add_systems(Update, clear_admitted_each_tick.before(ai_shield_focus));
+        app.add_systems(
+            Update,
+            crate::ship::shields::tick_shields.after(crate::ship::shields::handle_shields_messages),
+        );
+        let e = ship_entity(&mut app);
+
+        app.update(); // baseline
+        {
+            let mut em = app.world_mut().entity_mut(e);
+            em.get_mut::<ShipShields>().unwrap().0.facings[1].hp = 90;
+        }
+        app.update(); // focus arc 1
+        assert_eq!(focused_facing(&app, e), Some(1));
+
+        // Let the non-focused arcs decay from 100 toward their reduced cap.
+        for _ in 0..20 {
+            app.update();
+        }
+
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "decay on non-focused arcs must not steal the focus from the hit arc"
+        );
+        let history = app.world().entity(e).get::<ShieldsDamageHistory>().unwrap();
+        for idx in [0usize, 2, 3] {
+            assert!(
+                history.arcs[idx].is_empty(),
+                "non-focused arc {idx} decaying toward its cap must record no incoming damage"
+            );
+        }
     }
 
     #[test]

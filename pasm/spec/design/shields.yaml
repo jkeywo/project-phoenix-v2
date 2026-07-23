@@ -85,14 +85,14 @@ entities:
 
   - failure: shield-ai-damage-history-misread
     core:
-      status: accepted
+      status: deprecated
       confidence: confirmed
       title: Shield AI Damage History Misread
-      summary: The current damage-history implementation stores damage deltas but compares them as though they were prior arc health, so the intended recent-damage focus signal is not reliably observed.
+      summary: RESOLVED (issue #747). The damage-history implementation previously stored damage deltas and compared them as though they were prior arc health, so the recent-damage focus signal was not reliably observed. ShieldsDamageHistory.last_hp now holds a per-arc previous-health snapshot observed every tick, and concentration is measured over the authored damage window, so this failure mode no longer occurs. Retained (deprecated) as a record of the resolved risk and its recovery path.
     game_design:
       causes: [damage record lacks prior arc health snapshot]
       consequences: [AI Shields can miss or misclassify concentrated incoming damage]
       affected_roles: [shields-ai-operator-role]
       visible_to: [shields-ai-operator-role]
       terminal: false
-      recovery_paths: [store a separate per-arc previous health value before calculating each damage delta]
+      recovery_paths: [store a separate per-arc previous health value before calculating each damage delta (implemented as ShieldsDamageHistory.last_hp)]

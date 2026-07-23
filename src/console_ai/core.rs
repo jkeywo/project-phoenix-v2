@@ -509,10 +509,14 @@ pub enum ShieldFocusAiOutput {
 /// Rules (evaluated in order):
 /// 1. If `shields_is_low` is false or there are fewer than 2 facings, return
 ///    `None` (no AI involvement; single-arc ships have nothing to focus).
-/// 2. Damage concentration check — prune history outside `damage_window_secs`,
-///    then in the sub-window `[damage_window_secs - min_damage_window_secs,
-///    damage_window_secs]` count damage per arc. If any arc accounts for
-///    `damage_pct_threshold` % or more of total window damage, focus it.
+/// 2. Damage concentration check — sum recorded damage per arc over the
+///    authored recent-damage window `[current_time - window, current_time]`,
+///    where `window = max(damage_window_secs, min_damage_window_secs)` (the
+///    authored `damage_window_secs`, floored at `min_damage_window_secs` so a
+///    misconfigured window can never shrink below the reaction minimum). The
+///    caller prunes records older than `damage_window_secs` first. If any arc
+///    accounts for `damage_pct_threshold` % or more of total window damage,
+///    focus it.
 /// 3. Health imbalance check — if no arc met the damage threshold, compare
 ///    normalized health fractions (hp/max_hp). Sort ascending; if the lowest
 ///    is below `(health_ratio_threshold/100) × second_lowest`, focus it.
@@ -526,7 +530,14 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
 
     // ── 1. Damage concentration check ────────────────────────────────────────
     // Prune is done by the caller (operate_shields_ai prunes before building input).
-    let effective_start = input.current_time_secs - input.min_damage_window_secs;
+    // Concentration is measured over the AUTHORED recent-damage window
+    // (`damage_window_secs`), floored at `min_damage_window_secs` so a
+    // misconfigured window can never fall below the reaction minimum. The
+    // authored window — not a fixed last-`min_damage_window_secs` slice — is
+    // what "recent concentrated damage over authored windows" (issue #747)
+    // means.
+    let window = input.damage_window_secs.max(input.min_damage_window_secs);
+    let effective_start = input.current_time_secs - window;
 
     let mut damage_per_arc: Vec<i32> = vec![0; n];
     let mut total_window_damage: i32 = 0;
@@ -1312,27 +1323,33 @@ mod tests {
 
     #[test]
     fn shield_ai_damage_concentration_focuses_arc() {
-        // Arc at index 1 (Port) takes 80% of damage in the active window
-        // → should be focused even though its health is not the worst.
-        // effective window = [current_time - min_window, current_time] = [3.0, 4.0]
+        // Arc at index 1 (Port) takes 80% of damage over the AUTHORED window
+        // → should be focused even though every arc's health is equal.
+        // Concentration is measured over [current_time - window, current_time]
+        // where window = max(damage_window_secs, min_damage_window_secs) = 4.0,
+        // i.e. [0.0, 4.0]. The damage sits at t=1.0 — inside the authored 4s
+        // window but OUTSIDE the old last-`min_damage_window_secs` slice
+        // ([3.0, 4.0]) that the pre-#747 code measured. With balanced health
+        // (all arcs 90/100) the health-imbalance fallback cannot fire, so a
+        // Focus here proves the authored window governs concentration.
         let mut history = empty_history(4);
-        // Damage to Port at t=3.5s (within active window)
+        // Damage to Port at t=1.0s (inside the authored 4s window).
         history[1].push(DamageRecord {
-            timestamp: 3.5,
+            timestamp: 1.0,
             amount: 80,
         });
-        // Scattered damage to other arcs
+        // Scattered damage to other arcs at the same time.
         history[0].push(DamageRecord {
-            timestamp: 3.5,
+            timestamp: 1.0,
             amount: 10,
         });
         history[2].push(DamageRecord {
-            timestamp: 3.5,
+            timestamp: 1.0,
             amount: 10,
         });
         let facings = vec![
             make_snap("Fore", 90, 100, false),
-            make_snap("Port", 20, 100, false),
+            make_snap("Port", 90, 100, false),
             make_snap("Aft", 90, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
@@ -1418,32 +1435,39 @@ mod tests {
 
     #[test]
     fn shield_ai_damage_outside_active_window_ignored() {
-        // Damage at t=1.0s is older than min_window=1.0s when current_time=4.0.
-        // Window is [3.0, 4.0], so t=1.0 is outside → no arc sees concentration.
+        // Damage on Port (idx 1) at t=1.0s is older than the authored window
+        // when current_time=6.0: window = max(4.0, 1.0) = 4.0, so the active
+        // window is [2.0, 6.0] and t=1.0 falls outside it → the concentration
+        // branch sees nothing and the decision must fall through to health.
+        // Port is kept healthy (90/100) and Aft (idx 2) is the weak arc, so if
+        // the expired hit were (wrongly) counted the result would be Focus{1};
+        // because it is ignored, health imbalance focuses Aft instead.
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
-            timestamp: 1.0, // older than 3.0s window start
+            timestamp: 1.0, // older than the 2.0s window start
             amount: 80,
         });
         let facings = vec![
             make_snap("Fore", 90, 100, false),
-            make_snap("Port", 20, 100, false),
-            make_snap("Aft", 90, 100, false),
+            make_snap("Port", 90, 100, false),
+            make_snap("Aft", 20, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
-        let input = make_input(facings, true, history, 4.0);
-        // No damage in active window → falls to health check.
-        // worst normalized = 0.2 (Port), second = 0.9, 0.5*0.9=0.45, 0.2<0.45 → focus Port
+        let input = make_input(facings, true, history, 6.0);
+        // No damage in active window → health check.
+        // worst normalized = 0.2 (Aft), second = 0.9, 0.5*0.9=0.45, 0.2<0.45 → focus Aft
         assert_eq!(
             tick_shield_focus_ai(&input),
-            ShieldFocusAiOutput::Focus { facing_index: 1 }
+            ShieldFocusAiOutput::Focus { facing_index: 2 }
         );
     }
 
     #[test]
     fn shield_ai_damage_in_future_window_ignored() {
-        // Damage at t=5.0s is in the future relative to current_time=4.0
-        // (active window is [3.0, 4.0]). Should be ignored.
+        // Damage on Port (idx 1) at t=5.0s is in the future relative to
+        // current_time=4.0 (active window [0.0, 4.0]) and must be ignored.
+        // Port is kept healthy and Aft (idx 2) is the weak arc, so the ignored
+        // future hit cannot mask the health-imbalance fallback focusing Aft.
         let mut history = empty_history(4);
         history[1].push(DamageRecord {
             timestamp: 5.0,
@@ -1451,12 +1475,56 @@ mod tests {
         });
         let facings = vec![
             make_snap("Fore", 90, 100, false),
-            make_snap("Port", 20, 100, false),
-            make_snap("Aft", 90, 100, false),
+            make_snap("Port", 90, 100, false),
+            make_snap("Aft", 20, 100, false),
             make_snap("Starboard", 90, 100, false),
         ];
         let input = make_input(facings, true, history, 4.0);
-        // No damage in active window → health check: worst=0.2, second=0.9 → focus Port
+        // Future damage ignored → health check: worst=0.2 (Aft), second=0.9 → focus Aft
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::Focus { facing_index: 2 }
+        );
+    }
+
+    #[test]
+    fn shield_ai_concentration_window_floored_at_min_damage_window() {
+        // A misconfigured authored window (damage_window_secs=0.5) below the
+        // reaction minimum (min_damage_window_secs=2.0) must NOT shrink the
+        // concentration window below the floor. window = max(0.5, 2.0) = 2.0,
+        // so the active window is [2.0, 4.0] and Port's hit at t=2.5 is
+        // counted → Focus{1}. Without the floor (window=0.5 → [3.5, 4.0]) the
+        // hit would be excluded and, with balanced health, the decision would
+        // clear instead.
+        let mut history = empty_history(4);
+        history[1].push(DamageRecord {
+            timestamp: 2.5,
+            amount: 80,
+        });
+        history[0].push(DamageRecord {
+            timestamp: 2.5,
+            amount: 10,
+        });
+        history[2].push(DamageRecord {
+            timestamp: 2.5,
+            amount: 10,
+        });
+        let facings = vec![
+            make_snap("Fore", 90, 100, false),
+            make_snap("Port", 90, 100, false),
+            make_snap("Aft", 90, 100, false),
+            make_snap("Starboard", 90, 100, false),
+        ];
+        let input = ShieldFocusAiInput {
+            facings,
+            shields_is_low: true,
+            damage_history: history,
+            damage_window_secs: 0.5,
+            min_damage_window_secs: 2.0,
+            damage_pct_threshold: 50.0,
+            health_ratio_threshold: 50.0,
+            current_time_secs: 4.0,
+        };
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::Focus { facing_index: 1 }

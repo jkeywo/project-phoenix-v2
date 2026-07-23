@@ -164,6 +164,13 @@ entities:
     architecture:
       kind: service
       authority: authoritative
+      may_depend_on:
+        # ai_shield_focus (registered here) emits through the shields AI
+        # operator's single-owner console_ai::shields_emit module (issue #747),
+        # so server.rs — co-owned by this plugin — carries an observed edge into
+        # shields-recent-damage-ai. This registration/hosting relationship is
+        # incidental, not an authority coupling.
+        - shields-recent-damage-ai
       runs_in: [host-browser-runtime]
     implementation:
       status: declared

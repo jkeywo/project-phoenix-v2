@@ -174,7 +174,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Authoring Validator
-      summary: Resolves every authored world reference before activation and reports source-located errors for missing templates, names, flags, objectives, trigger targets, comms senders, and child-world paths.
+      summary: Resolves every authored world reference before activation and reports source-located errors for missing templates, names, flags, objectives, trigger targets, comms senders, and child-world paths. Also validates the base scenario manifest, reporting source-located findings for missing, unparseable, duplicate, or malformed scenario entries.
     architecture:
       kind: configuration-validator
       authority: authoritative
@@ -184,8 +184,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/validate.rs, src/headless/app.rs]
-      symbols: [validate_composition, validate_entity_identity, WorldFinding, has_error]
+      paths: [src/world/validate.rs, src/world/manifest.rs, src/headless/app.rs]
+      symbols: [validate_composition, validate_entity_identity, validate_manifest, WorldFinding, has_error]
       tests: [cargo test]
 
   - state: world-authoring-validation-state

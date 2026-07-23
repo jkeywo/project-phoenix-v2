@@ -909,39 +909,122 @@ pub fn wasm_get_available_ships() -> Array {
     };
     let arr = Array::new();
     for ship in ships {
+        arr.push(&ship_entry_to_js(ship));
+    }
+    arr
+}
+
+/// Enrich one `AvailableShipEntry` into a JS `{ template_path, label, class,
+/// hull_id, power_rating, name }` object, reading the extra metadata from the
+/// cached entity config when it is available.
+///
+/// Shared by `wasm_get_available_ships` (post-load, reads the loaded
+/// `WorldConfig`) and `wasm_get_scenario_catalog` (pre-load, reads the base
+/// scenario manifest) so both surfaces present ships identically.
+#[cfg(target_arch = "wasm32")]
+fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
+    let obj = Object::new();
+    let label = ship.label.as_deref().unwrap_or(&ship.template_path);
+    Reflect::set(
+        &obj,
+        &JsValue::from_str("template_path"),
+        &JsValue::from_str(&ship.template_path),
+    )
+    .ok();
+    Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
+    if let Some(cfg) = crate::config_cache::get_cached_entity_config(&ship.template_path) {
+        if let Some(ref class) = cfg.class {
+            Reflect::set(&obj, &JsValue::from_str("class"), &JsValue::from_str(class)).ok();
+        }
+        if let Some(ref hull_id) = cfg.hull_id {
+            Reflect::set(
+                &obj,
+                &JsValue::from_str("hull_id"),
+                &JsValue::from_str(hull_id),
+            )
+            .ok();
+        }
+        if let Some(rating) = cfg.power_rating {
+            Reflect::set(
+                &obj,
+                &JsValue::from_str("power_rating"),
+                &JsValue::from_f64(rating as f64),
+            )
+            .ok();
+        }
+        if let Some(ref name) = cfg.name {
+            Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(name)).ok();
+        }
+    }
+    obj
+}
+
+/// Deliver the base scenario manifest (`assets/scenarios.toml`) to Rust.
+///
+/// Called by JS during preload, before any world is loaded. Stored so
+/// `wasm_get_scenario_catalog` can build the pre-load catalog (issue #754).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_push_scenario_manifest(toml_str: String) {
+    crate::config_cache::set_scenario_manifest_toml(toml_str);
+}
+
+/// Return the authoritative pre-load scenario/ship catalog.
+///
+/// Unlike `wasm_get_available_ships` (which needs a loaded `WorldConfig`), this
+/// reads the base scenario manifest pushed via `wasm_push_scenario_manifest`
+/// and each referenced world TOML delivered via `wasm_push_world_toml`, so the
+/// catalog is available *before* a root world is activated (issue #754).
+///
+/// Returns a JS array of `{ id, world, label, description, ships: [...] }`
+/// objects where each `ships` entry matches `wasm_get_available_ships`'s shape.
+/// Only scenarios whose world TOML has been delivered are catalogued; a
+/// scenario whose world is still in flight is omitted until its TOML arrives.
+/// Returns an empty array when no manifest has been pushed.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_scenario_catalog() -> Array {
+    use crate::world::manifest::{build_catalog, parse_manifest};
+    let arr = Array::new();
+    let Some(manifest_toml) = crate::config_cache::get_scenario_manifest_toml() else {
+        return arr;
+    };
+    let Ok(manifest) = parse_manifest(&manifest_toml) else {
+        return arr;
+    };
+    let catalog = build_catalog(&manifest, |path| {
+        crate::config_cache::peek_pending_world_toml(path)
+    });
+    for scenario in &catalog.scenarios {
         let obj = Object::new();
-        let label = ship.label.as_deref().unwrap_or(&ship.template_path);
         Reflect::set(
             &obj,
-            &JsValue::from_str("template_path"),
-            &JsValue::from_str(&ship.template_path),
+            &JsValue::from_str("id"),
+            &JsValue::from_str(&scenario.id),
         )
         .ok();
-        Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
-        if let Some(cfg) = crate::config_cache::get_cached_entity_config(&ship.template_path) {
-            if let Some(ref class) = cfg.class {
-                Reflect::set(&obj, &JsValue::from_str("class"), &JsValue::from_str(class)).ok();
-            }
-            if let Some(ref hull_id) = cfg.hull_id {
-                Reflect::set(
-                    &obj,
-                    &JsValue::from_str("hull_id"),
-                    &JsValue::from_str(hull_id),
-                )
-                .ok();
-            }
-            if let Some(rating) = cfg.power_rating {
-                Reflect::set(
-                    &obj,
-                    &JsValue::from_str("power_rating"),
-                    &JsValue::from_f64(rating as f64),
-                )
-                .ok();
-            }
-            if let Some(ref name) = cfg.name {
-                Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(name)).ok();
-            }
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("world"),
+            &JsValue::from_str(&scenario.world),
+        )
+        .ok();
+        if let Some(ref label) = scenario.label {
+            Reflect::set(&obj, &JsValue::from_str("label"), &JsValue::from_str(label)).ok();
         }
+        if let Some(ref desc) = scenario.description {
+            Reflect::set(
+                &obj,
+                &JsValue::from_str("description"),
+                &JsValue::from_str(desc),
+            )
+            .ok();
+        }
+        let ships = Array::new();
+        for ship in &scenario.ships {
+            ships.push(&ship_entry_to_js(ship));
+        }
+        Reflect::set(&obj, &JsValue::from_str("ships"), &ships).ok();
         arr.push(&obj);
     }
     arr

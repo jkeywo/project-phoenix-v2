@@ -98,6 +98,13 @@ thread_local! {
     static WORLD_FETCH_REQUESTED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
 
+    /// The base scenario manifest TOML (`assets/scenarios.toml`), pushed by JS
+    /// during preload via `wasm_push_scenario_manifest`. Read by the pre-load
+    /// scenario/ship catalog accessor before any world is activated (issue
+    /// #754).
+    static SCENARIO_MANIFEST_TOML: RefCell<Option<String>> =
+        const { RefCell::new(None) };
+
     /// Set of sidecar paths already requested to avoid duplicate JS fetches.
     static SIDECAR_FETCH_REQUESTED: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
@@ -283,6 +290,32 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
 #[cfg(target_arch = "wasm32")]
 pub fn pop_pending_world_toml(path: &str) -> Option<String> {
     PENDING_WORLD_TOML.with(|m| m.borrow_mut().remove(path))
+}
+
+/// Peek the TOML for a previously-fetched world path without removing it.
+///
+/// The pre-load scenario catalog (issue #754) resolves several world TOMLs to
+/// read each scenario's `[global]` metadata and `[[available_ships]]`; unlike
+/// the additive-load path it must not consume the cache, so worlds stay
+/// available for the eventual `wasm_load_world`.
+#[cfg(target_arch = "wasm32")]
+pub fn peek_pending_world_toml(path: &str) -> Option<String> {
+    PENDING_WORLD_TOML.with(|m| m.borrow().get(path).cloned())
+}
+
+/// Store the base scenario manifest TOML (`assets/scenarios.toml`), pushed by
+/// JS during preload (issue #754).
+#[cfg(target_arch = "wasm32")]
+pub fn set_scenario_manifest_toml(toml_str: String) {
+    SCENARIO_MANIFEST_TOML.with(|slot| {
+        *slot.borrow_mut() = Some(toml_str);
+    });
+}
+
+/// Read the stored base scenario manifest TOML, if JS has pushed it.
+#[cfg(target_arch = "wasm32")]
+pub fn get_scenario_manifest_toml() -> Option<String> {
+    SCENARIO_MANIFEST_TOML.with(|slot| slot.borrow().clone())
 }
 
 /// Fire the JS world-fetch callback for `path` if not already requested.

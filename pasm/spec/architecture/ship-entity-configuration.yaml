@@ -153,7 +153,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Available Ship Catalog
-      summary: Reads a loaded world's available ship entries and exposes the template paths and labels offered for player-ship selection.
+      summary: Exposes the template paths and labels offered for player-ship selection. Reads a loaded world's available ship entries, and — before any world is loaded — builds the catalog from the base scenario manifest so each selectable scenario's ships are available pre-load.
     architecture:
       kind: catalog-provider
       authority: authoritative
@@ -163,8 +163,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/config.rs, src/server/bridge.rs, server.html]
-      symbols: [AvailableShipEntry]
+      paths: [src/world/manifest.rs, src/world/config.rs, src/server/bridge.rs, server.html]
+      symbols: [AvailableShipEntry, ScenarioCatalog, build_catalog]
       tests: [cargo test]
 
   - component: entity-template-schema-validator

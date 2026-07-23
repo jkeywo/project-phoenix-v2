@@ -1,0 +1,28 @@
+# Base scenario manifest (issue #754).
+#
+# The authoritative list of *selectable root worlds* — the scenarios a host may
+# choose before any world is loaded. Each entry references a world TOML under
+# `assets/worlds/`. Display metadata (title/description) and the per-scenario
+# player-ship list are read from the referenced world's `[global]` and
+# `[[available_ships]]` sections, so this manifest stays a thin index and the
+# authored data is single-sourced in the world file.
+#
+# Only regular selectable roots are listed. Composition-only worlds (patrol,
+# reinforcements, btf_path_*, btf_aphelion_protocol, the probe_* / duel /
+# rng_coverage test worlds) are loaded additively via `extra_worlds` or trigger
+# actions and are deliberately absent here.
+#
+# This schema is shared with mod-pack scenario manifests (issues #759/#760):
+# `[[scenario]]` entries with an `id`, a `world` path, and an optional `label`.
+
+[[scenario]]
+id = "default"
+world = "assets/worlds/default.toml"
+
+[[scenario]]
+id = "combat_test"
+world = "assets/worlds/combat_test.toml"
+
+[[scenario]]
+id = "before_the_fire"
+world = "assets/worlds/before_the_fire.toml"

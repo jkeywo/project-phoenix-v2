@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Content Pack Catalog
-      summary: Catalogues the authored root scenarios and their loadable supporting world files without treating content identity as a generic world-runtime concern. Current root selection is hardcoded; it will move to the shared base scenario manifest.
+      summary: Catalogues the authored root scenarios and their loadable supporting world files without treating content identity as a generic world-runtime concern. The selectable root set is declared explicitly in the base scenario manifest (assets/scenarios.toml).
     architecture:
       kind: content-catalog
       authority: authoritative
@@ -14,19 +14,24 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/before_the_fire.toml]
+      paths: [assets/scenarios.toml, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/worlds/before_the_fire.toml]
 
   - component: base-scenario-manifest
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Base Scenario Manifest
-      summary: Assets-root scenarios.toml manifest that explicitly lists regular selectable root worlds using the same schema as a mod-pack scenario manifest.
+      summary: Assets-root scenarios.toml manifest that explicitly lists regular selectable root worlds using the same schema as a mod-pack scenario manifest. Parsed and validated with source-located findings, and used to build the pre-load scenario/ship catalog before any world is activated.
     architecture:
       kind: content-catalog
       authority: authoritative
       produces: [world-content-pack-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [assets/scenarios.toml, src/world/manifest.rs, src/server/bridge.rs]
+      symbols: [Manifest, ScenarioEntry, parse_manifest, validate_manifest, ScenarioCatalog, build_catalog]
+      tests: [cargo test]
 
   - state: world-content-pack-state
     core:

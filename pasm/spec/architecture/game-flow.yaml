@@ -28,10 +28,10 @@ entities:
 
   - state: scenario-ship-catalog-state
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Scenario and Ship Catalog State
-      summary: Host-known selectable world and per-world available-ship catalog. Current code exposes available ships only after the host has loaded a world.
+      summary: Host-known selectable world and per-world available-ship catalog. Built from the base scenario manifest before any world is loaded, so the selectable scenarios and each scenario's ships are available pre-load; a loaded world still exposes its own available ships.
     architecture:
       classification: authoritative
       owner: world-available-ship-catalog
@@ -39,8 +39,8 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/world/config.rs, src/server/bridge.rs, server.html]
-      symbols: [WorldConfig]
+      paths: [src/world/manifest.rs, src/world/config.rs, src/server/bridge.rs, server.html]
+      symbols: [ScenarioCatalog, build_catalog, WorldConfig]
       tests: [cargo test]
 
   - component: scenario-ship-selection-arbiter

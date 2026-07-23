@@ -4,6 +4,7 @@ pub mod delayed;
 pub mod dispatch;
 pub mod flags;
 pub mod layers;
+pub mod manifest;
 pub mod scenario;
 pub mod server;
 pub mod validate;

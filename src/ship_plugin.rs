@@ -19,8 +19,9 @@ pub(crate) use crate::ship::helm_admission::{
 };
 pub(crate) use crate::ship::helm_ai::{
     ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust, ai_helm_tick_ready,
-    build_helm_ai_surfaces_frame, detect_reached_objective_completion, helm_axes_operate_ai,
-    tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer, HelmAiSurfacesFrame,
+    ai_helm_vertical_thrust, build_helm_ai_surfaces_frame, detect_reached_objective_completion,
+    helm_axes_operate_ai, tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer,
+    HelmAiSurfacesFrame,
 };
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::{handle_boost_messages, handle_impulse_messages};
@@ -53,6 +54,9 @@ impl Plugin for ShipPlugin {
             crate::system_registry::LATERAL_THRUST_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
+            crate::system_registry::VERTICAL_THRUST_SYSTEM_ID,
+        ))
+        .register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::HELM_BOOST_SYSTEM_ID,
         ));
         app.init_resource::<BankConfigResource>()
@@ -80,6 +84,7 @@ impl Plugin for ShipPlugin {
                     .after(ai_helm_thrust)
                     .after(ai_helm_steering)
                     .after(ai_helm_lateral_thrust)
+                    .after(ai_helm_vertical_thrust)
                     .after(ai_helm_impulse),
             )
             .add_systems(
@@ -265,6 +270,24 @@ impl Plugin for ShipPlugin {
                 .before(process_helm_inputs)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate
                 // cadence for all four per-axis systems.
+                .run_if(ai_helm_tick_ready),
+        );
+
+        // Per-axis helm AI: vertical thrust (issue #744). Same shape as its
+        // siblings — gated on the shared AI-helm sim tick, `.after(AiTickLabel)`
+        // for the decision frame, and `.before(process_helm_inputs)` so its
+        // emitted `VerticalThrustInput` is applied this tick. It reads the
+        // planner's `HelmMotionPlan` (the moving-hazard threat), so it also runs
+        // `.after(helm_motion_planner)`. Registered separately because the main
+        // tuple is at Bevy's 20-element limit.
+        app.add_systems(
+            Update,
+            ai_helm_vertical_thrust
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .after(crate::lobby::LobbySystemSet)
+                .after(crate::sim_sets::AiTickLabel)
+                .after(helm_motion_planner)
+                .before(process_helm_inputs)
                 .run_if(ai_helm_tick_ready),
         );
 

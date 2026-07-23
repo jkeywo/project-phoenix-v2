@@ -7983,6 +7983,7 @@ fn spawn_los_ship(
             forward_speed: 0.0,
             roll: 0.0,
             lateral_speed: 0.0,
+            ..Default::default()
         },
         Transform::from_xyz(x, 0.0, z),
         GlobalTransform::default(),

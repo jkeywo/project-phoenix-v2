@@ -9,6 +9,7 @@ use crate::ship::components::{
 };
 use crate::ship::helm::{
     BoostCommand, ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput,
+    VerticalThrustInput,
 };
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipPhysics;
@@ -17,6 +18,7 @@ use crate::simulation::{ShipBoost, ShipImpulse};
 pub(crate) fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
+        transform.translation.y = physics.y;
         transform.translation.z = physics.z;
         transform.rotation = Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll);
     }
@@ -140,6 +142,7 @@ pub(crate) fn integrate_ship_physics(
             &ThrustInput,
             &SteeringInput,
             &LateralThrustInput,
+            &VerticalThrustInput,
             (Option<&ShipImpulse>, Option<&ShipBoost>),
         ),
         With<crate::ai_plugin::AiHighFidelity>,
@@ -165,6 +168,7 @@ pub(crate) fn integrate_ship_physics(
         thrust_in,
         steering_in,
         lateral_in,
+        vertical_in,
         (impulse, boost),
     ) in ships.iter_mut()
     {
@@ -194,10 +198,12 @@ pub(crate) fn integrate_ship_physics(
 
         let state = ShipPhysicsState {
             x: physics.x,
+            y: physics.y,
             z: physics.z,
             yaw: physics.yaw,
             forward_speed: physics.forward_speed,
             lateral_speed: physics.lateral_speed,
+            vertical_speed: physics.vertical_speed,
         };
 
         let impulse_active = impulse.map(|i| i.0.is_active()).unwrap_or(false);
@@ -209,12 +215,16 @@ pub(crate) fn integrate_ship_physics(
                 thrust: 1.0,
                 steering: steering_in.0 * impulse_cfg_for_steering.steering_multiplier,
                 lateral: 0.0,
+                // Impulse autopilot levels out: no vertical manoeuvring while
+                // the drive is engaged (issue #744), mirroring lateral.
+                vertical: 0.0,
             }
         } else {
             ShipPhysicsInput {
                 thrust: thrust_in.0,
                 steering: steering_in.0,
                 lateral: lateral_in.0,
+                vertical: vertical_in.0,
             }
         };
 
@@ -237,6 +247,7 @@ pub(crate) fn integrate_ship_physics(
             thrust: input.thrust * engine_thrust_scale,
             steering: input.steering,
             lateral: input.lateral,
+            vertical: input.vertical,
         };
 
         let mut config = physics_cfg_comp
@@ -274,10 +285,12 @@ pub(crate) fn integrate_ship_physics(
         let result = compute_physics(state, scaled_input, dt, &config);
 
         physics.x = result.x;
+        physics.y = result.y;
         physics.z = result.z;
         physics.yaw = result.yaw;
         physics.forward_speed = result.forward_speed;
         physics.lateral_speed = result.lateral_speed;
+        physics.vertical_speed = result.vertical_speed;
 
         // Visual banking: LocalShip only, exactly as before — the helm AI has
         // never applied roll to NPCs (neither the old `operate_helm_ai` nor its
@@ -421,6 +434,7 @@ mod tests {
                 ThrustInput(thrust),
                 SteeringInput(steering),
                 LateralThrustInput(lateral),
+                VerticalThrustInput::default(),
             ))
             .id();
         if is_local {

@@ -1115,6 +1115,11 @@ pub enum SystemControlPayload {
     LateralThrustInput {
         lateral: f32,
     },
+    /// Set the vertical (up/down) thrust axis. Targets `helm-vertical-thrust`
+    /// (issue #744). AI-only today — emitted by `ai_helm_vertical_thrust`.
+    VerticalThrustInput {
+        vertical: f32,
+    },
     SetScienceTarget {
         uuid: String,
     },

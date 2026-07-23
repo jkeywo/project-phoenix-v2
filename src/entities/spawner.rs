@@ -644,6 +644,9 @@ pub fn spawn_entity(
                     .as_ref()
                     .map(|lt| lt.lateral_acceleration)
                     .unwrap_or(15.0),
+                // Vertical axis (issue #744): no dedicated helm_console TOML yet,
+                // so take the ShipPhysicsConfig defaults.
+                ..crate::ship_physics::ShipPhysicsConfig::new()
             },
         ));
         // Impulse config

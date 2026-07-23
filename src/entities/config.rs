@@ -155,6 +155,12 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::LATERAL_HAZARD_SENSITIVITY`] when absent.
     #[serde(default = "default_lateral_hazard_sensitivity")]
     pub lateral_hazard_sensitivity: f32,
+    /// Authored vertical-thrust sensitivity to the shared hazard surface (issue
+    /// #744): the multiplier the vertical-thrust actuator applies to the shared
+    /// assessment's moving-hazard threat before clamping to `[0, 1]`.
+    /// Defaults to [`crate::ai::VERTICAL_HAZARD_SENSITIVITY`] when absent.
+    #[serde(default = "default_vertical_hazard_sensitivity")]
+    pub vertical_hazard_sensitivity: f32,
     // `retreat_hull_threshold` lived here until issue #702. It fed a synthetic
     // hull-triggered Retreat that could never win (0..1 score against doctrine's
     // tens) and always steered to world origin (its anchor was empty and the
@@ -188,6 +194,7 @@ impl Default for BehaviourConfig {
             docking_approach_speed: default_docking_approach_speed(),
             hazard_ignore_size_ratio: default_hazard_ignore_size_ratio(),
             lateral_hazard_sensitivity: default_lateral_hazard_sensitivity(),
+            vertical_hazard_sensitivity: default_vertical_hazard_sensitivity(),
         }
     }
 }
@@ -222,6 +229,10 @@ fn default_hazard_ignore_size_ratio() -> f32 {
 
 fn default_lateral_hazard_sensitivity() -> f32 {
     crate::ai::LATERAL_HAZARD_SENSITIVITY
+}
+
+fn default_vertical_hazard_sensitivity() -> f32 {
+    crate::ai::VERTICAL_HAZARD_SENSITIVITY
 }
 
 /// Shape variant for the `[mesh]` section of an entity TOML.
@@ -843,9 +854,44 @@ pub struct HelmCapabilityConfig {
     /// Vertical movement mode. Defaults to `Planar`.
     #[serde(default)]
     pub vertical_movement_mode: VerticalMovementMode,
+    /// Maximum vertical offset (world units) a `Bounded` craft may climb away
+    /// from its cruise plane while dodging moving hazards (issue #744). Ignored
+    /// for `Planar` (no vertical motion) and `Full3D` (unbounded).
+    /// Defaults to [`crate::ai::MAX_VERTICAL_OFFSET`] when absent.
+    #[serde(default = "default_max_vertical_offset")]
+    pub max_vertical_offset: f32,
+    /// Gradual return-to-cruise gain for a `Bounded` craft once avoidance
+    /// urgency falls (issue #744): the vertical actuator eases the ship back to
+    /// its cruise plane at `-y * vertical_return_rate` rather than snapping.
+    /// Defaults to [`crate::ai::VERTICAL_RETURN_RATE`] when absent.
+    #[serde(default = "default_vertical_return_rate")]
+    pub vertical_return_rate: f32,
     /// Impulse capability tuning.
     #[serde(default)]
     pub impulse: ImpulseCapabilityConfig,
+}
+
+fn default_max_vertical_offset() -> f32 {
+    crate::ai::MAX_VERTICAL_OFFSET
+}
+
+fn default_vertical_return_rate() -> f32 {
+    crate::ai::VERTICAL_RETURN_RATE
+}
+
+/// Hand-written so `HelmCapabilityConfig::default()` matches what serde produces
+/// for a `[helm_capability]` block that omits every optional field — a derived
+/// `Default` would zero the vertical tunables instead of reading their authored
+/// constant defaults.
+impl Default for HelmCapabilityConfig {
+    fn default() -> Self {
+        Self {
+            vertical_movement_mode: VerticalMovementMode::default(),
+            max_vertical_offset: default_max_vertical_offset(),
+            vertical_return_rate: default_vertical_return_rate(),
+            impulse: ImpulseCapabilityConfig::default(),
+        }
+    }
 }
 
 /// Procedural engine trail tuning, from `[helm_console.engine_pfx]`.

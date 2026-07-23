@@ -1531,6 +1531,34 @@ mod tests {
         );
     }
 
+    /// Vertical thrust (issue #744) round-trips through the `ControlSystem`
+    /// envelope, targeting `helm-vertical-thrust`. AI-only on the wire, but the
+    /// payload must survive the codec like every other admitted command.
+    #[test]
+    fn vertical_thrust_control_system_payload_round_trips() {
+        for vertical in [-1.0_f32, -0.25, 0.0, 0.6, 1.0] {
+            let msg = ClientMessage::ControlSystem {
+                target: crate::system_registry::vertical_thrust_system_id(),
+                payload: SystemControlPayload::VerticalThrustInput { vertical },
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
+
+        // Pin the wire shape.
+        let encoded = JsonCodec
+            .encode_client(&ClientMessage::ControlSystem {
+                target: crate::system_registry::vertical_thrust_system_id(),
+                payload: SystemControlPayload::VerticalThrustInput { vertical: 0.5 },
+            })
+            .unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"helm-vertical-thrust","payload":{"type":"VerticalThrustInput","data":{"vertical":0.5}}}}"#,
+            "VerticalThrustInput wire shape must be stable"
+        );
+    }
+
     // ── ModifierSource / FlagKind / EntityTag / RegionEffectKind ───────────
     // (not ClientMessage/ServerMessage envelope tests — out of scope for the
     // table-driven harness, kept as-is)

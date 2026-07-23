@@ -16,9 +16,11 @@ use bevy::prelude::Component;
 ///
 /// `integrate_ship_physics` (`src/ship_plugin.rs`) is the **sole writer of the
 /// helm path**: it is the only system that turns helm intent
-/// (`ThrustInput`/`SteeringInput`/`LateralThrustInput`/`ImpulseCommand`/
-/// `BoostCommand`) into motion, and the only production caller of
-/// `compute_physics`. Do not add a second helm integrator — extend that one.
+/// (`ThrustInput`/`SteeringInput`/`LateralThrustInput`/`VerticalThrustInput`/
+/// `ImpulseCommand`/`BoostCommand`) into motion, and the only production caller
+/// of `compute_physics`. Do not add a second helm integrator — extend that one.
+/// The helm-path fields it owns are `x`/`y`/`z`/`yaw`/`forward_speed`/
+/// `lateral_speed`/`vertical_speed`/`roll` (the vertical pair added in #744).
 ///
 /// It is deliberately **not** the only writer of these fields overall. Four
 /// out-of-band writers are **sanctioned exceptions**. They are corrections and
@@ -40,6 +42,10 @@ use bevy::prelude::Component;
 pub struct ShipPhysics {
     /// X position in world space.
     pub x: f32,
+    /// Y (altitude / vertical) position in world space. Stays at the cruise
+    /// plane (0) for `Planar` hulls; driven by the vertical helm axis for
+    /// bounded / full-3D craft (issue #744).
+    pub y: f32,
     /// Z position in world space.
     pub z: f32,
     /// Yaw angle in radians (0 = facing negative Z).
@@ -50,6 +56,8 @@ pub struct ShipPhysics {
     pub roll: f32,
     /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
     pub lateral_speed: f32,
+    /// Current vertical (up/down) speed. Positive = up (+Y), negative = down (issue #744).
+    pub vertical_speed: f32,
 }
 
 /// Per-entity red-alert state for every ship entity (player and NPC).

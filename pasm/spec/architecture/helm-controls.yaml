@@ -194,7 +194,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Authoritative Ship Motion State
-      summary: Host-owned X/Z position, yaw, forward speed, lateral speed, and roll for the ship helm path.
+      summary: Host-owned X/Y/Z position, yaw, forward speed, lateral speed, vertical speed, and roll for the ship helm path (the Y/vertical pair added in #744 for bounded / full-3D craft).
     architecture:
       classification: authoritative
       owner: host-helm-control-router
@@ -635,10 +635,10 @@ entities:
 
   - state: vertical-movement-mode-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Vertical Movement Mode State
-      summary: Ship capability declaring whether the craft supports no vertical motion, bounded AI vertical motion, or full 3D six-degree-of-freedom flight.
+      summary: Ship capability declaring whether the craft supports no vertical motion (Planar), bounded AI vertical motion, or full 3D six-degree-of-freedom flight, plus the authored bounded limits (max vertical offset, gradual return rate).
       rationale:
         - Vertical movement support is ship-specific rather than universal, just like engines, steering, lateral thrust, and boost.
         - Bounded motion provides AI-only above-below avoidance without turning the current player game into full free 3D flight.
@@ -650,13 +650,24 @@ entities:
         - helm-motion-planner
         - helm-vertical-thrust-ai-operator
         - helm-ai-operator
+    implementation:
+      status: declared
+      paths:
+        - src/entities/config.rs
+        - src/entities/spawner.rs
+      symbols:
+        - VerticalMovementMode
+        - HelmCapabilityConfig
+        - HelmCapabilitySection
+      tests:
+        - cargo test
 
   - component: ship-capability-model
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Ship Capability Model
-      summary: Intended ship-authored capability surface for optional helm systems, movement modes, and manoeuvre policy.
+      summary: Ship-authored capability surface for optional helm systems, movement modes, and manoeuvre policy, loaded from the entity TOML [helm_capability] block.
       rationale:
         - Ships should declare whether they have engines, steering, lateral thrust, vertical thrust, impulse, and boost instead of relying on universal helm assumptions.
         - A ship without engines is a stationary installation through capability data, not a special code path.
@@ -669,6 +680,16 @@ entities:
         - impulse-manoeuvre-policy-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/entities/config.rs
+        - src/entities/spawner.rs
+      symbols:
+        - HelmCapabilityConfig
+        - HelmCapabilitySection
+      tests:
+        - cargo test
 
   - state: world-snapshot-state
     core:
@@ -1010,10 +1031,10 @@ entities:
 
   - component: helm-vertical-thrust-ai-operator
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Helm Vertical Thrust AI Operator
-      summary: Intended non-player-facing fine-system operator that consumes shared 3D motion intent and applies bounded or full vertical movement for collision avoidance against moving hazards.
+      summary: Non-player-facing per-axis fine-system operator that reads the shared hazard assessment's moving-hazard threat, weights it by the hull's authored vertical sensitivity, and emits an admitted VerticalThrustInput command that climbs to avoid moving hazards (bounded within an authored offset, unbounded in full-3D) and eases back to the cruise plane once the threat clears.
       rationale:
         - Vertical thrust is a separate fine system even though it is not player-facing yet.
         - In bounded mode it should support AI-only above-below avoidance and then return toward the authored cruise plane when urgency falls.
@@ -1027,10 +1048,18 @@ entities:
         - vertical-movement-mode-state
         - authoritative-ship-motion-state
       writes:
-        - last-helm-input-state
         - authoritative-ship-motion-state
       runs_in:
         - host-browser-runtime
+    implementation:
+      status: declared
+      paths:
+        - src/ship/helm_ai.rs
+        - src/ship/helm_planner.rs
+      symbols:
+        - ai_helm_vertical_thrust
+      tests:
+        - cargo test
 
   - component: torpedo-flight-operator
     core:

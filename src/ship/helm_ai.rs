@@ -8,7 +8,9 @@ use crate::ship::components::{
     ShipSystemControlSources,
 };
 #[cfg(test)]
-use crate::ship::helm::{ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput};
+use crate::ship::helm::{
+    ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
+};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::ShipImpulse;
 
@@ -555,6 +557,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             crate::system_registry::helm_thrust_system_id(),
             crate::system_registry::helm_steering_system_id(),
             crate::system_registry::lateral_thrust_system_id(),
+            crate::system_registry::vertical_thrust_system_id(),
             crate::system_registry::helm_impulse_system_id(),
         ]
         .iter()
@@ -1371,6 +1374,130 @@ pub(crate) fn ai_helm_lateral_thrust(
             entity_uuid,
             crate::system_registry::lateral_thrust_system_id(),
             crate::messages::SystemControlPayload::LateralThrustInput { lateral },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
+    }
+}
+
+/// Per-axis helm AI: vertical thrust (issue #744). Decides the up/down axis for
+/// ships whose `helm-vertical-thrust` system is AI-operated and emits it as an
+/// admitted `VerticalThrustInput` into the ship's own `AdmittedCommands`,
+/// through the same `emit_ai_command` arbiter as the other per-axis operators.
+///
+/// AI-only: the vertical axis has no player-facing control, so this operator is
+/// the sole decider of it. Its behaviour is gated on the hull's authored
+/// [`VerticalMovementMode`](crate::entity_config::VerticalMovementMode):
+///
+/// - **Planar** — never commands vertical motion (the axis stays at cruise).
+/// - **Bounded** — climbs to dodge *moving* hazards up to the authored
+///   `max_vertical_offset`, then eases back toward the cruise plane (`y = 0`) at
+///   the authored `vertical_return_rate` once the moving-hazard threat falls
+///   (the return is the hysteresis: it only engages when avoidance does not).
+/// - **Full3D** — the same avoidance climb without the offset ceiling and with
+///   no auto-return, exposing the full vertical degree of freedom.
+///
+/// The dodge responds to the shared hazard assessment's `moving_hazard_threat`
+/// (the planner pre-filters the contribution list to movable hazards, issue
+/// #744) weighted by the hull's authored `vertical_hazard_sensitivity` — so a
+/// static obstacle, however close, never drives a vertical dodge.
+pub(crate) fn ai_helm_vertical_thrust(
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&crate::entities::spawner::HelmCapabilitySection>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+) {
+    use crate::entity_config::VerticalMovementMode;
+    for (
+        entity,
+        sources,
+        physics,
+        behaviour_section,
+        capability,
+        entity_uuid,
+        ship_config,
+        mut admitted,
+    ) in ships.iter_mut()
+    {
+        // Gate on our own axis alone (issue #800), like every per-axis operator.
+        if !sources
+            .0
+            .policy_for(&crate::system_registry::vertical_thrust_system_id())
+            .operate_ai
+        {
+            continue;
+        }
+
+        let mode = capability
+            .map(|c| c.0.vertical_movement_mode)
+            .unwrap_or_default();
+
+        let vertical = match mode {
+            // A planar hull has no vertical axis — hold the cruise plane.
+            VerticalMovementMode::Planar => 0.0,
+            VerticalMovementMode::Bounded | VerticalMovementMode::Full3D => {
+                let sensitivity = behaviour_section
+                    .map(|b| b.0.vertical_hazard_sensitivity)
+                    .unwrap_or(crate::ai::VERTICAL_HAZARD_SENSITIVITY);
+                let moving_threat = plan
+                    .ships
+                    .get(&entity)
+                    .map(|sp| sp.hazard.moving_hazard_threat)
+                    .unwrap_or(0.0);
+                // Climb to dodge; the initial policy only ever climbs (positive)
+                // away from moving hazards sharing the cruise plane.
+                let climb = (moving_threat * sensitivity).clamp(0.0, 1.0);
+
+                if climb > f32::EPSILON {
+                    match mode {
+                        // Bounded: respect the authored ceiling — stop climbing
+                        // once at/above the max offset from cruise.
+                        VerticalMovementMode::Bounded => {
+                            let max_offset = capability
+                                .map(|c| c.0.max_vertical_offset)
+                                .unwrap_or(crate::ai::MAX_VERTICAL_OFFSET);
+                            if physics.y >= max_offset {
+                                0.0
+                            } else {
+                                climb
+                            }
+                        }
+                        // Full3D: unbounded vertical DOF, no ceiling.
+                        _ => climb,
+                    }
+                } else {
+                    // No moving hazard: Bounded eases back to the cruise plane;
+                    // Full3D holds its altitude (no auto-return).
+                    match mode {
+                        VerticalMovementMode::Bounded => {
+                            let return_rate = capability
+                                .map(|c| c.0.vertical_return_rate)
+                                .unwrap_or(crate::ai::VERTICAL_RETURN_RATE);
+                            (-physics.y * return_rate).clamp(-1.0, 1.0)
+                        }
+                        _ => 0.0,
+                    }
+                }
+            }
+        };
+
+        emit_ai_command(
+            entity_uuid,
+            crate::system_registry::vertical_thrust_system_id(),
+            crate::messages::SystemControlPayload::VerticalThrustInput { vertical },
             sources,
             &sessions,
             ship_config,
@@ -4541,6 +4668,210 @@ mod tests {
             lateral_intent(&mut ignores),
             0.0,
             "a hazard smaller than self must be ignored under the authored rule"
+        );
+    }
+
+    // ── Vertical thrust AI (issue #744) ──────────────────────────────────
+
+    fn capability_with_mode(
+        mode: crate::entity_config::VerticalMovementMode,
+        max_vertical_offset: f32,
+    ) -> crate::entity_config::HelmCapabilityConfig {
+        crate::entity_config::HelmCapabilityConfig {
+            vertical_movement_mode: mode,
+            max_vertical_offset,
+            ..Default::default()
+        }
+    }
+
+    /// Build an app whose ship runs AI vertical thrust under the given
+    /// capability. The helm proper stays human so only the vertical-thrust
+    /// operator can ever write the vertical axis (issue #744).
+    fn vertical_thrust_ai_app(
+        capability: crate::entity_config::HelmCapabilityConfig,
+        behaviour: Option<crate::entity_config::BehaviourConfig>,
+    ) -> App {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Human);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::system_registry::vertical_thrust_system_id(),
+                    ControlSource::Ai,
+                );
+            }
+        }
+        set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entities::spawner::HelmCapabilitySection(capability));
+        if let Some(behaviour) = behaviour {
+            set_behaviour_section(&mut app, behaviour);
+        }
+        app
+    }
+
+    fn vertical_intent(app: &mut App) -> f32 {
+        app.world_mut()
+            .query::<&VerticalThrustInput>()
+            .single(app.world())
+            .expect("ship must carry VerticalThrustInput")
+            .0
+    }
+
+    /// The initial vertical policy filters to *moving* hazards: an in-range
+    /// static obstacle (which the planar actuators would still dodge) drives no
+    /// vertical thrust, while an in-range moving hazard makes the ship climb.
+    /// Both sit inside the same authored 60-unit buffer, so the only difference
+    /// is the `movable` fact (issue #744).
+    #[test]
+    fn vertical_thrust_ai_responds_to_moving_hazard_not_static() {
+        let obstacle = [4.0, 0.0, -40.0];
+        let behaviour = crate::entity_config::BehaviourConfig {
+            avoidance_buffer: 60.0,
+            ..Default::default()
+        };
+
+        // Static hazard, in range: no vertical response.
+        let mut static_app = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(behaviour.clone()),
+        );
+        snapshot_with_obstacle(&mut static_app, obstacle, 1.0);
+        tick_twice(&mut static_app);
+        assert_eq!(
+            vertical_intent(&mut static_app),
+            0.0,
+            "an in-range STATIC hazard must not drive vertical thrust"
+        );
+
+        // Moving hazard, same spot and range: the ship climbs to dodge.
+        let mut moving_app = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(behaviour),
+        );
+        snapshot_with_moving_obstacle(&mut moving_app, obstacle, 1.0, 0.0, 0.0);
+        tick_twice(&mut moving_app);
+        assert!(
+            vertical_intent(&mut moving_app) > 0.0,
+            "an in-range MOVING hazard must drive a climb; got {}",
+            vertical_intent(&mut moving_app)
+        );
+    }
+
+    /// The authored `vertical_hazard_sensitivity` gates the response: sensitivity
+    /// 0 mutes the climb the default weight produces (issue #744).
+    #[test]
+    fn vertical_thrust_ai_honours_authored_sensitivity() {
+        let obstacle = [4.0, 0.0, -40.0];
+
+        let mut muted = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                vertical_hazard_sensitivity: 0.0,
+                ..Default::default()
+            }),
+        );
+        snapshot_with_moving_obstacle(&mut muted, obstacle, 1.0, 0.0, 0.0);
+        tick_twice(&mut muted);
+        assert_eq!(
+            vertical_intent(&mut muted),
+            0.0,
+            "authored zero vertical sensitivity must mute the climb"
+        );
+    }
+
+    /// The three movement modes produce demonstrably divergent authoritative Y
+    /// motion under the same persistent moving hazard (issue #744): Planar holds
+    /// the cruise plane, Bounded climbs but is capped at its authored offset,
+    /// and Full3D keeps climbing past that cap.
+    #[test]
+    fn vertical_movement_modes_diverge_under_a_moving_hazard() {
+        use crate::entity_config::VerticalMovementMode;
+        let obstacle = [4.0, 0.0, -40.0];
+        const BOUNDED_OFFSET: f32 = 2.0;
+
+        fn final_y(mode: VerticalMovementMode, obstacle: [f32; 3], offset: f32) -> f32 {
+            let mut app = vertical_thrust_ai_app(
+                capability_with_mode(mode, offset),
+                Some(crate::entity_config::BehaviourConfig {
+                    avoidance_buffer: 60.0,
+                    ..Default::default()
+                }),
+            );
+            // A persistent, planar moving hazard: assess_hazards is planar, so it
+            // stays a threat no matter how high the ship climbs.
+            snapshot_with_moving_obstacle(&mut app, obstacle, 1.0, 0.0, 0.0);
+            for _ in 0..60 {
+                tick(&mut app);
+            }
+            get_ship_physics(&mut app).y
+        }
+
+        let planar_y = final_y(VerticalMovementMode::Planar, obstacle, BOUNDED_OFFSET);
+        let bounded_y = final_y(VerticalMovementMode::Bounded, obstacle, BOUNDED_OFFSET);
+        let full3d_y = final_y(VerticalMovementMode::Full3D, obstacle, BOUNDED_OFFSET);
+
+        assert!(
+            planar_y.abs() < 0.01,
+            "Planar hull must never leave the cruise plane, got y={planar_y}"
+        );
+        assert!(
+            bounded_y > 0.5,
+            "Bounded hull must climb to dodge, got y={bounded_y}"
+        );
+        assert!(
+            bounded_y <= BOUNDED_OFFSET + 5.0,
+            "Bounded hull must respect its authored max offset ({BOUNDED_OFFSET}), got y={bounded_y}"
+        );
+        assert!(
+            full3d_y > bounded_y + 3.0,
+            "Full3D hull must climb well past the bounded cap; bounded={bounded_y} full3d={full3d_y}"
+        );
+    }
+
+    /// Bounded avoidance returns gradually to the cruise plane once the moving
+    /// hazard is gone (issue #744): the ship climbs while threatened, then eases
+    /// back toward y = 0 when the threat clears.
+    #[test]
+    fn bounded_vertical_returns_to_cruise_after_hazard_clears() {
+        let obstacle = [4.0, 0.0, -40.0];
+        let mut app = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }),
+        );
+        snapshot_with_moving_obstacle(&mut app, obstacle, 1.0, 0.0, 0.0);
+        for _ in 0..40 {
+            tick(&mut app);
+        }
+        let climbed = get_ship_physics(&mut app).y;
+        assert!(
+            climbed > 1.0,
+            "the ship must have climbed while threatened, got y={climbed}"
+        );
+
+        // Threat clears: the world is now empty.
+        app.insert_resource(crate::ai::server::WorldSnapshot { entities: vec![] });
+        for _ in 0..120 {
+            tick(&mut app);
+        }
+        let returned = get_ship_physics(&mut app).y;
+        assert!(
+            returned < climbed - 0.5,
+            "the ship must ease back toward cruise after the hazard clears; \
+             climbed={climbed} returned={returned}"
+        );
+        assert!(
+            returned < 1.0,
+            "the ship must return close to the cruise plane, got y={returned}"
         );
     }
 

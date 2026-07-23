@@ -2386,6 +2386,7 @@ fn spawn_game_start_entities(
                 .insert(crate::ship::helm::ThrustInput::default())
                 .insert(crate::ship::helm::SteeringInput::default())
                 .insert(crate::ship::helm::LateralThrustInput::default())
+                .insert(crate::ship::helm::VerticalThrustInput::default())
                 .insert(crate::ship::helm::ImpulseCommand::default())
                 .insert(crate::ship::helm::BoostCommand::default())
                 .insert(ShipSystemBlackboards::default())
@@ -2804,6 +2805,9 @@ fn spawn_game_start_entities(
                             .as_ref()
                             .map(|lt| lt.lateral_acceleration)
                             .unwrap_or(15.0),
+                        // Vertical axis (issue #744): no dedicated helm_console
+                        // TOML yet, so take the ShipPhysicsConfig defaults.
+                        ..crate::ship_physics::ShipPhysicsConfig::new()
                     });
             let physics_cfg_resource = crate::ship_plugin::ShipPhysicsConfigResource(
                 physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new()),
@@ -6342,6 +6346,7 @@ station = "pilot"
                     forward_speed: 100.0,
                     roll: 0.0,
                     lateral_speed: 0.0,
+                    ..Default::default()
                 },
                 CollisionCooldown::default(),
                 EntitySystemHull(SystemHull::from_config(&[(
@@ -6477,6 +6482,7 @@ station = "pilot"
                 forward_speed: 100.0,
                 roll: 0.0,
                 lateral_speed: 0.0,
+                ..Default::default()
             },
             CollisionCooldown::default(),
             EntitySystemHull(SystemHull::from_config(&[(

@@ -36,6 +36,13 @@ pub struct SteeringInput(pub f32);
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct LateralThrustInput(pub f32);
 
+/// Desired vertical (up/down) thrust input, in `[-1.0, 1.0]` (issue #744).
+/// AI-only: the vertical axis has no player-facing control, so this is written
+/// solely by the `ai_helm_vertical_thrust` operator through the admission path.
+/// Positive = climb (+Y), negative = descend.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct VerticalThrustInput(pub f32);
+
 /// Desired impulse-drive phase transition. Only `Idle` (cancel) and
 /// `Charging` (start) are ever written as commands — `Active` is reached by
 /// natural progression in `tick_impulse`, never commanded directly.
@@ -112,7 +119,7 @@ impl HelmPhysicsWriteGuard {
             "ShipPhysics helm-path single-writer violation on {entity}: frame {frame} was \
              already integrated by `{}`, and `{writer}` is now writing it again. \
              `integrate_ship_physics` must be the only helm-path writer of \
-             ShipPhysics.x/z/yaw/forward_speed/lateral_speed/roll. If you are adding an \
+             ShipPhysics.x/y/z/yaw/forward_speed/lateral_speed/vertical_speed/roll. If you are adding an \
              out-of-band correction (collision, recoil, slow-zone clamp, low-LOD dead \
              reckoning), do not call record_write — document it on `ShipPhysics` instead.",
             self.last_writer.unwrap_or("<unknown>"),

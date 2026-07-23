@@ -6,7 +6,9 @@ use crate::messages::{
 use crate::region_plugin::RegionMembership;
 use crate::server_app::LocalShip;
 use crate::ship::components::{LastHelmInput, ShipSystemControlSources};
-use crate::ship::helm::{ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput};
+use crate::ship::helm::{
+    ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
+};
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -78,6 +80,7 @@ pub(crate) fn process_helm_inputs(
         Option<&mut ThrustInput>,
         Option<&mut SteeringInput>,
         Option<&mut LateralThrustInput>,
+        Option<&mut VerticalThrustInput>,
         Option<&mut ImpulseCommand>,
         Has<LocalShip>,
     )>,
@@ -89,6 +92,7 @@ pub(crate) fn process_helm_inputs(
         mut thrust_in,
         mut steering_in,
         mut lateral_in,
+        mut vertical_in,
         mut impulse_cmd,
         is_local,
     ) in ships.iter_mut()
@@ -129,6 +133,15 @@ pub(crate) fn process_helm_inputs(
                     }
                     if let Some(li) = last_input.as_deref_mut() {
                         li.lateral = *lateral;
+                    }
+                }
+                // Vertical thrust (issue #744): AI-only, so no `LastHelmInput`
+                // mirror (that HUD cache carries no vertical field).
+                (t, SystemControlPayload::VerticalThrustInput { vertical })
+                    if *t == crate::system_registry::vertical_thrust_system_id().0 =>
+                {
+                    if let Some(vi) = vertical_in.as_deref_mut() {
+                        vi.0 = *vertical;
                     }
                 }
                 // The blocks-impulse region check lives in the guard: a charge

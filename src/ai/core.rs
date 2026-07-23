@@ -55,6 +55,23 @@ pub const HAZARD_IGNORE_SIZE_RATIO: f32 = 0.0;
 /// [`crate::entity_config::BehaviourConfig::lateral_hazard_sensitivity`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const LATERAL_HAZARD_SENSITIVITY: f32 = 1.0;
+/// Authored vertical-thrust hazard sensitivity default (issue #744): the
+/// multiplier the vertical-thrust actuator applies to the shared assessment's
+/// moving-hazard threat before clamping to `[0, 1]`. `1.0` passes it through
+/// unweighted. Parse-time default only — see
+/// [`crate::entity_config::BehaviourConfig::vertical_hazard_sensitivity`], whose
+/// serde default reads this constant so the two cannot drift apart.
+pub const VERTICAL_HAZARD_SENSITIVITY: f32 = 1.0;
+/// Authored maximum vertical offset (world units) a `Bounded` craft may climb
+/// away from its cruise plane while dodging (issue #744). Parse-time default
+/// only — see [`crate::entity_config::HelmCapabilityConfig::max_vertical_offset`].
+pub const MAX_VERTICAL_OFFSET: f32 = 30.0;
+/// Authored gradual return-to-cruise gain for `Bounded` craft (issue #744):
+/// once avoidance urgency falls, the vertical actuator commands a descent of
+/// `-y * VERTICAL_RETURN_RATE` (clamped) so the ship eases back to its cruise
+/// plane rather than snapping. Parse-time default only — see
+/// [`crate::entity_config::HelmCapabilityConfig::vertical_return_rate`].
+pub const VERTICAL_RETURN_RATE: f32 = 0.05;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
 /// At 1.5× the stop threshold the ship starts slowing; at the threshold it

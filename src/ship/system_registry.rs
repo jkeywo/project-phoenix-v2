@@ -133,6 +133,14 @@ pub const HELM_IMPULSE_SYSTEM_ID: &str = "helm-impulse";
 pub const LATERAL_THRUST_KIND: &str = "lateral_thrust";
 pub const LATERAL_THRUST_SYSTEM_ID: &str = "helm-lateral-thrust";
 
+/// Wire `SystemId` for the Helm Vertical Thrust fine system (issue #744).
+///
+/// Owns the vertical (up/down) axis: the `VerticalThrustInput` intent component.
+/// AI-only — no player-facing control — driven by `ai_helm_vertical_thrust` for
+/// bounded / full-3D craft avoiding moving hazards.
+pub const VERTICAL_THRUST_KIND: &str = "vertical_thrust";
+pub const VERTICAL_THRUST_SYSTEM_ID: &str = "helm-vertical-thrust";
+
 /// Wire `SystemId` for the Helm Thrust fine system (issue #701).
 ///
 /// Owns the throttle axis: the `ThrustInput` intent component. Split out of
@@ -473,6 +481,10 @@ pub fn helm_impulse_system_id() -> SystemId {
 
 pub fn lateral_thrust_system_id() -> SystemId {
     SystemId(LATERAL_THRUST_SYSTEM_ID.to_string())
+}
+
+pub fn vertical_thrust_system_id() -> SystemId {
+    SystemId(VERTICAL_THRUST_SYSTEM_ID.to_string())
 }
 
 // ── Per-axis Helm system id helpers (issue #701) ──────────────────────────────

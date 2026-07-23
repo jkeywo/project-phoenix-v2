@@ -84,6 +84,7 @@ pub fn test_app() -> App {
         crate::ship::helm::ThrustInput::default(),
         crate::ship::helm::SteeringInput::default(),
         crate::ship::helm::LateralThrustInput::default(),
+        crate::ship::helm::VerticalThrustInput::default(),
         crate::ship::helm::ImpulseCommand::default(),
         crate::ship::helm::BoostCommand::default(),
         // The console-owned surfaces the AI helm derives its goals from
@@ -499,6 +500,7 @@ pub fn test_app_with_engine_hull() -> App {
         crate::ship::helm::ThrustInput::default(),
         crate::ship::helm::SteeringInput::default(),
         crate::ship::helm::LateralThrustInput::default(),
+        crate::ship::helm::VerticalThrustInput::default(),
         crate::ship::helm::ImpulseCommand::default(),
         crate::ship::helm::BoostCommand::default(),
         // The console-owned surfaces the AI helm derives its goals from

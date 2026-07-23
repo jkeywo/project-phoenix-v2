@@ -726,6 +726,7 @@ fn lod_ai_ships(
                         crate::ship::helm::ThrustInput::default(),
                         crate::ship::helm::SteeringInput::default(),
                         crate::ship::helm::LateralThrustInput::default(),
+                        crate::ship::helm::VerticalThrustInput::default(),
                         crate::ship::helm::ImpulseCommand::default(),
                         crate::ship::helm::BoostCommand::default(),
                     ));
@@ -743,6 +744,7 @@ fn lod_ai_ships(
                         crate::ship::helm::ThrustInput,
                         crate::ship::helm::SteeringInput,
                         crate::ship::helm::LateralThrustInput,
+                        crate::ship::helm::VerticalThrustInput,
                         crate::ship::helm::ImpulseCommand,
                         crate::ship::helm::BoostCommand,
                     )>();
@@ -1946,6 +1948,7 @@ mod tests {
                 crate::ship::helm::ThrustInput::default(),
                 crate::ship::helm::SteeringInput::default(),
                 crate::ship::helm::LateralThrustInput::default(),
+                crate::ship::helm::VerticalThrustInput::default(),
                 crate::ship::helm::ImpulseCommand::default(),
                 crate::ship::helm::BoostCommand::default(),
             ))

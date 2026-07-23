@@ -52,6 +52,12 @@ pub struct HazardAssessment {
     pub urgency: f32,
     /// The strongest threat's UUID, if any.
     pub primary_hazard: Option<uuid::Uuid>,
+    /// Peak threat fraction across only the **moving** (`movable`) hazards,
+    /// `[0, 1]` (issue #744). The vertical-thrust actuator's initial policy
+    /// dodges moving hazards only — static obstacles are left to the planar
+    /// actuators — so the planner pre-filters the contribution list to movable
+    /// hazards here rather than forwarding the whole (non-`Copy`) list.
+    pub moving_hazard_threat: f32,
 }
 
 /// One ship's full plan for this tick.
@@ -222,10 +228,21 @@ pub(crate) fn helm_motion_planner(
             }
         }
 
+        // Moving-hazard threat for the vertical actuator (issue #744): the peak
+        // threat fraction among only the movable contributions. Static
+        // obstacles (asteroids etc.) never drive vertical avoidance.
+        let moving_hazard_threat = hazard_raw
+            .contributions
+            .iter()
+            .filter(|c| c.movable)
+            .map(|c| c.threat_fraction)
+            .fold(0.0_f32, f32::max);
+
         let hazard = HazardAssessment {
             hazard_forces: Vec3::from_array(hazard_raw.forces_local),
             urgency: hazard_raw.urgency,
             primary_hazard: hazard_raw.primary,
+            moving_hazard_threat,
         };
 
         if hazard.urgency > 0.0 {

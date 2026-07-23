@@ -3835,6 +3835,7 @@ mod dust_tests {
             forward_speed: forward,
             roll: 0.0,
             lateral_speed: lateral,
+            ..Default::default()
         }
     }
 
@@ -4720,11 +4721,14 @@ position = [0.5, -0.1, 0.25]
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.
                 crate::ai_plugin::AiHighFidelity,
-                crate::ship::helm::ThrustInput::default(),
-                crate::ship::helm::SteeringInput::default(),
-                crate::ship::helm::LateralThrustInput::default(),
-                crate::ship::helm::ImpulseCommand::default(),
-                crate::ship::helm::BoostCommand::default(),
+                (
+                    crate::ship::helm::ThrustInput::default(),
+                    crate::ship::helm::SteeringInput::default(),
+                    crate::ship::helm::LateralThrustInput::default(),
+                    crate::ship::helm::VerticalThrustInput::default(),
+                    crate::ship::helm::ImpulseCommand::default(),
+                    crate::ship::helm::BoostCommand::default(),
+                ),
             ))
             .id();
 
@@ -4777,11 +4781,14 @@ position = [0.5, -0.1, 0.25]
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.
                 crate::ai_plugin::AiHighFidelity,
-                crate::ship::helm::ThrustInput::default(),
-                crate::ship::helm::SteeringInput::default(),
-                crate::ship::helm::LateralThrustInput::default(),
-                crate::ship::helm::ImpulseCommand::default(),
-                crate::ship::helm::BoostCommand::default(),
+                (
+                    crate::ship::helm::ThrustInput::default(),
+                    crate::ship::helm::SteeringInput::default(),
+                    crate::ship::helm::LateralThrustInput::default(),
+                    crate::ship::helm::VerticalThrustInput::default(),
+                    crate::ship::helm::ImpulseCommand::default(),
+                    crate::ship::helm::BoostCommand::default(),
+                ),
             ))
             .id();
 

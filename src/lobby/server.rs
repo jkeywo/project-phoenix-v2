@@ -428,33 +428,234 @@ fn update_session_with_config(
         // extract those into `system_extras` keyed by system kind for the
         // kind-keyed providers to read. The aggregator itself is pure.
         if let Some(topology) = ship_config.ship_config.as_ref() {
-            let mut system_extras: std::collections::HashMap<String, toml::Value> =
-                std::collections::HashMap::new();
-            if let Some(sc) = &ship_config.shields_console {
-                // `[shields_console.base]` is optional; when omitted the
-                // historical shield defaults apply (the same fallback the
-                // runtime uses), so the manual reflects the ship's effective
-                // values either way.
-                let base_cfg = sc.base.clone().unwrap_or_default();
-                let mut base = toml::value::Table::new();
-                base.insert(
-                    "max_hp".into(),
-                    toml::Value::Integer(base_cfg.max_hp as i64),
-                );
-                base.insert(
-                    "regen_per_sec".into(),
-                    toml::Value::Float(base_cfg.regen_per_sec as f64),
-                );
-                system_extras.insert(
-                    crate::system_registry::SHIELDS_KIND.to_string(),
-                    toml::Value::Table(base),
-                );
-            }
+            let system_extras = build_manual_system_extras(ship_config);
             let registry = crate::ship::manual::ManualProviderRegistry::with_shipped_providers();
             ship_manual.0 =
                 crate::ship::manual::build_ship_manual(topology, &registry, &system_extras);
         }
     }
+}
+
+/// Extract the kind-keyed `system_extras` the manual providers need from the
+/// selected ship's `EntityConfig` (issue #773). The pure `ship::manual` module
+/// sees only the station/system topology, so every vessel-specific gameplay
+/// value a provider emits — weapon ranges, torpedo capacity, sensor range,
+/// power capacity, repair timings, comms range, helm capabilities — is plumbed
+/// through here, keyed by system kind, exactly as the shields base block was in
+/// issue #772. Machine value-codes only; no player-visible English.
+fn build_manual_system_extras(
+    ship_config: &crate::entity_config::EntityConfig,
+) -> std::collections::HashMap<String, toml::Value> {
+    use crate::system_registry as kinds;
+    let mut extras: std::collections::HashMap<String, toml::Value> =
+        std::collections::HashMap::new();
+    let f = toml::Value::Float;
+    let i = |n: i64| toml::Value::Integer(n);
+
+    // Shields base (issue #772): `[shields_console.base]` HP + regen. Optional
+    // block falls back to the historical shield defaults the runtime also uses.
+    if let Some(sc) = &ship_config.shields_console {
+        let base_cfg = sc.base.clone().unwrap_or_default();
+        let mut base = toml::value::Table::new();
+        base.insert("max_hp".into(), i(base_cfg.max_hp as i64));
+        base.insert("regen_per_sec".into(), f(base_cfg.regen_per_sec as f64));
+        extras.insert(kinds::SHIELDS_KIND.to_string(), toml::Value::Table(base));
+    }
+
+    if let Some(wc) = &ship_config.weapons_console {
+        // Phaser banks — one per-bank table tagged with its system id so the
+        // per-instance provider can find its own values. `0.0` authored fields
+        // resolve to the same runtime beam defaults the combat code applies.
+        use crate::entity_config::PhaserCombatConfig as P;
+        let banks: Vec<toml::Value> = wc
+            .phaser_banks
+            .iter()
+            .filter_map(|b| {
+                let sid = crate::system_registry::phaser_bank_system_id(&b.id)?;
+                let mut t = toml::value::Table::new();
+                t.insert("system_id".into(), toml::Value::String(sid.0));
+                let beam_range = if b.beam_range > 0.0 {
+                    b.beam_range
+                } else {
+                    P::DEFAULT_PHASER_RANGE
+                };
+                let beam_damage = if b.beam_damage_per_sec > 0.0 {
+                    b.beam_damage_per_sec
+                } else {
+                    P::DEFAULT_BEAM_DAMAGE_PER_SEC
+                };
+                let cooldown = if b.cooldown_secs > 0.0 {
+                    b.cooldown_secs
+                } else {
+                    P::DEFAULT_BEAM_COOLDOWN_SECS
+                };
+                t.insert("beam_range".into(), f(beam_range as f64));
+                t.insert("beam_damage_per_sec".into(), f(beam_damage as f64));
+                t.insert("cooldown_secs".into(), f(cooldown as f64));
+                t.insert("fire_arc_deg".into(), f(b.fire_arc_deg as f64));
+                Some(toml::Value::Table(t))
+            })
+            .collect();
+        if !banks.is_empty() {
+            let mut t = toml::value::Table::new();
+            t.insert("banks".into(), toml::Value::Array(banks));
+            extras.insert(kinds::PHASER_BANK_KIND.to_string(), toml::Value::Table(t));
+        }
+
+        // Blaster banks — range / volley / cooldown / fire arc + barrel count.
+        let bbanks: Vec<toml::Value> = wc
+            .blaster_banks
+            .iter()
+            .filter_map(|b| {
+                let sid = crate::system_registry::blaster_bank_system_id(&b.id)?;
+                let barrel_count = if b.barrels.is_empty() {
+                    1
+                } else {
+                    b.barrels.len()
+                };
+                let mut t = toml::value::Table::new();
+                t.insert("system_id".into(), toml::Value::String(sid.0));
+                t.insert("range".into(), f(b.range as f64));
+                t.insert("volley_count".into(), i(b.volley_count as i64));
+                t.insert("cooldown_secs".into(), f(b.cooldown_secs as f64));
+                t.insert("fire_arc_deg".into(), f(b.fire_arc_deg as f64));
+                t.insert("barrel_count".into(), i(barrel_count as i64));
+                Some(toml::Value::Table(t))
+            })
+            .collect();
+        if !bbanks.is_empty() {
+            let mut t = toml::value::Table::new();
+            t.insert("banks".into(), toml::Value::Array(bbanks));
+            extras.insert(kinds::BLASTER_BANK_KIND.to_string(), toml::Value::Table(t));
+        }
+
+        // Tactical radar range from `[weapons_console.radar]`.
+        if let Some(r) = &wc.radar {
+            let mut t = toml::value::Table::new();
+            t.insert("range".into(), f(r.range as f64));
+            extras.insert(
+                kinds::TACTICAL_RADAR_KIND.to_string(),
+                toml::Value::Table(t),
+            );
+        }
+    }
+
+    // Torpedoes — shared magazine/warhead figures + per-tube layout.
+    if let Some(tc) = &ship_config.torpedoes {
+        let mut mag = toml::value::Table::new();
+        mag.insert("count".into(), i(tc.count as i64));
+        mag.insert("damage_hull".into(), i(tc.damage_hull as i64));
+        mag.insert("damage_shields".into(), i(tc.damage_shields as i64));
+        mag.insert("load_time".into(), f(tc.load_time as f64));
+        extras.insert(
+            kinds::TORPEDO_MAGAZINE_KIND.to_string(),
+            toml::Value::Table(mag),
+        );
+
+        let tubes: Vec<toml::Value> = tc
+            .tubes
+            .iter()
+            .filter_map(|tube| {
+                let sid = crate::system_registry::torpedo_tube_system_id(&tube.id)?;
+                let load_time = tube.load_time.unwrap_or(tc.load_time);
+                let mut t = toml::value::Table::new();
+                t.insert("system_id".into(), toml::Value::String(sid.0));
+                t.insert("fire_arc_deg".into(), f(tube.fire_arc_deg as f64));
+                t.insert("load_time".into(), f(load_time as f64));
+                t.insert("volley_max".into(), i(tube.volley_max as i64));
+                Some(toml::Value::Table(t))
+            })
+            .collect();
+        if !tubes.is_empty() {
+            let mut t = toml::value::Table::new();
+            t.insert("tubes".into(), toml::Value::Array(tubes));
+            extras.insert(kinds::TORPEDO_TUBE_KIND.to_string(), toml::Value::Table(t));
+        }
+    }
+
+    // Sensors long-range radar range feeds both the coarse `sensors` section
+    // and the fine `sensor_radar` section (same authored range).
+    if let Some(sc) = &ship_config.sensors_console {
+        let mut t = toml::value::Table::new();
+        t.insert("range".into(), f(sc.long_range_radar.range as f64));
+        extras.insert(
+            kinds::SENSORS_KIND.to_string(),
+            toml::Value::Table(t.clone()),
+        );
+        extras.insert(kinds::SENSOR_RADAR_KIND.to_string(), toml::Value::Table(t));
+    }
+
+    // Power — reactor capacity + battery emergency reserve threshold.
+    if let Some(pc) = &ship_config.power {
+        let mut reactor = toml::value::Table::new();
+        reactor.insert("capacity".into(), f(pc.capacity as f64));
+        extras.insert(
+            kinds::POWER_REACTOR_KIND.to_string(),
+            toml::Value::Table(reactor),
+        );
+        let mut battery = toml::value::Table::new();
+        battery.insert(
+            "emergency_threshold".into(),
+            f(pc.emergency_threshold as f64),
+        );
+        extras.insert(
+            kinds::POWER_BATTERY_KIND.to_string(),
+            toml::Value::Table(battery),
+        );
+    }
+
+    // Repair team timings from `[repair]`.
+    if let Some(rc) = &ship_config.repair {
+        let mut t = toml::value::Table::new();
+        t.insert("repair_team_count".into(), i(rc.repair_team_count as i64));
+        t.insert(
+            "repair_rate_hp_per_sec".into(),
+            f(rc.repair_rate_hp_per_sec as f64),
+        );
+        t.insert(
+            "travel_duration_secs".into(),
+            f(rc.travel_duration_secs as f64),
+        );
+        extras.insert(kinds::REPAIR_KIND.to_string(), toml::Value::Table(t));
+    }
+
+    // Comms range from `[comms]`.
+    if let Some(cc) = &ship_config.comms {
+        let mut t = toml::value::Table::new();
+        t.insert("range".into(), f(cc.range as f64));
+        extras.insert(kinds::COMMS_KIND.to_string(), toml::Value::Table(t));
+    }
+
+    // Helm — speeds from `[helm_console]` and the EFFECTIVE `[helm_capability]`
+    // (movement mode + impulse steering), defaulting to planar / full config
+    // defaults when the block is absent. Reuses the same movement-mode mapping
+    // the client config path uses above.
+    let mut helm = toml::value::Table::new();
+    if let Some(hc) = &ship_config.helm_console {
+        helm.insert("max_speed".into(), f(hc.max_speed as f64));
+        helm.insert("max_reverse_speed".into(), f(hc.max_reverse_speed as f64));
+        helm.insert("max_yaw_rate".into(), f(hc.max_yaw_rate as f64));
+    }
+    let cap = ship_config.helm_capability.clone().unwrap_or_default();
+    let movement_mode = match cap.vertical_movement_mode {
+        crate::entity_config::VerticalMovementMode::Planar => "planar",
+        crate::entity_config::VerticalMovementMode::Bounded => "bounded",
+        crate::entity_config::VerticalMovementMode::Full3D => "full_3d",
+    };
+    helm.insert(
+        "movement_mode".into(),
+        toml::Value::String(movement_mode.to_string()),
+    );
+    helm.insert(
+        "impulse_steering_multiplier".into(),
+        f(cap.impulse.steering_multiplier as f64),
+    );
+    extras.insert(
+        kinds::HELM_THRUST_KIND.to_string(),
+        toml::Value::Table(helm),
+    );
+
+    extras
 }
 
 pub fn update_game_state_cache(
@@ -1548,5 +1749,143 @@ mod tests {
         assert_eq!(stations.stations[0].name, "Helm");
         assert_eq!(stations.stations[1].id.0, "tactical");
         assert_eq!(stations.stations[1].name, "Tactical");
+    }
+
+    // ── #773: system_extras extraction from real hull assets ──────────────────
+
+    /// Parse a real hull TOML into an `EntityConfig`, run the full manual
+    /// pipeline (`build_manual_system_extras` + `build_ship_manual`), and return
+    /// the resulting manual. This is the integration path the pure `ship::manual`
+    /// module can't cover on its own (it never sees `EntityConfig`).
+    fn manual_from_hull(path: &str) -> crate::ship::manual::ShipManualWire {
+        let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let config = crate::entity_config::EntityConfig::from_toml(&src)
+            .unwrap_or_else(|e| panic!("parse {path}: {e}"));
+        let topology = config
+            .ship_config
+            .clone()
+            .expect("hull declares a ship_config");
+        let extras = build_manual_system_extras(&config);
+        let registry = crate::ship::manual::ManualProviderRegistry::with_shipped_providers();
+        crate::ship::manual::build_ship_manual(&topology, &registry, &extras)
+    }
+
+    fn find_metric(
+        manual: &crate::ship::manual::ShipManualWire,
+        kind: &str,
+        code: &str,
+    ) -> Option<f64> {
+        manual
+            .stations
+            .iter()
+            .flat_map(|s| &s.sections)
+            .find(|sec| sec.kind == kind)
+            .and_then(|sec| sec.metrics.iter().find(|m| m.code == code))
+            .map(|m| m.value)
+    }
+
+    #[test]
+    fn real_hulls_produce_different_manual_values() {
+        let cruiser = manual_from_hull("assets/entities/alliance_cruiser.toml");
+        let courier = manual_from_hull("assets/entities/alliance_courier.toml");
+
+        // Reactor capacity: cruiser [power] capacity = 90, courier = 35.
+        let cruiser_cap = find_metric(
+            &cruiser,
+            crate::system_registry::POWER_REACTOR_KIND,
+            "capacity",
+        );
+        let courier_cap = find_metric(
+            &courier,
+            crate::system_registry::POWER_REACTOR_KIND,
+            "capacity",
+        );
+        assert_eq!(cruiser_cap, Some(90.0));
+        assert_eq!(courier_cap, Some(35.0));
+        assert_ne!(
+            cruiser_cap, courier_cap,
+            "manual content must change with ship configuration (AC2)"
+        );
+
+        // Comms range: cruiser [comms] range = 1200, courier = 1000.
+        assert_eq!(
+            find_metric(&cruiser, crate::system_registry::COMMS_KIND, "range"),
+            Some(1200.0)
+        );
+        assert_eq!(
+            find_metric(&courier, crate::system_registry::COMMS_KIND, "range"),
+            Some(1000.0)
+        );
+    }
+
+    #[test]
+    fn cruiser_manual_covers_weapons_helm_and_sensors_from_authored_config() {
+        let cruiser = manual_from_hull("assets/entities/alliance_cruiser.toml");
+
+        // Phaser bank beam range = 40 (authored on both banks).
+        assert_eq!(
+            find_metric(
+                &cruiser,
+                crate::system_registry::PHASER_BANK_KIND,
+                "beam_range"
+            ),
+            Some(40.0)
+        );
+        // Torpedo magazine capacity = 6, and three tubes declared.
+        assert_eq!(
+            find_metric(
+                &cruiser,
+                crate::system_registry::TORPEDO_MAGAZINE_KIND,
+                "capacity"
+            ),
+            Some(6.0)
+        );
+        assert_eq!(
+            find_metric(
+                &cruiser,
+                crate::system_registry::TORPEDO_MAGAZINE_KIND,
+                "tubes"
+            ),
+            Some(3.0)
+        );
+        // Sensors long-range radar range = 300.
+        assert_eq!(
+            find_metric(&cruiser, crate::system_registry::SENSORS_KIND, "range"),
+            Some(300.0)
+        );
+
+        // Helm movement mode: no `[helm_capability]` authored ⇒ effective planar.
+        let helm = cruiser
+            .stations
+            .iter()
+            .flat_map(|s| &s.sections)
+            .find(|sec| sec.kind == crate::system_registry::HELM_THRUST_KIND)
+            .expect("helm section present");
+        assert_eq!(
+            helm.capabilities
+                .iter()
+                .find(|c| c.code == "movement_mode")
+                .map(|c| c.value_code.as_str()),
+            Some("planar")
+        );
+        // And the authored helm max speed (10) is reflected.
+        assert_eq!(
+            helm.metrics
+                .iter()
+                .find(|m| m.code == "max_speed")
+                .map(|m| m.value),
+            Some(10.0)
+        );
+    }
+
+    #[test]
+    fn courier_manual_covers_its_blaster_bank() {
+        // The courier carries a blaster (range 35), not torpedoes — proving the
+        // blaster provider is fed from real authored config.
+        let courier = manual_from_hull("assets/entities/alliance_courier.toml");
+        assert_eq!(
+            find_metric(&courier, crate::system_registry::BLASTER_BANK_KIND, "range"),
+            Some(35.0)
+        );
     }
 }

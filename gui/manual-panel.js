@@ -59,7 +59,7 @@ export function ratingCaption(rating) {
  * automation list.
  *
  * @param {Document} doc
- * @param {{ kind: string, metrics: Array, automation: Array }} section
+ * @param {{ kind: string, metrics: Array, capabilities?: Array, automation: Array }} section
  * @returns {HTMLElement}
  */
 export function renderSection(doc, section) {
@@ -79,6 +79,19 @@ export function renderSection(doc, section) {
     row.textContent = t('manual.' + section.kind + '.' + metric.code, {
       value: formatMetricValue(metric.value),
     });
+    el.appendChild(row);
+  }
+
+  // Non-numeric capabilities (issue #773): the value is itself a machine
+  // value_code, resolved to English via `manual.<kind>.<code>.<value_code>`
+  // and interpolated into the `manual.<kind>.<code>` label — so both the
+  // label and the value stay in strings.csv (e.g. Helm movement mode).
+  for (const cap of section.capabilities || []) {
+    const row = doc.createElement('div');
+    row.className = 'manual-capability';
+    const valueId = 'manual.' + section.kind + '.' + cap.code + '.' + cap.value_code;
+    const value = has(valueId) ? t(valueId) : String(cap.value_code);
+    row.textContent = t('manual.' + section.kind + '.' + cap.code, { value });
     el.appendChild(row);
   }
 

@@ -83,6 +83,10 @@ const TABLE = new Map([
   ['manual.rating.none', 'none'],
   ['station.rating.std.name', 'STANDARD'],
   ['station.rating.backfill.name', 'BACKFILL (AI)'],
+  ['manual.section.helm_thrust', 'Helm'],
+  ['manual.helm_thrust.max_speed', 'Max speed: {value}'],
+  ['manual.helm_thrust.movement_mode', 'Movement mode: {value}'],
+  ['manual.helm_thrust.movement_mode.bounded', 'Bounded vertical'],
 ]);
 
 function fixtureManual() {
@@ -178,6 +182,22 @@ describe('renderManual', () => {
     const count = renderManual(root, null);
     expect(count).toBe(0);
     expect(allText(root).join('\n')).toContain('Ship manual unavailable');
+  });
+
+  it('renders a non-numeric capability via t() with a resolved value_code', () => {
+    // The Helm movement mode is carried as a machine value_code and rendered
+    // through `manual.<kind>.<code>.<value_code>` interpolated into the label.
+    const doc = makeDoc();
+    const section = {
+      kind: 'helm_thrust',
+      metrics: [{ code: 'max_speed', value: 10 }],
+      capabilities: [{ code: 'movement_mode', value_code: 'bounded' }],
+      automation: [],
+    };
+    const el = renderSection(doc, section);
+    const text = allText(el).join('\n');
+    expect(text).toContain('Max speed: 10');
+    expect(text).toContain('Movement mode: Bounded vertical');
   });
 
   it('is read-only: a section builds no interactive controls that send commands', () => {

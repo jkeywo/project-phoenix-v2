@@ -778,6 +778,7 @@ mod tests {
                                             value: 4.0,
                                         },
                                     ],
+                                    capabilities: vec![],
                                     automation: vec![
                                         crate::ship::manual::StationRatingAutomation {
                                             rating: "Backfill".into(),
@@ -786,6 +787,27 @@ mod tests {
                                             )],
                                         },
                                     ],
+                                }],
+                            },
+                            // Helm station: exercises the #773 `capabilities`
+                            // list (movement mode as a machine value_code) on
+                            // the round-trip so the wire field is covered.
+                            crate::ship::manual::StationManualWire {
+                                station_id: StationId("helm".into()),
+                                overview: Some("Fly the ship.".into()),
+                                sections: vec![crate::ship::manual::SystemManualSection {
+                                    kind: "helm_thrust".into(),
+                                    metrics: vec![crate::ship::manual::SystemManualMetric {
+                                        code: "max_speed".into(),
+                                        value: 10.0,
+                                    }],
+                                    capabilities: vec![
+                                        crate::ship::manual::SystemManualCapability {
+                                            code: "movement_mode".into(),
+                                            value_code: "bounded".into(),
+                                        },
+                                    ],
+                                    automation: vec![],
                                 }],
                             },
                         ],

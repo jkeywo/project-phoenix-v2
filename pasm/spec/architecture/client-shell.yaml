@@ -133,7 +133,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: System Manual Section Provider
-      summary: Per-system-kind documentation provider registry that derives structured manual content (numeric values plus machine codes the client maps to string ids) from the configured system, its vessel-specific values, and the station-rating automation mapping. Issue #772 ships one provider (Shields); the registry is keyed by system kind so #773 slots in the remaining systems.
+      summary: Per-system-kind documentation provider registry that derives structured manual content (numeric metrics, non-numeric capability value-codes, and machine codes the client maps to string ids) from the configured system, its vessel-specific values, and the station-rating automation mapping. Issue #773 completes the coverage begun by #772 (Shields): every configured system kind that carries vessel-specific config has a provider — weapons (phaser/blaster banks, torpedo tubes + magazine), tactical/sensor radar, sensors, power reactor + battery, repair, comms, and helm (whose vertical movement mode rides the capability list). Kinds with no numeric config (captain, red_alert, viewscreen, ownerless capabilities) stay overview-only rather than emitting a fabricated section.
     architecture:
       kind: documentation-provider
       authority: derived
@@ -142,15 +142,15 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/manual.rs, src/ship/rating.rs]
-      tests: [cargo test]
+      paths: [src/ship/manual.rs, src/ship/rating.rs, src/lobby/server.rs]
+      tests: [cargo test, npx vitest run]
 
   - state: system-manual-section-state
     core:
       status: implemented
       confidence: confirmed
       title: System Manual Section State
-      summary: Generated player-facing documentation sections for the systems configured on the current ship — structured values plus machine codes only, never composed English.
+      summary: Generated player-facing documentation sections for the systems configured on the current ship — numeric metrics plus non-numeric capability value-codes and machine codes only, never composed English. The capability list (added in #773) carries enum-valued capabilities such as the helm vertical movement mode as machine value-codes the client resolves through string ids.
     architecture:
       classification: derived
       owner: system-manual-section-provider

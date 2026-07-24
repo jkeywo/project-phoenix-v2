@@ -40,7 +40,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: System-Generated Manual Detail
-      summary: Each configured system supplies explanatory text calculated from the particular vessel's authored capabilities and values, including shield strength and which systems each station rating automates.
+      summary: Each configured system supplies explanatory detail calculated from the particular vessel's authored capabilities and values — weapons (phaser/blaster ranges, damage, cooldowns, arcs; torpedo magazine capacity, warhead damage, tube count and per-tube load/arc), tactical and long-range sensor radar ranges, power reactor capacity and battery reserve, repair team timings, comms range, and helm speeds plus vertical movement mode — alongside which systems each station rating automates.
     game_design:
       enforcement_links: [system-manual-section-provider]
       visibility: team-visible

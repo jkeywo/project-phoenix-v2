@@ -492,6 +492,27 @@ pub fn spawn_entity(
             selector: tactical_selector,
             power_rating: config.power_rating.map(|r| r as f32),
         });
+        // Navigation target selector (issue #778) — the per-system ranking
+        // policy `operate_navigation_ai` runs to rank objective destinations and
+        // eligible chart contacts into the shared Waypoint. From
+        // `[navigation_console.selector]` if authored, else the canonical
+        // default. `to_selector` cannot fail here: the block was validated in
+        // `EntityConfig::from_toml`. Power rating is exposed to the selector as
+        // `self_fact(power_rating)`.
+        let navigation_selector = config
+            .navigation_console
+            .as_ref()
+            .and_then(|nc| nc.selector.as_ref())
+            .map(|s| s.to_selector().unwrap_or_default())
+            .unwrap_or_else(|| {
+                crate::entities::config::default_navigation_target_selector_config()
+                    .to_selector()
+                    .unwrap_or_default()
+            });
+        entity_commands.insert(crate::console::navigation::NavigationTargetSelector {
+            selector: navigation_selector,
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying
         // a `[behaviour]` block, alongside the sensors block above and inside

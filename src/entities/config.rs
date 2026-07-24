@@ -1666,6 +1666,26 @@ pub const TACTICAL_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_RADAR_CONTACTS,
 ];
 
+/// Candidate source: positive, Navigation-relevant (Helm-affinity) objective
+/// destinations (issue #778). The Navigation host ranks the scored objective
+/// pool, resolves the winner's directive to a destination — a fixed world
+/// anchor (Reach / Retreat / Patrol) or a live entity anchor (Destroy) — and
+/// surfaces it as the sole `reachable` candidate of this source.
+pub const SELECTOR_SOURCE_NAV_OBJECTIVE: &str = "navigation-objectives";
+/// Candidate source: live entities the Navigation chart shows, surfaced as
+/// authorable entity-anchored destinations (issue #778). They do NOT carry the
+/// `reachable` marker under the canonical policy, so by default they enrich a
+/// coincident objective destination rather than independently steering the
+/// ship; an author may re-tune the selector's eligibility to admit them.
+pub const SELECTOR_SOURCE_CHART_CONTACTS: &str = "chart-contacts";
+
+/// The registered candidate sources the Navigation target selector may union
+/// (issue #778).
+pub const NAVIGATION_SELECTOR_SOURCES: &[&str] = &[
+    SELECTOR_SOURCE_NAV_OBJECTIVE,
+    SELECTOR_SOURCE_CHART_CONTACTS,
+];
+
 /// Parse-time fallbacks for the default Tactical selector (AGENTS.md rule #11
 /// parse-defaults only). The retired tier order was
 /// `objective > retained > last-attacker > nearest`; each tier becomes an
@@ -1713,6 +1733,18 @@ const DEFAULT_SELECTOR_SWITCH_MARGIN: f32 = 0.0;
 const DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT: f32 = 1000.0;
 const DEFAULT_SELECTOR_OBJECTIVE_WEIGHT: f32 = 100.0;
 const DEFAULT_SELECTOR_RADAR_WEIGHT: f32 = 1.0;
+
+/// Parse-time fallbacks for the default Navigation selector (issue #778,
+/// AGENTS.md rule #11 parse-defaults only). The retired Navigation AI ranked
+/// the scored objective pool and steered to the best positive Helm-relevant
+/// objective's destination; those objective destinations are the `reachable`
+/// tier here (`objective_weight`), dominating the enriching chart-contacts tier
+/// (`chart_contact_weight`). `switch_margin` is the anti-thrash hysteresis
+/// (AC3). Authors override every value via `[navigation_console.selector]`, so
+/// no gameplay value is pinned into a live tick.
+const DEFAULT_NAV_OBJECTIVE_WEIGHT: f32 = 100.0;
+const DEFAULT_NAV_CHART_CONTACT_WEIGHT: f32 = 1.0;
+const DEFAULT_NAV_SWITCH_MARGIN: f32 = 0.0;
 
 /// One authored additive utility term (`[[sensors_console.selector.score]]`,
 /// issue #776): a guard expression plus the weight it contributes to a
@@ -1932,6 +1964,57 @@ pub fn default_tactical_target_selector_config() -> FineSystemAiSelectorToml {
             ScoreTermToml {
                 when: "candidate_fact(source_radar) > 0".to_string(),
                 weight: DEFAULT_TACTICAL_RADAR_WEIGHT,
+            },
+        ],
+    }
+}
+
+/// The canonical default Navigation target selector synthesised for ships that
+/// do not author `[navigation_console.selector]` (issue #778).
+///
+/// Encodes the retired hardcoded Navigation AI ranking as data. The old path
+/// picked the top positive Helm-relevant objective and resolved its directive
+/// to a destination; here that destination is the sole `reachable` candidate of
+/// the `navigation-objectives` source and always outweighs the `chart-contacts`
+/// tier. Because the default eligibility admits only `reachable` candidates —
+/// and only the objective source marks its resolved destination reachable — the
+/// canonical policy drives the waypoint from objectives alone (the retired
+/// contract). Chart contacts are surfaced so an author can weight them into
+/// eligible destinations without touching Rust; by default they merely enrich a
+/// coincident objective destination. All weights, the switch margin, and the
+/// horizon are named parameters or parse-time defaults (AGENTS.md rule #11).
+pub fn default_navigation_target_selector_config() -> FineSystemAiSelectorToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert("objective_weight".to_string(), DEFAULT_NAV_OBJECTIVE_WEIGHT);
+    param.insert(
+        "chart_contact_weight".to_string(),
+        DEFAULT_NAV_CHART_CONTACT_WEIGHT,
+    );
+    FineSystemAiSelectorToml {
+        param,
+        sources: NAVIGATION_SELECTOR_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        // The Navigation chart is the whole-system view, not a radar: the host
+        // owns no live horizon gate (a Destroy hand-off deliberately steers the
+        // Helm toward something it cannot yet see), so the selector's own
+        // horizon is a static outer bound, matching Sensors/Tactical.
+        horizon: DEFAULT_SELECTOR_HORIZON,
+        switch_margin: DEFAULT_NAV_SWITCH_MARGIN,
+        // Only reachable destinations are eligible. The objective source marks
+        // its resolved destination reachable; chart contacts do not, so the
+        // canonical policy reproduces the retired "objectives drive the AI
+        // waypoint" contract. An author may widen this to admit chart contacts.
+        eligibility: "candidate_fact(reachable) > 0".to_string(),
+        score: vec![
+            ScoreTermToml {
+                when: "candidate_fact(source_nav_objective) > 0".to_string(),
+                weight: DEFAULT_NAV_OBJECTIVE_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_chart_contact) > 0".to_string(),
+                weight: DEFAULT_NAV_CHART_CONTACT_WEIGHT,
             },
         ],
     }
@@ -2671,6 +2754,13 @@ pub struct NavigationConsoleConfig {
     /// System chart radar config for the Navigation console.
     #[serde(default)]
     pub system_chart: crate::radar_config::RadarConfig,
+    /// Inline per-system target selector (issue #778). Loaded from
+    /// `[navigation_console.selector]`; absent ⇒ the canonical
+    /// [`default_navigation_target_selector_config`] is synthesised at spawn.
+    /// `operate_navigation_ai` runs it to rank objective destinations and
+    /// eligible chart contacts into the shared Waypoint.
+    #[serde(default)]
+    pub selector: Option<FineSystemAiSelectorToml>,
 }
 
 /// Config block for the Sensors console in a ship TOML.
@@ -3097,6 +3187,21 @@ impl EntityConfig {
             .and_then(|c| c.selector.as_ref())
         {
             validate_fine_system_ai_selector(sel, TACTICAL_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
+        }
+
+        // Validate an authored inline Navigation target selector before world
+        // activation (issue #778). Same deterministic content-error surface as
+        // the Sensors/Tactical selectors above — the Navigation host emits the
+        // authoritative waypoint through admission from this ranking, so a
+        // malformed selector must fail the entity load rather than reach a live
+        // tick.
+        if let Some(sel) = config
+            .navigation_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+        {
+            validate_fine_system_ai_selector(sel, NAVIGATION_SELECTOR_SOURCES)
                 .map_err(SerdeError::custom)?;
         }
 
@@ -6225,6 +6330,77 @@ horizon = 100.0
 switch_margin = 0.0
 sources = ["not-a-real-source"]
 eligibility = "candidate_fact(detectable) > 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad).is_err(),
+            "unknown selector source must fail from_toml before world activation"
+        );
+    }
+
+    // ── Navigation target selector schema + validation (issue #778) ──────────
+
+    fn navigation_selector_toml() -> &'static str {
+        r##"
+[navigation_console.selector]
+horizon = 5000.0
+switch_margin = 30.0
+sources = ["navigation-objectives", "chart-contacts"]
+eligibility = "candidate_fact(reachable) > 0"
+
+[navigation_console.selector.param]
+objective_weight = 200.0
+
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_nav_objective) > 0"
+weight = 200.0
+
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_chart_contact) > 0"
+weight = 1.0
+"##
+    }
+
+    #[test]
+    fn navigation_selector_parses_and_resolves_to_typed_selector() {
+        let config =
+            EntityConfig::from_toml(navigation_selector_toml()).expect("parse must succeed");
+        let sel = config
+            .navigation_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+            .expect("selector section present");
+        let resolved = sel.to_selector().expect("selector resolves");
+        assert_eq!(resolved.horizon, 5000.0);
+        assert_eq!(resolved.switch_margin, 30.0);
+        assert_eq!(resolved.score.len(), 2);
+        assert!(validate_fine_system_ai_selector(sel, NAVIGATION_SELECTOR_SOURCES).is_ok());
+    }
+
+    #[test]
+    fn default_navigation_selector_is_valid_and_resolves() {
+        let cfg = default_navigation_target_selector_config();
+        assert!(validate_fine_system_ai_selector(&cfg, NAVIGATION_SELECTOR_SOURCES).is_ok());
+        let resolved = cfg.to_selector().expect("default selector resolves");
+        // objective + chart-contact tiers.
+        assert_eq!(resolved.score.len(), 2);
+    }
+
+    #[test]
+    fn navigation_selector_unknown_source_is_rejected() {
+        let mut cfg = default_navigation_target_selector_config();
+        cfg.sources.push("radar-contacts".into());
+        let err = validate_fine_system_ai_selector(&cfg, NAVIGATION_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("radar-contacts"), "got: {err}");
+    }
+
+    #[test]
+    fn navigation_selector_bad_content_fails_entity_load() {
+        let bad = r##"
+[navigation_console.selector]
+horizon = 100.0
+switch_margin = 0.0
+sources = ["not-a-real-source"]
+eligibility = "candidate_fact(reachable) > 0"
 "##;
         assert!(
             EntityConfig::from_toml(bad).is_err(),

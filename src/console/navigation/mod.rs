@@ -446,13 +446,43 @@ fn publish_navigation_blackboard(
 
 // ── AI controller ──────────────────────────────────────────────────────────────
 
+/// Per-ship resolved Navigation target selector (issue #778).
+///
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
+/// authored `[navigation_console.selector]` or the canonical
+/// [`crate::entities::config::default_navigation_target_selector_config`]
+/// default — plus the authored ship `power_rating`, which `operate_navigation_ai`
+/// exposes to the selector's expressions as `self_fact(power_rating)`. Attached
+/// at spawn alongside the Sensors/Tactical selectors; ships without one fall
+/// back to the default selector inside `operate_navigation_ai` (bare-`App`
+/// fixtures). Mirrors [`crate::ship::sensors::SensorsTargetSelector`].
+#[derive(Component, Clone, Debug)]
+pub struct NavigationTargetSelector {
+    /// The resolved ranking policy.
+    pub selector: crate::ai::selector::TargetSelector,
+    /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
+    pub power_rating: Option<f32>,
+}
+
+impl Default for NavigationTargetSelector {
+    fn default() -> Self {
+        Self {
+            selector: crate::entities::config::default_navigation_target_selector_config()
+                .to_selector()
+                .unwrap_or_default(),
+            power_rating: None,
+        }
+    }
+}
+
 /// Per-entity AI loop for navigation. Loops over ALL ship entities (player and NPC)
 /// where the Navigation system is `ControlSource::Ai`.
 ///
-/// Reads the viewscreen blackboard's `scored_objectives`, picks the top
-/// Helm-relevant objective with `score > 0`, resolves its `AiDirective` to a
-/// world location, and — decide-and-emit (issue #830) — emits an admitted
-/// `SetNavigationWaypoint` / `ClearNavigationWaypoint` through the shared
+/// Reads the viewscreen blackboard's `scored_objectives`, ranks the positive
+/// Helm-relevant objectives and the eligible chart contacts through the
+/// REUSABLE [`crate::ai::selector::TargetSelector`] (issue #778), and —
+/// decide-and-emit (issue #830) — emits an admitted `SetNavigationWaypoint` /
+/// `ClearNavigationWaypoint` through the shared
 /// [`crate::command_admission::validate_and_admit`] seam with this ship's own
 /// `ai:<uuid>` token, rather than writing `NavigationWaypoint` directly (the §2
 /// violation). `handle_navigation_waypoint` applies it later this tick (Physics,
@@ -461,6 +491,19 @@ fn publish_navigation_blackboard(
 /// generation-idempotent, but emit-on-change keeps `AdmittedCommands` clean and
 /// mirrors #828. The Channel-3 `NavigateTo` clearance is issued by
 /// [`issue_navigate_to_clearance`], the shared origin-agnostic issuer — not here.
+///
+/// # Selector reuse — a UUID spine driving a Waypoint (issue #778)
+///
+/// [`crate::ai::selector::TargetSelector::select`] returns one candidate UUID,
+/// but Navigation needs a [`WaypointMode`] (a fixed `Free` anchor OR a live
+/// `Anchored` entity). So while assembling candidates the host builds a
+/// parallel `uuid → WaypointMode` side-table: an entity-anchored candidate (a
+/// Destroy objective's target, a chart contact) keys on the real entity UUID
+/// and maps to `Anchored`; a fixed-anchor candidate (Reach / Retreat / Patrol →
+/// world anchors, which are positions, not entities) synthesises a stable
+/// position-derived key and maps to `Free`. The winning UUID is looked back up
+/// through the side-table to recover the waypoint variant, so the entity-UUID
+/// selector spine is reused unchanged.
 pub fn operate_navigation_ai(
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<(
@@ -472,6 +515,7 @@ pub fn operate_navigation_ai(
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&crate::ai_plugin::ObjectiveCursors>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&NavigationTargetSelector>,
         &mut crate::messages::AdmittedCommands,
     )>,
     entities: Query<(
@@ -482,6 +526,11 @@ pub fn operate_navigation_ai(
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
+    // Canonical fallback selector for any ship missing an attached component
+    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
+    // spawn. Built once per tick, not per ship.
+    let default_selector = NavigationTargetSelector::default();
+
     let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
         .iter()
         .map(|(uuid, transform, name)| {
@@ -502,10 +551,11 @@ pub fn operate_navigation_ai(
         sources,
         blackboards,
         waypoint,
-        _ship_physics,
+        ship_physics,
         entity_uuid,
         cursors,
         ship_config,
+        target_selector,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -515,6 +565,7 @@ pub fn operate_navigation_ai(
         if !policy.operate_ai {
             continue;
         }
+        let selector_comp = target_selector.unwrap_or(&default_selector);
 
         let scored: Vec<crate::messages::ScoredObjective> = match blackboards
             .0
@@ -524,6 +575,22 @@ pub fn operate_navigation_ai(
             _ => vec![],
         };
 
+        // ── Build candidate sources for the reusable selector (#778) ──────────
+        // The selector ranks entity UUIDs; Navigation needs Waypoints, so a
+        // parallel `uuid → WaypointMode` side-table records the intended variant
+        // for every candidate, and the winning UUID is looked back up through it.
+        use crate::ai::selector::{SelectorCandidate, SelfContext};
+        let mut candidates: Vec<SelectorCandidate> = Vec::new();
+        let mut modes: std::collections::HashMap<String, WaypointMode> =
+            std::collections::HashMap::new();
+
+        // Source: navigation-objectives. The host ranks the objective pool by
+        // score (the retired "top positive Helm-relevant objective" filter) and
+        // resolves the winner's directive to its destination — the sole
+        // `reachable` candidate this source contributes. There is deliberately no
+        // range filter: Navigation is the ship's whole-system chart, and the
+        // Channel-3 hand-off exists to steer a short-ranged Helm toward something
+        // it cannot yet see for itself.
         let top = scored
             .iter()
             .filter(|o| {
@@ -534,62 +601,52 @@ pub fn operate_navigation_ai(
                     .partial_cmp(&b.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
-
-        // The waypoint this ship's Navigation AI wants, or `None` to clear it.
-        let desired: Option<WaypointMode> = if let Some(top_obj) = top {
-            // Resolve the directive to the waypoint Navigation wants the Helm to
-            // travel to, or `None` when it names nowhere reachable.
-            let resolved: Option<WaypointMode> = match &top_obj.directive {
-                // A `Destroy` target may be authored as a UUID *or* an entity name —
-                // `combat_test.toml` names "Starbase Alpha" — so resolve both, the
-                // way every other objective consumer does (`ai_target_selection`,
-                // `operate_helm`, `operate_sensors_ai`). Matching on UUID alone made
-                // every name-authored assault silently unresolvable, which cleared
-                // the waypoint and dropped the ship back to its patrol doctrine.
-                //
-                // There is deliberately no range filter here. Navigation is the
-                // ship's *chart*, not a radar: it shows the whole system, and the
-                // entire point of the Channel-3 handoff is to steer a short-ranged
-                // Helm toward something it cannot yet see for itself. This used to
-                // cull candidates by `nav_chart_range` read from the local player's
-                // ship config — a display extent, applied to NPCs that never owned
-                // it.
-                crate::messages::AiDirective::Destroy { target } => (!target.is_empty())
-                    .then(|| resolve_destroy_target(&all_entities, runtime.as_deref(), target))
-                    .flatten()
-                    .map(|(uuid, pos)| WaypointMode::Anchored {
-                        // The resolved UUID, not the authored target: `Anchored`
-                        // tracks its parent by UUID, so storing a name here would
-                        // leave the waypoint unable to follow a moving target.
-                        source_uuid: uuid,
-                        last_x: pos[0],
-                        last_z: pos[2],
-                    }),
-                crate::messages::AiDirective::Reach { anchor } => (!anchor.is_empty())
-                    .then(|| anchor_pos(&world_config, anchor))
-                    .flatten()
-                    .map(|pos| WaypointMode::Free {
-                        x: pos[0],
-                        z: pos[2],
-                    }),
-                crate::messages::AiDirective::Retreat { anchor } => (!anchor.is_empty())
-                    .then(|| anchor_pos(&world_config, anchor))
-                    .flatten()
-                    .map(|pos| WaypointMode::Free {
-                        x: pos[0],
-                        z: pos[2],
-                    }),
+        if let Some(top_obj) = top {
+            match &top_obj.directive {
+                // A `Destroy` target may be authored as a UUID *or* an entity
+                // name (`combat_test.toml` names "Starbase Alpha"), so resolve
+                // both the way every other objective consumer does. The candidate
+                // keys on the *resolved* entity UUID and maps to `Anchored`, so
+                // the waypoint tracks a moving target by UUID rather than name.
+                crate::messages::AiDirective::Destroy { target } if !target.is_empty() => {
+                    if let Some((uuid, pos)) =
+                        resolve_destroy_target(&all_entities, runtime.as_deref(), target)
+                    {
+                        modes.insert(
+                            uuid.clone(),
+                            WaypointMode::Anchored {
+                                source_uuid: uuid.clone(),
+                                last_x: pos[0],
+                                last_z: pos[2],
+                            },
+                        );
+                        candidates.push(nav_objective_candidate(&uuid, pos, top_obj.score));
+                    }
+                }
+                // Reach / Retreat name a fixed world anchor: a `Free` waypoint
+                // keyed on a stable position-derived synthetic UUID (anchors are
+                // positions, not entities, so there is no real UUID to key on).
+                crate::messages::AiDirective::Reach { anchor }
+                | crate::messages::AiDirective::Retreat { anchor }
+                    if !anchor.is_empty() =>
+                {
+                    if let Some(pos) = anchor_pos(&world_config, anchor) {
+                        let key = free_candidate_key(pos[0], pos[2]);
+                        modes.insert(
+                            key.clone(),
+                            WaypointMode::Free {
+                                x: pos[0],
+                                z: pos[2],
+                            },
+                        );
+                        candidates.push(nav_objective_candidate(&key, pos, top_obj.score));
+                    }
+                }
+                // Patrol resolves from the objective's *active cursor target*, not
+                // `anchors[0]` (issue #702): the cursor is the objective's own
+                // record of where it is on its route — the same one `helm_patrol`
+                // steers from — so Navigation and Helm agree on the current leg.
                 crate::messages::AiDirective::Patrol { anchors, loop_path } => {
-                    // Resolve from the objective's *active cursor target*, not
-                    // `anchors[0]` (issue #702). This system was cursor-blind: it
-                    // parked the waypoint on the first anchor of the route and left
-                    // it there for the whole patrol, so Navigation kept telling the
-                    // Helm to fly to a waypoint the ship had already rounded laps
-                    // ago. The cursor is the objective's own record of where it is
-                    // on its route — the same one `helm_patrol` steers from and
-                    // `advance_objective_cursors` advances — so reading it is what
-                    // makes Navigation and Helm agree about which waypoint is
-                    // current.
                     let index = cursors
                         .and_then(|c| {
                             c.0.iter()
@@ -601,24 +658,70 @@ pub fn operate_navigation_ai(
                         .as_ref()
                         .map(|wc| wc.anchors.clone())
                         .unwrap_or_default();
-                    crate::ai::patrol_cursor::cursor_target(
+                    if let Some(pos) = crate::ai::patrol_cursor::cursor_target(
                         index,
                         anchors,
                         *loop_path,
                         &world_anchors,
-                    )
-                    .map(|pos| WaypointMode::Free {
-                        x: pos[0],
-                        z: pos[2],
-                    })
+                    ) {
+                        let key = free_candidate_key(pos[0], pos[2]);
+                        modes.insert(
+                            key.clone(),
+                            WaypointMode::Free {
+                                x: pos[0],
+                                z: pos[2],
+                            },
+                        );
+                        candidates.push(nav_objective_candidate(&key, pos, top_obj.score));
+                    }
                 }
-                _ => None,
-            };
-            resolved
-        } else {
-            // No positive Helm-relevant objective: clear the waypoint.
-            None
+                _ => {}
+            }
+        }
+
+        // Source: chart-contacts. Every live chart entity is surfaced as an
+        // entity-anchored candidate. Under the canonical policy they lack the
+        // `reachable` marker (default eligibility admits only `reachable`), so
+        // they do not independently select — they merge their
+        // `source_chart_contact` marker into a coincident objective destination
+        // (the selector dedups by UUID, folding facts) and stand ready for an
+        // author to weight into eligible destinations.
+        for (uuid, _name, pos) in &all_entities {
+            modes.entry(uuid.clone()).or_insert(WaypointMode::Anchored {
+                source_uuid: uuid.clone(),
+                last_x: pos[0],
+                last_z: pos[2],
+            });
+            candidates.push(chart_contact_candidate(uuid, *pos));
+        }
+
+        // Self context: position (horizon filter) + authored power rating,
+        // exposed to the selector expressions as `self_fact(power_rating)`.
+        let mut self_facts = crate::world::flags::AiFacts::new();
+        if let Some(pr) = selector_comp.power_rating {
+            self_facts.set("power_rating", pr as f64);
+        }
+        let self_ctx = SelfContext {
+            position: [ship_physics.x, 0.0, ship_physics.z],
+            facts: self_facts,
         };
+
+        // A stable "current" key derived from the ship's current waypoint so the
+        // selector's hysteresis (AC3) can retain it: an `Anchored` waypoint keys
+        // on its entity UUID, a `Free` waypoint on its position-derived synthetic
+        // UUID — the same keys the candidates above use.
+        let current_key = match waypoint.mode() {
+            Some(WaypointMode::Anchored { source_uuid, .. }) => Some(source_uuid.clone()),
+            Some(WaypointMode::Free { x, z }) => Some(free_candidate_key(*x, *z)),
+            None => None,
+        };
+
+        // Rank through the reusable selector, then map the winning UUID back to
+        // the waypoint variant via the side-table. No eligible winner ⇒ clear.
+        let desired: Option<WaypointMode> = selector_comp
+            .selector
+            .select(&self_ctx, &candidates, current_key.as_deref(), &[])
+            .and_then(|uuid| modes.get(&uuid).cloned());
 
         // ── Emit on change only (issue #828 shape) ───────────────────────────
         // Compare against the current waypoint by identity (`same_waypoint`):
@@ -683,6 +786,56 @@ fn emit_navigation_ai_command(
         ship_config,
         admitted,
     )
+}
+
+/// A stable synthetic candidate UUID for a fixed-anchor (`Free`) destination,
+/// derived purely from its planar position (issue #778).
+///
+/// Anchors are world positions, not entities, so there is no real UUID to key a
+/// `Free` candidate on. The key must be reconstructable from the ship's current
+/// [`WaypointMode::Free`] for the selector's hysteresis to retain it, so it is
+/// derived from the exact `x`/`z` the waypoint stores — the same values the
+/// candidate carries — making the build-time and current-time keys bit-identical.
+fn free_candidate_key(x: f32, z: f32) -> String {
+    format!("anchor:{x}:{z}")
+}
+
+/// One `navigation-objectives` candidate: a genuinely reachable destination
+/// Navigation has been ordered toward (issue #778). Carries the `reachable`
+/// marker the default eligibility keys on, its source marker, and the
+/// originating objective's score (authorable via `candidate_fact(objective_score)`).
+fn nav_objective_candidate(
+    uuid: &str,
+    position: [f32; 3],
+    objective_score: f32,
+) -> crate::ai::selector::SelectorCandidate {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("reachable", 1.0);
+    facts.set("source_nav_objective", 1.0);
+    facts.set("objective_score", objective_score as f64);
+    crate::ai::selector::SelectorCandidate {
+        uuid: uuid.to_string(),
+        position,
+        facts,
+    }
+}
+
+/// One `chart-contacts` candidate: a live entity the Navigation chart shows
+/// (issue #778). It carries only `source_chart_contact`, NOT `reachable`, so
+/// under the canonical policy it enriches a coincident objective destination
+/// rather than independently steering the ship; an author may widen the
+/// selector's eligibility to admit it as a destination in its own right.
+fn chart_contact_candidate(
+    uuid: &str,
+    position: [f32; 3],
+) -> crate::ai::selector::SelectorCandidate {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("source_chart_contact", 1.0);
+    crate::ai::selector::SelectorCandidate {
+        uuid: uuid.to_string(),
+        position,
+        facts,
+    }
 }
 
 /// Resolve a `Destroy` directive's target to `(uuid, position)`.
@@ -2032,6 +2185,172 @@ mod tests {
         assert!(
             !human_policy.operate_ai,
             "Human Navigation must not operate AI"
+        );
+    }
+
+    // ── #778 selector: replacement, clearing, chart-contact source ─────────
+
+    /// AC6 (replacement): swapping the active objective's destination makes the
+    /// selector pick the new one, and the published waypoint is replaced — the
+    /// same observable set-then-set path a human console drives.
+    #[test]
+    fn operate_navigation_ai_replaces_waypoint_when_objective_changes() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors.insert("first".into(), [100.0, 0.0, 0.0]);
+        wc.anchors.insert("second".into(), [-250.0, 0.0, 80.0]);
+        app.world_mut().insert_resource(wc);
+
+        let reach = |anchor: &str| {
+            vec![crate::messages::ScoredObjective {
+                id: "reach".into(),
+                score: 70.0,
+                directive: crate::messages::AiDirective::Reach {
+                    anchor: anchor.into(),
+                },
+                source: crate::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::messages::SystemAffinity::Helm],
+                snapshot: crate::messages::ObjectiveSnapshot {
+                    id: "reach".into(),
+                    text: "Reach".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                },
+            }]
+        };
+
+        inject_viewscreen_objective(&mut app, reach("first"));
+        tick(&mut app);
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Free { x: 100.0, z: 0.0 })
+        );
+
+        inject_viewscreen_objective(&mut app, reach("second"));
+        tick(&mut app);
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Free { x: -250.0, z: 80.0 }),
+            "the selector must replace the waypoint when the objective destination changes"
+        );
+    }
+
+    /// AC2 / AC6: the `chart-contacts` source is genuinely wired — an authored
+    /// selector that admits chart contacts (the canonical default keys
+    /// eligibility on `reachable`, which they do not carry) selects a live
+    /// entity as an anchored destination with NO objective present at all,
+    /// exercising the "live entity-anchored destination" path through the
+    /// reusable selector.
+    #[test]
+    fn operate_navigation_ai_selects_chart_contact_when_author_widens_eligibility() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let cfg = crate::entities::config::FineSystemAiSelectorToml {
+            param: Default::default(),
+            sources: vec!["navigation-objectives".into(), "chart-contacts".into()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(source_chart_contact) > 0".into(),
+            score: vec![crate::entities::config::ScoreTermToml {
+                when: "candidate_fact(source_chart_contact) > 0".into(),
+                weight: 1.0,
+            }],
+        };
+        let selector = cfg.to_selector().expect("authored selector resolves");
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(NavigationTargetSelector {
+                selector,
+                power_rating: None,
+            });
+
+        // No objective — only a live chart contact.
+        inject_viewscreen_objective(&mut app, vec![]);
+        spawn_test_entity(&mut app, "contact-1", 300.0, -120.0);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Anchored {
+                source_uuid: "contact-1".into(),
+                last_x: 300.0,
+                last_z: -120.0,
+            }),
+            "a widened selector must select a chart contact as an anchored destination"
+        );
+    }
+
+    /// AC6 (lifecycle reset): a chart contact selected as a destination is
+    /// auto-cleared when its entity despawns — AI-authored anchored waypoints get
+    /// the same despawn-clear semantics as human-authored ones (AC4), because the
+    /// host keeps emitting the same admitted `SetNavigationWaypoint` and
+    /// `refresh_anchored_waypoint` is origin-blind.
+    #[test]
+    fn operate_navigation_ai_chart_contact_waypoint_auto_clears_on_despawn() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+        let cfg = crate::entities::config::FineSystemAiSelectorToml {
+            param: Default::default(),
+            sources: vec!["chart-contacts".into()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(source_chart_contact) > 0".into(),
+            score: vec![crate::entities::config::ScoreTermToml {
+                when: "candidate_fact(source_chart_contact) > 0".into(),
+                weight: 1.0,
+            }],
+        };
+        let selector = cfg.to_selector().expect("authored selector resolves");
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(NavigationTargetSelector {
+                selector,
+                power_rating: None,
+            });
+
+        inject_viewscreen_objective(&mut app, vec![]);
+        let contact = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("contact-despawn".into()),
+                Transform::from_xyz(150.0, 0.0, 40.0),
+            ))
+            .id();
+
+        tick(&mut app);
+        assert!(
+            matches!(
+                get_nav_waypoint(&mut app),
+                Some(WaypointMode::Anchored { .. })
+            ),
+            "chart contact must be selected before the despawn"
+        );
+
+        app.world_mut().entity_mut(contact).despawn();
+        tick(&mut app);
+        assert!(
+            get_nav_waypoint(&mut app).is_none(),
+            "an AI-anchored waypoint must auto-clear when its entity despawns, like a human one"
         );
     }
 

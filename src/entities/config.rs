@@ -1387,9 +1387,16 @@ pub struct WeaponsConsoleConfig {
 #[serde(deny_unknown_fields)]
 pub struct EngineeringConsoleConfig {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct CaptainConsoleConfig {}
+pub struct CaptainConsoleConfig {
+    /// Inline stateless AI policy for the Captain's Red Alert fine system
+    /// (`[captain_console.ai]`, issue #775). When present it is validated at
+    /// content load and drives `operate_captain_ai`; when absent the canonical
+    /// [`default_captain_ai_config`] policy is synthesised at spawn.
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1593,6 +1600,183 @@ fn default_red_alert_battery_engage_min_pct() -> f32 {
 }
 fn default_red_alert_battery_recharge_pct() -> f32 {
     100.0
+}
+
+// ── Inline stateless fine-system AI policy (issue #775) ───────────────────────
+
+/// Parse-time fallback for the Captain Red Alert combat window, in seconds.
+///
+/// Sanctioned by AGENTS.md rule #11 as a parse-default only: it seeds the
+/// synthesised default Captain policy for ships that do not author
+/// `[captain_console.ai]`. Authors override it via the named
+/// `combat_window_secs` parameter, so no gameplay value is pinned in Rust.
+pub const DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS: f32 = 10.0;
+
+/// The `red_alert` output channel: the one channel the Captain policy drives.
+pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
+/// The `set_red_alert` verb: the one typed verb the Captain policy emits.
+pub const CAPTAIN_SET_RED_ALERT_VERB: &str = "set_red_alert";
+
+/// One authored inline policy rule (`[[captain_console.ai.rule]]`, issue #775).
+///
+/// A rule binds a `priority` and an output `channel` to a `when` predicate
+/// (the shared `world::flags` grammar, extended with typed `fact(...)` atoms
+/// and `param(...)` references) and a typed `verb`. `value` is the boolean the
+/// verb applies for boolean-channel verbs such as `set_red_alert`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FineSystemAiRuleToml {
+    /// Higher wins within a channel; ties resolve to the earliest-authored rule.
+    pub priority: i32,
+    /// Output channel this rule contributes to (e.g. `"red_alert"`).
+    pub channel: String,
+    /// Guard expression; the rule fires when it evaluates `true`.
+    pub when: String,
+    /// Typed verb applied when this rule wins its channel (e.g. `"set_red_alert"`).
+    pub verb: String,
+    /// Boolean output value for boolean-channel verbs. Defaults to `false`.
+    #[serde(default)]
+    pub value: bool,
+}
+
+/// Inline stateless AI policy for an AI-capable fine system
+/// (`[captain_console.ai]`, issue #775).
+///
+/// A system declares EITHER a policy (`param` + `rule`) OR an explicit
+/// `idle = true`. An empty declaration (`ai = {}`) is neither and is rejected
+/// by [`validate_fine_system_ai_policy`] — silence is not a valid declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FineSystemAiConfigToml {
+    /// Explicit idle marker. Mutually exclusive with `rule`.
+    #[serde(default)]
+    pub idle: bool,
+    /// Named numeric parameters referenced by rule guards.
+    #[serde(default)]
+    pub param: std::collections::HashMap<String, f32>,
+    /// Prioritised per-channel reactive rules.
+    #[serde(default)]
+    pub rule: Vec<FineSystemAiRuleToml>,
+}
+
+impl FineSystemAiConfigToml {
+    /// Resolve this authored block into the pure typed [`crate::ai::policy::AiPolicy`]
+    /// the runtime evaluator consumes.
+    ///
+    /// Returns a diagnostic `Err` on an unparseable guard or unknown verb; call
+    /// [`validate_fine_system_ai_policy`] first at content-load time so this
+    /// never fails after world activation.
+    pub fn to_policy(&self) -> Result<crate::ai::policy::AiPolicy, String> {
+        let mut params = crate::world::flags::AiParams::new();
+        for (k, v) in &self.param {
+            params.set(k, *v as f64);
+        }
+        let mut rules = Vec::with_capacity(self.rule.len());
+        for r in &self.rule {
+            let when = crate::world::flags::parse_predicate(&r.when)?;
+            let verb = match r.verb.as_str() {
+                CAPTAIN_SET_RED_ALERT_VERB => crate::ai::policy::AiPolicyVerb::SetRedAlert(r.value),
+                other => return Err(format!("unknown ai policy verb '{other}'")),
+            };
+            rules.push(crate::ai::policy::AiPolicyRule {
+                priority: r.priority,
+                channel: r.channel.clone(),
+                when,
+                verb,
+            });
+        }
+        Ok(crate::ai::policy::AiPolicy {
+            params,
+            rules,
+            idle: self.idle,
+        })
+    }
+}
+
+/// The canonical default Captain Red Alert policy synthesised for ships that
+/// do not author `[captain_console.ai]` (issue #775).
+///
+/// Two rules on the single `red_alert` channel: raise Red Alert while the ship
+/// has been in combat within the authored `combat_window_secs`, otherwise
+/// stand down. Equivalent behaviour to the retired hardcoded `CaptainAi`, but
+/// now data-shaped and with the window as a named parameter.
+pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert(
+        "combat_window_secs".to_string(),
+        DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS,
+    );
+    FineSystemAiConfigToml {
+        idle: false,
+        param,
+        rule: vec![
+            FineSystemAiRuleToml {
+                priority: 10,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.to_string(),
+                when: "fact(secs_since_combat) < param(combat_window_secs)".to_string(),
+                verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
+                value: true,
+            },
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.to_string(),
+                when: "true".to_string(),
+                verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
+                value: false,
+            },
+        ],
+    }
+}
+
+/// Validate an inline stateless fine-system AI policy before world activation
+/// (issue #775), mirroring [`validate_phaser_banks`] et al.
+///
+/// Rejects:
+///   - a silent declaration (neither `idle` nor any `rule`),
+///   - a contradictory declaration (`idle = true` alongside rules),
+///   - an unparseable `when` guard (reusing `parse_predicate`'s diagnostic),
+///   - an unknown output `channel` or `verb`,
+///   - a `param(...)` reference to a parameter the author never declared.
+pub fn validate_fine_system_ai_policy(
+    cfg: &FineSystemAiConfigToml,
+    valid_channels: &[&str],
+    valid_verbs: &[&str],
+) -> Result<(), String> {
+    if cfg.idle {
+        if !cfg.rule.is_empty() {
+            return Err("ai policy declares idle = true but also carries rules".into());
+        }
+        return Ok(());
+    }
+    if cfg.rule.is_empty() {
+        return Err("ai policy is empty: declare at least one rule or set idle = true".into());
+    }
+    for (idx, r) in cfg.rule.iter().enumerate() {
+        if !valid_channels.contains(&r.channel.as_str()) {
+            return Err(format!(
+                "ai policy rule {idx} has unknown channel '{}' (valid: {valid_channels:?})",
+                r.channel
+            ));
+        }
+        if !valid_verbs.contains(&r.verb.as_str()) {
+            return Err(format!(
+                "ai policy rule {idx} has unknown verb '{}' (valid: {valid_verbs:?})",
+                r.verb
+            ));
+        }
+        let pred = crate::world::flags::parse_predicate(&r.when)
+            .map_err(|e| format!("ai policy rule {idx} has invalid `when` expression: {e}"))?;
+        let mut refs = Vec::new();
+        pred.referenced_params(&mut refs);
+        for name in refs {
+            if !cfg.param.contains_key(&name) {
+                return Err(format!(
+                    "ai policy rule {idx} references undeclared parameter '{name}'"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2506,6 +2690,20 @@ impl EntityConfig {
                     "[radar_appearance] must set icon and/or region_colour",
                 ));
             }
+        }
+
+        // Validate an authored inline Captain AI policy before world
+        // activation (issue #775). The Captain's single AI-capable fine system
+        // (Red Alert) drives one output channel with one verb. Structural,
+        // expression, channel, verb, and parameter errors are deterministic
+        // content errors surfaced through serde so the entity fails to load.
+        if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+            validate_fine_system_ai_policy(
+                ai,
+                &[CAPTAIN_RED_ALERT_CHANNEL],
+                &[CAPTAIN_SET_RED_ALERT_VERB],
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Clamp target_speed in every doctrine entry.
@@ -5376,6 +5574,183 @@ count = 10
             "shipped blaster banks must validate:\n{}",
             problems.join("\n")
         );
+    }
+
+    // ── Inline fine-system AI policy (issue #775) ────────────────────────────
+
+    const CHANNELS: &[&str] = &[CAPTAIN_RED_ALERT_CHANNEL];
+    const VERBS: &[&str] = &[CAPTAIN_SET_RED_ALERT_VERB];
+
+    fn captain_ai_toml() -> &'static str {
+        r#"
+name = "Test Cruiser"
+
+[captain_console.ai]
+param = { combat_window_secs = 8.0 }
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "fact(secs_since_combat) < param(combat_window_secs)"
+verb = "set_red_alert"
+value = true
+
+[[captain_console.ai.rule]]
+priority = 0
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = false
+"#
+    }
+
+    #[test]
+    fn captain_ai_policy_parses_and_resolves_to_typed_policy() {
+        let cfg = EntityConfig::from_toml(captain_ai_toml()).expect("parse must succeed");
+        let ai = cfg
+            .captain_console
+            .as_ref()
+            .and_then(|c| c.ai.as_ref())
+            .expect("captain_console.ai present");
+        assert_eq!(ai.param.get("combat_window_secs"), Some(&8.0));
+        assert_eq!(ai.rule.len(), 2);
+        let policy = ai.to_policy().expect("policy resolves");
+        assert_eq!(policy.rules.len(), 2);
+        assert!(!policy.idle);
+    }
+
+    #[test]
+    fn default_captain_policy_validates_and_resolves() {
+        let cfg = default_captain_ai_config();
+        assert!(validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).is_ok());
+        assert!(cfg.to_policy().is_ok());
+    }
+
+    #[test]
+    fn empty_ai_declaration_is_rejected_as_silence() {
+        // `[captain_console.ai]` with neither `idle` nor a rule is silence.
+        let toml = r#"
+name = "Silent"
+[captain_console.ai]
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("empty") || err.contains("idle"), "got: {err}");
+    }
+
+    #[test]
+    fn explicit_idle_declaration_is_accepted() {
+        let toml = r#"
+name = "Idle"
+[captain_console.ai]
+idle = true
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("idle is a valid declaration");
+        let ai = cfg.captain_console.unwrap().ai.unwrap();
+        assert!(ai.idle);
+        assert!(ai.to_policy().unwrap().idle);
+    }
+
+    #[test]
+    fn idle_with_rules_is_contradictory_and_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: true,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.into(),
+                when: "true".into(),
+                verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
+                value: true,
+            }],
+        };
+        let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
+        assert!(err.contains("idle"), "got: {err}");
+    }
+
+    #[test]
+    fn invalid_when_expression_is_rejected() {
+        let toml = r#"
+name = "BadExpr"
+[captain_console.ai]
+[[captain_console.ai.rule]]
+priority = 1
+channel = "red_alert"
+when = "fact(x) &"
+verb = "set_red_alert"
+value = true
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(
+            err.contains("invalid `when`") || err.contains("position"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn unknown_channel_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: "shields".into(),
+                when: "true".into(),
+                verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
+                value: true,
+            }],
+        };
+        let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_verb_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.into(),
+                when: "true".into(),
+                verb: "launch_torpedoes".into(),
+                value: true,
+            }],
+        };
+        let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn undeclared_parameter_reference_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(), // no params declared
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.into(),
+                when: "fact(secs_since_combat) < param(combat_window_secs)".into(),
+                verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
+                value: true,
+            }],
+        };
+        let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
+        assert!(err.contains("undeclared parameter"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_verb_surfaces_through_to_policy() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.into(),
+                when: "true".into(),
+                verb: "nope".into(),
+                value: true,
+            }],
+        };
+        assert!(cfg.to_policy().is_err());
     }
 
     #[test]

@@ -62,6 +62,7 @@ entities:
         - weapons-target-state
         - navigation-waypoint-state
         - recent-combat-activity-state
+      owns: [fine-system-ai-policy-state]
       writes: [fine-system-ai-policy-state]
       runs_in: [host-browser-runtime]
 
@@ -77,32 +78,34 @@ entities:
         - Policies reset when AI gains control and when an unavailable system recovers.
     architecture:
       classification: authoritative
-      owner: fine-system-ai-policy-runtime
-      writers: [fine-system-ai-policy-runtime, per-system-target-ranking-policy]
+      owner: per-system-target-ranking-policy
+      writers: [per-system-target-ranking-policy]
 
   - component: fine-system-ai-policy-runtime
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Fine-System AI Policy Runtime
-      summary: Evaluates independent fine-system policies from an immutable tick snapshot, takes at most one transition, resolves the highest-priority rule per typed output channel, and emits typed system inputs as a batch.
+      summary: Evaluates a fine system's inline stateless policy from an immutable per-tick fact snapshot, resolves the highest-priority matching rule per typed output channel, and emits the resulting typed system input.
       rationale:
         - All fine systems must observe one consistent tick snapshot rather than partially applied decisions from earlier systems.
         - Typed verbs restricted by system kind preserve AI and human input symmetry and prevent arbitrary simulation writes.
-        - One transition per eligible tick prevents accidental state skipping and transition loops.
+        - Resolving the highest-priority matching rule per channel keeps each tick's decision a pure function of the snapshot with no retained policy state.
     architecture:
       kind: ai-controller
       authority: authoritative
-      owns: [fine-system-ai-policy-state]
       reads:
-        - fine-system-ai-policy-state
         - system-control-source-state
         - ship-station-system-topology-state
         - ship-system-blackboards-state
         - world-snapshot-state
-      writes: [fine-system-ai-policy-state]
       sends: [system-control-command]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/captain/server.rs, src/ai/policy.rs, src/world/flags.rs]
+      symbols: [operate_captain_ai, resolve_channel, evaluate_with]
+      tests: [cargo test]
 
   - component: ai-policy-tick-scheduler
     core:
@@ -123,20 +126,24 @@ entities:
 
   - component: fine-system-ai-policy-validation
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Fine-System AI Policy Validation
-      summary: Rejects structurally invalid or ill-typed inline policies before world activation, warns for unreachable states, and accepts terminal states without warnings.
+      summary: Rejects structurally invalid or ill-typed inline stateless policies before world activation, checking rule structure, typed predicate expressions, output channels, verbs, and named parameter references.
       rationale:
-        - Missing policies, invalid references, priority conflicts, and forbidden outputs are deterministic content errors.
-        - A state with no exit may intentionally represent an NPC's end-of-life behaviour.
-        - Heuristic analysis must not manufacture certainty about authored gameplay intent.
+        - Missing policies, contradictory idle declarations, invalid references, and forbidden outputs are deterministic content errors.
+        - Validating expressions, channels, verbs, and parameters up front keeps authored content errors out of the live tick loop.
     architecture:
       kind: configuration-validator
       authority: authoritative
       reads: [ship-station-system-topology-state]
       coordinates: [fine-system-ai-policy-schema, ai-policy-expression-runtime, per-system-target-ranking-policy]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/entities/config.rs]
+      symbols: [validate_fine_system_ai_policy]
+      tests: [cargo test]
 
   - component: legacy-ai-doctrine-retirement
     core:

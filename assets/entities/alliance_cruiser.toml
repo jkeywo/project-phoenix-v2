@@ -375,6 +375,28 @@ nudge = 1
 
 [captain_console]
 
+# Inline stateless Captain AI policy (issue #775). The Red Alert fine system is
+# driven by a data-authored policy rather than a hardcoded controller: raise
+# Red Alert while the ship has been in combat within `combat_window_secs`,
+# otherwise stand down. The window is a named parameter, so a designer tunes it
+# without recompiling.
+[captain_console.ai]
+param = { combat_window_secs = 10.0 }
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "fact(secs_since_combat) < param(combat_window_secs)"
+verb = "set_red_alert"
+value = true
+
+[[captain_console.ai.rule]]
+priority = 0
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = false
+
 [engineering_console]
 
 [radar_appearance]

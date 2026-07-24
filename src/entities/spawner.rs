@@ -475,6 +475,19 @@ pub fn spawn_entity(
                 })
                 .unwrap_or_default(),
         );
+        // Captain AI policy (issue #775) — the inline stateless Red Alert
+        // policy from `[captain_console.ai]` if authored, else the canonical
+        // default. Attached to every ship (player + NPC come through their own
+        // paths) so `operate_captain_ai` reads a data-authored policy rather
+        // than a hardcoded controller. `to_policy` cannot fail here: the block
+        // was validated in `EntityConfig::from_toml`.
+        let captain_ai_policy = match config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_captain_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and

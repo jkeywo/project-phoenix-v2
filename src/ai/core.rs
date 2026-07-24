@@ -1,9 +1,8 @@
 /// Pure AI module — no Bevy imports.
 ///
 /// Contains navigation utilities (`steer_toward`, `avoidance_steering`),
-/// per-system operate functions (`operate_helm`), the shared
-/// [`assess_hazards`] collision surface (issue #743), and the `CaptainAi`
-/// helper. The operate functions are pure: issue #702
+/// per-system operate functions (`operate_helm`), and the shared
+/// [`assess_hazards`] collision surface (issue #743). The operate functions are pure: issue #702
 /// deleted the `AiMemory` private-reasoning state they used to mutate, so all
 /// per-ship AI state now lives in ECS components.
 ///
@@ -971,42 +970,6 @@ fn helm_navigate_to(
         target_speed
     };
     Some((thrust, steering))
-}
-
-// ── CaptainAi ────────────────────────────────────────────────────────────────
-
-/// Pure AI controller for the Captain console.
-///
-/// Reads combat timers from the viewscreen blackboard (issue #572) instead of
-/// the `RecentCombatActivity` resource; no private AI copy of timing state.
-#[derive(Debug, Clone, Default)]
-pub struct CaptainAi;
-
-/// How many seconds of recent activity count as "in combat".
-const CAPTAIN_COMBAT_WINDOW_SECS: f32 = 10.0;
-
-impl CaptainAi {
-    /// Returns `Some(true)` when the ship should be in red alert (damage taken
-    /// or weapon fired within the last 10 seconds), `Some(false)` otherwise.
-    ///
-    /// `now` is the current simulation elapsed time in seconds. The
-    /// `last_damage_taken_secs` and `last_weapon_fired_secs` values are absolute
-    /// elapsed-second timestamps (read from the viewscreen blackboard).
-    pub fn operate(
-        &self,
-        now: f32,
-        last_damage_taken_secs: Option<f32>,
-        last_weapon_fired_secs: Option<f32>,
-    ) -> Option<bool> {
-        let damage_recent =
-            last_damage_taken_secs.is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
-        let weapon_recent =
-            last_weapon_fired_secs.is_some_and(|s| now - s < CAPTAIN_COMBAT_WINDOW_SECS);
-        Some(damage_recent || weapon_recent)
-    }
-
-    /// No-op stub — channel-3 coordination not yet implemented for captain.
-    pub fn coordinate(&self) {}
 }
 
 // ── Shared desired-motion contract (issue #741) ───────────────────────────────
@@ -2440,43 +2403,6 @@ mod tests {
             steering, 0.0,
             "resolved Destroy should hold station instead of falling through to Patrol"
         );
-    }
-
-    // ── CaptainAi ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn captain_ai_returns_true_when_damage_within_window() {
-        let ai = CaptainAi;
-        // now=10, damage at ts=5 → delta=5s < 10s → true
-        assert_eq!(ai.operate(10.0, Some(5.0), None), Some(true));
-    }
-
-    #[test]
-    fn captain_ai_returns_true_when_weapon_fired_within_window() {
-        let ai = CaptainAi;
-        // now=10, weapon at ts=7 → delta=3s < 10s → true
-        assert_eq!(ai.operate(10.0, None, Some(7.0)), Some(true));
-    }
-
-    #[test]
-    fn captain_ai_returns_false_when_no_activity() {
-        let ai = CaptainAi;
-        assert_eq!(ai.operate(10.0, None, None), Some(false));
-    }
-
-    #[test]
-    fn captain_ai_returns_false_when_activity_older_than_window() {
-        let ai = CaptainAi;
-        // now=20, damage at ts=5 → delta=15s > 10s → false
-        // weapon at ts=8 → delta=12s > 10s → false
-        assert_eq!(ai.operate(20.0, Some(5.0), Some(8.0)), Some(false));
-    }
-
-    #[test]
-    fn captain_ai_returns_true_at_window_boundary() {
-        let ai = CaptainAi;
-        // now=10, damage at ts=0.1 → delta=9.9s < 10s → true
-        assert_eq!(ai.operate(10.0, Some(0.1), None), Some(true));
     }
 
     // ── score_doctrine_pool ───────────────────────────────────────────────

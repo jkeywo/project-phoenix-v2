@@ -174,6 +174,103 @@ impl CmpOp {
             CmpOp::Lt => lhs < rhs,
         }
     }
+
+    /// Float comparison, used by the typed-fact atoms (issue #775). Facts and
+    /// authored parameters are real-valued (durations, margins, weights), so
+    /// they compare as `f64` rather than the integer counter view.
+    fn apply_f64(self, lhs: f64, rhs: f64) -> bool {
+        match self {
+            CmpOp::Ge => lhs >= rhs,
+            CmpOp::Gt => lhs > rhs,
+            CmpOp::Eq => lhs == rhs,
+            CmpOp::Ne => lhs != rhs,
+            CmpOp::Le => lhs <= rhs,
+            CmpOp::Lt => lhs < rhs,
+        }
+    }
+}
+
+// ── Typed AI facts + named parameters (issue #775) ─────────────────────────
+//
+// The world-trigger predicate grammar reads scenario flags and counters. AI
+// fine-system policies additionally read *typed facts* — real-valued readings
+// snapshotted from the immutable per-tick world state (e.g. seconds since the
+// ship was last in combat) — and *named parameters* — authored tunables
+// (thresholds, durations, margins, weights) referenced by name from the
+// expression so no gameplay value is hardcoded in the predicate.
+//
+// Both are read-only. Flags and counters remain read-only too: a policy never
+// writes world state through an expression.
+
+/// Immutable snapshot of typed facts for one policy evaluation.
+///
+/// A fact that is *absent* (no reading available — e.g. the ship has never
+/// been in combat) makes every comparison against it evaluate `false`, so an
+/// author writing `fact(secs_since_combat) < param(window)` gets the intuitive
+/// "not recently in combat" answer when there is no combat history at all.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiFacts {
+    values: HashMap<String, f64>,
+}
+
+impl AiFacts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a present fact reading.
+    pub fn set(&mut self, name: &str, value: f64) {
+        self.values.insert(name.to_string(), value);
+    }
+
+    /// Read a fact reading; `None` when the fact is absent this tick.
+    pub fn get(&self, name: &str) -> Option<f64> {
+        self.values.get(name).copied()
+    }
+}
+
+/// Authored named parameters referenced by policy expressions.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiParams {
+    values: HashMap<String, f64>,
+}
+
+impl AiParams {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Author a named parameter value.
+    pub fn set(&mut self, name: &str, value: f64) {
+        self.values.insert(name.to_string(), value);
+    }
+
+    /// Resolve a named parameter; `None` when the name is unknown.
+    pub fn get(&self, name: &str) -> Option<f64> {
+        self.values.get(name).copied()
+    }
+
+    /// The set of authored parameter names (used by content validation).
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.values.keys().map(String::as_str)
+    }
+}
+
+/// Right-hand side of a `fact(name) CMP …` comparison: a numeric literal or a
+/// reference to an authored named parameter.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Operand {
+    Number(f64),
+    Param(String),
+}
+
+impl Operand {
+    fn resolve(&self, params: &AiParams) -> Option<f64> {
+        match self {
+            Operand::Number(n) => Some(*n),
+            Operand::Param(name) => params.get(name),
+        }
+    }
 }
 
 /// Parsed predicate expression.
@@ -189,20 +286,75 @@ pub enum Predicate {
         op: CmpOp,
         rhs: i64,
     },
+    /// `fact(name) CMP operand` — typed AI fact compared to a literal or a
+    /// named parameter (issue #775).
+    Fact {
+        name: String,
+        op: CmpOp,
+        rhs: Operand,
+    },
+    /// `true` / `false` literal (issue #775) — a default rule guard.
+    Bool(bool),
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
 }
 
 impl Predicate {
-    /// Evaluate the predicate against a flag-store chain.
+    /// Evaluate the predicate against a flag-store chain only.
+    ///
+    /// World triggers use this; typed-fact atoms have no readings here and
+    /// resolve `false`, and named-parameter operands have no bindings.
     pub fn evaluate(&self, chain: &[&FlagStore]) -> bool {
+        self.evaluate_with(&AiFacts::default(), &AiParams::default(), chain)
+    }
+
+    /// Evaluate against typed facts, named parameters, and a read-only flag
+    /// chain (issue #775). This is the AI fine-system policy entry point.
+    ///
+    /// Flags and counters stay read-only; facts and parameters are read-only
+    /// too. An absent fact, or a parameter operand that resolves to no value,
+    /// makes the comparison `false` — never a panic (the diagnostic-Err /
+    /// no-panic contract that content validation depends on).
+    pub fn evaluate_with(&self, facts: &AiFacts, params: &AiParams, chain: &[&FlagStore]) -> bool {
         match self {
             Predicate::Flag { name } => flag_in_chain(chain, name),
             Predicate::Counter { name, op, rhs } => op.apply(counter_in_chain(chain, name), *rhs),
-            Predicate::Not(inner) => !inner.evaluate(chain),
-            Predicate::And(a, b) => a.evaluate(chain) && b.evaluate(chain),
-            Predicate::Or(a, b) => a.evaluate(chain) || b.evaluate(chain),
+            Predicate::Fact { name, op, rhs } => {
+                match (facts.get(name), rhs.resolve(params)) {
+                    (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
+                    // Absent fact or unresolved parameter → false, never panic.
+                    _ => false,
+                }
+            }
+            Predicate::Bool(b) => *b,
+            Predicate::Not(inner) => !inner.evaluate_with(facts, params, chain),
+            Predicate::And(a, b) => {
+                a.evaluate_with(facts, params, chain) && b.evaluate_with(facts, params, chain)
+            }
+            Predicate::Or(a, b) => {
+                a.evaluate_with(facts, params, chain) || b.evaluate_with(facts, params, chain)
+            }
+        }
+    }
+
+    /// Collect every `param(name)` referenced anywhere in the expression.
+    ///
+    /// Content validation uses this to reject a policy expression that
+    /// references a named parameter the author never declared (issue #775).
+    pub fn referenced_params(&self, out: &mut Vec<String>) {
+        match self {
+            Predicate::Fact { rhs, .. } => {
+                if let Operand::Param(name) = rhs {
+                    out.push(name.clone());
+                }
+            }
+            Predicate::Flag { .. } | Predicate::Counter { .. } | Predicate::Bool(_) => {}
+            Predicate::Not(inner) => inner.referenced_params(out),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.referenced_params(out);
+                b.referenced_params(out);
+            }
         }
     }
 }
@@ -219,9 +371,13 @@ enum Token {
     Not,
     Flag,
     Counter,
+    Fact,
+    Param,
+    Bool(bool),
     Cmp(CmpOp),
     Ident(String),
     Int(i64),
+    Num(f64),
 }
 
 struct Tokeniser<'a> {
@@ -298,7 +454,9 @@ impl<'a> Tokeniser<'a> {
             self.pos += n;
             return Ok(Some((Token::Cmp(op), start)));
         }
-        // Integer (with optional leading -)
+        // Number (with optional leading - and optional fractional part). A
+        // number with a decimal point tokenises as `Num(f64)`; otherwise as
+        // `Int(i64)` so integer counter comparisons keep their exact typing.
         if c.is_ascii_digit()
             || (c == '-'
                 && self
@@ -309,18 +467,28 @@ impl<'a> Tokeniser<'a> {
                     .unwrap_or(false))
         {
             let mut end = self.pos + c.len_utf8();
+            let mut seen_dot = false;
             for ch in self.rest().chars().skip(1) {
                 if ch.is_ascii_digit() {
+                    end += ch.len_utf8();
+                } else if ch == '.' && !seen_dot {
+                    seen_dot = true;
                     end += ch.len_utf8();
                 } else {
                     break;
                 }
             }
             let slice = &self.src[self.pos..end];
+            self.pos = end;
+            if seen_dot {
+                let value: f64 = slice
+                    .parse()
+                    .map_err(|_| format!("Invalid number '{slice}' at position {start}"))?;
+                return Ok(Some((Token::Num(value), start)));
+            }
             let value: i64 = slice
                 .parse()
                 .map_err(|_| format!("Invalid integer '{slice}' at position {start}"))?;
-            self.pos = end;
             return Ok(Some((Token::Int(value), start)));
         }
         // Identifier-ish: letters/digits/underscore/colon/hyphen
@@ -341,6 +509,10 @@ impl<'a> Tokeniser<'a> {
                 "not" => Token::Not,
                 "flag" => Token::Flag,
                 "counter" => Token::Counter,
+                "fact" => Token::Fact,
+                "param" => Token::Param,
+                "true" => Token::Bool(true),
+                "false" => Token::Bool(false),
                 _ => Token::Ident(slice.to_string()),
             };
             return Ok(Some((tok, start)));
@@ -476,10 +648,52 @@ impl Parser {
                 };
                 Ok(Predicate::Counter { name, op, rhs })
             }
+            Some((Token::Fact, _)) => {
+                self.expect(&Token::LParen, "'(' after 'fact'")?;
+                let name = self.expect_name("name inside fact(...)")?;
+                self.expect(&Token::RParen, "')' to close fact(...)")?;
+                let op = match self.bump() {
+                    Some((Token::Cmp(op), _)) => op,
+                    Some((t, p)) => {
+                        return Err(format!(
+                        "Expected comparison operator after fact(...) but got {t:?} at position {p}"
+                    ))
+                    }
+                    None => return Err(
+                        "Expected comparison operator after fact(...) but reached end of predicate"
+                            .into(),
+                    ),
+                };
+                let rhs = self.parse_operand()?;
+                Ok(Predicate::Fact { name, op, rhs })
+            }
+            Some((Token::Bool(b), _)) => Ok(Predicate::Bool(b)),
             Some((t, p)) => Err(format!("Unexpected token {t:?} at position {p}")),
             None => Err(format!(
                 "Unexpected end of predicate at position {pos}; expected an atom"
             )),
+        }
+    }
+
+    /// Parse the right-hand side of a `fact(...) CMP` comparison: a numeric
+    /// literal (`Int` or `Num`) or a `param(name)` reference.
+    fn parse_operand(&mut self) -> Result<Operand, String> {
+        match self.bump() {
+            Some((Token::Int(n), _)) => Ok(Operand::Number(n as f64)),
+            Some((Token::Num(n), _)) => Ok(Operand::Number(n)),
+            Some((Token::Param, _)) => {
+                self.expect(&Token::LParen, "'(' after 'param'")?;
+                let name = self.expect_name("name inside param(...)")?;
+                self.expect(&Token::RParen, "')' to close param(...)")?;
+                Ok(Operand::Param(name))
+            }
+            Some((t, p)) => Err(format!(
+                "Expected a number or param(...) after comparison but got {t:?} at position {p}"
+            )),
+            None => Err(
+                "Expected a number or param(...) after comparison but reached end of predicate"
+                    .into(),
+            ),
         }
     }
 
@@ -493,6 +707,8 @@ impl Parser {
             Some((Token::Not, _)) => Ok("not".to_string()),
             Some((Token::Flag, _)) => Ok("flag".to_string()),
             Some((Token::Counter, _)) => Ok("counter".to_string()),
+            Some((Token::Fact, _)) => Ok("fact".to_string()),
+            Some((Token::Param, _)) => Ok("param".to_string()),
             Some((t, p)) => Err(format!("Expected {ctx} but got {t:?} at position {p}")),
             None => Err(format!("Expected {ctx} but reached end of predicate")),
         }
@@ -842,5 +1058,152 @@ mod tests {
     fn parse_bare_equals_errors_with_hint() {
         let err = parse_predicate("counter(a) = 1").unwrap_err();
         assert!(err.contains("=="), "should hint at ==, got: {err}");
+    }
+
+    // --- Typed AI facts + named parameters (issue #775) --------------------
+
+    fn facts_with(pairs: &[(&str, f64)]) -> AiFacts {
+        let mut f = AiFacts::new();
+        for (k, v) in pairs {
+            f.set(k, *v);
+        }
+        f
+    }
+
+    fn params_with(pairs: &[(&str, f64)]) -> AiParams {
+        let mut p = AiParams::new();
+        for (k, v) in pairs {
+            p.set(k, *v);
+        }
+        p
+    }
+
+    #[test]
+    fn parse_fact_atom_with_numeric_rhs() {
+        let pred = parse_predicate("fact(secs_since_combat) < 10.0").unwrap();
+        assert_eq!(
+            pred,
+            Predicate::Fact {
+                name: "secs_since_combat".into(),
+                op: CmpOp::Lt,
+                rhs: Operand::Number(10.0),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_fact_atom_with_param_rhs() {
+        let pred = parse_predicate("fact(secs_since_combat) < param(combat_window_secs)").unwrap();
+        assert_eq!(
+            pred,
+            Predicate::Fact {
+                name: "secs_since_combat".into(),
+                op: CmpOp::Lt,
+                rhs: Operand::Param("combat_window_secs".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_true_and_false_literals() {
+        assert_eq!(parse_predicate("true").unwrap(), Predicate::Bool(true));
+        assert_eq!(parse_predicate("false").unwrap(), Predicate::Bool(false));
+    }
+
+    #[test]
+    fn evaluate_fact_against_named_parameter_table() {
+        let p = parse_predicate("fact(secs_since_combat) < param(combat_window_secs)").unwrap();
+        let params = params_with(&[("combat_window_secs", 10.0)]);
+        let no_flags: &[&FlagStore] = &[];
+        // In combat 3s ago → within the 10s window → true.
+        assert!(p.evaluate_with(
+            &facts_with(&[("secs_since_combat", 3.0)]),
+            &params,
+            no_flags
+        ));
+        // 12s ago → outside the window → false.
+        assert!(!p.evaluate_with(
+            &facts_with(&[("secs_since_combat", 12.0)]),
+            &params,
+            no_flags
+        ));
+        // Exactly at the boundary → strict `<` is false.
+        assert!(!p.evaluate_with(
+            &facts_with(&[("secs_since_combat", 10.0)]),
+            &params,
+            no_flags
+        ));
+    }
+
+    #[test]
+    fn absent_fact_evaluates_false_never_panics() {
+        let p = parse_predicate("fact(secs_since_combat) < param(w)").unwrap();
+        let params = params_with(&[("w", 10.0)]);
+        // No `secs_since_combat` reading at all → false (not in combat).
+        assert!(!p.evaluate_with(&AiFacts::new(), &params, &[]));
+    }
+
+    #[test]
+    fn unresolved_parameter_evaluates_false_never_panics() {
+        let p = parse_predicate("fact(x) < param(missing)").unwrap();
+        // Parameter `missing` is not authored → comparison is false.
+        assert!(!p.evaluate_with(&facts_with(&[("x", 1.0)]), &AiParams::new(), &[]));
+    }
+
+    #[test]
+    fn bool_literal_evaluates_to_itself() {
+        assert!(parse_predicate("true").unwrap().evaluate_with(
+            &AiFacts::new(),
+            &AiParams::new(),
+            &[]
+        ));
+        assert!(!parse_predicate("false").unwrap().evaluate_with(
+            &AiFacts::new(),
+            &AiParams::new(),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn facts_compose_with_flags_and_boolean_operators() {
+        let s = store_with(&[("shooting", 1)]);
+        let p = parse_predicate("flag(shooting) or fact(secs_since_combat) < param(w)").unwrap();
+        let params = params_with(&[("w", 10.0)]);
+        // flag(shooting) is true → whole OR true even with no fact.
+        assert!(p.evaluate_with(&AiFacts::new(), &params, &[&s]));
+    }
+
+    #[test]
+    fn world_flag_evaluate_ignores_facts() {
+        // The world-trigger `evaluate` entry point still works and reads flags.
+        let s = store_with(&[("a", 1)]);
+        assert!(parse_predicate("flag(a)").unwrap().evaluate(&[&s]));
+    }
+
+    #[test]
+    fn parse_fact_without_operand_errors_without_panic() {
+        let err = parse_predicate("fact(x) <").unwrap_err();
+        assert!(err.contains("end of predicate"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_fact_with_bad_operand_errors_without_panic() {
+        let err = parse_predicate("fact(x) < flag(y)").unwrap_err();
+        assert!(err.contains("number or param"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_integer_rhs_for_fact_is_widened() {
+        // A fact comparison may use a bare integer; it widens to f64.
+        let p = parse_predicate("fact(x) >= 5").unwrap();
+        assert_eq!(
+            p,
+            Predicate::Fact {
+                name: "x".into(),
+                op: CmpOp::Ge,
+                rhs: Operand::Number(5.0),
+            }
+        );
+        assert!(p.evaluate_with(&facts_with(&[("x", 5.0)]), &AiParams::new(), &[]));
     }
 }

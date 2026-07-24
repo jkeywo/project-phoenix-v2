@@ -11,6 +11,17 @@ use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::world::server::ObjectiveManagerRes;
 
+/// Per-ship inline stateless Captain AI policy (issue #775).
+///
+/// Attached to every ship at spawn: from the ship's `[captain_console.ai]`
+/// block when authored, otherwise the canonical
+/// [`crate::entities::config::default_captain_ai_config`] policy. Read by
+/// [`operate_captain_ai`], which evaluates it over an immutable per-tick fact
+/// snapshot to decide the `red_alert` output channel — replacing the retired
+/// hardcoded `CaptainAi` combat-window controller.
+#[derive(Component, Clone, Debug, Default)]
+pub struct CaptainAiPolicy(pub crate::ai::policy::AiPolicy);
+
 pub struct CaptainPlugin;
 
 impl Plugin for CaptainPlugin {
@@ -181,10 +192,12 @@ fn handle_set_objective_priority(
     }
 }
 
-/// AI system: if the captain system is AI-controlled, run `CaptainAi::operate`
-/// and emit `SetRedAlert { active }` into `AdmittedCommands` with the desired
-/// state (issue #748). Runs before `handle_set_red_alert` so the command is
-/// visible to the handler in the same tick.
+/// AI system: if the red-alert system is AI-controlled, evaluate this ship's
+/// inline stateless [`CaptainAiPolicy`] over an immutable per-tick fact
+/// snapshot (issue #775) and emit `SetRedAlert { active }` into
+/// `AdmittedCommands` with the resolved state (issue #748). Runs before
+/// `handle_set_red_alert` so the command is visible to the handler in the same
+/// tick.
 ///
 /// The emit is guarded on a state change purely to avoid admission spam — the
 /// set command is idempotent, so a re-emit every tick would be harmless but
@@ -197,6 +210,11 @@ fn handle_set_objective_priority(
 fn operate_captain_ai(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
+    // Shared 10 Hz AI cadence latch (issue #775 AC3). `Option<Res<_>>` so
+    // bare-`App` fixtures without `AiPlugin` still pass parameter validation;
+    // when absent the policy evaluates every tick (matching the other
+    // snapshot-resilient AI systems and the pre-#775 per-frame behaviour).
+    ai_ready: Option<Res<crate::ai::server::AiSnapshotReady>>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
@@ -204,13 +222,30 @@ fn operate_captain_ai(
         Option<&crate::ship_state::ShipRedAlert>,
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&CaptainAiPolicy>,
     )>,
 ) {
+    // Gate on the deterministic 10 Hz base cadence.
+    if !ai_ready.map(|r| r.0).unwrap_or(true) {
+        return;
+    }
     let now = time.elapsed_secs();
-    let ai = crate::ai::core::CaptainAi;
+    // Canonical fallback for any ship missing an attached policy component
+    // (the bare-`App` unit fixtures). Real ships always carry one, authored or
+    // synthesised, attached at spawn. Built once per tick, not per ship.
+    let default_policy = crate::entities::config::default_captain_ai_config()
+        .to_policy()
+        .unwrap_or_default();
 
-    for (mut admitted, control_sources, activity, red_alert_opt, entity_uuid, ship_config) in
-        ship_query.iter_mut()
+    for (
+        mut admitted,
+        control_sources,
+        activity,
+        red_alert_opt,
+        entity_uuid,
+        ship_config,
+        ship_policy,
+    ) in ship_query.iter_mut()
     {
         let policy = control_sources
             .0
@@ -219,12 +254,32 @@ fn operate_captain_ai(
             continue;
         }
 
-        // Read this ship's own combat activity.
-        let last_under_attack =
-            most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken);
-        let last_weapon_fired = activity.last_weapon_fired;
+        // Build the immutable typed-fact snapshot for this evaluation from this
+        // ship's own combat activity. `secs_since_combat` is absent when the
+        // ship has no combat history at all — the policy then reads "not in
+        // combat" via the absent-fact rule.
+        let last_combat = most_recent(
+            most_recent(activity.last_damage_taken, activity.last_hostile_fire_taken),
+            activity.last_weapon_fired,
+        );
+        let mut facts = crate::world::flags::AiFacts::new();
+        if let Some(s) = last_combat {
+            facts.set("secs_since_combat", (now - s) as f64);
+        }
 
-        if let Some(should_be_red_alert) = ai.operate(now, last_under_attack, last_weapon_fired) {
+        // Resolve the `red_alert` output channel over the snapshot.
+        let active_policy = ship_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        let should_be_red_alert = active_policy
+            .resolve_channel(
+                crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
+                &facts,
+                &[],
+            )
+            .map(|verb| match verb {
+                crate::ai::policy::AiPolicyVerb::SetRedAlert(b) => *b,
+            });
+
+        if let Some(should_be_red_alert) = should_be_red_alert {
             let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
             if should_be_red_alert != current_red_alert {
                 // Route through the shared admission seam with this ship's own
@@ -1358,6 +1413,164 @@ mod tests {
         assert!(
             !get_red_alert(&mut app),
             "AI must only operate red alert when the red-alert system is automated"
+        );
+    }
+
+    // ── #775 inline stateless policy host integration tests ──────────────────
+
+    fn set_captain_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(CaptainAiPolicy(policy));
+    }
+
+    fn set_red_alert_offline(app: &mut App, offline: bool) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
+        let mut cs = q.single_mut(app.world_mut()).unwrap();
+        cs.0.set_offline(crate::system_registry::red_alert_system_id(), offline);
+    }
+
+    fn always_on_policy() -> crate::ai::policy::AiPolicy {
+        crate::entities::config::FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![crate::entities::config::FineSystemAiRuleToml {
+                priority: 10,
+                channel: "red_alert".into(),
+                when: "true".into(),
+                verb: "set_red_alert".into(),
+                value: true,
+            }],
+        }
+        .to_policy()
+        .unwrap()
+    }
+
+    fn idle_policy() -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            idle: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn authored_policy_drives_red_alert_output() {
+        // An authored "always on" policy raises Red Alert under AI control even
+        // with no combat activity — proving the data-authored policy, not a
+        // hardcoded controller, decides the typed output (AC2/AC4).
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_captain_policy(&mut app, always_on_policy());
+        // No combat activity at all.
+        tick(&mut app);
+        assert!(
+            get_red_alert(&mut app),
+            "authored always-on policy must raise Red Alert through the admitted path"
+        );
+    }
+
+    #[test]
+    fn authored_idle_policy_takes_no_action() {
+        // An explicit idle policy never raises Red Alert, even in combat —
+        // proving policy-or-idle is honoured at runtime (AC1/AC2).
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_captain_policy(&mut app, idle_policy());
+        set_activity_last_damage(&mut app, Some(0.0));
+        tick(&mut app);
+        assert!(
+            !get_red_alert(&mut app),
+            "idle policy must take no AI action even under recent damage"
+        );
+    }
+
+    #[test]
+    fn human_takeover_stops_ai_then_reacquisition_resets_from_facts() {
+        // AC5 lifecycle: AI raises Red Alert in combat; a human takes the
+        // console (Control Source → Human) and combat ends — the AI stops and
+        // does not force the state; when the AI reacquires with no combat it
+        // recomputes statelessly from current facts and stands down.
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_activity_last_damage(&mut app, Some(0.0));
+        tick(&mut app);
+        assert!(get_red_alert(&mut app), "AI raises Red Alert in combat");
+
+        // Human takes over; combat ends.
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Human,
+        );
+        set_activity_last_damage(&mut app, None);
+        set_activity_hostile_fire(&mut app, None);
+        tick(&mut app);
+        assert!(
+            get_red_alert(&mut app),
+            "AI must stop under human control and not force Red Alert off"
+        );
+
+        // AI reacquires with no combat history → stateless recompute stands down.
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        tick(&mut app);
+        assert!(
+            !get_red_alert(&mut app),
+            "reacquired AI must recompute from current facts and stand down"
+        );
+    }
+
+    #[test]
+    fn recovery_from_unavailability_resumes_policy() {
+        // AC4/AC5: while the Red Alert system is unavailable (offline) the AI
+        // cannot act even in combat (admission + operate_ai both deny); when it
+        // recovers, the stateless policy re-evaluates and raises Red Alert.
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_red_alert_offline(&mut app, true);
+        set_activity_last_damage(&mut app, Some(0.0));
+        tick(&mut app);
+        assert!(
+            !get_red_alert(&mut app),
+            "offline Red Alert system must block AI action"
+        );
+
+        // Recover: system available again → policy resumes.
+        set_red_alert_offline(&mut app, false);
+        tick(&mut app);
+        assert!(
+            get_red_alert(&mut app),
+            "recovered system must let the policy raise Red Alert"
         );
     }
 

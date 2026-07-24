@@ -2656,6 +2656,21 @@ fn spawn_game_start_entities(
                     .unwrap_or_default(),
             );
 
+            // Captain AI policy (issue #775) — the player ship half of the
+            // per-entity pattern above. Authored `[captain_console.ai]` drives
+            // `operate_captain_ai`; absent, the canonical default policy is
+            // synthesised. Validated already in `EntityConfig::from_toml`.
+            let captain_ai_policy =
+                match config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+                    Some(ai) => ai.to_policy().unwrap_or_default(),
+                    None => crate::entities::config::default_captain_ai_config()
+                        .to_policy()
+                        .unwrap_or_default(),
+                };
+            commands
+                .entity(spawned)
+                .insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
+
             // Shields damage history — per-ship Component tracking HP deltas
             // for the AI damage-concentration algorithm. Initialised empty; resized
             // lazily by operate_shields_ai to match the ship's arc count.

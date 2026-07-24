@@ -71,6 +71,14 @@ pub struct ShipRedAlert(pub bool);
 ///
 /// Replaces the `view_mode` field that was previously on the singleton
 /// `ShipState` resource. Added in issue #591.
+///
+/// The embedded `ViewscreenArbiter` holds the monotonic recency `sequence`
+/// backing the latest-valid-command-wins policy (issue #769). Because this is a
+/// per-*entity* component owned by the ship entity — spawned once at game start,
+/// never re-inserted on player reconnect (reconnect is a session/station event,
+/// not a ship respawn) — the `sequence` persists across reconnects. A
+/// reconnecting console therefore cannot reset the counter and clobber a newer
+/// view issued by another console.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ShipViewMode {
     pub view_mode: ViewMode,
@@ -97,7 +105,7 @@ impl ShipViewMode {
     pub fn request_view_mode_from(&mut self, requester: crate::messages::SystemId, mode: ViewMode) {
         let resolution = self
             .viewscreen
-            .request_channel_2(ViewscreenRequest { requester, mode });
+            .apply_channel_2(ViewscreenRequest { requester, mode });
         self.view_mode = resolution.mode;
         self.captain_view = self.viewscreen.captain_view();
     }
@@ -106,7 +114,7 @@ impl ShipViewMode {
         let requester = source_system_for_view_mode(&mode);
         let resolution = self
             .viewscreen
-            .show_channel_2(ViewscreenRequest { requester, mode });
+            .apply_channel_2(ViewscreenRequest { requester, mode });
         self.view_mode = resolution.mode;
         self.captain_view = self.viewscreen.captain_view();
     }

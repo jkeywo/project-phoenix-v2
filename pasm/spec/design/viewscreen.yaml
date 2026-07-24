@@ -49,7 +49,7 @@ entities:
 
   - mechanic: last-valid-viewscreen-command-wins
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Last Valid Viewscreen Command Wins
       summary: The most recent admitted viewscreen command wins regardless of console origin; there is no fixed source-priority order.

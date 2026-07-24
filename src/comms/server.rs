@@ -146,7 +146,14 @@ impl Plugin for CommsWorldPlugin {
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                     handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
-                    handle_show_on_screen.in_set(crate::sim_sets::SimSet::Input),
+                    // Deterministic same-tick viewscreen ordering (issue #769):
+                    // apply comms `ShowOnScreen` AFTER captain `SetView` so the
+                    // latest-valid-command-wins `sequence` is a total order when
+                    // both land in one tick (comms show is the later, winning
+                    // request on a tie).
+                    handle_show_on_screen
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(crate::console::captain::server::handle_set_view),
                     handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
                     auto_clear_on_screen_message.in_set(crate::sim_sets::SimSet::Broadcast),
                     update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),

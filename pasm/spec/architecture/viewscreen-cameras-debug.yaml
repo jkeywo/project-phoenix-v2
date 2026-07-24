@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Viewscreen Arbiter
-      summary: Resolves captain camera selection, cinematic mode, and competing channel-2 system requests into one active viewscreen owner and mode.
+      summary: Resolves captain camera selection, cinematic mode, and competing channel-2 system requests into one active viewscreen owner and mode; overlay conflicts are resolved by latest-valid-command recency, not a fixed source ranking.
     architecture:
       kind: arbitration-service
       authority: authoritative
@@ -36,7 +36,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Viewscreen Source Registry
-      summary: "Maps each viewscreen mode to its owning system: Captain camera/cinematic, Helm radar, Sensors radar, Navigation chart, or Comms."
+      summary: "Maps each viewscreen mode to its owning system for admission authority (Captain camera/cinematic, Helm radar, Sensors radar, Navigation chart, or Comms). It assigns ownership only; it does not rank sources — the arbiter resolves conflicts by recency."
     architecture:
       kind: routing-policy
       authority: authoritative
@@ -49,16 +49,32 @@ entities:
 
   - component: viewscreen-latest-command-policy
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Viewscreen Latest Command Policy
-      summary: Future arbiter policy that resolves competing admitted viewscreen requests strictly by recency, regardless of source system, replacing the current fixed source-priority ordering.
+      summary: Arbiter policy that resolves competing admitted viewscreen requests strictly by recency, regardless of source system, replacing the former fixed source-priority ordering. Each valid request bumps a monotonic sequence and always replaces the active view; toggle-off and captain-camera return are preserved. SetView and ShowOnScreen route through one arbiter method, and comms ShowOnScreen is scheduled after captain SetView so same-tick ordering is deterministic.
     architecture:
       kind: arbitration-policy
       authority: authoritative
       reads: [inter-system-message-state]
       writes: [viewscreen-resolution-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/ship/viewscreen.rs
+        - src/ship/state.rs
+        - src/console/captain/server.rs
+        - src/console/comms/server.rs
+        - src/comms/server.rs
+      symbols:
+        - apply_channel_2
+        - request_view_mode_from
+        - show_view_mode
+        - handle_set_view
+        - handle_show_on_screen
+      tests:
+        - cargo test
 
   - component: host-camera-renderer
     core:

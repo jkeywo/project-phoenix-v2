@@ -126,7 +126,16 @@ fn view_request_from_admitted(
     }
 }
 
-fn handle_set_view(
+/// Apply admitted viewscreen `SetView` requests to the local ship's
+/// `ShipViewMode` under the latest-valid-command-wins policy (issue #769).
+///
+/// Runs in `SimSet::Input`. Comms' `handle_show_on_screen` is explicitly
+/// ordered `.after` this system (see `CommsWorldPlugin`) so that when a
+/// `SetView` and a `ShowOnScreen` land in the SAME tick the two requests are
+/// applied in a deterministic order — `SetView` first, `ShowOnScreen` last —
+/// making the monotonic arbiter `sequence` an authoritative total order rather
+/// than depending on Bevy's ambiguous system-execution order.
+pub(crate) fn handle_set_view(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut view_mode_q: Query<
         &mut crate::ship_state::ShipViewMode,
@@ -1148,6 +1157,68 @@ mod tests {
         );
         tick(&mut app);
 
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
+    }
+
+    #[test]
+    fn unauthorised_set_view_does_not_disturb_active_view() {
+        // AC3 (issue #769): an unauthorised SetView is rejected at admission
+        // and never reaches the arbiter, so the currently resolved view is
+        // left unchanged. Here a helm-radar overlay is active and an
+        // unauthorised console attempts to steal the screen with a camera view.
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Authorised helm-radar overlay wins the screen.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Hoshi".into(),
+            },
+        );
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .set_station("helm", Some(crate::messages::StationId("helm".into())));
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Radar,
+                },
+            },
+        );
+        tick(&mut app);
+        assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
+
+        // Unauthorised console (no station held) attempts a SetView.
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::Identify {
+                token: "crew".into(),
+                name: "Bob".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::viewscreen_system_id(),
+                payload: SystemControlPayload::SetView {
+                    mode: ViewMode::Camera(CameraView::new("camera_port")),
+                },
+            },
+        );
+        tick(&mut app);
+
+        // Rejected at admission → active view is unchanged.
         assert_eq!(get_view_mode(&mut app), ViewMode::Radar);
     }
 

@@ -632,7 +632,17 @@ pub(crate) fn handle_show_on_screen(
                     vm.restore_captain_view();
                 } else {
                     on_screen.0 = Some(msg.clone());
-                    vm.show_view_mode(crate::messages::ViewMode::Comms);
+                    // Only push the Comms overlay when it is not already the
+                    // resolved view. `show_view_mode` now routes through the
+                    // unified latest-wins arbiter method (issue #769), whose
+                    // toggle-off dismisses a re-request of the active view —
+                    // so re-issuing Comms while it is already showing (e.g.
+                    // switching to a different on-screen message) must NOT call
+                    // it, otherwise the overlay would be dismissed instead of
+                    // updated.
+                    if !matches!(vm.view_mode, crate::messages::ViewMode::Comms) {
+                        vm.show_view_mode(crate::messages::ViewMode::Comms);
+                    }
                 }
             }
         }

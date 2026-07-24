@@ -753,6 +753,45 @@ mod tests {
                     )],
                 },
             ),
+            (
+                ServerMessageDiscriminants::ShipManual,
+                ServerMessage::ShipManual {
+                    manual: crate::ship::manual::ShipManualWire {
+                        stations: vec![
+                            crate::ship::manual::StationManualWire {
+                                station_id: StationId("captain".into()),
+                                overview: Some("You command the bridge.".into()),
+                                sections: vec![],
+                            },
+                            crate::ship::manual::StationManualWire {
+                                station_id: StationId("science".into()),
+                                overview: Some("Sensors and shields.".into()),
+                                sections: vec![crate::ship::manual::SystemManualSection {
+                                    kind: "shields".into(),
+                                    metrics: vec![
+                                        crate::ship::manual::SystemManualMetric {
+                                            code: "max_hp".into(),
+                                            value: 100.0,
+                                        },
+                                        crate::ship::manual::SystemManualMetric {
+                                            code: "arcs".into(),
+                                            value: 4.0,
+                                        },
+                                    ],
+                                    automation: vec![
+                                        crate::ship::manual::StationRatingAutomation {
+                                            rating: "Backfill".into(),
+                                            automated_systems: vec![SystemId(
+                                                "shield-arc-fore".into(),
+                                            )],
+                                        },
+                                    ],
+                                }],
+                            },
+                        ],
+                    },
+                },
+            ),
         ]
     }
 

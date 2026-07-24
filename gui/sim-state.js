@@ -159,6 +159,13 @@ export class ClientSimState {
      * rejections so the flash re-triggers.
      */
     this.commsRejection = null;
+    /**
+     * Read-only ship manual replica (issue #772), or null until the host's
+     * `ShipManual` message arrives. Shape mirrors `ShipManualWire`:
+     * `{ stations: [{ station_id, overview, sections: [...] }] }`. Presentation
+     * state ONLY — the client never mutates it or authors commands from it.
+     */
+    this.shipManual = null;
   }
 
   /**
@@ -336,6 +343,12 @@ export class ClientSimState {
         if (d.station_id != null) {
           this.stationRatings[d.station_id] = d.rating_name || '';
         }
+        break;
+      case 'ShipManual':
+        // Read-only presentation state (issue #772): store the replica as-is.
+        // The manual panel renders from it; nothing here mutates it or emits
+        // any command in response.
+        this.shipManual = d.manual || null;
         break;
       case 'BlackboardUpdate':
         for (const [systemId, bb] of (d.updates || [])) {

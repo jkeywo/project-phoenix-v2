@@ -344,6 +344,7 @@ description = "entity.alliance_courier.station.captain.description"
 rank = "Cmdr."
 short_code = "CPT"
 console = "gui/courier/captain.html"
+manual_overview = "The courier is a two-seat runabout and you are its commander. You fly the ship and run the bridge: set the viewscreen, call Red Alert, plot your course, and manage sensors and shields. On a small crew you wear several hats, so keep the picture in your head and lean on the ship's AI for anything you can't reach."
 
 [[station.rating]]
 name = "Std"
@@ -356,6 +357,7 @@ description = "entity.alliance_courier.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/courier/tactical.html"
+manual_overview = "You run the courier's weapons. Lock a target on the tactical radar and fire the blaster bank as your arc comes to bear. The courier trades a heavy weapons suite for speed, so pick your shots, use the pilot's manoeuvres to keep your arc on target, and don't get drawn into a slugging match."
 
 [[station.rating]]
 name = "Std"

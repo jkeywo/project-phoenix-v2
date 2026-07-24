@@ -62,6 +62,14 @@ pub struct Sessions(pub SessionManager);
 #[derive(Resource, Default)]
 pub struct ShipClientConfigResource(pub ShipClientConfig);
 
+/// Bevy resource wrapping the read-only ship manual replicated to the client
+/// (issue #772). Built from the selected ship's config by
+/// `update_session_with_config` — the same seam as `ShipClientConfigResource` —
+/// and published per-client as a dedicated `ServerMessage::ShipManual` right
+/// after `Welcome`. Client-side it is presentation state only.
+#[derive(Resource, Default)]
+pub struct ShipManualResource(pub crate::ship::manual::ShipManualWire);
+
 /// Server's authoritative copy of the world layout — populated once during
 /// world setup and broadcast to clients via `WorldSetup` after `StartGame`,
 /// and replayed inside `Welcome` for mid-game reconnects.
@@ -128,6 +136,7 @@ impl Plugin for LobbyPlugin {
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
             .insert_resource(ShipClientConfigResource::default())
+            .insert_resource(ShipManualResource::default())
             .init_resource::<ShipStations>()
             .init_resource::<CountdownTimer>()
             .init_state::<GamePhase>()
@@ -201,6 +210,7 @@ impl Plugin for LobbyPlugin {
 fn update_session_with_config(
     mut ship_stations: ResMut<ShipStations>,
     mut ship_client_config: ResMut<ShipClientConfigResource>,
+    mut ship_manual: ResMut<ShipManualResource>,
     pending_ship_config: Option<Res<PendingShipConfig>>,
     selected_ship: Option<Res<SelectedShipResource>>,
 ) {
@@ -410,6 +420,40 @@ fn update_session_with_config(
             next.impulse_steering_multiplier = cap.impulse.steering_multiplier;
         }
         ship_client_config.0 = next;
+
+        // Ship manual (issue #772): build the read-only per-station manual from
+        // the same selected-ship config that feeds the client above. Generated
+        // system sections need a few values that live outside the station/system
+        // topology — for shields, `[shields_console.base] max_hp/regen` — so
+        // extract those into `system_extras` keyed by system kind for the
+        // kind-keyed providers to read. The aggregator itself is pure.
+        if let Some(topology) = ship_config.ship_config.as_ref() {
+            let mut system_extras: std::collections::HashMap<String, toml::Value> =
+                std::collections::HashMap::new();
+            if let Some(sc) = &ship_config.shields_console {
+                // `[shields_console.base]` is optional; when omitted the
+                // historical shield defaults apply (the same fallback the
+                // runtime uses), so the manual reflects the ship's effective
+                // values either way.
+                let base_cfg = sc.base.clone().unwrap_or_default();
+                let mut base = toml::value::Table::new();
+                base.insert(
+                    "max_hp".into(),
+                    toml::Value::Integer(base_cfg.max_hp as i64),
+                );
+                base.insert(
+                    "regen_per_sec".into(),
+                    toml::Value::Float(base_cfg.regen_per_sec as f64),
+                );
+                system_extras.insert(
+                    crate::system_registry::SHIELDS_KIND.to_string(),
+                    toml::Value::Table(base),
+                );
+            }
+            let registry = crate::ship::manual::ManualProviderRegistry::with_shipped_providers();
+            ship_manual.0 =
+                crate::ship::manual::build_ship_manual(topology, &registry, &system_extras);
+        }
     }
 }
 
@@ -445,6 +489,7 @@ pub fn handle_identify_system(
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
     ship_client_config: Res<ShipClientConfigResource>,
+    ship_manual: Res<ShipManualResource>,
     mut ship_query: Query<
         (
             &ShipConfigComponent,
@@ -479,6 +524,13 @@ pub fn handle_identify_system(
                 &ship_client_config.0,
                 &ratings_snapshot,
             );
+            // Publish the read-only ship manual (issue #772) to this client
+            // right after its Welcome — same trigger, same recipient. Only when
+            // the identify was accepted (a Welcome is going out).
+            let sent_welcome = result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
             apply_result(
                 result,
                 &mut outbox,
@@ -488,6 +540,14 @@ pub fn handle_identify_system(
                 &mut active_ratings,
                 countdown.as_deref_mut(),
             );
+            if sent_welcome {
+                outbox.0.push((
+                    Target::Token(token.clone()),
+                    ServerMessage::ShipManual {
+                        manual: ship_manual.0.clone(),
+                    },
+                ));
+            }
         } else {
             // No Ship entity yet (Lobby/Loading) — fall back to whatever
             // ratings players have picked in the lobby so far, so (re)joining
@@ -504,6 +564,10 @@ pub fn handle_identify_system(
                 &pending_ratings,
             );
             let mut fallback_ratings = ActiveStationRatings::default();
+            let sent_welcome = result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
             apply_result(
                 result,
                 &mut outbox,
@@ -513,6 +577,14 @@ pub fn handle_identify_system(
                 &mut fallback_ratings,
                 countdown.as_deref_mut(),
             );
+            if sent_welcome {
+                outbox.0.push((
+                    Target::Token(token.clone()),
+                    ServerMessage::ShipManual {
+                        manual: ship_manual.0.clone(),
+                    },
+                ));
+            }
         }
     }
 }
@@ -1219,6 +1291,7 @@ mod tests {
                         ai_tuning: None,
                     }],
                     console: None,
+                    manual_overview: None,
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -1232,6 +1305,7 @@ mod tests {
                         ai_tuning: None,
                     }],
                     console: None,
+                    manual_overview: None,
                 },
             ],
             systems: vec![],
@@ -1351,6 +1425,7 @@ mod tests {
                     ai_tuning: None,
                 }],
                 console: None,
+                manual_overview: None,
             }],
             systems: vec![],
             power_groups: HashMap::new(),
@@ -1439,6 +1514,7 @@ mod tests {
                         ai_tuning: None,
                     }],
                     console: None,
+                    manual_overview: None,
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -1452,6 +1528,7 @@ mod tests {
                         ai_tuning: None,
                     }],
                     console: None,
+                    manual_overview: None,
                 },
             ],
             systems: vec![],

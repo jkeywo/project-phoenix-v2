@@ -511,6 +511,7 @@ description = "entity.alliance_battleship.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/battleship/captain.html"
+manual_overview = "You command a capital ship with a full nine-seat bridge crew. Set the viewscreen, call Red Alert, and coordinate the whole crew through a sustained engagement. The battleship is slow but overwhelming — your job is to keep every station pulling in the same direction. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
 name = "Std"
@@ -527,6 +528,7 @@ description = "entity.alliance_battleship.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/battleship/helm.html"
+manual_overview = "You fly a heavy warship. It is slow to turn and slow to stop, so plan your manoeuvres well ahead: throttle and steering set your line, lateral thrust helps bring the broadside arcs to bear, and impulse gives you a measured burst. Anticipate where Tactical needs the guns pointed and get there early."
 
 [[station.rating]]
 name = "Std"
@@ -539,6 +541,7 @@ description = "entity.alliance_battleship.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/battleship/tactical.html"
+manual_overview = "You run the battleship's formidable weapons suite: fore and aft phasers, a heavy forward blaster, and a six-tube torpedo battery. Lock targets, manage tube loading and volley patterns, and match phaser frequency to enemy shields. There is a lot of firepower to conduct here — prioritise threats and keep the volume of fire up. Simplified rating auto-fires the phaser banks."
 
 [[station.rating]]
 name = "Std"
@@ -555,6 +558,7 @@ description = "entity.alliance_battleship.station.repair.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/battleship/repair.html"
+manual_overview = "You lead damage control. Dispatch repair teams to damaged systems by priority and watch the ship-wide hull picture. On a capital ship there is always something to fix under sustained fire, so triage hard: keep the guns, the drives, and the shields alive before the cosmetic damage."
 
 [[station.rating]]
 name = "Std"
@@ -567,6 +571,7 @@ description = "entity.alliance_battleship.station.sensors.description"
 rank = "Ens."
 short_code = "SCI"
 console = "gui/battleship/sensors.html"
+manual_overview = "You are the ship's eyes. Sweep the long-range radar, identify and classify contacts, and feed target designations to Tactical so the guns are always working the right threat. On a big ship in a big fight, your early warning is what keeps the crew ahead of the enemy."
 
 [[station.rating]]
 name = "Std"
@@ -579,6 +584,7 @@ description = "entity.alliance_battleship.station.shields.description"
 rank = "Ens."
 short_code = "SHD"
 console = "gui/battleship/shields.html"
+manual_overview = "You run the shield grid, a dedicated station on a ship this size. Focus an arc to reinforce it against the bearing of incoming fire, watch each facing's HP and regeneration, and rotate focus as the enemy shifts their aim. The generated Shields section below reads this ship's actual arc strength and regen rate."
 
 [[station.rating]]
 name = "Std"
@@ -591,6 +597,7 @@ description = "entity.alliance_battleship.station.navigation.description"
 rank = "Ens."
 short_code = "NAV"
 console = "gui/battleship/navigation.html"
+manual_overview = "You plot the ship's course. Set waypoints on the system chart for the Helm to follow and clear them onto new headings as the mission develops. A battleship handles slowly, so give the Helm plenty of warning and think several moves ahead of the current position."
 
 [[station.rating]]
 name = "Std"
@@ -603,6 +610,7 @@ description = "entity.alliance_battleship.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
 console = "gui/battleship/power.html"
+manual_overview = "You manage the reactor. Allocate power between helm, weapons, and sensors to match the tactical situation, and watch the battery reserve during heavy weapons fire. On a capital ship the demands are constant and competing — read the battle and shift power to wherever the crew needs it most."
 
 [[station.rating]]
 name = "Std"
@@ -615,6 +623,7 @@ description = "entity.alliance_battleship.station.comms.description"
 rank = "Ens."
 short_code = "COM"
 console = "gui/battleship/comms.html"
+manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. On a capital ship you are the link between the bridge and everyone else in the sector — stay on top of the message queue and flag anything urgent."
 
 [[station.rating]]
 name = "Std"

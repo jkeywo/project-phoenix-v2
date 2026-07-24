@@ -76,6 +76,7 @@ mod tests {
                     short_code: "P".into(),
                     ratings: vec![],
                     console: None,
+                    manual_overview: None,
                 },
                 StationConfig {
                     id: StationId("helm".into()),
@@ -85,6 +86,7 @@ mod tests {
                     short_code: "H".into(),
                     ratings: vec![],
                     console: None,
+                    manual_overview: None,
                 },
             ],
             systems: vec![
@@ -228,6 +230,7 @@ mod tests {
             short_code: "PLT".into(),
             ratings: vec![],
             console: None,
+            manual_overview: None,
         });
         config.systems.push(SystemInstanceConfig {
             id: SystemId("blaster-fore".into()),

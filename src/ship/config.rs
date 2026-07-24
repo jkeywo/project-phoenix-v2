@@ -46,6 +46,16 @@ pub struct StationConfig {
     /// station has no dedicated UI.
     #[serde(default)]
     pub console: Option<String>,
+    /// Authored overview prose for this station's ship manual tab (issue #772).
+    ///
+    /// This is LITERAL authored English read from `[[station]] manual_overview`
+    /// in the ship TOML — the same authored-content precedent as comms response
+    /// text and `display_name`, NOT a `strings.csv` id and NOT emitted English
+    /// in Rust. `#[serde(default)]` so hulls that omit it (and the
+    /// `rejects_missing_required_*` tests) keep parsing. See
+    /// `crate::ship::manual` for how it is combined with generated sections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_overview: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -442,6 +452,7 @@ description = "Command the bridge."
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/captain-console.html"
+manual_overview = "You command the bridge and set the ship's posture."
 
 [[station.rating]]
 name = "Assisted"
@@ -544,6 +555,34 @@ power_group = "ops"
         let decoded = parse_ok(&encoded);
 
         assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn station_config_parses_manual_overview_field() {
+        let config = parse_ok(valid_toml());
+
+        let captain = config.station(&StationId("captain".into())).unwrap();
+        assert_eq!(
+            captain.manual_overview.as_deref(),
+            Some("You command the bridge and set the ship's posture."),
+        );
+        // Absent on stations that authored none (issue #772 default).
+        let tactical = config.station(&StationId("tactical".into())).unwrap();
+        assert_eq!(tactical.manual_overview, None);
+    }
+
+    #[test]
+    fn station_config_manual_overview_survives_round_trip() {
+        let config = parse_ok(valid_toml());
+        let encoded = toml::to_string(&config).expect("ship config should serialize");
+        let decoded = parse_ok(&encoded);
+
+        assert_eq!(
+            decoded
+                .station(&StationId("captain".into()))
+                .and_then(|s| s.manual_overview.clone()),
+            Some("You command the bridge and set the ship's posture.".to_string()),
+        );
     }
 
     #[test]

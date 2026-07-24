@@ -63,6 +63,8 @@
   <script type="module" src="gui/connection-manager.js"></script>
   <!-- Settings panel: gear button + overlay with Rating, Volume, QR toggle, Leave Station -->
   <script type="module" src="gui/settings-panel.js"></script>
+  <!-- Ship manual (issue #772): book button + read-only overlay, tab per station -->
+  <script type="module" src="gui/manual-panel.js"></script>
   <style>
     /* -- CSS variables (lobby + shared) -------------------------------- */
     :root {
@@ -622,6 +624,114 @@
       border-color: var(--alert-red); color: var(--alert-red);
     }
     .settings-leave-btn:active { background: rgba(255,51,68,0.1); }
+
+    /* ── Ship manual panel (issue #772) ──────────────────────────
+       Book button beside the settings gear; read-only overlay with a
+       tab per authored station. Mounted by gui/manual-panel.js. */
+    .manual-btn {
+      position: fixed;
+      bottom: 0.5rem;
+      left: 3.0rem;
+      z-index: 60;
+      width: 2rem;
+      height: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.05rem;
+      line-height: 1;
+      color: var(--dim);
+      background: rgba(14, 17, 23, 0.7);
+      border: 1px solid var(--edge);
+      border-radius: 3px;
+      cursor: pointer;
+      user-select: none;
+      touch-action: manipulation;
+      padding: 0;
+    }
+    .manual-btn:hover { color: #cce; border-color: #6a8; }
+    .manual-btn:active { background: rgba(30, 40, 60, 0.85); }
+    .manual-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(5, 8, 24, 0.88);
+      cursor: pointer;
+    }
+    .manual-overlay[hidden] { display: none; }
+    .manual-popup {
+      cursor: auto;
+      background: var(--surface);
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      padding: 1rem 1.25rem 1.25rem;
+      min-width: 280px;
+      max-width: 420px;
+      width: 92%;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      overflow: hidden;
+    }
+    .manual-heading {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.75rem; font-weight: 600;
+      letter-spacing: 0.12em;
+      color: var(--signal-cyan);
+      text-transform: uppercase;
+    }
+    .manual-body { display: flex; flex-direction: column; gap: 0.6rem; overflow: hidden; }
+    .manual-tabs { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+    .manual-tab {
+      padding: 0.3rem 0.6rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.65rem; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      cursor: pointer;
+      border: 1px solid var(--edge); border-radius: 3px;
+      background: var(--surface2); color: var(--dim);
+      touch-action: manipulation;
+    }
+    .manual-tab.active {
+      background: #0a2830; border-color: var(--signal-cyan);
+      color: var(--signal-cyan);
+    }
+    .manual-panel-host { overflow-y: auto; max-height: 60vh; }
+    .manual-station-panel { display: flex; flex-direction: column; gap: 0.7rem; }
+    .manual-overview {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem; line-height: 1.5; color: #cce;
+      white-space: pre-wrap;
+    }
+    .manual-section {
+      display: flex; flex-direction: column; gap: 0.25rem;
+      border-top: 1px solid var(--edge); padding-top: 0.5rem;
+    }
+    .manual-section-heading {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.7rem; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--signal-cyan);
+    }
+    .manual-metric {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem; color: var(--dim);
+    }
+    .manual-automation-heading {
+      margin-top: 0.35rem;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.62rem; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--dim);
+    }
+    .manual-automation-row {
+      display: flex; gap: 0.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem; color: var(--dim);
+    }
+    .manual-rating-name { color: var(--signal-cyan); min-width: 5rem; }
+    .manual-rating-systems { flex: 1; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -1826,6 +1936,15 @@
             }),
             audioEl: document.getElementById('ui-click'),
             myToken: myToken,
+          });
+        }
+
+        // Mount the read-only ship manual (issue #772). The book button opens
+        // an overlay with a tab for every authored station; content is read
+        // from the replicated, non-authoritative simState.shipManual.
+        if (typeof window.mountManual === 'function') {
+          window.mountManual({
+            getManual: () => (window.simState ? window.simState.shipManual : null),
           });
         }
 

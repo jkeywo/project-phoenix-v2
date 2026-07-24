@@ -1,7 +1,7 @@
 entities:
   - role: ship-manual-reader
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Ship Manual Reader
       summary: Player consulting the ship-specific reference manual, organised into tabs for every station on the selected ship.
@@ -12,7 +12,7 @@ entities:
 
   - verb: open-ship-manual
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Open Ship Manual
       summary: Open a read-only ship manual with a tab for each authored station, including its overview and aggregated system sections.
@@ -25,7 +25,7 @@ entities:
 
   - information: ship-authored-station-help
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Ship-Authored Station Help
       summary: Author-written overview text explaining how to play each station on this particular ship.
@@ -37,7 +37,7 @@ entities:
 
   - information: system-generated-manual-detail
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: System-Generated Manual Detail
       summary: Each configured system supplies explanatory text calculated from the particular vessel's authored capabilities and values, including shield strength and which systems each station rating automates.
@@ -49,7 +49,7 @@ entities:
 
   - mechanic: aggregated-ship-station-manual
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Aggregated Ship Station Manual
       summary: A station manual combines ship-authored role overview text with generated sections from every system owned by that station. Generated sections reflect this vessel's capabilities and its authored rating-to-AI-control mapping.

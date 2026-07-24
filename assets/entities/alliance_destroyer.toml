@@ -397,6 +397,7 @@ description = "entity.alliance_destroyer.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/destroyer/captain.html"
+manual_overview = "You command the destroyer. Set the viewscreen, call Red Alert, and direct a four-seat crew through the fight. The destroyer is built to hit hard and turn fast, so keep Helm and Tactical coordinated and call your shots early. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
 name = "Std"
@@ -413,6 +414,7 @@ description = "entity.alliance_destroyer.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/destroyer/helm.html"
+manual_overview = "You fly the destroyer — a fast, agile hull that rewards aggressive flying. Throttle and steering set your line; lateral thrust slides you across a target's arc; boost and impulse close or break range in a hurry. Keep the omni phaser on target for Tactical. Simplified rating lets the AI hold lateral thrust."
 
 [[station.rating]]
 name = "Std"
@@ -429,6 +431,7 @@ description = "entity.alliance_destroyer.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
 console = "gui/destroyer/tactical.html"
+manual_overview = "You run the destroyer's weapons: an omni phaser, port and starboard blasters, and a torpedo tube. Lock your target, manage torpedo loading and volley size, and match phaser frequency to break enemy shields. With guns on multiple arcs, work with the Helm to keep something on target at all times. Simplified rating lets the AI auto-fire the omni phaser."
 
 [[station.rating]]
 name = "Std"
@@ -445,6 +448,7 @@ description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/destroyer/engineering.html"
+manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and sensors, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
 name = "Std"

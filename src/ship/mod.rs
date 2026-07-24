@@ -16,6 +16,7 @@ pub mod helm_planner;
 pub mod impulse;
 pub mod impulse_boost_systems;
 pub mod lateral_thrust;
+pub mod manual;
 pub mod physics;
 pub mod physics_systems;
 pub mod power;

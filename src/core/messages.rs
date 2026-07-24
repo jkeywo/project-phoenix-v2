@@ -1,5 +1,6 @@
 use crate::damage::DamageTier;
 pub use crate::entity_tags::EntityTag;
+pub use crate::ship::manual::ShipManualWire;
 use crate::stations_config::ShipStations;
 use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
@@ -1904,6 +1905,17 @@ pub enum ServerMessage {
     /// `updates` is a list of `(SystemId, SystemBlackboard)` pairs.
     BlackboardUpdate {
         updates: Vec<(SystemId, SystemBlackboard)>,
+    },
+    /// Read-only ship manual replicated to the phone client (issue #772).
+    ///
+    /// Fully determined by the selected ship's config, so it is published once
+    /// per client alongside `Welcome`. Carries one entry per authored station:
+    /// the station's authored overview prose plus generated, structured system
+    /// sections (numeric values + machine codes the client renders via `t()`).
+    /// The client treats it as presentation state only — it never mutates or
+    /// authors from it. See `crate::ship::manual`.
+    ShipManual {
+        manual: ShipManualWire,
     },
 }
 

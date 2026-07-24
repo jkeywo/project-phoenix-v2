@@ -98,7 +98,7 @@ entities:
 
   - component: ship-manual-content-builder
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Ship Manual Content Builder
       summary: Reads ship-authored per-station overview text and the authoritative configured topology to build a ship-specific player manual source.
@@ -109,48 +109,62 @@ entities:
       reads: [ship-station-system-topology-state]
       produces: [ship-authored-station-help-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/manual.rs, src/ship/config.rs]
+      tests: [cargo test]
 
   - state: ship-authored-station-help-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Ship-Authored Station Help State
-      summary: Per-station authored overview text explaining how to play this ship's version of each station.
+      summary: Per-station authored overview text (`[[station]] manual_overview`) explaining how to play this ship's version of each station — literal authored prose, the sanctioned authored-content exception, not a strings id.
     architecture:
       classification: authoritative
       owner: ship-manual-content-builder
       writers: [ship-manual-content-builder]
+    implementation:
+      status: declared
+      paths: [src/ship/config.rs, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml, assets/entities/alliance_battleship.toml]
 
   - component: system-manual-section-provider
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: System Manual Section Provider
-      summary: Per-system documentation provider that derives explanatory manual content from the configured system, its vessel-specific values, and station-rating automation mapping.
+      summary: Per-system-kind documentation provider registry that derives structured manual content (numeric values plus machine codes the client maps to string ids) from the configured system, its vessel-specific values, and the station-rating automation mapping. Issue #772 ships one provider (Shields); the registry is keyed by system kind so #773 slots in the remaining systems.
     architecture:
       kind: documentation-provider
       authority: derived
       reads: [ship-station-system-topology-state]
       produces: [system-manual-section-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/manual.rs, src/ship/rating.rs]
+      tests: [cargo test]
 
   - state: system-manual-section-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: System Manual Section State
-      summary: Generated player-facing documentation sections for the systems configured on the current ship.
+      summary: Generated player-facing documentation sections for the systems configured on the current ship — structured values plus machine codes only, never composed English.
     architecture:
       classification: derived
       owner: system-manual-section-provider
       writers: [system-manual-section-provider]
+    implementation:
+      status: declared
+      paths: [src/ship/manual.rs]
 
   - component: station-manual-aggregator
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Station Manual Aggregator
-      summary: Combines each station's ship-authored overview with the generated manual sections for the systems it owns.
+      summary: Combines each authored station's ship-authored overview with the generated manual sections for the systems it owns, at the same selected-ship / Welcome seam that already flows station data to the client.
     architecture:
       kind: documentation-aggregator
       authority: derived
@@ -158,41 +172,57 @@ entities:
       reads: [ship-authored-station-help-state, system-manual-section-state, ship-station-system-topology-state]
       produces: [ship-manual-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/manual.rs, src/lobby/server.rs]
+      tests: [cargo test]
 
   - state: ship-manual-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Ship Manual State
-      summary: Derived ship-specific manual with one station section per authored station, ready to replicate as read-only player reference content.
+      summary: Derived ship-specific manual with one station section per authored station, replicated read-only via the dedicated `ServerMessage::ShipManual` wire variant.
     architecture:
       classification: derived
       owner: station-manual-aggregator
       writers: [station-manual-aggregator]
       replicas: [ship-manual-replica]
+    implementation:
+      status: declared
+      paths: [src/ship/manual.rs, src/lobby/server.rs, src/core/messages.rs, src/core/codec.rs]
+      tests: [cargo test]
 
   - state: ship-manual-replica
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Ship Manual Replica
-      summary: Phone-client copy of the current ship manual, used only for player-facing reading and never as a source of authority.
+      summary: Phone-client copy of the current ship manual, stored as read-only presentation state and used only for player-facing reading — never mutated and never a source of authority.
     architecture:
       classification: replicated
       owner: station-manual-aggregator
       derived_from: [ship-manual-state]
+    implementation:
+      status: declared
+      paths: [gui/sim-state.js]
+      tests: [npx vitest run]
 
   - component: client-ship-manual-surface
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Client Ship Manual Surface
-      summary: Read-only client manual with tabs for every authored station, showing the ship-authored overview followed by generated vessel-specific system sections.
+      summary: Read-only client manual (book button + overlay) with tabs for every authored station, showing the ship-authored overview followed by generated vessel-specific system sections. Labels resolve through the string table via t(); the surface never sends or dispatches.
     architecture:
       kind: client-documentation-surface
       authority: non-authoritative
       reads: [ship-manual-replica, client-presentation-state]
       runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [gui/manual-panel.js, client.html, assets/strings/strings.csv]
+      tests: [npx vitest run]
 
   - component: client-station-rating-control
     core:

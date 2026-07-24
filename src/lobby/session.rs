@@ -337,6 +337,7 @@ mod tests {
                     short_code: station.short_code,
                     ratings: vec![],
                     console: None,
+                    manual_overview: None,
                 })
                 .collect(),
             systems: vec![SystemInstanceConfig {

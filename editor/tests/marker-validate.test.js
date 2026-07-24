@@ -96,6 +96,28 @@ describe('collectMarkerRefs', () => {
       'blaster_fore_starboard',
     ]);
   });
+
+  it('emits one reference per authored torpedo barrel marker (issue #766)', () => {
+    const refs = collectMarkerRefs(
+      entity({
+        torpedoes: {
+          tubes: [
+            { id: 'centre', marker: 'torpedo_centre', barrels: ['torpedo_centre_port', 'torpedo_centre_starboard'] },
+          ],
+        },
+      }),
+    );
+    expect(refs.map((r) => r.path)).toEqual([
+      'torpedoes.tubes[0].marker',
+      'torpedoes.tubes[0].barrels[0]',
+      'torpedoes.tubes[0].barrels[1]',
+    ]);
+    expect(refs.map((r) => r.name)).toEqual([
+      'torpedo_centre',
+      'torpedo_centre_port',
+      'torpedo_centre_starboard',
+    ]);
+  });
 });
 
 describe('validateEntityMarkers — representative systems, success and failure', () => {

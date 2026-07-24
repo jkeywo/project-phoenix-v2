@@ -6584,6 +6584,121 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
     );
 }
 
+/// Patterned launch (issue #766): `handle_fire_torpedo` resolves the immediate
+/// round's origin from the authored barrel marker (not ship centre), and the
+/// tube surfaces the active pattern step/barrel for the Tactical indicator.
+#[test]
+fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
+    use crate::entity_spawner::EntityUuid;
+    use crate::model_rig::{Marker, ModelMarkers};
+    use bevy::ecs::system::RunSystemOnce;
+    use std::collections::HashMap;
+
+    let mut app = test_app();
+
+    // Alternating two-barrel pattern on a fresh tube.
+    let tube_cfg = crate::entities::config::TorpedoTubeConfig {
+        id: "fore-centre".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 90.0,
+        load_time: None,
+        marker: None,
+        barrels: vec!["tp_port".into(), "tp_starboard".into()],
+        pattern: vec![
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![0],
+                offset_secs: 0.0,
+            },
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![1],
+                offset_secs: 0.5,
+            },
+        ],
+        volley_max: 3,
+        ai_target_count: None,
+    };
+    let mut torp =
+        crate::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
+    torp.torpedoes_remaining -= 2;
+    torp.tube_mut("fore-centre").unwrap().loaded_count = 2;
+
+    // Distinct barrel-marker positions (identity base) so the origin's X
+    // identifies the barrel: port at +3, starboard at -3.
+    let mut markers = HashMap::new();
+    markers.insert(
+        "tp_port".to_string(),
+        Marker {
+            position: [3.0, 0.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
+        },
+    );
+    markers.insert(
+        "tp_starboard".to_string(),
+        Marker {
+            position: [-3.0, 0.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
+        },
+    );
+    let mm = ModelMarkers::from_markers(markers);
+
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid("shooter".into()),
+            crate::ship_plugin::ShipSystemControlSources(
+                crate::ship::control_source::ControlSourceResolver::new(),
+            ),
+            ShipPhysics::default(),
+            mm,
+            TorpedoSystemResource(torp),
+            crate::server_app::WeaponFiredThisTick::default(),
+            AdmittedCommands(vec![AdmittedCommand {
+                target: SystemId("torpedo-tube-fore-centre".into()),
+                payload: SystemControlPayload::FireTorpedo { target_uuid: None },
+                response_token: None,
+            }]),
+            crate::server_app::ShipSystemBlackboards::default(),
+            bevy::prelude::Transform::default(),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(handle_fire_torpedo)
+        .expect("handle_fire_torpedo should run");
+
+    // The immediate round left from barrel 0 (tp_port at x = +3), NOT ship
+    // centre (x = 0).
+    let launched: Vec<(f32, f32)> = app
+        .world()
+        .resource::<SimOutbox>()
+        .0
+        .iter()
+        .filter_map(|(_, m)| match m {
+            ServerMessage::TorpedoLaunched { tube, x, z, .. } if tube == "fore-centre" => {
+                Some((*x, *z))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(launched.len(), 1, "one immediate launch broadcast");
+    assert!(
+        (launched[0].0 - 3.0).abs() < 1e-4,
+        "immediate round must leave from barrel 0's marker (x=+3), got {}",
+        launched[0].0
+    );
+
+    // The tube surfaces the active patterned attack.
+    let ts = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .expect("ship keeps its torpedo component");
+    let tube = ts.0.tube("fore-centre").unwrap();
+    assert_eq!(tube.active_barrels, vec![0]);
+    assert_eq!(tube.pattern_step, 1);
+    assert_eq!(tube.pattern_len(), 2);
+}
+
 /// Issue #698 promotion: `ai_torpedo_auto_fire` used to hardcode
 /// `TorpedoAiInput { target_facing_shields: 0 }`, which made
 /// `auto_fire_torpedo`'s "shields must be down" condition unreachable — the AI
@@ -8126,6 +8241,8 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
             fire_arc_deg: 90.0,
             load_time: None,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
         }],

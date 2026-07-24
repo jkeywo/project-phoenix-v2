@@ -6,6 +6,7 @@ import { validateWorldReferences } from './world-references.js';
 import { validateWorldReferencesIndexed } from './world-references-indexed.js';
 import { validateEntityMarkers } from './marker-validate.js';
 import { validateBlasterBanks } from './blaster-validate.js';
+import { validateTorpedoTubes } from './torpedo-validate.js';
 
 /**
  * Pure admission primitive (issue #757). Mirrors the Rust atomic-activation
@@ -206,6 +207,13 @@ export function validateFile(filePath, parsedContent, context = null) {
     // `validate_blaster_banks` in src/entities/config.rs. Errors block save.
     if (parsedContent.weapons_console?.blaster_banks) {
       results.push(...validateBlasterBanks(parsedContent.weapons_console.blaster_banks));
+    }
+
+    // Torpedo barrel-pattern schema (issue #766): same barrel-index / per-step /
+    // offset checks, mirroring `validate_torpedo_tubes` in
+    // src/entities/config.rs. Errors block save via the #757 admission gate.
+    if (parsedContent.torpedoes?.tubes) {
+      results.push(...validateTorpedoTubes(parsedContent.torpedoes.tubes));
     }
 
     // Model-marker contract (issue #758). Cross-file: the entity's `[mesh]`

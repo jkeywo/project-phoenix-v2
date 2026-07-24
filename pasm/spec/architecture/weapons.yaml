@@ -221,8 +221,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/entities/config.rs]
-      symbols: [TorpedoSystem, build_torpedo_target_snapshot, tick_torpedo_lifecycle, TorpedoesConfig]
+      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/entities/config.rs]
+      symbols: [TorpedoSystem, TorpedoTube, build_torpedo_target_snapshot, tick_torpedo_lifecycle, handle_fire_torpedo, launch_with_barrels, TorpedoesConfig]
       tests: [cargo test]
 
   - state: torpedo-state
@@ -238,7 +238,7 @@ entities:
     implementation:
       status: declared
       paths: [src/weapons/torpedo.rs]
-      symbols: [TorpedoSystem]
+      symbols: [TorpedoSystem, TorpedoTube, TubeBurstState]
       tests: [cargo test]
 
   - component: tactical-weapons-projection
@@ -291,6 +291,7 @@ entities:
         - "Authoring validation, both twins (AC1/AC3). `validate_barrel_pattern` (rejects empty step, barrel index >= barrel count, negative/non-finite offset, multi-barrel-with-no-pattern) is called by `validate_blaster_banks` (Rust) and mirrored by `editor/blaster-validate.js` wired into `validateFile`, so an invalid pattern blocks save via the #757 admission gate. Per-barrel marker references are emitted by `collect_marker_refs` / `collectMarkerRefs`, so a missing barrel marker is rejected by the shipped-asset conformance test and the editor."
         - "Firing carries barrel identity (AC2). `BlasterSystem::tick` takes one world origin per barrel (`barrel_origins`), resolved by `tick_blaster_system` from each barrel's rig marker, and emits one `LaunchEvent { barrel, x, z, heading }` per firing barrel, so simultaneous steps launch multiple bolts from distinct authored points on one tick and alternating steps launch from the right origin each step."
         - "Blackboard + Tactical (AC4). `BlasterBankState` gains `active_barrels`, `pattern_step`, `pattern_len`; `ph-blasters-controls.js` renders a step/barrel indicator (string ids `component.blasters.pattern_step`/`.barrels`). Round-tripped in `codec.rs`."
+        - "Torpedo half preserves the ammunition economy (issue #766, AC3). Torpedoes reuse the SAME `src/weapons/pattern.rs` schema and `validate_barrel_pattern` (called by `validate_torpedo_tubes`, mirrored by `editor/torpedo-validate.js`). The pattern maps onto the EXISTING `launch`/`TubeBurstState` burst machinery: `TorpedoTube::barrel_sequence` flattens the offset-ordered steps into a `(barrel, step)` list and each volley round — the immediate `launch_with_barrels` shot plus every burst shot in `tick_torpedo_lifecycle` — draws its origin from the next barrel, cycling. The pattern governs ONLY which barrel a round leaves from and the barrel order; `loaded_count`, the shared `torpedoes_remaining` magazine, and `burst_interval_secs` stay the sole authority over the count. Magazine spend still happens at LOAD time (`start_load`/`claim_magazine_round`), never at launch. Timing rule: `burst_interval_secs` remains the sole cadence between rounds; the pattern's `offset_secs` only orders the barrel sequence. A 2-barrel simultaneous step with 1 round loaded fires exactly 1 torpedo and leaves the magazine untouched (`launch_does_not_change_torpedo_count` still holds). `handle_fire_torpedo` resolves per-barrel world origins from the tube's rig markers (falling back to ship centre for legacy single-marker tubes); `TorpedoTubeState`/`ph-torpedo-controls.js` surface `active_barrels`/`pattern_step`/`pattern_len`. `alliance_battleship`'s fore-centre tube authors a real twin-barrel pattern."
     architecture:
       kind: configuration-schema
       authority: authoritative
@@ -300,19 +301,27 @@ entities:
       paths:
         - src/weapons/pattern.rs
         - src/weapons/blaster.rs
+        - src/weapons/torpedo.rs
         - src/entities/config.rs
         - src/entities/marker_validate.rs
         - src/console/weapons/blaster.rs
+        - src/console/weapons/torpedo.rs
         - src/core/messages.rs
         - editor/blaster-validate.js
+        - editor/torpedo-validate.js
         - editor/marker-validate.js
         - gui/components/ph-blasters-controls.js
+        - gui/components/ph-torpedo-controls.js
       symbols:
         - BarrelPatternStep
         - BarrelPattern
         - validate_barrel_pattern
         - validate_blaster_banks
         - validateBlasterBanks
+        - validate_torpedo_tubes
+        - validateTorpedoTubes
+        - launch_with_barrels
+        - barrel_sequence
       tests: [cargo test, npx vitest run]
 
   - component: weapon-readiness-feedback-policy

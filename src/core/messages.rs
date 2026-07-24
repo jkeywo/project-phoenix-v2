@@ -368,6 +368,20 @@ pub struct TorpedoTubeState {
     /// Shared readiness + blocking-reason contract (issue #764).
     #[serde(default)]
     pub readiness: WeaponReadiness,
+    /// Barrel indices the most recently launched round left from (issue #766).
+    /// One entry per shot (torpedoes fire one-per-burst). Empty when the tube
+    /// is idle or has no multi-barrel pattern. Drives the Tactical barrel/step
+    /// indicator.
+    #[serde(default)]
+    pub active_barrels: Vec<u32>,
+    /// 1-based index of the current pattern step (0 when idle). With
+    /// `pattern_len` this renders as "step N/M" for a patterned attack.
+    #[serde(default)]
+    pub pattern_step: u32,
+    /// Total number of steps in this tube's authored firing pattern (issue
+    /// #766). 0 when the tube has no multi-barrel pattern (single-barrel tube).
+    #[serde(default)]
+    pub pattern_len: u32,
 }
 
 fn default_tube_volley_max_wire() -> u32 {

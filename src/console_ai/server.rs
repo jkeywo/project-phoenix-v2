@@ -2700,6 +2700,8 @@ station = "sensors"
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
                 volley_max: 2,
                 ai_target_count: None,
             }],

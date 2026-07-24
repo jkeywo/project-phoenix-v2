@@ -415,6 +415,9 @@ mod tests {
                         target_count: 3,
                         load_progress: 1.0,
                         readiness: WeaponReadiness::default(),
+                        active_barrels: Vec::new(),
+                        pattern_step: 0,
+                        pattern_len: 0,
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
@@ -1339,9 +1342,48 @@ mod tests {
                 target_count: 4,
                 load_progress: 0.65,
                 readiness: WeaponReadiness::default(),
+                // Patterned attack in progress (issue #766): step 2 of 3,
+                // barrel 1 firing this round.
+                active_barrels: vec![1],
+                pattern_step: 2,
+                pattern_len: 3,
             }],
             torpedo_count: 8,
             phaser_mode: PhaserMode::Auto,
+            blasters: vec![],
+            phaser_frequency: 0.5,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    /// `TorpedoTubeState` patterned-attack fields round-trip (issue #766).
+    #[test]
+    fn torpedo_tube_state_pattern_fields_round_trip() {
+        use crate::messages::{PhaserMode, TorpedoTubeState, WeaponReadiness};
+        let msg = ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            target_name: None,
+            banks: vec![],
+            tubes: vec![TorpedoTubeState {
+                id: "fore-centre".to_string(),
+                loaded: true,
+                reload_secs: 0.0,
+                state: "loaded".into(),
+                progress: 1.0,
+                load_time: 3.0,
+                volley_max: 3,
+                loaded_count: 3,
+                target_count: 3,
+                load_progress: 1.0,
+                readiness: WeaponReadiness::default(),
+                // Patterned attack: step 2 of 3, barrel 1 active this round.
+                active_barrels: vec![1],
+                pattern_step: 2,
+                pattern_len: 3,
+            }],
+            torpedo_count: 27,
+            phaser_mode: PhaserMode::Manual,
             blasters: vec![],
             phaser_frequency: 0.5,
         };
@@ -1390,6 +1432,9 @@ mod tests {
                     target_range: Some(100.0),
                     target_arc: Some(10.0),
                 },
+                active_barrels: Vec::new(),
+                pattern_step: 0,
+                pattern_len: 0,
             }],
             torpedo_count: 4,
             phaser_mode: PhaserMode::Manual,

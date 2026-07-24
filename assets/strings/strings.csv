@@ -439,6 +439,8 @@ component.shield_panel.integrity,"Shield panel label for overall integrity bar",
 component.shield_panel.focus,"Shield focus readout. {name} is the focused facing","[FOCUS: {name}]"
 component.torpedoes.title,"Torpedo controls panel heading","[TORPEDOES]"
 component.torpedoes.empty,"Torpedo controls when the ship has no torpedo tubes","[NO TORPEDO TUBES]"
+component.torpedoes.pattern_step,"Torpedo patterned-attack step indicator (step number of total)","[STEP {step}/{total}]"
+component.torpedoes.barrels,"Torpedo patterned-attack active-barrel indicator listing firing barrel indices","[BARRELS {barrels}]"
 component.boost.binding,"Boost control key-binding hint (Shift key or gamepad A)","[HOLD SHIFT · A]"
 component.impulse.binding,"Impulse control key-binding hint (Ctrl key or gamepad B)","[CTRL · B]"
 console.stance.friendly,"Contact stance badge on the comms contact list","[FRIENDLY]"

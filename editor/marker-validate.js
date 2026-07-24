@@ -116,6 +116,27 @@ export function collectMarkerRefs(parsed) {
     }
   }
 
+  // Per-barrel torpedo markers (issue #766): each authored barrel-marker name
+  // is its own reference, mirroring the blaster loop above.
+  const torpedoTubes = parsed.torpedoes?.tubes;
+  if (Array.isArray(torpedoTubes)) {
+    for (let i = 0; i < torpedoTubes.length; i++) {
+      const entry = torpedoTubes[i];
+      const barrels = entry && Array.isArray(entry.barrels) ? entry.barrels : null;
+      if (!barrels) continue;
+      for (let b = 0; b < barrels.length; b++) {
+        const name = typeof barrels[b] === 'string' ? barrels[b].trim() : '';
+        if (!name) continue;
+        refs.push({
+          role: 'weapon',
+          owner: `Torpedo tube "${entry.id ?? i}" barrel ${b}`,
+          name,
+          path: `torpedoes.tubes[${i}].barrels[${b}]`,
+        });
+      }
+    }
+  }
+
   const pfxMarkers = parsed.helm_console?.engine_pfx?.markers;
   if (Array.isArray(pfxMarkers)) {
     for (let i = 0; i < pfxMarkers.length; i++) {

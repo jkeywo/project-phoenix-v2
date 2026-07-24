@@ -277,6 +277,9 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
                 target_count: t.target_count,
                 load_progress: t.load_progress(),
                 readiness,
+                active_barrels: t.active_barrels.clone(),
+                pattern_step: t.pattern_step,
+                pattern_len: t.pattern_len(),
             }
         })
         .collect();
@@ -599,6 +602,9 @@ fn build_tube_states(
                 target_count: t.target_count,
                 load_progress: t.load_progress(),
                 readiness,
+                active_barrels: t.active_barrels.clone(),
+                pattern_step: t.pattern_step,
+                pattern_len: t.pattern_len(),
             }
         })
         .collect()

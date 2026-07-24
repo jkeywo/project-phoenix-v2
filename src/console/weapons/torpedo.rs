@@ -265,6 +265,8 @@ pub(crate) fn handle_fire_torpedo(
         (
             &ShipSystemControlSources,
             &ShipPhysics,
+            &Transform,
+            Option<&crate::model_rig::ModelMarkers>,
             &AdmittedCommands,
             Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&crate::entity_spawner::EntityUuid>,
@@ -280,6 +282,8 @@ pub(crate) fn handle_fire_torpedo(
     for (
         control_sources,
         physics,
+        transform,
+        markers_opt,
         admitted,
         blackboards_opt,
         source_uuid_opt,
@@ -365,10 +369,30 @@ pub(crate) fn handle_fire_torpedo(
                 _ => None,
             };
             let homing_uuid: Option<String> = combat_lock.or_else(|| target_uuid.clone());
+            // Resolve one world-XZ origin per authored barrel marker (issue
+            // #766), mirroring `tick_blaster_system`. A tube with no barrels
+            // authored yields an empty slice, so `launch_with_barrels` falls
+            // back to the ship-centre origin — the pre-#766 behaviour, so
+            // shipped single-marker torpedo hulls are unchanged. Each barrel
+            // marker resolves via the rig; an unresolved marker falls back to
+            // ship centre.
+            let barrel_origins: Vec<(f32, f32)> = torpedo_sys
+                .tube(tube_id.as_str())
+                .map(|t| t.barrels.clone())
+                .unwrap_or_default()
+                .iter()
+                .map(|name| {
+                    markers_opt
+                        .and_then(|m| m.resolve_world_position(transform, name))
+                        .map(|pos| (pos.x, pos.z))
+                        .unwrap_or((physics.x, physics.z))
+                })
+                .collect();
             use crate::torpedo::LaunchResult;
-            let result = torpedo_sys.launch(
+            let result = torpedo_sys.launch_with_barrels(
                 tube_id.as_str(),
                 uuid.clone(),
+                &barrel_origins,
                 physics.x,
                 physics.z,
                 launch_heading,
@@ -381,6 +405,16 @@ pub(crate) fn handle_fire_torpedo(
                     ..
                 } => {
                     any_fired = true;
+                    // The immediate torpedo's real spawn origin (barrel marker
+                    // or ship centre) so the broadcast matches the sim. Burst
+                    // rounds carry their own origins via `burst_launched`.
+                    let (launch_x, launch_z) = torpedo_sys
+                        .in_flight
+                        .iter()
+                        .rev()
+                        .find(|t| t.uuid == launched_uuid)
+                        .map(|t| (t.x, t.z))
+                        .unwrap_or((physics.x, physics.z));
                     if let Some(ref mut msgs) = balance_events {
                         msgs.write(crate::balance::BalanceEvent::WeaponFired {
                             shooter: source_uuid.clone().filter(|u| !u.is_empty()),
@@ -393,8 +427,8 @@ pub(crate) fn handle_fire_torpedo(
                         ServerMessage::TorpedoLaunched {
                             uuid: launched_uuid,
                             tube: tube_id.clone(),
-                            x: physics.x,
-                            z: physics.z,
+                            x: launch_x,
+                            z: launch_z,
                             heading: launch_heading,
                         },
                     ));

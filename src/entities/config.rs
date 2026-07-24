@@ -1204,9 +1204,25 @@ pub struct TorpedoTubeConfig {
     pub load_time: Option<f32>,
     /// Optional rig-marker name linking this tube to a mount point in the
     /// model's rig sidecar (`[markers.<name>]`). When absent or unresolved,
-    /// callers fall back to the ship-centre launch origin.
+    /// callers fall back to the ship-centre launch origin. In the single-barrel
+    /// (backward-compat) case this is the sole launch origin.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Authored barrel-marker names (issue #766). Each entry is a rig-marker
+    /// name; a barrel-index pattern step addresses these by position. When
+    /// empty the tube has one implicit barrel = `marker` (unchanged behaviour).
+    /// Reuses the exact schema blasters wired in issue #765.
+    #[serde(default)]
+    pub barrels: Vec<String>,
+    /// Timed multi-barrel firing pattern (issue #766). A step lists barrel
+    /// indices; successive steps at increasing offsets order the barrels a
+    /// volley's rounds leave from. The pattern governs only WHICH barrel each
+    /// launched round leaves from and in what order — never how many rounds
+    /// exist: the magazine, `loaded_count`, and the burst cadence remain the
+    /// sole authority over the torpedo count. When empty the tube launches
+    /// from the single implicit barrel exactly as before.
+    #[serde(default)]
+    pub pattern: crate::weapons::pattern::BarrelPattern,
     /// Maximum number of torpedoes that can be loaded into this tube at once
     /// (volley capacity). Default `1` preserves existing single-shot
     /// behaviour. Values greater than 1 allow the tube to queue multiple
@@ -1305,7 +1321,14 @@ pub fn validate_blaster_banks(banks: &[BlasterBankConfig]) -> Result<(), String>
 
 /// Validate a `[[torpedoes.tubes]]` list parsed from TOML.
 ///
-/// Rejects: empty list, duplicate `id`, `fire_arc_deg` outside `(0, 360]`.
+/// Rejects: empty list, duplicate `id`, `fire_arc_deg` outside `(0, 360]`, and
+/// (issue #766) a barrel pattern that fires no barrels in a step, references a
+/// barrel index beyond the declared barrel count, uses a negative offset, or is
+/// omitted while more than one barrel is declared (see
+/// [`crate::weapons::pattern::validate_barrel_pattern`]).
+///
+/// The barrel count is the authored `barrels.len()`, or `1` for the implicit
+/// single-barrel (backward-compat) tube.
 pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String> {
     if tubes.is_empty() {
         return Err("torpedo tubes list is empty".into());
@@ -1321,6 +1344,16 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
                 t.id, t.fire_arc_deg
             ));
         }
+        let barrel_count = if t.barrels.is_empty() {
+            1
+        } else {
+            t.barrels.len()
+        };
+        crate::weapons::pattern::validate_barrel_pattern(
+            &format!("torpedo tube '{}'", t.id),
+            barrel_count,
+            &t.pattern,
+        )?;
     }
     Ok(())
 }
@@ -4838,6 +4871,8 @@ fire_arc_deg = 90.0
             fire_arc_deg: 90.0,
             load_time: None,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
         }];
@@ -5032,6 +5067,8 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
             },
@@ -5041,6 +5078,8 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
             },
@@ -5063,6 +5102,8 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
             },
@@ -5072,6 +5113,8 @@ count = 10
                 fire_arc_deg: 90.0,
                 load_time: None,
                 marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
             },
@@ -5089,11 +5132,130 @@ count = 10
             fire_arc_deg: 0.0,
             load_time: None,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));
+    }
+
+    // ── Torpedo tube barrel-pattern validation (issue #766) ──────────────────
+
+    fn torpedo_tube(id: &str) -> TorpedoTubeConfig {
+        TorpedoTubeConfig {
+            id: id.into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 90.0,
+            load_time: None,
+            marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
+            volley_max: 1,
+            ai_target_count: None,
+        }
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_accepts_legacy_single_barrel() {
+        // No barrels + no pattern is the backward-compat single-barrel tube.
+        assert!(validate_torpedo_tubes(&[torpedo_tube("fore")]).is_ok());
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_accepts_valid_pattern() {
+        let mut t = torpedo_tube("fore");
+        t.barrels = vec!["b0".into(), "b1".into()];
+        t.pattern = vec![
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![0],
+                offset_secs: 0.0,
+            },
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![0, 1],
+                offset_secs: 0.3,
+            },
+        ];
+        assert!(validate_torpedo_tubes(&[t]).is_ok());
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_barrel_index_out_of_range() {
+        let mut t = torpedo_tube("fore");
+        t.barrels = vec!["b0".into(), "b1".into()];
+        t.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![2], // only 0,1 exist
+            offset_secs: 0.0,
+        }];
+        let err = validate_torpedo_tubes(&[t]).unwrap_err();
+        assert!(err.contains("barrel index 2"), "{err}");
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_negative_offset() {
+        let mut t = torpedo_tube("fore");
+        t.barrels = vec!["b0".into()];
+        t.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![0],
+            offset_secs: -0.5,
+        }];
+        let err = validate_torpedo_tubes(&[t]).unwrap_err();
+        assert!(err.contains("offset_secs"), "{err}");
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_empty_step() {
+        let mut t = torpedo_tube("fore");
+        t.barrels = vec!["b0".into()];
+        t.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![],
+            offset_secs: 0.0,
+        }];
+        assert!(validate_torpedo_tubes(&[t]).is_err());
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_multi_barrel_without_pattern() {
+        let mut t = torpedo_tube("fore");
+        t.barrels = vec!["b0".into(), "b1".into()];
+        // No pattern: under-specified for >1 barrel.
+        let err = validate_torpedo_tubes(&[t]).unwrap_err();
+        assert!(err.contains("pattern"), "{err}");
+    }
+
+    #[test]
+    fn every_shipped_torpedo_tube_config_validates() {
+        // The authoring gate the editor enforces must hold for shipped hulls.
+        let mut problems: Vec<String> = Vec::new();
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities exists");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let cfg: EntityConfig = match toml::from_str(&text) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let Some(torpedoes) = cfg.torpedoes.as_ref() else {
+                continue;
+            };
+            if torpedoes.tubes.is_empty() {
+                continue;
+            }
+            if let Err(e) = validate_torpedo_tubes(&torpedoes.tubes) {
+                problems.push(format!("{}: {e}", path.display()));
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "shipped torpedo tubes invalid: {problems:?}"
+        );
     }
 
     // ── Blaster bank validation (issue #765) ─────────────────────────────────

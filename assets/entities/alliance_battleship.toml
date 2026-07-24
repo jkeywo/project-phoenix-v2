@@ -294,12 +294,34 @@ load_time = 3
 volley_max = 3
 marker = "torpedo_starboard"
 
+# Patterned spinal launcher (issue #766): twin fore barrels with a timed
+# barrel pattern. The pattern orders which barrel each loaded round leaves
+# from — alternating port/starboard, then a both-barrel step — while the
+# magazine, loaded_count and burst_interval stay the sole authority over how
+# many rounds actually fire:
+#   round 0 → barrel 0 (port)
+#   round 1 → barrel 1 (starboard)
+#   round 2 → barrel 0, round 3 → barrel 1 (the [0,1] step's barrels, one
+#            per loaded round — a torpedo leaves one barrel per burst tick)
 [[torpedoes.tubes]]
 id = "fore-centre"
 facing_deg = 0
 fire_arc_deg = 90
 load_time = 3
 volley_max = 3
+barrels = [ "torpedo_centre_port", "torpedo_centre_starboard" ]
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 0 ]
+offset_secs = 0.0
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 1 ]
+offset_secs = 0.5
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 0, 1 ]
+offset_secs = 1.0
 
 [[torpedoes.tubes]]
 id = "aft-port"

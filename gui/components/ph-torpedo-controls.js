@@ -59,6 +59,8 @@ export class PhTorpedoControls extends HTMLElement {
       background: linear-gradient(0deg, var(--loaded) 0%, #7ee29a 100%);
       transition: height 0.15s linear;
     }
+    .pattern-row { display: flex; gap: 0.5rem; padding-left: 4.5rem; font-size: 0.5rem; letter-spacing: 0.15em; color: var(--reloading); }
+    .pattern-row.idle { display: none; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
@@ -137,7 +139,19 @@ export class PhTorpedoControls extends HTMLElement {
     controls.appendChild(fireBtn);
     row.appendChild(controls);
 
-    return { row, lbl, status, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [] };
+    // Patterned-attack indicator (issue #766): current pattern step + active
+    // barrels. Hidden unless the tube has a multi-barrel pattern.
+    const patternRow = document.createElement('div');
+    patternRow.className = 'pattern-row idle';
+    const stepEl = document.createElement('span');
+    stepEl.className = 'pattern-step';
+    const barrelsEl = document.createElement('span');
+    barrelsEl.className = 'pattern-barrels';
+    patternRow.appendChild(stepEl);
+    patternRow.appendChild(barrelsEl);
+    row.appendChild(patternRow);
+
+    return { row, lbl, status, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [], patternRow };
   }
 
   // Rebuild slot <div> elements when volley_max changes.
@@ -261,6 +275,28 @@ export class PhTorpedoControls extends HTMLElement {
       els.fireBtn.disabled = !canFire;
       els.fireBtn.className = canFire ? 'btn armed' : 'btn disabled';
       els.fireBtn.querySelector('.led').className = 'led' + (canFire ? ' on' : '');
+
+      // Patterned-attack indicator (issue #766). `pattern_len > 0` marks a
+      // multi-barrel patterned tube; show which step is active and which
+      // barrel(s) most recently fired.
+      const patternRow = els.patternRow;
+      const patternLen = Number(tube.pattern_len || 0);
+      const patternStep = Number(tube.pattern_step || 0);
+      const activeBarrels = Array.isArray(tube.active_barrels) ? tube.active_barrels : [];
+      if (patternLen > 0 && patternStep > 0) {
+        patternRow.className = 'pattern-row';
+        patternRow.querySelector('.pattern-step').textContent = t('component.torpedoes.pattern_step', {
+          step: patternStep,
+          total: patternLen,
+        });
+        patternRow.querySelector('.pattern-barrels').textContent = activeBarrels.length
+          ? t('component.torpedoes.barrels', { barrels: activeBarrels.join(',') })
+          : '';
+      } else {
+        patternRow.className = 'pattern-row idle';
+        patternRow.querySelector('.pattern-step').textContent = '';
+        patternRow.querySelector('.pattern-barrels').textContent = '';
+      }
     });
   }
 }

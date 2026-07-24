@@ -240,6 +240,16 @@ pub fn collect_marker_refs(config: &EntityConfig) -> Vec<MarkerRef> {
                     name,
                 ));
             }
+            // Each authored barrel marker (issue #766) is its own reference, so
+            // a missing or incompatible barrel marker is rejected exactly like
+            // the single `marker`.
+            for (i, name) in tube.barrels.iter().enumerate() {
+                refs.push(MarkerRef::new(
+                    MarkerRole::Weapon,
+                    format!("torpedo tube '{}' barrel {i}", tube.id),
+                    name,
+                ));
+            }
         }
     }
 
@@ -565,6 +575,38 @@ marker = "torpedo_port"
             "{}",
             findings[0].message
         );
+    }
+
+    #[test]
+    fn torpedo_barrel_markers_validated_per_barrel() {
+        // Two authored barrels + a pattern; one barrel marker is misspelled.
+        let body = r##"
+[[torpedoes.tubes]]
+id = "twin"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+barrels = [ "torpedo_port", "torpedo_nose" ]
+[[torpedoes.tubes.pattern]]
+barrels = [ 0 ]
+offset_secs = 0.0
+[[torpedoes.tubes.pattern]]
+barrels = [ 1 ]
+offset_secs = 0.2
+"##;
+        let (toml, cfg) = entity(body);
+        let findings = validate_entity_markers("f.toml", &toml, &cfg, Some(&rig()));
+        // `torpedo_port` resolves; `torpedo_nose` does not.
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, CATEGORY_MISSING);
+        assert!(
+            findings[0].message.contains("torpedo tube 'twin' barrel 1"),
+            "{}",
+            findings[0].message
+        );
+
+        // Both barrels valid → clean.
+        let (toml, cfg) = entity(&body.replace("torpedo_nose", "torpedo_port"));
+        assert!(validate_entity_markers("f.toml", &toml, &cfg, Some(&rig())).is_empty());
     }
 
     #[test]

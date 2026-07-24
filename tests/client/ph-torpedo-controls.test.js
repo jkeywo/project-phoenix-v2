@@ -287,4 +287,41 @@ describe('PhTorpedoControls', () => {
     expect(el.shadowRoot.querySelectorAll('.tube-row').length).toBe(1);
     expect(el.shadowRoot.querySelector('.tube-row').dataset.id).toBe('fore_port');
   });
+
+  // ── Patterned multi-barrel attack indicator (issue #766) ──────────────
+  it('renders the active patterned attack step and barrels', () => {
+    const { el } = setup();
+    el.state = {
+      tubes: [
+        {
+          id: 'fore-centre',
+          volley_max: 3,
+          loaded_count: 2,
+          target_count: 3,
+          pattern_len: 2,
+          pattern_step: 1,
+          active_barrels: [0],
+        },
+      ],
+      magazine: { current: 6, max: 20 },
+    };
+    const patternRow = tubeRow(el, 'fore-centre').querySelector('.pattern-row');
+    expect(patternRow.classList.contains('idle')).toBe(false);
+    expect(queryText(el, '.pattern-step')).toBe(
+      t('component.torpedoes.pattern_step', { step: 1, total: 2 }),
+    );
+    expect(queryText(el, '.pattern-barrels')).toBe(
+      t('component.torpedoes.barrels', { barrels: '0' }),
+    );
+  });
+
+  it('hides the pattern indicator for a legacy single-barrel tube', () => {
+    const { el } = setup();
+    el.state = {
+      tubes: [{ id: 'fore_port', volley_max: 1, loaded_count: 1, target_count: 1, pattern_len: 0 }],
+      magazine: { current: 6, max: 20 },
+    };
+    const patternRow = tubeRow(el, 'fore_port').querySelector('.pattern-row');
+    expect(patternRow.classList.contains('idle')).toBe(true);
+  });
 });

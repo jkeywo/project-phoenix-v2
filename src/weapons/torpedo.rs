@@ -13,6 +13,7 @@
 //! Coordinate system: same as `ship_physics` / `radar` Ã¢â‚¬â€ XZ plane, Y-up.
 //! Ship forward is Ã¢Ë†â€™Z when yaw = 0.
 
+use crate::weapons::pattern::BarrelPattern;
 use std::f32::consts::PI;
 
 /// String identifier for a torpedo tube (matches the `id` field in TOML).
@@ -196,6 +197,23 @@ pub struct TorpedoTube {
     /// it is never applied to `target_count` directly, so AI and human
     /// loading share one code path.
     pub ai_target_count: u32,
+    /// Authored barrel-marker names (issue #766). Empty ⇒ one implicit barrel
+    /// = the tube's single `marker`. A [`pattern`](Self::pattern) step
+    /// addresses these by index. Threaded from `TorpedoTubeConfig::barrels`.
+    pub barrels: Vec<String>,
+    /// Timed multi-barrel firing pattern (issue #766). Governs only WHICH
+    /// authored barrel each launched round leaves from, and the order barrels
+    /// cycle through the volley — NOT how many rounds fire. `loaded_count`, the
+    /// magazine, and the burst cadence stay the sole authority over the count.
+    pub pattern: BarrelPattern,
+    /// Barrel indices that fired on the most recently launched round (issue
+    /// #766). One entry per shot (torpedoes fire one-per-burst). Empty when the
+    /// tube has never fired. Surfaced on the wire for the Tactical indicator.
+    pub active_barrels: Vec<u32>,
+    /// 1-based index of the pattern step the most recently launched round came
+    /// from (0 when none has fired). With [`Self::pattern_len`] this renders as
+    /// "step N/M" for a patterned tube.
+    pub pattern_step: u32,
 }
 
 impl TorpedoTube {
@@ -282,6 +300,61 @@ impl TorpedoTube {
         self.load_state = TubeLoadState::Unloaded;
     }
 
+    /// Number of authored barrels: the barrel-marker count, or `1` (the
+    /// implicit single barrel = `marker`) when none are authored.
+    pub fn barrel_count(&self) -> usize {
+        if self.barrels.is_empty() {
+            1
+        } else {
+            self.barrels.len()
+        }
+    }
+
+    /// Total number of authored pattern steps (0 when the tube has no
+    /// multi-barrel pattern — the single-barrel/backward-compat case). Surfaced
+    /// on the wire so the Tactical indicator only shows a step count for a
+    /// genuine patterned tube.
+    pub fn pattern_len(&self) -> u32 {
+        self.pattern.len() as u32
+    }
+
+    /// The flattened, offset-ordered barrel firing sequence for one volley
+    /// (issue #766). Each entry is `(barrel_index, step_number)` where
+    /// `step_number` is the 1-based position of the owning step after sorting
+    /// the pattern by `offset_secs`.
+    ///
+    /// A step listing several barrels contributes each of them, in order, at
+    /// the same `step_number` — successive rounds of a volley draw their origin
+    /// from consecutive entries (cycling when the volley is longer than the
+    /// sequence). This is the ORIGIN map only: it decides which barrel a round
+    /// leaves from, never how many rounds a volley fires (that stays
+    /// `loaded_count`).
+    ///
+    /// An empty pattern yields a single implicit barrel `0` at step `0`, so the
+    /// backward-compat single-barrel tube resolves every round to `marker`.
+    pub fn barrel_sequence(&self) -> Vec<(u32, u32)> {
+        if self.pattern.is_empty() {
+            return vec![(0, 0)];
+        }
+        let mut steps: Vec<&crate::weapons::pattern::BarrelPatternStep> =
+            self.pattern.iter().collect();
+        steps.sort_by(|a, b| {
+            a.offset_secs
+                .partial_cmp(&b.offset_secs)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut seq = Vec::new();
+        for (i, step) in steps.iter().enumerate() {
+            for &b in &step.barrels {
+                seq.push((b, (i + 1) as u32));
+            }
+        }
+        if seq.is_empty() {
+            seq.push((0, 0));
+        }
+        seq
+    }
+
     /// True if `bearing_rad` (radians from ship-forward, +right = positive)
     /// is within this tube's fire arc.
     pub fn is_in_arc(&self, bearing_rad: f32) -> bool {
@@ -351,6 +424,18 @@ pub struct TubeBurstState {
     pub launch_heading: f32,
     pub target_uuid: Option<String>,
     pub source_uuid: Option<String>,
+    /// World-XZ origin per authored barrel index (issue #766), captured at fire
+    /// time from the tube's barrel markers. Empty for a legacy single-barrel
+    /// launch, in which case burst shots fall back to `launch_x`/`launch_z`.
+    pub barrel_origins: Vec<(f32, f32)>,
+    /// The tube's flattened `(barrel_index, step_number)` firing sequence
+    /// (issue #766), captured at fire time. Each burst shot draws its origin
+    /// from the next entry, cycling. Empty ⇒ legacy single-origin burst.
+    pub barrel_sequence: Vec<(u32, u32)>,
+    /// Index of the next volley round to fire (0-based across the whole volley;
+    /// the immediate launch was round 0, so the first burst shot is round 1).
+    /// Indexes `barrel_sequence` modulo its length.
+    pub next_shot_index: u32,
 }
 
 impl TorpedoSystem {
@@ -374,6 +459,10 @@ impl TorpedoSystem {
                 loaded_count: 0,
                 target_count: 0,
                 ai_target_count,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                active_barrels: Vec::new(),
+                pattern_step: 0,
             },
             TorpedoTube {
                 id: "fore_starboard".to_string(),
@@ -385,6 +474,10 @@ impl TorpedoSystem {
                 loaded_count: 0,
                 target_count: 0,
                 ai_target_count,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                active_barrels: Vec::new(),
+                pattern_step: 0,
             },
             TorpedoTube {
                 id: "aft".to_string(),
@@ -396,6 +489,10 @@ impl TorpedoSystem {
                 loaded_count: 0,
                 target_count: 0,
                 ai_target_count,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                active_barrels: Vec::new(),
+                pattern_step: 0,
             },
         ];
         Self {
@@ -434,6 +531,10 @@ impl TorpedoSystem {
                     .or(global_ai_target)
                     .unwrap_or(c.volley_max)
                     .min(c.volley_max),
+                barrels: c.barrels.clone(),
+                pattern: c.pattern.clone(),
+                active_barrels: Vec::new(),
+                pattern_step: 0,
             })
             .collect();
         let count = config.count;
@@ -575,22 +676,87 @@ impl TorpedoSystem {
         target_uuid: Option<String>,
         source_uuid: Option<String>,
     ) -> LaunchResult {
+        // Legacy single-origin launch: no authored barrel origins, so every
+        // round leaves from `launch_x`/`launch_z` (ship centre or single
+        // marker) exactly as before issue #766.
+        self.launch_with_barrels(
+            tube_id,
+            uuid,
+            &[],
+            launch_x,
+            launch_z,
+            launch_heading,
+            target_uuid,
+            source_uuid,
+        )
+    }
+
+    /// Patterned launch (issue #766). Identical to [`Self::launch`] except the
+    /// caller supplies one resolved world-XZ origin per authored barrel index
+    /// (`barrel_origins`, resolved by the Bevy driver from the tube's rig
+    /// markers). Each volley round draws its origin from the tube's flattened
+    /// barrel sequence — the immediate launch from the first sequence entry,
+    /// and every burst shot from the next, cycling.
+    ///
+    /// The pattern governs ONLY the origin (and barrel order); it never changes
+    /// the number of rounds fired. That stays `loaded_count`: a two-barrel
+    /// simultaneous step with only one round loaded fires exactly one torpedo,
+    /// the magazine is untouched (spend already happened at load time), and the
+    /// burst count is bounded by `loaded_count - 1`.
+    ///
+    /// Timing rule (documented per issue #766): `burst_interval_secs` remains
+    /// the SOLE cadence between rounds. The pattern's `offset_secs` orders the
+    /// barrel sequence (steps fire in ascending-offset order) but does not
+    /// retime the burst — keeping the round count and cadence authoritative.
+    ///
+    /// An empty `barrel_origins` (or a tube with no pattern) reproduces the
+    /// legacy single-origin launch.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_with_barrels(
+        &mut self,
+        tube_id: &str,
+        uuid: String,
+        barrel_origins: &[(f32, f32)],
+        launch_x: f32,
+        launch_z: f32,
+        launch_heading: f32,
+        target_uuid: Option<String>,
+        source_uuid: Option<String>,
+    ) -> LaunchResult {
         let lifespan = self.config.lifespan;
         let burst_interval = self.config.burst_interval_secs;
-        let Some(tube) = self.tube_mut(tube_id) else {
+        let shield_pierce = self.config.shield_pierce;
+        let Some(idx) = self.tubes.iter().position(|t| t.id == tube_id) else {
             return LaunchResult::UnknownTube;
         };
-        if tube.loaded_count == 0 {
+        if self.tubes[idx].loaded_count == 0 {
             return LaunchResult::TubeNotLoaded;
         }
-        let count = tube.loaded_count;
-        tube.mark_fired(); // sets loaded_count = 0, load_state = Unloaded
-        let shield_pierce = self.config.shield_pierce;
-        // Fire the first torpedo immediately.
+        let count = self.tubes[idx].loaded_count;
+        // Resolve the tube's barrel firing sequence up-front (origin map only —
+        // never affects `count`).
+        let sequence = self.tubes[idx].barrel_sequence();
+        // Resolve the origin + (barrel, step) for a given 0-based volley round.
+        let resolve = |round: u32| -> ((f32, f32), u32, u32) {
+            let (barrel, step) = sequence[(round as usize) % sequence.len()];
+            let origin = barrel_origins
+                .get(barrel as usize)
+                .copied()
+                .or_else(|| barrel_origins.first().copied())
+                .unwrap_or((launch_x, launch_z));
+            (origin, barrel, step)
+        };
+
+        self.tubes[idx].mark_fired(); // sets loaded_count = 0, load_state = Unloaded
+
+        // Round 0: the immediate launch.
+        let ((origin_x, origin_z), barrel0, step0) = resolve(0);
+        self.tubes[idx].active_barrels = vec![barrel0];
+        self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
             uuid: uuid.clone(),
-            x: launch_x,
-            z: launch_z,
+            x: origin_x,
+            z: origin_z,
             heading: launch_heading,
             lifespan_remaining: lifespan,
             target_uuid: target_uuid.clone(),
@@ -598,10 +764,10 @@ impl TorpedoSystem {
             tube_id: tube_id.to_string(),
             shield_pierce,
         });
+
         let count_remaining = count - 1;
-        // Schedule the remaining burst torpedoes.
+        // Schedule the remaining burst torpedoes — count bounded by loaded_count.
         if count_remaining > 0 {
-            // Remove any existing burst state for this tube.
             self.burst_states.retain(|b| b.tube_id != tube_id);
             self.burst_states.push(TubeBurstState {
                 tube_id: tube_id.to_string(),
@@ -612,6 +778,9 @@ impl TorpedoSystem {
                 launch_heading,
                 target_uuid,
                 source_uuid,
+                barrel_origins: barrel_origins.to_vec(),
+                barrel_sequence: sequence,
+                next_shot_index: 1,
             });
         }
         LaunchResult::Launched {
@@ -692,14 +861,36 @@ impl TorpedoSystem {
         let mut burst_torpedoes: Vec<Torpedo> = Vec::new();
         let mut burst_events: Vec<(String, String, f32, f32, f32)> = Vec::new();
         let mut completed_bursts: Vec<usize> = Vec::new();
+        // Per-tube pattern-state updates (tube_id, barrel, step) to apply after
+        // the burst loop — the tubes and burst_states both live on `self`, so a
+        // deferred pass avoids a split borrow (issue #766).
+        let mut pattern_updates: Vec<(String, u32, u32)> = Vec::new();
         for (i, burst) in self.burst_states.iter_mut().enumerate() {
             burst.timer -= dt;
             if burst.timer <= 0.0 && burst.pending > 0 {
                 let uuid = next_uuid();
+                // Resolve this burst shot's origin from the barrel sequence
+                // captured at fire time (issue #766). A legacy single-origin
+                // burst (empty sequence/origins) falls back to launch_x/z.
+                let (origin_x, origin_z, barrel, step) = if burst.barrel_sequence.is_empty() {
+                    (burst.launch_x, burst.launch_z, 0u32, 0u32)
+                } else {
+                    let (barrel, step) = burst.barrel_sequence
+                        [(burst.next_shot_index as usize) % burst.barrel_sequence.len()];
+                    let (ox, oz) = burst
+                        .barrel_origins
+                        .get(barrel as usize)
+                        .copied()
+                        .or_else(|| burst.barrel_origins.first().copied())
+                        .unwrap_or((burst.launch_x, burst.launch_z));
+                    (ox, oz, barrel, step)
+                };
+                burst.next_shot_index += 1;
+                pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
                     uuid: uuid.clone(),
-                    x: burst.launch_x,
-                    z: burst.launch_z,
+                    x: origin_x,
+                    z: origin_z,
                     heading: burst.launch_heading,
                     lifespan_remaining: lifespan,
                     target_uuid: burst.target_uuid.clone(),
@@ -710,8 +901,8 @@ impl TorpedoSystem {
                 burst_events.push((
                     burst.tube_id.clone(),
                     uuid,
-                    burst.launch_x,
-                    burst.launch_z,
+                    origin_x,
+                    origin_z,
                     burst.launch_heading,
                 ));
                 burst.pending -= 1;
@@ -724,6 +915,14 @@ impl TorpedoSystem {
         }
         self.in_flight.extend(burst_torpedoes);
         result.burst_launched.extend(burst_events);
+        // Reflect the most recent burst shot's barrel/step on the tube so the
+        // blackboard/Tactical indicator tracks the active patterned attack.
+        for (tube_id, barrel, step) in pattern_updates {
+            if let Some(tube) = self.tubes.iter_mut().find(|t| t.id == tube_id) {
+                tube.active_barrels = vec![barrel];
+                tube.pattern_step = step;
+            }
+        }
         // Remove completed burst states (in reverse to preserve indices).
         for &i in completed_bursts.iter().rev() {
             self.burst_states.remove(i);
@@ -896,6 +1095,8 @@ mod tests {
             fire_arc_deg,
             load_time: None,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
         }
@@ -1479,6 +1680,8 @@ mod tests {
             fire_arc_deg: 180.0,
             load_time: None,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             volley_max,
             ai_target_count: None,
         }
@@ -1739,5 +1942,228 @@ mod tests {
             sys.torpedoes_remaining, 10,
             "both torpedoes returned to magazine"
         );
+    }
+
+    // ── Patterned multi-barrel attacks (issue #766) ──────────────────────────
+
+    use crate::weapons::pattern::BarrelPatternStep;
+
+    fn barrel_step(barrels: &[u32], offset: f32) -> BarrelPatternStep {
+        BarrelPatternStep {
+            barrels: barrels.to_vec(),
+            offset_secs: offset,
+        }
+    }
+
+    fn patterned_cfg(
+        id: &str,
+        barrels: Vec<String>,
+        pattern: Vec<BarrelPatternStep>,
+        volley_max: u32,
+    ) -> TorpedoTubeConfig {
+        TorpedoTubeConfig {
+            id: id.into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 180.0,
+            load_time: None,
+            marker: None,
+            barrels,
+            pattern,
+            volley_max,
+            ai_target_count: None,
+        }
+    }
+
+    /// Pre-load `n` rounds into `tube` directly, decrementing the magazine to
+    /// mirror the load-time spend (so a later `launch` proves it does NOT spend
+    /// again).
+    fn preload(sys: &mut TorpedoSystem, tube: &str, n: u32) {
+        sys.torpedoes_remaining -= n;
+        sys.tube_mut(tube).unwrap().loaded_count = n;
+    }
+
+    fn burst_next() -> impl FnMut() -> String {
+        let mut i = 100u32;
+        move || {
+            i += 1;
+            format!("burst-{i}")
+        }
+    }
+
+    #[test]
+    fn patterned_alternating_launches_from_barrels_in_sequence() {
+        // Two barrels, two steps at increasing offsets → the volley's rounds
+        // leave from barrel 0 then barrel 1.
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        let cfg = patterned_cfg(
+            "t1",
+            vec!["b0".into(), "b1".into()],
+            vec![barrel_step(&[0], 0.0), barrel_step(&[1], 0.5)],
+            2,
+        );
+        let mut sys = TorpedoSystem::from_configs(&[cfg], config);
+        preload(&mut sys, "t1", 2);
+
+        // Distinct origins per barrel so a torpedo's X identifies its barrel.
+        let origins = [(10.0, 0.0), (20.0, 0.0)];
+        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        assert!(matches!(
+            r,
+            LaunchResult::Launched {
+                count_remaining: 1,
+                ..
+            }
+        ));
+        // Immediate round from barrel 0.
+        assert_eq!(sys.in_flight.len(), 1);
+        assert!((sys.in_flight[0].x - 10.0).abs() < 1e-4, "barrel 0 origin");
+        assert_eq!(sys.tube("t1").unwrap().active_barrels, vec![0]);
+        assert_eq!(sys.tube("t1").unwrap().pattern_step, 1);
+
+        // Burst shot fires from barrel 1 after the burst interval.
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let mut next = burst_next();
+        sys.tick(0.3, &targets, &mut next);
+        assert_eq!(sys.in_flight.len(), 2);
+        let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
+        assert!((burst.x - 20.0).abs() < 1e-4, "barrel 1 origin");
+        assert_eq!(sys.tube("t1").unwrap().active_barrels, vec![1]);
+        assert_eq!(sys.tube("t1").unwrap().pattern_step, 2);
+    }
+
+    #[test]
+    fn patterned_simultaneous_launches_from_multiple_barrels() {
+        // One step listing several barrels → consecutive rounds leave from each
+        // listed barrel. With two loaded, both barrels are used.
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        let cfg = patterned_cfg(
+            "t1",
+            vec!["b0".into(), "b1".into()],
+            vec![barrel_step(&[0, 1], 0.0)],
+            2,
+        );
+        let mut sys = TorpedoSystem::from_configs(&[cfg], config);
+        preload(&mut sys, "t1", 2);
+
+        let origins = [(10.0, 0.0), (20.0, 0.0)];
+        sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        assert!((sys.in_flight[0].x - 10.0).abs() < 1e-4, "barrel 0 origin");
+
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let mut next = burst_next();
+        sys.tick(0.3, &targets, &mut next);
+        assert_eq!(sys.in_flight.len(), 2, "both barrels fire");
+        let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
+        assert!((burst.x - 20.0).abs() < 1e-4, "barrel 1 origin");
+    }
+
+    /// AC3: a two-barrel simultaneous step with only ONE round loaded fires
+    /// exactly one torpedo and leaves the magazine untouched. The pattern never
+    /// invents rounds — `loaded_count` is the count authority.
+    #[test]
+    fn patterned_simultaneous_step_with_one_loaded_fires_exactly_one() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        let cfg = patterned_cfg(
+            "t1",
+            vec!["b0".into(), "b1".into()],
+            vec![barrel_step(&[0, 1], 0.0)],
+            2,
+        );
+        let mut sys = TorpedoSystem::from_configs(&[cfg], config);
+        preload(&mut sys, "t1", 1);
+        let mag_before = sys.torpedoes_remaining;
+
+        let origins = [(10.0, 0.0), (20.0, 0.0)];
+        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        assert!(
+            matches!(
+                r,
+                LaunchResult::Launched {
+                    count_remaining: 0,
+                    ..
+                }
+            ),
+            "a step listing 2 barrels must NOT fire 2 when only 1 is loaded"
+        );
+        assert_eq!(sys.in_flight.len(), 1, "exactly one torpedo fired");
+        assert!(
+            sys.burst_states.is_empty(),
+            "no burst scheduled for 1 round"
+        );
+        assert!(
+            (sys.in_flight[0].x - 10.0).abs() < 1e-4,
+            "first barrel only"
+        );
+        assert_eq!(
+            sys.torpedoes_remaining, mag_before,
+            "launch must not spend from the magazine (spend happens at load)"
+        );
+    }
+
+    /// AC3: the burst count stays bounded by `loaded_count` even when the
+    /// pattern is short — the barrel sequence cycles for origins but never
+    /// extends the volley.
+    #[test]
+    fn patterned_burst_count_bounded_by_loaded_count() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        // Single-step, single-barrel pattern; two rounds loaded.
+        let cfg = patterned_cfg("t1", vec!["b0".into()], vec![barrel_step(&[0], 0.0)], 3);
+        let mut sys = TorpedoSystem::from_configs(&[cfg], config);
+        preload(&mut sys, "t1", 2);
+        let mag_before = sys.torpedoes_remaining;
+
+        let origins = [(10.0, 0.0)];
+        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        assert!(matches!(
+            r,
+            LaunchResult::Launched {
+                count_remaining: 1,
+                ..
+            }
+        ));
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let mut next = burst_next();
+        // Drive well past several burst intervals.
+        sys.tick(0.3, &targets, &mut next);
+        sys.tick(0.3, &targets, &mut next);
+        sys.tick(0.3, &targets, &mut next);
+        assert_eq!(
+            sys.in_flight.len(),
+            2,
+            "exactly loaded_count torpedoes fire — no more"
+        );
+        assert!(sys.burst_states.is_empty());
+        assert_eq!(
+            sys.torpedoes_remaining, mag_before,
+            "magazine untouched by patterned firing"
+        );
+    }
+
+    #[test]
+    fn legacy_launch_without_barrels_uses_ship_centre_origin() {
+        // Back-compat: no barrels/pattern authored → every round leaves from the
+        // passed launch origin exactly as before issue #766.
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
+        preload(&mut sys, "t1", 2);
+        sys.launch("t1", "u0".into(), 7.0, -3.0, 0.0, None, None);
+        assert!((sys.in_flight[0].x - 7.0).abs() < 1e-4);
+        assert!((sys.in_flight[0].z - (-3.0)).abs() < 1e-4);
+        // Legacy tube reports no pattern → no step indicator.
+        assert_eq!(sys.tube("t1").unwrap().pattern_len(), 0);
+        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let mut next = burst_next();
+        sys.tick(0.3, &targets, &mut next);
+        let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
+        assert!((burst.x - 7.0).abs() < 1e-4, "burst from ship centre too");
     }
 }

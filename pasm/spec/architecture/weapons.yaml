@@ -260,15 +260,24 @@ entities:
 
   - component: phaser-attack-target-lock
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Phaser Attack Target Lock
       summary: A phaser attack captures the current weapons target when it begins and keeps that target for the attack while the target remains in the firing arc.
+      rationale:
+        - "Capture-at-attack-start is authoritative. handle_fire_phaser (and ai_phaser_auto_fire) read the FROZEN viewscreen combat_lock only at beam start and write ActiveBeam.target_uuid + .bank once; both fire entrypoints early-out while beam.target_uuid.is_some(), so a live beam cannot be retargeted by a new selection or a mid-attack FirePhaser. Every tick, tick_beams_prepare re-resolves the CAPTURED beam.target_uuid (never TacticalRadarSelection or combat_lock) and severs the beam only when that uuid leaves the bank arc/range or vanishes."
+        - "Bank independence: one ActiveBeam per ship means only one bank fires a beam at a time, so the captured target/bank is a single (uuid, bank) pair. Per-bank cooldowns (PhaserCooldown.per_bank) are independent, so cooldown on one bank never disturbs another bank's live captured beam."
+        - "Observability (AC3): attack termination + cooldown are observable via BeamStarted/BeamEnded (both carry the captured target_uuid + bank) and the per-bank PhaserBankBlackboard (on_cooldown, cooldown_remaining). No new wire field was added — the captured target is already surfaced by the beam lifecycle events, and WeaponsBlackboard.target_uuid deliberately mirrors the live combat lock for the reticle."
     architecture:
       kind: weapon-policy
       authority: authoritative
-      reads: [weapons-target-state]
+      reads: [weapons-target-state, viewscreen-target-facts-state, phaser-beam-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/beam.rs]
+      symbols: [handle_fire_phaser, ai_phaser_auto_fire, tick_beams_prepare, ActiveBeam]
+      tests: [cargo test]
 
   - component: patterned-barrel-attacks
     core:

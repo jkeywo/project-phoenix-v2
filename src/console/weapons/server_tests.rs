@@ -354,6 +354,13 @@ fn active_beam_target_is_none(app: &mut App) -> bool {
     get_active_beam_target(app).is_none()
 }
 
+fn get_active_beam_bank(app: &mut App) -> Option<String> {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
+    q.single(app.world()).ok().and_then(|b| b.bank.clone())
+}
+
 fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
     let mut q = app
         .world_mut()
@@ -1150,6 +1157,194 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
         "expected BeamStarted for new target after cooldown"
     );
     assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t2"));
+}
+
+/// Issue #763 (AC1) — a firing phaser does not jump to a newly selected
+/// target. Capture-at-attack-start is authoritative: `handle_fire_phaser`
+/// records `ActiveBeam.target_uuid` from the frozen combat lock when the beam
+/// opens, and every later tick re-resolves *that captured uuid*, never the
+/// live selection. Changing the combat lock (and even re-issuing FirePhaser on
+/// the same bank) while the beam is live must leave the beam on its original
+/// target. Modelled on `retarget_after_cooldown_cancels_prior_beam_and_starts_new`
+/// but WITHOUT winding `remaining_secs`/cooldown down — the beam stays live
+/// throughout.
+#[test]
+fn firing_beam_retains_captured_target_when_combat_lock_changes() {
+    let mut app = test_app();
+    app.world_mut()
+        .insert_resource(WorldResource(crate::messages::WorldData {
+            entities: vec![
+                crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
+                crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
+            ],
+            ..Default::default()
+        }));
+    app.world_mut().spawn((
+        crate::simulation::Asteroid,
+        crate::simulation::AsteroidUuid("t1".into()),
+        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            crate::messages::SystemId("captain".into()),
+            30.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -20.0),
+    ));
+    app.world_mut().spawn((
+        crate::simulation::Asteroid,
+        crate::simulation::AsteroidUuid("t2".into()),
+        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            crate::messages::SystemId("captain".into()),
+            30.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -15.0),
+    ));
+    start_game_with_weapons(&mut app);
+
+    // Lock t1 and open fire on the port bank.
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
+        },
+    );
+    let _ = tick(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
+        },
+    );
+    let _ = tick(&mut app);
+    assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t1"));
+
+    // Change the combat lock to t2 mid-attack (does NOT reset remaining_secs
+    // or cooldown — the beam is still live and burning down its duration), and
+    // re-issue FirePhaser on the same bank to prove the fire entrypoint
+    // early-outs while a beam is live.
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
+        },
+    );
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: SystemId("phaser-port".into()),
+            payload: SystemControlPayload::FirePhaser,
+        },
+    );
+
+    let mut all_out = Vec::new();
+    for _ in 0..3 {
+        all_out.extend(tick(&mut app));
+    }
+
+    // The live selection has moved to t2 ...
+    assert_eq!(get_weapons_target(&mut app).as_deref(), Some("t2"));
+    // ... but the beam is still burning the ORIGINAL captured target t1.
+    assert_eq!(
+        get_active_beam_target(&mut app).as_deref(),
+        Some("t1"),
+        "firing beam must retain its captured target when the combat lock changes"
+    );
+    // No new beam opened on t2 while the original was live.
+    assert!(
+        !all_out.iter().any(|m| matches!(
+            &m.msg,
+            ServerMessage::BeamStarted { target_uuid, .. } if target_uuid == "t2"
+        )),
+        "no BeamStarted should fire for the newly selected target mid-attack"
+    );
+}
+
+/// Issue #763 (AC2) — the captured target stays valid only while it remains a
+/// live entity. When the captured entity vanishes mid-beam, the sever path in
+/// `tick_beams_prepare` (`live_entity_xz` → `None`) clears the beam, starts the
+/// bank cooldown, and emits `BeamEnded`. Complements
+/// `beam_severs_when_target_leaves_phaser_range` (range) and
+/// `beam_severs_when_target_leaves_bank_arc` (arc).
+#[test]
+fn beam_severs_when_target_vanishes() {
+    let mut app = test_app();
+    let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+    // Despawn the live target entity mid-beam.
+    let entity = {
+        let mut q = app
+            .world_mut()
+            .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+        q.iter(app.world())
+            .find(|(_, u)| u.0 == "target-uuid")
+            .map(|(e, _)| e)
+            .expect("target entity should exist")
+    };
+    app.world_mut().entity_mut(entity).despawn();
+
+    let out = tick(&mut app);
+
+    assert!(
+        out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+        "expected BeamEnded when the captured target vanishes"
+    );
+    assert!(
+        active_beam_target_is_none(&mut app),
+        "beam should clear when its captured target vanishes"
+    );
+    assert!(
+        phaser_bank_is_active(&mut app, "port"),
+        "cooldown should start after target-vanish sever"
+    );
+}
+
+/// Issue #763 (AC4) — independent banks. The single-`ActiveBeam`-per-ship model
+/// means only one bank fires a beam at a time, so bank independence is tested at
+/// the capture/cooldown level: driving the *other* bank (starboard) into
+/// cooldown must not disturb the port bank's live captured beam, and the two
+/// banks' cooldown state stays independent (`PhaserCooldown` is per-bank). This
+/// is the LIVE counterpart to the pure `banks_are_independent` test in
+/// `src/weapons/phaser.rs`.
+#[test]
+fn independent_bank_cooldown_does_not_disturb_live_captured_beam() {
+    let mut app = test_app();
+    // Target at port beam (-20, 0), inside the port bank's arc.
+    let _ = lock_and_fire(&mut app, -20.0, 0.0);
+    assert_eq!(
+        get_active_beam_target(&mut app).as_deref(),
+        Some("target-uuid")
+    );
+    assert_eq!(get_active_beam_bank(&mut app).as_deref(), Some("port"));
+
+    // Independently drive the OTHER bank into cooldown.
+    start_phaser_cooldown(&mut app, "starboard", 5.0);
+
+    let out = tick(&mut app);
+
+    // Port's live captured beam is untouched by starboard's cooldown.
+    assert_eq!(
+        get_active_beam_target(&mut app).as_deref(),
+        Some("target-uuid"),
+        "port's captured beam must survive an unrelated starboard cooldown"
+    );
+    assert_eq!(get_active_beam_bank(&mut app).as_deref(), Some("port"));
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+        "starboard's cooldown must not sever the live port beam"
+    );
+    // Cooldown state is per-bank and independent.
+    assert!(phaser_bank_is_active(&mut app, "starboard"));
+    assert!(
+        !phaser_bank_is_active(&mut app, "port"),
+        "the port bank is mid-beam, not on cooldown"
+    );
 }
 
 // ── SetPhaserMode tests ────────────────────────────────────────────────

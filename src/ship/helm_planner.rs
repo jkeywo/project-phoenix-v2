@@ -245,6 +245,31 @@ pub(crate) fn helm_motion_planner(
             moving_hazard_threat,
         };
 
+        // ── Imminent-collision facing override (issue #780, AC4) ──────────────
+        // Ordinary avoidance BENDS travel (the hazard force is a velocity
+        // contribution the actuators read) without ever touching the active
+        // doctrine or the desired facing. ONLY an imminent collision — hazard
+        // urgency at or above the hull's AUTHORED threshold — may TEMPORARILY
+        // override desired facing, turning the hull along the escape heading so
+        // it can thrust clear. The override is stateless: it is recomputed from
+        // this tick's urgency and evaporates the moment urgency drops back under
+        // the threshold (like docking / arc-bearing self-clear), so no lifecycle
+        // state is introduced. The threshold defaults to 1.0 (effectively off)
+        // so no shipped hull changes behaviour until it opts in.
+        let imminent_threshold = behaviour_section
+            .map(|b| b.0.imminent_collision_facing_threshold)
+            .unwrap_or(crate::ai::IMMINENT_COLLISION_FACING_THRESHOLD);
+        if hazard.urgency >= imminent_threshold {
+            // Escape heading = the horizontal repulsion direction (ship-local
+            // x = starboard, z = aft). Facing is planar for every current hull,
+            // so the vertical component is dropped here regardless of movement
+            // mode — the planar-facing contract is unchanged.
+            let escape = Vec3::new(hazard.hazard_forces.x, 0.0, hazard.hazard_forces.z);
+            if escape.length_squared() > f32::EPSILON {
+                motion.desired_facing_local = escape.normalize();
+            }
+        }
+
         if hazard.urgency > 0.0 {
             crate::pdebug!(
                 log,

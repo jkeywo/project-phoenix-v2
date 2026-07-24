@@ -265,6 +265,7 @@ entities:
         - "A ship ignores hazards with a lower size_rating than its own: large ships do not avoid smaller ships at all."
         - Each fine actuator owns its sensitivity to hazard distance and force weighting; those authored sensitivities implicitly determine response priority instead of one global priority ladder.
         - Vertical separation is evaluated for collision and weapon range even when its present visual effect is negligible.
+        - "Issue #780 made the single shared scan genuinely 3D: assess_hazards now computes a vertical (local +Y) force for ELIGIBLE MOVING hazards only (a co-planar moving hazard drives an upward climb; an off-plane one follows the actual vertical separation sign), while static obstacles leave the vertical axis at zero (AC5). The one scan (still called once in helm_motion_planner — no duplicate per-actuator scans, AC2) publishes the 3D force plus the moving-hazard threat once into HazardAssessment; the vertical actuator reads those facts, not a re-scan. The planner gates the Y component on VerticalMovementMode so Planar hulls take none. The published facts are further seeded into each secondary actuator's policy snapshot by seed_helm_actuator_facts, resolving the #779 empty-facts edge so authored guards fire."
     architecture:
       classification: authoritative
       owner: helm-motion-planner
@@ -274,6 +275,8 @@ entities:
         - helm-ai-operator
         - helm-lateral-thrust-ai-operator
         - helm-vertical-thrust-ai-operator
+        - helm-impulse-ai-operator
+        - helm-boost-ai-operator
       replicas:
         - helm-motion-blackboard-state
     implementation:
@@ -281,11 +284,13 @@ entities:
       paths:
         - src/ship/helm_planner.rs
         - src/ai/core.rs
+        - src/ship/helm_ai.rs
       symbols:
         - HazardAssessment
         - HazardAssessmentRaw
         - HazardContribution
         - assess_hazards
+        - seed_helm_actuator_facts
       tests:
         - cargo test
 
@@ -322,20 +327,35 @@ entities:
 
   - state: impulse-manoeuvre-policy-state
     core:
-      status: proposed
-      confidence: provisional
+      status: implemented
+      confidence: confirmed
       title: Impulse Manoeuvre Policy State
-      summary: Ship-authored impulse policy that applies a harsh steering multiplier while impulse is active and disables boost during impulse travel.
+      summary: Ship-authored impulse/boost manoeuvre policy — the harsh in-impulse steering multiplier and boost-during-impulse availability, plus (since #780) the authored inline AI policy blocks that gate whether the impulse and boost fine actuators may engage this tick.
       rationale:
         - Impulse should not force steering fully to zero; the standard steering multiplier is 0.1 so course correction remains possible but severe.
         - Boost is unavailable while impulse is active, regardless of the ship's normal boost capability.
         - The steering multiplier and any ship-specific override belong in authored capability data rather than executable constants.
+        - "Issue #780 made this state the AC6 home for authored impulse/boost MANOEUVRE POLICY: the [helm_console.impulse_ai] and [helm_console.boost_ai] blocks (HelmImpulseAiPolicy / HelmBoostAiPolicy) are authored per-hull and resolved by helm-impulse-ai-operator / helm-boost-ai-operator to decide whether each drive may engage this tick, respecting the ship's authored policy AND capability availability. Defaults preserve baseline (impulse unconditional permit, boost idle)."
     architecture:
       classification: authoritative
       owner: ship-capability-model
       readers:
         - helm-input-arbiter
         - host-helm-control-router
+        - helm-impulse-ai-operator
+        - helm-boost-ai-operator
+    implementation:
+      status: observed
+      paths:
+        - src/entities/config.rs
+        - src/ship/helm_ai.rs
+      symbols:
+        - HelmImpulseAiPolicy
+        - HelmBoostAiPolicy
+        - default_impulse_ai_config
+        - default_boost_ai_config
+      tests:
+        - cargo test
 
   - state: boost-drive-state
     core:
@@ -871,6 +891,7 @@ entities:
         - "Issue #824: like its three siblings it no longer writes the intent component directly — it emits through the shared validate_and_admit seam."
         - "Issue #743: horizontal collision avoidance moved into the shared hazard-assessment surface. This operator no longer re-derives the projected-collision geometry; it reads HazardAssessment.hazard_forces from the planner's HelmMotionPlan and weights the starboard repulsion by the hull's authored lateral_hazard_sensitivity. The docking translation still overrides it (issue #742) and the emit → admit → apply arbiter path is unchanged."
         - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmLateralAiPolicy (attached at spawn from [helm_console.lateral_ai], else default_lateral_ai_config — unconditional actuate) resolves the lateral channel to the actuate_lateral_thrust mode verb over a fact snapshot seeded from the shared hazard surface (seed_helm_actuator_facts). A hold resolution emits nothing; the docking translation remains an UNCONDITIONAL sanctioned override applied before the gate. The dodge magnitude still comes from HazardAssessment.hazard_forces weighted by lateral_hazard_sensitivity — avoidance BENDS travel without swapping the doctrine (AC3)."
     architecture:
       kind: service
       authority: authoritative
@@ -879,6 +900,8 @@ entities:
         - world-snapshot-state
         - authoritative-ship-motion-state
         - helm-ai-surfaces-frame-state
+        - hazard-assessment-state
+        - helm-actuator-input-state
       depends_on:
         - host-command-admission
       runs_in:
@@ -889,9 +912,16 @@ entities:
         - src/ship/helm_ai.rs
         - src/ship/helm_lateral_emit.rs
         - src/ai/core.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
       symbols:
         - ai_helm_lateral_thrust
         - emit_helm_lateral_command
+        - HelmLateralAiPolicy
+        - HELM_LATERAL_CHANNEL
+        - HELM_ACTUATE_LATERAL_THRUST_VERB
+        - default_lateral_ai_config
+        - seed_helm_actuator_facts
       tests:
         - cargo test
 
@@ -1083,6 +1113,7 @@ entities:
         - Vertical thrust is a separate fine system even though it is not player-facing yet.
         - In bounded mode it should support AI-only above-below avoidance and then return toward the authored cruise plane when urgency falls.
         - This operator should react to moving hazards only, leaving static-obstacle responses to other helm actuators.
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmVerticalAiPolicy (attached at spawn from [helm_console.vertical_ai], else default_vertical_ai_config — unconditional actuate) resolves the vertical channel to the actuate_vertical_thrust mode verb over a fact snapshot seeded from the shared moving-hazard threat and the ship's current vertical offset (seed_helm_actuator_facts). The authored VerticalMovementMode still gates the magnitude host-side, so a Planar hull takes no Y component regardless of the verb (planar-facing contract preserved). A hold resolution emits nothing."
     architecture:
       kind: service
       authority: authoritative
@@ -1091,6 +1122,7 @@ entities:
         - hazard-assessment-state
         - vertical-movement-mode-state
         - authoritative-ship-motion-state
+        - helm-actuator-input-state
       writes:
         - authoritative-ship-motion-state
       runs_in:
@@ -1100,8 +1132,100 @@ entities:
       paths:
         - src/ship/helm_ai.rs
         - src/ship/helm_planner.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
       symbols:
         - ai_helm_vertical_thrust
+        - HelmVerticalAiPolicy
+        - HELM_VERTICAL_CHANNEL
+        - HELM_ACTUATE_VERTICAL_THRUST_VERB
+        - default_vertical_ai_config
+        - seed_helm_actuator_facts
+      tests:
+        - cargo test
+
+  - component: helm-impulse-ai-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Impulse AI Operator
+      summary: Per-axis impulse decide system whose stateless policy resolves the impulse-channel engage_impulse mode verb to decide whether the impulse manoeuvre is PERMITTED this tick; the host then applies the authored doctrine use_impulse and decide_impulse geometry, emitting an admitted StartImpulseCharge/CancelImpulse only on a genuine engage/cancel transition.
+      rationale:
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine while preserving the pre-#780 baseline exactly. HelmImpulseAiPolicy (attached at spawn from [helm_console.impulse_ai], else default_impulse_ai_config — unconditional permit) resolves the impulse channel to the engage_impulse mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts: impulse_available/boost_available). A hold resolution emits nothing."
+        - "Availability + manoeuvre policy (AC6): impulse capability is the presence of ImpulseConfigResource — no config, no emit. The engage-vs-cancel decision itself stays host-side (decide_impulse geometry over the radar-gated visible view) and the authored doctrine use_impulse veto is unchanged, so the policy verb is an additional authored gate layered on top."
+        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); emits through the shared validate_and_admit seam like its siblings (AGENTS.md #6). Full removal of the residual hardcoded decision is the coordinated tail #794."
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - helm-ai-surfaces-frame-state
+        - hazard-assessment-state
+        - impulse-drive-state
+        - impulse-manoeuvre-policy-state
+        - authoritative-ship-motion-state
+        - helm-actuator-input-state
+      depends_on:
+        - host-command-admission
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: observed
+      paths:
+        - src/ship/helm_ai.rs
+        - src/ship/helm_ai_emit.rs
+        - src/ai/core.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
+      symbols:
+        - ai_helm_impulse
+        - HelmImpulseAiPolicy
+        - HELM_IMPULSE_CHANNEL
+        - HELM_ENGAGE_IMPULSE_VERB
+        - default_impulse_ai_config
+        - decide_impulse
+        - seed_helm_actuator_facts
+      tests:
+        - cargo test
+
+  - component: helm-boost-ai-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Helm Boost AI Operator
+      summary: New per-axis boost decide system whose stateless policy resolves the boost-channel engage_boost mode verb to decide whether to engage boost this tick; it emits an admitted SetBoost through the SAME command-admission seam a human uses, on-change only, when the boost feature is available.
+      rationale:
+        - "Issue #780 introduced AI boost for the first time. HelmBoostAiPolicy (attached at spawn from [helm_console.boost_ai], else default_boost_ai_config — explicit idle, no AI boost) resolves the boost channel to the engage_boost mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts). Fires ⇒ engage; holds ⇒ release. The idle default preserves the pre-#780 baseline (no AI boost) exactly."
+        - "Availability (AC6): boost capability is an ENABLED BoostConfigResource — absent or feature-disabled, the operator stands down and emits nothing (mirrors the human handle_boost_messages enabled-guard)."
+        - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Since #780 handle_boost_messages runs in Physics .after(ai_helm_boost) so the AI-emitted SetBoost is applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the shared ai_helm_tick cadence (AGENTS.md #7)."
+    architecture:
+      kind: service
+      authority: authoritative
+      reads:
+        - hazard-assessment-state
+        - boost-drive-state
+        - impulse-manoeuvre-policy-state
+        - authoritative-ship-motion-state
+        - helm-actuator-input-state
+      depends_on:
+        - host-command-admission
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: observed
+      paths:
+        - src/ship/helm_ai.rs
+        - src/ship/helm_ai_emit.rs
+        - src/ship/impulse_boost_systems.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
+      symbols:
+        - ai_helm_boost
+        - HelmBoostAiPolicy
+        - HELM_BOOST_CHANNEL
+        - HELM_ENGAGE_BOOST_VERB
+        - default_boost_ai_config
+        - handle_boost_messages
+        - seed_helm_actuator_facts
       tests:
         - cargo test
 

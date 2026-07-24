@@ -18,10 +18,10 @@ pub(crate) use crate::ship::helm_admission::{
     operate_helm_engine_ai, process_helm_inputs, publish_joystick_to_engines,
 };
 pub(crate) use crate::ship::helm_ai::{
-    ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust, ai_helm_tick_ready,
-    ai_helm_vertical_thrust, build_helm_ai_surfaces_frame, detect_reached_objective_completion,
-    helm_axes_operate_ai, tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer,
-    HelmAiSurfacesFrame,
+    ai_helm_boost, ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust,
+    ai_helm_tick_ready, ai_helm_vertical_thrust, build_helm_ai_surfaces_frame,
+    detect_reached_objective_completion, helm_axes_operate_ai, tick_ai_helm_timer, AiHelmTickReady,
+    AiHelmTickTimer, HelmAiSurfacesFrame,
 };
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::{handle_boost_messages, handle_impulse_messages};
@@ -69,7 +69,8 @@ impl Plugin for ShipPlugin {
                     .after(ai_helm_steering)
                     .after(ai_helm_lateral_thrust)
                     .after(ai_helm_vertical_thrust)
-                    .after(ai_helm_impulse),
+                    .after(ai_helm_impulse)
+                    .after(ai_helm_boost),
             )
             .add_systems(
                 Update,
@@ -159,7 +160,18 @@ impl Plugin for ShipPlugin {
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs),
                     handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
-                    handle_boost_messages.in_set(crate::sim_sets::SimSet::Input),
+                    // Boost applier: since #780 it runs in `Physics` `.after`
+                    // `ai_helm_boost` (registered below) so the per-axis boost AI's
+                    // admitted `SetBoost` — emitted in `Physics` after the planner —
+                    // is consumed the SAME tick it is emitted, the same way
+                    // `process_helm_inputs` applies the other AI-emitted helm
+                    // commands. A human `SetBoost` (admitted before `Input`) is
+                    // still present in `AdmittedCommands` here, so the human path is
+                    // unchanged; `apply_helm_commands` keeps its `.after` edge so
+                    // the boost transition still lands before `tick_boost`.
+                    handle_boost_messages
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(ai_helm_boost),
                     // Sole helm-path writer of ShipPhysics (issues #695, #699):
                     // reads the intent components written by
                     // `process_helm_inputs` (human/admission) and the per-axis
@@ -272,6 +284,25 @@ impl Plugin for ShipPlugin {
                 .after(crate::sim_sets::AiTickLabel)
                 .after(helm_motion_planner)
                 .before(process_helm_inputs)
+                .run_if(ai_helm_tick_ready),
+        );
+
+        // Per-axis helm AI: boost (issue #780). Same shape as its siblings —
+        // gated on the shared AI-helm sim tick, `.after(AiTickLabel)` for the
+        // decision frame, and `.before(handle_boost_messages)` so its emitted
+        // admitted `SetBoost` is turned into a `BoostCommand` this tick (the
+        // human boost path — `handle_boost_messages` — is the applier of admitted
+        // boost commands). It reads the planner's `HelmMotionPlan` hazard facts,
+        // so it also runs `.after(helm_motion_planner)`. Registered separately
+        // because the main tuple is at Bevy's 20-element limit.
+        app.add_systems(
+            Update,
+            ai_helm_boost
+                .in_set(crate::sim_sets::SimSet::Physics)
+                .after(crate::lobby::LobbySystemSet)
+                .after(crate::sim_sets::AiTickLabel)
+                .after(helm_motion_planner)
+                .before(handle_boost_messages)
                 .run_if(ai_helm_tick_ready),
         );
 

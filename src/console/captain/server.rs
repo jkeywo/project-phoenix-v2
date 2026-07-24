@@ -281,7 +281,11 @@ fn operate_captain_ai(
                 // continuous-actuator mode verbs (issue #779) never resolve on
                 // it, but the match must stay exhaustive.
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
-                | crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing => None,
+                | crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
+                | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
+                | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
+                | crate::ai::policy::AiPolicyVerb::EngageImpulse
+                | crate::ai::policy::AiPolicyVerb::EngageBoost => None,
             });
 
         if let Some(should_be_red_alert) = should_be_red_alert {

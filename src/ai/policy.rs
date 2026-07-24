@@ -46,6 +46,29 @@ pub enum AiPolicyVerb {
     /// decoded from the shared `DesiredMotion.desired_facing_local`, not carried
     /// here.
     ActuateDesiredFacing,
+    /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
+    /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
+    /// starboard/port magnitude comes from the shared hazard assessment weighted
+    /// by the hull's authored `lateral_hazard_sensitivity` (or the docking
+    /// translation), never from the verb.
+    ActuateLateralThrust,
+    /// Actuate the bounded/full-3D vertical-thrust axis this tick (the `vertical`
+    /// channel of the Vertical Thrust fine system, issue #780). A mode verb: the
+    /// continuous climb/return magnitude comes from the shared moving-hazard
+    /// threat and the authored `VerticalMovementMode` ceiling / return rate, never
+    /// from the verb.
+    ActuateVerticalThrust,
+    /// Engage the impulse drive this tick (the `impulse` channel of the Impulse
+    /// fine system, issue #780). A mode verb: whether the host actually emits
+    /// `StartImpulseCharge`/`CancelImpulse` still follows the authored doctrine
+    /// `use_impulse` and the `decide_impulse` geometry — the verb only says the
+    /// policy permits impulse manoeuvres this tick.
+    EngageImpulse,
+    /// Engage the boost drive this tick (the `boost` channel of the Boost fine
+    /// system, issue #780). A mode verb: its presence tells the host to drive the
+    /// ship's boost active via the same admitted `SetBoost` a human uses; its
+    /// absence ("hold"/idle) leaves boost as it is.
+    EngageBoost,
 }
 
 /// One inline stateless policy rule.
@@ -252,6 +275,102 @@ mod tests {
             p.resolve_channel("longitudinal", &AiFacts::new(), &[]),
             None
         );
+    }
+
+    // ── Helm secondary-actuator mode verbs (issue #780) ──────────────────────
+
+    /// The four secondary helm channels each resolve their own value-less mode
+    /// verb independently, and a guard that references a seeded fact actually
+    /// fires — proving the #779 empty-facts edge is closed once the host seeds
+    /// facts (issue #780 populates them; here we prove the runtime honours them).
+    #[test]
+    fn secondary_actuator_channels_resolve_their_own_mode_verbs() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "lateral".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::ActuateLateralThrust,
+                },
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "vertical".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::ActuateVerticalThrust,
+                },
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "impulse".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::EngageImpulse,
+                },
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "boost".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::EngageBoost,
+                },
+            ],
+            idle: false,
+        };
+        assert_eq!(
+            p.resolve_channel("lateral", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::ActuateLateralThrust)
+        );
+        assert_eq!(
+            p.resolve_channel("vertical", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::ActuateVerticalThrust)
+        );
+        assert_eq!(
+            p.resolve_channel("impulse", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::EngageImpulse)
+        );
+        assert_eq!(
+            p.resolve_channel("boost", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::EngageBoost)
+        );
+    }
+
+    /// A fact-referencing guard on a secondary channel fires only when the seeded
+    /// fact crosses the authored threshold — the concrete behaviour #780 needs
+    /// from the runtime once the host populates hazard/availability facts.
+    #[test]
+    fn boost_guard_fires_only_when_seeded_fact_crosses_threshold() {
+        let mut params = AiParams::new();
+        params.set("boost_urgency", 0.5);
+        let p = AiPolicy {
+            params,
+            rules: vec![AiPolicyRule {
+                priority: 10,
+                channel: "boost".into(),
+                when: parse_predicate(
+                    "fact(hazard_urgency) > param(boost_urgency) and fact(boost_available) > 0",
+                )
+                .unwrap(),
+                verb: AiPolicyVerb::EngageBoost,
+            }],
+            idle: false,
+        };
+        // Available but calm → no fire (hold).
+        let mut calm = AiFacts::new();
+        calm.set("hazard_urgency", 0.1);
+        calm.set("boost_available", 1.0);
+        assert_eq!(p.resolve_channel("boost", &calm, &[]), None);
+        // Available and urgent → fire.
+        let mut urgent = AiFacts::new();
+        urgent.set("hazard_urgency", 0.9);
+        urgent.set("boost_available", 1.0);
+        assert_eq!(
+            p.resolve_channel("boost", &urgent, &[]),
+            Some(&AiPolicyVerb::EngageBoost)
+        );
+        // Urgent but unavailable → no fire.
+        let mut unavailable = AiFacts::new();
+        unavailable.set("hazard_urgency", 0.9);
+        unavailable.set("boost_available", 0.0);
+        assert_eq!(p.resolve_channel("boost", &unavailable, &[]), None);
     }
 
     #[test]

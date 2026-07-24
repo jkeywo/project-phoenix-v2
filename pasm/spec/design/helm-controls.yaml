@@ -153,6 +153,7 @@ entities:
       summary: Shared 3D hazard forces and capability facts guide actuator responses without exposing a separate player collision controller.
       rationale:
         - "Issue #743: the shared hazard assessment now publishes per-entity movable, dangerous, and size_rating facts plus per-hazard force contributions, and lateral thrust responds to that surface through its own authored sensitivity rather than a separate avoidance helper."
+        - "Issue #780: the single shared scan is now genuinely 3D — moving hazards contribute a vertical force (static ones do not), and the published facts are seeded into every secondary actuator's policy snapshot so authored hazard guards can fire. An imminent-collision facing override is derived from the same shared urgency, never a separate scan."
     game_design:
       enforcement_links:
         - helm-motion-planner
@@ -189,6 +190,7 @@ entities:
       summary: Objectives and shared hazard forces produce desired motion, then each available fine actuator responds according to authored sensitivity.
       rationale:
         - "Issue #743: lateral thrust now responds primarily to collision avoidance by reading the shared hazard-assessment force scaled by an authored lateral_hazard_sensitivity, replacing the separate operate_lateral_thrust helper."
+        - "Issue #780: all four secondary fine actuators (lateral, vertical, impulse, boost) are now policy-driven — an authored per-hull mode-verb policy gates whether each actuator acts this tick, over a fact snapshot seeded from the shared hazard surface. Ordinary avoidance BENDS travel without swapping the movement doctrine; only an imminent collision (hazard urgency past an authored threshold) may TEMPORARILY override desired facing toward the escape heading, self-clearing when urgency drops. Bounded vertical responds only to moving hazards and eases back to the authored cruise plane."
     game_design:
       participating_roles:
         - helm-operator
@@ -203,6 +205,7 @@ entities:
         - engines slow for arrival or collision avoidance
         - lateral thrust responds primarily to collision avoidance
         - vertical thrust responds only to moving hazards in bounded vertical mode
+        - only an imminent collision temporarily overrides desired facing, self-clearing when urgency falls
 
   - coordination: tactical-helm-arc-request
     core:
@@ -269,7 +272,7 @@ entities:
         - hazard-aware-helm-actuation
       intended_directional_effect: Lower impulse steering and stronger hazard sensitivity make travel safer but reduce precise manoeuvring.
       bounds: impulse steering multiplier is ship-authored, with 0.1 as the standard intended value
-      maturity: lateral hazard sensitivity is authored and wired (issue #743); impulse steering multiplier still pending ship capability migration
+      maturity: "lateral hazard sensitivity authored and wired (#743); since #780 all four secondary actuators (lateral/vertical/impulse/boost) are policy-driven with per-hull authored mode-verb policies, moving-only bounded vertical avoidance, and an authored imminent-collision facing-override threshold; impulse steering multiplier still pending ship capability migration"
 
   - playtest-claim: helm-shared-intent-preserves-player-agency
     core:

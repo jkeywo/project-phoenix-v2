@@ -71,6 +71,16 @@ pub const MAX_VERTICAL_OFFSET: f32 = 30.0;
 /// plane rather than snapping. Parse-time default only — see
 /// [`crate::entity_config::HelmCapabilityConfig::vertical_return_rate`].
 pub const VERTICAL_RETURN_RATE: f32 = 0.05;
+/// Authored hazard-urgency threshold at or above which an imminent collision may
+/// TEMPORARILY override the ship's desired facing to point along the escape
+/// direction (issue #780, AC4). Below it, ordinary avoidance only bends travel
+/// and never touches facing. `1.0` here means "off by default" (only a
+/// full-urgency, effectively-unavoidable collision qualifies) — a hull opts into
+/// an earlier facing bail-out by authoring a lower
+/// [`crate::entity_config::BehaviourConfig::imminent_collision_facing_threshold`].
+/// Parse-time default only; the override is stateless and evaporates the tick
+/// urgency drops back under the threshold.
+pub const IMMINENT_COLLISION_FACING_THRESHOLD: f32 = 1.0;
 /// Proportional deceleration factor for approach: thrust begins ramping down
 /// when distance is within this multiple of the target stop-distance.
 /// At 1.5× the stop threshold the ship starts slowing; at the threshold it
@@ -1185,9 +1195,34 @@ pub fn assess_hazards(
             let inv = threat_fraction / dist;
             let rx = ddx * inv;
             let rz = ddz * inv;
-            // Rotate into the ship-local frame (x = starboard, z = aft).
-            let contribution = [rx * stbd_x + rz * stbd_z, 0.0, -(rx * fwd_x + rz * fwd_z)];
+            // Vertical (local +Y = up) repulsion, issue #780: the surface is now
+            // genuinely 3D, but only ELIGIBLE MOVING hazards contribute a vertical
+            // component (AC5) — static obstacles stay a purely planar concern for
+            // the lateral/engine actuators. When the hazard is off the ship's
+            // cruise plane the climb follows the actual vertical separation; when
+            // both share the plane (`dy ≈ 0`, the common case today) the initial
+            // policy climbs UP by convention to clear a co-planar moving threat.
+            // The magnitude matches the planar contribution's severity so a
+            // bounded/full-3D hull's authored sensitivity weights all axes alike.
+            let vertical_contribution = if entity.movable {
+                let dy = self_pos[1] - entity.position[1];
+                if dy.abs() > 0.01 {
+                    dy.signum() * threat_fraction
+                } else {
+                    threat_fraction
+                }
+            } else {
+                0.0
+            };
+            // Rotate the horizontal repulsion into the ship-local frame
+            // (x = starboard, z = aft); the vertical component is already ship-up.
+            let contribution = [
+                rx * stbd_x + rz * stbd_z,
+                vertical_contribution,
+                -(rx * fwd_x + rz * fwd_z),
+            ];
             force[0] += contribution[0];
+            force[1] += contribution[1];
             force[2] += contribution[2];
             contributions.push(HazardContribution {
                 uuid: entity.uuid,
@@ -3024,6 +3059,108 @@ mod tests {
             c.force_local
         );
         assert!((c.threat_fraction - hz.urgency).abs() < 1e-6);
+        // Issue #780: the surface is 3D, but a STATIC hazard contributes no
+        // vertical component — the vertical axis is a moving-hazard concern (AC5).
+        assert_eq!(
+            hz.forces_local[1], 0.0,
+            "a static hazard must not push the vertical axis, got {:?}",
+            hz.forces_local
+        );
+        assert_eq!(c.force_local[1], 0.0);
+    }
+
+    /// Issue #780 (AC2/AC5): `assess_hazards` is genuinely 3D — an ELIGIBLE
+    /// MOVING hazard populates a vertical (local +Y) force so a bounded/full-3D
+    /// hull can climb to clear it, while an identically-placed STATIC hazard
+    /// leaves the vertical axis untouched. Both register a horizontal threat, so
+    /// the only difference is the `movable` fact.
+    #[test]
+    fn assess_hazards_computes_vertical_force_for_moving_only() {
+        // A co-planar obstacle dead ahead that projects into collision.
+        let make = |movable: bool| WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: Uuid::from_u128(7),
+                position: [0.0, 0.0, -10.0],
+                radius: 5.0,
+                movable,
+                dangerous: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let moving = assess_hazards(
+            &make(true),
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
+        assert!(
+            moving.forces_local[1] > 0.0,
+            "a co-planar MOVING hazard must produce an upward (climb) vertical \
+             force, got {:?}",
+            moving.forces_local
+        );
+        assert!(moving.contributions[0].force_local[1] > 0.0);
+
+        let static_hz = assess_hazards(
+            &make(false),
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
+        assert_eq!(
+            static_hz.forces_local[1], 0.0,
+            "a STATIC hazard must leave the vertical axis at zero, got {:?}",
+            static_hz.forces_local
+        );
+        // Both still registered a horizontal (aft) repulsion, proving the vertical
+        // difference is the `movable` fact and not just a missed collision.
+        assert!(moving.forces_local[2] > 0.0 && static_hz.forces_local[2] > 0.0);
+    }
+
+    /// Issue #780: an off-plane moving hazard drives the climb along the ACTUAL
+    /// vertical separation — a hazard below the ship pushes it up, one above
+    /// pushes it down.
+    #[test]
+    fn assess_hazards_follows_vertical_separation_sign() {
+        let make = |hazard_y: f32| WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            self_radius: 2.0,
+            entities: vec![AiWorldEntity {
+                uuid: Uuid::from_u128(8),
+                position: [0.0, hazard_y, -10.0],
+                radius: 5.0,
+                movable: true,
+                dangerous: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Hazard below (y = -5): dy = self(0) - (-5) = +5 → climb up (+).
+        let below = assess_hazards(
+            &make(-5.0),
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
+        assert!(below.forces_local[1] > 0.0, "hazard below must push up");
+        // Hazard above (y = +5): dy = -5 → descend (-).
+        let above = assess_hazards(
+            &make(5.0),
+            3.0,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_IGNORE_SIZE_RATIO,
+        );
+        assert!(above.forces_local[1] < 0.0, "hazard above must push down");
     }
 
     #[test]

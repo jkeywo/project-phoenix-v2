@@ -580,6 +580,58 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
             steering_ai_policy,
         ));
+        // Helm secondary-actuator AI policies (issue #780): lateral / vertical /
+        // impulse / boost, from their `[helm_console.*_ai]` blocks if authored,
+        // else the canonical defaults (lateral/vertical unconditional actuate,
+        // impulse unconditional permit, boost idle). Attached to every ship so
+        // the secondary hosts resolve a data-authored mode verb rather than a
+        // hardcoded branch. `to_policy` cannot fail here (validated at load).
+        let lateral_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.lateral_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_lateral_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmLateralAiPolicy(lateral_ai_policy));
+        let vertical_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.vertical_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_vertical_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
+            vertical_ai_policy,
+        ));
+        let impulse_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.impulse_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_impulse_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmImpulseAiPolicy(impulse_ai_policy));
+        let boost_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.boost_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_boost_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmBoostAiPolicy(boost_ai_policy));
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and

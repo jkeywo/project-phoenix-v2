@@ -161,6 +161,15 @@ pub struct BehaviourConfig {
     /// Defaults to [`crate::ai::VERTICAL_HAZARD_SENSITIVITY`] when absent.
     #[serde(default = "default_vertical_hazard_sensitivity")]
     pub vertical_hazard_sensitivity: f32,
+    /// Authored hazard-urgency threshold at or above which an imminent collision
+    /// may TEMPORARILY override the ship's desired facing toward the escape
+    /// direction (issue #780, AC4). Ordinary avoidance below this only bends
+    /// travel and never touches facing. Defaults to
+    /// [`crate::ai::IMMINENT_COLLISION_FACING_THRESHOLD`] (`1.0` — effectively
+    /// off) when absent; the override is stateless and self-clears the tick
+    /// urgency drops back under the threshold.
+    #[serde(default = "default_imminent_collision_facing_threshold")]
+    pub imminent_collision_facing_threshold: f32,
     // `retreat_hull_threshold` lived here until issue #702. It fed a synthetic
     // hull-triggered Retreat that could never win (0..1 score against doctrine's
     // tens) and always steered to world origin (its anchor was empty and the
@@ -195,8 +204,13 @@ impl Default for BehaviourConfig {
             hazard_ignore_size_ratio: default_hazard_ignore_size_ratio(),
             lateral_hazard_sensitivity: default_lateral_hazard_sensitivity(),
             vertical_hazard_sensitivity: default_vertical_hazard_sensitivity(),
+            imminent_collision_facing_threshold: default_imminent_collision_facing_threshold(),
         }
     }
+}
+
+fn default_imminent_collision_facing_threshold() -> f32 {
+    crate::ai::IMMINENT_COLLISION_FACING_THRESHOLD
 }
 
 fn default_waypoint_arrival_radius() -> f32 {
@@ -820,6 +834,32 @@ pub struct HelmConsoleConfig {
     /// channel with the `actuate_desired_facing` mode verb.
     #[serde(default)]
     pub steering_ai: Option<FineSystemAiConfigToml>,
+    /// Inline stateless AI policy for the **Lateral Thrust** fine system, from
+    /// `[helm_console.lateral_ai]` (issue #780). Absent ⇒ the canonical
+    /// [`default_lateral_ai_config`] (unconditional actuate) is synthesised at
+    /// spawn. Drives the `lateral` channel with the `actuate_lateral_thrust`
+    /// mode verb.
+    #[serde(default)]
+    pub lateral_ai: Option<FineSystemAiConfigToml>,
+    /// Inline stateless AI policy for the **Vertical Thrust** fine system, from
+    /// `[helm_console.vertical_ai]` (issue #780). Absent ⇒ the canonical
+    /// [`default_vertical_ai_config`] (unconditional actuate) is synthesised at
+    /// spawn. Drives the `vertical` channel with the `actuate_vertical_thrust`
+    /// mode verb.
+    #[serde(default)]
+    pub vertical_ai: Option<FineSystemAiConfigToml>,
+    /// Inline stateless AI policy for the **Impulse** fine system, from
+    /// `[helm_console.impulse_ai]` (issue #780). Absent ⇒ the canonical
+    /// [`default_impulse_ai_config`] (unconditional permit) is synthesised at
+    /// spawn. Drives the `impulse` channel with the `engage_impulse` mode verb.
+    #[serde(default)]
+    pub impulse_ai: Option<FineSystemAiConfigToml>,
+    /// Inline stateless AI policy for the **Boost** fine system, from
+    /// `[helm_console.boost_ai]` (issue #780). Absent ⇒ the canonical
+    /// [`default_boost_ai_config`] (explicit idle — no AI boost) is synthesised
+    /// at spawn. Drives the `boost` channel with the `engage_boost` mode verb.
+    #[serde(default)]
+    pub boost_ai: Option<FineSystemAiConfigToml>,
 }
 
 /// What vertical movement capability the ship has.
@@ -1660,6 +1700,45 @@ pub const HELM_YAW_CHANNEL: &str = "yaw";
 /// `desired_facing_local`; its absence ("hold") emits nothing.
 pub const HELM_ACTUATE_DESIRED_FACING_VERB: &str = "actuate_desired_facing";
 
+// ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
+//
+// Lateral thrust, bounded vertical thrust, impulse, and boost move onto the same
+// #775 policy spine. Each drives a single output channel with a single value-less
+// MODE verb: the verb decides *whether* to actuate this tick, while the
+// continuous magnitude / engage-vs-cancel decision stays sourced host-side from
+// geometry, capability, and the shared hazard assessment (AGENTS.md rule #11 —
+// no gameplay scalar pinned in the verb).
+
+/// The `lateral` output channel: the Lateral Thrust fine system's dodge axis.
+pub const HELM_LATERAL_CHANNEL: &str = "lateral";
+/// The `actuate_lateral_thrust` verb: the Lateral Thrust mode verb. Its presence
+/// lets the host emit `LateralThrustInput` with the magnitude from the shared
+/// hazard surface (or docking translation); its absence ("hold") emits nothing.
+pub const HELM_ACTUATE_LATERAL_THRUST_VERB: &str = "actuate_lateral_thrust";
+
+/// The `vertical` output channel: the Vertical Thrust fine system's climb axis.
+pub const HELM_VERTICAL_CHANNEL: &str = "vertical";
+/// The `actuate_vertical_thrust` verb: the Vertical Thrust mode verb. Its
+/// presence lets the host emit `VerticalThrustInput` with the climb/return
+/// magnitude gated on the authored `VerticalMovementMode`; its absence emits
+/// nothing.
+pub const HELM_ACTUATE_VERTICAL_THRUST_VERB: &str = "actuate_vertical_thrust";
+
+/// The `impulse` output channel: the Impulse fine system's engage/cancel axis.
+pub const HELM_IMPULSE_CHANNEL: &str = "impulse";
+/// The `engage_impulse` verb: the Impulse mode verb. Its presence permits the
+/// impulse manoeuvre this tick; the host still applies the authored doctrine
+/// `use_impulse` and the `decide_impulse` geometry. Its absence ("hold") emits
+/// nothing.
+pub const HELM_ENGAGE_IMPULSE_VERB: &str = "engage_impulse";
+
+/// The `boost` output channel: the Boost fine system's engage axis.
+pub const HELM_BOOST_CHANNEL: &str = "boost";
+/// The `engage_boost` verb: the Boost mode verb. Its presence drives the ship's
+/// boost active via the same admitted `SetBoost` a human uses; its absence
+/// ("hold"/idle) leaves boost as it is.
+pub const HELM_ENGAGE_BOOST_VERB: &str = "engage_boost";
+
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
 /// Candidate source: the ship's frozen combat lock (Tactical's designated
@@ -2164,6 +2243,16 @@ impl FineSystemAiConfigToml {
                 HELM_ACTUATE_DESIRED_FACING_VERB => {
                     crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
                 }
+                // Helm secondary-actuator mode verbs (issue #780): value-less,
+                // like the travel-axis verbs above.
+                HELM_ACTUATE_LATERAL_THRUST_VERB => {
+                    crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
+                }
+                HELM_ACTUATE_VERTICAL_THRUST_VERB => {
+                    crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
+                }
+                HELM_ENGAGE_IMPULSE_VERB => crate::ai::policy::AiPolicyVerb::EngageImpulse,
+                HELM_ENGAGE_BOOST_VERB => crate::ai::policy::AiPolicyVerb::EngageBoost,
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2254,6 +2343,89 @@ pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ACTUATE_DESIRED_FACING_VERB.to_string(),
             value: false,
         }],
+    }
+}
+
+/// The canonical default Lateral Thrust policy synthesised for ships that do not
+/// author `[helm_console.lateral_ai]` (issue #780).
+///
+/// One unconditional rule on the `lateral` channel: always actuate. This
+/// reproduces the pre-#780 baseline, where `ai_helm_lateral_thrust` ran the dodge
+/// (and docking translation) every tick — the DECISION to actuate now flows
+/// through a data-authored policy verb a designer can gate, while the continuous
+/// dodge magnitude still comes from the shared hazard surface.
+pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_LATERAL_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ACTUATE_LATERAL_THRUST_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default Vertical Thrust policy synthesised for ships that do not
+/// author `[helm_console.vertical_ai]` (issue #780).
+///
+/// One unconditional rule on the `vertical` channel: always actuate. Baseline
+/// preserving — the pre-#780 `ai_helm_vertical_thrust` ran the bounded/full-3D
+/// climb-and-return every tick, gated only on the authored `VerticalMovementMode`
+/// (which stays a host-side capability gate, not a policy scalar). A `Planar`
+/// hull still takes no vertical component because the host zeroes it regardless
+/// of the policy verb.
+pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_VERTICAL_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ACTUATE_VERTICAL_THRUST_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default Impulse policy synthesised for ships that do not author
+/// `[helm_console.impulse_ai]` (issue #780).
+///
+/// One unconditional rule on the `impulse` channel: the policy always PERMITS the
+/// impulse manoeuvre. This preserves the pre-#780 baseline exactly, because the
+/// engage-vs-cancel decision itself is still made host-side from the authored
+/// doctrine `use_impulse` fact and the `decide_impulse` geometry — the policy
+/// verb is an additional authored gate layered on top, defaulting to "permit".
+pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_IMPULSE_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ENGAGE_IMPULSE_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default Boost policy synthesised for ships that do not author
+/// `[helm_console.boost_ai]` (issue #780).
+///
+/// An explicit **idle** declaration: today no AI ever engages boost, so the
+/// baseline-preserving default is "takes no AI boost action". A hull opts in by
+/// authoring `[helm_console.boost_ai]` with a rule on the `boost` channel; until
+/// then `ai_helm_boost` resolves `None` every tick and emits nothing. Idle is a
+/// legal, distinct-from-silence declaration accepted by validation.
+pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: true,
+        param: std::collections::HashMap::new(),
+        rule: Vec::new(),
     }
 }
 
@@ -3267,6 +3439,42 @@ impl EntityConfig {
                     ai,
                     &[HELM_YAW_CHANNEL],
                     &[HELM_ACTUATE_DESIRED_FACING_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
+            // Secondary helm fine-actuator policies (issue #780): each drives its
+            // own single channel with its own single mode verb. Wrong-axis verbs,
+            // unknown channels, unparseable guards, and undeclared parameter
+            // references fail the entity load here, before any live tick.
+            if let Some(ai) = hc.lateral_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_LATERAL_CHANNEL],
+                    &[HELM_ACTUATE_LATERAL_THRUST_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
+            if let Some(ai) = hc.vertical_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_VERTICAL_CHANNEL],
+                    &[HELM_ACTUATE_VERTICAL_THRUST_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
+            if let Some(ai) = hc.impulse_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_IMPULSE_CHANNEL],
+                    &[HELM_ENGAGE_IMPULSE_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
+            if let Some(ai) = hc.boost_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_BOOST_CHANNEL],
+                    &[HELM_ENGAGE_BOOST_VERB],
                 )
                 .map_err(SerdeError::custom)?;
             }
@@ -6494,6 +6702,140 @@ max_speed = 30.0
 "#;
         let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
         assert!(err.contains("empty") || err.contains("idle"), "got: {err}");
+    }
+
+    // ── Helm secondary-actuator AI policy (issue #780) ───────────────────────
+
+    const LATERAL_CHANNELS: &[&str] = &[HELM_LATERAL_CHANNEL];
+    const LATERAL_VERBS: &[&str] = &[HELM_ACTUATE_LATERAL_THRUST_VERB];
+    const VERTICAL_CHANNELS: &[&str] = &[HELM_VERTICAL_CHANNEL];
+    const VERTICAL_VERBS: &[&str] = &[HELM_ACTUATE_VERTICAL_THRUST_VERB];
+    const IMPULSE_CHANNELS: &[&str] = &[HELM_IMPULSE_CHANNEL];
+    const IMPULSE_VERBS: &[&str] = &[HELM_ENGAGE_IMPULSE_VERB];
+    const BOOST_CHANNELS: &[&str] = &[HELM_BOOST_CHANNEL];
+    const BOOST_VERBS: &[&str] = &[HELM_ENGAGE_BOOST_VERB];
+
+    #[test]
+    fn default_secondary_helm_policies_validate_and_resolve() {
+        // Lateral / vertical / impulse default to unconditional actuate/permit;
+        // boost defaults to explicit idle (no AI boost).
+        let lat = default_lateral_ai_config();
+        assert!(validate_fine_system_ai_policy(&lat, LATERAL_CHANNELS, LATERAL_VERBS).is_ok());
+        assert_eq!(
+            lat.to_policy().unwrap().resolve_channel(
+                HELM_LATERAL_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::ActuateLateralThrust),
+        );
+
+        let vert = default_vertical_ai_config();
+        assert!(validate_fine_system_ai_policy(&vert, VERTICAL_CHANNELS, VERTICAL_VERBS).is_ok());
+        assert_eq!(
+            vert.to_policy().unwrap().resolve_channel(
+                HELM_VERTICAL_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust),
+        );
+
+        let imp = default_impulse_ai_config();
+        assert!(validate_fine_system_ai_policy(&imp, IMPULSE_CHANNELS, IMPULSE_VERBS).is_ok());
+        assert_eq!(
+            imp.to_policy().unwrap().resolve_channel(
+                HELM_IMPULSE_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::EngageImpulse),
+        );
+
+        let boost = default_boost_ai_config();
+        assert!(validate_fine_system_ai_policy(&boost, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+        let boost_policy = boost.to_policy().unwrap();
+        assert!(
+            boost_policy.idle,
+            "default boost policy is an explicit idle"
+        );
+        assert_eq!(
+            boost_policy.resolve_channel(
+                HELM_BOOST_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            None,
+            "an idle boost policy never engages"
+        );
+    }
+
+    #[test]
+    fn authored_secondary_helm_policies_parse_at_entity_load() {
+        let toml = r#"
+name = "Test Cruiser"
+
+[helm_console]
+max_speed = 30.0
+
+[helm_console.boost_ai.param]
+boost_urgency = 0.5
+
+[[helm_console.boost_ai.rule]]
+priority = 10
+channel = "boost"
+when = "fact(hazard_urgency) > param(boost_urgency) and fact(boost_available) > 0"
+verb = "engage_boost"
+
+[helm_console.impulse_ai]
+[[helm_console.impulse_ai.rule]]
+priority = 10
+channel = "impulse"
+when = "fact(impulse_available) > 0"
+verb = "engage_impulse"
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("parse must succeed");
+        let hc = cfg.helm_console.as_ref().expect("helm_console present");
+        let boost = hc.boost_ai.as_ref().expect("boost_ai present");
+        assert_eq!(boost.to_policy().unwrap().rules.len(), 1);
+        let impulse = hc.impulse_ai.as_ref().expect("impulse_ai present");
+        assert_eq!(impulse.to_policy().unwrap().rules.len(), 1);
+    }
+
+    #[test]
+    fn wrong_verb_on_secondary_helm_channel_is_rejected() {
+        // The impulse verb on the boost channel is unknown to the boost host.
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: HELM_BOOST_CHANNEL.into(),
+                verb: HELM_ENGAGE_IMPULSE_VERB.into(),
+                when: "true".into(),
+                value: false,
+            }],
+        };
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn wrong_secondary_helm_verb_rejected_at_entity_load() {
+        // Authoring the lateral verb on the vertical channel fails the load.
+        let toml = r#"
+name = "BadHelm"
+[helm_console]
+max_speed = 30.0
+[helm_console.vertical_ai]
+[[helm_console.vertical_ai.rule]]
+priority = 1
+channel = "vertical"
+when = "true"
+verb = "actuate_lateral_thrust"
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
     }
 
     // ── Sensors target selector schema + validation (issue #776) ─────────────

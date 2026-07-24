@@ -2771,6 +2771,66 @@ fn spawn_game_start_entities(
                     steering_ai_policy,
                 ));
 
+            // Helm secondary-actuator AI policies (issue #780) — player-ship half
+            // of the per-entity pattern in `spawner.rs`. Authored
+            // `[helm_console.lateral_ai/vertical_ai/impulse_ai/boost_ai]` drive the
+            // secondary hosts; absent, the canonical defaults are synthesised.
+            // Validated already in `EntityConfig::from_toml`.
+            let lateral_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.lateral_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_lateral_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            let vertical_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.vertical_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_vertical_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            let impulse_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.impulse_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_impulse_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            let boost_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.boost_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_boost_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmLateralAiPolicy(lateral_ai_policy));
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
+                    vertical_ai_policy,
+                ));
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmImpulseAiPolicy(impulse_ai_policy));
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmBoostAiPolicy(boost_ai_policy));
+
             // Shields damage history — per-ship Component tracking HP deltas
             // for the AI damage-concentration algorithm. Initialised empty; resized
             // lazily by operate_shields_ai to match the ship's arc count.

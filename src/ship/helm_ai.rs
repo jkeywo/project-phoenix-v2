@@ -9,7 +9,7 @@ use crate::command_admission::ai_emit::emit_ai_command;
 #[cfg(test)]
 use crate::ship::components::LastHelmInput;
 use crate::ship::components::{
-    HelmWaypointClearance, ImpulseConfigResource, PendingArcBearingRequest,
+    BoostConfigResource, HelmWaypointClearance, ImpulseConfigResource, PendingArcBearingRequest,
     ShipSystemControlSources,
 };
 #[cfg(test)]
@@ -19,7 +19,7 @@ use crate::ship::helm::{
 use crate::ship::helm_ai_emit::emit_helm_ai_command;
 use crate::ship::helm_lateral_emit::emit_helm_lateral_command;
 use crate::ship_state::ShipPhysics;
-use crate::simulation::ShipImpulse;
+use crate::simulation::{ShipBoost, ShipImpulse};
 
 /// The shared fixed-rate AI-helm sim tick (issue #803). One repeating timer
 /// gates **all four** per-axis AI helm systems (`ai_helm_thrust`,
@@ -1032,6 +1032,39 @@ pub struct HelmEnginesAiPolicy(pub crate::ai::policy::AiPolicy);
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmSteeringAiPolicy(pub crate::ai::policy::AiPolicy);
 
+/// Per-ship inline stateless **Lateral Thrust** AI policy (issue #780). From
+/// `[helm_console.lateral_ai]` when authored, else
+/// [`crate::entities::config::default_lateral_ai_config`]. Read by
+/// [`ai_helm_lateral_thrust`] to decide whether to actuate the dodge this tick;
+/// the continuous magnitude still comes from the shared hazard surface.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmLateralAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Per-ship inline stateless **Vertical Thrust** AI policy (issue #780). From
+/// `[helm_console.vertical_ai]` when authored, else
+/// [`crate::entities::config::default_vertical_ai_config`]. Read by
+/// [`ai_helm_vertical_thrust`] to decide whether to actuate the climb/return this
+/// tick; the authored `VerticalMovementMode` still gates the magnitude host-side.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmVerticalAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Per-ship inline stateless **Impulse** AI policy (issue #780). From
+/// `[helm_console.impulse_ai]` when authored, else
+/// [`crate::entities::config::default_impulse_ai_config`]. Read by
+/// [`ai_helm_impulse`] to decide whether the impulse manoeuvre is permitted this
+/// tick; the host still applies doctrine `use_impulse` and `decide_impulse`
+/// geometry.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Per-ship inline stateless **Boost** AI policy (issue #780). From
+/// `[helm_console.boost_ai]` when authored, else the idle
+/// [`crate::entities::config::default_boost_ai_config`] (no AI boost by default).
+/// Read by [`ai_helm_boost`] to decide whether to engage boost this tick, emitted
+/// through the same admitted `SetBoost` seam a human uses.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
+
 /// Resolve a helm fine-system policy's single mode channel to a bare "actuate
 /// this tick?" boolean (issue #779).
 ///
@@ -1048,6 +1081,36 @@ fn helm_policy_actuates(
     expected: &crate::ai::policy::AiPolicyVerb,
 ) -> bool {
     policy.resolve_channel(channel, facts, &[]) == Some(expected)
+}
+
+/// Seed the per-tick policy fact snapshot for a secondary helm actuator host
+/// (issue #780). This is THE piece that resolves the #779 empty-facts sharp
+/// edge: the travel-axis hosts pass an empty `AiFacts`, so a `fact(...)`
+/// guard validates but never fires; the secondary hosts instead seed hazard and
+/// capability/availability facts here so authored guards (AC5/AC6) actually
+/// evaluate. Facts are read from the shared `HazardAssessment` the planner
+/// already published — no re-scan (AC2) — and from host-side capability, keeping
+/// `policy.rs` Bevy-free (AGENTS.md #10).
+fn seed_helm_actuator_facts(
+    hazard: Option<&crate::ship::helm_planner::HazardAssessment>,
+    impulse_available: bool,
+    boost_available: bool,
+    vertical_offset: f32,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    let (urgency, moving_threat) = hazard
+        .map(|h| (h.urgency, h.moving_hazard_threat))
+        .unwrap_or((0.0, 0.0));
+    facts.set("hazard_urgency", urgency as f64);
+    facts.set("moving_hazard_threat", moving_threat as f64);
+    facts.set("hazard_present", if urgency > 0.0 { 1.0 } else { 0.0 });
+    facts.set(
+        "impulse_available",
+        if impulse_available { 1.0 } else { 0.0 },
+    );
+    facts.set("boost_available", if boost_available { 1.0 } else { 0.0 });
+    facts.set("vertical_offset", vertical_offset as f64);
+    facts
 }
 
 /// Per-axis helm AI: throttle. Decides the throttle for ships whose
@@ -1258,8 +1321,10 @@ pub(crate) fn ai_helm_steering(
 /// `apply_helm_commands` transitions on `ImpulseCommand` change detection, so
 /// an unconditional emission would re-issue `start_charge`/`cancel_charge`
 /// every tick.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_impulse(
     frame: Res<HelmAiSurfacesFrame>,
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
@@ -1268,7 +1333,9 @@ pub(crate) fn ai_helm_impulse(
             &ShipPhysics,
             Option<&ShipImpulse>,
             Option<&ImpulseConfigResource>,
+            Option<&BoostConfigResource>,
             Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&HelmImpulseAiPolicy>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             Option<&crate::ai_plugin::ObjectiveCursors>,
@@ -1277,13 +1344,20 @@ pub(crate) fn ai_helm_impulse(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
+    // Canonical fallback for ships missing an attached policy (bare-`App`
+    // fixtures); built once per tick — mirrors `ai_helm_thrust`.
+    let default_policy = crate::entities::config::default_impulse_ai_config()
+        .to_policy()
+        .unwrap_or_default();
     for (
         entity,
         sources,
         physics,
         impulse_comp,
         impulse_cfg,
+        boost_cfg,
         behaviour_section,
+        impulse_policy,
         entity_uuid,
         ship_config,
         cursors,
@@ -1300,10 +1374,35 @@ pub(crate) fn ai_helm_impulse(
         }
 
         // No drive or no per-hull drive config → nothing to command. Matches
-        // the monolith, which guards the same pair.
+        // the monolith, which guards the same pair. Availability (AC6): the
+        // presence of `ImpulseConfigResource` is the impulse capability — no
+        // config, no emit.
         let (Some(impulse), Some(cfg)) = (impulse_comp, impulse_cfg) else {
             continue;
         };
+
+        // Authored manoeuvre policy gate (issue #780, AC6): seed the hazard +
+        // availability facts and resolve the `impulse` channel. Its default
+        // (unconditional permit) preserves the pre-#780 baseline exactly — the
+        // engage/cancel decision is still made below from doctrine + geometry —
+        // while an authored guard may hold impulse. A "hold" resolution emits
+        // nothing.
+        let boost_available = boost_cfg.map(|c| c.enabled).unwrap_or(false);
+        let facts = seed_helm_actuator_facts(
+            plan.ships.get(&entity).map(|sp| &sp.hazard),
+            true,
+            boost_available,
+            physics.y,
+        );
+        let policy = impulse_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        if !helm_policy_actuates(
+            policy,
+            crate::entities::config::HELM_IMPULSE_CHANNEL,
+            &facts,
+            &crate::ai::policy::AiPolicyVerb::EngageImpulse,
+        ) {
+            continue;
+        }
 
         let Some(sf) = frame.ships.get(&entity) else {
             continue;
@@ -1422,6 +1521,7 @@ pub(crate) fn ai_helm_lateral_thrust(
             // a `[behaviour]` section still runs AI lateral thrust, on the
             // `crate::ai::*` fallbacks that match the serde defaults.
             Option<&crate::entities::spawner::BehaviourSection>,
+            Option<&HelmLateralAiPolicy>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
@@ -1429,8 +1529,20 @@ pub(crate) fn ai_helm_lateral_thrust(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    for (entity, sources, behaviour_section, entity_uuid, ship_config, mut admitted) in
-        ships.iter_mut()
+    // Canonical fallback for ships missing an attached policy; built once per
+    // tick — mirrors `ai_helm_thrust`.
+    let default_policy = crate::entities::config::default_lateral_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    for (
+        entity,
+        sources,
+        behaviour_section,
+        lateral_policy,
+        entity_uuid,
+        ship_config,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         // Gate on our own system alone (issue #703) — see the module note above.
         if !sources
@@ -1454,10 +1566,31 @@ pub(crate) fn ai_helm_lateral_thrust(
         // this tick, owns the lateral axis: its controlled translation is the
         // sanctioned use of lateral thrust, distinct from the avoidance dodge
         // below and from the facing-only arc-bearing request. Read straight off
-        // the shared desired-motion contract's `x`.
+        // the shared desired-motion contract's `x`. This is an UNCONDITIONAL
+        // sanctioned override (issue #780): it precedes the policy gate so a
+        // docking hull always translates onto its berth.
         let docking_lateral = ship_plan
             .filter(|sp| sp.docking_active)
             .map(|sp| sp.motion.desired_velocity_local.x);
+
+        // Authored actuation-policy gate (issue #780, AC1/AC3): outside a docking
+        // manoeuvre, the DECISION to actuate the dodge flows through
+        // HelmLateralAiPolicy over a fact snapshot seeded from the shared hazard
+        // surface — never a doctrine swap (AC3), only a gate on the dodge. Its
+        // default (unconditional actuate) reproduces the pre-#780 always-on
+        // avoidance; a "hold" resolution emits nothing and lateral coasts.
+        if docking_lateral.is_none() {
+            let facts = seed_helm_actuator_facts(ship_plan.map(|sp| &sp.hazard), false, false, 0.0);
+            let policy = lateral_policy.map(|p| &p.0).unwrap_or(&default_policy);
+            if !helm_policy_actuates(
+                policy,
+                crate::entities::config::HELM_LATERAL_CHANNEL,
+                &facts,
+                &crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+            ) {
+                continue;
+            }
+        }
 
         let lateral = if let Some(docking_lateral) = docking_lateral {
             docking_lateral
@@ -1528,6 +1661,7 @@ pub(crate) fn ai_helm_vertical_thrust(
             &ShipPhysics,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entities::spawner::HelmCapabilitySection>,
+            Option<&HelmVerticalAiPolicy>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
@@ -1536,12 +1670,18 @@ pub(crate) fn ai_helm_vertical_thrust(
     >,
 ) {
     use crate::entity_config::VerticalMovementMode;
+    // Canonical fallback for ships missing an attached policy; built once per
+    // tick — mirrors `ai_helm_thrust`.
+    let default_policy = crate::entities::config::default_vertical_ai_config()
+        .to_policy()
+        .unwrap_or_default();
     for (
         entity,
         sources,
         physics,
         behaviour_section,
         capability,
+        vertical_policy,
         entity_uuid,
         ship_config,
         mut admitted,
@@ -1553,6 +1693,30 @@ pub(crate) fn ai_helm_vertical_thrust(
             .policy_for(&crate::system_registry::vertical_thrust_system_id())
             .operate_ai
         {
+            continue;
+        }
+
+        // Authored actuation-policy gate (issue #780, AC1/AC5): the DECISION to
+        // actuate the vertical axis flows through HelmVerticalAiPolicy over a
+        // fact snapshot seeded from the shared moving-hazard threat and the
+        // ship's current vertical offset (for return-to-cruise guards). Its
+        // default (unconditional actuate) preserves the pre-#780 behaviour; the
+        // authored `VerticalMovementMode` still gates the magnitude below, so a
+        // Planar hull takes no Y component regardless of the verb. A "hold"
+        // resolution emits nothing.
+        let facts = seed_helm_actuator_facts(
+            plan.ships.get(&entity).map(|sp| &sp.hazard),
+            false,
+            false,
+            physics.y,
+        );
+        let policy = vertical_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        if !helm_policy_actuates(
+            policy,
+            crate::entities::config::HELM_VERTICAL_CHANNEL,
+            &facts,
+            &crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+        ) {
             continue;
         }
 
@@ -1613,6 +1777,117 @@ pub(crate) fn ai_helm_vertical_thrust(
             entity_uuid,
             crate::system_registry::vertical_thrust_system_id(),
             crate::messages::SystemControlPayload::VerticalThrustInput { vertical },
+            sources,
+            &sessions,
+            ship_config,
+            &mut admitted,
+        );
+    }
+}
+
+/// Per-axis helm AI: boost drive (issue #780). Decides engage/release for ships
+/// whose `helm-boost` system is AI-operated and emits it as an admitted
+/// `SetBoost { active }` into the ship's own `AdmittedCommands` — the SAME seam
+/// a human `SetBoost`/`ToggleBoost` passes through (`handle_boost_messages`),
+/// preserving human/AI symmetry (AGENTS.md #6).
+///
+/// Modelled on [`ai_helm_impulse`]: discrete and on-change. Availability (AC6) is
+/// the presence of an *enabled* [`BoostConfigResource`] — no config, or a
+/// feature-disabled one, and the system stands down without emitting. The
+/// DECISION flows through [`HelmBoostAiPolicy`] resolving the `boost` channel to
+/// the `engage_boost` mode verb over a fact snapshot seeded from the shared
+/// hazard surface: fires ⇒ boost on, holds ⇒ boost off. The canonical default is
+/// idle, so a ship that authors no `[helm_console.boost_ai]` never AI-boosts —
+/// the pre-#780 baseline. It emits only when the desired state differs from the
+/// current `ShipBoost`, so it does not re-issue `SetBoost` every tick.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ai_helm_boost(
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&ShipBoost>,
+            Option<&BoostConfigResource>,
+            Option<&ImpulseConfigResource>,
+            Option<&HelmBoostAiPolicy>,
+            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::components::ShipConfigComponent>,
+            &mut crate::messages::AdmittedCommands,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+) {
+    // Canonical fallback (idle) for ships missing an attached policy; built once
+    // per tick — mirrors `ai_helm_thrust`.
+    let default_policy = crate::entities::config::default_boost_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    for (
+        entity,
+        sources,
+        physics,
+        boost_comp,
+        boost_cfg,
+        impulse_cfg,
+        boost_policy,
+        entity_uuid,
+        ship_config,
+        mut admitted,
+    ) in ships.iter_mut()
+    {
+        // Gate on our own system alone — see the module note above.
+        if !sources
+            .0
+            .policy_for(&crate::system_registry::helm_boost_system_id())
+            .operate_ai
+        {
+            continue;
+        }
+
+        // Availability (AC6): the feature must be present AND enabled. No
+        // BoostConfigResource, or one with the feature disabled, means no boost
+        // capability — emit nothing (mirrors the human `handle_boost_messages`
+        // enabled-guard).
+        let (Some(boost), Some(cfg)) = (boost_comp, boost_cfg) else {
+            continue;
+        };
+        if !cfg.enabled {
+            continue;
+        }
+
+        // Authored manoeuvre policy (issue #780, AC6): resolve the `boost`
+        // channel over a fact snapshot seeded from the shared hazard surface and
+        // availability. Fires ⇒ engage; holds ⇒ release.
+        let facts = seed_helm_actuator_facts(
+            plan.ships.get(&entity).map(|sp| &sp.hazard),
+            impulse_cfg.is_some(),
+            true,
+            physics.y,
+        );
+        let policy = boost_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        let desired_active = helm_policy_actuates(
+            policy,
+            crate::entities::config::HELM_BOOST_CHANNEL,
+            &facts,
+            &crate::ai::policy::AiPolicyVerb::EngageBoost,
+        );
+
+        // On-change only: `SetBoost` sets the desired active state, and the
+        // shared integrator applies the transition; re-issuing an unchanged state
+        // every tick is redundant. Mirrors `ai_helm_impulse`'s NoChange skip.
+        if desired_active == boost.0.is_active() {
+            continue;
+        }
+
+        emit_ai_command(
+            entity_uuid,
+            crate::system_registry::helm_boost_system_id(),
+            crate::messages::SystemControlPayload::SetBoost {
+                active: desired_active,
+            },
             sources,
             &sessions,
             ship_config,
@@ -1829,7 +2104,7 @@ mod tests {
             ),
         ];
 
-        let axes: [(&str, crate::messages::SystemId); 4] = [
+        let axes: [(&str, crate::messages::SystemId); 5] = [
             (
                 "helm-thrust",
                 crate::system_registry::helm_thrust_system_id(),
@@ -1846,6 +2121,7 @@ mod tests {
                 "helm-lateral-thrust",
                 crate::system_registry::lateral_thrust_system_id(),
             ),
+            ("helm-boost", crate::system_registry::helm_boost_system_id()),
         ];
 
         for (hull, toml_str) in hulls {
@@ -5263,6 +5539,428 @@ mod tests {
         assert!(
             returned < 1.0,
             "the ship must return close to the cruise plane, got y={returned}"
+        );
+    }
+
+    // ── Secondary-actuator policy gate + fact seeding (issue #780) ───────────
+
+    fn set_vertical_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(HelmVerticalAiPolicy(policy));
+    }
+
+    fn set_lateral_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(HelmLateralAiPolicy(policy));
+    }
+
+    /// A vertical policy that actuates only while the seeded `moving_hazard_threat`
+    /// fact exceeds an authored threshold — a `fact(...)`-referencing guard.
+    fn threat_gated_vertical_policy(threshold: f64) -> crate::ai::policy::AiPolicy {
+        let mut params = crate::world::flags::AiParams::new();
+        params.set("threshold", threshold);
+        crate::ai::policy::AiPolicy {
+            params,
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_VERTICAL_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate(
+                    "fact(moving_hazard_threat) > param(threshold)",
+                )
+                .unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+            }],
+            idle: false,
+        }
+    }
+
+    /// THE #779 empty-facts sharp edge, resolved (issue #780). A vertical policy
+    /// whose guard references the seeded `moving_hazard_threat` fact must actually
+    /// FIRE — impossible before #780 because the helm hosts passed an empty
+    /// `AiFacts`. With no moving hazard the guard is false and the axis holds at
+    /// cruise; introduce a moving hazard and the same guard fires and the ship
+    /// climbs. Proves the host now seeds real hazard facts.
+    #[test]
+    fn vertical_fact_guard_fires_only_once_hazard_fact_is_seeded() {
+        // Guard needs threat > 0.1. No hazard → fact seeds 0.0 → hold at cruise.
+        let mut calm = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }),
+        );
+        set_vertical_ai_policy(&mut calm, threat_gated_vertical_policy(0.1));
+        app_empty_snapshot(&mut calm);
+        tick_twice(&mut calm);
+        assert_eq!(
+            vertical_intent(&mut calm),
+            0.0,
+            "with no hazard the seeded moving_hazard_threat is 0, the guard is \
+             false, and the vertical axis holds — the pre-#780 empty facts would \
+             have made this guard un-fireable at all"
+        );
+
+        // Same policy, now a moving hazard seeds a nonzero threat → guard fires.
+        let mut threatened = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }),
+        );
+        set_vertical_ai_policy(&mut threatened, threat_gated_vertical_policy(0.1));
+        snapshot_with_moving_obstacle(&mut threatened, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
+        tick_twice(&mut threatened);
+        assert!(
+            vertical_intent(&mut threatened) > 0.0,
+            "a seeded moving_hazard_threat above the authored threshold must fire \
+             the guard and climb; got {}",
+            vertical_intent(&mut threatened)
+        );
+    }
+
+    /// AC1/AC7 typed output + an authored idle/hold: a vertical policy that never
+    /// fires holds the axis, proving the actuator emits a TYPED VerticalThrustInput
+    /// only when its own channel resolves — not unconditionally.
+    #[test]
+    fn vertical_actuator_holds_under_never_firing_policy() {
+        let mut app = vertical_thrust_ai_app(
+            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }),
+        );
+        // Threshold above 1.0 can never be crossed by a [0,1] threat → never fires.
+        set_vertical_ai_policy(&mut app, threat_gated_vertical_policy(2.0));
+        snapshot_with_moving_obstacle(&mut app, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            vertical_intent(&mut app),
+            0.0,
+            "a policy that never fires must hold the vertical axis despite a live \
+             moving hazard the default policy would climb for"
+        );
+    }
+
+    /// AC3: ordinary avoidance BENDS travel without swapping the doctrine. A
+    /// lateral policy that never fires suppresses the dodge, proving the dodge
+    /// flows through the actuator gate — while the same tick's engine/steering
+    /// doctrine (a forward Reach) is untouched.
+    #[test]
+    fn lateral_actuator_holds_under_never_firing_policy() {
+        let mut app = lateral_dodge_app();
+        // A policy on the lateral channel that never fires.
+        let never = crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_LATERAL_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate("fact(hazard_urgency) > 9.0").unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+            }],
+            idle: false,
+        };
+        set_lateral_ai_policy(&mut app, never);
+        tick_twice(&mut app);
+        assert_eq!(
+            lateral_intent(&mut app),
+            0.0,
+            "a never-firing lateral policy must hold the dodge even with a hazard \
+             in range the default policy would dodge"
+        );
+    }
+
+    fn app_empty_snapshot(app: &mut App) {
+        app.insert_resource(crate::ai::server::WorldSnapshot { entities: vec![] });
+    }
+
+    // ── Boost AI operator (issue #780) ───────────────────────────────────────
+
+    fn boost_command(app: &mut App) -> bool {
+        app.world_mut()
+            .query::<&crate::ship::helm::BoostCommand>()
+            .single(app.world())
+            .expect("ship must carry BoostCommand")
+            .0
+    }
+
+    /// Build an app whose ship runs AI boost. Boost feature enabled, helm-boost
+    /// on AI, an objective + a moving hazard so the plan carries urgency.
+    fn boost_ai_app(policy: Option<crate::ai::policy::AiPolicy>) -> App {
+        let mut app = test_app();
+        // Full helm on AI: this puts a travel axis on AI so the shared frame +
+        // hazard plan are built (the frame is gated on any of
+        // thrust/steering/lateral/vertical/impulse being AI, not boost), and it
+        // puts helm-boost on AI so the boost operator runs.
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
+        set_behaviour_section(
+            &mut app,
+            crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            },
+        );
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship::components::BoostConfigResource {
+                enabled: true,
+                ..Default::default()
+            });
+        if let Some(policy) = policy {
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(HelmBoostAiPolicy(policy));
+        }
+        snapshot_with_moving_obstacle(&mut app, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
+        app
+    }
+
+    /// A boost policy that engages while the seeded hazard-urgency fact is above a
+    /// threshold and boost is available.
+    fn hazard_boost_policy() -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_BOOST_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate(
+                    "fact(hazard_urgency) > 0.0 and fact(boost_available) > 0",
+                )
+                .unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::EngageBoost,
+            }],
+            idle: false,
+        }
+    }
+
+    /// AC1/AC6: `ai_helm_boost` emits a typed `SetBoost` through the same admitted
+    /// seam a human uses, engaging boost when its authored policy fires and the
+    /// feature is available.
+    #[test]
+    fn ai_helm_boost_engages_under_authored_hazard_policy() {
+        let mut app = boost_ai_app(Some(hazard_boost_policy()));
+        tick_twice(&mut app);
+        assert!(
+            boost_command(&mut app),
+            "an authored boost policy firing on the seeded hazard fact must engage \
+             boost through the admitted SetBoost seam"
+        );
+    }
+
+    /// AC6 availability/capability filtering: with the boost feature absent, the
+    /// operator stands down and boost never engages, however urgent the hazard —
+    /// even under the same policy that engages it when available.
+    #[test]
+    fn ai_helm_boost_stands_down_without_boost_config() {
+        let mut app = boost_ai_app(Some(hazard_boost_policy()));
+        // Strip the boost capability.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ship::components::BoostConfigResource>();
+        tick_twice(&mut app);
+        assert!(
+            !boost_command(&mut app),
+            "no BoostConfigResource means no boost capability — the operator must \
+             emit nothing"
+        );
+    }
+
+    /// Baseline preservation (issue #780): the canonical default boost policy is
+    /// idle, so a ship that authors no `[helm_console.boost_ai]` never AI-boosts,
+    /// exactly as before #780 — even with the feature enabled and a live hazard.
+    #[test]
+    fn ai_helm_boost_default_idle_never_engages() {
+        // No policy component → the host falls back to the idle default.
+        let mut app = boost_ai_app(None);
+        tick_twice(&mut app);
+        assert!(
+            !boost_command(&mut app),
+            "the default idle boost policy must never engage boost (the pre-#780 \
+             baseline: no AI boost)"
+        );
+    }
+
+    /// `ai_helm_boost` runs on the shared AI-helm sim tick like its four siblings
+    /// (issue #780 + #803), not once per rendered frame.
+    #[test]
+    fn ai_helm_boost_runs_on_the_shared_sim_tick_not_per_frame() {
+        // A boost policy keyed off a sentinel-independent fact so it toggles
+        // deterministically: engage while the seeded hazard is present. The probe
+        // measures BoostCommand transitions, which only the operator can drive.
+        let mut app = boost_ai_app(Some(hazard_boost_policy()));
+        let counts = count_sim_tick_runs(
+            &mut app,
+            // Arm: force the applied BoostCommand back off so a run is observable
+            // as a re-engage. (The operator re-emits only on change.)
+            |app| {
+                let ship = find_ship_entity(app);
+                let mut entity = app.world_mut().entity_mut(ship);
+                entity
+                    .get_mut::<crate::ship::helm::BoostCommand>()
+                    .unwrap()
+                    .0 = false;
+                *entity.get_mut::<ShipBoost>().unwrap() = ShipBoost::default();
+            },
+            boost_command,
+        );
+        assert_shared_sim_tick_cadence("ai_helm_boost", counts);
+    }
+
+    // ── Avoidance bends travel; only imminent collision overrides facing ─────
+
+    fn plan_desired_facing(app: &mut App, ship: Entity) -> Vec3 {
+        app.world()
+            .resource::<crate::ship::helm_planner::HelmMotionPlan>()
+            .ships
+            .get(&ship)
+            .map(|sp| sp.motion.desired_facing_local)
+            .unwrap_or_default()
+    }
+
+    /// An app steering toward a forward Reach with a moving hazard on the
+    /// starboard bow. `imminent_collision_facing_threshold` is authored so the
+    /// same hazard is either ordinary avoidance (default 1.0 — off) or an
+    /// imminent-collision facing override (low threshold).
+    fn avoidance_facing_app(imminent_threshold: f32) -> App {
+        let mut app = test_app();
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        app.insert_resource(world_config_with_anchor("far-ahead", [0.0, 0.0, -900.0]));
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective("far-ahead", 8.0)]);
+        set_behaviour_section(
+            &mut app,
+            crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                imminent_collision_facing_threshold: imminent_threshold,
+                ..Default::default()
+            },
+        );
+        // Stationary: below `AVOIDANCE_MIN_SPEED`, so the ordinary steering
+        // doctrine (which includes avoidance_steering) does NOT turn facing —
+        // isolating the imminent-collision facing override as the only thing that
+        // can move desired facing off the forward objective heading.
+        let mut physics = get_ship_physics(&mut app);
+        physics.forward_speed = 0.0;
+        physics.yaw = 0.0;
+        set_ship_physics(&mut app, physics);
+        // Close hazard on the starboard bow → high urgency, port-ward repulsion.
+        snapshot_with_moving_obstacle(&mut app, [3.0, 0.0, -10.0], 1.0, 0.0, 0.0);
+        app
+    }
+
+    /// AC4: only an imminent collision may temporarily override desired facing.
+    /// With the default (off) threshold the same in-range hazard leaves facing on
+    /// the forward objective heading (≈ -Z, x ≈ 0); with a low authored threshold
+    /// the imminent hazard overrides it toward the escape heading (a nonzero
+    /// local-X facing away from the starboard threat). The ship is stationary so
+    /// the ordinary avoidance-steering doctrine cannot itself turn facing —
+    /// proving the override, not doctrine, is what moves it.
+    #[test]
+    fn facing_overridden_only_when_collision_imminent() {
+        let mut ordinary = avoidance_facing_app(1.0);
+        let ship_o = find_ship_entity(&mut ordinary);
+        tick_twice(&mut ordinary);
+        let ordinary_facing = plan_desired_facing(&mut ordinary, ship_o);
+        assert!(
+            ordinary_facing.x.abs() < 0.1 && ordinary_facing.z < 0.0,
+            "ordinary avoidance must leave facing on the forward objective heading \
+             (the doctrine never touches facing on hazards below the imminent \
+             threshold), got {ordinary_facing:?}"
+        );
+
+        let mut imminent = avoidance_facing_app(0.01);
+        let ship_i = find_ship_entity(&mut imminent);
+        tick_twice(&mut imminent);
+        let imminent_facing = plan_desired_facing(&mut imminent, ship_i);
+        assert!(
+            imminent_facing.x.abs() > 0.2,
+            "an imminent collision must temporarily override facing toward the \
+             escape heading (nonzero local-X), got {imminent_facing:?}"
+        );
+    }
+
+    /// AC3: ordinary avoidance BENDS travel without changing the active doctrine.
+    /// A forward Reach's throttle doctrine is identical with and without a hazard
+    /// in range — the avoidance response shows up in the lateral dodge, not in a
+    /// swapped travel decision.
+    #[test]
+    fn avoidance_bends_travel_without_changing_doctrine() {
+        fn forward_throttle_and_dodge(with_hazard: bool) -> (f32, f32) {
+            let mut app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }));
+            // A forward objective so the engine doctrine commands forward travel.
+            set_helm_control_source(&mut app, ControlSource::Ai);
+            app.insert_resource(world_config_with_anchor("ahead", [0.0, 0.0, -900.0]));
+            set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective("ahead", 8.0)]);
+            let mut physics = get_ship_physics(&mut app);
+            physics.forward_speed = 10.0;
+            physics.yaw = 0.0;
+            set_ship_physics(&mut app, physics);
+            if with_hazard {
+                snapshot_with_obstacle(&mut app, [4.0, 0.0, -40.0], 1.0);
+            }
+            tick_twice(&mut app);
+            let ship = find_ship_entity(&mut app);
+            let thrust = app
+                .world()
+                .resource::<crate::ship::helm_planner::HelmMotionPlan>()
+                .ships
+                .get(&ship)
+                .map(|sp| {
+                    crate::ai::decode_thrust_from_velocity(
+                        sp.motion.desired_velocity_local.to_array(),
+                    )
+                })
+                .unwrap_or(0.0);
+            (thrust, lateral_intent(&mut app))
+        }
+
+        let (clear_thrust, clear_dodge) = forward_throttle_and_dodge(false);
+        let (hazard_thrust, hazard_dodge) = forward_throttle_and_dodge(true);
+
+        assert!(
+            (clear_thrust - hazard_thrust).abs() < 1e-4,
+            "the travel doctrine (forward throttle) must be UNCHANGED by avoidance; \
+             clear={clear_thrust} hazard={hazard_thrust}"
+        );
+        assert_eq!(
+            clear_dodge, 0.0,
+            "no hazard means no dodge — precondition for the bend below"
+        );
+        assert!(
+            hazard_dodge.abs() > 0.0,
+            "avoidance must BEND travel via the lateral dodge, got {hazard_dodge}"
+        );
+    }
+
+    /// AC6 capability filtering for impulse: with no `ImpulseConfigResource` the
+    /// impulse operator stands down and never charges, even with an engaging
+    /// objective geometry that otherwise would.
+    #[test]
+    fn ai_helm_impulse_stands_down_without_impulse_config() {
+        let anchor = "station-alpha";
+        let mut app = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+        // Strip the impulse capability the fixture installed.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<ImpulseConfigResource>();
+        tick(&mut app);
+        assert_eq!(
+            get_impulse_command(&mut app),
+            crate::impulse::ImpulsePhase::Idle,
+            "no ImpulseConfigResource means no impulse capability — no charge"
         );
     }
 

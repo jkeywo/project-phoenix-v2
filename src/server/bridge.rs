@@ -969,6 +969,90 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
     crate::config_cache::set_scenario_manifest_toml(toml_str);
 }
 
+/// Validate an uploaded host mod-pack ZIP and, when accepted, install its
+/// session-scoped content overlay (issue #760).
+///
+/// Called by the pre-scenario upload control on the host page with the raw
+/// archive bytes. Validation is atomic (`world::mod_pack::validate_mod_pack`):
+/// on ANY failure nothing is applied and the returned array carries error
+/// findings; on success the exact-path overlay + mod manifest are installed via
+/// `config_cache::set_mod_pack_overlay` and an empty (or warning-only) array is
+/// returned, after which JS re-reads `wasm_get_scenario_catalog`.
+///
+/// Each finding is a JS object `{ severity, category, message, file, line }`.
+/// Manifest root worlds resolve against the pack first, then base worlds the
+/// host has already fetched (`peek_pending_world_toml`).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
+    let result = crate::world::mod_pack::validate_mod_pack(bytes, |path| {
+        crate::config_cache::peek_pending_world_toml(path)
+    });
+
+    let arr = Array::new();
+    for finding in &result.findings {
+        let obj = Object::new();
+        let severity = match finding.severity {
+            crate::world::validate::Severity::Error => "error",
+            crate::world::validate::Severity::Warning => "warning",
+        };
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("severity"),
+            &JsValue::from_str(severity),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("category"),
+            &JsValue::from_str(finding.category),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("message"),
+            &JsValue::from_str(&finding.message),
+        )
+        .ok();
+        Reflect::set(
+            &obj,
+            &JsValue::from_str("file"),
+            &JsValue::from_str(&finding.source.file),
+        )
+        .ok();
+        if let Some(line) = finding.source.line {
+            Reflect::set(
+                &obj,
+                &JsValue::from_str("line"),
+                &JsValue::from_f64(line as f64),
+            )
+            .ok();
+        }
+        arr.push(&obj);
+    }
+
+    // Atomic: install the overlay only when no finding is an error (AC1).
+    if result.is_accepted() {
+        crate::config_cache::set_mod_pack_overlay(
+            result.files.into_iter().collect(),
+            result.manifest_toml,
+        );
+    }
+    arr
+}
+
+/// Discard the current host mod-pack overlay + manifest (issue #760, AC4).
+///
+/// Called on return-to-lobby (before the next scenario stage) and before a new
+/// upload, so uploaded state never leaks into a fresh selection or a same-page
+/// next round. A page reload clears the thread-locals anyway; this covers the
+/// same-page seams.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_clear_mod_pack() {
+    crate::config_cache::clear_mod_pack_overlay();
+}
+
 /// Return the authoritative pre-load scenario/ship catalog.
 ///
 /// Unlike `wasm_get_available_ships` (which needs a loaded `WorldConfig`), this
@@ -984,7 +1068,7 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_scenario_catalog() -> Array {
-    use crate::world::manifest::{build_catalog, parse_manifest};
+    use crate::world::manifest::{build_merged_catalog, parse_manifest};
     let arr = Array::new();
     let Some(manifest_toml) = crate::config_cache::get_scenario_manifest_toml() else {
         return arr;
@@ -992,8 +1076,14 @@ pub fn wasm_get_scenario_catalog() -> Array {
     let Ok(manifest) = parse_manifest(&manifest_toml) else {
         return arr;
     };
-    let catalog = build_catalog(&manifest, |path| {
-        crate::config_cache::peek_pending_world_toml(path)
+    // Merge the base manifest with any validated mod-pack manifest (issue #760,
+    // AC3), resolving every root world through the overlay-aware resolver (pack
+    // content first, then base). Only manifest-listed scenarios appear.
+    let mod_manifest =
+        crate::config_cache::get_mod_manifest_toml().and_then(|t| parse_manifest(&t).ok());
+    let catalog = build_merged_catalog(&manifest, mod_manifest.as_ref(), |path| {
+        crate::config_cache::mod_pack_overlay_get(path)
+            .or_else(|| crate::config_cache::peek_pending_world_toml(path))
     });
     for scenario in &catalog.scenarios {
         let obj = Object::new();

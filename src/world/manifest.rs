@@ -210,6 +210,36 @@ pub fn build_catalog(
     ScenarioCatalog { scenarios }
 }
 
+/// Build the merged scenario catalog from the base manifest PLUS an optional
+/// validated mod-pack manifest (issue #760, AC3).
+///
+/// Both manifests are resolved through the same overlay-aware `resolve_world`
+/// closure (the caller consults the uploaded-pack overlay first, then base
+/// content), so a mod scenario's root world is read from the pack. The merged
+/// catalog contains regular scenarios and manifest-listed mod scenarios ONLY —
+/// a world present in the overlay but not named by any manifest never appears
+/// as a selectable scenario. A mod entry whose `id` matches a base entry
+/// REPLACES it (exact-path/id override, consistent with the overlay's
+/// add-or-replace contract); otherwise it is appended.
+pub fn build_merged_catalog(
+    base: &Manifest,
+    mod_manifest: Option<&Manifest>,
+    resolve_world: impl Fn(&str) -> Option<String>,
+) -> ScenarioCatalog {
+    let mut catalog = build_catalog(base, &resolve_world);
+    if let Some(modm) = mod_manifest {
+        let mod_catalog = build_catalog(modm, &resolve_world);
+        for entry in mod_catalog.scenarios {
+            if let Some(existing) = catalog.scenarios.iter_mut().find(|s| s.id == entry.id) {
+                *existing = entry;
+            } else {
+                catalog.scenarios.push(entry);
+            }
+        }
+    }
+    catalog
+}
+
 /// Build an error [`WorldFinding`] located in the manifest text.
 fn finding(
     category: &'static str,
@@ -479,6 +509,77 @@ world = "assets/worlds/story.toml"
         let catalog = build_catalog(&m, resolver(map));
         assert_eq!(catalog.scenarios.len(), 1);
         assert!(catalog.scenarios[0].ships.is_empty());
+    }
+
+    // -- merged catalog (issue #760, AC3) ------------------------------------
+
+    #[test]
+    fn merged_catalog_contains_only_manifest_listed_scenarios() {
+        let base = parse_manifest(MANIFEST).unwrap();
+        let mod_manifest = parse_manifest(
+            r#"
+[[scenario]]
+id = "mod_skirmish"
+world = "assets/worlds/mod_skirmish.toml"
+"#,
+        )
+        .unwrap();
+
+        // Overlay holds the base worlds, the listed mod world, AND an extra
+        // mod world that no manifest names — the latter must NOT appear.
+        let mut map = full_map();
+        map.insert(
+            "assets/worlds/mod_skirmish.toml".to_string(),
+            "[global]\ntitle = \"world.mod_skirmish.title\"\n".to_string(),
+        );
+        map.insert(
+            "assets/worlds/unlisted_mod.toml".to_string(),
+            "[global]\ntitle = \"world.unlisted.title\"\n".to_string(),
+        );
+
+        let catalog = build_merged_catalog(&base, Some(&mod_manifest), resolver(map));
+        let ids: Vec<&str> = catalog.scenarios.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["default", "combat_test", "mod_skirmish"]);
+        assert!(
+            !ids.contains(&"unlisted_mod"),
+            "an overlay world not named by a manifest must not be selectable"
+        );
+    }
+
+    #[test]
+    fn merged_catalog_mod_entry_replaces_base_id() {
+        let base = parse_manifest(MANIFEST).unwrap();
+        let mod_manifest = parse_manifest(
+            r#"
+[[scenario]]
+id = "default"
+world = "assets/worlds/mod_default.toml"
+label = "Modded Default"
+"#,
+        )
+        .unwrap();
+        let mut map = full_map();
+        map.insert(
+            "assets/worlds/mod_default.toml".to_string(),
+            "[global]\ntitle = \"world.mod_default.title\"\n".to_string(),
+        );
+        let catalog = build_merged_catalog(&base, Some(&mod_manifest), resolver(map));
+        // Still two ids (default replaced in place, not duplicated).
+        assert_eq!(catalog.scenarios.len(), 2);
+        let default = catalog
+            .scenarios
+            .iter()
+            .find(|s| s.id == "default")
+            .unwrap();
+        assert_eq!(default.world, "assets/worlds/mod_default.toml");
+        assert_eq!(default.label.as_deref(), Some("Modded Default"));
+    }
+
+    #[test]
+    fn merged_catalog_without_mod_manifest_is_base_only() {
+        let base = parse_manifest(MANIFEST).unwrap();
+        let catalog = build_merged_catalog(&base, None, resolver(full_map()));
+        assert_eq!(catalog.scenarios.len(), 2);
     }
 
     // -- shipped manifest ----------------------------------------------------

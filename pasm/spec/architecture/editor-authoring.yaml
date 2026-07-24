@@ -120,7 +120,7 @@ entities:
 
   - component: host-mod-pack-upload
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Host Mod Pack Upload
       summary: Server-page pre-scenario control that accepts one TOML-only ZIP with its required scenario manifest for the next selection session and presents validation failures without starting a round.
@@ -130,10 +130,23 @@ entities:
       owns: [uploaded-mod-pack-state]
       produces: [uploaded-mod-pack-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: confirmed
+      paths:
+        - server.html
+        - src/server/bridge.rs
+      tests: [cargo test]
+    evidence:
+      - kind: code
+        reference: pre-scenario upload control gated to the scenario stage
+        summary: server.html adds a file input + button inside #scenario-panel and ignores any pick once _worldLoadStarted latches, so an in-progress round is never affected.
+      - kind: code
+        reference: wasm_validate_mod_pack bridges the upload to atomic validation
+        summary: The button reads the ZIP bytes and calls the wasm_validate_mod_pack export, which validates atomically and installs the session overlay only on acceptance.
 
   - state: uploaded-mod-pack-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Uploaded Mod Pack State
       summary: Host-session-scoped uploaded archive, required scenario manifest, and parsed candidate files, discarded when the host session ends and never applied to an in-progress round.
@@ -141,10 +154,15 @@ entities:
       classification: authoritative
       owner: host-mod-pack-upload
       writers: [host-mod-pack-upload]
+    implementation:
+      status: confirmed
+      paths:
+        - src/entities/config_cache.rs
+      tests: [cargo test]
 
   - component: mod-content-overlay-resolver
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Mod Content Overlay Resolver
       summary: Validates a TOML-only uploaded archive and required manifest against supported authored paths, composes exact-path replacements and additions over base content, and rejects the entire pack on invalid archive, manifest, path, parse, or reference failure.
@@ -155,10 +173,26 @@ entities:
       reads: [uploaded-mod-pack-state, world-content-pack-state]
       produces: [composed-world-content-pack-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: confirmed
+      paths:
+        - src/world/mod_pack.rs
+        - src/entities/config_cache.rs
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: valid_pack_is_accepted / corrupt_archive_rejects_whole_pack
+        summary: validate_mod_pack accepts a well-formed pack and rejects a malformed archive, missing manifest, off-whitelist path, unparseable TOML, or unresolved composition reference — nothing is applied on any failure (AC1).
+      - kind: test
+        reference: store_zip_round_trips / store_zip_rejects_non_store_method / store_zip_rejects_crc_mismatch
+        summary: The hand-rolled store-only ZIP reader mirrors editor/mod-pack-export.js — it round-trips real archive bytes and rejects non-store method and CRC mismatch.
+      - kind: test
+        reference: mod_pack_overlay_returns_pack_content_for_overridden_path
+        summary: Both content channels consult the exact-path overlay first (pack content wins) and fall through to the normal fetch for non-overridden paths (AC2).
 
   - state: composed-world-content-pack-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Composed World Content Pack State
       summary: Fully validated base-plus-mod authored TOML view used only for the next selected scenario and its dependent entities, factions, and definitions.
@@ -166,10 +200,15 @@ entities:
       classification: authoritative
       owner: mod-content-overlay-resolver
       writers: [mod-content-overlay-resolver]
+    implementation:
+      status: confirmed
+      paths:
+        - src/entities/config_cache.rs
+      tests: [cargo test]
 
   - component: mod-aware-scenario-catalog
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Mod-Aware Scenario Catalog
       summary: Extends the pre-scenario catalog with only the root worlds explicitly named by the validated mod manifest, alongside regular scenarios declared by assets/scenarios.toml.
@@ -179,6 +218,19 @@ entities:
       reads: [composed-world-content-pack-state, scenario-ship-catalog-state, world-content-pack-state]
       produces: [scenario-ship-catalog-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: confirmed
+      paths:
+        - src/world/manifest.rs
+        - src/server/bridge.rs
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: merged_catalog_contains_only_manifest_listed_scenarios
+        summary: build_merged_catalog merges the base manifest with a validated mod manifest; an overlay world named by no manifest never becomes selectable (AC3).
+      - kind: test
+        reference: merged_catalog_mod_entry_replaces_base_id
+        summary: A mod scenario whose id matches a base scenario replaces it in place, matching the overlay's add-or-replace contract.
 
   - state: editor-validation-state
     core:

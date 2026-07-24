@@ -123,6 +123,62 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+// ── Session-scoped mod-pack overlay (issue #760) ─────────────────────────────
+//
+// A VALID host mod-pack upload installs an in-memory, exact-path -> TOML map
+// here plus the pack's scenario manifest. Both content-resolution channels
+// (world/catalog fetch and entity/faction config request) consult
+// [`mod_pack_overlay_get`] FIRST, returning pack content for any overridden
+// authored path and falling back to the normal HTTP fetch otherwise (AC2). The
+// overlay only ever ADDS or REPLACES supported authored paths — it never
+// touches disk. It is host-session-scoped: a page reload clears these
+// thread-locals naturally, and [`clear_mod_pack_overlay`] discards them for the
+// same-page return-to-lobby / next-upload seam (AC4).
+//
+// Ungated (native + wasm) so the overlay resolution is unit-testable on native
+// without dragging in wasm-bindgen, exactly like the sidecar inbox above.
+thread_local! {
+    /// Exact authored path -> uploaded TOML for the current host session.
+    static UPLOADED_PACK_TOML: RefCell<HashMap<String, String>> =
+        RefCell::new(HashMap::new());
+
+    /// The uploaded pack's `scenarios.toml` manifest, if a valid pack is active.
+    static MOD_MANIFEST_TOML: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Install a validated mod-pack overlay for the current host session (issue
+/// #760). Called only after atomic validation accepts the pack, so nothing
+/// partial is ever installed. Replaces any previously installed overlay.
+pub fn set_mod_pack_overlay(files: HashMap<String, String>, manifest_toml: String) {
+    UPLOADED_PACK_TOML.with(|m| {
+        *m.borrow_mut() = files;
+    });
+    MOD_MANIFEST_TOML.with(|slot| {
+        *slot.borrow_mut() = Some(manifest_toml);
+    });
+}
+
+/// Look up an overridden authored path in the mod-pack overlay, if any.
+///
+/// Both content channels consult this before falling back to the normal fetch,
+/// so an uploaded pack's file wins for any exact authored path it carries.
+pub fn mod_pack_overlay_get(path: &str) -> Option<String> {
+    UPLOADED_PACK_TOML.with(|m| m.borrow().get(path).cloned())
+}
+
+/// The active mod-pack scenario manifest TOML, if a valid pack is installed.
+pub fn get_mod_manifest_toml() -> Option<String> {
+    MOD_MANIFEST_TOML.with(|slot| slot.borrow().clone())
+}
+
+/// Discard the mod-pack overlay + manifest for the current session (issue #760,
+/// AC4). Called before a new upload and on return-to-lobby, so uploaded state
+/// never leaks into a fresh selection stage or a same-page next round.
+pub fn clear_mod_pack_overlay() {
+    UPLOADED_PACK_TOML.with(|m| m.borrow_mut().clear());
+    MOD_MANIFEST_TOML.with(|slot| *slot.borrow_mut() = None);
+}
+
 // ── Public WASM API ──────────────────────────────────────────────────────────
 
 /// Set the JavaScript callback for config fetch requests.
@@ -143,6 +199,10 @@ pub fn set_config_request_callback(callback: Function) {
 /// Returns Err(JsValue) on parse failure (without crashing).
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    // Mod-pack overlay wins for any overridden authored path (issue #760, AC2):
+    // when the session has an uploaded pack file at this exact path, parse the
+    // pack's content instead of the TOML JS fetched over HTTP.
+    let toml_str = mod_pack_overlay_get(&path).unwrap_or(toml_str);
     match EntityConfig::from_toml(&toml_str) {
         Ok(config) => {
             // Discover any nested template paths this config references
@@ -326,6 +386,15 @@ pub fn request_world_fetch(path: String) {
         return;
     }
     WORLD_FETCH_REQUESTED.with(|s| s.borrow_mut().insert(path.clone()));
+    // Mod-pack overlay wins for any overridden world path (issue #760, AC2):
+    // satisfy the fetch directly from the uploaded pack instead of firing the
+    // JS HTTP callback, so an additive extra_worlds load reads pack content.
+    if let Some(toml_str) = mod_pack_overlay_get(&path) {
+        PENDING_WORLD_TOML.with(|m| {
+            m.borrow_mut().insert(path, toml_str);
+        });
+        return;
+    }
     WORLD_FETCH_CB.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
@@ -946,6 +1015,38 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         );
         // Cache entry persists after take.
         assert!(super::is_pending_sidecar_delivered(&path));
+    }
+
+    // ── Mod-pack overlay resolution (issue #760) ─────────────────────────
+
+    #[test]
+    fn mod_pack_overlay_returns_pack_content_for_overridden_path() {
+        let mut files = HashMap::new();
+        files.insert(
+            "assets/entities/__ovl_ship.toml".to_string(),
+            "tags = [\"pack\"]\n".to_string(),
+        );
+        super::set_mod_pack_overlay(files, "manifest".to_string());
+
+        // Overridden path returns pack content; a non-overridden path falls
+        // through (None → caller does the normal HTTP fetch).
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__ovl_ship.toml"),
+            Some("tags = [\"pack\"]\n".to_string())
+        );
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__ovl_other.toml"),
+            None
+        );
+        assert_eq!(super::get_mod_manifest_toml(), Some("manifest".to_string()));
+
+        // Session end / return-to-lobby discards the overlay (AC4).
+        super::clear_mod_pack_overlay();
+        assert_eq!(
+            super::mod_pack_overlay_get("assets/entities/__ovl_ship.toml"),
+            None
+        );
+        assert_eq!(super::get_mod_manifest_toml(), None);
     }
 
     #[test]

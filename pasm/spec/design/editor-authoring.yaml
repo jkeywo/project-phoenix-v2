@@ -12,7 +12,7 @@ entities:
 
   - role: host-mod-pack-operator
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Host Mod Pack Operator
       summary: Person at the server page who uploads a mod pack before selecting the next scenario.
@@ -53,7 +53,7 @@ entities:
 
   - verb: upload-mod-pack
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Upload Mod Pack
       summary: Upload a TOML-only ZIP and its required scenario manifest to the server page before scenario selection, where its files may add content or replace files at the same supported authored path.
@@ -63,10 +63,17 @@ entities:
       inputs: [ZIP mod pack]
       resolution: host-authoritative-validation
       outputs: [composed content catalog or visible package errors]
+    implementation:
+      status: confirmed
+      paths:
+        - server.html
+        - src/server/bridge.rs
+        - src/world/mod_pack.rs
+      tests: [cargo test]
 
   - decision: mod-pack-content-composition
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Mod Pack Content Composition
       summary: A validated mod pack overlays base authored TOML by exact supported path, replacing matching files and adding new files. Only root worlds explicitly named by its manifest appear in the selectable scenario list.
@@ -106,7 +113,7 @@ entities:
 
   - mechanic: unified-scenario-manifest
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Unified Scenario Manifest
       summary: Base content declares selectable regular scenarios in assets/scenarios.toml using the same manifest contract as a mod pack. The composed catalog merges the base manifest with a validated mod manifest.
@@ -115,3 +122,9 @@ entities:
       participating_roles: [scenario-author, host-mod-pack-operator]
       resolution: host-authoritative-content-catalog
       outputs: [explicit regular scenario list, explicit mod scenario list, composed selectable scenario catalog]
+    implementation:
+      status: confirmed
+      paths:
+        - src/world/manifest.rs
+        - src/server/bridge.rs
+      tests: [cargo test]

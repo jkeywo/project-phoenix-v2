@@ -28,6 +28,119 @@ use crate::torpedo::TorpedoSystem;
 #[derive(Resource, Component, Clone)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
 
+/// Per-ship map of each torpedo tube's inline stateless load + launch policy
+/// (issue #782), keyed by `TorpedoTubeConfig.id`. The torpedo twin of
+/// [`crate::weapons_plugin::BlasterBankAiPolicies`]: built at spawn from each
+/// tube's authored `ai` block, falling back to the canonical
+/// [`crate::entities::config::default_torpedo_tube_ai_config`] (unconditional
+/// load + launch) so a tube without an authored policy keeps behaving exactly as
+/// before (AC1). Read by `ai_torpedo_load` (the `torpedo_load` channel) and
+/// `ai_torpedo_auto_fire` (the `torpedo_launch` channel).
+#[derive(Component, Default, Clone, Debug)]
+pub struct TorpedoTubeAiPolicies(
+    pub std::collections::HashMap<crate::entity_config::TorpedoTubeId, crate::ai::policy::AiPolicy>,
+);
+
+/// The shared torpedo magazine's inline stateless grant policy (issue #782,
+/// AC1). Resolved inside [`handle_torpedo_magazine_inter_system`] right before
+/// the authoritative `claim_magazine_round`, so the magazine — the single writer
+/// of `torpedoes_remaining` — consults a data-authored arbiter before granting a
+/// pending claim. Built at spawn from `[torpedoes].ai`, else the canonical
+/// [`crate::entities::config::default_torpedo_magazine_ai_config`] (unconditional
+/// grant), so baseline claim behaviour is preserved.
+#[derive(Component, Default, Clone, Debug)]
+pub struct TorpedoMagazineAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Seed the per-tick policy fact snapshot for one torpedo tube's LOAD decision
+/// (issue #782), the torpedo twin of
+/// [`crate::weapons_plugin::seed_blaster_bank_facts`]. Closes the #779
+/// empty-facts edge for torpedo tubes: the host resolves the tube's live loading
+/// state before calling this, so a `fact(...)` guard evaluates over real per-tube
+/// state while `policy.rs` stays Bevy-free (AGENTS.md #10).
+pub fn seed_torpedo_tube_load_facts(
+    loaded_count: u32,
+    target_count: u32,
+    ai_target_count: u32,
+    magazine: u32,
+    operates_ai: bool,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("loaded_count", loaded_count as f64);
+    facts.set("target_count", target_count as f64);
+    facts.set("ai_target_count", ai_target_count as f64);
+    facts.set("magazine", magazine as f64);
+    facts.set("operates_ai", if operates_ai { 1.0 } else { 0.0 });
+    facts
+}
+
+/// Seed the per-tick policy fact snapshot for one torpedo tube's LAUNCH decision
+/// (issue #782). Mirrors [`seed_torpedo_tube_load_facts`]; the host has already
+/// resolved the tube's live readiness (loaded, target valid, in range, in arc)
+/// and the shield arc the shot would strike before calling this.
+pub fn seed_torpedo_tube_launch_facts(
+    loaded: bool,
+    target_valid: bool,
+    in_range: bool,
+    in_arc: bool,
+    target_facing_shields: i32,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("loaded", if loaded { 1.0 } else { 0.0 });
+    facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
+    facts.set("in_range", if in_range { 1.0 } else { 0.0 });
+    facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
+    facts.set("target_facing_shields", target_facing_shields as f64);
+    facts
+}
+
+/// Seed the per-tick policy fact snapshot for the shared magazine's GRANT
+/// decision (issue #782). `magazine` is the live `torpedoes_remaining`;
+/// `in_flight` is the count of this ship's torpedoes currently in flight — the
+/// AC5 public fact the magazine policy can gate on.
+pub fn seed_torpedo_magazine_facts(magazine: u32, in_flight: u32) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("magazine", magazine as f64);
+    facts.set("in_flight", in_flight as f64);
+    facts
+}
+
+/// Resolve a torpedo tube's policy to a bare "load this tick?" boolean
+/// (issue #782). Returns `true` only when a guard fires on the `torpedo_load`
+/// channel yielding `LoadTorpedo`; `None`/idle/mismatched verbs "hold".
+pub fn torpedo_tube_load_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+) -> bool {
+    policy.resolve_channel(crate::entities::config::TORPEDO_LOAD_CHANNEL, facts, &[])
+        == Some(&crate::ai::policy::AiPolicyVerb::LoadTorpedo)
+}
+
+/// Resolve a torpedo tube's policy to a bare "launch this tick?" boolean
+/// (issue #782). Returns `true` only when a guard fires on the `torpedo_launch`
+/// channel yielding `LaunchTorpedo`; `None`/idle/mismatched verbs "hold".
+pub fn torpedo_tube_launch_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+) -> bool {
+    policy.resolve_channel(crate::entities::config::TORPEDO_LAUNCH_CHANNEL, facts, &[])
+        == Some(&crate::ai::policy::AiPolicyVerb::LaunchTorpedo)
+}
+
+/// Resolve the shared magazine's policy to a bare "grant this claim?" boolean
+/// (issue #782). Returns `true` only when a guard fires on the
+/// `torpedo_magazine_grant` channel yielding `GrantTorpedoRound`; `None`/idle/
+/// mismatched verbs "hold" (refuse the claim without touching the counter).
+pub fn torpedo_magazine_grant_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+) -> bool {
+    policy.resolve_channel(
+        crate::entities::config::TORPEDO_MAGAZINE_CHANNEL,
+        facts,
+        &[],
+    ) == Some(&crate::ai::policy::AiPolicyVerb::GrantTorpedoRound)
+}
+
 /// Admitted-command consumer for `LoadTube` (issue #846).
 ///
 /// Reads each ship's own `AdmittedCommands` for `LoadTube` payloads targeting
@@ -486,6 +599,7 @@ pub fn handle_torpedo_magazine_inter_system(
             Entity,
             &ShipSystemControlSources,
             &mut TorpedoSystemResource,
+            Option<&TorpedoMagazineAiPolicy>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         With<crate::server_app::Ship>,
@@ -493,6 +607,11 @@ pub fn handle_torpedo_magazine_inter_system(
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+    // Canonical fallback for a ship/magazine missing an attached policy
+    // (bare-`App` fixtures). Built once — unconditional grant (baseline, AC1).
+    let default_magazine_policy = crate::entities::config::default_torpedo_magazine_ai_config()
+        .to_policy()
+        .unwrap_or_default();
     // Collect targeted claims: (source_entity, tube_id). Only claims for the
     // magazine system are relevant here — everything else is ignored.
     let claims: Vec<(Option<Entity>, String)> = queue
@@ -513,12 +632,14 @@ pub fn handle_torpedo_magazine_inter_system(
     let local_ship_entity: Option<Entity> =
         ship_q
             .iter()
-            .find_map(|(e, _, _, is_local)| if is_local { Some(e) } else { None });
+            .find_map(|(e, _, _, _, is_local)| if is_local { Some(e) } else { None });
 
     for (source_entity, tube_id) in claims {
         let target_entity = source_entity.or(local_ship_entity);
         if let Some(target) = target_entity {
-            if let Ok((_e, control_sources, mut torpedo_sys, _is_local)) = ship_q.get_mut(target) {
+            if let Ok((_e, control_sources, mut torpedo_sys, mag_policy_opt, _is_local)) =
+                ship_q.get_mut(target)
+            {
                 // Gate: magazine must be online (or absent → treat as online for
                 // ships that don't declare a magazine fine system, preserving
                 // legacy behaviour). The `torpedo_magazine` system is added to
@@ -536,6 +657,24 @@ pub fn handle_torpedo_magazine_inter_system(
                         // still handled below in subsequent iterations.
                         continue;
                     }
+                }
+                // AC1/AC6: the shared magazine consults its authored grant policy
+                // right before the authoritative reservation. The offline gate
+                // above stays the hard authority; this data-authored arbiter can
+                // refuse a claim (e.g. hold rounds while in-flight torpedoes are
+                // high) without ever becoming a second writer of
+                // `torpedoes_remaining`. Claims are still drained in queue order,
+                // so same-tick contention stays deterministic. Facts read the
+                // live counter plus this ship's in-flight count (the AC5 fact).
+                let mag_policy = mag_policy_opt
+                    .map(|p| &p.0)
+                    .unwrap_or(&default_magazine_policy);
+                let facts = seed_torpedo_magazine_facts(
+                    torpedo_sys.0.torpedoes_remaining,
+                    torpedo_sys.0.in_flight.len() as u32,
+                );
+                if !torpedo_magazine_grant_policy_fires(mag_policy, &facts) {
+                    continue; // authored policy refuses this claim.
                 }
                 if !torpedo_sys.0.claim_magazine_round() {
                     continue; // magazine empty — refuse this claim.

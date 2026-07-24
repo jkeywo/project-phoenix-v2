@@ -1243,6 +1243,9 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
                 is_online: magazine_online,
                 torpedoes_remaining: torpedo_sys.0.torpedoes_remaining,
                 capacity: torpedo_sys.0.config.count,
+                // AC5: publish the in-flight count as a public authoritative fact
+                // so other policies read it on the next AI tick.
+                torpedoes_in_flight: torpedo_sys.0.in_flight.len() as u32,
             }),
         );
     }

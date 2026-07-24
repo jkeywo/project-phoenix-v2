@@ -2358,6 +2358,7 @@ mod tests {
             is_online: false,
             torpedoes_remaining: 3,
             capacity: 10,
+            torpedoes_in_flight: 0,
         });
         let json = serde_json::to_string(&bb).unwrap();
         assert!(json.contains("\"kind\":\"TorpedoMagazine\""), "got: {json}");

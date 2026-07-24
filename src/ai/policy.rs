@@ -83,6 +83,32 @@ pub enum AiPolicyVerb {
     /// `ChargeBlasterStart` a human does; its absence ("hold"/idle) holds this
     /// bank's volley.
     FireBlaster,
+    /// Load a round into this torpedo tube this tick (the `torpedo_load` channel
+    /// of a torpedo tube fine system, issue #782). A value-less action verb: the
+    /// tube, its authored volley target, and the shared magazine all come from the
+    /// host context, never the verb. Its presence tells the host to emit the same
+    /// admitted `SetTorpedoVolleyTarget` a Tactical player does (which the auto-load
+    /// path turns into a `ClaimTorpedoRound` against the shared magazine); its
+    /// absence ("hold"/idle) leaves the tube's volley target where it is.
+    LoadTorpedo,
+    /// Launch an already-loaded round from this torpedo tube this tick (the
+    /// `torpedo_launch` channel of a torpedo tube fine system, issue #782). A
+    /// value-less action verb, the launch twin of [`AiPolicyVerb::LoadTorpedo`]:
+    /// the tube and the ship's authoritative combat lock come from the host
+    /// context. Its presence tells the host to emit the same admitted `FireTorpedo`
+    /// a human does; its absence ("hold"/idle) holds this tube's launch. Launch
+    /// consumes ammunition reserved earlier at load time — it never touches the
+    /// magazine counter itself.
+    LaunchTorpedo,
+    /// Grant a pending magazine round claim this tick (the `torpedo_magazine_grant`
+    /// channel of the shared torpedo magazine fine system, issue #782). A
+    /// value-less action verb resolved inside the single magazine consumer right
+    /// before the authoritative `claim_magazine_round`: its presence permits the
+    /// reservation to proceed, its absence ("hold"/idle) refuses the claim without
+    /// decrementing the counter. The offline gate remains the hard authority; this
+    /// policy is a data-authored arbiter layered on top, and never becomes a second
+    /// writer of `torpedoes_remaining`.
+    GrantTorpedoRound,
 }
 
 /// One inline stateless policy rule.
@@ -492,5 +518,108 @@ mod tests {
             p.resolve_channel("red_alert", &AiFacts::new(), &[]),
             Some(&AiPolicyVerb::SetRedAlert(true))
         );
+    }
+
+    // ── Torpedo tube load + launch channels (issue #782) ─────────────────────
+
+    /// A tube policy carrying a load rule and a launch rule: the two channels
+    /// resolve independently, and a fact guard on one channel does not affect the
+    /// other. Mirrors the two-stage tube pipeline (LOAD then LAUNCH).
+    fn torpedo_tube_policy() -> AiPolicy {
+        AiPolicy {
+            params: AiParams::new(),
+            rules: vec![
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "torpedo_load".into(),
+                    when: parse_predicate("fact(magazine) > 0").unwrap(),
+                    verb: AiPolicyVerb::LoadTorpedo,
+                },
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "torpedo_launch".into(),
+                    when: parse_predicate("fact(target_facing_shields) <= 0").unwrap(),
+                    verb: AiPolicyVerb::LaunchTorpedo,
+                },
+            ],
+            idle: false,
+        }
+    }
+
+    #[test]
+    fn torpedo_load_and_launch_channels_resolve_independently() {
+        let p = torpedo_tube_policy();
+
+        // Magazine has stock → load fires; shields down → launch fires.
+        let mut f = AiFacts::new();
+        f.set("magazine", 4.0);
+        f.set("target_facing_shields", 0.0);
+        assert_eq!(
+            p.resolve_channel("torpedo_load", &f, &[]),
+            Some(&AiPolicyVerb::LoadTorpedo)
+        );
+        assert_eq!(
+            p.resolve_channel("torpedo_launch", &f, &[]),
+            Some(&AiPolicyVerb::LaunchTorpedo)
+        );
+
+        // Empty magazine holds LOAD but a downed striking arc still fires LAUNCH:
+        // the two channels are independent.
+        let mut f = AiFacts::new();
+        f.set("magazine", 0.0);
+        f.set("target_facing_shields", 0.0);
+        assert_eq!(p.resolve_channel("torpedo_load", &f, &[]), None);
+        assert_eq!(
+            p.resolve_channel("torpedo_launch", &f, &[]),
+            Some(&AiPolicyVerb::LaunchTorpedo)
+        );
+
+        // A healthy striking arc holds LAUNCH while a stocked magazine still loads.
+        let mut f = AiFacts::new();
+        f.set("magazine", 4.0);
+        f.set("target_facing_shields", 25.0);
+        assert_eq!(
+            p.resolve_channel("torpedo_load", &f, &[]),
+            Some(&AiPolicyVerb::LoadTorpedo)
+        );
+        assert_eq!(p.resolve_channel("torpedo_launch", &f, &[]), None);
+    }
+
+    #[test]
+    fn idle_torpedo_tube_holds_both_channels() {
+        let p = AiPolicy {
+            idle: true,
+            ..Default::default()
+        };
+        let mut f = AiFacts::new();
+        f.set("magazine", 4.0);
+        f.set("target_facing_shields", 0.0);
+        assert_eq!(p.resolve_channel("torpedo_load", &f, &[]), None);
+        assert_eq!(p.resolve_channel("torpedo_launch", &f, &[]), None);
+    }
+
+    #[test]
+    fn torpedo_magazine_grant_channel_resolves() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "torpedo_magazine_grant".into(),
+                when: parse_predicate("fact(in_flight) < 3").unwrap(),
+                verb: AiPolicyVerb::GrantTorpedoRound,
+            }],
+            idle: false,
+        };
+        // Few in flight → grant.
+        let mut f = AiFacts::new();
+        f.set("in_flight", 1.0);
+        assert_eq!(
+            p.resolve_channel("torpedo_magazine_grant", &f, &[]),
+            Some(&AiPolicyVerb::GrantTorpedoRound)
+        );
+        // Saturated in flight → hold (refuse the claim).
+        let mut f = AiFacts::new();
+        f.set("in_flight", 5.0);
+        assert_eq!(p.resolve_channel("torpedo_magazine_grant", &f, &[]), None);
     }
 }

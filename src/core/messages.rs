@@ -2267,6 +2267,13 @@ pub struct TorpedoMagazineBlackboard {
     pub torpedoes_remaining: u32,
     /// Maximum magazine capacity (from ship TOML `[torpedoes] count`).
     pub capacity: u32,
+    /// Count of this ship's torpedoes currently in flight (issue #782, AC5).
+    /// Published each tick in `SimSet::Publish` so other policies read it on the
+    /// NEXT AI tick — the same one-tick-lag discipline as the combat lock. This
+    /// is the public authoritative in-flight fact a torpedo tube or magazine
+    /// policy (or another ship's policy) can gate on.
+    #[serde(default)]
+    pub torpedoes_in_flight: u32,
 }
 
 /// Raw sim truth for the Power Reactor fine system, published each tick into

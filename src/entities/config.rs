@@ -1310,6 +1310,15 @@ pub struct TorpedoTubeConfig {
     /// `Some(0)` disables AI loading for this tube.
     #[serde(default)]
     pub ai_target_count: Option<u32>,
+    /// Inline stateless AI policy for this tube's load + launch decisions
+    /// (issue #782). When authored it is validated at content load and drives
+    /// `ai_torpedo_load`'s per-tube load gate and `ai_torpedo_auto_fire`'s
+    /// per-tube launch gate; when absent the canonical
+    /// [`default_torpedo_tube_ai_config`] (unconditional load + launch) is
+    /// synthesised at spawn so baseline behaviour is preserved. An explicit
+    /// `idle = true` is the per-tube opt-out (AC1).
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
 }
 
 fn default_tube_volley_max() -> u32 {
@@ -1799,6 +1808,49 @@ pub const BLASTER_FIRE_VERB: &str = "fire_blaster";
 pub const BLASTER_BANK_CHANNELS: &[&str] = &[BLASTER_FIRE_CHANNEL];
 /// The registered verbs a blaster bank policy may emit (issue #781).
 pub const BLASTER_BANK_VERBS: &[&str] = &[BLASTER_FIRE_VERB];
+
+// ── Torpedo tube + magazine fine-system AI policy channels/verbs (issue #782) ─
+//
+// A torpedo tube is a two-stage pipeline owned by two fine systems: the TUBE
+// decides whether to LOAD (reserve a round from the shared magazine) and whether
+// to LAUNCH (fire an already-loaded round), while the shared MAGAZINE arbitrates
+// whether to GRANT a pending reservation. Every verb is value-less: the tube, its
+// authored volley target, the ship's authoritative combat lock, and all
+// thresholds stay TOML/host-side, never in the verb (AGENTS.md rule #11). The
+// host enforces loaded state, magazine availability, target validity, range, and
+// arc before resolving these policies, so the runtime only reports *whether the
+// authored behaviour permits* the load/launch/grant of an already-ready stage.
+
+/// The `torpedo_load` output channel: a tube's load-a-round axis.
+pub const TORPEDO_LOAD_CHANNEL: &str = "torpedo_load";
+/// The `load_torpedo` verb. Its presence tells the host to emit the same admitted
+/// `SetTorpedoVolleyTarget` a Tactical player does; its absence ("hold"/idle)
+/// leaves the tube's volley target where it is.
+pub const TORPEDO_LOAD_VERB: &str = "load_torpedo";
+
+/// The `torpedo_launch` output channel: a tube's launch-a-loaded-round axis.
+pub const TORPEDO_LAUNCH_CHANNEL: &str = "torpedo_launch";
+/// The `launch_torpedo` verb. Its presence tells the host to emit the same
+/// admitted `FireTorpedo` a human does; its absence ("hold"/idle) holds fire.
+pub const TORPEDO_LAUNCH_VERB: &str = "launch_torpedo";
+
+/// The registered output channels a torpedo tube policy may drive (issue #782).
+pub const TORPEDO_TUBE_CHANNELS: &[&str] = &[TORPEDO_LOAD_CHANNEL, TORPEDO_LAUNCH_CHANNEL];
+/// The registered verbs a torpedo tube policy may emit (issue #782).
+pub const TORPEDO_TUBE_VERBS: &[&str] = &[TORPEDO_LOAD_VERB, TORPEDO_LAUNCH_VERB];
+
+/// The `torpedo_magazine_grant` output channel: the shared magazine's
+/// grant-a-claim axis, resolved inside the single magazine consumer.
+pub const TORPEDO_MAGAZINE_CHANNEL: &str = "torpedo_magazine_grant";
+/// The `grant_torpedo_round` verb. Its presence permits a pending
+/// `ClaimTorpedoRound` reservation to proceed; its absence ("hold"/idle) refuses
+/// the claim without touching the magazine counter.
+pub const TORPEDO_MAGAZINE_GRANT_VERB: &str = "grant_torpedo_round";
+
+/// The registered output channels a torpedo magazine policy may drive (#782).
+pub const TORPEDO_MAGAZINE_CHANNELS: &[&str] = &[TORPEDO_MAGAZINE_CHANNEL];
+/// The registered verbs a torpedo magazine policy may emit (issue #782).
+pub const TORPEDO_MAGAZINE_VERBS: &[&str] = &[TORPEDO_MAGAZINE_GRANT_VERB];
 
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
@@ -2319,6 +2371,13 @@ impl FineSystemAiConfigToml {
                 // firing bank come from the host context, not the policy.
                 PHASER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FirePhaser,
                 BLASTER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FireBlaster,
+                // Torpedo tube + magazine action verbs (issue #782): value-less,
+                // like the weapon-bank verbs. The `value` field is ignored — the
+                // tube, volley target, combat lock, and magazine come from the
+                // host context, not the policy.
+                TORPEDO_LOAD_VERB => crate::ai::policy::AiPolicyVerb::LoadTorpedo,
+                TORPEDO_LAUNCH_VERB => crate::ai::policy::AiPolicyVerb::LaunchTorpedo,
+                TORPEDO_MAGAZINE_GRANT_VERB => crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2534,6 +2593,59 @@ pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
             channel: BLASTER_FIRE_CHANNEL.to_string(),
             when: "true".to_string(),
             verb: BLASTER_FIRE_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default torpedo-tube policy synthesised for AI-capable tubes
+/// that do not author an inline `ai` block (issue #782).
+///
+/// Two unconditional rules — one on the `torpedo_load` channel, one on the
+/// `torpedo_launch` channel — so a tube with no authored policy keeps loading and
+/// launching exactly as before (AC1 baseline). The host still enforces loaded
+/// state, magazine availability, target validity, range, and arc; the DECISION to
+/// load or launch now flows through data-authored policy verbs a designer can
+/// gate. No count/range/arc is pinned in the verbs; those stay TOML on the tube.
+/// An explicit `idle` is the opt-out.
+pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: TORPEDO_LOAD_CHANNEL.to_string(),
+                when: "true".to_string(),
+                verb: TORPEDO_LOAD_VERB.to_string(),
+                value: false,
+            },
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: TORPEDO_LAUNCH_CHANNEL.to_string(),
+                when: "true".to_string(),
+                verb: TORPEDO_LAUNCH_VERB.to_string(),
+                value: false,
+            },
+        ],
+    }
+}
+
+/// The canonical default torpedo-magazine policy synthesised for a shared
+/// magazine that does not author an inline `ai` block (issue #782). One
+/// unconditional rule on the `torpedo_magazine_grant` channel: always grant. This
+/// reproduces the pre-#782 baseline where every claim that passed the offline +
+/// non-empty gates was granted; the offline gate remains the hard authority and
+/// this policy is a data-authored arbiter layered on top.
+pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: TORPEDO_MAGAZINE_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: TORPEDO_MAGAZINE_GRANT_VERB.to_string(),
             value: false,
         }],
     }
@@ -3042,6 +3154,15 @@ pub struct TorpedoesConfig {
     /// back to its own `volley_max`.
     #[serde(default)]
     pub ai_volley_target: Option<u32>,
+    /// Inline stateless AI policy for the shared magazine's grant decision
+    /// (issue #782, AC1). When authored it is validated at content load and
+    /// resolved inside `handle_torpedo_magazine_inter_system` right before the
+    /// authoritative `claim_magazine_round`; when absent the canonical
+    /// [`default_torpedo_magazine_ai_config`] (unconditional grant) is
+    /// synthesised at spawn so baseline claim behaviour is preserved. The offline
+    /// gate stays the hard authority; this is a data-authored arbiter on top.
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
 }
 
 fn default_burst_interval_secs() -> f32 {
@@ -3088,6 +3209,7 @@ impl Default for TorpedoesConfig {
             tubes: Vec::new(),
             burst_interval_secs: default_burst_interval_secs(),
             ai_volley_target: None,
+            ai: None,
         }
     }
 }
@@ -3609,6 +3731,31 @@ impl EntityConfig {
                     validate_fine_system_ai_policy(ai, BLASTER_BANK_CHANNELS, BLASTER_BANK_VERBS)
                         .map_err(SerdeError::custom)?;
                 }
+            }
+        }
+
+        // Validate authored inline torpedo tube + magazine AI policies before
+        // world activation (issue #782). Each AI-capable tube may declare an
+        // inline `ai` block driving its `torpedo_load` / `torpedo_launch`
+        // channels; the shared magazine may declare its own `ai` block driving
+        // the `torpedo_magazine_grant` channel. Unknown channels/verbs (a launch
+        // verb on the magazine channel, a grant verb on a tube), unparseable
+        // guards, and undeclared parameter references fail the entity load here,
+        // before any live tick — mirroring the weapon-bank validation above.
+        if let Some(tc) = config.torpedoes.as_ref() {
+            for tube in &tc.tubes {
+                if let Some(ai) = tube.ai.as_ref() {
+                    validate_fine_system_ai_policy(ai, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS)
+                        .map_err(SerdeError::custom)?;
+                }
+            }
+            if let Some(ai) = tc.ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    TORPEDO_MAGAZINE_CHANNELS,
+                    TORPEDO_MAGAZINE_VERBS,
+                )
+                .map_err(SerdeError::custom)?;
             }
         }
 
@@ -6022,6 +6169,7 @@ fire_arc_deg = 90.0
             pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
+            ai: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         assert!(sys.start_load("fore"));
@@ -6218,6 +6366,7 @@ count = 10
                 pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
+                ai: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -6229,6 +6378,7 @@ count = 10
                 pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
+                ai: None,
             },
         ];
         assert!(validate_torpedo_tubes(&tubes).is_ok());
@@ -6253,6 +6403,7 @@ count = 10
                 pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
+                ai: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
@@ -6264,6 +6415,7 @@ count = 10
                 pattern: Vec::new(),
                 volley_max: 1,
                 ai_target_count: None,
+                ai: None,
             },
         ];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
@@ -6283,6 +6435,7 @@ count = 10
             pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
+            ai: None,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));
@@ -6301,6 +6454,7 @@ count = 10
             pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
+            ai: None,
         }
     }
 
@@ -6700,6 +6854,167 @@ priority = 0
 channel = "phaser_fire"
 when = "true"
 verb = "fire_blaster"
+value = false
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    // ── Torpedo tube + magazine AI policy (issue #782) ───────────────────────
+
+    #[test]
+    fn default_torpedo_tube_and_magazine_policies_validate_and_resolve() {
+        let t = default_torpedo_tube_ai_config();
+        assert!(
+            validate_fine_system_ai_policy(&t, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS).is_ok()
+        );
+        let tp = t.to_policy().expect("tube default resolves");
+        // Baseline: unconditional load + launch (not idle, two rules).
+        assert!(!tp.idle);
+        assert_eq!(tp.rules.len(), 2);
+
+        let m = default_torpedo_magazine_ai_config();
+        assert!(validate_fine_system_ai_policy(
+            &m,
+            TORPEDO_MAGAZINE_CHANNELS,
+            TORPEDO_MAGAZINE_VERBS
+        )
+        .is_ok());
+        assert!(!m.to_policy().expect("magazine default resolves").idle);
+    }
+
+    #[test]
+    fn torpedo_tube_inline_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Bomber"
+
+[torpedoes]
+count = 8
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes.ai.rule]]
+priority = 0
+channel = "torpedo_load"
+when = "fact(magazine) > 0"
+verb = "load_torpedo"
+value = false
+
+[[torpedoes.tubes.ai.rule]]
+priority = 0
+channel = "torpedo_launch"
+when = "fact(target_facing_shields) <= 0"
+verb = "launch_torpedo"
+value = false
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("tube ai must parse + validate");
+        let tube = &cfg.torpedoes.unwrap().tubes[0];
+        let policy = tube.ai.as_ref().unwrap().to_policy().unwrap();
+        assert_eq!(policy.rules.len(), 2);
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::LoadTorpedo
+        );
+        assert_eq!(
+            policy.rules[1].verb,
+            crate::ai::policy::AiPolicyVerb::LaunchTorpedo
+        );
+    }
+
+    #[test]
+    fn torpedo_magazine_inline_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Bomber"
+
+[torpedoes]
+count = 8
+
+[[torpedoes.ai.rule]]
+priority = 0
+channel = "torpedo_magazine_grant"
+when = "fact(in_flight) < 3"
+verb = "grant_torpedo_round"
+value = false
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("magazine ai must parse + validate");
+        let policy = cfg
+            .torpedoes
+            .unwrap()
+            .ai
+            .as_ref()
+            .unwrap()
+            .to_policy()
+            .unwrap();
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::GrantTorpedoRound
+        );
+    }
+
+    #[test]
+    fn torpedo_tube_inline_idle_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Bomber"
+
+[torpedoes]
+count = 8
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+
+[torpedoes.tubes.ai]
+idle = true
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("tube idle ai must parse");
+        let tube = &cfg.torpedoes.unwrap().tubes[0];
+        assert!(tube.ai.as_ref().unwrap().to_policy().unwrap().idle);
+    }
+
+    #[test]
+    fn torpedo_tube_ai_rejects_unknown_verb_at_load() {
+        // The magazine grant verb on a tube channel is an authoring error caught
+        // by the from_toml validation loop, before any live tick.
+        let toml = r#"
+name = "Bad"
+
+[torpedoes]
+count = 8
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes.ai.rule]]
+priority = 0
+channel = "torpedo_load"
+when = "true"
+verb = "grant_torpedo_round"
+value = false
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn torpedo_magazine_ai_rejects_unknown_channel_at_load() {
+        // A tube channel on the magazine block is rejected.
+        let toml = r#"
+name = "Bad"
+
+[torpedoes]
+count = 8
+
+[[torpedoes.ai.rule]]
+priority = 0
+channel = "torpedo_launch"
+when = "true"
+verb = "grant_torpedo_round"
 value = false
 "#;
         let err = EntityConfig::from_toml(toml).unwrap_err().to_string();

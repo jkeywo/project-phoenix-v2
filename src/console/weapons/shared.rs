@@ -5,7 +5,6 @@
 
 use bevy::prelude::*;
 
-use crate::lobby::Sessions;
 use crate::messages::SystemId;
 use crate::ship_plugin::ShipSystemControlSources;
 use crate::simulation::AsteroidUuid;
@@ -34,30 +33,6 @@ pub(crate) fn live_entity_xz(
         }
     }
     None
-}
-
-/// Returns true if `token` is authorized to issue Tactical fire orders.
-///
-/// Either the token is the connected player currently holding the station that
-/// owns this ship's weapons, or it is the local HTML-console operator
-/// ([`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]) — the browser server
-/// viewscreen / native wry server case, where the operator drives the console
-/// directly with no remote PeerJS session (issue #422 / PRD #419).
-///
-/// The weapons owner is resolved from the ship config rather than assumed to
-/// be a station named "tactical", so single-station hulls (the Courier, whose
-/// blaster lives on "pilot") authorize correctly.
-pub(crate) fn tactical_authorized(
-    sessions: &Sessions,
-    ship_config: &crate::ship_plugin::ShipConfigComponent,
-    token: &str,
-) -> bool {
-    ship_config
-        .0
-        .weapons_station()
-        .and_then(|station| sessions.0.holder_for_station(&station))
-        == Some(token)
-        || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
 }
 
 /// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency)

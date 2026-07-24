@@ -304,7 +304,13 @@ pub(crate) use torpedo::{
     build_torpedo_target_snapshot, handle_fire_torpedo, handle_load_tube,
     handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
 };
-pub use torpedo::{handle_torpedo_magazine_inter_system, TorpedoSystemResource};
+pub use torpedo::{
+    handle_torpedo_magazine_inter_system, seed_torpedo_magazine_facts,
+    seed_torpedo_tube_launch_facts, seed_torpedo_tube_load_facts,
+    torpedo_magazine_grant_policy_fires, torpedo_tube_launch_policy_fires,
+    torpedo_tube_load_policy_fires, TorpedoMagazineAiPolicy, TorpedoSystemResource,
+    TorpedoTubeAiPolicies,
+};
 
 // Blackboard publish systems, broadcaster, and cache resources extracted to
 // `blackboard.rs` (issue #729). `LastWeaponsUpdate`, `compute_current_weapons_update`,

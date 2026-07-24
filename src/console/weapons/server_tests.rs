@@ -7047,6 +7047,172 @@ fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
     );
 }
 
+// ── Per-tube LAUNCH policy gate (issue #782) ────────────────────────────
+
+/// Attach a `TorpedoTubeAiPolicies` map to the local ship for `fore_port`, built
+/// from an authored `when` guard on the `torpedo_launch` channel.
+fn attach_launch_policy(app: &mut App, when: &str) {
+    let ai = crate::entity_config::FineSystemAiConfigToml {
+        idle: false,
+        param: Default::default(),
+        rule: vec![crate::entity_config::FineSystemAiRuleToml {
+            priority: 0,
+            channel: crate::entity_config::TORPEDO_LAUNCH_CHANNEL.into(),
+            when: when.into(),
+            verb: crate::entity_config::TORPEDO_LAUNCH_VERB.into(),
+            value: false,
+        }],
+    };
+    let mut map = std::collections::HashMap::new();
+    map.insert("fore_port".to_string(), ai.to_policy().unwrap());
+    let ship = local_ship(app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+}
+
+/// An idle launch policy blocks the launch even though the tube is loaded, in
+/// arc, and the target's striking shield arc is down — the per-tube launch opt-out
+/// (AC1/AC2).
+#[test]
+fn ai_torpedo_auto_fire_idle_launch_policy_blocks_launch() {
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+
+    let mut map = std::collections::HashMap::new();
+    map.insert(
+        "fore_port".to_string(),
+        crate::ai::policy::AiPolicy {
+            idle: true,
+            ..Default::default()
+        },
+    );
+    let ship = local_ship(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "an idle launch policy must hold fire even from a ready tube"
+    );
+}
+
+/// The #779 empty-facts lesson for the launch side: the host seeds real per-tube
+/// readiness facts, so a `fact(...)` guard actually evaluates. `fact(in_arc) > 0`
+/// fires (in_arc is seeded to 1 for candidates); `fact(in_arc) > 5` holds —
+/// proving the facts are seeded, not empty.
+#[test]
+fn ai_torpedo_auto_fire_launch_fact_guard_fires_over_seeded_facts() {
+    // Satisfiable guard → launch. If facts were empty, `fact(in_arc)` would read
+    // 0 and this guard would hold — so a launch here proves the fact was seeded.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "fact(in_arc) > 0");
+    let out = tick(&mut app);
+    assert!(
+        out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "a launch guard satisfied by the seeded in_arc fact must fire"
+    );
+
+    // Unsatisfiable guard → hold.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "fact(in_arc) > 5");
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "a launch guard unsatisfiable over the seeded in_arc fact must hold"
+    );
+}
+
+/// Target invalidation: a locked target UUID that resolves to no live entity
+/// (destroyed / never spawned) yields no launch — even under an unconditional
+/// launch policy — because the host readiness gate finds nothing to shoot at.
+#[test]
+fn ai_torpedo_auto_fire_holds_when_target_invalidated() {
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    // Locked target names an entity that does not exist in the world.
+    set_weapons_target(&mut app, Some("ghost-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    attach_launch_policy(&mut app, "true");
+
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "an invalidated target (no live entity) must produce no launch"
+    );
+}
+
+/// AC5: in-flight torpedoes are published as a public authoritative fact on the
+/// shared magazine blackboard, so other policies read the count on the NEXT AI
+/// tick (the same one-tick-lag discipline as the combat lock).
+#[test]
+fn torpedo_in_flight_count_is_published_as_a_public_fact() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    let mut ts = TorpedoSystem::new(TorpedoConfig::default());
+    ts.in_flight.push(crate::torpedo::Torpedo {
+        uuid: "flying-1".into(),
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        heading: 0.0,
+        pitch: 0.0,
+        lifespan_remaining: 10.0,
+        target_uuid: None,
+        source_uuid: Some("shooter".into()),
+        tube_id: "fore_port".into(),
+        shield_pierce: 0.0,
+    });
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            TorpedoSystemResource(ts),
+            crate::server_app::ShipSystemBlackboards::default(),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(crate::console::weapons::publish_torpedo_magazine_blackboard)
+        .expect("publish runs");
+
+    let bbs = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap();
+    let mag = bbs
+        .0
+        .get(&crate::system_registry::torpedo_magazine_system_id());
+    match mag {
+        Some(crate::messages::SystemBlackboard::TorpedoMagazine(bb)) => {
+            assert_eq!(
+                bb.torpedoes_in_flight, 1,
+                "the published magazine fact must expose the in-flight count"
+            );
+        }
+        other => panic!("expected a TorpedoMagazine blackboard, got {other:?}"),
+    }
+}
+
 /// `handle_fire_torpedo` (the consumer) reads `AdmittedCommands` and fires
 /// a torpedo. Pins the consumer from a hand-written command, independently
 /// of the AI decider. (The admitted buffer is cleared each tick by
@@ -7117,6 +7283,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
         ],
         volley_max: 3,
         ai_target_count: None,
+        ai: None,
     };
     let mut torp =
         crate::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
@@ -7926,6 +8093,133 @@ fn magazine_claim_refused_when_empty() {
         tube_state,
         Some(crate::torpedo::TubeLoadState::Unloaded),
         "empty magazine must not begin loading the tube"
+    );
+}
+
+// ── Same-tick magazine contention (issue #782, AC6) ───────────────────
+
+/// Push two `ClaimTorpedoRound` claims (fore_port then fore_starboard) at a
+/// magazine holding exactly ONE round, then run the single consumer. The
+/// authoritative counter has exactly one writer draining the queue in Vec order,
+/// so the FIRST claim wins the round and the SECOND is refused — deterministically
+/// on every run. This is the atomicity invariant #782 must not break: the tube
+/// LOAD policy and the magazine GRANT policy only DECIDE, they never decrement
+/// `torpedoes_remaining` themselves.
+#[test]
+fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    for _ in 0..8 {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        let ship = local_ship(&mut app);
+
+        // Magazine holds exactly one round.
+        {
+            let mut ts = app
+                .world_mut()
+                .get_mut::<TorpedoSystemResource>(ship)
+                .unwrap();
+            ts.0.torpedoes_remaining = 1;
+        }
+
+        // Two competing claims, in a fixed queue order.
+        {
+            let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
+            q.0.push(InterSystemMsg {
+                target: crate::system_registry::torpedo_magazine_system_id(),
+                payload: InterSystemPayload::ClaimTorpedoRound {
+                    tube: "fore_port".into(),
+                },
+                source_entity: Some(ship),
+            });
+            q.0.push(InterSystemMsg {
+                target: crate::system_registry::torpedo_magazine_system_id(),
+                payload: InterSystemPayload::ClaimTorpedoRound {
+                    tube: "fore_starboard".into(),
+                },
+                source_entity: Some(ship),
+            });
+        }
+
+        app.world_mut()
+            .run_system_once(crate::console::weapons::handle_torpedo_magazine_inter_system)
+            .expect("magazine consumer runs");
+
+        let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
+        assert_eq!(
+            ts.0.torpedoes_remaining, 0,
+            "the single round must be reserved exactly once — one writer, no double-spend"
+        );
+        assert!(
+            matches!(
+                ts.0.tube("fore_port").map(|t| &t.load_state),
+                Some(crate::torpedo::TubeLoadState::Loading { .. })
+            ),
+            "the first claim in queue order must win the contested round"
+        );
+        assert_eq!(
+            ts.0.tube("fore_starboard").map(|t| &t.load_state),
+            Some(&crate::torpedo::TubeLoadState::Unloaded),
+            "the second claim must be refused when the magazine is exhausted"
+        );
+    }
+}
+
+/// The magazine's authored GRANT policy (AC1) gates the reservation right before
+/// `claim_magazine_round`. An idle magazine policy refuses every claim, so the
+/// counter is never decremented and the tube never loads — the offline gate stays
+/// the hard authority and the policy is a data-authored arbiter layered on top.
+#[test]
+fn idle_magazine_grant_policy_refuses_the_claim() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    let ship = local_ship(&mut app);
+
+    let before = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .torpedoes_remaining;
+    assert!(before > 0, "precondition: magazine has stock");
+
+    // Attach an idle magazine grant policy.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+            crate::ai::policy::AiPolicy {
+                idle: true,
+                ..Default::default()
+            },
+        ));
+
+    {
+        let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
+        q.0.push(InterSystemMsg {
+            target: crate::system_registry::torpedo_magazine_system_id(),
+            payload: InterSystemPayload::ClaimTorpedoRound {
+                tube: "fore_port".into(),
+            },
+            source_entity: Some(ship),
+        });
+    }
+
+    app.world_mut()
+        .run_system_once(crate::console::weapons::handle_torpedo_magazine_inter_system)
+        .expect("magazine consumer runs");
+
+    let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
+    assert_eq!(
+        ts.0.torpedoes_remaining, before,
+        "an idle magazine grant policy must refuse the claim — counter unchanged"
+    );
+    assert_eq!(
+        ts.0.tube("fore_port").map(|t| &t.load_state),
+        Some(&crate::torpedo::TubeLoadState::Unloaded),
+        "a refused claim must not begin loading the tube"
     );
 }
 
@@ -8752,6 +9046,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
             pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
+            ai: None,
         }],
         TorpedoConfig {
             count: 10,

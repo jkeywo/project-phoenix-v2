@@ -23,16 +23,18 @@ entities:
       confidence: confirmed
       title: Torpedo Magazine Round Claim
       summary: Shared magazine owns ammunition and accepts same-tick tube claims only while available; disabled magazines block loading and launch.
+      rationale:
+        - "Issue #782 (AC1/AC3/AC6) layered a data-authored GRANT policy on the claim seam. handle_torpedo_magazine_inter_system now resolves the ship's TorpedoMagazineAiPolicy (torpedo_magazine_grant channel, grant_torpedo_round verb) over seed_torpedo_magazine_facts (magazine, in_flight) INSIDE the single consumer, right before the authoritative claim_magazine_round — so torpedoes_remaining keeps exactly ONE writer, claims are still drained in Vec (queue) order, and same-tick contention across competing tubes stays deterministic. The offline gate stays the hard authority (a disabled magazine refuses regardless); the policy is an arbiter on top (default_torpedo_magazine_ai_config = unconditional grant, so baseline claim behaviour is preserved). The tube LOAD policy only DECIDES whether to emit SetTorpedoVolleyTarget/LoadTube; neither policy ever decrements the counter itself."
     architecture:
       kind: inter-system-policy
       authority: authoritative
-      reads: [torpedo-state, inter-system-message-state, authoritative-damage-state]
+      reads: [torpedo-state, inter-system-message-state, authoritative-damage-state, fine-system-ai-policy-state]
       writes: [torpedo-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/core/messages.rs]
-      symbols: [handle_torpedo_magazine_inter_system]
+      paths: [src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/core/messages.rs]
+      symbols: [handle_torpedo_magazine_inter_system, TorpedoMagazineAiPolicy, seed_torpedo_magazine_facts, torpedo_magazine_grant_policy_fires]
       tests: [cargo test]
 
   - component: tactical-ai-weapon-operator
@@ -67,16 +69,18 @@ entities:
         - "Issue #694 replaced the old fused torpedo-firing block formerly inline in operate_tactical_ai. ai_torpedo_auto_fire decides which tubes to fire; issue #846 retired TorpedoIntents and made the AI emit FireTorpedo through emit_ai_command, the same seam human ControlSystem messages travel. The consumer handle_fire_torpedo reads AdmittedCommands over per-ship Query<With<Ship>>."
         - Gated on AiHighFidelity plus a dedicated torpedo_magazine_system_id() operate_ai policy, distinct from the per-fine-system Tactical gate that governs target selection.
         - "Issue #698 promoted this from preliminary to full: the target_locked and target_shields inputs to the pure auto_fire_torpedo decision were hardcoded to true/0, and now read real state — target_locked from the Combat Lock resolving to a live entity, target_shields from the sum of the target's online ShipShields facings. Targets without ShipShields (asteroids, debris) read 0 and stay torpedo-eligible."
+        - "Issue #782 made the torpedo decision a STATELESS per-tube policy (per-bank-weapon-policy applied to tubes), with NO artificial loading/firing states. TWO verbs across two stages: LOAD (ai_torpedo_load resolves each tube's torpedo_load channel over seed_torpedo_tube_load_facts — loaded_count, target_count, ai_target_count, magazine, operates_ai — and emits the SAME admitted SetTorpedoVolleyTarget a Tactical player sends) and LAUNCH (ai_torpedo_auto_fire resolves each tube's torpedo_launch channel over seed_torpedo_tube_launch_facts — loaded, target_valid, in_range, in_arc, target_facing_shields — and emits the SAME admitted FireTorpedo). Both read TorpedoTubeAiPolicies; only a tube whose policy fires emits, giving per-tube independence and a per-tube idle opt-out. Defaults (default_torpedo_tube_ai_config = unconditional load+launch) preserve baseline (AC1). The #779 empty-facts edge is closed host-side (facts seeded before every gate; policy.rs stays Bevy-free). Ammunition is reserved at LOAD time through the existing ClaimTorpedoRound → claim_magazine_round seam (AC3); LAUNCH only consumes already-reserved loaded_count and never touches the magazine counter. Tubes emit typed inputs through admission, never a direct launch — handle_fire_torpedo remains the sole caller of launch_with_barrels."
     architecture:
       kind: ai-controller
       authority: authoritative
-      reads: [weapons-target-state, torpedo-state, system-control-source-state]
+      reads: [weapons-target-state, torpedo-state, system-control-source-state, fine-system-ai-policy-state]
       writes: [torpedo-state]
+      sends: [system-control-command]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/mod.rs]
-      symbols: [ai_torpedo_auto_fire, auto_fire_torpedo]
+      paths: [src/console_ai/server.rs, src/console_ai/core.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs]
+      symbols: [ai_torpedo_auto_fire, ai_torpedo_load, auto_fire_torpedo, torpedo_load_orders, TorpedoTubeAiPolicies, seed_torpedo_tube_load_facts, seed_torpedo_tube_launch_facts, torpedo_tube_load_policy_fires, torpedo_tube_launch_policy_fires]
       tests: [cargo test]
 
   - component: phaser-auto-fire-ai
@@ -239,6 +243,8 @@ entities:
       confidence: confirmed
       title: Torpedo System
       summary: Per-tube firing arcs and reload state draw from a shared magazine; in-flight guided torpedoes detonate by proximity and snapshot launch-time damage and shield pierce.
+      rationale:
+        - "Issue #782 (AC5) made in-flight torpedoes a PUBLIC authoritative fact. TorpedoSystem::in_flight was previously only broadcast as TorpedoLaunched/TorpedoDestroyed messages; publish_torpedo_magazine_blackboard now also publishes torpedoes_in_flight on the TorpedoMagazineBlackboard in SimSet::Publish, so other policies (this ship's magazine grant policy, or another ship's policies) read the count on the NEXT AI tick — the same one-tick-lag discipline as the combat lock."
     architecture:
       kind: weapon-system
       authority: authoritative
@@ -248,8 +254,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/entities/config.rs]
-      symbols: [TorpedoSystem, TorpedoTube, build_torpedo_target_snapshot, tick_torpedo_lifecycle, handle_fire_torpedo, launch_with_barrels, TorpedoesConfig]
+      paths: [src/weapons/torpedo.rs, src/console/weapons/mod.rs, src/console/weapons/torpedo.rs, src/console/weapons/blackboard.rs, src/entities/config.rs]
+      symbols: [TorpedoSystem, TorpedoTube, build_torpedo_target_snapshot, tick_torpedo_lifecycle, handle_fire_torpedo, launch_with_barrels, TorpedoesConfig, publish_torpedo_magazine_blackboard]
       tests: [cargo test]
 
   - state: torpedo-state

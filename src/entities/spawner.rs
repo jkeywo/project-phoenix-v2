@@ -792,6 +792,38 @@ pub fn spawn_entity(
             crate::torpedo::TorpedoSystem::new(runtime_config)
         };
         entity_commands.insert(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
+
+        // Per-tube torpedo load + launch AI policies (issue #782): each tube's
+        // inline `ai` block if authored, else the canonical default
+        // (unconditional load + launch) so baseline behaviour is preserved.
+        // Validated at load, so `to_policy` cannot fail here.
+        let tube_policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> = tc
+            .tubes
+            .iter()
+            .map(|t| {
+                let policy = match t.ai.as_ref() {
+                    Some(ai) => ai.to_policy().unwrap_or_default(),
+                    None => crate::entities::config::default_torpedo_tube_ai_config()
+                        .to_policy()
+                        .unwrap_or_default(),
+                };
+                (t.id.clone(), policy)
+            })
+            .collect();
+        entity_commands.insert(crate::weapons_plugin::TorpedoTubeAiPolicies(tube_policies));
+
+        // The shared magazine's grant AI policy (issue #782, AC1): the authored
+        // `[torpedoes].ai` block if present, else the canonical default
+        // (unconditional grant).
+        let magazine_policy = match tc.ai.as_ref() {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_torpedo_magazine_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+            magazine_policy,
+        ));
     }
 
     // Blasters — attach a `BlasterSystemResource` component when the entity

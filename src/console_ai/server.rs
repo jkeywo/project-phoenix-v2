@@ -707,6 +707,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             &crate::ship_state::ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::weapons_plugin::TorpedoSystemResource>,
+            Option<&crate::weapons_plugin::TorpedoTubeAiPolicies>,
             &mut crate::messages::AdmittedCommands,
         ),
         (
@@ -729,6 +730,11 @@ pub(crate) fn ai_torpedo_auto_fire(
     >,
 ) {
     let policy_sid = crate::system_registry::torpedo_magazine_system_id();
+    // Canonical fallback for any tube missing an attached policy (bare-`App`
+    // fixtures). Built once — unconditional launch (baseline, AC1).
+    let default_tube_policy = crate::entities::config::default_torpedo_tube_ai_config()
+        .to_policy()
+        .unwrap_or_default();
 
     for (
         entity_uuid,
@@ -738,6 +744,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         physics,
         blackboards,
         torpedo_sys_comp,
+        tube_policies,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -862,6 +869,29 @@ pub(crate) fn ai_torpedo_auto_fire(
 
         let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
         for tube_id in tubes_to_fire {
+            // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
+            // already resolved this tube's host readiness (loaded, in arc, target
+            // locked, striking-arc shields down, magazine non-empty); now resolve
+            // the tube's own authored launch policy over a seeded snapshot. Only a
+            // tube whose policy fires `LaunchTorpedo` launches — an idle tube (or
+            // one whose guard holds) is skipped, leaving other tubes free to fire
+            // (per-tube independence). The default launches unconditionally, so
+            // baseline auto-fire is preserved (AC1/AC2). The candidates all passed
+            // the host gates, so those facts are `true`; `target_facing_shields`
+            // passes through so a policy can still gate on the striking arc.
+            let launch_policy = tube_policies
+                .and_then(|p| p.0.get(&tube_id))
+                .unwrap_or(&default_tube_policy);
+            let facts = crate::weapons_plugin::seed_torpedo_tube_launch_facts(
+                true,
+                true,
+                true,
+                true,
+                target_facing_shields,
+            );
+            if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(launch_policy, &facts) {
+                continue;
+            }
             // Emit as an admitted command through the shared AI seam (issue
             // #846), instead of the retired `TorpedoIntents` buffer.
             let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
@@ -935,15 +965,28 @@ pub(crate) fn ai_torpedo_load(
             &crate::ship_plugin::ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &crate::weapons_plugin::TorpedoSystemResource,
+            Option<&crate::weapons_plugin::TorpedoTubeAiPolicies>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
     let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+    // Canonical fallback for any tube missing an attached policy (bare-`App`
+    // fixtures). Built once — unconditional load (baseline, AC1).
+    let default_tube_policy = crate::entities::config::default_torpedo_tube_ai_config()
+        .to_policy()
+        .unwrap_or_default();
 
-    for (ship_entity, entity_uuid, control_sources, ship_config, torpedo_sys, mut admitted) in
-        ships.iter_mut()
+    for (
+        ship_entity,
+        entity_uuid,
+        control_sources,
+        ship_config,
+        torpedo_sys,
+        tube_policies,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         if !control_sources.0.policy_for(&magazine_id).operate_ai {
             continue;
@@ -976,6 +1019,28 @@ pub(crate) fn ai_torpedo_load(
             .collect();
 
         for (tube_id, count) in crate::console_ai::torpedo_load_orders(&tubes) {
+            // Per-tube LOAD policy gate (issue #782): `torpedo_load_orders`
+            // decided this tube is AI-operated and off its configured volley
+            // target; now resolve the tube's own authored load policy over a
+            // seeded fact snapshot. Only a tube whose policy fires `LoadTorpedo`
+            // emits the volley order — an idle tube (or one whose guard holds)
+            // is skipped, leaving other tubes free to load (per-tube
+            // independence). The default policy loads unconditionally, so
+            // baseline behaviour is preserved (AC1/AC2).
+            let policy = tube_policies
+                .and_then(|p| p.0.get(&tube_id))
+                .unwrap_or(&default_tube_policy);
+            let tube_ref = torpedo_sys.0.tube(&tube_id);
+            let facts = crate::weapons_plugin::seed_torpedo_tube_load_facts(
+                tube_ref.map(|t| t.loaded_count).unwrap_or(0),
+                tube_ref.map(|t| t.target_count).unwrap_or(0),
+                count,
+                torpedo_sys.0.torpedoes_remaining,
+                true,
+            );
+            if !crate::weapons_plugin::torpedo_tube_load_policy_fires(policy, &facts) {
+                continue;
+            }
             let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
                 continue;
             };
@@ -2704,6 +2769,7 @@ station = "sensors"
                 pattern: Vec::new(),
                 volley_max: 2,
                 ai_target_count: None,
+                ai: None,
             }],
             crate::torpedo::TorpedoConfig::default(),
         );
@@ -2805,5 +2871,93 @@ station = "sensors"
         app.update();
 
         assert_eq!(tube_target_count(&app, e), 0);
+    }
+
+    // ── Per-tube LOAD policy gate (issue #782) ──────────────────────────────
+
+    /// Attach a single-tube `TorpedoTubeAiPolicies` map to `e` for the
+    /// `fore_port` tube, built from an authored `when` guard on the
+    /// `torpedo_load` channel.
+    fn attach_load_policy(app: &mut App, e: Entity, when: &str) {
+        let ai = crate::entity_config::FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![crate::entity_config::FineSystemAiRuleToml {
+                priority: 0,
+                channel: crate::entity_config::TORPEDO_LOAD_CHANNEL.into(),
+                when: when.into(),
+                verb: crate::entity_config::TORPEDO_LOAD_VERB.into(),
+                value: false,
+            }],
+        };
+        let mut map = std::collections::HashMap::new();
+        map.insert("fore_port".to_string(), ai.to_policy().unwrap());
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+    }
+
+    /// An idle tube policy holds the load: no `SetTorpedoVolleyTarget` is issued
+    /// even though the tube is AI-operated and off its configured volley target.
+    #[test]
+    fn ai_torpedo_load_idle_tube_policy_holds() {
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "fore_port".to_string(),
+            crate::ai::policy::AiPolicy {
+                idle: true,
+                ..Default::default()
+            },
+        );
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+        app.update();
+
+        assert_eq!(
+            tube_target_count(&app, e),
+            0,
+            "an idle tube policy must hold the AI load order"
+        );
+        assert!(
+            app.world()
+                .entity(e)
+                .get::<AdmittedCommands>()
+                .unwrap()
+                .0
+                .is_empty(),
+            "no volley command should be admitted when the tube policy is idle"
+        );
+    }
+
+    /// The #779 empty-facts lesson: the host seeds real per-tube facts, so a
+    /// `fact(...)` guard actually evaluates. A guard that can never hold over the
+    /// live magazine count (`fact(magazine) > 100`, magazine is 10) holds the
+    /// load; the complementary guard (`fact(magazine) > 0`) fires it — proving the
+    /// facts are seeded, not empty.
+    #[test]
+    fn ai_torpedo_load_fact_guard_fires_over_seeded_facts() {
+        // Unsatisfiable guard → hold.
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        attach_load_policy(&mut app, e, "fact(magazine) > 100");
+        app.update();
+        assert_eq!(
+            tube_target_count(&app, e),
+            0,
+            "a load guard that never holds over the seeded magazine fact must hold"
+        );
+
+        // Satisfiable guard → fire. If facts were empty (#779), `fact(magazine)`
+        // would read 0 and this guard would also hold — so a fire here proves the
+        // magazine fact was seeded.
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        attach_load_policy(&mut app, e, "fact(magazine) > 0");
+        app.update();
+        assert_eq!(
+            tube_target_count(&app, e),
+            2,
+            "a load guard satisfied by the seeded magazine fact must fire the order"
+        );
     }
 }

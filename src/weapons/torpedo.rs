@@ -1152,6 +1152,7 @@ mod tests {
             pattern: Vec::new(),
             volley_max: 1,
             ai_target_count: None,
+            ai: None,
         }
     }
 
@@ -1755,6 +1756,7 @@ mod tests {
             pattern: Vec::new(),
             volley_max,
             ai_target_count: None,
+            ai: None,
         }
     }
 
@@ -2042,6 +2044,7 @@ mod tests {
             pattern,
             volley_max,
             ai_target_count: None,
+            ai: None,
         }
     }
 

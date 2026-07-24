@@ -46,16 +46,23 @@ test('mid-game station claim: Leave and Ready both register via real DOM clicks'
   // Soak through several more ticks before clicking Leave, so the click lands
   // in the middle of the ongoing 10Hz stream (the original failure mode).
   await p2.waitForTimeout(800);
+  // #771 AC3: mid-round release is a two-step arm→confirm. The first click
+  // arms the control (swapping its label to the confirm string) without
+  // sending; the second click sends ReleaseStation.
+  await p2.click('.detail-release-btn');
+  await expect(p2.locator('.detail-release-btn')).toHaveText('[CONFIRM RELEASE?]', { timeout: 5_000 });
   await p2.click('.detail-release-btn');
   await p2.waitForSelector('.detail-station-name:has-text("No station assigned")', { timeout: 5_000 });
 
-  // Re-claim Helm and this time press Ready.
+  // Re-claim Helm and this time press Take Station (the in-progress relabel of
+  // the Ready hand-off, #771 AC1). It still sends SetReady{ ready: true }.
   await p2.click('#station-list .station-row:has-text("Helm") button.claim-btn');
   await p2.waitForSelector('#ready-btn:not([style*="display: none"])', { timeout: 5_000 });
+  await expect(p2.locator('#ready-btn')).toHaveText('[TAKE STATION]', { timeout: 5_000 });
   await p2.waitForTimeout(800);
   await p2.click('#ready-btn');
 
-  // A successful Ready hands the station over from Backfill AI and
+  // A successful Take Station hands the station over from Backfill AI and
   // transitions the client into the console view (lobby panel hides, the
   // Helm console section becomes active).
   await expect(p2.locator('#helm-ui')).toHaveClass(/active/, { timeout: 5_000 });

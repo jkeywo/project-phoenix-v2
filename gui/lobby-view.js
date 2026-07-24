@@ -25,6 +25,23 @@ export function nextLobbyConsole(lobbyConsole, myStation) {
 }
 
 /**
+ * Decide what a click on a mid-round release control should do (issue #771
+ * AC3/AC4). Releasing a station during an active round is a two-step
+ * arm→confirm (imitating ph-comms-current-message): the first click arms and
+ * swaps the button to a confirm string, the second click sends. In the lobby
+ * (phase !== 'InProgress') release stays immediate.
+ *
+ * @param {string} phase   uiState.phase
+ * @param {boolean} armed   whether the release is currently armed
+ * @returns {{ send: boolean, armed: boolean }}
+ *   send=true means dispatch ReleaseStation now; armed is the next armed state.
+ */
+export function releaseConfirmStep(phase, armed) {
+  if (phase === 'InProgress' && !armed) return { send: false, armed: true };
+  return { send: true, armed: false };
+}
+
+/**
  * Build the lobby view model.
  *
  * @param {object} s  uiState (players, stations, maxPlayers, allReady,
@@ -91,6 +108,10 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
       readyBtn = { visible: true, mode: 'countdown', secs: s.countdownSecs, sendReady: false };
     } else if (isReady) {
       readyBtn = { visible: true, mode: 'ready-confirmed', sendReady: false };
+    } else if (s.phase === 'InProgress') {
+      // In-progress claiming: the same SetReady{true} hand-off, relabelled as
+      // "Take Station" (issue #771 AC1). Lobby keeps the 'ready' mode below.
+      readyBtn = { visible: true, mode: 'take-station', sendReady: true };
     } else {
       readyBtn = { visible: true, mode: 'ready', sendReady: true };
     }
@@ -133,4 +154,5 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
 if (typeof window !== 'undefined') {
   window.lobbyViewModel = lobbyViewModel;
   window.nextLobbyConsole = nextLobbyConsole;
+  window.releaseConfirmStep = releaseConfirmStep;
 }

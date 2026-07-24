@@ -51,7 +51,7 @@ entities:
 
   - verb: take-station
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Take Station
       summary: During an active round, a player who has claimed an available station explicitly takes it from Backfill AI. This is the existing readiness hand-off with a distinct player-facing label.
@@ -64,7 +64,7 @@ entities:
 
   - mechanic: mid-round-station-handoff-presentation
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Mid-Round Station Handoff Presentation
       summary: The same authoritative hand-off action is labelled Take Station during InProgress, while Ready remains reserved for collective lobby start readiness.
@@ -76,7 +76,7 @@ entities:
 
   - mechanic: confirmed-mid-round-station-release
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Confirmed Mid-Round Station Release
       summary: Leaving a station during InProgress requires a client confirmation because it immediately returns that station to Backfill AI. Lobby release remains immediate.

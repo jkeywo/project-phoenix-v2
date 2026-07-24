@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lobbyViewModel, nextLobbyConsole } from '../../gui/lobby-view.js';
+import { lobbyViewModel, nextLobbyConsole, releaseConfirmStep } from '../../gui/lobby-view.js';
 
 const MY = 'tok-me';
 
@@ -130,6 +130,30 @@ describe('lobbyViewModel — ready button', () => {
   it('countdown mode wins over ready state and carries the seconds', () => {
     const vm = lobbyViewModel(seated({ ready: true }, { countdownSecs: 5 }), MY, null);
     expect(vm.readyBtn).toEqual({ visible: true, mode: 'countdown', secs: 5, sendReady: false });
+  });
+
+  it('take-station mode in-progress — same SetReady{true} hand-off (#771 AC1/AC2)', () => {
+    const vm = lobbyViewModel(seated({}, { phase: 'InProgress' }), MY, null);
+    expect(vm.readyBtn).toEqual({ visible: true, mode: 'take-station', sendReady: true });
+  });
+
+  it('lobby keeps plain ready mode (not take-station)', () => {
+    const vm = lobbyViewModel(seated({}, { phase: 'Lobby' }), MY, null);
+    expect(vm.readyBtn.mode).toBe('ready');
+  });
+});
+
+describe('releaseConfirmStep — mid-round release arm→confirm (#771 AC3/AC4)', () => {
+  it('lobby release is immediate — sends without arming', () => {
+    expect(releaseConfirmStep('Lobby', false)).toEqual({ send: true, armed: false });
+  });
+
+  it('in-progress first click arms and does not send', () => {
+    expect(releaseConfirmStep('InProgress', false)).toEqual({ send: false, armed: true });
+  });
+
+  it('in-progress second click (armed) sends and disarms', () => {
+    expect(releaseConfirmStep('InProgress', true)).toEqual({ send: true, armed: false });
   });
 });
 

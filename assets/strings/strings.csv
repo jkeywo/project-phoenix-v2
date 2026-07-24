@@ -719,6 +719,8 @@ client.release,"Station card button — release your own claimed station","[RELE
 client.taken,"Station card button — station is held by another player","[TAKEN]"
 client.claim,"Station card button — claim a free station","[CLAIM]"
 client.leave,"Station detail button — leave the current station","[LEAVE]"
+client.take_station,"Lobby readiness button relabelled during an active round — takes the claimed station from Backfill AI","[TAKE STATION]"
+client.release_confirm,"Station release button after arming — asks the player to confirm returning the station to Backfill AI mid-round","[CONFIRM RELEASE?]"
 client.all_crew_ready,"Lobby ready-pill when every station is readied","[ALL CREW READY]"
 client.awaiting_crew,"Lobby ready-pill while stations are still unready","[AWAITING CREW]"
 client.status_select_station,"Lobby status line before the player claims a station","[Select a station to join the crew]"

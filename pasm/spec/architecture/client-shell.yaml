@@ -213,7 +213,7 @@ entities:
 
   - component: client-mid-round-station-handoff
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Client Mid-Round Station Handoff
       summary: Client presentation that labels the existing in-progress readiness hand-off as Take Station after a player claims an available station, while retaining Ready for the lobby, and confirms an in-round station release before returning control to Backfill.
@@ -222,3 +222,8 @@ entities:
       authority: non-authoritative
       reads: [client-presentation-state, lobby-session-replica, system-control-source-state]
       runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [client.html, gui/lobby-view.js, gui/client-router.js, assets/strings/strings.csv]
+      messages: [SelectStation, ReleaseStation, SetReady]
+      tests: [npx vitest run]

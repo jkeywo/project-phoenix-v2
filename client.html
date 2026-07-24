@@ -924,6 +924,11 @@
     /// Resets when the player releases their station.
     let lobbyConsole = null;
     let pendingMidGameClaim = false;
+    // #771 AC3: a mid-round station release is a two-step arm→confirm (imitates
+    // ph-comms-current-message). First click arms + swaps the button to a
+    // confirm string; second click sends ReleaseStation. In-progress only —
+    // lobby release stays immediate. Reset whenever we leave InProgress.
+    let releaseArmed = false;
 
     // Single source of truth for changing the active console. Called only by
     // the render() reconciler now that the tab bar and swipe gesture are gone
@@ -1224,6 +1229,23 @@
       // the view model.
       lobbyConsole = vm.selectedConsole;
       const mine = myConsoles(s);
+      // #771 AC3/AC4: the armed-release confirm only exists in-progress; leaving
+      // InProgress (or never being in it) disarms so lobby release is immediate.
+      const inProgress = s.phase === 'InProgress';
+      if (!inProgress) releaseArmed = false;
+      // Shared by the row RELEASE and detail LEAVE controls. In-progress: first
+      // click arms (re-render swaps to the confirm label), second click sends.
+      // Lobby: immediate send. Preserves the pendingMidGameClaim reset either way.
+      const releaseStation = () => {
+        const step = window.releaseConfirmStep(s.phase, releaseArmed);
+        releaseArmed = step.armed;
+        if (!step.send) {
+          scheduleRender();
+          return;
+        }
+        pendingMidGameClaim = false;
+        send('ReleaseStation');
+      };
 
       // Toggle station list vs tutorial
       const tutorial = document.getElementById('lobby-tutorial');
@@ -1287,11 +1309,8 @@
         const btn = document.createElement('button');
         if (row.button === 'release') {
           btn.className = 'mine-btn';
-          btn.textContent = t('client.release');
-          btn.addEventListener('click', () => {
-            pendingMidGameClaim = false;
-            send('ReleaseStation');
-          });
+          btn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.release');
+          btn.addEventListener('click', () => releaseStation());
         } else if (row.button === 'taken') {
           btn.className = 'taken-btn';
           btn.textContent = t('client.taken');
@@ -1323,11 +1342,8 @@
           detailHeader.appendChild(nameSpan);
           const releaseBtn = document.createElement('button');
           releaseBtn.className = 'detail-release-btn';
-          releaseBtn.textContent = t('client.leave');
-          releaseBtn.addEventListener('click', () => {
-            pendingMidGameClaim = false;
-            send('ReleaseStation');
-          });
+          releaseBtn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.leave');
+          releaseBtn.addEventListener('click', () => releaseStation());
           detailHeader.appendChild(releaseBtn);
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
@@ -1393,6 +1409,11 @@
           } else if (vm.readyBtn.mode === 'ready-confirmed') {
             readyBtn.textContent = t('client.ready_confirmed');
             readyBtn.className = 'armed glow';
+          } else if (vm.readyBtn.mode === 'take-station') {
+            // In-progress claiming: same SetReady{true} hand-off, relabelled
+            // as Take Station (#771 AC1/AC2 — text only, sendReady unchanged).
+            readyBtn.textContent = t('client.take_station');
+            readyBtn.className = 'armed';
           } else {
             readyBtn.textContent = t('client.ready');
             readyBtn.className = 'armed';

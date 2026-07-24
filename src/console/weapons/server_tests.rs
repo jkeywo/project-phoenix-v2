@@ -204,6 +204,7 @@ fn test_app() -> App {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 },
                 crate::entity_config::PhaserBankConfig {
                     id: "starboard".into(),
@@ -217,6 +218,7 @@ fn test_app() -> App {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 },
             ],
         },
@@ -287,6 +289,7 @@ fn test_app() -> App {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 },
                 crate::entity_config::PhaserBankConfig {
                     id: "starboard".into(),
@@ -300,6 +303,7 @@ fn test_app() -> App {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 },
             ],
         }),
@@ -4276,10 +4280,12 @@ rank = "Ltn."
                     beam_color: vec![],
                     shield_pierce: Some(0.0),
                     marker: None,
+                    ai: None,
                 }],
                 blaster_banks: vec![],
                 radar: None,
                 selector: None,
+                selector_idle: false,
             }),
             EntitySystemHull(SystemHull::from_config(&[(
                 SystemId("captain".into()),
@@ -4469,6 +4475,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 }],
             }),
             AdmittedCommands::default(),
@@ -4546,6 +4553,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 }],
             }),
             AdmittedCommands::default(),
@@ -4691,6 +4699,7 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 }],
             }),
         ))
@@ -4754,6 +4763,7 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }],
         }),
     ));
@@ -4808,6 +4818,7 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }],
         }),
     ));
@@ -5183,6 +5194,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
             beam_color: vec![],
             shield_pierce: None,
             marker: None,
+            ai: None,
         }],
     };
     let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid).unwrap();
@@ -5405,6 +5417,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
                     selects: vec![],
                 }),
                 selector: None,
+                selector_idle: false,
             },
         ));
 }
@@ -5503,6 +5516,7 @@ fn tactical_ai_respects_radar_range() {
                             selects: vec![],
                         }),
                         selector: None,
+                        selector_idle: false,
                     },
                 ),
             );
@@ -8037,6 +8051,7 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }];
         }
     }
@@ -8190,6 +8205,7 @@ ai_only = true
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 }],
             }),
             Transform::default(),
@@ -8420,6 +8436,7 @@ fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }];
         }
     }
@@ -8487,6 +8504,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }];
         }
     }
@@ -8889,6 +8907,7 @@ fn los_test_app() -> App {
                     beam_color: vec![],
                     shield_pierce: None,
                     marker: None,
+                    ai: None,
                 }],
             },
         ))
@@ -8961,6 +8980,7 @@ fn spawn_los_ship(
                 beam_color: vec![],
                 shield_pierce: None,
                 marker: None,
+                ai: None,
             }],
         }),
         crate::ship_plugin::ShipSystemControlSources::default(),
@@ -9263,6 +9283,9 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
+            // #781: blaster AI now emits an admitted ChargeBlasterStart consumed
+            // by handle_fire_blaster — the ship needs an AdmittedCommands.
+            crate::messages::AdmittedCommands::default(),
             npc_physics,
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
                 crate::blaster::BlasterBankConfig {
@@ -9356,6 +9379,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
+            crate::messages::AdmittedCommands::default(),
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
                 crate::blaster::BlasterBankConfig {
@@ -9405,34 +9429,52 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
     );
 }
 
-/// AI token sent through `handle_fire_blaster` must route to the NPC and fire.
+/// An admitted `ChargeBlasterStart` — the origin-agnostic typed input both a
+/// human and the AI decider now converge on (issue #781) — is consumed by
+/// `handle_fire_blaster` and arms the bank. Post-converge the handler reads
+/// per-ship `AdmittedCommands`, not raw `InboundMessage`s, so this injects the
+/// admitted command directly (the shape admission produces from either origin).
 #[test]
-fn handle_fire_blaster_accepts_ai_token() {
+fn handle_fire_blaster_consumes_admitted_charge_start() {
     use crate::entity_spawner::EntityUuid;
 
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
 
     let npc_uuid = "bb000000-0000-0000-0000-000000000030";
     let target_uuid_str = "bb000000-0000-0000-0000-000000000031";
 
-    // NPC with Tactical set to Ai.
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
-    // #801: seed the blaster bank's fine system (no coarse tactical).
     sources.set(
         crate::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
-    let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
+    // Frozen combat lock on the viewscreen blackboard — the surface
+    // handle_fire_blaster's arc check reads.
+    let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
+    blackboards.0.insert(
+        crate::system_registry::viewscreen_system_id(),
+        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+            combat_lock: Some(target_uuid_str.to_string()),
+            ..Default::default()
+        }),
+    );
+    // Pre-admitted ChargeBlasterStart (no ShipConfigComponent → admission does
+    // not clear this ship's queue, so the injected command survives to Physics).
+    let mut admitted = crate::messages::AdmittedCommands::default();
+    admitted.0.push(crate::messages::AdmittedCommand {
+        target: crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        payload: SystemControlPayload::ChargeBlasterStart,
+        response_token: None,
+    });
     let npc_entity = app
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            EntityUuid(npc_uuid.to_string()), // Seeds the NPC's Tactical lock. This used to seed
-            // `ShipAiMemory.target` and rely on `tick_blaster_auto_fire`'s
-            // legacy fallback to read it; #702 deleted that fallback, so the
-            // lock goes where every other consumer looks for it.
-            TacticalRadarSelection(Some(target_uuid_parsed.to_string())),
+            EntityUuid(npc_uuid.to_string()),
+            // Seeds the viewscreen combat_lock via `seed_viewscreen_from_selection`.
+            TacticalRadarSelection(Some(target_uuid_str.to_string())),
+            blackboards,
+            admitted,
             crate::ship_plugin::ShipSystemControlSources(sources),
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
@@ -9472,38 +9514,17 @@ fn handle_fire_blaster_accepts_ai_token() {
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
 
-    // Register the AI token so handle_fire_blaster can resolve it.
-    {
-        let mut reg = app
-            .world_mut()
-            .resource_mut::<crate::ai_plugin::AiTokenRegistry>();
-        reg.register_with_entity(npc_uuid, npc_entity);
-    }
-
-    // Send a FireBlaster ControlSystem message via the AI token.
-    let ai_token = format!("ai:{}", npc_uuid);
-    push(
-        &mut app,
-        &ai_token,
-        ClientMessage::ControlSystem {
-            target: SystemId("blaster-fore".into()),
-            payload: SystemControlPayload::FireBlaster,
-        },
-    );
-
     app.update();
 
     let blaster_res = app
         .world()
         .get::<BlasterSystemResource>(npc_entity)
         .unwrap();
-    // After app.update(): handle_fire_blaster (Input) arms the volley, then
-    // tick_blaster_system (Physics) fires it and enters cooldown. By the time
-    // we check, pending_volley is 0 and on_cooldown is true — verify cooldown
-    // as evidence the volley was dispatched.
+    // handle_fire_blaster (Physics) arms the volley, tick_blaster_system (Physics)
+    // fires it and enters cooldown. on_cooldown is evidence the volley dispatched.
     assert!(
         blaster_res.0[0].volley.on_cooldown,
-        "handle_fire_blaster must accept AI token and enter cooldown after firing"
+        "handle_fire_blaster must consume the admitted ChargeBlasterStart and fire"
     );
 }
 
@@ -9520,7 +9541,6 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
     use crate::entity_spawner::EntityUuid;
 
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
 
     let npc_uuid = "bb000000-0000-0000-0000-000000000040";
     let target_uuid_str = "bb000000-0000-0000-0000-000000000041";
@@ -9530,27 +9550,36 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
+    // Frozen combat lock on the viewscreen blackboard (issue #829/#822).
+    let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
+    blackboards.0.insert(
+        crate::system_registry::viewscreen_system_id(),
+        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+            combat_lock: Some(target_uuid_str.to_string()),
+            ..Default::default()
+        }),
+    );
+    // A pre-admitted ChargeBlasterStart addressed to `blaster-fore-port` — the id
+    // the registry produces for the underscore-authored `fore_port` bank. The
+    // handler forward-maps each authored bank id and compares, so this resolves;
+    // the old inverse ("strip `blaster-`") turned it back into `fore-port` and
+    // matched nothing. Injected directly (no ShipConfigComponent → admission
+    // leaves this ship's queue intact, so it survives to Physics).
+    let mut admitted = crate::messages::AdmittedCommands::default();
+    admitted.0.push(crate::messages::AdmittedCommand {
+        target: crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
+        payload: SystemControlPayload::ChargeBlasterStart,
+        response_token: None,
+    });
     let npc_entity = app
         .world_mut()
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            // The lock lives on the viewscreen blackboard's Combat Lock
-            // (issue #829/#822) — `TacticalRadarSelection` is no longer read
-            // by the fire path, so seeding it here would prove nothing.
-            {
-                let mut bbs = crate::server_app::ShipSystemBlackboards::default();
-                bbs.0.insert(
-                    crate::system_registry::viewscreen_system_id(),
-                    crate::messages::SystemBlackboard::Viewscreen(
-                        crate::messages::ViewscreenBlackboard {
-                            combat_lock: Some(target_uuid_str.to_string()),
-                            ..Default::default()
-                        },
-                    ),
-                );
-                bbs
-            },
+            // Seeds the viewscreen combat_lock via `seed_viewscreen_from_selection`.
+            TacticalRadarSelection(Some(target_uuid_str.to_string())),
+            blackboards,
+            admitted,
             crate::ship_plugin::ShipSystemControlSources(sources),
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
@@ -9580,14 +9609,11 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         ))
         .id();
 
-    // Deliberately BEYOND the bank's 35-unit range. `tick_blaster_auto_fire`
-    // runs in the same `SimSet::Input` on any bank whose fine system operates
-    // AI, and would arm this bank on its own — which would make the assertion
-    // below true whether or not `handle_fire_blaster` resolved the bank id at
-    // all. Out of range, auto-fire skips the bank, and the explicit
-    // `FireBlaster` order is the only thing that can arm it (the handler skips
-    // its own range/arc check for AI tokens by design — `tick_blaster_auto_fire`
-    // owns arc enforcement for AI fire).
+    // Deliberately BEYOND the bank's 35-unit range: `tick_blaster_auto_fire`
+    // would skip the bank (out of range) and emit nothing, so the injected
+    // explicit order is the ONLY thing that can arm it. handle_fire_blaster
+    // applies an arc check (360° here → passes) but no range gate on an explicit
+    // order, so a successful bank-id resolution is what arms the volley.
     app.world_mut().spawn((
         EntityUuid(target_uuid_str.to_string()),
         crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
@@ -9596,24 +9622,6 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         )])),
         Transform::from_xyz(0.0, 0.0, -100.0),
     ));
-
-    {
-        let mut reg = app
-            .world_mut()
-            .resource_mut::<crate::ai_plugin::AiTokenRegistry>();
-        reg.register_with_entity(npc_uuid, npc_entity);
-    }
-
-    let ai_token = format!("ai:{}", npc_uuid);
-    push(
-        &mut app,
-        &ai_token,
-        ClientMessage::ControlSystem {
-            // The id the registry actually produces for `fore_port`.
-            target: crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
-            payload: SystemControlPayload::FireBlaster,
-        },
-    );
 
     app.update();
 
@@ -9624,6 +9632,337 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
     assert!(
         blaster_res.0[0].volley.on_cooldown,
         "an underscore-authored bank id must still receive its fire order"
+    );
+}
+
+// ── Per-bank weapon AI policy (issue #781) ───────────────────────────────────
+//
+// Each AI-capable phaser/blaster bank resolves its OWN inline stateless policy
+// over a seeded readiness snapshot before firing, emitting the SAME typed input a
+// human does. These pin: idle banks hold fire (blocking condition), a per-bank
+// `fact(...)` guard actually fires (the #779 empty-facts edge closed by seeding),
+// one idle bank does not disarm another (per-bank independence), Control-Source
+// symmetry, and the AC6 radar idle declaration.
+
+/// Build a phaser-bank fire policy from a single guard expression.
+fn phaser_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
+    crate::entities::config::FineSystemAiConfigToml {
+        idle: false,
+        param: Default::default(),
+        rule: vec![crate::entities::config::FineSystemAiRuleToml {
+            priority: 0,
+            channel: crate::entities::config::PHASER_FIRE_CHANNEL.to_string(),
+            when: when.to_string(),
+            verb: crate::entities::config::PHASER_FIRE_VERB.to_string(),
+            value: false,
+        }],
+    }
+    .to_policy()
+    .expect("valid phaser bank policy")
+}
+
+fn idle_bank_policy() -> crate::ai::policy::AiPolicy {
+    crate::ai::policy::AiPolicy {
+        idle: true,
+        ..Default::default()
+    }
+}
+
+/// Spawn an AI-controlled NPC with the given phaser banks + per-bank policies,
+/// a locked target ahead (−Z), and everything the decide→admit→fire chain needs.
+fn spawn_policy_phaser_npc(
+    app: &mut App,
+    npc_uuid: &str,
+    target_uuid: &str,
+    banks: Vec<(
+        crate::entity_config::PhaserBankConfig,
+        crate::ai::policy::AiPolicy,
+    )>,
+) -> Entity {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    let mut policies = std::collections::HashMap::new();
+    let mut bank_cfgs = Vec::new();
+    for (cfg, policy) in banks {
+        sources.set(
+            crate::system_registry::phaser_bank_system_id(&cfg.id).unwrap(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        policies.insert(cfg.id.clone(), policy);
+        bank_cfgs.push(cfg);
+    }
+
+    let npc = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            ActiveBeam::default(),
+            PhaserCooldown::default(),
+            ShipPhysics::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: bank_cfgs,
+            }),
+            crate::weapons_plugin::PhaserBankAiPolicies(policies),
+            AdmittedCommands::default(),
+            Transform::default(),
+        ))
+        .id();
+
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -20.0),
+    ));
+    npc
+}
+
+fn wide_bank(id: &str, facing_deg: f32) -> crate::entity_config::PhaserBankConfig {
+    crate::entity_config::PhaserBankConfig {
+        id: id.into(),
+        facing_deg,
+        fire_arc_deg: 360.0,
+        auto_arc_deg: 360.0,
+        beam_range: 50.0,
+        beam_damage_per_sec: 5.0,
+        beam_duration_secs: 3.0,
+        cooldown_secs: 6.0,
+        beam_color: vec![],
+        shield_pierce: None,
+        marker: None,
+        ai: None,
+    }
+}
+
+/// An idle phaser bank policy holds fire even when the bank is host-ready
+/// (target in range/arc, off cooldown) — a blocking condition (AC1/AC2).
+#[test]
+fn phaser_bank_idle_policy_holds_fire() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000001",
+        "cc000000-0000-0000-0000-000000000002",
+        vec![(wide_bank("fore", 0.0), idle_bank_policy())],
+    );
+    app.update();
+    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+    assert!(
+        beam.target_uuid.is_none(),
+        "an idle phaser bank policy must hold fire — no beam should start"
+    );
+}
+
+/// A per-bank `fact(...)` guard actually fires once the host seeds the readiness
+/// snapshot (the #779 empty-facts edge closed), AND one idle bank does not disarm
+/// another (per-bank independence, AC7): the fore bank is idle, the aft bank's
+/// guard references a seeded fact and fires — so the ship opens fire from aft.
+#[test]
+fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000011",
+        "cc000000-0000-0000-0000-000000000012",
+        vec![
+            // fore bank: idle → holds. If it wrongly fired, `bank` would be "fore".
+            (wide_bank("fore", 0.0), idle_bank_policy()),
+            // aft bank: fires only when the seeded `in_range` fact is set — proves
+            // a fact guard evaluates (never a spurious empty-facts fire).
+            (
+                wide_bank("aft", 180.0),
+                phaser_bank_fire_policy("fact(in_range) > 0 and fact(target_valid) > 0"),
+            ),
+        ],
+    );
+    app.update();
+    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+    assert!(
+        beam.target_uuid.is_some(),
+        "the aft bank's fact guard must fire (facts are seeded) even though fore is idle"
+    );
+    assert_eq!(
+        beam.bank.as_deref(),
+        Some("aft"),
+        "the idle fore bank must not fire and must not disarm the firing aft bank"
+    );
+}
+
+/// Control-Source symmetry (AC7): a human's admitted `FirePhaser` and an
+/// AI-policy fire produce the identical observable output — an active beam on the
+/// same bank. Here the same admitted `FirePhaser` a human would send arms the
+/// beam through `handle_fire_phaser`, matching the AI path above.
+#[test]
+fn phaser_human_admitted_fire_matches_ai_policy_output() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+
+    let npc_uuid = "cc000000-0000-0000-0000-000000000021";
+    let target_uuid = "cc000000-0000-0000-0000-000000000022";
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    // Human-operable bank (accept_human_input via Human control source).
+    sources.set(
+        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::control_source::ControlSource::Human,
+    );
+    let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
+    blackboards.0.insert(
+        crate::system_registry::viewscreen_system_id(),
+        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
+            combat_lock: Some(target_uuid.to_string()),
+            ..Default::default()
+        }),
+    );
+    let mut admitted = AdmittedCommands::default();
+    admitted.0.push(crate::messages::AdmittedCommand {
+        target: crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        payload: crate::messages::SystemControlPayload::FirePhaser,
+        response_token: None,
+    });
+    let npc = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            blackboards,
+            admitted,
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            ActiveBeam::default(),
+            PhaserCooldown::default(),
+            ShipPhysics::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+                banks: vec![wide_bank("fore", 0.0)],
+            }),
+            Transform::default(),
+        ))
+        .id();
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -20.0),
+    ));
+    app.update();
+    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+    assert!(
+        beam.target_uuid.is_some() && beam.bank.as_deref() == Some("fore"),
+        "a human admitted FirePhaser must produce the same active beam an AI-policy fire does"
+    );
+}
+
+/// An idle blaster bank policy holds its volley even when the bank is host-ready
+/// (AC1/AC2): no cooldown is entered because no volley is dispatched.
+#[test]
+fn blaster_bank_idle_policy_holds_fire() {
+    use crate::entity_spawner::EntityUuid;
+    let mut app = test_app();
+
+    let npc_uuid = "cc000000-0000-0000-0000-000000000031";
+    let target_uuid = "cc000000-0000-0000-0000-000000000032";
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    let mut policies = std::collections::HashMap::new();
+    policies.insert("fore".to_string(), idle_bank_policy());
+    let npc = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            crate::messages::AdmittedCommands::default(),
+            ShipPhysics::default(),
+            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                crate::blaster::BlasterBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 360.0,
+                    volley_count: 1,
+                    volley_interval_secs: 0.1,
+                    cooldown_secs: 3.0,
+                    charge_time_secs: 0.0,
+                    projectile_speed: 40.0,
+                    collision_radius: 1.5,
+                    visual_scale: 1.0,
+                    damage: 10,
+                    shield_pierce: 0.0,
+                    recoil_impulse: 0.0,
+                    screenshake_magnitude: 0.0,
+                    marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
+                    range: 35.0,
+                },
+            )]),
+            crate::weapons_plugin::BlasterBankAiPolicies(policies),
+            Transform::default(),
+        ))
+        .id();
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -10.0),
+    ));
+    app.update();
+    let blaster_res = app.world().get::<BlasterSystemResource>(npc).unwrap();
+    assert!(
+        !blaster_res.0[0].volley.on_cooldown && blaster_res.0[0].in_flight.is_empty(),
+        "an idle blaster bank policy must hold its volley — no fire, no cooldown"
+    );
+}
+
+/// AC6: an explicit Tactical-radar idle declaration makes the radar take NO AI
+/// target selection even when a tactical fine system is AI-operated — the ship
+/// acquires nothing, distinct from a default (non-idle) radar that would lock the
+/// objective (pinned by `ai_target_selection_runs_when_any_tactical_system_operates_ai`).
+#[test]
+fn tactical_radar_idle_makes_no_ai_selection() {
+    let mut app = test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // Attach an explicit idle radar declaration to the LocalShip.
+    let ship = local_ship_entity(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TacticalTargetSelector {
+            idle: true,
+            ..Default::default()
+        });
+
+    // Provide a lockable objective target — a non-idle radar would acquire it.
+    let target_uuid = uuid::Uuid::new_v4().to_string();
+    spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("wave_1".into(), target_uuid.clone());
+    insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "an idle Tactical radar must make no AI selection — the lock stays empty"
     );
 }
 

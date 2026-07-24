@@ -92,7 +92,11 @@ impl Plugin for WeaponsPlugin {
             crate::system_registry::PHASER_CONTROL_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"))
-        .register_admitted_consumer(ConsumerMatcher::prefix("phaser-"));
+        .register_admitted_consumer(ConsumerMatcher::prefix("phaser-"))
+        // Blaster banks converge on the admission seam (issue #781): both a
+        // human's `ChargeBlasterStart` and the AI decider's emitted one travel
+        // as admitted `blaster-{bank}` commands consumed by `handle_fire_blaster`.
+        .register_admitted_consumer(ConsumerMatcher::prefix("blaster-"));
         app.init_resource::<crate::messages::InterSystemQueue>();
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
@@ -167,8 +171,11 @@ impl Plugin for WeaponsPlugin {
                     // any same-tick reader.
                     ai_target_selection.in_set(crate::sim_sets::SimSet::Input),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
+                    // Blaster auto-fire DECIDE (issue #781): emits an admitted
+                    // `ChargeBlasterStart` through the shared AI seam, converging
+                    // with the human path at `handle_fire_blaster` (Physics).
+                    // Stays in `Input` so it reads pre-physics `Transform`s.
                     tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
-                    handle_fire_blaster.in_set(crate::sim_sets::SimSet::Input),
                 ),
             )
             .add_systems(
@@ -223,6 +230,16 @@ impl Plugin for WeaponsPlugin {
                     handle_torpedo_magazine_inter_system
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(handle_load_tube),
+                    // Blaster fire CONSUME (issue #781): reads per-ship
+                    // `AdmittedCommands` that both the human (via
+                    // `admit_system_commands`) and the AI decider
+                    // (`tick_blaster_auto_fire`, Input) wrote this tick, and arms
+                    // the volley. Ordered before `tick_blaster_system` so the
+                    // armed volley launches the same tick (mirrors the Input →
+                    // Physics phaser flow).
+                    handle_fire_blaster
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .before(tick_blaster_system),
                     tick_blaster_system.in_set(crate::sim_sets::SimSet::Physics),
                 ),
             )
@@ -255,10 +272,10 @@ pub(crate) use shared::{
 // stays `pub` here for external consumers (`src/server/pfx.rs`,
 // `src/entities/spawner.rs` via the `weapons_plugin` alias); the systems are
 // re-exported so the plugin build fn and the test module keep resolving them.
-pub use blaster::BlasterSystemResource;
 pub(crate) use blaster::{
     handle_blaster_hits, handle_fire_blaster, tick_blaster_auto_fire, tick_blaster_system,
 };
+pub use blaster::{seed_blaster_bank_facts, BlasterBankAiPolicies, BlasterSystemResource};
 
 // Beam (phaser) types and systems extracted to `beam.rs` (issue #727). The
 // types and `drain_power_for_active_beam` stay `pub` here for external
@@ -271,9 +288,10 @@ pub(crate) use beam::{
     tick_beams_tick_lifetimes,
 };
 pub use beam::{
-    drain_power_for_active_beam, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
-    LastShipAttacker, PhaserCombatConfigResource, PhaserCooldown, TacticalRadarSelection,
-    TacticalTargetSelector, BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
+    drain_power_for_active_beam, seed_phaser_bank_facts, ActiveBeam, BeamEndedEvent,
+    BeamStartedEvent, CurrentPhaserMode, LastShipAttacker, PhaserBankAiPolicies,
+    PhaserCombatConfigResource, PhaserCooldown, TacticalRadarSelection, TacticalTargetSelector,
+    BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -894,7 +912,14 @@ fn ai_target_selection(
         // in that case; the human operator drives `TacticalRadarSelection` directly via
         // `handle_set_target`. Clearing the intent here stops a ship that flips
         // from AI to human control leaving a stale selection on its blackboard.
-        if !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+        // Explicit AI-or-idle declaration for the Tactical radar (issue #781,
+        // AC6). An authored `selector_idle = true` makes the radar take no AI
+        // selection even when a tactical fine system is AI-operated — the
+        // explicit opt-out that distinguishes "radar deliberately idle" from
+        // "no selector authored → default". `None` (bare-`App` fixtures) is not
+        // idle, preserving baseline behaviour.
+        let radar_idle = target_selector.map(|s| s.idle).unwrap_or(false);
+        if radar_idle || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             clear_locked_target_if_present(&mut blackboards);
             continue;
         }

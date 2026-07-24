@@ -5,6 +5,8 @@ entities:
       confidence: confirmed
       title: Tactical Fine System Operator
       summary: Applies Tactical authority and availability separately to phaser banks, blaster banks, torpedo tubes, tactical radar, and torpedo magazine rather than treating Tactical as one indestructible system.
+      rationale:
+        - "Issue #781 made each AI-capable phaser and blaster bank resolve its OWN inline stateless open-fire policy-or-idle (per-bank-weapon-policy): a bank observes the authoritative target, readiness, frequency, range, and arc and emits the SAME typed Tactical input a human does (FirePhaser / ChargeBlasterStart) through admission, never spawning attacks or mutating damage directly. The bank is the unit of AI decision — banks are Vec entries, so the resolved policies attach ship-level keyed by bank id — and one idle bank does not disarm another."
     architecture:
       kind: system-operator
       authority: authoritative
@@ -12,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/ship/system_registry.rs]
+      paths: [src/console/weapons/mod.rs, src/ship/system_registry.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs]
       tests: [cargo test]
 
   - component: torpedo-magazine-round-claim
@@ -41,6 +43,7 @@ entities:
       summary: Uses scored Destroy objectives and fine-system availability to select and track targets, and issue arc-bearing coordination when a usable family lacks arc; firing decisions for individual weapon families live in separate decide/apply AI systems that read the resulting target.
       rationale:
         - "Issue #694 removed the torpedo-firing block that used to run inline inside this operator (operate_tactical_ai). Torpedo auto-fire now lives in torpedo-auto-fire-ai (ai_torpedo_auto_fire in src/console_ai/server.rs). Issue #697 then split target selection itself into ai_target_selection (decide, writes WeaponsBlackboard.locked_target) and operate_tactical_ai (apply, writes WeaponsTarget), and issue #698 split phaser firing the same way into phaser-auto-fire-ai. Issue #700 deleted operate_tactical_ai: with every other responsibility rehomed, the remaining glue was folded back into ai_target_selection, which now gates on any_tactical_system_operates_ai (any tactical fine system's own operate_ai policy — the dead coarse tactical fallback was deleted by #801), publishes its choice to WeaponsBlackboard.locked_target as observable intent, and applies the same choice to WeaponsTarget in one system. Selection could not be separated from application by a sim set the way the other AI decide/apply pairs are — every WeaponsTarget reader runs in SimSet::Input — so keeping them in one system is what makes the AI's read-modify-write atomic against handle_set_target, the other Input writer of WeaponsTarget."
+        - "Issue #781 (AC6) gave the tactical radar an EXPLICIT AI-or-idle declaration. Previously ai_target_selection ran its selector whenever any_tactical_system_operates_ai held and otherwise cleared the lock, but there was no way to say 'the radar deliberately makes no AI selection' versus 'no selector authored → default selector'. An authored [weapons_console] selector_idle = true is carried on the TacticalTargetSelector component (field idle, seeded at spawn) and honoured at the same gate: when the radar is idle ai_target_selection clears any stale intent and skips the ship even under AI control. Default false preserves the prior behaviour."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -50,8 +53,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, src/ai/core.rs]
-      symbols: [ai_target_selection]
+      paths: [src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/ai/core.rs]
+      symbols: [ai_target_selection, TacticalTargetSelector]
       tests: [cargo test]
 
   - component: torpedo-auto-fire-ai
@@ -86,17 +89,40 @@ entities:
         - "Issue #698 split the former fused tick_phaser_auto_fire into ai_phaser_auto_fire (decide) and integrate_weapons_state (apply). Issue #846 retired both PhaserIntents and integrate_weapons_state: the decider now emits FirePhaser through emit_ai_command, and handle_fire_phaser reads AdmittedCommands directly."
         - "Gated on any_bank_operates_ai (per-bank phaser_bank_system_id() operate_ai policy; a ship declaring no fine banks has no bank that can be AI-operated — the dead coarse tactical fallback was deleted by #801), OR the LocalShip's CurrentPhaserMode::Auto toggle. Per-bank policy is re-checked when choosing which bank fires, so one offline bank does not disarm the others."
         - "Deliberately NOT gated on AiHighFidelity, unlike ai_torpedo_auto_fire: low-LOD NPCs must keep firing phasers, and the CurrentPhaserMode::Auto leg is a human console toggle rather than AI at all."
+        - "Issue #781 made the per-bank fire decision resolve each bank's OWN inline stateless policy (per-bank-weapon-policy). For each host-ready candidate bank (off-cooldown, target in range/arc) the host seeds a per-bank fact snapshot (seed_phaser_bank_facts: target_valid, on_cooldown, cooldown_remaining, in_range, in_arc, frequency) and resolves PhaserBankAiPolicies on the phaser_fire channel; only a bank whose policy yields fire_phaser is selected, then it emits the SAME admitted FirePhaser as before. A bank declares an inline ai block or an explicit idle; the default is unconditional fire so baseline auto-fire is unchanged (AC1). One idle bank does not disarm another (AC7). AC3 phaser frequency + sustained-lock semantics are untouched — the policy governs only whether to OPEN fire, not beam sustain."
     architecture:
       kind: ai-controller
       authority: authoritative
-      reads: [weapons-target-state, system-control-source-state]
+      reads: [weapons-target-state, system-control-source-state, fine-system-ai-policy-state]
       writes: [weapons-target-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs]
-      symbols: [ai_phaser_auto_fire]
+      paths: [src/console/weapons/mod.rs, src/console/weapons/beam.rs]
+      symbols: [ai_phaser_auto_fire, PhaserBankAiPolicies, seed_phaser_bank_facts]
       tests: [cargo test]
+
+  - component: blaster-auto-fire-ai
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Blaster Auto-Fire AI
+      summary: AI decide system that resolves each AI-capable blaster bank's inline open-fire policy and emits ChargeBlasterStart through the shared admission seam (issue #781). The paired consumer (handle_fire_blaster) reads each ship's AdmittedCommands in SimSet::Physics and arms the volley before tick_blaster_system launches it.
+      rationale:
+        - "Issue #781 converged blaster firing onto admission — the real Control-Source symmetry fix (AGENTS.md #6, AC5/AC7). Previously tick_blaster_auto_fire called bank.request_charge_start() DIRECTLY while the human path read raw InboundMessages, and the human path applied an arc check the AI path skipped. Now tick_blaster_auto_fire emits ChargeBlasterStart via emit_ai_command (per-bank, only when the bank's blaster_fire-channel policy fires over a seeded seed_blaster_bank_facts snapshot), and handle_fire_blaster consumes per-ship AdmittedCommands (registered blaster- consumer) in SimSet::Physics with the arc check applied identically to human and AI origins, before tick_blaster_system. Both origins meet at handle_fire_blaster with no human-vs-AI branch."
+        - "Gated on any_blaster_bank_operates_ai (per-bank blaster_bank_system_id() operate_ai policy; no coarse tactical fallback, #801). Each bank declares an inline ai block or explicit idle; the default is unconditional fire so baseline auto-fire is preserved (AC1), and one idle bank does not disarm another (AC7). AC4 is untouched: the linear-intercept prediction is computed once at fire time inside BlasterSystem::tick and bolts fly straight after — the policy only decides whether a bank starts a volley."
+    architecture:
+      kind: ai-controller
+      authority: authoritative
+      reads: [weapons-target-state, blaster-projectile-state, system-control-source-state, fine-system-ai-policy-state]
+      sends: [system-control-command]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/weapons/blaster.rs, src/console/weapons/mod.rs]
+      symbols: [tick_blaster_auto_fire, handle_fire_blaster, BlasterBankAiPolicies, seed_blaster_bank_facts]
+      tests: [cargo test]
+
   - component: tactical-weapons-controls
     core:
       status: implemented

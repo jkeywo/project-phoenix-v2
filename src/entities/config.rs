@@ -1107,6 +1107,14 @@ pub struct PhaserBankConfig {
     /// when absent or unresolved they fall back to the hull-offset default.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Inline stateless AI policy for this bank's open-fire decision
+    /// (issue #781). When authored it is validated at content load and drives
+    /// `ai_phaser_auto_fire`'s per-bank fire gate; when absent the canonical
+    /// [`default_phaser_bank_ai_config`] (unconditional fire) is synthesised at
+    /// spawn so baseline auto-fire is preserved. An explicit `idle = true` is the
+    /// per-bank opt-out (AC1).
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
 }
 
 /// Stable identifier for a blaster bank, parsed verbatim from the TOML
@@ -1178,6 +1186,14 @@ pub struct BlasterBankConfig {
     /// absent from TOML.
     #[serde(default = "default_blaster_range")]
     pub range: f32,
+    /// Inline stateless AI policy for this bank's open-fire decision
+    /// (issue #781). When authored it is validated at content load and drives
+    /// `tick_blaster_auto_fire`'s per-bank fire gate; when absent the canonical
+    /// [`default_blaster_bank_ai_config`] (unconditional fire) is synthesised at
+    /// spawn so baseline auto-fire is preserved. An explicit `idle = true` is the
+    /// per-bank opt-out (AC1).
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
 }
 
 fn default_blaster_fire_arc_deg() -> f32 {
@@ -1442,6 +1458,15 @@ pub struct WeaponsConsoleConfig {
     /// authoritative `TacticalRadarSelection`.
     #[serde(default)]
     pub selector: Option<FineSystemAiSelectorToml>,
+    /// Explicit Tactical-radar idle declaration (issue #781, AC6). When `true`
+    /// the radar takes NO AI target selection — `ai_target_selection` clears any
+    /// stale lock and skips the ship — even when a tactical fine system is
+    /// AI-operated. This is the explicit AI-or-idle opt-out that distinguishes
+    /// "the radar deliberately makes no AI selection" from "no selector authored
+    /// → default selector". Defaults to `false` (radar runs its selector as
+    /// before), so baseline behaviour is preserved.
+    #[serde(default)]
+    pub selector_idle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1738,6 +1763,42 @@ pub const HELM_BOOST_CHANNEL: &str = "boost";
 /// boost active via the same admitted `SetBoost` a human uses; its absence
 /// ("hold"/idle) leaves boost as it is.
 pub const HELM_ENGAGE_BOOST_VERB: &str = "engage_boost";
+
+// ── Weapon-bank fine-system AI policy channels/verbs (issue #781) ─────────────
+//
+// Each AI-capable phaser and blaster bank drives a single output channel with a
+// single value-less ACTION verb: the verb decides *whether* to open fire this
+// tick, while the target (the ship's authoritative combat lock), the firing
+// bank, and the beam frequency all come from the host context — never the verb
+// (AGENTS.md rule #11 — no fire thresholds/ranges/arcs/cooldowns pinned here;
+// those stay TOML on the bank configs). Each bank enforces availability,
+// cooldown, range, arc, and target validity host-side before resolving its
+// policy, so the runtime only reports *whether the authored behaviour permits*
+// firing an already-ready bank.
+
+/// The `phaser_fire` output channel: a phaser bank's open-fire axis.
+pub const PHASER_FIRE_CHANNEL: &str = "phaser_fire";
+/// The `fire_phaser` verb: the phaser-bank fire verb. Its presence tells the
+/// host to emit the same admitted `FirePhaser` a human does; its absence
+/// ("hold"/idle) holds this bank's fire.
+pub const PHASER_FIRE_VERB: &str = "fire_phaser";
+
+/// The registered output channels a phaser bank policy may drive (issue #781).
+pub const PHASER_BANK_CHANNELS: &[&str] = &[PHASER_FIRE_CHANNEL];
+/// The registered verbs a phaser bank policy may emit (issue #781).
+pub const PHASER_BANK_VERBS: &[&str] = &[PHASER_FIRE_VERB];
+
+/// The `blaster_fire` output channel: a blaster bank's open-fire axis.
+pub const BLASTER_FIRE_CHANNEL: &str = "blaster_fire";
+/// The `fire_blaster` verb: the blaster-bank fire verb. Its presence tells the
+/// host to emit the same admitted `ChargeBlasterStart` a human does; its absence
+/// ("hold"/idle) holds this bank's volley.
+pub const BLASTER_FIRE_VERB: &str = "fire_blaster";
+
+/// The registered output channels a blaster bank policy may drive (issue #781).
+pub const BLASTER_BANK_CHANNELS: &[&str] = &[BLASTER_FIRE_CHANNEL];
+/// The registered verbs a blaster bank policy may emit (issue #781).
+pub const BLASTER_BANK_VERBS: &[&str] = &[BLASTER_FIRE_VERB];
 
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
@@ -2253,6 +2314,11 @@ impl FineSystemAiConfigToml {
                 }
                 HELM_ENGAGE_IMPULSE_VERB => crate::ai::policy::AiPolicyVerb::EngageImpulse,
                 HELM_ENGAGE_BOOST_VERB => crate::ai::policy::AiPolicyVerb::EngageBoost,
+                // Weapon-bank action verbs (issue #781): value-less, like the
+                // helm mode verbs. The `value` field is ignored — the target and
+                // firing bank come from the host context, not the policy.
+                PHASER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FirePhaser,
+                BLASTER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FireBlaster,
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2426,6 +2492,50 @@ pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
         idle: true,
         param: std::collections::HashMap::new(),
         rule: Vec::new(),
+    }
+}
+
+/// The canonical default phaser-bank open-fire policy synthesised for AI-capable
+/// phaser banks that do not author an inline `ai` block (issue #781).
+///
+/// One unconditional rule on the `phaser_fire` channel: always fire. This
+/// reproduces the pre-#781 baseline exactly, where a bank auto-fired whenever the
+/// host found it off-cooldown with the target in range and arc — the host still
+/// enforces all of those readiness gates, and the DECISION to open fire now flows
+/// through a data-authored policy verb a designer can gate (mirrors
+/// [`default_engines_ai_config`]). No fire threshold/range/arc/cooldown is pinned
+/// in the verb; those stay TOML on the bank config. An explicit `idle` is the
+/// opt-out (AC1).
+pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: PHASER_FIRE_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: PHASER_FIRE_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default blaster-bank open-fire policy synthesised for AI-capable
+/// blaster banks that do not author an inline `ai` block (issue #781). Mirror of
+/// [`default_phaser_bank_ai_config`] on the `blaster_fire` channel: always fire,
+/// with the host still enforcing availability, cooldown, range, arc, and target
+/// validity before the volley starts.
+pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: BLASTER_FIRE_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: BLASTER_FIRE_VERB.to_string(),
+            value: false,
+        }],
     }
 }
 
@@ -3477,6 +3587,28 @@ impl EntityConfig {
                     &[HELM_ENGAGE_BOOST_VERB],
                 )
                 .map_err(SerdeError::custom)?;
+            }
+        }
+
+        // Validate authored inline per-bank weapon AI policies before world
+        // activation (issue #781). Each AI-capable phaser and blaster bank may
+        // declare an inline `ai` block driving its single `phaser_fire` /
+        // `blaster_fire` channel with its single fire verb. Unknown
+        // channels/verbs, unparseable guards, and undeclared parameter
+        // references fail the entity load here, before any live tick — mirroring
+        // the helm validation block above.
+        if let Some(wc) = config.weapons_console.as_ref() {
+            for bank in &wc.phaser_banks {
+                if let Some(ai) = bank.ai.as_ref() {
+                    validate_fine_system_ai_policy(ai, PHASER_BANK_CHANNELS, PHASER_BANK_VERBS)
+                        .map_err(SerdeError::custom)?;
+                }
+            }
+            for bank in &wc.blaster_banks {
+                if let Some(ai) = bank.ai.as_ref() {
+                    validate_fine_system_ai_policy(ai, BLASTER_BANK_CHANNELS, BLASTER_BANK_VERBS)
+                        .map_err(SerdeError::custom)?;
+                }
             }
         }
 
@@ -6465,6 +6597,113 @@ idle = true
         let ai = cfg.captain_console.unwrap().ai.unwrap();
         assert!(ai.idle);
         assert!(ai.to_policy().unwrap().idle);
+    }
+
+    // ── Per-bank weapon AI policy (issue #781) ───────────────────────────────
+
+    #[test]
+    fn default_phaser_and_blaster_bank_policies_validate_and_resolve() {
+        let p = default_phaser_bank_ai_config();
+        assert!(
+            validate_fine_system_ai_policy(&p, PHASER_BANK_CHANNELS, PHASER_BANK_VERBS).is_ok()
+        );
+        let pp = p.to_policy().expect("phaser default resolves");
+        // Baseline: unconditional fire (not idle, one rule).
+        assert!(!pp.idle);
+        assert_eq!(pp.rules.len(), 1);
+
+        let b = default_blaster_bank_ai_config();
+        assert!(
+            validate_fine_system_ai_policy(&b, BLASTER_BANK_CHANNELS, BLASTER_BANK_VERBS).is_ok()
+        );
+        assert!(!b.to_policy().expect("blaster default resolves").idle);
+    }
+
+    #[test]
+    fn phaser_bank_inline_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Gunboat"
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+auto_arc_deg = 60.0
+
+[[weapons_console.phaser_banks.ai.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "fact(in_range) > 0 and fact(in_arc) > 0"
+verb = "fire_phaser"
+value = false
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("phaser bank ai must parse + validate");
+        let bank = &cfg.weapons_console.unwrap().phaser_banks[0];
+        let policy = bank.ai.as_ref().unwrap().to_policy().unwrap();
+        assert_eq!(policy.rules.len(), 1);
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::FirePhaser
+        );
+    }
+
+    #[test]
+    fn blaster_bank_inline_idle_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Escort"
+
+[[weapons_console.blaster_banks]]
+id = "fore"
+
+[weapons_console.blaster_banks.ai]
+idle = true
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("blaster bank idle ai must parse");
+        let bank = &cfg.weapons_console.unwrap().blaster_banks[0];
+        assert!(bank.ai.as_ref().unwrap().to_policy().unwrap().idle);
+    }
+
+    #[test]
+    fn phaser_bank_ai_rejects_unknown_verb_at_load() {
+        // The blaster verb on a phaser bank channel is an authoring error caught
+        // by the from_toml validation loop, before any live tick.
+        let toml = r#"
+name = "Bad"
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+auto_arc_deg = 60.0
+
+[[weapons_console.phaser_banks.ai.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "true"
+verb = "fire_blaster"
+value = false
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn blaster_bank_ai_rejects_unknown_channel_at_load() {
+        let toml = r#"
+name = "Bad2"
+
+[[weapons_console.blaster_banks]]
+id = "fore"
+
+[[weapons_console.blaster_banks.ai.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "true"
+verb = "fire_blaster"
+value = false
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown channel"), "got: {err}");
     }
 
     #[test]

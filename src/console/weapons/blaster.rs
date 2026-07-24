@@ -6,15 +6,10 @@
 
 use bevy::prelude::*;
 
-use super::shared::{
-    any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, tactical_authorized,
-};
+use super::shared::{any_blaster_bank_operates_ai, live_entity_xz, system_is_registered};
 use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
-use crate::ai_plugin::AiTokenRegistry;
-use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
-use crate::messages::{
-    ClientMessage, GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload,
-};
+use crate::lobby::{Sessions, Target, WorldResource};
+use crate::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
 
 /// This ship's **Combat Lock** from its frozen viewscreen blackboard (issue
 /// #829): the ship-wide target every weapons firing path reads, in place of the
@@ -43,199 +38,212 @@ use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 #[derive(Resource, Component, Clone, Default)]
 pub struct BlasterSystemResource(pub Vec<crate::blaster::BlasterSystem>);
 
-/// Handle blaster fire/charge control messages:
+/// Per-ship map of each blaster bank's inline stateless open-fire policy
+/// (issue #781), keyed by `BlasterBankConfig.id`. The blaster twin of
+/// [`crate::weapons_plugin::PhaserBankAiPolicies`]: built at spawn from each
+/// bank's authored `ai` block, falling back to the canonical
+/// [`crate::entities::config::default_blaster_bank_ai_config`] (unconditional
+/// fire) so a bank without an authored policy keeps auto-firing exactly as before
+/// (AC1). Read by [`tick_blaster_auto_fire`].
+#[derive(Component, Default, Clone, Debug)]
+pub struct BlasterBankAiPolicies(
+    pub std::collections::HashMap<crate::entity_config::BlasterBankId, crate::ai::policy::AiPolicy>,
+);
+
+/// Seed the per-tick policy fact snapshot for one blaster bank's open-fire
+/// decision (issue #781), the blaster twin of
+/// [`crate::weapons_plugin::seed_phaser_bank_facts`]. Closes the #779 empty-facts
+/// edge for blaster banks: the host resolves the bank's live readiness before
+/// calling this, so a `fact(...)` guard evaluates over real per-bank state while
+/// `policy.rs` stays Bevy-free.
+pub fn seed_blaster_bank_facts(
+    target_valid: bool,
+    on_cooldown: bool,
+    cooldown_remaining: f32,
+    in_range: bool,
+    in_arc: bool,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
+    facts.set("on_cooldown", if on_cooldown { 1.0 } else { 0.0 });
+    facts.set("cooldown_remaining", cooldown_remaining as f64);
+    facts.set("in_range", if in_range { 1.0 } else { 0.0 });
+    facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
+    facts
+}
+
+/// Resolve a blaster bank's policy to a bare "open fire this tick?" boolean
+/// (issue #781). Returns `true` only when a guard fires on the `blaster_fire`
+/// channel yielding `FireBlaster`; `None`/idle/mismatched verbs "hold".
+fn blaster_bank_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+) -> bool {
+    policy.resolve_channel(crate::entities::config::BLASTER_FIRE_CHANNEL, facts, &[])
+        == Some(&crate::ai::policy::AiPolicyVerb::FireBlaster)
+}
+
+/// Admitted-command consumer for blaster fire/charge control (issue #781).
 ///
-/// - `ControlSystem { target: "blaster-<id>", payload: FireBlaster }` — legacy
-///   alias, behaves as `ChargeBlasterStart` (instant-fire when `charge_time_secs == 0`).
-/// - `ControlSystem { target: "blaster-<id>", payload: ChargeBlasterStart }` — begins
-///   charge (or instant-fires when `charge_time_secs == 0`, issue #636).
-/// - `ControlSystem { target: "blaster-<id>", payload: ChargeBlasterCancel }` — cancels
-///   an in-progress charge with no penalty (issue #636).
+/// Reads each ship's own `AdmittedCommands` for blaster payloads:
 ///
-/// Resolves the bank id from the target SystemId, gates on the bank's
-/// fine-system policy, then dispatches to the appropriate `BlasterSystem` method.
+/// - `FireBlaster` — legacy alias, behaves as `ChargeBlasterStart` (instant-fire
+///   when `charge_time_secs == 0`).
+/// - `ChargeBlasterStart` — begins charge (or instant-fires when
+///   `charge_time_secs == 0`, issue #636).
+/// - `ChargeBlasterCancel` — cancels an in-progress charge with no penalty.
 ///
-/// Runs in `SimSet::Input`.
+/// # Control-Source symmetry (issue #781, AC5/AC7 — the convergence fix)
+///
+/// Before #781 the human path read raw `InboundMessage`s here (with its own
+/// `tactical_authorized` check) while the AI path called
+/// `bank.request_charge_start()` DIRECTLY inside `tick_blaster_auto_fire` — two
+/// origins, two code paths, and the human path applied an arc check the AI path
+/// skipped. Now both origins converge exactly like phasers: a human's
+/// `ControlSystem` is admitted by `admit_system_commands`, an AI decision is
+/// emitted through `emit_ai_command`, and BOTH land in this ship's
+/// `AdmittedCommands`, which this system consumes with no human-vs-AI branch. The
+/// arc check below therefore applies identically to both origins.
+///
+/// Runs in `SimSet::Physics` — after admission's `clear_before_input` and after
+/// the AI decider (`tick_blaster_auto_fire`, `SimSet::Input`) has emitted, but
+/// ordered before `tick_blaster_system` so the armed volley launches the same
+/// tick.
 pub(crate) fn handle_fire_blaster(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    ai_registry: Option<Res<AiTokenRegistry>>,
-    localship_q: Query<
-        (Entity, &crate::ship_plugin::ShipConfigComponent),
-        With<crate::server_app::LocalShip>,
-    >,
     mut ship_q: Query<
         (
             &ShipSystemControlSources,
             &ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
+            &crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let local_ship: Option<(Entity, &crate::ship_plugin::ShipConfigComponent)> =
-        localship_q.single().ok();
-
-    for ev in reader.read() {
-        let ClientMessage::ControlSystem { target, payload } = &ev.msg else {
-            continue;
-        };
-
-        // Accept FireBlaster (legacy), ChargeBlasterStart, and ChargeBlasterCancel.
-        let is_charge_start = matches!(
-            payload,
-            SystemControlPayload::FireBlaster | SystemControlPayload::ChargeBlasterStart
-        );
-        let is_charge_cancel = matches!(payload, SystemControlPayload::ChargeBlasterCancel);
-        if !is_charge_start && !is_charge_cancel {
-            continue;
-        }
-
-        // Cheap pre-filter only — the authoritative bank match happens below,
-        // once the shooter's own bank list is in scope.
-        if !target.0.starts_with("blaster-") {
-            continue;
-        }
-
-        // Resolve shooter entity — AI tokens route through AiTokenRegistry;
-        // human tokens route to the LocalShip.
-        let shooter_entity: Entity = if ev.token.starts_with("ai:") {
-            match ai_registry
-                .as_deref()
-                .and_then(|r| r.bevy_entity_for_token(&ev.token))
-            {
-                Some(e) => e,
-                None => continue,
-            }
-        } else {
-            match local_ship {
-                Some((e, cfg)) if tactical_authorized(&sessions, cfg, &ev.token) => e,
-                _ => continue,
-            }
-        };
-
-        let Ok((control_sources, physics, blackboards_opt, mut blaster_res)) =
-            ship_q.get_mut(shooter_entity)
-        else {
-            continue;
-        };
-
-        // Resolve the command's target back to one of THIS ship's banks by
-        // running the canonical forward mapping
-        // (`system_registry::blaster_bank_system_id`) over each authored bank
-        // id and comparing — never by inverting the string.
-        //
-        // The inverse ("strip `blaster-`, take what's left as the bank id") is
-        // lossy: the mapping folds `_` to `-`, so a hull authoring a bank id
-        // like `fore_port` produced `blaster-fore-port`, which inverted back to
-        // `fore-port` and matched no bank — the order was silently dropped.
-        // Exactly the bug the torpedo tube handler carried until this same fix,
-        // latent here only because every shipped hull happens to author
-        // hyphen-free bank ids.
-        let Some(bank_id) = blaster_res.0.iter().find_map(|b| {
-            crate::system_registry::blaster_bank_system_id(&b.config.id)
-                .filter(|id| id == target)
-                .map(|_| b.config.id.clone())
-        }) else {
-            continue;
-        };
-
-        // Gate on the bank's fine-system policy. AI tokens require operate_ai;
-        // human tokens require accept_human_input.
-        let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
-            .filter(|id| system_is_registered(control_sources, id));
-        let policy = match &bank_system_id {
-            Some(id) => control_sources.0.policy_for(id),
-            // Unregistered fine system: the default-source policy — exactly
-            // what `policy_for` returns for any unknown id. No coarse
-            // `tactical` fallback (issue #801).
-            None => crate::ship::control_source::control_tick_policy(
-                crate::ship::control_source::ControlSource::default(),
-            ),
-        };
-        let is_ai_token = ev.token.starts_with("ai:");
-        let authorized = if is_ai_token {
-            policy.operate_ai
-        } else {
-            policy.accept_human_input
-        };
-        if !authorized {
-            continue;
-        }
-
-        // Arc check: resolve the player's locked target and verify it's within the
-        // bank's fire arc. Target selection mirrors tick_blaster_auto_fire:
-        // the ship's authoritative `TacticalRadarSelection` lock.
-        // AI tokens skip this check — arc enforcement for AI fire is handled by
-        // tick_blaster_auto_fire instead.
-        if is_charge_start && !is_ai_token {
-            let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
+    for (control_sources, physics, blackboards_opt, mut blaster_res, admitted) in ship_q.iter_mut()
+    {
+        for cmd in admitted.0.iter() {
+            // Accept FireBlaster (legacy), ChargeBlasterStart, and ChargeBlasterCancel.
+            let is_charge_start = matches!(
+                cmd.payload,
+                SystemControlPayload::FireBlaster | SystemControlPayload::ChargeBlasterStart
+            );
+            let is_charge_cancel = matches!(cmd.payload, SystemControlPayload::ChargeBlasterCancel);
+            if !is_charge_start && !is_charge_cancel {
                 continue;
-            };
-            let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            }
+
+            // Resolve the command's target back to one of THIS ship's banks by
+            // running the canonical forward mapping over each authored bank id
+            // and comparing — never by inverting the string (the mapping folds
+            // `_` to `-`, so the inverse is lossy).
+            let Some(bank_id) = blaster_res.0.iter().find_map(|b| {
+                crate::system_registry::blaster_bank_system_id(&b.config.id)
+                    .filter(|id| id == &cmd.target)
+                    .map(|_| b.config.id.clone())
+            }) else {
                 continue;
             };
 
-            // Find the bank to check its arc config.
-            let bank_arc_ok = blaster_res
-                .0
-                .iter()
-                .find(|b| b.config.id == bank_id)
-                .map(|bank| {
-                    let (rx, ry) = crate::weapons::phaser::ship_local(
-                        tx,
-                        tz,
-                        physics.x,
-                        physics.z,
-                        physics.yaw,
-                    );
-                    crate::weapons::phaser::in_arc(
-                        rx,
-                        ry,
-                        bank.config.facing_deg,
-                        bank.config.fire_arc_deg,
-                    )
-                })
-                .unwrap_or(false);
-            if !bank_arc_ok {
+            // System-state gate: the bank must be operable (not Offline).
+            // Admission already gated the token identity, so — like
+            // `handle_fire_phaser` — this only checks operability, with no
+            // human-vs-AI branch below this point.
+            let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
+                .filter(|id| system_is_registered(control_sources, id));
+            let policy = match &bank_system_id {
+                Some(id) => control_sources.0.policy_for(id),
+                None => crate::ship::control_source::control_tick_policy(
+                    crate::ship::control_source::ControlSource::default(),
+                ),
+            };
+            if !policy.accept_human_input && !policy.operate_ai {
                 continue;
             }
-        }
 
-        // Dispatch to the matching bank.
-        if let Some(bank) = blaster_res.0.iter_mut().find(|b| b.config.id == bank_id) {
+            // Arc check for a fire/charge-start, applied to BOTH origins now that
+            // the source identity is stripped. The target is the ship's frozen
+            // combat lock — the same surface `tick_blaster_auto_fire` reads. A
+            // cancel needs no target/arc.
             if is_charge_start {
-                bank.request_charge_start();
-            } else {
-                bank.request_charge_cancel();
+                let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
+                    continue;
+                };
+                let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                    continue;
+                };
+                let bank_arc_ok = blaster_res
+                    .0
+                    .iter()
+                    .find(|b| b.config.id == bank_id)
+                    .map(|bank| {
+                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                            tx,
+                            tz,
+                            physics.x,
+                            physics.z,
+                            physics.yaw,
+                        );
+                        crate::weapons::phaser::in_arc(
+                            rx,
+                            ry,
+                            bank.config.facing_deg,
+                            bank.config.fire_arc_deg,
+                        )
+                    })
+                    .unwrap_or(false);
+                if !bank_arc_ok {
+                    continue;
+                }
+            }
+
+            // Dispatch to the matching bank. `request_charge_start` /
+            // `request_fire` are self-guarding (no-op when the bank is not
+            // fire-ready), so a redundant order is harmless.
+            if let Some(bank) = blaster_res.0.iter_mut().find(|b| b.config.id == bank_id) {
+                if is_charge_start {
+                    bank.request_charge_start();
+                } else {
+                    bank.request_charge_cancel();
+                }
             }
         }
     }
 }
 
-/// Auto-fire blaster banks for AI-controlled ships.
+/// Decide which AI-controlled blaster banks should open fire this tick, and emit
+/// an admitted `ChargeBlasterStart` for each through the shared AI seam
+/// (issue #781).
 ///
-/// Iterates every ship (`With<Ship>`) — player + NPC — and calls
-/// `request_charge_start()` on each blaster bank whose fine-system policy
-/// has `operate_ai == true` when the ship has a valid target in range and
-/// within the bank's fire arc. Ships whose config declares no `blaster_bank`
-/// fine systems fall back to the coarse `tactical.operate_ai` policy.
+/// Iterates every ship (`With<Ship>`) — player + NPC. For each blaster bank whose
+/// fine-system policy has `operate_ai == true`, the host resolves the bank's live
+/// readiness (target lock, fire-ready, range, arc), seeds a per-bank fact
+/// snapshot, and resolves the bank's OWN inline stateless open-fire policy on the
+/// `blaster_fire` channel. Only a bank whose policy fires emits — and it emits the
+/// SAME typed `ChargeBlasterStart` a human does via
+/// [`crate::command_admission::ai_emit::emit_ai_command`], converging with the
+/// human path at [`handle_fire_blaster`] (AC5/AC7). No bank spawns a volley
+/// directly anymore.
 ///
-/// Target selection: the ship's [`TacticalRadarSelection`] lock — the one authoritative
-/// surface, whoever set it. (A legacy `ShipAiMemory::target` fallback sat here
-/// until #702; it had been redundant for production NPCs since #703.) Range and
-/// arc checks use each bank's config values.
+/// Target selection: the **Combat Lock** from this ship's frozen viewscreen
+/// blackboard (issue #829, spec §1/§3). Range and arc checks use each bank's
+/// config values (AGENTS.md #11 — thresholds stay TOML on the bank).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_blaster_auto_fire(
+    sessions: Res<Sessions>,
     mut ship_q: Query<
         (
+            Option<&crate::entity_spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
-            &mut BlasterSystemResource,
+            &BlasterSystemResource,
+            Option<&BlasterBankAiPolicies>,
+            &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -243,9 +251,6 @@ pub(crate) fn tick_blaster_auto_fire(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
-    // Was an unconditional per-frame `eprintln!` / `console.log_1` on both
-    // targets, which drowned out everything else in a headless run. Now gated
-    // behind `--log weapons=trace` / `?log=weapons=trace`.
     crate::ptrace!(
         log,
         crate::logging::LogCat::Weapons,
@@ -253,8 +258,22 @@ pub(crate) fn tick_blaster_auto_fire(
         ship_q.iter().len()
     );
 
-    for (control_sources, ship_config_opt, physics, blackboards_opt, mut blaster_res) in
-        ship_q.iter_mut()
+    // Canonical fallback for any bank missing an attached policy (bare-`App`
+    // fixtures). Built once — unconditional fire (baseline, AC1).
+    let default_bank_policy = crate::entities::config::default_blaster_bank_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+
+    for (
+        entity_uuid,
+        control_sources,
+        ship_config_opt,
+        physics,
+        blackboards_opt,
+        blaster_res,
+        bank_policies_opt,
+        mut admitted,
+    ) in ship_q.iter_mut()
     {
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
@@ -273,43 +292,75 @@ pub(crate) fn tick_blaster_auto_fire(
 
         // Target selection: the **Combat Lock** from this ship's frozen
         // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted.
-        let target_uuid: Option<String> = blaster_combat_lock(blackboards_opt);
-        let Some(target_uuid) = target_uuid else {
+        let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
             continue;
         };
-
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
             continue;
         };
 
-        for bank in blaster_res.0.iter_mut() {
-            // Skip banks that are not ready to accept a new fire command.
-            if !bank.is_fire_ready() {
-                continue;
+        // Collect the banks to fire first (immutable read of `blaster_res`),
+        // then emit — `emit_ai_command` borrows `admitted` mutably.
+        let mut banks_to_fire: Vec<String> = Vec::new();
+        for bank in blaster_res.0.iter() {
+            // Per-bank fine-system gate — skip banks whose fine system is not
+            // AI-operated (offline/human), so one bank firing never depends on
+            // another's control source.
+            if let Some(bank_sid) = crate::system_registry::blaster_bank_system_id(&bank.config.id)
+            {
+                if system_is_registered(control_sources, &bank_sid)
+                    && !control_sources.0.policy_for(&bank_sid).operate_ai
+                {
+                    continue;
+                }
             }
 
-            // Range check.
+            // Host readiness gates (AC2): availability/cooldown, range, arc.
+            let fire_ready = bank.is_fire_ready();
             let dx = tx - physics.x;
             let dz = tz - physics.z;
-            let dist_sq = dx * dx + dz * dz;
-            let range_sq = bank.config.range * bank.config.range;
-            if dist_sq > range_sq {
-                continue;
-            }
-
-            // Arc check: convert target to ship-local coordinates.
+            let in_range = dx * dx + dz * dz <= bank.config.range * bank.config.range;
             let (rx, ry) =
                 crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
-            if !crate::weapons::phaser::in_arc(
+            let in_arc = crate::weapons::phaser::in_arc(
                 rx,
                 ry,
                 bank.config.facing_deg,
                 bank.config.fire_arc_deg,
-            ) {
+            );
+            if !fire_ready || !in_range || !in_arc {
                 continue;
             }
 
-            bank.request_charge_start();
+            // Per-bank policy gate (issue #781): the bank is host-ready — now
+            // resolve its own authored open-fire policy over a seeded readiness
+            // snapshot. An idle bank (or one whose guard holds) is skipped,
+            // leaving other banks free to fire (per-bank independence, AC7).
+            let policy = bank_policies_opt
+                .and_then(|p| p.0.get(&bank.config.id))
+                .unwrap_or(&default_bank_policy);
+            let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc);
+            if blaster_bank_policy_fires(policy, &facts) {
+                banks_to_fire.push(bank.config.id.clone());
+            }
+        }
+
+        // Emit the SAME typed input a human does for every firing bank
+        // (AC5/AC7). `handle_fire_blaster` (Physics) consumes these and
+        // dispatches the volley, converging with the human origin.
+        for bank_id in banks_to_fire {
+            let Some(target) = crate::system_registry::blaster_bank_system_id(&bank_id) else {
+                continue;
+            };
+            crate::command_admission::ai_emit::emit_ai_command(
+                entity_uuid,
+                target,
+                crate::messages::SystemControlPayload::ChargeBlasterStart,
+                control_sources,
+                &sessions,
+                ship_config_opt,
+                &mut admitted,
+            );
         }
     }
 }

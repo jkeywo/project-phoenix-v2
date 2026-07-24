@@ -2698,6 +2698,13 @@ fn spawn_game_start_entities(
                 .insert(crate::weapons_plugin::TacticalTargetSelector {
                     selector: tactical_selector,
                     power_rating: config.power_rating.map(|r| r as f32),
+                    // AC6 (issue #781): explicit radar idle from `[weapons_console]
+                    // selector_idle`, else baseline (radar runs its selector).
+                    idle: config
+                        .weapons_console
+                        .as_ref()
+                        .map(|wc| wc.selector_idle)
+                        .unwrap_or(false),
                 });
 
             // Navigation target selector (issue #778) — the player-ship half of

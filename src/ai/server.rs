@@ -1455,10 +1455,12 @@ mod tests {
                 beam_color: vec![],
                 shield_pierce: Some(0.0),
                 marker: None,
+                ai: None,
             }],
             blaster_banks: vec![],
             radar: None,
             selector: None,
+            selector_idle: false,
         }
     }
 

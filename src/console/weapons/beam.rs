@@ -66,6 +66,13 @@ pub struct TacticalTargetSelector {
     pub selector: crate::ai::selector::TargetSelector,
     /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
     pub power_rating: Option<f32>,
+    /// Explicit Tactical-radar idle declaration (issue #781, AC6). When `true`
+    /// the radar takes NO AI target selection: `ai_target_selection` clears any
+    /// stale lock and skips the ship even when a tactical fine system is
+    /// AI-operated. Seeded from `[weapons_console] selector_idle`. This is the
+    /// explicit AI-or-idle opt-out that distinguishes "the radar deliberately
+    /// makes no AI selection" from "no selector authored → default selector".
+    pub idle: bool,
 }
 
 impl Default for TacticalTargetSelector {
@@ -75,6 +82,7 @@ impl Default for TacticalTargetSelector {
                 .to_selector()
                 .unwrap_or_default(),
             power_rating: None,
+            idle: false,
         }
     }
 }
@@ -174,6 +182,62 @@ impl Default for CurrentPhaserMode {
 /// `Component` (per-entity path, PR 5 unification).
 #[derive(Resource, Component, Default, Clone)]
 pub struct PhaserCombatConfigResource(pub crate::entity_config::PhaserCombatConfig);
+
+/// Per-ship map of each phaser bank's inline stateless open-fire policy
+/// (issue #781), keyed by the same bank id used everywhere else
+/// (`PhaserBankConfig.id`). Built at spawn from each bank's authored `ai` block,
+/// falling back to the canonical
+/// [`crate::entities::config::default_phaser_bank_ai_config`] (unconditional
+/// fire) so a bank without an authored policy keeps auto-firing exactly as
+/// before (AC1 baseline preservation).
+///
+/// Read by [`ai_phaser_auto_fire`]: for each candidate bank the host seeds a
+/// per-bank readiness fact snapshot ([`seed_phaser_bank_facts`]) and resolves the
+/// bank's policy on the `phaser_fire` channel; only a bank whose policy fires is
+/// selected. A bank with no entry falls back to the default policy, so the map
+/// being absent (bare-`App` fixtures) means "every bank fires unconditionally".
+#[derive(Component, Default, Clone, Debug)]
+pub struct PhaserBankAiPolicies(
+    pub std::collections::HashMap<crate::entity_config::PhaserBankId, crate::ai::policy::AiPolicy>,
+);
+
+/// Seed the per-tick policy fact snapshot for one phaser bank's open-fire
+/// decision (issue #781), modelled on
+/// [`crate::ship::helm_ai::seed_helm_actuator_facts`]. This is THE piece that
+/// closes the #779 empty-facts sharp edge for weapon banks: without seeding, a
+/// `fact(...)` guard validates but never fires. The host has already resolved the
+/// bank's live readiness (target lock, cooldown, range, arc, frequency) before
+/// calling this, so the policy evaluates over the real per-bank state while
+/// `policy.rs` stays Bevy-free (AGENTS.md #10).
+pub fn seed_phaser_bank_facts(
+    target_valid: bool,
+    on_cooldown: bool,
+    cooldown_remaining: f32,
+    in_range: bool,
+    in_arc: bool,
+    frequency: f32,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
+    facts.set("on_cooldown", if on_cooldown { 1.0 } else { 0.0 });
+    facts.set("cooldown_remaining", cooldown_remaining as f64);
+    facts.set("in_range", if in_range { 1.0 } else { 0.0 });
+    facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
+    facts.set("frequency", frequency as f64);
+    facts
+}
+
+/// Resolve a phaser bank's policy to a bare "open fire this tick?" boolean
+/// (issue #781), the weapon-bank twin of `helm_policy_actuates`. The policy is a
+/// pure fact→verb map: it returns `FirePhaser` when a guard fires and `None`
+/// ("hold") otherwise. A mismatched verb resolves to "hold" defensively.
+fn phaser_bank_policy_fires(
+    policy: &crate::ai::policy::AiPolicy,
+    facts: &crate::world::flags::AiFacts,
+) -> bool {
+    policy.resolve_channel(crate::entities::config::PHASER_FIRE_CHANNEL, facts, &[])
+        == Some(&crate::ai::policy::AiPolicyVerb::FirePhaser)
+}
 
 // ── Beam Events (Observer pattern) ───────────────────────────────────────
 
@@ -585,6 +649,8 @@ pub(crate) fn ai_phaser_auto_fire(
             &mut AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
             Option<&crate::modifiers::ShipModifiers>,
+            Option<&PhaserBankAiPolicies>,
+            Option<&crate::ship_state::ShipPhaserFrequency>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -592,6 +658,13 @@ pub(crate) fn ai_phaser_auto_fire(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     use crate::entity_config::PhaserCombatConfig;
+
+    // Canonical fallback for any bank missing an attached policy (bare-`App`
+    // fixtures, or a ship spawned without the per-bank policy map). Built once —
+    // unconditional fire, so baseline auto-fire is preserved (AC1).
+    let default_bank_policy = crate::entities::config::default_phaser_bank_ai_config()
+        .to_policy()
+        .unwrap_or_default();
 
     for (
         is_local,
@@ -605,6 +678,8 @@ pub(crate) fn ai_phaser_auto_fire(
         mut admitted,
         combat_config_opt,
         modifiers_opt,
+        bank_policies_opt,
+        phaser_freq_opt,
     ) in ship_q.iter_mut()
     {
         // Gate: auto-fire only when at least one phaser bank on this ship is
@@ -677,7 +752,23 @@ pub(crate) fn ai_phaser_auto_fire(
                 physics.yaw,
                 effective_range,
             );
-            (ready && !cooldown.is_bank_active("")).then(String::new)
+            // No authored banks: the legacy single implicit bank. Gate its fire
+            // on the ship-level default policy so an author can still declare an
+            // idle radar/idle default, but with no per-bank map fall back to
+            // unconditional fire (baseline).
+            let policy = bank_policies_opt
+                .and_then(|p| p.0.get(""))
+                .unwrap_or(&default_bank_policy);
+            let facts = seed_phaser_bank_facts(
+                true,
+                false,
+                0.0,
+                ready,
+                ready,
+                phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+            );
+            (ready && !cooldown.is_bank_active("") && phaser_bank_policy_fires(policy, &facts))
+                .then(String::new)
         } else {
             combat_config.0.banks.iter().find_map(|b| {
                 // Per-bank fine-system gate — skip offline banks.
@@ -702,7 +793,27 @@ pub(crate) fn ai_phaser_auto_fire(
                 let (rx, ry) =
                     crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
                 let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
-                (range_ok && arc_ok).then(|| b.id.clone())
+                if !(range_ok && arc_ok) {
+                    return None;
+                }
+                // Per-bank policy gate (issue #781): the bank is host-ready
+                // (off-cooldown, target in range/arc) — now resolve its own
+                // authored open-fire policy over a seeded readiness snapshot.
+                // Only a bank whose policy fires is selected; an idle bank (or one
+                // whose guard holds) is skipped, leaving other banks free to fire
+                // (per-bank independence, AC7).
+                let policy = bank_policies_opt
+                    .and_then(|p| p.0.get(&b.id))
+                    .unwrap_or(&default_bank_policy);
+                let facts = seed_phaser_bank_facts(
+                    true,
+                    false,
+                    0.0,
+                    range_ok,
+                    arc_ok,
+                    phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+                );
+                phaser_bank_policy_fires(policy, &facts).then(|| b.id.clone())
             })
         };
 

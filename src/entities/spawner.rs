@@ -491,6 +491,13 @@ pub fn spawn_entity(
         entity_commands.insert(crate::weapons_plugin::TacticalTargetSelector {
             selector: tactical_selector,
             power_rating: config.power_rating.map(|r| r as f32),
+            // AC6 (issue #781): explicit radar idle from `[weapons_console]
+            // selector_idle`, else the baseline (radar runs its selector).
+            idle: config
+                .weapons_console
+                .as_ref()
+                .map(|wc| wc.selector_idle)
+                .unwrap_or(false),
         });
         // Navigation target selector (issue #778) — the per-system ranking
         // policy `operate_navigation_ai` runs to rank objective destinations and
@@ -728,6 +735,26 @@ pub fn spawn_entity(
         entity_commands.insert(crate::weapons_plugin::PhaserCombatConfigResource(
             combat_config,
         ));
+        // Per-bank phaser open-fire AI policies (issue #781): each bank's inline
+        // `ai` block if authored, else the canonical default (unconditional
+        // fire) so baseline auto-fire is preserved. `to_policy` cannot fail here
+        // — every authored bank block was validated in `EntityConfig::from_toml`.
+        let phaser_bank_policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> =
+            wc.phaser_banks
+                .iter()
+                .map(|b| {
+                    let policy = match b.ai.as_ref() {
+                        Some(ai) => ai.to_policy().unwrap_or_default(),
+                        None => crate::entities::config::default_phaser_bank_ai_config()
+                            .to_policy()
+                            .unwrap_or_default(),
+                    };
+                    (b.id.clone(), policy)
+                })
+                .collect();
+        entity_commands.insert(crate::weapons_plugin::PhaserBankAiPolicies(
+            phaser_bank_policies,
+        ));
         // PhaserRenderConfig: take the first bank's beam_color if any, else default.
         let render_config = if let Some(first_bank) = wc.phaser_banks.first() {
             crate::weapons_plugin::PhaserRenderConfig {
@@ -780,6 +807,28 @@ pub fn spawn_entity(
                 .collect();
             entity_commands.insert(crate::weapons_plugin::BlasterSystemResource(
                 blaster_systems,
+            ));
+            // Per-bank blaster open-fire AI policies (issue #781): each bank's
+            // inline `ai` block if authored, else the canonical default
+            // (unconditional fire). Validated at load, so `to_policy` cannot fail.
+            let blaster_bank_policies: std::collections::HashMap<
+                String,
+                crate::ai::policy::AiPolicy,
+            > = wc
+                .blaster_banks
+                .iter()
+                .map(|b| {
+                    let policy = match b.ai.as_ref() {
+                        Some(ai) => ai.to_policy().unwrap_or_default(),
+                        None => crate::entities::config::default_blaster_bank_ai_config()
+                            .to_policy()
+                            .unwrap_or_default(),
+                    };
+                    (b.id.clone(), policy)
+                })
+                .collect();
+            entity_commands.insert(crate::weapons_plugin::BlasterBankAiPolicies(
+                blaster_bank_policies,
             ));
         }
     }

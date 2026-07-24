@@ -285,7 +285,11 @@ fn operate_captain_ai(
                 | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
                 | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
                 | crate::ai::policy::AiPolicyVerb::EngageImpulse
-                | crate::ai::policy::AiPolicyVerb::EngageBoost => None,
+                | crate::ai::policy::AiPolicyVerb::EngageBoost
+                // Weapon-bank fire verbs (issue #781) never resolve on the
+                // Captain's red_alert channel, but the match must stay exhaustive.
+                | crate::ai::policy::AiPolicyVerb::FirePhaser
+                | crate::ai::policy::AiPolicyVerb::FireBlaster => None,
             });
 
         if let Some(should_be_red_alert) = should_be_red_alert {

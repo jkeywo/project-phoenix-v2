@@ -69,6 +69,20 @@ pub enum AiPolicyVerb {
     /// ship's boost active via the same admitted `SetBoost` a human uses; its
     /// absence ("hold"/idle) leaves boost as it is.
     EngageBoost,
+    /// Open fire from this phaser bank this tick (the `phaser_fire` channel of a
+    /// phaser bank fine system, issue #781). A value-less action verb: the target
+    /// (the ship's authoritative combat lock), the firing bank, and the beam
+    /// frequency all come from the host context, not the verb. Its presence tells
+    /// the host to emit the same admitted `FirePhaser` a human does; its absence
+    /// ("hold"/idle) holds this bank's fire.
+    FirePhaser,
+    /// Open fire from this blaster bank this tick (the `blaster_fire` channel of a
+    /// blaster bank fine system, issue #781). A value-less action verb, the
+    /// blaster twin of [`AiPolicyVerb::FirePhaser`]: the target and bank come from
+    /// the host context. Its presence tells the host to emit the same admitted
+    /// `ChargeBlasterStart` a human does; its absence ("hold"/idle) holds this
+    /// bank's volley.
+    FireBlaster,
 }
 
 /// One inline stateless policy rule.
@@ -371,6 +385,86 @@ mod tests {
         unavailable.set("hazard_urgency", 0.9);
         unavailable.set("boost_available", 0.0);
         assert_eq!(p.resolve_channel("boost", &unavailable, &[]), None);
+    }
+
+    // ── Weapon-bank action verbs (issue #781) ────────────────────────────────
+
+    /// A per-bank phaser policy whose fire guard references seeded facts fires
+    /// only when the target is valid, in range, in arc, AND the bank is
+    /// off-cooldown — the concrete behaviour #781 needs from the runtime once the
+    /// host seeds the per-bank readiness snapshot. Mirrors the boost-guard fact
+    /// test: proves a `fact(...)` guard actually evaluates (the #779 empty-facts
+    /// edge is closed once the host seeds facts).
+    #[test]
+    fn phaser_fire_guard_fires_only_when_seeded_readiness_facts_pass() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 10,
+                channel: "phaser_fire".into(),
+                when: parse_predicate(
+                    "fact(target_valid) > 0 and fact(in_range) > 0 \
+                     and fact(in_arc) > 0 and fact(on_cooldown) < 1",
+                )
+                .unwrap(),
+                verb: AiPolicyVerb::FirePhaser,
+            }],
+            idle: false,
+        };
+        // Ready in every dimension → fire.
+        let mut ready = AiFacts::new();
+        ready.set("target_valid", 1.0);
+        ready.set("in_range", 1.0);
+        ready.set("in_arc", 1.0);
+        ready.set("on_cooldown", 0.0);
+        assert_eq!(
+            p.resolve_channel("phaser_fire", &ready, &[]),
+            Some(&AiPolicyVerb::FirePhaser)
+        );
+        // On cooldown → hold.
+        let mut cooling = ready.clone();
+        cooling.set("on_cooldown", 1.0);
+        assert_eq!(p.resolve_channel("phaser_fire", &cooling, &[]), None);
+        // Out of arc → hold.
+        let mut out_of_arc = ready.clone();
+        out_of_arc.set("in_arc", 0.0);
+        assert_eq!(p.resolve_channel("phaser_fire", &out_of_arc, &[]), None);
+        // Empty facts (no seeding) → guard is false → hold, never a spurious fire.
+        assert_eq!(p.resolve_channel("phaser_fire", &AiFacts::new(), &[]), None);
+    }
+
+    /// The blaster action verb resolves on its own `blaster_fire` channel and is
+    /// held by an explicit idle declaration — the per-bank opt-out (AC1).
+    #[test]
+    fn blaster_fire_verb_resolves_and_idle_holds() {
+        let firing = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "blaster_fire".into(),
+                when: parse_predicate("true").unwrap(),
+                verb: AiPolicyVerb::FireBlaster,
+            }],
+            idle: false,
+        };
+        assert_eq!(
+            firing.resolve_channel("blaster_fire", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::FireBlaster)
+        );
+        // A phaser-channel query never picks up the blaster verb.
+        assert_eq!(
+            firing.resolve_channel("phaser_fire", &AiFacts::new(), &[]),
+            None
+        );
+        // An explicit idle bank holds fire regardless of readiness.
+        let idle = AiPolicy {
+            idle: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            idle.resolve_channel("blaster_fire", &AiFacts::new(), &[]),
+            None
+        );
     }
 
     #[test]

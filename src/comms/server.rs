@@ -424,7 +424,8 @@ pub(crate) fn tick_pending_follow_ups(
 
         // Inject the real message.
         let new_msg_id = uuid::Uuid::new_v4().to_string();
-        let responses: Vec<String> = pfu.node.responses.iter().map(|r| r.text.clone()).collect();
+        let available = current_sender_in_range(&comms, &pfu.sender_uuid);
+        let responses = crate::comms::content::response_views(&pfu.node.responses, available);
         let new_msg = CommsMessage {
             id: new_msg_id.clone(),
             sender_uuid: pfu.sender_uuid.clone(),
@@ -435,7 +436,7 @@ pub(crate) fn tick_pending_follow_ups(
             selected_response: None,
             is_read: false,
             is_orphaned: false,
-            sender_in_range: current_sender_in_range(&comms, &pfu.sender_uuid),
+            sender_in_range: available,
             thread_id: pfu.thread_id.clone(),
             is_urgent: pfu.urgent,
         };
@@ -641,6 +642,14 @@ pub(crate) fn broadcast_comms_state(
             }
             // else: leave sender_in_range = true for synthetic senders
         }
+        // Availability of every response tracks the message's sender range
+        // (issue #761): a response is submittable exactly when its sender is
+        // reachable. Stamped here so the authoritative range pass is the one
+        // source of truth for both `sender_in_range` and per-response
+        // `available`.
+        for r in m.responses.iter_mut() {
+            r.available = m.sender_in_range;
+        }
     }
     let objectives_snap = objectives.0.sorted_snapshots();
     let mut contacts = comms.contacts.clone();
@@ -742,7 +751,8 @@ pub(crate) fn inject_comms_templates(
         // Root templates inject immediately when their template-level
         // `trigger` fires. Per-node triggers are reserved for follow-ups.
         let msg_id = uuid::Uuid::new_v4().to_string();
-        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
+        let available = current_sender_in_range(comms, &sender_uuid);
+        let responses = crate::comms::content::response_views(&fc.node.responses, available);
         let msg = crate::messages::CommsMessage {
             id: msg_id.clone(),
             sender_uuid: sender_uuid.clone(),
@@ -753,7 +763,7 @@ pub(crate) fn inject_comms_templates(
             selected_response: None,
             is_read: false,
             is_orphaned: false,
-            sender_in_range: current_sender_in_range(comms, &sender_uuid),
+            sender_in_range: available,
             thread_id: thread_id.clone(),
             is_urgent: fc.urgent,
         };
@@ -937,6 +947,7 @@ pub(crate) mod tests {
                     body: "USS Phoenix, please identify yourself.".into(),
                     responses: vec![CommsResponse {
                         text: "We are on a survey mission.".into(),
+                        important: false,
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-survey".into(),
                             text: "Complete the survey".into(),
@@ -1421,6 +1432,93 @@ pub(crate) mod tests {
         assert!(
             messages[0].sender_in_range,
             "sender_in_range true when station within range"
+        );
+    }
+
+    /// Issue #761 projection: the authored `important` flag and the
+    /// authoritative `available` (in-range) flag ride onto each wire response.
+    /// `important` is preserved regardless of range; `available` tracks the
+    /// sender's reachability and flips false once the station leaves range.
+    #[test]
+    fn comms_state_projects_important_and_available_onto_responses() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456761";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        // Mark the sole authored response important so we can assert it rides
+        // the wire independent of range.
+        {
+            let mut comms = app.world_mut().resource_mut::<CommsRuntime>();
+            comms.comms_template_states[0].template.node.responses[0].important = true;
+        }
+
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(100.0),
+            ))
+            .id();
+
+        let _ = tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let messages = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::CommsState { messages, .. } => Some(messages.clone()),
+                _ => None,
+            })
+            .expect("CommsState must be broadcast");
+        assert_eq!(messages[0].responses.len(), 1);
+        assert!(
+            messages[0].responses[0].important,
+            "authored important flag must ride the wire"
+        );
+        assert!(
+            messages[0].responses[0].available,
+            "response available while sender in range"
+        );
+
+        // Move the station far away: the response becomes unavailable while its
+        // important flag is unchanged.
+        if let Ok(mut e) = app.world_mut().get_entity_mut(station_entity) {
+            e.insert(Transform::from_xyz(5000.0, 0.0, 0.0));
+        }
+        let out = tick(&mut app);
+        let messages = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::CommsState { messages, .. } => Some(messages.clone()),
+                _ => None,
+            })
+            .expect("CommsState re-broadcast after range flip");
+        assert!(
+            !messages[0].responses[0].available,
+            "response unavailable once sender leaves range"
+        );
+        assert!(
+            messages[0].responses[0].important,
+            "important flag is range-independent"
         );
     }
 
@@ -2008,6 +2106,7 @@ pub(crate) mod tests {
                         body: "AI auto-respond test.".to_string(),
                         responses: vec![CommsResponse {
                             text: "Acknowledged.".to_string(),
+                            important: false,
                             actions: vec![],
                             follow_up: None,
                         }],

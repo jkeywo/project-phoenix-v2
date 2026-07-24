@@ -78,7 +78,7 @@ entities:
 
   - mechanic: important-comms-decision-warning
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Important Comms Decision Warning
       summary: Authors may mark a response as important so the Comms UI gives a clear warning and confirmation before the normal immediate, irreversible response is sent.
@@ -91,7 +91,7 @@ entities:
 
   - mechanic: comms-unavailable-response-feedback
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Comms Unavailable Response Feedback
       summary: A response whose physical sender is out of range is greyed out. If a stale or forced submission is rejected, that response briefly flashes red.

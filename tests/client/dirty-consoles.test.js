@@ -62,6 +62,7 @@ describe('STATIC_MESSAGE_CONSOLES', () => {
     AsteroidDestroyed: ['tactical', 'helm', 'sensors'],
     EntityDespawned: ['tactical', 'helm', 'sensors'],
     CommsState: ['comms'],
+    CommsResponseRejected: ['comms'],
     RatingChanged: ['captain'],
   };
 

@@ -114,36 +114,51 @@ entities:
 
   - component: important-comms-decision-presentation
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Important Comms Decision Presentation
-      summary: Future authored-response presentation contract that warns and confirms responses marked important before normal submission, without changing server authority or response finality.
+      summary: Authored-response presentation contract that warns and confirms responses the world author marked important before normal submission, without changing server authority or response finality. The authored `important` flag rides the wire per response (`CommsResponseView.important`); the phone comms component arms an important response on first click and submits only on a second confirm click.
     architecture:
       kind: presentation-contract
       authority: non-authoritative
       reads: [world-configuration-state, comms-dialogue-state]
       runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/config.rs, src/core/messages.rs, src/comms/content.rs, gui/components/ph-comms-current-message.js]
+      symbols: [CommsResponseView, response_views]
+      tests: [cargo test, npx vitest run]
 
   - component: comms-response-availability-presentation
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Comms Response Availability Presentation
-      summary: Future phone presentation that greys response controls when the authoritative sender reachability flag says a physical channel is unavailable.
+      summary: Phone presentation that greys and disables response controls when the authoritative sender reachability flag says the physical channel is unavailable. Each wire response carries an `available` flag stamped from the same range pass that stamps message `sender_in_range`; the comms component renders unavailable responses visible-but-greyed and refuses to submit them.
     architecture:
       kind: presentation-contract
       authority: non-authoritative
       reads: [comms-range-state, comms-dialogue-state]
       runs_in: [phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/comms/server.rs, src/console/comms/server.rs, gui/components/ph-comms-current-message.js]
+      symbols: [CommsResponseView, broadcast_comms_state, publish_comms_blackboard]
+      tests: [cargo test, npx vitest run]
 
   - component: comms-response-rejection-feedback
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Comms Response Rejection Feedback
-      summary: Future host-to-phone rejection feedback that lets the attempted unavailable response flash red when a stale or forced submission is refused.
+      summary: Host-to-phone rejection feedback that lets the attempted response flash red when a stale (no active dialogue), out-of-range, or out-of-bounds submission is refused. The host emits `ServerMessage::CommsResponseRejected { message_id, response_index }` to the submitting comms token at the drop points in `handle_respond_to_message`; the client folds it into sim state and the comms component flashes the matching response control red.
     architecture:
       kind: interaction-feedback-contract
       authority: authoritative
       reads: [comms-range-state, comms-dialogue-state]
       runs_in: [host-browser-runtime, phone-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/comms/server.rs, src/core/messages.rs, src/core/codec.rs, gui/sim-state.js, gui/console-state.js, gui/dirty-consoles.js, gui/components/ph-comms-current-message.js]
+      symbols: [handle_respond_to_message, CommsRespondAux]
+      tests: [cargo test, npx vitest run]

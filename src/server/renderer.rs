@@ -798,7 +798,7 @@ fn sync_comms_overlay(
         });
         for (idx, response) in msg.responses.iter().enumerate() {
             let letter = (b'A' + idx as u8) as char;
-            let label = format!("{})  {}", letter, response);
+            let label = format!("{})  {}", letter, response.text);
             commands.entity(panel).with_children(|p| {
                 p.spawn((
                     Text::new(label),

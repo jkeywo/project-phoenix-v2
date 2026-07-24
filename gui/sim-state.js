@@ -152,6 +152,13 @@ export class ClientSimState {
     this.weaponsBlips = [];
     /** Label of the currently-focused shield facing, derived from ShieldStatus. */
     this.shieldFocusedFacing = null;
+    /**
+     * Latest host rejection of a comms response (#761 AC3), or null.
+     * `{ message_id, response_index, ts }` — the comms console surfaces it so
+     * the attempted response button flashes red. `ts` distinguishes repeat
+     * rejections so the flash re-triggers.
+     */
+    this.commsRejection = null;
   }
 
   /**
@@ -311,6 +318,16 @@ export class ClientSimState {
         break;
       case 'CommsState':
         this.objectives = d.objectives || [];
+        break;
+      case 'CommsResponseRejected':
+        // Transient feedback (#761 AC3): the submitting comms holder's attempt
+        // was refused. Stamp a fresh timestamp so a repeat rejection for the
+        // same button re-triggers the red flash.
+        this.commsRejection = {
+          message_id: d.message_id,
+          response_index: d.response_index,
+          ts: Date.now(),
+        };
         break;
       case 'RatingChanged':
         if (d.station_id != null) {

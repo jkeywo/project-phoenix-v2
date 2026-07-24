@@ -171,6 +171,18 @@ describe('availableResponses / responseButtonsEnabled', () => {
     expect(s.availableResponses(msg('m1', { responses: ['A'], selected_response: 0 }))).toEqual([]);
   });
 
+  it('passes through object-shaped responses (#761 text/important/available)', () => {
+    // Post-#761 the wire carries per-response objects; availableResponses
+    // returns them verbatim so the component can render important/available.
+    const s = new ClientCommsState();
+    const responses = [
+      { text: 'Arm it', important: true, available: true },
+      { text: 'Reply', important: false, available: false },
+    ];
+    expect(s.availableResponses(msg('m1', { responses }))).toEqual(responses);
+    expect(s.availableResponses(msg('m1', { responses, selected_response: 0 }))).toEqual([]);
+  });
+
   it('buttons enabled only when the selected thread has an active message', () => {
     const s = new ClientCommsState();
     s.apply(commsStateMsg([msg('m1'), msg('m2', { responses: [] })]));

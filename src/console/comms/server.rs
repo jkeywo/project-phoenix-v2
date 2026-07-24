@@ -87,6 +87,11 @@ fn publish_comms_blackboard(
             } else if rt.range_active && uuid::Uuid::parse_str(&m.sender_uuid).is_ok() {
                 m.sender_in_range = false;
             }
+            // Per-response availability tracks sender range (issue #761), the
+            // same authoritative reachability that stamps `sender_in_range`.
+            for r in m.responses.iter_mut() {
+                r.available = m.sender_in_range;
+            }
         }
     }
 
@@ -230,7 +235,8 @@ pub(crate) fn handle_hail(
             // for follow-ups, not roots — the template-level `trigger`
             // already controls when the root arrives.
             let msg_id = uuid::Uuid::new_v4().to_string();
-            let responses: Vec<String> = f.node.responses.iter().map(|r| r.text.clone()).collect();
+            let available = current_sender_in_range(&comms, &sender_uuid);
+            let responses = crate::comms::content::response_views(&f.node.responses, available);
             let msg = CommsMessage {
                 id: msg_id.clone(),
                 sender_uuid: sender_uuid.clone(),
@@ -241,7 +247,7 @@ pub(crate) fn handle_hail(
                 selected_response: None,
                 is_read: false,
                 is_orphaned: false,
-                sender_in_range: current_sender_in_range(&comms, &sender_uuid),
+                sender_in_range: available,
                 thread_id: thread_id.clone(),
                 is_urgent: f.urgent,
             };
@@ -281,6 +287,19 @@ pub(crate) fn handle_hail(
     }
 }
 
+/// Auxiliary params for [`handle_respond_to_message`], bundled into one
+/// `SystemParam` so the system stays within Bevy's 16-argument limit
+/// (issue #761 added the rejection-feedback seam). Carries the seeded RNG and
+/// balance-event ledger the shared dispatch pass needs, plus `Sessions` +
+/// `SimOutbox` for routing `CommsResponseRejected` to the submitting holder.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct CommsRespondAux<'w> {
+    sessions: Res<'w, crate::lobby::Sessions>,
+    outbox: ResMut<'w, crate::simulation::SimOutbox>,
+    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    balance_events: Option<ResMut<'w, bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+}
+
 /// Handle `RespondToMessage { message_id, response_index }` from Comms holders.
 ///
 /// Records the chosen response on the inbox message, fires any associated
@@ -307,11 +326,34 @@ pub(crate) fn handle_respond_to_message(
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // Bundled to stay within Bevy's 16-argument system limit: the seeded RNG
+    // and balance-event ledger the dispatch pass needs, plus the issue-#761
+    // rejection-feedback seam (`Sessions` + `SimOutbox`) addressed to the
+    // submitting Comms holder.
+    mut aux: CommsRespondAux,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
+    };
+    // Resolve the submitting comms token once per tick: the rejection channel
+    // (issue #761) targets whoever currently holds the Comms console.
+    let comms_token = aux
+        .sessions
+        .0
+        .holder_for_station(&crate::messages::StationId("comms".into()))
+        .map(|t| t.to_string());
+    // Helper: push a `CommsResponseRejected` for the attempted control so the
+    // client can flash it red. A no-op when no comms holder is seated.
+    let reject = |outbox: &mut crate::simulation::SimOutbox, message_id: &str, idx: usize| {
+        if let Some(token) = comms_token.as_deref() {
+            outbox.0.push((
+                crate::lobby::Target::Token(token.to_string()),
+                crate::messages::ServerMessage::CommsResponseRejected {
+                    message_id: message_id.to_string(),
+                    response_index: idx,
+                },
+            ));
+        }
     };
     for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
         let (message_id, response_index) = match &cmd.payload {
@@ -325,23 +367,34 @@ pub(crate) fn handle_respond_to_message(
         // Look up active dialogue for this message.
         let dialogue = match comms.active_dialogues.get(message_id) {
             Some(d) => d.clone(),
-            None => continue,
+            None => {
+                // Stale submission: the message has no active dialogue (already
+                // responded to, cleared, or never existed). Reject so the
+                // client flashes the attempted control red (issue #761 AC3).
+                reject(&mut aux.outbox, message_id, *response_index);
+                continue;
+            }
         };
 
         // Server-side range gate: if range tracking is active, the sender
         // of this message must currently be in range. Out-of-range responses
-        // are silently dropped so stale clients can't fire actions on a
-        // hidden response button.
+        // are rejected (issue #761): forced/stale submissions on a greyed
+        // response are refused and the attempted control flashes red.
         if comms.range_active {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
             match comms.range_flags.get(&sender_uuid).copied() {
                 Some(true) => {}
-                _ => continue,
+                _ => {
+                    reject(&mut aux.outbox, message_id, *response_index);
+                    continue;
+                }
             }
         }
 
         let responses = &dialogue.current_node.responses;
         if *response_index >= responses.len() {
+            // Out-of-bounds index (forced/stale client): reject.
+            reject(&mut aux.outbox, message_id, *response_index);
             continue;
         }
 
@@ -395,7 +448,7 @@ pub(crate) fn handle_respond_to_message(
         let template_loader = crate::entity_loader::WasmTemplateLoader;
         // Seeded, for the same reason the trigger pipeline is: a spawned
         // entity's UUID keys the balance ledgers in the headless report.
-        let uuid_source = || crate::sim_rng::assign_uuid_with(sim_rng.as_deref());
+        let uuid_source = || crate::sim_rng::assign_uuid_with(aux.sim_rng.as_deref());
 
         for action in &response.actions {
             let layers =
@@ -440,7 +493,7 @@ pub(crate) fn handle_respond_to_message(
                 game_over_reason.as_deref_mut(),
                 &mut faction_dispatch,
                 &mut ai_query,
-                balance_events.as_deref_mut(),
+                aux.balance_events.as_deref_mut(),
             );
             runtime.pending_world_events.extend(new_events);
         }
@@ -495,8 +548,9 @@ pub(crate) fn handle_respond_to_message(
             } else {
                 // No trigger — inject immediately (same tick).
                 let new_msg_id = uuid::Uuid::new_v4().to_string();
-                let new_responses: Vec<String> =
-                    follow_up.responses.iter().map(|r| r.text.clone()).collect();
+                let available = current_sender_in_range(&comms, &sender_uuid);
+                let new_responses =
+                    crate::comms::content::response_views(&follow_up.responses, available);
                 let new_msg = CommsMessage {
                     id: new_msg_id.clone(),
                     sender_uuid: sender_uuid.clone(),
@@ -507,7 +561,7 @@ pub(crate) fn handle_respond_to_message(
                     selected_response: None,
                     is_read: false,
                     is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&comms, &sender_uuid),
+                    sender_in_range: available,
                     thread_id: thread_id.clone(),
                     is_urgent: false,
                 };
@@ -843,7 +897,11 @@ mod tests {
             sender_name: "Station Alpha".into(),
             subject: "Test".into(),
             body: "Body text".into(),
-            responses: vec!["OK".into()],
+            responses: vec![crate::messages::CommsResponseView {
+                text: "OK".into(),
+                important: false,
+                available: true,
+            }],
             selected_response: None,
             is_read: false,
             is_orphaned: false,
@@ -1499,6 +1557,7 @@ mod tests {
                         body: "Hello, Phoenix.".into(),
                         responses: vec![CommsResponse {
                             text: "Acknowledge.".into(),
+                            important: false,
                             actions,
                             follow_up: None,
                         }],
@@ -1555,6 +1614,122 @@ mod tests {
         let _ = tick(&mut app);
 
         app
+    }
+
+    // -- Issue #761: authoritative rejection feedback (AC3) --------------------
+
+    fn find_rejection(out: &[crate::lobby::OutboundMessage]) -> Option<(String, usize)> {
+        out.iter().find_map(|m| match &m.msg {
+            ServerMessage::CommsResponseRejected {
+                message_id,
+                response_index,
+            } => Some((message_id.clone(), *response_index)),
+            _ => None,
+        })
+    }
+
+    /// A `RespondToMessage` for a message with no active dialogue (stale — the
+    /// message was cleared or never existed) is rejected, and the rejection is
+    /// addressed to the submitting comms holder.
+    #[test]
+    fn stale_response_is_rejected() {
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456011";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: "no-such-message".into(),
+                    response_index: 3,
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let (message_id, response_index) =
+            find_rejection(&out).expect("stale response must be rejected");
+        assert_eq!(message_id, "no-such-message");
+        assert_eq!(response_index, 3);
+    }
+
+    /// A `RespondToMessage` whose sender has left comms range is rejected
+    /// (forced/stale submission on a greyed response). Hail in range to seat an
+    /// active dialogue, move the station away, then respond.
+    #[test]
+    fn out_of_range_response_is_rejected() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456012";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(100.0),
+            ))
+            .id();
+        let _ = tick(&mut app);
+
+        // Hail while in range so a dialogue is active.
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let msg_id = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::CommsState { messages, .. } => {
+                    messages.first().map(|msg| msg.id.clone())
+                }
+                _ => None,
+            })
+            .expect("hail must deliver a comms message");
+
+        // Move the station out of range.
+        if let Ok(mut e) = app.world_mut().get_entity_mut(station_entity) {
+            e.insert(Transform::from_xyz(5000.0, 0.0, 0.0));
+        }
+        let _ = tick(&mut app);
+
+        // Respond now that the sender is out of range.
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                    message_id: msg_id.clone(),
+                    response_index: 0,
+                },
+            },
+        );
+        let out = tick(&mut app);
+        let (rejected_id, idx) =
+            find_rejection(&out).expect("out-of-range response must be rejected");
+        assert_eq!(rejected_id, msg_id);
+        assert_eq!(idx, 0);
     }
 
     #[test]
@@ -1961,6 +2136,7 @@ mod tests {
                         body: "Fire?".into(),
                         responses: vec![CommsResponse {
                             text: "Fire.".into(),
+                            important: false,
                             actions: vec![TriggerAction::DestroyEntity {
                                 entity: "doomed".into(),
                             }],
@@ -2306,6 +2482,7 @@ mod tests {
                         body: "Hello, Phoenix.".into(),
                         responses: vec![CommsResponse {
                             text: "Acknowledge.".into(),
+                            important: false,
                             actions: vec![
                                 TriggerAction::AddFactionEnemy {
                                     faction: "Harrow".into(),
@@ -3125,6 +3302,7 @@ mod tests {
                     body: "Identify yourself.".into(),
                     responses: vec![CommsResponse {
                         text: "We are the Phoenix.".into(),
+                        important: false,
                         actions: vec![],
                         follow_up: Some(CommsDialogueNode {
                             body: "Welcome, Phoenix.".into(),

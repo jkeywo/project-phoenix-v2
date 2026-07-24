@@ -621,7 +621,11 @@ mod tests {
                         sender_name: "Starbase 12".into(),
                         subject: "Greetings".into(),
                         body: "Welcome to the sector.".into(),
-                        responses: vec!["Acknowledged".into()],
+                        responses: vec![crate::messages::CommsResponseView {
+                            text: "Acknowledged".into(),
+                            important: true,
+                            available: true,
+                        }],
                         selected_response: Some(0),
                         is_read: false,
                         is_orphaned: false,
@@ -636,6 +640,13 @@ mod tests {
                         in_range: true,
                         is_urgent: false,
                     }],
+                },
+            ),
+            (
+                ServerMessageDiscriminants::CommsResponseRejected,
+                ServerMessage::CommsResponseRejected {
+                    message_id: "m1".into(),
+                    response_index: 2,
                 },
             ),
             (
@@ -1878,6 +1889,29 @@ mod tests {
             msg.thread_id.is_empty(),
             "thread_id should default to empty string for backward compat"
         );
+    }
+
+    #[test]
+    fn comms_response_view_missing_flags_default_important_false_available_true() {
+        // A pre-#761 wire payload carries responses as bare `{ "text": ... }`
+        // objects. `important` must default to false and `available` to true.
+        let json = r#"{"text":"Acknowledge"}"#;
+        let view: crate::messages::CommsResponseView = serde_json::from_str(json).unwrap();
+        assert_eq!(view.text, "Acknowledge");
+        assert!(!view.important, "important must default to false");
+        assert!(view.available, "available must default to true");
+    }
+
+    #[test]
+    fn comms_response_view_round_trips_important_and_available() {
+        let view = crate::messages::CommsResponseView {
+            text: "Fire everything".into(),
+            important: true,
+            available: false,
+        };
+        let json = serde_json::to_string(&view).unwrap();
+        let back: crate::messages::CommsResponseView = serde_json::from_str(&json).unwrap();
+        assert_eq!(view, back);
     }
 
     #[test]

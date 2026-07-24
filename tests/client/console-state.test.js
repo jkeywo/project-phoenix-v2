@@ -1272,6 +1272,12 @@ describe('buildCommsConsoleState', () => {
   it('on_screen is true when currentView is Comms', () => {
     expect(parse(buildCommsConsoleState({ currentView: 'Comms' })).on_screen).toBe(true);
   });
+
+  it('surfaces commsRejection as rejection (#761)', () => {
+    const rejection = { message_id: 'm1', response_index: 1, ts: 42 };
+    expect(parse(buildCommsConsoleState({ commsRejection: rejection })).rejection).toEqual(rejection);
+    expect(parse(buildCommsConsoleState({})).rejection).toBeNull();
+  });
 });
 
 // ── buildNavigationConsoleState ───────────────────────────────────────────────

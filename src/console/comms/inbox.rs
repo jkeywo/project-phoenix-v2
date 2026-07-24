@@ -138,7 +138,18 @@ mod tests {
             sender_name: "Station Alpha".into(),
             subject: "Distress".into(),
             body: "We are under attack!".into(),
-            responses: vec!["Understood".into(), "On our way".into()],
+            responses: vec![
+                crate::messages::CommsResponseView {
+                    text: "Understood".into(),
+                    important: false,
+                    available: true,
+                },
+                crate::messages::CommsResponseView {
+                    text: "On our way".into(),
+                    important: false,
+                    available: true,
+                },
+            ],
             selected_response: None,
             is_read: false,
             is_orphaned: false,

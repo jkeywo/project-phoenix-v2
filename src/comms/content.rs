@@ -22,10 +22,28 @@ use std::collections::{HashMap, HashSet};
 
 // Re-export the comms TOML vocabulary so comms consumers import template
 // types alongside the runtime state types defined here.
+use crate::messages::CommsResponseView;
 use crate::world::config::TriggerCondition;
 pub use crate::world::config::{CommsDialogueNode, CommsResponse, CommsTemplate};
 use crate::world::content::{condition_matches, WorldEvent};
 use crate::world::flags::FlagStore;
+
+/// Project a node's authored responses onto the wire `CommsResponseView`
+/// vector (issue #761). Each view carries the authored `text`, the authored
+/// `important` flag, and the current `available` (sender-in-range) flag. All
+/// responses in a message share the same availability — a response is
+/// "unavailable" exactly when its message's sender is out of comms range, the
+/// same authoritative reachability that stamps `CommsMessage::sender_in_range`.
+pub fn response_views(responses: &[CommsResponse], available: bool) -> Vec<CommsResponseView> {
+    responses
+        .iter()
+        .map(|r| CommsResponseView {
+            text: r.text.clone(),
+            important: r.important,
+            available,
+        })
+        .collect()
+}
 
 // ── Runtime state ─────────────────────────────────────────────────────────
 

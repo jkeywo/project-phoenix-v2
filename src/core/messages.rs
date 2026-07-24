@@ -455,6 +455,30 @@ fn default_true() -> bool {
     true
 }
 
+/// A single authored response option as projected onto the wire (issue #761).
+///
+/// Carries the authored response `text`, the authored `important` flag (a
+/// response the author marked as consequential enough to warrant a client-side
+/// confirmation before submission), and the authoritative `available` flag
+/// (false when the message's sender is currently out of comms range, mirroring
+/// [`CommsMessage::sender_in_range`]). The client greys unavailable responses
+/// and confirms important ones; neither flag relaxes any server-side gate.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CommsResponseView {
+    /// Authored response text (authored TOML, not a strings.csv id — mirrors
+    /// the `display_name` precedent).
+    pub text: String,
+    /// True when the author flagged this response as important; the client
+    /// requires an explicit confirm before submitting it. Defaults to false
+    /// for backward-compatible wire payloads.
+    #[serde(default)]
+    pub important: bool,
+    /// True when this response is currently submittable (its message's sender
+    /// is in comms range). Defaults to true for backward compatibility.
+    #[serde(default = "default_true")]
+    pub available: bool,
+}
+
 /// A single message in the Comms inbox.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CommsMessage {
@@ -469,7 +493,11 @@ pub struct CommsMessage {
     /// Full message body shown in the expanded chat view.
     pub body: String,
     /// Available response options. Empty while awaiting a reply (loading).
-    pub responses: Vec<String>,
+    ///
+    /// Promoted from `Vec<String>` (issue #761) to a per-response view so the
+    /// client learns each response's authored `important` flag and its
+    /// authoritative `available` (in-range) state, not just its text.
+    pub responses: Vec<CommsResponseView>,
     /// Index into `responses` for the reply the player chose, if any.
     pub selected_response: Option<usize>,
     /// True once the player has opened the message.
@@ -1573,6 +1601,16 @@ pub enum ServerMessage {
         messages: Vec<CommsMessage>,
         objectives: Vec<ObjectiveSnapshot>,
         contacts: Vec<CommsContact>,
+    },
+    /// Sent to the submitting Comms console holder when a `RespondToMessage`
+    /// command is refused by the host (issue #761): the message has no active
+    /// dialogue (stale), its sender is out of comms range, or the response
+    /// index is out of bounds (forced/stale). The client flashes the attempted
+    /// response control red. Accepted responses remain immediate and
+    /// irreversible — this is a rejection-only feedback channel.
+    CommsResponseRejected {
+        message_id: String,
+        response_index: usize,
     },
     /// Broadcast to all players when every console's HP reaches 0.
     /// Clients should show a game-over screen.

@@ -534,6 +534,11 @@ struct RawCommsFollowUp {
 #[derive(Debug, Deserialize)]
 struct RawCommsResponse {
     text: String,
+    /// When true, the client requires an explicit confirmation before
+    /// submitting this response (issue #761). Authored TOML flag; defaults
+    /// to false so existing responses submit immediately as before.
+    #[serde(default)]
+    important: bool,
     #[serde(default, rename = "action")]
     actions: Vec<RawActionEntry>,
     #[serde(default)]
@@ -904,6 +909,11 @@ pub struct Trigger {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommsResponse {
     pub text: String,
+    /// True when the author marked this response important, so the client
+    /// confirms before submitting it (issue #761). Not a strings.csv id — the
+    /// authored `text` stays authored TOML, and this flag rides the wire in
+    /// `CommsResponseView`.
+    pub important: bool,
     pub actions: Vec<TriggerAction>,
     pub follow_up: Option<CommsDialogueNode>,
 }
@@ -1369,6 +1379,7 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
         };
         responses.push(CommsResponse {
             text: raw_resp.text.clone(),
+            important: raw_resp.important,
             actions,
             follow_up,
         });
@@ -2923,6 +2934,41 @@ message = "Please state your business."
             TriggerAction::AddObjective { mandatory, .. } => assert!(*mandatory),
             _ => panic!("expected mandatory AddObjective"),
         }
+        // `important` defaults to false when the authored response omits it.
+        assert!(!tmpl.node.responses[0].important);
+        assert!(!tmpl.node.responses[1].important);
+    }
+
+    #[test]
+    fn parse_world_reads_important_response_flag() {
+        // Issue #761: an authored `important = true` on a `[[comms.response]]`
+        // parses through to `CommsResponse::important`. It defaults to false
+        // when omitted, mirroring the `display_name` authored-TOML precedent.
+        let toml = r#"
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_hailed"
+entity  = "Starbase Alpha"
+message = "Arm the warhead?"
+
+  [[comms.response]]
+  text      = "Arm it."
+  important = true
+
+  [[comms.response]]
+  text = "Stand down."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let tmpl = &cfg.comms[0];
+        assert_eq!(tmpl.node.responses.len(), 2);
+        assert!(
+            tmpl.node.responses[0].important,
+            "authored important = true must parse through"
+        );
+        assert!(
+            !tmpl.node.responses[1].important,
+            "omitted important must default to false"
+        );
     }
 
     #[test]

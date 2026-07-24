@@ -375,6 +375,14 @@ describe('apply entity lifecycle', () => {
     expect(s.objectives).toEqual(objectives);
   });
 
+  it('CommsResponseRejected stamps commsRejection with a timestamp', () => {
+    const s = new ClientSimState();
+    expect(s.commsRejection).toBeNull();
+    s.apply({ type: 'CommsResponseRejected', data: { message_id: 'm7', response_index: 2 } });
+    expect(s.commsRejection).toMatchObject({ message_id: 'm7', response_index: 2 });
+    expect(typeof s.commsRejection.ts).toBe('number');
+  });
+
   it('unrelated messages do not disturb the state', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 0, 0)];

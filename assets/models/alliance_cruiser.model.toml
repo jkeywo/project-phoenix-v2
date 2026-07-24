@@ -24,7 +24,7 @@ direction = [ 0, 0, -1 ]
 position = [ 0.8, 0.1, -0.9 ]
 direction = [ 0, 0, -1 ]
 
-[markers.torpdo_aft]
+[markers.torpedo_aft]
 position = [ 0, 0, -0.7 ]
 direction = [ 0, 0, -1 ]
 
@@ -32,7 +32,7 @@ direction = [ 0, 0, -1 ]
 position = [ 0.25, 0, 0.25 ]
 direction = [ 0.1389302994421039, 0, 0.9903021619167189 ]
 
-[markers.torpedo_starbord]
+[markers.torpedo_starboard]
 position = [ -0.25, 0, 0.25 ]
 direction = [ -0.13938093999218928, 0, 0.9902388366282621 ]
 

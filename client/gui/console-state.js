@@ -1251,6 +1251,9 @@ export function buildSensorsConsoleState(state) {
  */
 export function buildCommsConsoleState(state) {
   const bb = state.blackboards && state.blackboards['comms'];
+  // Latest host rejection of an attempted response (#761 AC3); the comms
+  // component flashes the matching button red.
+  const rejection = state.commsRejection ?? null;
   if (bb) {
     return JSON.stringify({
       messages:   bb.messages   ?? [],
@@ -1259,6 +1262,7 @@ export function buildCommsConsoleState(state) {
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
       comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+      rejection,
     });
   }
   // Legacy fallback.
@@ -1268,6 +1272,7 @@ export function buildCommsConsoleState(state) {
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+    rejection,
   });
 }
 

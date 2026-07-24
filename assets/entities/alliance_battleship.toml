@@ -222,10 +222,16 @@ cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
 marker = "phasers_aft"
 
-# Heavy blaster bank: hold-to-fire, 2-shot volley, heavy sphere projectile, recoil + screenshake.
+# Heavy blaster bank: hold-to-fire, twin fore barrels with a patterned attack
+# (issue #765). The timed pattern alternates single-barrel shots, then finishes
+# with a simultaneous both-barrel volley:
+#   t=0.0s  → barrel 0 (port)
+#   t=0.6s  → barrel 1 (starboard)
+#   t=1.2s  → barrels 0 AND 1 together (simultaneous)
 [[weapons_console.blaster_banks]]
 id = "heavy-fore"
 marker = "blaster_fore"
+barrels = [ "blaster_fore_port", "blaster_fore_starboard" ]
 facing_deg = 0
 fire_arc_deg = 22.5
 charge_time_secs = 3.0
@@ -240,6 +246,18 @@ shield_pierce = 0.15
 recoil_impulse = 6.0
 screenshake_magnitude = 1.0
 range = 50.0
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 0 ]
+offset_secs = 0.0
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 1 ]
+offset_secs = 0.6
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 0, 1 ]
+offset_secs = 1.2
 
 # 5-tube torpedo layout: 3 fore + 2 aft, volley_max=3, 30-round magazine, burst_interval=0.5s
 [torpedoes]
@@ -276,12 +294,34 @@ load_time = 3
 volley_max = 3
 marker = "torpedo_starboard"
 
+# Patterned spinal launcher (issue #766): twin fore barrels with a timed
+# barrel pattern. The pattern orders which barrel each loaded round leaves
+# from — alternating port/starboard, then a both-barrel step — while the
+# magazine, loaded_count and burst_interval stay the sole authority over how
+# many rounds actually fire:
+#   round 0 → barrel 0 (port)
+#   round 1 → barrel 1 (starboard)
+#   round 2 → barrel 0, round 3 → barrel 1 (the [0,1] step's barrels, one
+#            per loaded round — a torpedo leaves one barrel per burst tick)
 [[torpedoes.tubes]]
 id = "fore-centre"
 facing_deg = 0
 fire_arc_deg = 90
 load_time = 3
 volley_max = 3
+barrels = [ "torpedo_centre_port", "torpedo_centre_starboard" ]
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 0 ]
+offset_secs = 0.0
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 1 ]
+offset_secs = 0.5
+
+[[torpedoes.tubes.pattern]]
+barrels = [ 0, 1 ]
+offset_secs = 1.0
 
 [[torpedoes.tubes]]
 id = "aft-port"
@@ -403,14 +443,27 @@ capacity = 90
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 22
 
-[power.ai]
-movement_thrust_threshold = 0.7
-movement_engage_delay_secs = 3.0
-movement_battery_engage_min_pct = 50.0
-movement_battery_recharge_pct = 100.0
-red_alert_engage_delay_secs = 3.0
-red_alert_battery_engage_min_pct = 10.0
-red_alert_battery_recharge_pct = 100.0
+# Data-authored power AI rules (issue #762). Each rule targets one authored
+# power group and carries its own battery floor (`min_battery_reserve`); the AI
+# nudges that group's allocation only while the trigger holds and the battery
+# stays at or above the floor, so allocation never rises past what the reactor
+# can sustain.
+[[power.ai.rule]]
+group = "helm"
+trigger = "thrust"
+thrust_threshold = 0.7
+engage_delay_secs = 3.0
+min_battery_reserve = 50.0
+battery_recharge_pct = 100.0
+nudge = 1
+
+[[power.ai.rule]]
+group = "weapons"
+trigger = "red_alert"
+engage_delay_secs = 3.0
+min_battery_reserve = 10.0
+battery_recharge_pct = 100.0
+nudge = 1
 
 [captain_console]
 
@@ -425,7 +478,9 @@ icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_battleship.power_groups.ops.label"
-default_level = 2
+# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
+# reactor recharges at idle and the AI/human spends up only on demand (#762).
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -443,7 +498,7 @@ max_level = 4
 
 [power_groups.sensors]
 label = "entity.alliance_battleship.power_groups.sensors.label"
-default_level = 2
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -456,6 +511,7 @@ description = "entity.alliance_battleship.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/battleship/captain.html"
+manual_overview = "You command a capital ship with a full nine-seat bridge crew. Set the viewscreen, call Red Alert, and coordinate the whole crew through a sustained engagement. The battleship is slow but overwhelming — your job is to keep every station pulling in the same direction. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
 name = "Std"
@@ -472,6 +528,7 @@ description = "entity.alliance_battleship.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/battleship/helm.html"
+manual_overview = "You fly a heavy warship. It is slow to turn and slow to stop, so plan your manoeuvres well ahead: throttle and steering set your line, lateral thrust helps bring the broadside arcs to bear, and impulse gives you a measured burst. Anticipate where Tactical needs the guns pointed and get there early."
 
 [[station.rating]]
 name = "Std"
@@ -484,6 +541,7 @@ description = "entity.alliance_battleship.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/battleship/tactical.html"
+manual_overview = "You run the battleship's formidable weapons suite: fore and aft phasers, a heavy forward blaster, and a six-tube torpedo battery. Lock targets, manage tube loading and volley patterns, and match phaser frequency to enemy shields. There is a lot of firepower to conduct here — prioritise threats and keep the volume of fire up. Simplified rating auto-fires the phaser banks."
 
 [[station.rating]]
 name = "Std"
@@ -500,6 +558,7 @@ description = "entity.alliance_battleship.station.repair.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/battleship/repair.html"
+manual_overview = "You lead damage control. Dispatch repair teams to damaged systems by priority and watch the ship-wide hull picture. On a capital ship there is always something to fix under sustained fire, so triage hard: keep the guns, the drives, and the shields alive before the cosmetic damage."
 
 [[station.rating]]
 name = "Std"
@@ -512,6 +571,7 @@ description = "entity.alliance_battleship.station.sensors.description"
 rank = "Ens."
 short_code = "SCI"
 console = "gui/battleship/sensors.html"
+manual_overview = "You are the ship's eyes. Sweep the long-range radar, identify and classify contacts, and feed target designations to Tactical so the guns are always working the right threat. On a big ship in a big fight, your early warning is what keeps the crew ahead of the enemy."
 
 [[station.rating]]
 name = "Std"
@@ -524,6 +584,7 @@ description = "entity.alliance_battleship.station.shields.description"
 rank = "Ens."
 short_code = "SHD"
 console = "gui/battleship/shields.html"
+manual_overview = "You run the shield grid, a dedicated station on a ship this size. Focus an arc to reinforce it against the bearing of incoming fire, watch each facing's HP and regeneration, and rotate focus as the enemy shifts their aim. The generated Shields section below reads this ship's actual arc strength and regen rate."
 
 [[station.rating]]
 name = "Std"
@@ -536,6 +597,7 @@ description = "entity.alliance_battleship.station.navigation.description"
 rank = "Ens."
 short_code = "NAV"
 console = "gui/battleship/navigation.html"
+manual_overview = "You plot the ship's course. Set waypoints on the system chart for the Helm to follow and clear them onto new headings as the mission develops. A battleship handles slowly, so give the Helm plenty of warning and think several moves ahead of the current position."
 
 [[station.rating]]
 name = "Std"
@@ -548,6 +610,7 @@ description = "entity.alliance_battleship.station.power.description"
 rank = "Ltn."
 short_code = "PWR"
 console = "gui/battleship/power.html"
+manual_overview = "You manage the reactor. Allocate power between helm, weapons, and sensors to match the tactical situation, and watch the battery reserve during heavy weapons fire. On a capital ship the demands are constant and competing — read the battle and shift power to wherever the crew needs it most."
 
 [[station.rating]]
 name = "Std"
@@ -560,6 +623,7 @@ description = "entity.alliance_battleship.station.comms.description"
 rank = "Ens."
 short_code = "COM"
 console = "gui/battleship/comms.html"
+manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. On a capital ship you are the link between the bridge and everyone else in the sector — stay on top of the message queue and flag anything urgent."
 
 [[station.rating]]
 name = "Std"
@@ -752,7 +816,6 @@ power_group = "sensors"
 id = "shields-system"
 kind = "shields"
 station = "shields"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

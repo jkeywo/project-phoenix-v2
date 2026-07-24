@@ -5,6 +5,23 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 
+/**
+ * Normalise a wire response into `{ text, important, available }`.
+ *
+ * Post-#761 the server sends per-response objects; older payloads (and the
+ * legacy captain/pilot overlays) may still pass bare strings. A bare string
+ * is treated as an available, non-important response.
+ */
+function normalizeResponse(r) {
+  if (typeof r === 'string') return { text: r, important: false, available: true };
+  return {
+    text: r && r.text != null ? r.text : '',
+    important: !!(r && r.important),
+    // Availability defaults to true when the field is absent (backward compat).
+    available: !(r && r.available === false),
+  };
+}
+
 export class PhCommsCurrentMessage extends HTMLElement {
   #state = null;
   #respCache = new Map();
@@ -14,6 +31,12 @@ export class PhCommsCurrentMessage extends HTMLElement {
   #senderEl = null;
   #messagesEl = null;
   #responsesEl = null;
+  // Index of the important response currently armed (awaiting a confirm click),
+  // or null when nothing is armed. Reset whenever the thread changes.
+  #armedIdx = null;
+  // Timestamp of the last rejection this element flashed, so a repeated
+  // rejection for the same button re-triggers the animation.
+  #lastRejectionTs = null;
 
   constructor() {
     super();
@@ -34,6 +57,17 @@ export class PhCommsCurrentMessage extends HTMLElement {
     .resp-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: 0.65rem; font-weight: 600; padding: 0.35rem 0.6rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
     .resp-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
     .resp-btn:disabled { opacity: 0.35; cursor: default; }
+    /* Unavailable (sender out of range): visible but greyed and disabled,
+       mirroring ph-comms-contact-list's .out-of-range. */
+    .resp-btn.unavailable { opacity: 0.45; }
+    /* An armed important response awaiting a confirm click. */
+    .resp-btn.important { border-color: #c8a24a; color: #e8c874; }
+    /* Red flash when the host rejects an attempted submission (#761 AC3). */
+    .resp-btn.rejected { animation: resp-reject-flash 0.6s ease; }
+    @keyframes resp-reject-flash {
+      0%   { background: #4a1515; border-color: #e05555; color: #ffb0b0; }
+      100% { background: var(--bg-card); border-color: var(--line-faint); color: var(--ink); }
+    }
   </style>
   <div id="container">
     <div class="placeholder" id="placeholder">${t('component.comms_message.no_active_hail')}</div>
@@ -80,8 +114,11 @@ export class PhCommsCurrentMessage extends HTMLElement {
     const tid = thread.id;
     const sender = thread.sender_name || '';
     const body = thread.body || '';
-    const responses = Array.isArray(thread.responses) ? thread.responses : [];
+    const responses = (Array.isArray(thread.responses) ? thread.responses : [])
+      .map(normalizeResponse);
     const selectedIdx = thread.selected_response;
+    // Rejection targeting THIS thread (#761 AC3): the attempted control flashes.
+    const rejection = s.rejection && s.rejection.message_id === tid ? s.rejection : null;
 
     this.#senderEl.textContent = sender;
 
@@ -90,6 +127,7 @@ export class PhCommsCurrentMessage extends HTMLElement {
       this.#respCache.clear();
       if (this.#responsesEl) { this.#responsesEl.remove(); this.#responsesEl = null; }
       this.#prevThreadId = tid;
+      this.#armedIdx = null;
     }
 
     this.#messagesEl.firstChild.firstChild.textContent = body || '(empty)';
@@ -109,7 +147,7 @@ export class PhCommsCurrentMessage extends HTMLElement {
         if (!live.has(key)) { btn.remove(); this.#respCache.delete(key); }
       }
 
-      responses.forEach((text, idx) => {
+      responses.forEach((r, idx) => {
         const key = String(idx);
         const chosen = selectedIdx != null && idx === selectedIdx;
         let btn = this.#respCache.get(key);
@@ -117,17 +155,74 @@ export class PhCommsCurrentMessage extends HTMLElement {
           btn = document.createElement('button');
           btn.className = 'resp-btn';
           btn.dataset.idx = key;
-          btn.addEventListener('click', () => {
-            if (this.sendAction) {
-              this.sendAction('respond_to_message', { message_id: tid, response_index: Number(btn.dataset.idx) });
-            }
-          });
+          btn.addEventListener('click', () => this.#onResponseClick(btn, tid));
           this.#respCache.set(key, btn);
           this.#responsesEl.appendChild(btn);
         }
-        btn.disabled = chosen;
-        btn.textContent = chosen ? '\u2713 ' + text : text;
+        // Stash per-response flags on the element so the (persistent) click
+        // handler always reads the current render's values.
+        btn.dataset.important = r.important ? 'true' : 'false';
+        btn.dataset.available = r.available ? 'true' : 'false';
+
+        const armed = this.#armedIdx === idx;
+        // A greyed unavailable response is disabled; a chosen one is disabled.
+        btn.disabled = chosen || !r.available;
+        btn.classList.toggle('unavailable', !r.available && !chosen);
+        btn.classList.toggle('important', r.important && armed && r.available && !chosen);
+
+        let label = r.text;
+        if (chosen) {
+          label = '\u2713 ' + r.text;
+          btn.removeAttribute('title');
+        } else if (!r.available) {
+          btn.title = t('component.comms_message.unavailable');
+        } else if (armed) {
+          label = t('component.comms_message.confirm_important');
+          btn.removeAttribute('title');
+        } else {
+          btn.removeAttribute('title');
+        }
+        btn.textContent = label;
       });
+
+      // Apply the red-flash to the attempted control. Re-trigger on a fresh
+      // rejection even when the button element is reused across renders.
+      if (rejection && rejection.ts !== this.#lastRejectionTs) {
+        const btn = this.#respCache.get(String(rejection.response_index));
+        if (btn) {
+          btn.title = t('component.comms_message.rejected');
+          btn.classList.remove('rejected');
+          // Force reflow so re-adding the class restarts the animation.
+          void btn.offsetWidth;
+          btn.classList.add('rejected');
+        }
+        this.#lastRejectionTs = rejection.ts;
+      }
+    }
+  }
+
+  /**
+   * Handle a click on a response button. Non-important responses submit
+   * immediately (unchanged behaviour). An important response arms on the first
+   * click (showing a confirm prompt) and submits on the second \u2014 a two-step
+   * confirm so exceptional irreversible choices are not committed accidentally
+   * (#761 AC1). Unavailable responses never submit.
+   */
+  #onResponseClick(btn, tid) {
+    if (btn.dataset.available === 'false') return; // greyed: never submit
+    const idx = Number(btn.dataset.idx);
+    const important = btn.dataset.important === 'true';
+    if (important && this.#armedIdx !== idx) {
+      // First click on an important response: arm and re-render to show the
+      // confirm prompt. Nothing is sent yet.
+      this.#armedIdx = idx;
+      this.#render();
+      return;
+    }
+    // Non-important, or a confirmed important response: submit and disarm.
+    this.#armedIdx = null;
+    if (this.sendAction) {
+      this.sendAction('respond_to_message', { message_id: tid, response_index: idx });
     }
   }
 }

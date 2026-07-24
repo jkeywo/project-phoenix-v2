@@ -351,14 +351,27 @@ capacity = 90
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
 
-[power.ai]
-movement_thrust_threshold = 0.7
-movement_engage_delay_secs = 3.0
-movement_battery_engage_min_pct = 50.0
-movement_battery_recharge_pct = 100.0
-red_alert_engage_delay_secs = 3.0
-red_alert_battery_engage_min_pct = 10.0
-red_alert_battery_recharge_pct = 100.0
+# Data-authored power AI rules (issue #762). Each rule targets one authored
+# power group and carries its own battery floor (`min_battery_reserve`); the AI
+# nudges that group's allocation only while the trigger holds and the battery
+# stays at or above the floor, so allocation never rises past what the reactor
+# can sustain.
+[[power.ai.rule]]
+group = "helm"
+trigger = "thrust"
+thrust_threshold = 0.7
+engage_delay_secs = 3.0
+min_battery_reserve = 50.0
+battery_recharge_pct = 100.0
+nudge = 1
+
+[[power.ai.rule]]
+group = "weapons"
+trigger = "red_alert"
+engage_delay_secs = 3.0
+min_battery_reserve = 10.0
+battery_recharge_pct = 100.0
+nudge = 1
 
 [captain_console]
 
@@ -373,7 +386,9 @@ icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_cruiser.power_groups.ops.label"
-default_level = 2
+# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
+# reactor recharges at idle and the AI/human spends up only on demand (#762).
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -391,7 +406,7 @@ max_level = 4
 
 [power_groups.sensors]
 label = "entity.alliance_cruiser.power_groups.sensors.label"
-default_level = 2
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -402,6 +417,7 @@ description = "entity.alliance_cruiser.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/cruiser/captain.html"
+manual_overview = "You command the bridge from the captain's chair. Set the viewscreen, call Red Alert to bring the crew to combat readiness, and read the room: your job is to direct the crew, not to fly or fire. Simplified rating hands Red Alert to the ship's AI so you can focus on the mission."
 
 [[station.rating]]
 name = "Std"
@@ -418,6 +434,7 @@ description = "entity.alliance_cruiser.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/cruiser/helm.html"
+manual_overview = "You fly the ship. Throttle and steering set your heading and speed; lateral thrust slides you sideways to line up firing arcs or dodge incoming fire; boost and impulse give you short bursts of speed. Watch the short-range radar for hazards. Simplified rating lets the AI hold lateral thrust so you keep the stick and throttle."
 
 [[station.rating]]
 name = "Std"
@@ -434,6 +451,7 @@ description = "entity.alliance_cruiser.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/cruiser/tactical.html"
+manual_overview = "You run the weapons. Lock a target on the tactical radar, then fire phasers and launch torpedoes as your arcs come to bear. Manage torpedo loading and volley size, and match phaser frequency to punch through enemy shields. Simplified rating lets the AI auto-fire the phaser banks so you concentrate on torpedoes and targeting."
 
 [[station.rating]]
 name = "Std"
@@ -450,6 +468,7 @@ description = "entity.alliance_cruiser.station.science.description"
 rank = "Lt. Cmdr."
 short_code = "SCI"
 console = "gui/cruiser/science.html"
+manual_overview = "You run sensors and the shield grid. Sweep the long-range radar to identify contacts and feed target designations to Tactical, and manage the shields: focus an arc to reinforce it against a bearing of incoming fire, and keep an eye on regeneration between hits. The generated Shields section below reads this ship's actual arc strength."
 
 [[station.rating]]
 name = "Std"
@@ -462,6 +481,7 @@ description = "entity.alliance_cruiser.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/cruiser/engineering.html"
+manual_overview = "You keep the ship alive. Allocate reactor power between helm, weapons, and sensors as the situation demands, and dispatch repair teams to damaged systems by priority. Watch the battery reserve during heavy weapons fire. Simplified rating lets the AI run the repair teams so you concentrate on power allocation."
 
 [[station.rating]]
 name = "Std"
@@ -478,6 +498,7 @@ description = "entity.alliance_cruiser.station.comms.description"
 rank = "Ens."
 short_code = "COM"
 console = "gui/cruiser/comms.html"
+manual_overview = "You handle communications and navigation. Hail contacts, read and answer incoming messages, and plot the ship's course by setting waypoints on the system chart for the Helm to follow. Keep the captain informed of mission traffic and clear the Helm onto new headings as objectives shift."
 
 [[station.rating]]
 name = "Std"
@@ -629,7 +650,6 @@ power_group = "sensors"
 id = "shields-system"
 kind = "shields"
 station = "science"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

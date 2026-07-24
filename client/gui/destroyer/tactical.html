@@ -144,7 +144,7 @@
         var hasUnread = messages.some(function(m) { return !m.is_read; });
         commsUnread.classList.toggle('show', hasUnread);
         var threadMsg = messages.find(function(m) { return !m.is_read; }) || messages[messages.length - 1] || null;
-        commsMsgEl.state = { thread: threadMsg };
+        commsMsgEl.state = { thread: threadMsg, rejection: c.rejection };
         navMapEl.state = { blips: n.blips || [], range: n.radar_range || 5000, ship_pos: { x: n.ship_x || 0, z: n.ship_z || 0 }, ship_heading: n.ship_heading || 0, waypoint: n.waypoint || null };
         var targetName = w.target_name || w.target_uuid || null;
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : 'NO TARGET';

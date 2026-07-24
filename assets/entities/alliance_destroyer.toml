@@ -331,14 +331,27 @@ capacity = 70
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 20
 
-[power.ai]
-movement_thrust_threshold = 0.7
-movement_engage_delay_secs = 3.0
-movement_battery_engage_min_pct = 50.0
-movement_battery_recharge_pct = 100.0
-red_alert_engage_delay_secs = 3.0
-red_alert_battery_engage_min_pct = 10.0
-red_alert_battery_recharge_pct = 100.0
+# Data-authored power AI rules (issue #762). Each rule targets one authored
+# power group and carries its own battery floor (`min_battery_reserve`); the AI
+# nudges that group's allocation only while the trigger holds and the battery
+# stays at or above the floor, so allocation never rises past what the reactor
+# can sustain.
+[[power.ai.rule]]
+group = "helm"
+trigger = "thrust"
+thrust_threshold = 0.7
+engage_delay_secs = 3.0
+min_battery_reserve = 50.0
+battery_recharge_pct = 100.0
+nudge = 1
+
+[[power.ai.rule]]
+group = "weapons"
+trigger = "red_alert"
+engage_delay_secs = 3.0
+min_battery_reserve = 10.0
+battery_recharge_pct = 100.0
+nudge = 1
 
 [captain_console]
 
@@ -353,7 +366,9 @@ icon = "ship"
 
 [power_groups.ops]
 label = "entity.alliance_destroyer.power_groups.ops.label"
-default_level = 2
+# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
+# reactor recharges at idle and the AI/human spends up only on demand (#762).
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -371,7 +386,7 @@ max_level = 4
 
 [power_groups.sensors]
 label = "entity.alliance_destroyer.power_groups.sensors.label"
-default_level = 2
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -382,6 +397,7 @@ description = "entity.alliance_destroyer.station.captain.description"
 rank = "Cpt."
 short_code = "CPT"
 console = "gui/destroyer/captain.html"
+manual_overview = "You command the destroyer. Set the viewscreen, call Red Alert, and direct a four-seat crew through the fight. The destroyer is built to hit hard and turn fast, so keep Helm and Tactical coordinated and call your shots early. Simplified rating hands Red Alert to the ship's AI."
 
 [[station.rating]]
 name = "Std"
@@ -398,6 +414,7 @@ description = "entity.alliance_destroyer.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/destroyer/helm.html"
+manual_overview = "You fly the destroyer — a fast, agile hull that rewards aggressive flying. Throttle and steering set your line; lateral thrust slides you across a target's arc; boost and impulse close or break range in a hurry. Keep the omni phaser on target for Tactical. Simplified rating lets the AI hold lateral thrust."
 
 [[station.rating]]
 name = "Std"
@@ -414,6 +431,7 @@ description = "entity.alliance_destroyer.station.tactical.description"
 rank = "Lt. Cmdr."
 short_code = "TAC"
 console = "gui/destroyer/tactical.html"
+manual_overview = "You run the destroyer's weapons: an omni phaser, port and starboard blasters, and a torpedo tube. Lock your target, manage torpedo loading and volley size, and match phaser frequency to break enemy shields. With guns on multiple arcs, work with the Helm to keep something on target at all times. Simplified rating lets the AI auto-fire the omni phaser."
 
 [[station.rating]]
 name = "Std"
@@ -430,6 +448,7 @@ description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/destroyer/engineering.html"
+manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and sensors, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
 name = "Std"
@@ -603,7 +622,6 @@ power_group = "ops"
 id = "shields-system"
 kind = "shields"
 station = "engineering"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

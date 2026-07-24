@@ -179,6 +179,13 @@
     }
     .world-btn:hover { background: #223; border-color: #558; }
     .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
+    #mod-pack-upload {
+      margin-top: auto; padding-top: 1rem; border-top: 1px solid #223;
+      display: flex; flex-direction: column; gap: 0.4rem;
+    }
+    #mod-pack-status {
+      font-size: 0.72rem; color: #889; white-space: normal; word-break: break-word;
+    }
     /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
     .lobby-panel {
       position: fixed;
@@ -785,6 +792,14 @@
     }
     .debug-action:hover { background: #223; border-color: #558; }
     .debug-action.active { background: #224; border-color: #66c; color: #ccf; }
+    /* Disabled host override (e.g. teleport with no shared waypoint). */
+    .debug-action:disabled, .debug-action.disabled {
+      opacity: 0.35; cursor: not-allowed;
+      background: #1a1a1a; border-color: #333; color: #555;
+    }
+    .debug-action:disabled:hover, .debug-action.disabled:hover {
+      background: #1a1a1a; border-color: #333;
+    }
     /* Tab bar (right of actions) */
     #debug-tabs {
       display: flex; flex-direction: row;
@@ -839,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-3ff534e8bd216c81.js" crossorigin="anonymous" integrity="sha384-snYeQFpP1qhGs7zvQ6qfpk05/rhgP6gMD8kgsQTSqAT12TNyQTfRiAbymLFz49mt"><link rel="preload" href="./project-phoenix-3ff534e8bd216c81_bg.wasm" crossorigin="anonymous" integrity="sha384-h2uyC7DdKWu2XKgXqh8pE52P14jN/pIthMc9zeaFCbWmODs/ViYjicG88D3QZjlp" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-7468825015497cf8.js" crossorigin="anonymous" integrity="sha384-Mr1COs0e8zPpRE3+9dGZIG9lDLzif74shGNf04Xz9RJurzm5IvwGzkltvx3BO++w"><link rel="preload" href="./project-phoenix-7468825015497cf8_bg.wasm" crossorigin="anonymous" integrity="sha384-g+fLvlup8vtoloegq7T0+FG9ploEiBBqYKixhU4UGbXZwLC8tSeXjaFIILU7aH90" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -947,6 +962,14 @@
     <div id="world-list">
       <div id="world-list-label" data-i18n="server.select_world">Select a world</div>
       <div id="scenario-loading" data-i18n="server.loading">Loading…</div>
+      <!-- Pre-scenario mod-pack upload (issue #760). Shown only during scenario
+           selection; #scenario-panel is hidden once world load starts, so
+           in-progress rounds are unaffected (AC4). -->
+      <div id="mod-pack-upload">
+        <input id="mod-pack-file" type="file" accept=".zip" style="display:none;">
+        <button id="mod-pack-btn" class="world-btn" data-i18n="server.upload_mod_pack">Upload mod pack</button>
+        <div id="mod-pack-status"></div>
+      </div>
     </div>
   </div>
 
@@ -1100,6 +1123,7 @@
             <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
             <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
             <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
+            <button class="debug-action" data-action="teleport-waypoint" title="Teleport ship to Navigation waypoint" disabled>📍</button>
           </div>
           <div id="debug-tabs">
             <button class="debug-tab active" data-tab="0">Mod</button>
@@ -1123,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-3ff534e8bd216c81.js';
-const wasm = await init({ module_or_path: './project-phoenix-3ff534e8bd216c81_bg.wasm' });
+import init, * as bindings from './project-phoenix-7468825015497cf8.js';
+const wasm = await init({ module_or_path: './project-phoenix-7468825015497cf8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2140,6 +2164,85 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       broadcastScenarioCatalog();
     }
 
+    // ── Pre-scenario mod-pack upload (issue #760) ──────────────────────────
+    // Re-read the merged (base + validated-mod) catalog from Rust and refresh
+    // the picker + phones. wasm_get_scenario_catalog resolves mod worlds from
+    // the session overlay populated by a valid upload.
+    function refreshMergedCatalog() {
+      try {
+        _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []);
+      } catch (e) {
+        console.error('[Phoenix] merged catalog refresh failed:', e);
+        return;
+      }
+      renderScenarioLockState();
+      broadcastScenarioCatalog();
+    }
+
+    // Wire the file chooser. Uploads are accepted ONLY in the pre-round
+    // scenario stage — once _worldLoadStarted latches (driveWorldLoad) the
+    // panel is hidden and any pick is ignored, so an in-progress round is never
+    // affected (AC4). A valid pack installs the session overlay in Rust and its
+    // manifest-listed worlds join the catalog (AC2/AC3); an invalid pack shows
+    // its findings and applies nothing (AC1).
+    (function wireModPackUpload() {
+      const btn = document.getElementById('mod-pack-btn');
+      const input = document.getElementById('mod-pack-file');
+      const status = document.getElementById('mod-pack-status');
+      if (!btn || !input) return;
+
+      function setStatus(id, extra) {
+        if (!status) return;
+        status.textContent = t(id) + (extra ? ' ' + extra : '');
+      }
+
+      btn.addEventListener('click', function () {
+        if (_worldLoadStarted) return;
+        input.value = '';
+        input.click();
+      });
+
+      input.addEventListener('change', async function () {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        if (_worldLoadStarted || !wasmReady) return;
+        setStatus('server.mod_pack_reading');
+        let bytes;
+        try {
+          bytes = new Uint8Array(await file.arrayBuffer());
+        } catch (e) {
+          console.error('[Phoenix] mod pack read failed:', e);
+          setStatus('server.mod_pack_read_error');
+          return;
+        }
+        // A new upload supersedes any previous overlay (AC4): clear first so a
+        // rejected pack cannot leave stale content behind.
+        try { wasmBindings.wasm_clear_mod_pack(); } catch (_) {}
+        let findings;
+        try {
+          findings = Array.from(wasmBindings.wasm_validate_mod_pack(bytes) || []);
+        } catch (e) {
+          console.error('[Phoenix] mod pack validation threw:', e);
+          setStatus('server.mod_pack_rejected');
+          return;
+        }
+        const errors = findings.filter(function (f) { return f && f.severity === 'error'; });
+        if (errors.length > 0) {
+          // Rust applied NOTHING (atomic). Surface the findings; the merged
+          // catalog is unchanged. Refresh so any prior overlay we just cleared
+          // is reflected.
+          setStatus('server.mod_pack_rejected');
+          for (const f of errors) {
+            console.error('[Phoenix] mod pack finding:', f.category, '-', f.message);
+          }
+          refreshMergedCatalog();
+          return;
+        }
+        setStatus('server.mod_pack_applied');
+        refreshMergedCatalog();
+      });
+    })();
+
     // Allow automated tests (and quick dev launches) to bypass the picker via
     // ?scenario=<path>, e.g. /?scenario=assets/worlds/default.toml
     (function() {
@@ -2523,6 +2626,8 @@ function finishInit() {
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;
   window.wasm_get_instagib = wasmBindings.wasm_get_instagib;
+  window.wasm_teleport_to_waypoint = wasmBindings.wasm_teleport_to_waypoint;
+  window.wasm_has_navigation_waypoint = wasmBindings.wasm_has_navigation_waypoint;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {
@@ -2546,6 +2651,11 @@ function finishInit() {
     // SAME arbiter flow as round 1 — no legacy confirm bypass.
     _preSelection = { scenario_id: null, template_path: null };
     _worldLoadStarted = false;
+    // Session end / next round discards any uploaded mod-pack overlay (issue
+    // #760, AC4): the next scenario stage starts from base content unless the
+    // host uploads again. Refresh the catalog so the picker drops mod scenarios.
+    try { wasmBindings.wasm_clear_mod_pack(); } catch (_) {}
+    try { _scenarioCatalog = Array.from(wasmBindings.wasm_get_scenario_catalog() || []); } catch (_) {}
     renderScenarioLockState();
     // Re-broadcast the (now-unlocked) catalog so already-connected phones
     // return to the shared pre-scenario picker for the next round (issue #756).
@@ -2811,6 +2921,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
       var content = document.getElementById('debug-content');
       var tabs = document.querySelectorAll('.debug-tab');
       var actions = document.querySelectorAll('.debug-action');
+      var teleportBtn = document.querySelector('.debug-action[data-action="teleport-waypoint"]');
       var panelOpen = false;
       var activeTab = 0;
       // Track resource ON/OFF state (all 4 are toggled together)
@@ -2904,6 +3015,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
                 btn.classList.toggle('active', wasm_get_instagib());
               }
               break;
+            case 'teleport-waypoint':
+              // Host-only sim override: fire-and-forget (like pause/wireframes).
+              // Guarded by the disabled state, but re-check to be safe.
+              if (btn.disabled) break;
+              if (typeof wasm_teleport_to_waypoint === 'function') wasm_teleport_to_waypoint();
+              break;
           }
         });
       });
@@ -2930,6 +3047,13 @@ window.addEventListener('TrunkApplicationStarted', () => {
       function rafLoop() {
         if (panelOpen && typeof dataGetters[activeTab] === 'function') {
           content.textContent = dataGetters[activeTab]();
+        }
+        // Host teleport override (issue #770, AC2): disabled while there is no
+        // shared Navigation waypoint to teleport to.
+        if (teleportBtn && typeof wasm_has_navigation_waypoint === 'function') {
+          var hasWaypoint = wasm_has_navigation_waypoint();
+          teleportBtn.disabled = !hasWaypoint;
+          teleportBtn.classList.toggle('disabled', !hasWaypoint);
         }
         requestAnimationFrame(rafLoop);
       }

@@ -287,18 +287,33 @@ capacity = 35
 rates = [ 3, 2, 1, 0, -1, -3 ]
 emergency_threshold = 10
 
-[power.ai]
-movement_thrust_threshold = 0.7
-movement_engage_delay_secs = 3.0
-movement_battery_engage_min_pct = 50.0
-movement_battery_recharge_pct = 100.0
-red_alert_engage_delay_secs = 3.0
-red_alert_battery_engage_min_pct = 10.0
-red_alert_battery_recharge_pct = 100.0
+# Data-authored power AI rules (issue #762). Each rule targets one authored
+# power group and carries its own battery floor (`min_battery_reserve`); the AI
+# nudges that group's allocation only while the trigger holds and the battery
+# stays at or above the floor, so allocation never rises past what the reactor
+# can sustain.
+[[power.ai.rule]]
+group = "helm"
+trigger = "thrust"
+thrust_threshold = 0.7
+engage_delay_secs = 3.0
+min_battery_reserve = 50.0
+battery_recharge_pct = 100.0
+nudge = 1
+
+[[power.ai.rule]]
+group = "weapons"
+trigger = "red_alert"
+engage_delay_secs = 3.0
+min_battery_reserve = 10.0
+battery_recharge_pct = 100.0
+nudge = 1
 
 [power_groups.ops]
 label = "entity.alliance_courier.power_groups.ops.label"
-default_level = 2
+# Rests at 1 so the four authored groups sum to a sustainable total (<=6): the
+# reactor recharges at idle and the AI/human spends up only on demand (#762).
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -316,7 +331,7 @@ max_level = 4
 
 [power_groups.sensors]
 label = "entity.alliance_courier.power_groups.sensors.label"
-default_level = 2
+default_level = 1
 min_level = 1
 max_level = 4
 
@@ -329,6 +344,7 @@ description = "entity.alliance_courier.station.captain.description"
 rank = "Cmdr."
 short_code = "CPT"
 console = "gui/courier/captain.html"
+manual_overview = "The courier is a two-seat runabout and you are its commander. You fly the ship and run the bridge: set the viewscreen, call Red Alert, plot your course, and manage sensors and shields. On a small crew you wear several hats, so keep the picture in your head and lean on the ship's AI for anything you can't reach."
 
 [[station.rating]]
 name = "Std"
@@ -341,6 +357,7 @@ description = "entity.alliance_courier.station.tactical.description"
 rank = "Ltn."
 short_code = "TAC"
 console = "gui/courier/tactical.html"
+manual_overview = "You run the courier's weapons. Lock a target on the tactical radar and fire the blaster bank as your arc comes to bear. The courier trades a heavy weapons suite for speed, so pick your shots, use the pilot's manoeuvres to keep your arc on target, and don't get drawn into a slugging match."
 
 [[station.rating]]
 name = "Std"
@@ -468,7 +485,6 @@ power_group = "ops"
 id = "shields-system"
 kind = "shields"
 station = "captain"
-marker = "ship"
 power_group = "ops"
 
 [[system]]

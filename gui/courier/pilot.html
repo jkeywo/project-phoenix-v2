@@ -214,7 +214,7 @@
         );
         var threadMsg = messages.find(function(m) { return !m.is_read; })
           || messages[messages.length - 1] || null;
-        document.getElementById('comms-current-message').state = { thread: threadMsg };
+        document.getElementById('comms-current-message').state = { thread: threadMsg, rejection: c.rejection };
 
         document.getElementById('navigation-map').state = {
           blips: n.blips || [],

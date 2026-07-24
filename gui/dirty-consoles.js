@@ -59,6 +59,9 @@ export const STATIC_MESSAGE_CONSOLES = Object.freeze({
   AsteroidDestroyed: Object.freeze(['tactical', 'helm', 'sensors']),
   EntityDespawned: Object.freeze(['tactical', 'helm', 'sensors']),
   CommsState: Object.freeze(['comms']),
+  // Rejection feedback (#761 AC3): re-push the comms console so the attempted
+  // response button flashes red.
+  CommsResponseRejected: Object.freeze(['comms']),
   // stationRatings is already fresh when this fires (sim-state applied the
   // message first); controlSources lags until the next SimState tick, so the
   // captain badge is pushed immediately from here.

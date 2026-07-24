@@ -76,7 +76,7 @@
         var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
         document.getElementById('comms-contact-list').state = { contacts: comms.contacts || [] };
         document.getElementById('comms-hail-list').state = comms;
-        document.getElementById('comms-current-message').state = { thread: threadMsg };
+        document.getElementById('comms-current-message').state = { thread: threadMsg, rejection: comms.rejection };
         document.getElementById('station-damage').state = s.own_hull || null;
         document.getElementById('footer-target').textContent = threadMsg ? (threadMsg.sender_name || t('console.common.active_hail')) : t('console.common.no_active_hail');
         setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);

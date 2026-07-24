@@ -44,6 +44,6 @@ direction = [ 0, 0, 1 ]
 position = [ -0.5433494862301935, 0.09845132712045346, 0.009012524646963116 ]
 direction = [ 0, 0, 1 ]
 
-[markers.phaser_omni]
+[markers.phasers_omni]
 position = [ -0.0008642971880697476, 0.4707843831481353, -0.5426769906728605 ]
 direction = [ 0, 0, 1 ]

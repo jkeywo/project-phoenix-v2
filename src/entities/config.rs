@@ -1381,6 +1381,14 @@ pub struct WeaponsConsoleConfig {
     /// `[weapons_console.radar]`.
     #[serde(default)]
     pub radar: Option<crate::radar_config::RadarConfig>,
+    /// Inline per-system target selector (issue #777). Loaded from
+    /// `[weapons_console.selector]`; absent ⇒ the canonical
+    /// [`default_tactical_target_selector_config`] is synthesised at spawn.
+    /// Mirrors [`SensorsConsoleConfig::selector`] — the Tactical host ranks its
+    /// own candidates independently and remains the sole writer of the
+    /// authoritative `TacticalRadarSelection`.
+    #[serde(default)]
+    pub selector: Option<FineSystemAiSelectorToml>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1636,6 +1644,63 @@ pub const SENSORS_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_RADAR_CONTACTS,
 ];
 
+/// Candidate source: the ship's advisory **Science Target** — the Sensors
+/// radar's selected target, surfaced from the frozen viewscreen blackboard
+/// (issue #777). Tactical may strongly favour this pick through an authored
+/// score bonus, but independently revalidates it before copying (AC2/AC3). It
+/// is deliberately NOT the same as `combat-lock`: that is Tactical's OWN output
+/// and is excluded to avoid circularity.
+pub const SELECTOR_SOURCE_SENSORS_DESIGNATION: &str = "sensors-designation";
+/// Candidate source: whoever last attacked this ship (`LastShipAttacker`).
+pub const SELECTOR_SOURCE_LAST_ATTACKER: &str = "last-attacker";
+
+/// The registered candidate sources the Tactical target selector may union
+/// (issue #777). `combat-lock` is intentionally absent: it is Tactical's own
+/// authoritative output, so unioning it would be circular. The ship's current
+/// lock is instead surfaced by the host as an internal `source_retained`
+/// retention candidate (not a cross-system source), so it too is absent here.
+pub const TACTICAL_SELECTOR_SOURCES: &[&str] = &[
+    SELECTOR_SOURCE_SENSORS_DESIGNATION,
+    SELECTOR_SOURCE_OBJECTIVE_DESTROY,
+    SELECTOR_SOURCE_LAST_ATTACKER,
+    SELECTOR_SOURCE_RADAR_CONTACTS,
+];
+
+/// Parse-time fallbacks for the default Tactical selector (AGENTS.md rule #11
+/// parse-defaults only). The retired tier order was
+/// `objective > retained > last-attacker > nearest`; each tier becomes an
+/// additive source weight, highest-first, with the Sensors-favour bonus (AC2)
+/// slotted between objective and retained. `switch_margin` is the anti-thrash
+/// hysteresis (AC5). Every value is overridable via `[weapons_console.selector]`
+/// fields or its `param` table, so no gameplay value is pinned into a live tick.
+///
+/// PRECEDENCE INVARIANT — because the selector sums weights and a single
+/// candidate can carry several source markers at once (the ship's current lock
+/// is commonly ALSO its Sensors designation, and may also be the last attacker
+/// and the nearest hostile), the weights are chosen so `objective_weight`
+/// strictly dominates the MAXIMUM achievable non-objective stack by more than
+/// `switch_margin`:
+///
+/// ```text
+///   sensors_designation + retained + last_attacker + radar
+///     = 500 + 200 + 100 + 1 = 801  <  1000 − 50 = 950  =  objective − margin
+/// ```
+///
+/// So an in-range named Destroy objective ALWAYS wins the ranking AND survives
+/// hysteresis retention — even against the ship's own retained Sensors
+/// designation. `retained` still exceeds `last_attacker`, so an established
+/// engagement is not broken off by a fresh attacker (the retired tier-2 > tier-3
+/// ordering). Retention thus has a bounded additive contribution AND
+/// switch-margin hysteresis; the invariant, not the mechanism name, is what
+/// guarantees objective primacy. This invariant is asserted in
+/// `default_tactical_selector_objective_dominates_max_non_objective_stack`.
+const DEFAULT_TACTICAL_OBJECTIVE_WEIGHT: f32 = 1000.0;
+const DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT: f32 = 500.0;
+const DEFAULT_TACTICAL_RETAINED_WEIGHT: f32 = 200.0;
+const DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT: f32 = 100.0;
+const DEFAULT_TACTICAL_RADAR_WEIGHT: f32 = 1.0;
+const DEFAULT_TACTICAL_SWITCH_MARGIN: f32 = 50.0;
+
 /// Parse-time fallbacks for the default Sensors selector (AGENTS.md rule #11
 /// parse-defaults only). Authors override every one via `[sensors_console.selector]`
 /// fields or its `param` table, so no gameplay value is pinned into a live tick.
@@ -1766,6 +1831,107 @@ pub fn default_sensors_target_selector_config() -> FineSystemAiSelectorToml {
             ScoreTermToml {
                 when: "candidate_fact(source_radar) > 0".to_string(),
                 weight: DEFAULT_SELECTOR_RADAR_WEIGHT,
+            },
+        ],
+    }
+}
+
+/// The canonical default Tactical target selector synthesised for ships that
+/// do not author `[weapons_console.selector]` (issue #777).
+///
+/// Encodes the retired hardcoded Tactical tier chain as data. The old tier
+/// order was `objective ≫ retained ≫ last-attacker ≫ nearest-hostile`; each
+/// tier becomes an additive source weight, highest-first, and the advisory
+/// Sensors designation gets its own favour bonus (AC2) — below explicit mission
+/// orders (`objective`) but above the retained lock and whoever last shot us.
+///
+/// Because the selector SUMS weights and one entity can carry several source
+/// markers (the current lock is commonly also the Sensors designation, and may
+/// also be the last attacker and nearest hostile), a naive high `retained`
+/// weight would let `sensors_designation + retained` overtake a distinct
+/// in-range `objective` — the ship would refuse to retarget onto its explicit
+/// mission objective. The weights are therefore sized so `objective` strictly
+/// dominates the maximum achievable non-objective stack by more than
+/// `switch_margin` (see the PRECEDENCE INVARIANT on the constant block above:
+/// 500 + 200 + 100 + 1 = 801 < 1000 − 50). Retention keeps a bounded additive
+/// contribution (still > `last_attacker`, so an established engagement is not
+/// broken off by a fresh attacker) AND the selector's switch-margin hysteresis;
+/// the invariant, not the mechanism, is what guarantees objective primacy.
+///
+/// Independent revalidation (AC3) is the eligibility guard: a candidate is
+/// engageable when it is detectable AND either an explicit target the host
+/// already vetted (`source_objective` / `source_last_attacker` /
+/// `source_retained`) OR independently hostile — so a friendly Sensors
+/// designation, carrying only `source_sensors_designation`, is dropped rather
+/// than copied.
+///
+/// All weights, the Sensors-favour bonus, the switch margin, and the horizon
+/// are named parameters or parse-time defaults, so a designer retunes Tactical
+/// target ranking without touching Rust (AGENTS.md rule #11).
+pub fn default_tactical_target_selector_config() -> FineSystemAiSelectorToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert(
+        "objective_weight".to_string(),
+        DEFAULT_TACTICAL_OBJECTIVE_WEIGHT,
+    );
+    param.insert(
+        "sensors_designation_weight".to_string(),
+        DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT,
+    );
+    param.insert(
+        "retained_weight".to_string(),
+        DEFAULT_TACTICAL_RETAINED_WEIGHT,
+    );
+    param.insert(
+        "last_attacker_weight".to_string(),
+        DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT,
+    );
+    param.insert("radar_weight".to_string(), DEFAULT_TACTICAL_RADAR_WEIGHT);
+    FineSystemAiSelectorToml {
+        param,
+        sources: TACTICAL_SELECTOR_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        horizon: DEFAULT_SELECTOR_HORIZON,
+        switch_margin: DEFAULT_TACTICAL_SWITCH_MARGIN,
+        // AC3 independent revalidation. Detectable is a precondition for every
+        // candidate; beyond that, an explicit target the host already vetted
+        // (objective order / last attacker / retained lock) is engageable
+        // regardless of faction, while any other candidate — crucially the
+        // advisory Sensors designation and auto-acquired radar contacts — must
+        // be independently `hostile`. This is what makes Tactical refuse a
+        // friendly Sensors pick (AC3) while still honouring a mission that
+        // names a factionless assault target.
+        eligibility: "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 \
+                      or candidate_fact(source_last_attacker) > 0 \
+                      or candidate_fact(source_retained) > 0 \
+                      or candidate_fact(hostile) > 0)"
+            .to_string(),
+        // Additive source weights, highest-first. The `source_retained` term is
+        // bounded (see the PRECEDENCE INVARIANT): it exceeds `last_attacker` so
+        // an established lock is not stolen by a fresh attacker, but the whole
+        // non-objective stack stays below `objective − switch_margin`.
+        score: vec![
+            ScoreTermToml {
+                when: "candidate_fact(source_objective) > 0".to_string(),
+                weight: DEFAULT_TACTICAL_OBJECTIVE_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_sensors_designation) > 0".to_string(),
+                weight: DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_retained) > 0".to_string(),
+                weight: DEFAULT_TACTICAL_RETAINED_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_last_attacker) > 0".to_string(),
+                weight: DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_radar) > 0".to_string(),
+                weight: DEFAULT_TACTICAL_RADAR_WEIGHT,
             },
         ],
     }
@@ -2917,6 +3083,20 @@ impl EntityConfig {
             .and_then(|c| c.selector.as_ref())
         {
             validate_fine_system_ai_selector(sel, SENSORS_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
+        }
+
+        // Validate an authored inline Tactical target selector before world
+        // activation (issue #777). Same deterministic content-error surface as
+        // the Sensors selector above — the Tactical host is the sole writer of
+        // the authoritative weapons target, so a malformed ranking must fail
+        // the entity load rather than reach a live tick.
+        if let Some(sel) = config
+            .weapons_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+        {
+            validate_fine_system_ai_selector(sel, TACTICAL_SELECTOR_SOURCES)
                 .map_err(SerdeError::custom)?;
         }
 
@@ -6049,6 +6229,106 @@ eligibility = "candidate_fact(detectable) > 0"
         assert!(
             EntityConfig::from_toml(bad).is_err(),
             "unknown selector source must fail from_toml before world activation"
+        );
+    }
+
+    // ── Tactical target selector schema + validation (issue #777) ────────────
+
+    fn tactical_selector_toml() -> &'static str {
+        r##"
+[weapons_console.selector]
+horizon = 3000.0
+switch_margin = 40.0
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(hostile) > 0)"
+
+[weapons_console.selector.param]
+sensors_designation_weight = 800.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_sensors_designation) > 0"
+weight = 800.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1.0
+"##
+    }
+
+    #[test]
+    fn tactical_selector_parses_and_resolves_to_typed_selector() {
+        let config = EntityConfig::from_toml(tactical_selector_toml()).expect("parse must succeed");
+        let sel = config
+            .weapons_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+            .expect("selector section present");
+        let resolved = sel.to_selector().expect("selector resolves");
+        assert_eq!(resolved.horizon, 3000.0);
+        assert_eq!(resolved.switch_margin, 40.0);
+        assert_eq!(resolved.score.len(), 2);
+        assert!(validate_fine_system_ai_selector(sel, TACTICAL_SELECTOR_SOURCES).is_ok());
+    }
+
+    #[test]
+    fn default_tactical_selector_is_valid_and_resolves() {
+        let cfg = default_tactical_target_selector_config();
+        assert!(validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).is_ok());
+        let resolved = cfg.to_selector().expect("default selector resolves");
+        // objective, sensors-designation, retained, last-attacker, radar.
+        assert_eq!(resolved.score.len(), 5);
+    }
+
+    /// The precedence invariant that prevents the #777 additive-stacking bug:
+    /// the objective weight must strictly dominate the maximum non-objective
+    /// stack (`sensors_designation + retained + last_attacker + radar`) by more
+    /// than `switch_margin`, so an in-range named Destroy objective always wins
+    /// the ranking AND survives hysteresis retention — even against the ship's
+    /// own current lock coinciding with its Sensors designation.
+    #[test]
+    fn default_tactical_selector_objective_dominates_max_non_objective_stack() {
+        // Const-block asserts: the invariant is over compile-time constants, so
+        // this is a static guard, not a runtime check (clippy).
+        const {
+            let max_non_objective = DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT
+                + DEFAULT_TACTICAL_RETAINED_WEIGHT
+                + DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT
+                + DEFAULT_TACTICAL_RADAR_WEIGHT;
+            // objective must dominate the max non-objective stack by more than
+            // the switch margin — otherwise a stacked non-objective candidate can
+            // beat, or be retained over, an explicit Destroy objective (#777).
+            assert!(
+                max_non_objective
+                    < DEFAULT_TACTICAL_OBJECTIVE_WEIGHT - DEFAULT_TACTICAL_SWITCH_MARGIN
+            );
+            // Retention must still outrank a fresh last attacker so an
+            // established engagement is not broken off (retired tier-2 > tier-3).
+            assert!(DEFAULT_TACTICAL_RETAINED_WEIGHT > DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT);
+        }
+    }
+
+    #[test]
+    fn tactical_selector_rejects_combat_lock_source() {
+        // `combat-lock` is Tactical's OWN output — unioning it would be
+        // circular, so it is not a registered Tactical source.
+        let mut cfg = default_tactical_target_selector_config();
+        cfg.sources.push(SELECTOR_SOURCE_COMBAT_LOCK.into());
+        let err = validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains(SELECTOR_SOURCE_COMBAT_LOCK), "got: {err}");
+    }
+
+    #[test]
+    fn tactical_selector_bad_content_fails_entity_load() {
+        let bad = r##"
+[weapons_console.selector]
+horizon = 100.0
+switch_margin = 0.0
+sources = ["not-a-real-source"]
+eligibility = "candidate_fact(detectable) > 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad).is_err(),
+            "unknown Tactical selector source must fail from_toml before world activation"
         );
     }
 

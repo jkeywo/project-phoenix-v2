@@ -1458,6 +1458,7 @@ mod tests {
             }],
             blaster_banks: vec![],
             radar: None,
+            selector: None,
         }
     }
 

@@ -45,6 +45,40 @@ pub const PHASER_BATTERY_DRAIN_PER_SEC: f32 = 5.0;
 #[derive(Component, Default, Clone, Debug)]
 pub struct TacticalRadarSelection(pub Option<String>);
 
+/// Per-ship resolved Tactical target selector (issue #777).
+///
+/// The Tactical mirror of [`crate::ship::sensors::SensorsTargetSelector`]:
+/// holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
+/// authored `[weapons_console.selector]` or the canonical
+/// [`crate::entities::config::default_tactical_target_selector_config`] default
+/// — plus the authored ship `power_rating`, which `ai_target_selection` exposes
+/// to the selector's expressions as `self_fact(power_rating)`.
+///
+/// Attached at spawn on every ship (NPC and player) alongside
+/// `SensorsTargetSelector`; ships without one (bare-`App` fixtures) fall back to
+/// the default selector inside `ai_target_selection`. The selector RANKS
+/// candidates; it never writes authoritative state — the host applies the
+/// chosen UUID to `TacticalRadarSelection` directly, keeping Tactical the sole
+/// writer (AC4).
+#[derive(Component, Clone, Debug)]
+pub struct TacticalTargetSelector {
+    /// The resolved ranking policy.
+    pub selector: crate::ai::selector::TargetSelector,
+    /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
+    pub power_rating: Option<f32>,
+}
+
+impl Default for TacticalTargetSelector {
+    fn default() -> Self {
+        Self {
+            selector: crate::entities::config::default_tactical_target_selector_config()
+                .to_selector()
+                .unwrap_or_default(),
+            power_rating: None,
+        }
+    }
+}
+
 /// UUID of the last entity that attacked this ship. Written by the unified
 /// `tick_beams` in the Damage phase on the targeted ship's entity;
 /// consumed by that ship's `ai_target_selection` as a fallback target.

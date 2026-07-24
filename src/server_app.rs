@@ -2678,6 +2678,28 @@ fn spawn_game_start_entities(
                     power_rating: config.power_rating.map(|r| r as f32),
                 });
 
+            // Tactical target selector (issue #777) — the player-ship half of
+            // the per-entity pattern. Authored `[weapons_console.selector]`
+            // drives `ai_target_selection`'s ranking under Backfill; absent, the
+            // canonical default selector is synthesised. Validated already in
+            // `EntityConfig::from_toml`.
+            let tactical_selector = config
+                .weapons_console
+                .as_ref()
+                .and_then(|wc| wc.selector.as_ref())
+                .map(|s| s.to_selector().unwrap_or_default())
+                .unwrap_or_else(|| {
+                    crate::entities::config::default_tactical_target_selector_config()
+                        .to_selector()
+                        .unwrap_or_default()
+                });
+            commands
+                .entity(spawned)
+                .insert(crate::weapons_plugin::TacticalTargetSelector {
+                    selector: tactical_selector,
+                    power_rating: config.power_rating.map(|r| r as f32),
+                });
+
             // Captain AI policy (issue #775) — the player ship half of the
             // per-entity pattern above. Authored `[captain_console.ai]` drives
             // `operate_captain_ai`; absent, the canonical default policy is

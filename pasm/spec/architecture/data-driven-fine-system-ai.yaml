@@ -58,6 +58,7 @@ entities:
         - Sensors designation remains advisory; another system may favour and copy it only through its own eligibility and ranking policy.
         - Stable UUID tie-breaking and authored switch margins prevent query-order dependence and target oscillation.
         - "Issue #776 landed the reusable selector as a Bevy-free sibling of the #775 channel policy (TargetSelector::select in src/ai/selector.rs): union+dedup by UUID, planar-horizon filter, self/candidate/target eligibility, additive score, switch-margin hysteresis, smallest-UUID tie-break. Sensors is the first host — operate_sensors_ai feeds the combat-lock/objective-destroy/radar-contacts sources and emits the existing admitted SetScienceTarget/ClearScienceTarget, never exceeding Sensors authority."
+        - "Issue #777 added Tactical as the second host (ai_target_selection in src/console/weapons/mod.rs, TacticalTargetSelector in src/console/weapons/beam.rs). Its authored sources are sensors-designation/objective-destroy/last-attacker/radar-contacts (combat-lock is excluded — it is Tactical's own output; the ship's current lock is instead surfaced internally as a source_retained retention candidate). The default selector encodes the retired tier order objective>retained>last-attacker>nearest as additive source weights (objective 1000 / sensors_designation 500 (the Sensors-favour bonus, AC2) / retained 200 / last_attacker 100 / radar 1) plus switch_margin(50) hysteresis. Because scores are SUMMED and one entity can carry several source markers at once — the current lock is commonly ALSO the ship's own Sensors designation — the weights obey a precedence invariant: the max non-objective stack (sensors_designation+retained+last_attacker+radar = 500+200+100+1 = 801) stays below objective(1000) by more than switch_margin (801 < 1000-50 = 950). So an in-range named Destroy objective ALWAYS wins the ranking and survives hysteresis retention, even against a lock coinciding with the Sensors designation (the #777 additive-stacking regression: retained must not let sensors+retained overtake an objective). retained still exceeds last_attacker, so an established engagement is not broken off by a fresh attacker. The invariant is asserted in default_tactical_selector_objective_dominates_max_non_objective_stack. Tactical independently revalidates the advisory Sensors pick — re-running faction::is_enemy per candidate for hostility, plus visibility (host-owned damage-scaled radar horizon) and its own eligibility (AC3) — before copying it, and writes the authoritative TacticalRadarSelection DIRECTLY inside ai_target_selection (never through admission). The selector only RANKS; Tactical stays the sole writer (AC4). The direct write, on-change guard, .before(handle_set_target) ordering, and every-tick SimSet::Input cadence are preserved for read-seed-decide-write atomicity against the human SetTarget writer."
     architecture:
       kind: selection-policy
       authority: authoritative
@@ -74,8 +75,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ai/selector.rs, src/world/flags.rs, src/ship/sensors.rs, src/entities/config.rs]
-      symbols: [TargetSelector, select, validate_fine_system_ai_selector, operate_sensors_ai]
+      paths: [src/ai/selector.rs, src/world/flags.rs, src/ship/sensors.rs, src/console/weapons/mod.rs, src/console/weapons/beam.rs, src/entities/config.rs]
+      symbols: [TargetSelector, select, validate_fine_system_ai_selector, operate_sensors_ai, ai_target_selection, TacticalTargetSelector]
       tests: [cargo test]
 
   - state: fine-system-ai-policy-state
@@ -88,7 +89,7 @@ entities:
         - Policy state is private and cannot become a hidden ship-wide state machine.
         - Cross-system behaviour observes public authoritative simulation facts rather than another policy's state name or memory.
         - Policies reset when AI gains control and when an unavailable system recovers.
-        - "Issue #776 realizes the selected-target facet: the Sensors selector's retained pick is the ship's own SensorRadarSelection, recomputed each eligible tick and held through the authored switch margin. Typed local memory, deterministic random occurrence counts, and bounded history remain proposed facets for future policy kinds."
+        - "Issue #776 realizes the selected-target facet: the Sensors selector's retained pick is the ship's own SensorRadarSelection, recomputed each eligible tick and held through the authored switch margin. Issue #777 extends the same facet to Tactical: its retained pick is the ship's own TacticalRadarSelection, surfaced as the internal source_retained retention candidate and held through the authored switch margin. Typed local memory, deterministic random occurrence counts, and bounded history remain proposed facets for future policy kinds."
     architecture:
       classification: authoritative
       owner: per-system-target-ranking-policy

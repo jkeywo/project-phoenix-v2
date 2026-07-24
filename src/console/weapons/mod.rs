@@ -273,7 +273,7 @@ pub(crate) use beam::{
 pub use beam::{
     drain_power_for_active_beam, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
     LastShipAttacker, PhaserCombatConfigResource, PhaserCooldown, TacticalRadarSelection,
-    BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
+    TacticalTargetSelector, BEAM_DAMAGE_PER_SEC, PHASER_BATTERY_DRAIN_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -797,6 +797,10 @@ fn ai_target_selection(
             // omit them; a ship with no faction acquires nothing this way.
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&FactionComponent>,
+            // Per-ship data-driven Tactical target selector (issue #777).
+            // `Option` so bare-`App` fixtures without an attached component fall
+            // back to the canonical default selector built once below.
+            Option<&TacticalTargetSelector>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -859,6 +863,11 @@ fn ai_target_selection(
             .unwrap_or_else(|| uuid.to_string())
     };
 
+    // Canonical fallback selector for any ship missing an attached component
+    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
+    // spawn. Built once per tick, not per ship.
+    let default_selector = TacticalTargetSelector::default();
+
     for (
         ship_entity,
         ship_config,
@@ -871,6 +880,7 @@ fn ai_target_selection(
         weapons_section,
         self_uuid,
         self_faction,
+        target_selector,
     ) in ship_query.iter_mut()
     {
         // Only select for ships whose Tactical surface is AI-controlled.
@@ -913,26 +923,34 @@ fn ai_target_selection(
             }
         };
 
-        // Start from the ship's current lock: acquisition below only *replaces*
-        // it when a fresh in-range candidate exists, and the staleness guard
-        // only clears it — preserving the pre-split semantics exactly.
-        //
-        // Cloned out of the `Mut` once, so the retention tier below can read it
-        // without holding a borrow across the write-back at the end.
+        // The ship's current lock, cloned out of the `Mut` once so the candidate
+        // build below can read it (as the retention candidate) and pass it to
+        // the selector as `current`, without holding a borrow across the
+        // write-back at the end.
         let current_lock: Option<String> = weapons_target.0.clone();
-        let mut selected: Option<String> = current_lock.clone();
 
-        // Acquire from Destroy objectives, falling back to the lock we already
-        // hold, then to the last attacker, then to the nearest hostile.
+        // ── Data-driven Tactical target ranking (#777) ──────────────────────
+        // The retired four-tier `if/else if` chain (objective ≫ retained ≫
+        // last-attacker ≫ nearest-hostile) is now four registered candidate
+        // sources fed to the ship's authored `TargetSelector`. The selector
+        // unions + dedups them, applies the authored eligibility (independent
+        // hostility revalidation, AC3), sums the additive per-source utility
+        // (the Sensors-favour bonus is one such term, AC2), and retains the
+        // current lock through the authored switch margin (AC5). Tactical stays
+        // the SOLE writer of `TacticalRadarSelection`: the selector only RANKS;
+        // the host applies the chosen UUID directly below (AC4).
+        //
+        // The host keeps owning the live, damage-scaled horizon: every
+        // candidate is pre-filtered to `within_range` here (AC5), so the
+        // selector's own authored horizon is a static outer bound only.
         let top_destroy = top_destroy_objective_target(Some(&*blackboards));
         // An *untargeted* Destroy directive — `Destroy { target: "" }` — is
-        // standing "engage any hostile you detect" doctrine, which is what
-        // every shipped hostile TOML authors (`directive_kind = "Destroy"` with
-        // no `directive_target`). It is the only case that licenses the
-        // nearest-hostile scan: a Destroy naming someone specific must not
-        // wander onto a different ship just because that ship is closer.
+        // standing "engage any hostile you detect" doctrine (every shipped
+        // hostile TOML). It is the only case that licenses the nearest-hostile
+        // source: a Destroy naming someone specific must not decay into
+        // shoot-whoever-is-closest.
         let destroy_is_untargeted = matches!(top_destroy, Some(""));
-        let objective_target = match top_destroy {
+        let objective_target: Option<String> = match top_destroy {
             Some("") => None,
             Some(target_name) => {
                 resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
@@ -940,49 +958,53 @@ fn ai_target_selection(
             None => None,
         };
 
-        // Tier 2: keep the engagement we are already in — "still resolvable,
-        // and still inside our own radar horizon". See the ordering rationale on
-        // this system's doc comment: without this tier the nearest-hostile scan
-        // below re-decides from scratch every tick, and since the helm pursues
-        // this lock, the ship slews between bearings as well as retargeting.
-        let retained_lock = || -> Option<String> {
-            let current = current_lock.clone()?;
-            let alive = target_xz(&current).is_some();
-            // An untargeted Destroy directive is combat doctrine: retain only
-            // an opposing ship. This lets a combat_test attacker drop its
-            // factionless Starbase assault lock after `not_attacked` closes
-            // that named objective, then acquire the player/attacker.
-            let combat_appropriate = if destroy_is_untargeted {
-                self_faction.map(|f| f.0).is_some_and(|self_faction_uuid| {
-                    hostile_scan_q
-                        .iter()
-                        .find_map(|(u, _, faction)| {
-                            (u.0 == current).then_some(faction.map(|f| f.0)).flatten()
-                        })
-                        .is_some_and(|target_faction| {
-                            crate::faction::is_enemy(
-                                Some(self_faction_uuid),
-                                Some(target_faction),
-                                registry,
-                            )
-                        })
-                })
-            } else {
-                true
-            };
-            (alive && combat_appropriate && (!range_bounds_targets || within_range(&current)))
-                .then_some(current)
+        // The advisory Sensors designation (AC2), read from the FROZEN
+        // viewscreen `science_target` (#829) — never the channel-3
+        // `TargetDesignation` chatter, which is viewscreen-only and unreadable
+        // here. Cloned to own it before the mutable blackboard write below.
+        let science_target: Option<String> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(vbb)) => vbb.science_target.clone(),
+            _ => None,
         };
 
-        // Tier 4 (issue #703): standing Destroy doctrine with nobody named,
-        // nothing already locked, and nobody having shot us yet. Before this
-        // tier an NPC could only acquire a weapons target *after* taking a
-        // phaser hit (the only writer of `LastShipAttacker`), so shipped
-        // hostiles never opened fire.
-        //
-        // Delegates the faction verdict and the distance ordering to
-        // `ai::core::find_nearest_hostile` over a `WorldView` built here, rather
-        // than open-coding "hostile" and "nearest" a second time.
+        // Independent hostility verdict (AC3): re-run `faction::is_enemy` over
+        // the live registry per candidate UUID — the Sensors pick's hostility is
+        // never trusted. Faction is read from the `With<Ship>` scan surface;
+        // factionless / non-ship candidates are neutral (never auto-hostile).
+        let self_faction_uuid = self_faction.map(|f| f.0);
+        let is_hostile = |uuid: &str| -> bool {
+            let target_faction = hostile_scan_q.iter().find_map(|(u, _, faction)| {
+                (u.0 == uuid).then_some(faction.map(|f| f.0)).flatten()
+            });
+            crate::faction::is_enemy(self_faction_uuid, target_faction, registry)
+        };
+
+        // Build a candidate for `uuid` from `source_fact`, pre-filtered to the
+        // live radar horizon and stamped with the independent hostility verdict.
+        // `detectable` is implied by passing the host's own range gate.
+        let make_candidate =
+            |uuid: &str, source_fact: &str| -> Option<crate::ai::selector::SelectorCandidate> {
+                let (tx, tz) = target_xz(uuid)?;
+                if range_bounds_targets && !within_range(uuid) {
+                    return None;
+                }
+                let mut facts = crate::world::flags::AiFacts::new();
+                facts.set("detectable", 1.0);
+                facts.set("hostile", if is_hostile(uuid) { 1.0 } else { 0.0 });
+                facts.set(source_fact, 1.0);
+                Some(crate::ai::selector::SelectorCandidate {
+                    uuid: uuid.to_string(),
+                    position: [tx, 0.0, tz],
+                    facts,
+                })
+            };
+
+        // Nearest faction-hostile (issue #703), delegating the faction verdict
+        // and distance ordering to `ai::core::find_nearest_hostile` over a
+        // `WorldView` built here rather than open-coding "hostile"/"nearest".
         let nearest_hostile = |registry: &crate::faction::FactionRegistry| -> Option<String> {
             let self_faction_uuid = self_faction.map(|f| f.0)?;
             let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
@@ -1010,55 +1032,79 @@ fn ai_target_selection(
                 ..crate::ai::WorldView::default()
             };
             let found = crate::ai::find_nearest_hostile(&world_view, registry)?;
-            // Map back to the entity's own UUID string rather than
-            // re-serialising, so the result is byte-identical to what
-            // `target_xz` / `live_entity_xz` look up.
             hostile_scan_q.iter().find_map(|(u, _, _)| {
                 (uuid::Uuid::parse_str(&u.0).ok() == Some(found)).then(|| u.0.clone())
             })
         };
 
-        // Which tier produced the acquisition, kept alongside the result for the
-        // `debug`-level "why this target" line below. The `if let ... else if`
-        // chain preserves the exact short-circuit laziness of the original
-        // `.or_else` chain: `retained_lock` and `nearest_hostile` are only
-        // evaluated when the higher tiers yield `None`.
-        let (acquired, acquired_tier): (Option<String>, &'static str) =
-            if let Some(t) = objective_target {
-                (Some(t), "objective")
-            } else if let Some(t) = retained_lock() {
-                (Some(t), "retained")
-            } else if let Some(t) = last_attacker.0.clone() {
-                (Some(t), "last-attacker")
-            } else if let Some(t) = destroy_is_untargeted
-                .then(|| nearest_hostile(registry))
-                .flatten()
-            {
-                (Some(t), "nearest-hostile")
-            } else {
-                (None, "none")
-            };
+        use crate::ai::selector::SelectorCandidate;
+        let mut candidates: Vec<SelectorCandidate> = Vec::new();
 
-        // The radar gate applies to every tier alike (issue #680): a ship must
-        // not lock what its own damage-scaled tactical radar cannot see.
-        if let Some(uuid) = acquired {
-            if !range_bounds_targets || within_range(&uuid) {
-                selected = Some(uuid);
+        // Source: sensors-designation — the advisory Sensors pick (AC2). Copied
+        // only if it survives independent revalidation (AC3): the candidate
+        // carries the recomputed `hostile` fact, and the authored eligibility
+        // drops a friendly / out-of-range designation.
+        if let Some(sci) = science_target.as_deref() {
+            if let Some(c) = make_candidate(sci, "source_sensors_designation") {
+                candidates.push(c);
+            }
+        }
+        // Source: objective-destroy — the explicit named Destroy target.
+        if let Some(obj) = objective_target.as_deref() {
+            if let Some(c) = make_candidate(obj, "source_objective") {
+                candidates.push(c);
+            }
+        }
+        // Source: last-attacker — whoever last hit us.
+        if let Some(att) = last_attacker.0.as_deref() {
+            if let Some(c) = make_candidate(att, "source_last_attacker") {
+                candidates.push(c);
+            }
+        }
+        // Retention candidate — the ship's own current lock (the old tier-2),
+        // surfaced internally (NOT a cross-system source) so the selector can
+        // retain it. Combat-appropriateness gates it exactly as before: under
+        // untargeted combat doctrine, retain only an opposing ship; otherwise
+        // retain the standing lock regardless of faction (a human or
+        // objective-driven assault lock on scenery). The eligibility guard
+        // admits `source_retained` without a hostility check for that reason.
+        if let Some(cur) = current_lock.as_deref() {
+            let combat_appropriate = !destroy_is_untargeted || is_hostile(cur);
+            if combat_appropriate {
+                if let Some(c) = make_candidate(cur, "source_retained") {
+                    candidates.push(c);
+                }
+            }
+        }
+        // Source: radar-contacts — nearest faction-hostile, licensed only by
+        // untargeted combat doctrine (see `destroy_is_untargeted`).
+        if destroy_is_untargeted {
+            if let Some(nearest) = nearest_hostile(registry) {
+                if let Some(c) = make_candidate(&nearest, "source_radar") {
+                    candidates.push(c);
+                }
             }
         }
 
-        // Stale-target guard: if the selection points at an entity that no
-        // longer exists in the world, drop it. This prevents AI from sitting
-        // idle after its last Destroy-objective target is killed — without this
-        // guard, ai_phaser_auto_fire and the torpedo path both skip on the
-        // dead entity UUID and never acquire a fresh target.
-        // Also drops targets beyond radar range (issue #680).
-        if let Some(current) = selected.clone() {
-            let alive = target_xz(&current).is_some();
-            if !alive || (range_bounds_targets && !within_range(&current)) {
-                selected = None;
-            }
+        // Self context: position (the selector's own outer horizon filter) plus
+        // the authored power rating, exposed as `self_fact(power_rating)` (AC2).
+        let selector_comp = target_selector.unwrap_or(&default_selector);
+        let mut self_facts = crate::world::flags::AiFacts::new();
+        if let Some(pr) = selector_comp.power_rating {
+            self_facts.set("power_rating", pr as f64);
         }
+        let self_ctx = crate::ai::selector::SelfContext {
+            position: [physics.x, 0.0, physics.z],
+            facts: self_facts,
+        };
+
+        // Rank. Passing the current lock lets the selector apply switch-margin
+        // retention (AC5); an invalid current lock fails eligibility / is absent
+        // from the candidates and is replaced this same tick (AC5).
+        let selected =
+            selector_comp
+                .selector
+                .select(&self_ctx, &candidates, current_lock.as_deref(), &[]);
 
         // Publish the decision as intent (observability), then apply it to the
         // authoritative lock.
@@ -1068,9 +1114,10 @@ fn ai_target_selection(
         // unchanged.
         if weapons_target.0 != selected {
             // Target CHANGED — the single most load-bearing balance line: the
-            // headline `info` edge names the from→to, and the `debug` line
-            // records which acquisition tier won (why this target). Entity-
-            // scoped so `--log-entity <ship>` narrows it to one hull.
+            // headline `info` edge names the from→to. Entity-scoped so
+            // `--log-entity <ship>` narrows it to one hull. The "why" is now the
+            // authored selector scoring rather than a fixed tier label, so the
+            // `debug` line reports the data-driven ranking produced this pick.
             let from = weapons_target
                 .0
                 .as_deref()
@@ -1090,7 +1137,8 @@ fn ai_target_selection(
                 log,
                 crate::logging::LogCat::Ai,
                 entity = ship_entity,
-                "acquired {to} via tier {acquired_tier}"
+                "acquired {to} via data-driven Tactical selector ({} candidates)",
+                candidates.len()
             );
             weapons_target.0 = selected;
         }

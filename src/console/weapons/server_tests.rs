@@ -4279,6 +4279,7 @@ rank = "Ltn."
                 }],
                 blaster_banks: vec![],
                 radar: None,
+                selector: None,
             }),
             EntitySystemHull(SystemHull::from_config(&[(
                 SystemId("captain".into()),
@@ -5403,6 +5404,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
                     shows: vec![EntityTag::Ship],
                     selects: vec![],
                 }),
+                selector: None,
             },
         ));
 }
@@ -5500,6 +5502,7 @@ fn tactical_ai_respects_radar_range() {
                             shows: vec![EntityTag::Ship],
                             selects: vec![],
                         }),
+                        selector: None,
                     },
                 ),
             );
@@ -5978,6 +5981,179 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
         "the nearest-hostile tier must only auto-acquire ships — a factioned non-ship is \
          not what the tactical radar shows, and locking one would have the AI open fire on \
          scenery it cannot even see"
+    );
+}
+
+// ── Advisory Sensors designation copying + Tactical authority (issue #777) ──
+//
+// AC2/AC3/AC4/AC6: Tactical ranks its own candidates, may strongly favour the
+// advisory Sensors science target, but independently revalidates it and remains
+// the SOLE writer of the authoritative `TacticalRadarSelection`. The Sensors
+// pick reaches Tactical only through the frozen viewscreen `science_target`,
+// which the harness' `seed_viewscreen_from_selection` glue lifts from the
+// ship's own `SensorRadarSelection` before `SimSet::Input` — exactly as the
+// radar publisher + viewscreen aggregator do in the full app.
+
+/// Set the LocalShip's advisory Sensors science target. The seed glue lifts it
+/// into `ViewscreenBlackboard::science_target`, which `ai_target_selection`
+/// reads as the `sensors-designation` candidate source.
+fn set_science_designation(app: &mut App, uuid: Option<String>) {
+    let entity = local_ship_entity(app);
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::sensors_plugin::SensorRadarSelection(uuid));
+}
+
+/// AC6(a): Tactical COPIES the advisory Sensors designation when it wins the
+/// authored ranking. The designated hostile is further away than an unnamed
+/// hostile the radar-contacts source would otherwise pick; the Sensors-favour
+/// bonus carries the day, and the observable authoritative weapons target lands
+/// on the designated ship.
+#[test]
+fn tactical_copies_the_advisory_sensors_designation_when_it_wins_scoring() {
+    let mut app = test_app();
+    let designated_uuid = uuid::Uuid::new_v4().to_string();
+    let nearer_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // The designated hostile is FURTHER than an unnamed hostile the radar
+    // source would pick — so a plain nearest scan would choose the nearer one.
+    spawn_factioned_target(
+        &mut app,
+        &designated_uuid,
+        0.0,
+        -120.0,
+        federation_faction(),
+    );
+    spawn_factioned_target(&mut app, &nearer_uuid, 0.0, -20.0, federation_faction());
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+    set_science_designation(&mut app, Some(designated_uuid.clone()));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(designated_uuid.as_str()),
+        "Tactical must favour the advisory Sensors designation through its authored score \
+         bonus (AC2) and copy it into the authoritative TacticalRadarSelection (AC6), even \
+         when a nearer unnamed hostile is available"
+    );
+}
+
+/// AC6(b) / AC3: Tactical REFUSES the Sensors pick when it fails independent
+/// revalidation — here the designation is a friendly ship — and falls back to
+/// its own independently-validated hostile.
+#[test]
+fn tactical_refuses_a_friendly_sensors_designation_and_picks_its_own_hostile() {
+    let mut app = test_app();
+    let friendly_uuid = uuid::Uuid::new_v4().to_string();
+    let hostile_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // Sensors designates a same-faction (Harrow) ship right next to us; the only
+    // opposing ship is further away.
+    spawn_factioned_target(&mut app, &friendly_uuid, 0.0, -20.0, harrow_faction());
+    spawn_factioned_target(&mut app, &hostile_uuid, 0.0, -100.0, federation_faction());
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+    set_science_designation(&mut app, Some(friendly_uuid.clone()));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(hostile_uuid.as_str()),
+        "Tactical must independently revalidate the Sensors designation's hostility (AC3) — \
+         a friendly pick is refused, and Tactical acquires its own hostile instead"
+    );
+}
+
+/// AC4 / AC6(c): a Sensors designation ALONE never mutates the authoritative
+/// weapons target. With no candidate Tactical will validate — the designation is
+/// a friendly and nothing else is on the board — `TacticalRadarSelection` stays
+/// empty, proving the Sensors host never writes or bypasses weapons target state.
+#[test]
+fn sensors_designation_alone_does_not_mutate_the_weapons_target() {
+    let mut app = test_app();
+    let friendly_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // Only a friendly ship exists, and Sensors designates it. No objective, no
+    // last attacker, no hostile.
+    spawn_factioned_target(&mut app, &friendly_uuid, 0.0, -20.0, harrow_faction());
+    set_local_last_attacker(&mut app, None);
+    set_science_designation(&mut app, Some(friendly_uuid.clone()));
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a Sensors designation must never directly write or bypass the authoritative weapons \
+         target (AC4): Tactical refused the friendly pick and had nothing else to validate, so \
+         TacticalRadarSelection stays empty"
+    );
+}
+
+/// Regression (issue #777): scores are ADDITIVE and one entity can carry
+/// several source markers. With the original weights the current lock scored
+/// its `retained` weight (500) ON TOP of its `sensors_designation` weight (800)
+/// whenever the two coincided — the common NPC case (sensors AI →
+/// SensorRadarSelection → frozen science_target → same ship's Tactical) — for a
+/// stacked 1300 that beat a distinct in-range named Destroy objective (1000).
+/// The ship refused to retarget onto its explicit mission objective.
+///
+/// The weights are now sized so `objective` (1000) strictly dominates the whole
+/// non-objective stack by more than `switch_margin` (sensors 500 + retained 200
+/// = 700 < 1000 − 50). The coinciding lock scores 700, the objective 1000 wins,
+/// and hysteresis cannot save the lock (700 < 950). This is the exact case the
+/// review finding describes; no earlier test covered it.
+#[test]
+fn objective_beats_a_lock_that_coincides_with_the_sensors_designation() {
+    let mut app = test_app();
+    let designated_uuid = uuid::Uuid::new_v4().to_string();
+    let objective_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 300.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // The current lock is a hostile that the ship's own Sensors radar ALSO
+    // designates — so as a candidate it carries BOTH `source_retained` and
+    // `source_sensors_designation`, the double-source stack the finding names.
+    spawn_factioned_target(&mut app, &designated_uuid, 0.0, -20.0, federation_faction());
+    set_weapons_target(&mut app, Some(designated_uuid.clone()));
+    set_science_designation(&mut app, Some(designated_uuid.clone()));
+
+    // A DISTINCT, in-range ship named by an explicit Destroy objective. A named
+    // (not untargeted) objective keeps the nearest-hostile radar source out of
+    // the pool, so the only candidates are the designated lock and this
+    // objective.
+    spawn_entity_target(&mut app, &objective_uuid, 0.0, -120.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("primary".into(), objective_uuid.clone());
+    insert_destroy_objective_blackboard(&mut app, "primary", 90.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(objective_uuid.as_str()),
+        "an in-range named Destroy objective (1000) must win over the ship's current lock even \
+         when that lock coincides with its own Sensors designation — retention is switch_margin \
+         hysteresis, not an additive weight that stacks to 1300 and refuses the mission objective"
     );
 }
 

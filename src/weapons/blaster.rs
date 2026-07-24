@@ -59,8 +59,15 @@ pub struct BlasterBankConfig {
     pub recoil_impulse: f32,
     /// Screenshake magnitude (reserved for a later issue, default 0).
     pub screenshake_magnitude: f32,
-    /// Optional rig-marker name for mount point resolution.
+    /// Optional rig-marker name for mount point resolution. In the
+    /// single-barrel (backward-compat) case this is the sole projectile origin.
     pub marker: Option<String>,
+    /// Authored barrel-marker names (issue #765). Empty ⇒ one implicit barrel
+    /// = `marker`. A [`pattern`](Self::pattern) step addresses these by index.
+    pub barrels: Vec<String>,
+    /// Timed multi-barrel firing pattern (issue #765). Empty ⇒ the uniform
+    /// `volley_count` volley from the single implicit barrel (unchanged).
+    pub pattern: crate::weapons::pattern::BarrelPattern,
     /// Maximum range in world units. Projectile lifespan is computed as
     /// `range / projectile_speed` at fire time.
     pub range: f32,
@@ -84,7 +91,45 @@ impl Default for BlasterBankConfig {
             recoil_impulse: 0.0,
             screenshake_magnitude: 0.0,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             range: 35.0,
+        }
+    }
+}
+
+impl BlasterBankConfig {
+    /// Effective barrel count: the authored barrel-marker count, or `1` (the
+    /// implicit single barrel = `marker`) when none are authored.
+    pub fn barrel_count(&self) -> usize {
+        if self.barrels.is_empty() {
+            1
+        } else {
+            self.barrels.len()
+        }
+    }
+
+    /// Resolve the firing schedule for one volley as an ordered list of
+    /// `(barrels, at_secs)` steps, sorted by `at_secs`.
+    ///
+    /// When a [`pattern`](Self::pattern) is authored it drives the schedule
+    /// verbatim (a step fires its barrels simultaneously; successive steps at
+    /// increasing offsets alternate). When no pattern is authored the bank
+    /// falls back to the uniform volley: `volley_count` shots of barrel `0`
+    /// spaced `volley_interval_secs` apart — exactly the pre-#765 behaviour.
+    pub fn firing_schedule(&self) -> Vec<(Vec<u32>, f32)> {
+        if !self.pattern.is_empty() {
+            let mut steps: Vec<(Vec<u32>, f32)> = self
+                .pattern
+                .iter()
+                .map(|s| (s.barrels.clone(), s.offset_secs.max(0.0)))
+                .collect();
+            steps.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            steps
+        } else {
+            (0..self.volley_count)
+                .map(|i| (vec![0u32], i as f32 * self.volley_interval_secs))
+                .collect()
         }
     }
 }
@@ -136,10 +181,22 @@ impl BlasterProjectile {
 /// Runtime state for the volley + cooldown cycle of one blaster bank.
 #[derive(Clone, Debug, Default)]
 pub struct BlasterVolleyState {
-    /// How many more projectiles remain to be launched in the current volley.
+    /// How many pattern steps remain to be fired in the current volley. Named
+    /// `pending_volley` for wire/back-compat: in a single-barrel bank one step
+    /// == one projectile, so this still counts projectiles remaining.
     pub pending_volley: u32,
-    /// Countdown timer (seconds) before the next projectile in the volley fires.
-    pub volley_timer: f32,
+    /// The resolved firing schedule for the active volley: an ordered list of
+    /// `(barrels, at_secs)` steps (issue #765). Empty when idle.
+    pub schedule: Vec<(Vec<u32>, f32)>,
+    /// Index of the next step in `schedule` to fire.
+    pub next_step: usize,
+    /// Seconds elapsed since the current volley (schedule) began.
+    pub volley_elapsed: f32,
+    /// Barrel indices that fired on the most recently emitted step (issue #765).
+    /// Empty when idle. Surfaced on the blackboard for the Tactical indicator.
+    pub active_barrels: Vec<u32>,
+    /// 1-based index of the most recently fired step (0 when none fired yet).
+    pub current_step: u32,
     /// True while the bank is waiting for the post-volley cooldown to expire.
     pub on_cooldown: bool,
     /// Seconds remaining on the cooldown timer (0 when ready).
@@ -190,15 +247,31 @@ impl BlasterSystem {
     /// launch — arc enforcement is deferred to a future issue. All projectiles
     /// are aimed at the predicted intercept regardless of the arc boundary.
     pub fn request_fire(&mut self) -> bool {
-        if self.config.volley_count == 0 {
+        // An empty schedule means nothing would fire (volley_count == 0 with no
+        // pattern authored). A pattern-driven bank is armed even when
+        // volley_count is 0, because the pattern — not volley_count — decides
+        // what fires.
+        if self.config.firing_schedule().is_empty() {
             return false;
         }
         if !self.is_fire_ready() {
             return false;
         }
-        self.volley.pending_volley = self.config.volley_count;
-        self.volley.volley_timer = 0.0; // fire immediately on first tick
+        self.arm_volley();
         true
+    }
+
+    /// Arm a fresh volley from the config's firing schedule (issue #765).
+    /// Resets the schedule cursor and elapsed timer so the first due step fires
+    /// on the next `tick`. Shared by `request_fire` and charge completion.
+    fn arm_volley(&mut self) {
+        let schedule = self.config.firing_schedule();
+        self.volley.pending_volley = schedule.len() as u32;
+        self.volley.schedule = schedule;
+        self.volley.next_step = 0;
+        self.volley.volley_elapsed = 0.0;
+        self.volley.active_barrels.clear();
+        self.volley.current_step = 0;
     }
 
     /// Begin the charge phase for a hold-to-fire bank (issue #636).
@@ -242,21 +315,25 @@ impl BlasterSystem {
         (self.volley.charge_elapsed / self.config.charge_time_secs).clamp(0.0, 1.0)
     }
 
-    /// Advance the volley timer by `dt` seconds.
+    /// Advance the volley by `dt` seconds against the resolved firing schedule
+    /// (issue #765).
     ///
-    /// When `volley_timer` reaches 0 and `pending_volley > 0`, one projectile
-    /// is launched and returned (for the caller to broadcast). When the volley
-    /// completes (`pending_volley == 0`), the cooldown starts. Expired
-    /// projectiles are also pruned here.
+    /// `barrel_origins` supplies one world-XZ position per barrel index — the
+    /// caller resolves these from the bank's authored barrel markers (or the
+    /// single `marker` in the backward-compat case). Every pattern step whose
+    /// `at_secs` has been reached this tick fires: for each barrel index in the
+    /// step a projectile is launched from `barrel_origins[index]`, producing
+    /// ONE [`LaunchEvent`] per barrel. A step with several barrels fires them
+    /// simultaneously; successive steps alternate. When the schedule is
+    /// exhausted the post-volley cooldown starts. Expired projectiles are
+    /// pruned here.
     ///
-    /// Returns a list of `LaunchEvent`s — one per projectile launched this
-    /// tick. The caller is responsible for obtaining the fire position and
-    /// emitting server messages.
+    /// The caller is responsible for emitting server messages from the returned
+    /// events (each already carries its resolved origin and barrel index).
     pub fn tick(
         &mut self,
         dt: f32,
-        shooter_x: f32,
-        shooter_z: f32,
+        barrel_origins: &[(f32, f32)],
         shooter_yaw: f32,
         target_x: f32,
         target_z: f32,
@@ -277,13 +354,10 @@ impl BlasterSystem {
         if self.volley.charging {
             self.volley.charge_elapsed += dt;
             if self.volley.charge_elapsed >= self.config.charge_time_secs {
-                // Charge complete — transition to volley start.
+                // Charge complete — arm the volley from the firing schedule.
                 self.volley.charging = false;
                 self.volley.charge_elapsed = 0.0;
-                if self.config.volley_count > 0 {
-                    self.volley.pending_volley = self.config.volley_count;
-                    self.volley.volley_timer = 0.0;
-                }
+                self.arm_volley();
             } else {
                 // Still charging — no projectile launch yet.
                 return Vec::new();
@@ -304,58 +378,85 @@ impl BlasterSystem {
             return Vec::new();
         }
 
-        // Count down the inter-shot timer.
-        self.volley.volley_timer -= dt;
-        if self.volley.volley_timer > 0.0 {
-            return Vec::new();
+        // Advance the volley clock and fire the next step if it is now due.
+        //
+        // At most ONE step fires per tick — this preserves the pre-#765
+        // one-projectile-per-tick cadence of the uniform volley exactly (a
+        // coarse `dt` spanning several offsets never batches successive steps
+        // into a single tick). A single step still emits one event PER barrel,
+        // so a simultaneous multi-barrel step fires together on one tick.
+        self.volley.volley_elapsed += dt;
+        let lifespan = self.config.range / self.config.projectile_speed;
+        let mut events = Vec::new();
+        let mut fired_barrels: Vec<u32> = Vec::new();
+
+        if self.volley.next_step < self.volley.schedule.len()
+            && self.volley.schedule[self.volley.next_step].1 <= self.volley.volley_elapsed
+        {
+            let barrels = self.volley.schedule[self.volley.next_step].0.clone();
+            for &barrel in &barrels {
+                // Origin resolves per barrel; falls back to the first supplied
+                // origin (then the world origin) so a mis-sized origin slice
+                // still fires from a plausible point rather than panicking.
+                let (origin_x, origin_z) = barrel_origins
+                    .get(barrel as usize)
+                    .copied()
+                    .or_else(|| barrel_origins.first().copied())
+                    .unwrap_or((0.0, 0.0));
+                let uuid = next_uuid();
+                let heading = predict_intercept_heading(
+                    origin_x,
+                    origin_z,
+                    target_x,
+                    target_z,
+                    target_vx,
+                    target_vz,
+                    self.config.projectile_speed,
+                    shooter_yaw,
+                    self.config.facing_deg,
+                );
+                self.in_flight.push(BlasterProjectile {
+                    id: uuid.clone(),
+                    x: origin_x,
+                    z: origin_z,
+                    heading,
+                    speed: self.config.projectile_speed,
+                    lifespan_remaining: lifespan,
+                    collision_radius: self.config.collision_radius,
+                    damage: self.config.damage,
+                    shield_pierce: self.config.shield_pierce,
+                    source_uuid: source_uuid.to_string(),
+                });
+                events.push(LaunchEvent {
+                    projectile_id: uuid,
+                    x: origin_x,
+                    z: origin_z,
+                    heading,
+                    barrel,
+                });
+            }
+            fired_barrels = barrels;
+            self.volley.next_step += 1;
+            self.volley.current_step = self.volley.next_step as u32;
+            self.volley.pending_volley = self.volley.pending_volley.saturating_sub(1);
         }
 
-        // Fire one projectile.
-        let uuid = next_uuid();
-        let heading = predict_intercept_heading(
-            shooter_x,
-            shooter_z,
-            target_x,
-            target_z,
-            target_vx,
-            target_vz,
-            self.config.projectile_speed,
-            shooter_yaw,
-            self.config.facing_deg,
-        );
-        let lifespan = self.config.range / self.config.projectile_speed;
-        let projectile = BlasterProjectile {
-            id: uuid.clone(),
-            x: shooter_x,
-            z: shooter_z,
-            heading,
-            speed: self.config.projectile_speed,
-            lifespan_remaining: lifespan,
-            collision_radius: self.config.collision_radius,
-            damage: self.config.damage,
-            shield_pierce: self.config.shield_pierce,
-            source_uuid: source_uuid.to_string(),
-        };
-        let event = LaunchEvent {
-            projectile_id: uuid,
-            x: projectile.x,
-            z: projectile.z,
-            heading: projectile.heading,
-        };
-        self.in_flight.push(projectile);
+        if !fired_barrels.is_empty() {
+            self.volley.active_barrels = fired_barrels;
+        }
 
-        self.volley.pending_volley -= 1;
-        // Schedule the next shot.
-        if self.volley.pending_volley > 0 {
-            self.volley.volley_timer = self.config.volley_interval_secs;
-        } else {
-            // Volley complete — start cooldown.
+        // Volley complete — start cooldown and clear the active-step indicator.
+        if self.volley.pending_volley == 0 && self.volley.next_step >= self.volley.schedule.len() {
             self.volley.on_cooldown = true;
             self.volley.cooldown_remaining = self.config.cooldown_secs;
-            self.volley.volley_timer = 0.0;
+            self.volley.schedule.clear();
+            self.volley.next_step = 0;
+            self.volley.volley_elapsed = 0.0;
+            self.volley.active_barrels.clear();
+            self.volley.current_step = 0;
         }
 
-        vec![event]
+        events
     }
 
     /// Check every live projectile against a list of possible targets.
@@ -447,6 +548,16 @@ impl BlasterSystem {
             charge_progress: self.charge_progress(),
             has_charge: self.config.charge_time_secs > 0.0,
             readiness,
+            active_barrels: self.volley.active_barrels.clone(),
+            pattern_step: self.volley.current_step,
+            // Only a genuine multi-barrel pattern reports a length; the uniform
+            // single-barrel volley leaves this 0 so the client shows no
+            // step indicator for legacy banks.
+            pattern_len: if self.config.pattern.is_empty() {
+                0
+            } else {
+                self.config.pattern.len() as u32
+            },
         }
     }
 }
@@ -460,6 +571,10 @@ pub struct LaunchEvent {
     pub x: f32,
     pub z: f32,
     pub heading: f32,
+    /// Zero-based barrel index this bolt left from (issue #765). `0` for a
+    /// single-barrel/backward-compat bank. Lets telemetry and the caller
+    /// attribute the shot to a specific authored barrel marker.
+    pub barrel: u32,
 }
 
 /// Projectile stats returned by `consume_hit` for the damage system.
@@ -552,6 +667,8 @@ mod tests {
             recoil_impulse: 0.0,
             screenshake_magnitude: 0.0,
             marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
             range: 35.0,
         })
     }
@@ -561,12 +678,14 @@ mod tests {
     }
 
     fn tick_system(sys: &mut BlasterSystem, dt: f32, uuids: &mut Vec<String>) -> Vec<LaunchEvent> {
+        // Enough origins for any barrel index the tests use; a single-barrel
+        // bank only ever reads index 0.
+        let origins = [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
         let (tx, tz, tvx, tvz) = no_target();
         let mut idx = 0usize;
         let events = sys.tick(
             dt,
-            0.0,
-            0.0,
+            &origins,
             0.0,
             tx,
             tz,
@@ -606,7 +725,7 @@ mod tests {
         sys.request_fire();
 
         let mut uuids = Vec::new();
-        // First shot fires immediately (volley_timer starts at 0).
+        // First shot fires immediately (schedule step 0 is at offset 0).
         let e1 = tick_system(&mut sys, 0.001, &mut uuids);
         assert_eq!(e1.len(), 1, "first tick should launch 1 projectile");
 
@@ -630,6 +749,142 @@ mod tests {
         // After volley, enters cooldown.
         assert!(sys.volley.on_cooldown);
         assert!(!sys.is_fire_ready());
+    }
+
+    // ── Patterned multi-barrel attacks (issue #765) ─────────────────────────
+
+    use crate::weapons::pattern::BarrelPatternStep;
+
+    fn step(barrels: &[u32], offset: f32) -> BarrelPatternStep {
+        BarrelPatternStep {
+            barrels: barrels.to_vec(),
+            offset_secs: offset,
+        }
+    }
+
+    fn make_pattern_system(barrels: Vec<String>, pattern: Vec<BarrelPatternStep>) -> BlasterSystem {
+        BlasterSystem::new(BlasterBankConfig {
+            id: "multi".to_string(),
+            volley_interval_secs: 0.1,
+            cooldown_secs: 2.0,
+            projectile_speed: 40.0,
+            range: 35.0,
+            barrels,
+            pattern,
+            ..BlasterBankConfig::default()
+        })
+    }
+
+    /// Tick with per-barrel origins so the emitted events prove which barrel
+    /// fired (by its distinct world X).
+    fn tick_with_origins(
+        sys: &mut BlasterSystem,
+        dt: f32,
+        origins: &[(f32, f32)],
+    ) -> Vec<LaunchEvent> {
+        let mut idx = 0usize;
+        sys.tick(
+            dt,
+            origins,
+            0.0,
+            100.0,
+            0.0,
+            0.0,
+            0.0,
+            "shooter",
+            &mut || {
+                idx += 1;
+                format!("p-{idx}")
+            },
+        )
+    }
+
+    #[test]
+    fn alternating_pattern_fires_barrels_in_sequence() {
+        // Two barrels, two steps at increasing offsets → alternating fire.
+        let sys_barrels = vec!["b0".to_string(), "b1".to_string()];
+        let pattern = vec![step(&[0], 0.0), step(&[1], 0.2)];
+        let mut sys = make_pattern_system(sys_barrels, pattern);
+        assert!(sys.request_fire());
+        assert_eq!(sys.volley.pending_volley, 2, "two scheduled steps");
+
+        // Distinct origins per barrel so the event's X identifies the barrel.
+        let origins = [(10.0, 0.0), (20.0, 0.0)];
+
+        // First tick fires only barrel 0 (offset 0).
+        let e1 = tick_with_origins(&mut sys, 0.01, &origins);
+        assert_eq!(e1.len(), 1, "step 0 fires one barrel");
+        assert_eq!(e1[0].barrel, 0);
+        assert!((e1[0].x - 10.0).abs() < 1e-4, "barrel 0 origin");
+
+        // Not yet at 0.2s → no fire.
+        let e2 = tick_with_origins(&mut sys, 0.1, &origins);
+        assert_eq!(e2.len(), 0, "barrel 1 not due until 0.2s");
+
+        // Past 0.2s → barrel 1 fires.
+        let e3 = tick_with_origins(&mut sys, 0.1, &origins);
+        assert_eq!(e3.len(), 1, "step 1 fires one barrel");
+        assert_eq!(e3[0].barrel, 1);
+        assert!((e3[0].x - 20.0).abs() < 1e-4, "barrel 1 origin");
+
+        // Volley done → cooldown.
+        assert!(sys.volley.on_cooldown);
+    }
+
+    #[test]
+    fn simultaneous_step_fires_multiple_barrels_one_tick() {
+        // A single step listing several barrels fires them together on one tick.
+        let sys_barrels = vec!["b0".to_string(), "b1".to_string(), "b2".to_string()];
+        let pattern = vec![step(&[0, 2], 0.0)];
+        let mut sys = make_pattern_system(sys_barrels, pattern);
+        assert!(sys.request_fire());
+
+        let origins = [(10.0, 0.0), (20.0, 0.0), (30.0, 0.0)];
+        let e1 = tick_with_origins(&mut sys, 0.01, &origins);
+        assert_eq!(e1.len(), 2, "two barrels fire simultaneously");
+        let mut barrels: Vec<u32> = e1.iter().map(|e| e.barrel).collect();
+        barrels.sort();
+        assert_eq!(barrels, vec![0, 2]);
+        // Distinct origins prove the events come from distinct barrels.
+        let xs: Vec<f32> = e1.iter().map(|e| e.x).collect();
+        assert!(xs.contains(&10.0) && xs.contains(&30.0), "{xs:?}");
+        // Single-step pattern → volley completes immediately.
+        assert!(sys.volley.on_cooldown);
+    }
+
+    #[test]
+    fn backward_compat_single_barrel_unchanged() {
+        // No barrels + no pattern → identical to the legacy uniform volley:
+        // volley_count shots from the single origin, one per tick.
+        let mut sys = make_system(); // volley_count 3, interval 0.1
+        assert!(sys.request_fire());
+        assert_eq!(sys.volley.pending_volley, 3);
+        let origins = [(5.0, 0.0)];
+
+        let e1 = tick_with_origins(&mut sys, 0.001, &origins);
+        assert_eq!(e1.len(), 1);
+        assert_eq!(e1[0].barrel, 0, "implicit single barrel is index 0");
+        assert!((e1[0].x - 5.0).abs() < 1e-4);
+
+        assert_eq!(tick_with_origins(&mut sys, 0.05, &origins).len(), 0);
+        assert_eq!(tick_with_origins(&mut sys, 0.1, &origins).len(), 1);
+        assert_eq!(tick_with_origins(&mut sys, 0.1, &origins).len(), 1);
+        assert!(sys.volley.on_cooldown);
+    }
+
+    #[test]
+    fn bank_state_reflects_active_pattern() {
+        let sys_barrels = vec!["b0".to_string(), "b1".to_string()];
+        let pattern = vec![step(&[0], 0.0), step(&[1], 0.2)];
+        let mut sys = make_pattern_system(sys_barrels, pattern);
+        sys.request_fire();
+        let origins = [(10.0, 0.0), (20.0, 0.0)];
+        tick_with_origins(&mut sys, 0.01, &origins);
+
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -10.0)), true);
+        assert_eq!(state.pattern_len, 2, "two-step pattern");
+        assert_eq!(state.pattern_step, 1, "on step 1 after first fire");
+        assert_eq!(state.active_barrels, vec![0], "barrel 0 just fired");
     }
 
     #[test]

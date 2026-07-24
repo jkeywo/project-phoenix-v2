@@ -74,6 +74,28 @@ describe('collectMarkerRefs', () => {
     const refs = collectMarkerRefs(entity({ system: [{ id: 'shields', marker: 'ship' }] }));
     expect(refs).toEqual([]);
   });
+
+  it('emits one reference per authored barrel marker (issue #765)', () => {
+    const refs = collectMarkerRefs(
+      entity({
+        weapons_console: {
+          blaster_banks: [
+            { id: 'twin', marker: 'blaster_fore', barrels: ['blaster_fore_port', 'blaster_fore_starboard'] },
+          ],
+        },
+      }),
+    );
+    expect(refs.map((r) => r.path)).toEqual([
+      'weapons_console.blaster_banks[0].marker',
+      'weapons_console.blaster_banks[0].barrels[0]',
+      'weapons_console.blaster_banks[0].barrels[1]',
+    ]);
+    expect(refs.map((r) => r.name)).toEqual([
+      'blaster_fore',
+      'blaster_fore_port',
+      'blaster_fore_starboard',
+    ]);
+  });
 });
 
 describe('validateEntityMarkers — representative systems, success and failure', () => {

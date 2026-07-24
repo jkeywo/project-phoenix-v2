@@ -214,6 +214,42 @@ describe('PhBlastersControls', () => {
     expect(el.shadowRoot.querySelector('.btn').disabled).toBe(true);
   });
 
+  // ── Patterned multi-barrel attack indicator (issue #765) ───────────────
+  it('renders the active patterned attack step and barrels', () => {
+    const { el } = setup();
+    el.state = {
+      banks: [
+        {
+          id: 'heavy',
+          label: 'Heavy',
+          on_cooldown: false,
+          charge_progress: 0,
+          pending_volley: 2,
+          pattern_len: 3,
+          pattern_step: 1,
+          active_barrels: [0, 1],
+        },
+      ],
+    };
+    const patternRow = el.shadowRoot.querySelector('.pattern-row');
+    expect(patternRow.classList.contains('idle')).toBe(false);
+    expect(queryText(el, '.pattern-step')).toBe(
+      t('component.blasters.pattern_step', { step: 1, total: 3 }),
+    );
+    expect(queryText(el, '.pattern-barrels')).toBe(
+      t('component.blasters.barrels', { barrels: '0,1' }),
+    );
+  });
+
+  it('hides the pattern indicator for a legacy single-barrel bank', () => {
+    const { el } = setup();
+    el.state = {
+      banks: [{ id: 'port', label: 'Port', on_cooldown: false, charge_progress: 0, pattern_len: 0 }],
+    };
+    const patternRow = el.shadowRoot.querySelector('.pattern-row');
+    expect(patternRow.classList.contains('idle')).toBe(true);
+  });
+
   it('reconciles banks by id', () => {
     const { el } = setup();
     el.state = {

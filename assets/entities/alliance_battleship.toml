@@ -222,10 +222,16 @@ cooldown_secs = 6
 beam_color = [ 1, 0.4, 0.1, 1 ]
 marker = "phasers_aft"
 
-# Heavy blaster bank: hold-to-fire, 2-shot volley, heavy sphere projectile, recoil + screenshake.
+# Heavy blaster bank: hold-to-fire, twin fore barrels with a patterned attack
+# (issue #765). The timed pattern alternates single-barrel shots, then finishes
+# with a simultaneous both-barrel volley:
+#   t=0.0s  → barrel 0 (port)
+#   t=0.6s  → barrel 1 (starboard)
+#   t=1.2s  → barrels 0 AND 1 together (simultaneous)
 [[weapons_console.blaster_banks]]
 id = "heavy-fore"
 marker = "blaster_fore"
+barrels = [ "blaster_fore_port", "blaster_fore_starboard" ]
 facing_deg = 0
 fire_arc_deg = 22.5
 charge_time_secs = 3.0
@@ -240,6 +246,18 @@ shield_pierce = 0.15
 recoil_impulse = 6.0
 screenshake_magnitude = 1.0
 range = 50.0
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 0 ]
+offset_secs = 0.0
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 1 ]
+offset_secs = 0.6
+
+[[weapons_console.blaster_banks.pattern]]
+barrels = [ 0, 1 ]
+offset_secs = 1.2
 
 # 5-tube torpedo layout: 3 fore + 2 aft, volley_max=3, 30-round magazine, burst_interval=0.5s
 [torpedoes]

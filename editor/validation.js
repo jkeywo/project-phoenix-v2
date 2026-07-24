@@ -5,6 +5,7 @@ import { validateTriggerActions } from './action-schema.js';
 import { validateWorldReferences } from './world-references.js';
 import { validateWorldReferencesIndexed } from './world-references-indexed.js';
 import { validateEntityMarkers } from './marker-validate.js';
+import { validateBlasterBanks } from './blaster-validate.js';
 
 /**
  * Pure admission primitive (issue #757). Mirrors the Rust atomic-activation
@@ -198,6 +199,13 @@ export function validateFile(filePath, parsedContent, context = null) {
     if (parsedContent.behaviour) {
       const behaviourResults = validateBehaviourBlock(parsedContent.behaviour);
       results.push(...behaviourResults);
+    }
+
+    // Blaster barrel-pattern schema (issue #765): barrel-index references,
+    // per-step barrel lists, and offsets must be valid, mirroring
+    // `validate_blaster_banks` in src/entities/config.rs. Errors block save.
+    if (parsedContent.weapons_console?.blaster_banks) {
+      results.push(...validateBlasterBanks(parsedContent.weapons_console.blaster_banks));
     }
 
     // Model-marker contract (issue #758). Cross-file: the entity's `[mesh]`

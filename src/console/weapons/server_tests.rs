@@ -3410,6 +3410,8 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
         recoil_impulse: 0.0,
         screenshake_magnitude: 0.0,
         marker: None,
+        barrels: Vec::new(),
+        pattern: Vec::new(),
         range: 35.0,
     });
     bank.in_flight.push(crate::blaster::BlasterProjectile {
@@ -3484,6 +3486,8 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
         recoil_impulse: 0.0,
         screenshake_magnitude: 0.0,
         marker: None,
+        barrels: Vec::new(),
+        pattern: Vec::new(),
         range: 35.0,
     });
     bank.in_flight.push(crate::blaster::BlasterProjectile {
@@ -8671,6 +8675,8 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
                     recoil_impulse: 0.0,
                     screenshake_magnitude: 0.0,
                     marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
                     range: 35.0,
                 },
             )]),
@@ -8762,6 +8768,8 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
                     recoil_impulse: 0.0,
                     screenshake_magnitude: 0.0,
                     marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
                     range: 35.0,
                 },
             )]),
@@ -8838,6 +8846,8 @@ fn handle_fire_blaster_accepts_ai_token() {
                     recoil_impulse: 0.0,
                     screenshake_magnitude: 0.0,
                     marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
                     range: 35.0,
                 },
             )]),
@@ -8955,6 +8965,8 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
                     recoil_impulse: 0.0,
                     screenshake_magnitude: 0.0,
                     marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
                     range: 35.0,
                 },
             )]),

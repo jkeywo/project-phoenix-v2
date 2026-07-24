@@ -34,6 +34,8 @@ export class PhBlastersControls extends HTMLElement {
     .bank-row.ready .status { color: var(--loaded); }
     .bar-row { display: flex; align-items: center; gap: 0.4rem; padding-left: 2.9rem; }
     .bar-label { font-size: 0.55rem; color: var(--ink-dim); min-width: 2rem; }
+    .pattern-row { display: flex; gap: 0.5rem; padding-left: 2.9rem; font-size: 0.5rem; letter-spacing: 0.15em; color: var(--reloading); }
+    .pattern-row.idle { display: none; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header"><span>${t('component.blasters.title')}</span></div>
@@ -149,6 +151,18 @@ export class PhBlastersControls extends HTMLElement {
         barRow.appendChild(barWrap2);
         row.appendChild(barRow);
 
+        // Patterned-attack indicator (issue #765): current pattern step +
+        // active barrels. Hidden unless the bank has a multi-barrel pattern.
+        const patternRow = document.createElement('div');
+        patternRow.className = 'pattern-row idle';
+        const stepEl = document.createElement('span');
+        stepEl.className = 'pattern-step';
+        const barrelsEl = document.createElement('span');
+        barrelsEl.className = 'pattern-barrels';
+        patternRow.appendChild(stepEl);
+        patternRow.appendChild(barrelsEl);
+        row.appendChild(patternRow);
+
         if (idx < container.children.length) {
           container.insertBefore(row, container.children[idx]);
         } else {
@@ -216,6 +230,28 @@ export class PhBlastersControls extends HTMLElement {
         chargeFill.style.display = 'none';
         cooldownFill.style.display = 'none';
         row.querySelector('.bar-label').textContent = '';
+      }
+
+      // Patterned-attack indicator (issue #765). `pattern_len > 0` marks a
+      // multi-barrel patterned bank; show which step is active and which
+      // barrels are currently firing.
+      const patternRow = row.querySelector('.pattern-row');
+      const patternLen = Number(bank.pattern_len || 0);
+      const patternStep = Number(bank.pattern_step || 0);
+      const activeBarrels = Array.isArray(bank.active_barrels) ? bank.active_barrels : [];
+      if (patternLen > 0 && patternStep > 0) {
+        patternRow.className = 'pattern-row';
+        patternRow.querySelector('.pattern-step').textContent = t('component.blasters.pattern_step', {
+          step: patternStep,
+          total: patternLen,
+        });
+        patternRow.querySelector('.pattern-barrels').textContent = activeBarrels.length
+          ? t('component.blasters.barrels', { barrels: activeBarrels.join(',') })
+          : '';
+      } else {
+        patternRow.className = 'pattern-row idle';
+        patternRow.querySelector('.pattern-step').textContent = '';
+        patternRow.querySelector('.pattern-barrels').textContent = '';
       }
     });
   }

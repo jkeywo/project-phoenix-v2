@@ -399,6 +399,19 @@ pub struct BlasterBankState {
     /// Shared readiness + blocking-reason contract (issue #764).
     #[serde(default)]
     pub readiness: WeaponReadiness,
+    /// Barrel indices firing on the current pattern step (issue #765). Empty
+    /// when the bank is idle or between steps of an alternating pattern with no
+    /// barrel currently active. Drives the Tactical barrel/step indicator.
+    #[serde(default)]
+    pub active_barrels: Vec<u32>,
+    /// 1-based index of the current pattern step (0 when idle). Together with
+    /// `pattern_len` this renders as "step N/M" for a patterned attack.
+    #[serde(default)]
+    pub pattern_step: u32,
+    /// Total number of steps in this bank's authored firing pattern (issue
+    /// #765). 0 when the bank has no multi-barrel pattern (single-barrel volley).
+    #[serde(default)]
+    pub pattern_len: u32,
 }
 
 /// Static, per-bank configuration sent to clients in `Welcome` so the

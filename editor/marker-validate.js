@@ -94,6 +94,28 @@ export function collectMarkerRefs(parsed) {
   banks(parsed.weapons_console?.blaster_banks, 'weapons_console.blaster_banks', 'Blaster bank');
   banks(parsed.torpedoes?.tubes, 'torpedoes.tubes', 'Torpedo tube');
 
+  // Per-barrel markers (issue #765): each authored barrel-marker name is its
+  // own reference, so a missing/incompatible barrel marker is rejected just
+  // like the bank's single `marker`.
+  const blasterBanks = parsed.weapons_console?.blaster_banks;
+  if (Array.isArray(blasterBanks)) {
+    for (let i = 0; i < blasterBanks.length; i++) {
+      const entry = blasterBanks[i];
+      const barrels = entry && Array.isArray(entry.barrels) ? entry.barrels : null;
+      if (!barrels) continue;
+      for (let b = 0; b < barrels.length; b++) {
+        const name = typeof barrels[b] === 'string' ? barrels[b].trim() : '';
+        if (!name) continue;
+        refs.push({
+          role: 'weapon',
+          owner: `Blaster bank "${entry.id ?? i}" barrel ${b}`,
+          name,
+          path: `weapons_console.blaster_banks[${i}].barrels[${b}]`,
+        });
+      }
+    }
+  }
+
   const pfxMarkers = parsed.helm_console?.engine_pfx?.markers;
   if (Array.isArray(pfxMarkers)) {
     for (let i = 0; i < pfxMarkers.length; i++) {

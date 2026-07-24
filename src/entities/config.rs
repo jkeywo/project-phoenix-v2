@@ -1105,9 +1105,21 @@ pub struct BlasterBankConfig {
     /// Screenshake magnitude (reserved for a later issue).
     #[serde(default)]
     pub screenshake_magnitude: f32,
-    /// Optional rig-marker name linking this bank to a mount point.
+    /// Optional rig-marker name linking this bank to a mount point. In the
+    /// single-barrel (backward-compat) case this is the sole projectile origin.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Authored barrel-marker names (issue #765). Each entry is a rig-marker
+    /// name; a barrel-index pattern step addresses these by position. When
+    /// empty the bank has one implicit barrel = `marker` (unchanged behaviour).
+    #[serde(default)]
+    pub barrels: Vec<String>,
+    /// Timed multi-barrel firing pattern (issue #765). A step fires its listed
+    /// barrel indices simultaneously at `offset_secs`; successive steps at
+    /// increasing offsets alternate. When empty the bank fires the uniform
+    /// `volley_count` volley from the single implicit barrel (unchanged).
+    #[serde(default)]
+    pub pattern: crate::weapons::pattern::BarrelPattern,
     /// Maximum range in world units. Projectile lifespan is computed per-bank
     /// as `range / projectile_speed`. Use `default_blaster_range` (35.0) when
     /// absent from TOML.
@@ -1162,6 +1174,8 @@ impl BlasterBankConfig {
             recoil_impulse: self.recoil_impulse,
             screenshake_magnitude: self.screenshake_magnitude,
             marker: self.marker.clone(),
+            barrels: self.barrels.clone(),
+            pattern: self.pattern.clone(),
             range: self.range,
         }
     }
@@ -1246,6 +1260,45 @@ pub fn validate_phaser_banks(banks: &[PhaserBankConfig]) -> Result<(), String> {
                 b.id, b.auto_arc_deg, b.fire_arc_deg
             ));
         }
+    }
+    Ok(())
+}
+
+/// Validate a `[[weapons_console.blaster_banks]]` list parsed from TOML
+/// (issue #765).
+///
+/// An empty list is accepted — most hulls carry no blasters. Rejects:
+///   - duplicate `id` values,
+///   - `fire_arc_deg` outside `(0, 360]`,
+///   - a barrel pattern that fires no barrels in a step, references a barrel
+///     index beyond the declared barrel count, uses a negative offset, or is
+///     omitted while more than one barrel is declared (see
+///     [`crate::weapons::pattern::validate_barrel_pattern`]).
+///
+/// The barrel count is the authored `barrels.len()`, or `1` for the implicit
+/// single-barrel (backward-compat) bank.
+pub fn validate_blaster_banks(banks: &[BlasterBankConfig]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for b in banks {
+        if !seen.insert(b.id.as_str()) {
+            return Err(format!("duplicate blaster bank id '{}'", b.id));
+        }
+        if !(b.fire_arc_deg > 0.0 && b.fire_arc_deg <= 360.0) {
+            return Err(format!(
+                "blaster bank '{}' has fire_arc_deg={} outside (0, 360]",
+                b.id, b.fire_arc_deg
+            ));
+        }
+        let barrel_count = if b.barrels.is_empty() {
+            1
+        } else {
+            b.barrels.len()
+        };
+        crate::weapons::pattern::validate_barrel_pattern(
+            &format!("blaster bank '{}'", b.id),
+            barrel_count,
+            &b.pattern,
+        )?;
     }
     Ok(())
 }
@@ -5041,6 +5094,126 @@ count = 10
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));
+    }
+
+    // ── Blaster bank validation (issue #765) ─────────────────────────────────
+
+    fn blaster_bank(id: &str) -> BlasterBankConfig {
+        BlasterBankConfig {
+            id: id.into(),
+            fire_arc_deg: 90.0,
+            ..BlasterBankConfig::default()
+        }
+    }
+
+    #[test]
+    fn validate_blaster_banks_accepts_empty_list() {
+        // Most hulls carry no blasters; an empty list is fine.
+        assert!(validate_blaster_banks(&[]).is_ok());
+    }
+
+    #[test]
+    fn validate_blaster_banks_accepts_legacy_single_barrel() {
+        // No barrels + no pattern is the backward-compat single-barrel bank.
+        let banks = vec![blaster_bank("fore")];
+        assert!(validate_blaster_banks(&banks).is_ok());
+    }
+
+    #[test]
+    fn validate_blaster_banks_accepts_valid_pattern() {
+        let mut b = blaster_bank("fore");
+        b.barrels = vec!["b0".into(), "b1".into()];
+        b.pattern = vec![
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![0],
+                offset_secs: 0.0,
+            },
+            crate::weapons::pattern::BarrelPatternStep {
+                barrels: vec![0, 1],
+                offset_secs: 0.3,
+            },
+        ];
+        assert!(validate_blaster_banks(&[b]).is_ok());
+    }
+
+    #[test]
+    fn validate_blaster_banks_rejects_barrel_index_out_of_range() {
+        let mut b = blaster_bank("fore");
+        b.barrels = vec!["b0".into(), "b1".into()];
+        b.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![2], // only 0,1 exist
+            offset_secs: 0.0,
+        }];
+        let err = validate_blaster_banks(&[b]).unwrap_err();
+        assert!(err.contains("barrel index 2"), "{err}");
+    }
+
+    #[test]
+    fn validate_blaster_banks_rejects_negative_offset() {
+        let mut b = blaster_bank("fore");
+        b.barrels = vec!["b0".into()];
+        b.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![0],
+            offset_secs: -0.5,
+        }];
+        let err = validate_blaster_banks(&[b]).unwrap_err();
+        assert!(err.contains("offset_secs"), "{err}");
+    }
+
+    #[test]
+    fn validate_blaster_banks_rejects_empty_step() {
+        let mut b = blaster_bank("fore");
+        b.barrels = vec!["b0".into()];
+        b.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![],
+            offset_secs: 0.0,
+        }];
+        assert!(validate_blaster_banks(&[b]).is_err());
+    }
+
+    #[test]
+    fn validate_blaster_banks_rejects_multi_barrel_without_pattern() {
+        let mut b = blaster_bank("fore");
+        b.barrels = vec!["b0".into(), "b1".into()];
+        // No pattern: under-specified for >1 barrel.
+        let err = validate_blaster_banks(&[b]).unwrap_err();
+        assert!(err.contains("pattern"), "{err}");
+    }
+
+    #[test]
+    fn validate_blaster_banks_rejects_duplicate_ids() {
+        let banks = vec![blaster_bank("fore"), blaster_bank("fore")];
+        let err = validate_blaster_banks(&banks).unwrap_err();
+        assert!(err.contains("duplicate"));
+    }
+
+    #[test]
+    fn every_shipped_blaster_bank_config_validates() {
+        // The authoring gate the editor enforces must hold for shipped hulls.
+        let mut problems: Vec<String> = Vec::new();
+        let entries = std::fs::read_dir("assets/entities").expect("assets/entities exists");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml = std::fs::read_to_string(&path).expect("entity readable");
+            let cfg = match EntityConfig::from_toml(&toml) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if let Some(weapons) = cfg.weapons_console.as_ref() {
+                if let Err(e) = validate_blaster_banks(&weapons.blaster_banks) {
+                    problems.push(format!("{file}: {e}"));
+                }
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "shipped blaster banks must validate:\n{}",
+            problems.join("\n")
+        );
     }
 
     #[test]

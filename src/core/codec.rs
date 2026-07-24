@@ -1395,10 +1395,10 @@ mod tests {
             phaser_mode: PhaserMode::Manual,
             blasters: vec![BlasterBankState {
                 id: "starboard".into(),
-                fire_ready: true,
+                fire_ready: false,
                 on_cooldown: false,
                 cooldown_remaining: 0.0,
-                pending_volley: 0,
+                pending_volley: 2,
                 charge_progress: 0.0,
                 has_charge: false,
                 readiness: WeaponReadiness {
@@ -1407,6 +1407,11 @@ mod tests {
                     target_range: Some(12.5),
                     target_arc: Some(3.0),
                 },
+                // Patterned attack in progress (issue #765): step 1 of 3,
+                // barrels 0 and 2 firing simultaneously.
+                active_barrels: vec![0, 2],
+                pattern_step: 1,
+                pattern_len: 3,
             }],
             phaser_frequency: 0.5,
         };

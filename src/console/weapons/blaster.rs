@@ -404,23 +404,31 @@ pub(crate) fn tick_blaster_system(
             let recoil_impulse = bank.config.recoil_impulse;
             let screenshake_magnitude = bank.config.screenshake_magnitude;
 
-            // Named rig marker takes priority for the projectile's spawn
-            // origin; falls back to ship center when the bank has no marker
-            // or the model's sidecar doesn't define it.
-            let (origin_x, origin_z) = bank
-                .config
-                .marker
-                .as_deref()
-                .and_then(|name| {
-                    markers_opt.and_then(|m| m.resolve_world_position(transform, name))
+            // Resolve one world-space origin per authored barrel marker (issue
+            // #765). A bank with no barrels authored has one implicit barrel =
+            // the bank's single `marker`. Each name resolves via the rig, and
+            // falls back to ship centre when the bank has no marker or the
+            // sidecar doesn't declare it.
+            let barrel_names: Vec<Option<String>> = if bank.config.barrels.is_empty() {
+                vec![bank.config.marker.clone()]
+            } else {
+                bank.config.barrels.iter().cloned().map(Some).collect()
+            };
+            let barrel_origins: Vec<(f32, f32)> = barrel_names
+                .iter()
+                .map(|name| {
+                    name.as_deref()
+                        .and_then(|n| {
+                            markers_opt.and_then(|m| m.resolve_world_position(transform, n))
+                        })
+                        .map(|pos| (pos.x, pos.z))
+                        .unwrap_or((physics.x, physics.z))
                 })
-                .map(|pos| (pos.x, pos.z))
-                .unwrap_or((physics.x, physics.z));
+                .collect();
 
             let events = bank.tick(
                 dt,
-                origin_x,
-                origin_z,
+                &barrel_origins,
                 physics.yaw,
                 target_x,
                 target_z,

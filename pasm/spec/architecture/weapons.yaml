@@ -187,7 +187,7 @@ entities:
     implementation:
       status: declared
       paths: [src/weapons/blaster.rs, src/console/weapons/mod.rs, src/entities/config.rs]
-      symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig]
+      symbols: [BlasterSystem, BlasterProjectile, BlasterBankConfig, LaunchEvent]
       tests: [cargo test]
 
   - state: blaster-projectile-state
@@ -281,14 +281,39 @@ entities:
 
   - component: patterned-barrel-attacks
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Patterned Barrel Attacks
       summary: Blaster and torpedo banks declare multiple barrel marker points and a timed attack pattern of offsets and barrel-index arrays, allowing alternating or simultaneous shots.
+      rationale:
+        - "Shared, reusable schema (issue #765). `BarrelPatternStep { barrels: Vec<u32>, offset_secs: f32 }` and the `BarrelPattern` alias live in the weapon-family-agnostic `src/weapons/pattern.rs` so torpedoes (issue #766) reuse the exact types and validator. A step fires its listed barrel indices SIMULTANEOUSLY at `offset_secs`; successive steps at increasing offsets ALTERNATE. Blasters wire it now; the blaster half of the evidence is covered here."
+        - "Backward compatible. A bank with no `barrels` and no `pattern` is one implicit barrel (= the existing `marker`) firing the uniform `volley_count` volley — `BlasterBankConfig::firing_schedule` returns the legacy schedule and `tick` fires at most one step per tick, preserving the pre-#765 one-bolt-per-tick cadence exactly. The four shipped blaster hulls are unchanged; `alliance_battleship` authors a real twin-barrel alternating-then-simultaneous pattern."
+        - "Authoring validation, both twins (AC1/AC3). `validate_barrel_pattern` (rejects empty step, barrel index >= barrel count, negative/non-finite offset, multi-barrel-with-no-pattern) is called by `validate_blaster_banks` (Rust) and mirrored by `editor/blaster-validate.js` wired into `validateFile`, so an invalid pattern blocks save via the #757 admission gate. Per-barrel marker references are emitted by `collect_marker_refs` / `collectMarkerRefs`, so a missing barrel marker is rejected by the shipped-asset conformance test and the editor."
+        - "Firing carries barrel identity (AC2). `BlasterSystem::tick` takes one world origin per barrel (`barrel_origins`), resolved by `tick_blaster_system` from each barrel's rig marker, and emits one `LaunchEvent { barrel, x, z, heading }` per firing barrel, so simultaneous steps launch multiple bolts from distinct authored points on one tick and alternating steps launch from the right origin each step."
+        - "Blackboard + Tactical (AC4). `BlasterBankState` gains `active_barrels`, `pattern_step`, `pattern_len`; `ph-blasters-controls.js` renders a step/barrel indicator (string ids `component.blasters.pattern_step`/`.barrels`). Round-tripped in `codec.rs`."
     architecture:
       kind: configuration-schema
       authority: authoritative
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/weapons/pattern.rs
+        - src/weapons/blaster.rs
+        - src/entities/config.rs
+        - src/entities/marker_validate.rs
+        - src/console/weapons/blaster.rs
+        - src/core/messages.rs
+        - editor/blaster-validate.js
+        - editor/marker-validate.js
+        - gui/components/ph-blasters-controls.js
+      symbols:
+        - BarrelPatternStep
+        - BarrelPattern
+        - validate_barrel_pattern
+        - validate_blaster_banks
+        - validateBlasterBanks
+      tests: [cargo test, npx vitest run]
 
   - component: weapon-readiness-feedback-policy
     core:

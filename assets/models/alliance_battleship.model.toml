@@ -51,3 +51,13 @@ direction = [ -1, 0, 0 ]
 [markers.blaster_fore]
 position = [ -0.00004438507734219972, 0.56257748899829, -0.02786860877870094 ]
 direction = [ 0, 0, 1 ]
+
+# Twin fore barrels for the patterned heavy blaster (issue #765): port and
+# starboard of the central mount, firing forward.
+[markers.blaster_fore_port]
+position = [ 0.25, 0.56257748899829, -0.02786860877870094 ]
+direction = [ 0, 0, 1 ]
+
+[markers.blaster_fore_starboard]
+position = [ -0.25, 0.56257748899829, -0.02786860877870094 ]
+direction = [ 0, 0, 1 ]

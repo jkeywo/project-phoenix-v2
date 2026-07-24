@@ -7,7 +7,10 @@ pub mod torpedo;
 use bevy::prelude::*;
 
 use crate::entity_spawner::FactionComponent;
-use crate::messages::{CoordinationPayload, ModifierSlot, SystemBlackboard, WeaponsBlackboard};
+use crate::messages::{
+    CoordinationPayload, ModifierSlot, SystemBlackboard, WeaponEmitterArc, WeaponFamily,
+    WeaponTargetGeometry, WeaponsBlackboard,
+};
 use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
 use crate::ship_state::ShipPhysics;
 use crate::simulation::AsteroidUuid;
@@ -300,22 +303,97 @@ pub(crate) use blackboard::{
     publish_weapons_core_blackboard, WeaponsUpdateFirstTick,
 };
 
-/// Tracks the last target for which Weapons asked Helm to bring the phaser
-/// arc to bear, so the channel-3 request only fires on a new/changed arc
-/// miss rather than every tick (issue #677).
+/// Tracks the last arc-bearing request Weapons asked Helm for, so the
+/// channel-3 request only re-fires when the *condition* changes — a different
+/// weapon family, a different target, or a change to the usable emitter arcs
+/// (e.g. a bank going offline / a range modifier shifting) — rather than every
+/// tick the same miss persists (issues #677, #767).
 #[derive(Component, Default, Clone)]
 pub struct WeaponsArcRequestState {
-    pub last_notified_target: Option<String>,
+    pub last: Option<(WeaponFamily, String, Vec<WeaponEmitterArc>)>,
+}
+
+/// One weapon emitter's inputs to the pure family-arc evaluation (issue #767):
+/// its online/usable state, its family arc geometry against the current target,
+/// and the arc/range Helm would need to turn toward.
+struct EmitterArcInput {
+    /// Emitter is not offline (disabled / destroyed).
+    online: bool,
+    /// Emitter can actually fire a round if it bore (torpedo tube loaded);
+    /// always true for phasers/blasters, which have no per-emitter ammo.
+    usable: bool,
+    facing_deg: f32,
+    arc_deg: f32,
+    range: f32,
+    /// Shared geometry against the locked target for this emitter's arc/range.
+    geometry: WeaponTargetGeometry,
+}
+
+/// Pure, testable core of the arc-bearing family condition (issues #764, #767).
+///
+/// A family qualifies for an arc-bearing request ONLY when it is capable
+/// (≥1 emitter), at least one usable ONLINE emitter is blocked specifically by
+/// `OutOfArc` while in range, and NO emitter is `Ready`. Returns the union of
+/// the family's usable ONLINE emitter arcs to carry in the request, or `None`
+/// when the family does not qualify — incapable (no emitters), unavailable
+/// (all offline), or out of range (no bearing helps). Driven off the shared
+/// [`WeaponReadiness`] classification so emitter and Helm agree on the
+/// condition; cooldown/loading are deliberately not considered here (a bearing
+/// request is about *facing*, matching the pre-#767 phaser behaviour).
+fn evaluate_family_arc_request(emitters: &[EmitterArcInput]) -> Option<Vec<WeaponEmitterArc>> {
+    if emitters.is_empty() {
+        return None; // incapable — nothing to bring to bear
+    }
+    let mut arcs = Vec::new();
+    let mut has_out_of_arc_in_range = false;
+    let mut has_ready = false;
+    for e in emitters {
+        if e.online && e.usable {
+            arcs.push(WeaponEmitterArc {
+                facing_deg: e.facing_deg,
+                arc_deg: e.arc_deg,
+                range: e.range,
+            });
+        }
+        // Cooldown/loading are intentionally `false`: arc-bearing is a facing
+        // request, not a timing one. `no_ammo` stands in for "unusable" (an
+        // empty torpedo tube) so it classifies as `NoAmmo`, never `OutOfArc`.
+        let readiness = crate::messages::WeaponReadiness::evaluate(
+            e.online,
+            false,
+            false,
+            !e.usable,
+            Some(e.geometry),
+        );
+        if readiness.blocking_reason == crate::messages::WeaponBlockReason::OutOfArc {
+            has_out_of_arc_in_range = true;
+        }
+        if readiness.ready {
+            has_ready = true;
+        }
+    }
+    (has_out_of_arc_in_range && !has_ready).then_some(arcs)
 }
 
 /// Emit a channel-3 `ArcBearingRequest` coordination message to Helm whenever
-/// the current weapons target is within at least one bank's range but
-/// outside every bank's firing arc.
+/// the selected usable weapon family has the current target in range but
+/// outside every one of that family's available arcs (issues #677, #767).
+///
+/// Generalises the pre-#767 phaser-only request to be weapon-family-aware:
+/// each capable family (phasers, blasters, torpedoes) is evaluated via
+/// [`evaluate_family_arc_request`]; a single family's request is emitted so
+/// exactly one is ever active. The family-selection rule is a **fixed
+/// priority — phasers, then blasters, then torpedoes** (structural, not a
+/// gameplay value): the always-available primary beam is brought to bear first,
+/// falling back to secondary families only when the primary cannot be the
+/// reason. There is no per-family Tactical selector surface to key off, so a
+/// deterministic priority keeps exactly one request active and independent of
+/// evaluation order.
 ///
 /// Iterates every ship (player + NPC), mirroring `tick_sensors_frequency_hint`.
-/// Debounced via [`WeaponsArcRequestState`]: only fires when the arc-missed
-/// target changes (including transitioning from "no miss" to "miss" or back),
-/// not on every tick the same miss persists.
+/// Debounced via [`WeaponsArcRequestState`]: re-fires when the family, target,
+/// OR the usable arc set changes, not on every tick the same miss persists.
+#[allow(clippy::too_many_arguments)]
 fn tick_weapons_arc_request(
     mut ship_q: Query<
         (
@@ -324,6 +402,8 @@ fn tick_weapons_arc_request(
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             Option<&PhaserCombatConfigResource>,
+            Option<&blaster::BlasterSystemResource>,
+            Option<&torpedo::TorpedoSystemResource>,
             Option<&crate::modifiers::ShipModifiers>,
             &mut WeaponsArcRequestState,
         ),
@@ -345,6 +425,8 @@ fn tick_weapons_arc_request(
         physics,
         blackboards,
         combat_config_opt,
+        blaster_opt,
+        torpedo_opt,
         modifiers_opt,
         mut state,
     ) in ship_q.iter_mut()
@@ -358,77 +440,153 @@ fn tick_weapons_arc_request(
             _ => None,
         };
         let Some(target_uuid) = combat_lock else {
-            state.last_notified_target = None;
+            state.last = None;
             continue;
         };
         let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-            state.last_notified_target = None;
+            state.last = None;
             continue;
         };
 
-        let combat_config_default = PhaserCombatConfigResource::default();
-        let combat_config: &PhaserCombatConfigResource =
-            combat_config_opt.unwrap_or(&combat_config_default);
-        // No banks configured means no meaningful "firing arc" concept —
-        // nothing to request Helm to bear on.
-        if combat_config.0.banks.is_empty() {
-            state.last_notified_target = None;
-            continue;
-        }
         let modifiers_default = crate::modifiers::ShipModifiers::new();
         let modifiers: &crate::modifiers::ShipModifiers =
             modifiers_opt.unwrap_or(&modifiers_default);
+        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
 
-        // A target is a valid arc-request candidate when it's within range of
-        // at least one bank but outside every bank's arc — i.e. Weapons could
-        // fire if Helm brought the ship around, but can't right now.
-        let any_in_range_and_arc = combat_config.0.banks.iter().any(|b| {
-            let bank_base_range = if b.beam_range > 0.0 {
-                b.beam_range
-            } else {
-                PhaserCombatConfig::DEFAULT_PHASER_RANGE
-            };
-            let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-            let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                <= effective_range * effective_range;
-            let (rx, ry) =
-                crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
-            let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
-            range_ok && arc_ok
-        });
-        let any_in_range = combat_config.0.banks.iter().any(|b| {
-            let bank_base_range = if b.beam_range > 0.0 {
-                b.beam_range
-            } else {
-                PhaserCombatConfig::DEFAULT_PHASER_RANGE
-            };
-            let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-            (tx - physics.x).powi(2) + (tz - physics.z).powi(2) <= effective_range * effective_range
+        let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
+            match sid {
+                Some(id) => control_sources.0.is_offline(&id),
+                None => false,
+            }
+        };
+        let geometry = |range: f32, facing_deg: f32, arc_deg: f32| {
+            crate::weapons::phaser::target_geometry(
+                tx,
+                tz,
+                physics.x,
+                physics.z,
+                physics.yaw,
+                range,
+                facing_deg,
+                arc_deg,
+            )
+        };
+
+        // ── Phaser banks: facing + AI auto-fire arc, per-bank beam range ×
+        // radar modifier (keep consistent with pre-#767 behaviour). ──────────
+        let phaser_emitters: Vec<EmitterArcInput> = combat_config_opt
+            .map(|cfg| {
+                cfg.0
+                    .banks
+                    .iter()
+                    .map(|b| {
+                        let base = if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let range = base * radar_range_mult;
+                        EmitterArcInput {
+                            online: !is_offline(crate::system_registry::phaser_bank_system_id(
+                                &b.id,
+                            )),
+                            usable: true,
+                            facing_deg: b.facing_deg,
+                            arc_deg: b.auto_arc_deg,
+                            range,
+                            geometry: geometry(range, b.facing_deg, b.auto_arc_deg),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // ── Blaster banks: facing + fire arc, per-bank projectile range. ─────
+        let blaster_emitters: Vec<EmitterArcInput> = blaster_opt
+            .map(|res| {
+                res.0
+                    .iter()
+                    .map(|bs| {
+                        let c = &bs.config;
+                        EmitterArcInput {
+                            online: !is_offline(crate::system_registry::blaster_bank_system_id(
+                                &c.id,
+                            )),
+                            usable: true,
+                            facing_deg: c.facing_deg,
+                            arc_deg: c.fire_arc_deg,
+                            range: c.range,
+                            geometry: geometry(c.range, c.facing_deg, c.fire_arc_deg),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // ── Torpedo tubes: facing + fire arc, homing reach (speed × lifespan);
+        // only a loaded tube is `usable`. ────────────────────────────────────
+        let torpedo_emitters: Vec<EmitterArcInput> = torpedo_opt
+            .map(|res| {
+                let reach = res.0.config.speed * res.0.config.lifespan;
+                res.0
+                    .tubes
+                    .iter()
+                    .map(|t| EmitterArcInput {
+                        online: !is_offline(crate::system_registry::torpedo_tube_system_id(&t.id)),
+                        usable: t.loaded_count > 0,
+                        facing_deg: t.facing_deg,
+                        arc_deg: t.fire_arc_deg,
+                        range: reach,
+                        geometry: geometry(reach, t.facing_deg, t.fire_arc_deg),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Fixed family priority: phasers → blasters → torpedoes. Emit for the
+        // first family that qualifies so exactly one request is ever active.
+        let families = [
+            (WeaponFamily::Phasers, &phaser_emitters),
+            (WeaponFamily::Blasters, &blaster_emitters),
+            (WeaponFamily::Torpedoes, &torpedo_emitters),
+        ];
+        let selected = families.iter().find_map(|(fam, emitters)| {
+            evaluate_family_arc_request(emitters).map(|arcs| (*fam, arcs))
         });
 
-        let arc_missed = any_in_range && !any_in_range_and_arc;
-        if !arc_missed {
-            state.last_notified_target = None;
+        let Some((family, arcs)) = selected else {
+            state.last = None;
+            continue;
+        };
+
+        // Debounce on family + target + the usable arc set: a change to any of
+        // these is a new condition and must re-fire (issue #767 AC4).
+        let key = (family, target_uuid.clone(), arcs.clone());
+        if state.last.as_ref() == Some(&key) {
             continue;
         }
-
-        if state.last_notified_target.as_deref() == Some(target_uuid.as_str()) {
-            // Already notified Helm about this exact arc miss; debounced.
-            continue;
-        }
-        state.last_notified_target = Some(target_uuid.clone());
+        state.last = Some(key);
 
         let label = entity_name_q
             .iter()
             .find_map(|(u, n)| (u.0 == target_uuid).then(|| n.0.clone()))
             .unwrap_or_else(|| target_uuid.clone());
 
-        // No coarse weapons SystemId exists; the fore phaser bank is used as
-        // the representative sender for control-source resolution, mirroring
-        // `emit_shields_coordination`'s "first arc as representative sender".
-        let sender_origin = control_sources
-            .0
-            .source_for(&crate::system_registry::phaser_fore_system_id());
+        // Representative sender for control-source resolution: the emitting
+        // family's canonical fine system (a blaster/torpedo-only ship has no
+        // phaser-fore), falling back to phaser-fore.
+        let sender_system = match family {
+            WeaponFamily::Phasers => crate::system_registry::phaser_fore_system_id(),
+            WeaponFamily::Blasters => blaster_opt
+                .and_then(|res| res.0.first())
+                .and_then(|bs| crate::system_registry::blaster_bank_system_id(&bs.config.id))
+                .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
+            WeaponFamily::Torpedoes => torpedo_opt
+                .and_then(|res| res.0.tubes.first())
+                .and_then(|t| crate::system_registry::torpedo_tube_system_id(&t.id))
+                .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
+        };
+        let sender_origin = control_sources.0.source_for(&sender_system);
 
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
@@ -437,6 +595,8 @@ fn tick_weapons_arc_request(
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: target_uuid,
                 label,
+                family,
+                arcs,
             },
             sender_label: "Weapons".to_string(),
         });

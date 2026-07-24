@@ -1058,6 +1058,19 @@ mod tests {
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
+                family: crate::messages::WeaponFamily::Blasters,
+                arcs: vec![
+                    crate::messages::WeaponEmitterArc {
+                        facing_deg: 0.0,
+                        arc_deg: 90.0,
+                        range: 35.0,
+                    },
+                    crate::messages::WeaponEmitterArc {
+                        facing_deg: 180.0,
+                        arc_deg: 60.0,
+                        range: 40.0,
+                    },
+                ],
             },
         };
         assert_client_roundtrip(&JsonCodec, send_msg.clone());
@@ -1068,6 +1081,12 @@ mod tests {
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
+                family: crate::messages::WeaponFamily::Torpedoes,
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 45.0,
+                    range: 120.0,
+                }],
             },
             sender_label: "Weapons".into(),
         };

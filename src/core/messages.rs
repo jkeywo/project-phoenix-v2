@@ -319,6 +319,40 @@ impl WeaponReadiness {
     }
 }
 
+/// The weapon family an [`CoordinationPayload::ArcBearingRequest`] is emitted
+/// for (issue #767). A structural identity — not player-facing text — used to
+/// key the emitter debounce, pick the localised chatter/popup label, and
+/// document which family's arcs the request carries.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum WeaponFamily {
+    /// Beam phaser banks.
+    #[default]
+    Phasers,
+    /// Projectile blaster banks.
+    Blasters,
+    /// Homing torpedo tubes.
+    Torpedoes,
+}
+
+/// One usable weapon emitter's fire-arc + range constraint, carried in an
+/// [`CoordinationPayload::ArcBearingRequest`] (issue #767).
+///
+/// The emitter (Tactical) fills the union of a family's ONLINE emitter arcs so
+/// Helm can turn toward the emitting family's *actual* nearest arc edge — and
+/// self-clear against the same geometry — rather than a hard-coded phaser arc.
+/// `arc_deg` is the family's applicable arc (phaser auto-fire arc, blaster /
+/// torpedo fire arc); `range` is that emitter's already-modifier-scaled
+/// effective range, so Helm's range test matches the emitter's exactly.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WeaponEmitterArc {
+    /// Centre of the emitter's fire arc, degrees clockwise from ship-forward.
+    pub facing_deg: f32,
+    /// Total fire-arc width in degrees for this family.
+    pub arc_deg: f32,
+    /// Effective range of this emitter in world units.
+    pub range: f32,
+}
+
 /// Per-bank state broadcast to the Tactical operator as part of `WeaponsUpdate`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankState {
@@ -1437,11 +1471,20 @@ pub enum CoordinationPayload {
     /// AI Tactical consumes it silently, human Tactical gets a popup
     /// (issue #676 — replaces the old direct `SensorsTargetSuggestion`).
     TargetDesignation { uuid: String, label: String },
-    /// Weapons asks Helm to yaw so the phaser firing arc bears on `uuid`.
-    /// AI Helm folds this into its steering; human Helm gets a popup
-    /// ("Tactical: come about, bring phasers to bear") via `route_coordination`
-    /// (issue #677).
-    ArcBearingRequest { uuid: String, label: String },
+    /// Weapons asks Helm to yaw so the selected weapon family's firing arc
+    /// bears on `uuid`. AI Helm folds this into its steering; human Helm gets a
+    /// family-aware popup via `route_coordination` (issues #677, #767).
+    ///
+    /// `family` names the emitting weapon family (phasers/blasters/torpedoes);
+    /// `arcs` carries that family's usable ONLINE emitter arcs so Helm turns
+    /// toward — and self-clears against — the actual family's geometry rather
+    /// than a hard-coded phaser arc (issue #767).
+    ArcBearingRequest {
+        uuid: String,
+        label: String,
+        family: WeaponFamily,
+        arcs: Vec<WeaponEmitterArc>,
+    },
     /// Power system reports a brownout (demand exceeds supply) for a group
     /// that is actively drawing power it cannot get (issue #678).
     /// Fire-once-debounced; only fires when the affected system has level > 1

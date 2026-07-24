@@ -45,15 +45,29 @@ pub struct ActiveStationRatings(pub HashMap<StationId, String>);
 pub struct CoordinationQueue(pub CoordinationLagQueue);
 
 /// Pending Weapons->Helm arc-bearing request, delivered via the channel-3
-/// coordination bus (issue #677). Set by `process_coordination_lag` when a
-/// `CoordinationPayload::ArcBearingRequest` is consumed by an AI-controlled
-/// Helm; read (and cleared once the requested entity is no longer visible)
-/// by `ai_helm_steering` to bias steering toward the requested bearing.
+/// coordination bus (issues #677, #767). Set by `process_coordination_lag`
+/// when a `CoordinationPayload::ArcBearingRequest` is consumed by an
+/// AI-controlled Helm; read by `ai_helm_steering` to bias steering toward the
+/// requested bearing.
+///
+/// `arcs` carries the emitting weapon family's usable ONLINE emitter arcs
+/// (facing/arc/effective-range), copied verbatim from the request payload
+/// (issue #767). `ai_helm_steering` self-clears `target` — via
+/// `apply_arc_bearing_request` — the moment the target leaves the merged view,
+/// leaves the range of every carried arc, or enters some carried arc, so the
+/// bias never outlives the condition that created it and stays consistent with
+/// the emitter that raised it.
 /// (`operate_helm_ai` was the other reader until #704 deleted it; it stood down
 /// from the whole arc-bearing step whenever helm-steering was AI, so the fold
 /// into steering is now unconditional rather than a fallback.)
 #[derive(Component, Clone, Debug, Default)]
-pub struct PendingArcBearingRequest(pub Option<uuid::Uuid>);
+pub struct PendingArcBearingRequest {
+    /// The target the Helm is biasing to bring a weapon arc onto, or `None`.
+    pub target: Option<uuid::Uuid>,
+    /// The emitting family's usable ONLINE emitter arcs. Empty when no request
+    /// is pending; drives both the steering bias and the geometric self-clear.
+    pub arcs: Vec<crate::messages::WeaponEmitterArc>,
+}
 
 /// A distinct docking intent (issue #742): the UUID of the dock the Helm AI is
 /// closing on, or `None` when not docking.

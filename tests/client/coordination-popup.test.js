@@ -54,6 +54,19 @@ describe('normalizeCoordinationPayload — variants', () => {
       .toMatchObject({ title: 'Tactical: come about, bring phasers to bear', body: 'Raider-2' });
   });
 
+  it('ArcBearingRequest is weapon-family-aware (issue #767)', () => {
+    expect(normalizeCoordinationPayload(
+      { type: 'ArcBearingRequest', data: { label: 'Raider-2', family: 'Blasters' } }, 'x').title)
+      .toBe('Tactical: come about, bring blasters to bear');
+    expect(normalizeCoordinationPayload(
+      { type: 'ArcBearingRequest', data: { label: 'Raider-2', family: 'Torpedoes' } }, 'x').title)
+      .toBe('Tactical: come about, bring torpedoes to bear');
+    // Phasers by default when the family field is absent (pre-#767 payloads).
+    expect(normalizeCoordinationPayload(
+      { type: 'ArcBearingRequest', data: { label: 'Raider-2' } }, 'x').title)
+      .toBe('Tactical: come about, bring phasers to bear');
+  });
+
   it('PowerBrownout carries the allocation level', () => {
     expect(normalizeCoordinationPayload(
       { type: 'PowerBrownout', data: { label: 'Phasers', allocated_level: 1 } }, 'x'))

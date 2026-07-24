@@ -701,44 +701,63 @@ pub(crate) fn helm_ai_decision(
     )
 }
 
-/// Apply the Weapons→Helm arc-bearing request (issue #677) to `steering`.
+/// Apply the Weapons→Helm arc-bearing request (issues #677, #767) to `steering`.
 ///
-/// Biases steering to face the requested target so the phaser firing arc can
-/// bear on it, without disturbing the thrust/range-holding decision
-/// `operate_helm` already made. Cleared once the requested entity is no
-/// longer visible (destroyed or out of radar range), OR once the ship's
-/// current facing already brings some bank's arc onto the target — the same
-/// `in_arc` check Weapons uses to decide whether to ask at all — so the bias
-/// never persists after the request has been satisfied or outlives the
-/// situation that created it.
+/// Biases steering to face the requested target so the emitting weapon
+/// family's firing arc can bear on it, without disturbing the thrust/range-
+/// holding decision `operate_helm` already made.
+///
+/// The request carries the emitting family's usable ONLINE emitter arcs
+/// (facing/arc/effective-range) in `pending.arcs` (issue #767 — was a
+/// hard-coded phaser-only `auto_arc` scan before). Cleared — so the bias never
+/// outlives the situation that created it, and stays consistent with the
+/// emitter that raised it — when ANY of:
+///   - the requested entity is no longer visible (destroyed / out of radar);
+///   - the target is beyond the range of EVERY carried arc (no yaw helps —
+///     this is the AC4 "target leaves range" clear);
+///   - the target is already inside some carried arc AND that arc reaches it
+///     (the family can fire — the same in-range-and-in-arc geometry the emitter
+///     uses to decide whether to ask at all).
+/// Only while the target is in reach of some arc but no arc bears does it
+/// steer.
 fn apply_arc_bearing_request(
     steering: &mut f32,
     pending: Option<&mut PendingArcBearingRequest>,
     world_view: &crate::ai::WorldView,
     physics: &ShipPhysics,
-    combat_config: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
 ) {
     let Some(pending) = pending else { return };
-    let Some(bearing_uuid) = pending.0 else {
+    let Some(bearing_uuid) = pending.target else {
         return;
     };
     match world_view.entities.iter().find(|e| e.uuid == bearing_uuid) {
         Some(target_entity) => {
-            let arc_satisfied = combat_config.is_some_and(|cfg| {
-                cfg.0.banks.iter().any(|b| {
-                    let (rx, ry) = crate::weapons::phaser::ship_local(
-                        target_entity.position[0],
-                        target_entity.position[2],
-                        physics.x,
-                        physics.z,
-                        physics.yaw,
-                    );
-                    crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg)
-                })
-            });
+            // Per carried emitter arc, resolve the shared target geometry with
+            // the family's own arc + effective range. `in_reach` = the target
+            // is within some emitter's range; `can_bear` = some emitter has it
+            // in BOTH range and arc (i.e. that emitter could now fire).
+            let mut in_reach = false;
+            let mut can_bear = false;
+            for a in &pending.arcs {
+                let g = crate::weapons::phaser::target_geometry(
+                    target_entity.position[0],
+                    target_entity.position[2],
+                    physics.x,
+                    physics.z,
+                    physics.yaw,
+                    a.range,
+                    a.facing_deg,
+                    a.arc_deg,
+                );
+                in_reach |= g.in_range;
+                can_bear |= g.in_range && g.in_arc;
+            }
+            // Satisfied (clear) when nothing is in reach — no bearing helps —
+            // or when the family can already bear on the target.
+            let satisfied = !in_reach || can_bear;
 
-            if arc_satisfied {
-                pending.0 = None;
+            if satisfied {
+                pending.target = None;
             } else {
                 let dx = target_entity.position[0] - world_view.entity_pos[0];
                 let dz = target_entity.position[2] - world_view.entity_pos[2];
@@ -753,7 +772,7 @@ fn apply_arc_bearing_request(
                 }
             }
         }
-        None => pending.0 = None,
+        None => pending.target = None,
     }
 }
 
@@ -1073,22 +1092,13 @@ pub(crate) fn ai_helm_steering(
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             Option<&mut PendingArcBearingRequest>,
-            Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    for (
-        entity,
-        sources,
-        physics,
-        entity_uuid,
-        ship_config,
-        mut pending_bearing,
-        combat_config_opt,
-        mut admitted,
-    ) in ships.iter_mut()
+    for (entity, sources, physics, entity_uuid, ship_config, mut pending_bearing, mut admitted) in
+        ships.iter_mut()
     {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
@@ -1119,7 +1129,6 @@ pub(crate) fn ai_helm_steering(
                 pending_bearing.as_deref_mut(),
                 &sf.merged_view,
                 physics,
-                combat_config_opt,
             );
         }
 
@@ -1944,7 +1953,16 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(PendingArcBearingRequest(Some(bearing_uuid)));
+            .insert(PendingArcBearingRequest {
+                target: Some(bearing_uuid),
+                // Fore bank, narrow arc, ample range: the far-starboard target is
+                // in reach but well out of arc, so steering must bias to bear.
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 5000.0,
+                }],
+            });
 
         // Shipped-hull sources: coarse + both axes on AI.
         let resolver =
@@ -3294,7 +3312,14 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(PendingArcBearingRequest(Some(bearing_uuid)));
+            .insert(PendingArcBearingRequest {
+                target: Some(bearing_uuid),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 5000.0,
+                }],
+            });
 
         // Tactical's lock: what the helm pursues (issue #702).
         set_ship_weapons_target(&mut app, &destroy_uuid_str);
@@ -3342,26 +3367,19 @@ mod tests {
             Transform::from_xyz(0.0, 0.0, -200.0),
         ));
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert((
-            PendingArcBearingRequest(Some(bearing_uuid)),
-            crate::weapons_plugin::PhaserCombatConfigResource(
-                crate::entity_config::PhaserCombatConfig {
-                    banks: vec![crate::entity_config::PhaserBankConfig {
-                        id: "fore".into(),
-                        facing_deg: 0.0,
-                        fire_arc_deg: 30.0,
-                        auto_arc_deg: 30.0,
-                        beam_range: 50.0,
-                        beam_damage_per_sec: 5.0,
-                        beam_duration_secs: 3.0,
-                        cooldown_secs: 6.0,
-                        beam_color: vec![],
-                        shield_pierce: None,
-                        marker: None,
-                    }],
-                },
-            ),
-        ));
+        // The carried family arc (issue #767): a fore bank, narrow arc, range
+        // that reaches the target directly ahead — so the ship's own facing
+        // already brings it into arc AND range, i.e. the family can fire.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest {
+                target: Some(bearing_uuid),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 500.0,
+                }],
+            });
 
         tick(&mut app);
 
@@ -3370,9 +3388,65 @@ mod tests {
             .get::<PendingArcBearingRequest>(ship)
             .expect("ship must carry PendingArcBearingRequest");
         assert_eq!(
-            pending.0, None,
-            "a request must clear once the ship's own facing already brings a bank's arc onto the target, \
-             not persist indefinitely after being satisfied"
+            pending.target, None,
+            "a request must clear once the ship's own facing already brings the carried family's arc \
+             onto the target, not persist indefinitely after being satisfied"
+        );
+    }
+
+    /// AC4 (issue #767): a request clears when the target leaves the range of
+    /// every carried emitter arc — no yaw can help, so the bias must not
+    /// persist steering the ship at an unreachable contact.
+    #[test]
+    fn helm_ai_clears_arc_bearing_request_once_target_leaves_range() {
+        let mut app = test_app();
+        let destroy_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityName("Harrow Destroyer".into()),
+            Transform::from_xyz(0.0, 0.0, -1000.0),
+        ));
+        let mut runtime = crate::world::server::WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
+        app.insert_resource(runtime);
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+            crate::messages::ShipClientConfig {
+                helm_radar_range: 5000.0,
+                ..Default::default()
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective("wave_1", 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+
+        // Bearing contact well off to starboard AND far beyond the carried
+        // arc's range (range 50, target ~200 away) — out of reach entirely.
+        let bearing_uuid = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityName("Bearing Contact".into()),
+            Transform::from_xyz(200.0, 0.0, -1.0),
+        ));
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest {
+                target: Some(bearing_uuid),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 50.0,
+                }],
+            });
+
+        tick(&mut app);
+
+        let pending = app
+            .world()
+            .get::<PendingArcBearingRequest>(ship)
+            .expect("ship must carry PendingArcBearingRequest");
+        assert_eq!(
+            pending.target, None,
+            "a request must clear once the target is beyond every carried arc's range — no bearing helps"
         );
     }
 
@@ -3403,7 +3477,14 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(PendingArcBearingRequest(Some(stale_uuid)));
+            .insert(PendingArcBearingRequest {
+                target: Some(stale_uuid),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 5000.0,
+                }],
+            });
 
         tick(&mut app);
 
@@ -3412,7 +3493,7 @@ mod tests {
             .get::<PendingArcBearingRequest>(ship)
             .expect("ship must carry PendingArcBearingRequest");
         assert_eq!(
-            pending.0, None,
+            pending.target, None,
             "a pending request for a no-longer-visible target must be cleared, not stuck forever"
         );
     }
@@ -3457,7 +3538,14 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(PendingArcBearingRequest(Some(bearing_uuid)));
+            .insert(PendingArcBearingRequest {
+                target: Some(bearing_uuid),
+                arcs: vec![crate::messages::WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 5000.0,
+                }],
+            });
 
         set_ship_weapons_target(&mut app, &destroy_uuid_str);
         tick(&mut app);

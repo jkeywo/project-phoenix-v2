@@ -726,10 +726,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Pending Arc Bearing Request State
-      summary: Host-owned temporary request that biases helm AI steering toward a target until weapons can bear.
+      summary: Host-owned temporary request that biases helm AI steering toward a target until the emitting weapon family can bear.
       rationale:
         - This is an internal coordination state, not a player-authored objective.
-        - Helm AI clears it when the target leaves visibility or some phaser bank arc can already cover the target.
+        - "Weapon-family-aware (issue #767): the component carries the emitting family's usable ONLINE emitter arcs (`Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>`), copied from the `ArcBearingRequest` payload by `process_coordination_lag`. `apply_arc_bearing_request` biases facing-only steering against those carried arcs — no longer a hard-coded phaser scan."
+        - "Helm AI clears it when the target leaves visibility, leaves the range of every carried arc, or enters some carried arc (the emitting family can already bear) — the same geometry the emitter uses to decide whether to ask."
     architecture:
       classification: authoritative
       owner: helm-ai-operator
@@ -740,8 +741,11 @@ entities:
       paths:
         - src/ship/components.rs
         - src/ship_plugin.rs
+        - src/ship/helm_ai.rs
+        - src/ship/coordination_systems.rs
       symbols:
         - PendingArcBearingRequest
+        - apply_arc_bearing_request
 
   - state: docking-motion-intent-state
     core:

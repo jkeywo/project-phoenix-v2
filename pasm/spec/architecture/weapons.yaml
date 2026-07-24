@@ -377,13 +377,39 @@ entities:
 
   - component: weapon-family-arc-bearing-coordination
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Weapon-Family Arc-Bearing Coordination
       summary: Tactical requests a Helm bearing when the selected usable phaser, blaster, or torpedo family has a target in range but outside its available firing arcs.
+      rationale:
+        - "Weapon-family-aware (issue #767). `tick_weapons_arc_request` generalises the pre-#767 phaser-only, family-agnostic request: it evaluates each capable family (phasers/blasters/torpedoes) via the pure `evaluate_family_arc_request`, driven off the shared #764 `WeaponReadiness` classification so emitter and Helm agree on the condition. A family qualifies ONLY when it is capable (≥1 emitter), at least one usable ONLINE emitter is blocked specifically by `OutOfArc` while in range, and NO emitter is `Ready`. Nothing is emitted for an incapable family (no emitters), an unavailable one (all `Offline`), or an out-of-range one (all `OutOfRange` — no bearing helps)."
+        - "Family-selection rule (documented, structural — not a gameplay value): a FIXED family priority — phasers, then blasters, then torpedoes. There is no per-family Tactical selector surface (`CurrentPhaserMode` is a phaser sub-mode, not a family selector), so a deterministic priority keeps exactly one `ArcBearingRequest` active at a time, independent of evaluation order. The always-available primary beam is brought to bear first; secondary families are the request only when the primary cannot be the reason."
+        - "Per-family arcs on the wire (AC1). The request carries the emitting `WeaponFamily` and the union of that family's usable ONLINE emitter arcs as `Vec<WeaponEmitterArc { facing_deg, arc_deg, range }>` — phaser facing + auto-fire arc × per-bank beam range × radar modifier; blaster facing + fire arc × projectile range; torpedo-tube facing + fire arc × homing reach (speed × lifespan), only loaded tubes usable. Serialize/Deserialize + codec round-trip cover the extended shape."
+        - "Helm consumes as facing intent, no drift (AC2). `apply_arc_bearing_request` biases ONLY `steering` (never thrust — the facing-only invariant per helm-controls.yaml). It resolves the target against the carried family arcs via the shared `weapons::phaser::target_geometry`, so Helm and the emitter judge the same geometry rather than a hard-coded phaser arc."
+        - "Both sides clear on target/range/arc change (AC4). The emitter debounce (`WeaponsArcRequestState`) keys on family + target + the usable arc set, so a change of family, target, or arc condition re-fires. The Helm self-clear (`PendingArcBearingRequest`) drops the request when the target leaves the merged view, leaves the range of every carried arc, or enters some carried arc (the family can fire)."
+        - "Player-facing label is family-aware. The client popup (`gui/coordination-popup.js`) names the emitting family (phasers/blasters/torpedoes), following that file's existing inline-English chatter pattern; server-side AI-to-AI viewscreen chatter (`format_coordination_chatter`) does likewise."
     architecture:
       kind: coordination-policy
       authority: authoritative
       reads: [weapons-target-state]
       coordinates: [tactical-weapons-controls]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/console/weapons/mod.rs
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - src/ship/components.rs
+        - src/ship/coordination_systems.rs
+        - src/ship/helm_ai.rs
+        - gui/coordination-popup.js
+      symbols:
+        - tick_weapons_arc_request
+        - evaluate_family_arc_request
+        - WeaponsArcRequestState
+        - WeaponFamily
+        - WeaponEmitterArc
+        - PendingArcBearingRequest
+        - apply_arc_bearing_request
+      tests: [cargo test, npx vitest run]

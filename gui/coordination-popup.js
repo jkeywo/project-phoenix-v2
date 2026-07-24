@@ -39,7 +39,14 @@ export function normalizeCoordinationPayload(payload, senderLabel) {
     title = 'Sensors designates: ' + (payload.data?.label || payload.label || '?');
     body = '';
   } else if (payload.type === 'ArcBearingRequest') {
-    title = 'Tactical: come about, bring phasers to bear';
+    // Family-aware (issue #767): name the weapon family that needs the bearing.
+    // `family` is the serialised WeaponFamily variant; defaults to phasers for
+    // pre-#767 payloads that omit it.
+    const family = payload.data?.family || payload.family;
+    const weapon = family === 'Blasters' ? 'blasters'
+      : family === 'Torpedoes' ? 'torpedoes'
+      : 'phasers';
+    title = 'Tactical: come about, bring ' + weapon + ' to bear';
     body = payload.data?.label || payload.label || '';
   } else if (payload.type === 'PowerBrownout') {
     const sysLabel = payload.data?.label || payload.label || 'System';

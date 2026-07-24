@@ -104,8 +104,18 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
         CoordinationPayload::TargetDesignation { label, .. } => {
             format!("Designating target: {label}")
         }
-        CoordinationPayload::ArcBearingRequest { label, .. } => {
-            format!("Come about, bring phasers to bear on {label}")
+        CoordinationPayload::ArcBearingRequest { label, family, .. } => {
+            // Family-aware (issue #767): name the weapon family that needs the
+            // bearing. This is server-side AI-to-AI viewscreen flavour text
+            // (there is no host-side string table); the player-facing popup
+            // label is built family-aware in coordination-popup.js, following
+            // that file's existing inline-English chatter pattern.
+            let weapons = match family {
+                crate::messages::WeaponFamily::Phasers => "phasers",
+                crate::messages::WeaponFamily::Blasters => "blasters",
+                crate::messages::WeaponFamily::Torpedoes => "torpedoes",
+            };
+            format!("Come about, bring {weapons} to bear on {label}")
         }
         CoordinationPayload::PowerBrownout {
             label,
@@ -310,9 +320,15 @@ pub fn process_coordination_lag(
                     // AI Helm folds a consumed arc-bearing request into its
                     // steering (issue #677) rather than only chattering about it.
                     if target_policy.operate_ai && msg.target == helm_key {
-                        if let CoordinationPayload::ArcBearingRequest { uuid, .. } = &msg.payload {
+                        if let CoordinationPayload::ArcBearingRequest { uuid, arcs, .. } =
+                            &msg.payload
+                        {
                             if let Some(pending) = pending_bearing.as_deref_mut() {
-                                pending.0 = uuid::Uuid::parse_str(uuid).ok();
+                                // Carry the emitting family's arcs (issue #767)
+                                // so `ai_helm_steering` biases toward — and
+                                // self-clears against — that family's geometry.
+                                pending.target = uuid::Uuid::parse_str(uuid).ok();
+                                pending.arcs = arcs.clone();
                             }
                         }
                         // Channel-3 Navigation-to-Helm handoff (issues #681,

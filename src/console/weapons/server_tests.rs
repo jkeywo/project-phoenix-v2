@@ -4831,6 +4831,312 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
     );
 }
 
+// ── #767: weapon-family-aware arc-bearing coordination ───────────────────────
+
+/// Build a single-bank blaster resource facing forward with the given fire arc
+/// and range.
+fn blaster_res(facing_deg: f32, fire_arc_deg: f32, range: f32) -> BlasterSystemResource {
+    BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+        crate::blaster::BlasterBankConfig {
+            id: "fore".into(),
+            facing_deg,
+            fire_arc_deg,
+            range,
+            ..crate::blaster::BlasterBankConfig::default()
+        },
+    )])
+}
+
+/// A single-tube, loaded torpedo resource facing forward with the given fire
+/// arc. Homing reach is `speed × lifespan` from the default config.
+fn loaded_torpedo_res(facing_deg: f32, fire_arc_deg: f32) -> TorpedoSystemResource {
+    let mut ts = TorpedoSystem::new(TorpedoConfig::default());
+    ts.tubes.truncate(1);
+    let tube = &mut ts.tubes[0];
+    tube.facing_deg = facing_deg;
+    tube.fire_arc_deg = fire_arc_deg;
+    tube.loaded_count = 1;
+    TorpedoSystemResource(ts)
+}
+
+/// Find the single `ArcBearingRequest` in the log, if any.
+fn find_arc_request(app: &App) -> Option<CoordinationPayload> {
+    app.world()
+        .resource::<ArcRequestLog>()
+        .0
+        .iter()
+        .find(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. }))
+        .map(|e| e.payload.clone())
+}
+
+/// A BLASTER-only ship whose target is in range but out of every blaster arc
+/// must emit an `ArcBearingRequest` for the Blasters family carrying that
+/// family's arcs.
+#[test]
+fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000001";
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        // No phaser config: blasters are the only capable family.
+        blaster_res(0.0, 30.0, 50.0),
+    ));
+    // Directly to starboard: in range (20 < 50) but 90° off the 30° fore arc.
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    let payload = find_arc_request(&app).expect("blaster family must emit an ArcBearingRequest");
+    match payload {
+        CoordinationPayload::ArcBearingRequest {
+            uuid, family, arcs, ..
+        } => {
+            assert_eq!(uuid, target_uuid);
+            assert_eq!(family, WeaponFamily::Blasters);
+            assert_eq!(
+                arcs,
+                vec![WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: 50.0,
+                }],
+                "request must carry the blaster family's fire arc + range"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// A TORPEDO-only ship (loaded tube) with an in-range, out-of-arc target must
+/// emit for the Torpedoes family carrying the tube's arc + homing reach.
+#[test]
+fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000002";
+    // Homing reach = default speed × lifespan.
+    let cfg = TorpedoConfig::default();
+    let reach = cfg.speed * cfg.lifespan;
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        loaded_torpedo_res(0.0, 30.0),
+    ));
+    // To starboard: in homing reach but 90° off the 30° fore tube arc.
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    let payload = find_arc_request(&app).expect("torpedo family must emit an ArcBearingRequest");
+    match payload {
+        CoordinationPayload::ArcBearingRequest { family, arcs, .. } => {
+            assert_eq!(family, WeaponFamily::Torpedoes);
+            assert_eq!(
+                arcs,
+                vec![WeaponEmitterArc {
+                    facing_deg: 0.0,
+                    arc_deg: 30.0,
+                    range: reach,
+                }],
+                "request must carry the tube's fire arc + homing reach"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// No request for an INCAPABLE family: a ship with no emitters of any family
+/// (an empty blaster vec, no phasers, no tubes) must not emit.
+#[test]
+fn tick_weapons_arc_request_silent_when_family_incapable() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000003";
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        BlasterSystemResource(vec![]), // capable of nothing
+    ));
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    assert!(
+        find_arc_request(&app).is_none(),
+        "an incapable ship (no emitters) must not emit an ArcBearingRequest"
+    );
+}
+
+/// No request when the only family's emitters are OFFLINE: an offline blaster
+/// bank classifies as `Offline`, never `OutOfArc`, so no bearing is asked.
+#[test]
+fn tick_weapons_arc_request_silent_when_family_offline() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000004";
+
+    let mut cs = ShipSystemControlSources::default();
+    cs.0.set_offline(SystemId("blaster-fore".into()), true);
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        cs,
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        blaster_res(0.0, 30.0, 50.0),
+    ));
+    // In range, out of arc — but the bank is offline.
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(20.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    assert!(
+        find_arc_request(&app).is_none(),
+        "an offline weapon family must not emit an ArcBearingRequest"
+    );
+}
+
+/// No request when the target is OUT OF RANGE of every emitter: no yaw brings
+/// an out-of-reach contact into a firing solution, so nothing is asked.
+#[test]
+fn tick_weapons_arc_request_silent_when_target_out_of_range() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000005";
+
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        ShipSystemControlSources::default(),
+        ShipPhysics::default(),
+        crate::server_app::ShipSystemBlackboards::default(),
+        TacticalRadarSelection(Some(target_uuid.to_string())),
+        WeaponsArcRequestState::default(),
+        blaster_res(0.0, 30.0, 50.0),
+    ));
+    // Beyond the 50-unit blaster range (200 away) — out of range entirely.
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(200.0, 0.0, 0.0),
+    ));
+
+    app.update();
+
+    assert!(
+        find_arc_request(&app).is_none(),
+        "an out-of-range target must not emit an ArcBearingRequest — no bearing helps"
+    );
+}
+
+/// The request clears (re-fires) when the target crosses INTO the family's arc:
+/// once the same family+target has the target in arc, no request stands.
+#[test]
+fn tick_weapons_arc_request_clears_when_target_enters_arc() {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut app = test_app();
+    let target_uuid = "cc000000-0000-0000-0000-000000000006";
+
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            ShipSystemControlSources::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            WeaponsArcRequestState::default(),
+            blaster_res(0.0, 30.0, 50.0),
+        ))
+        .id();
+    // Start out of arc (starboard) → request fires.
+    let target = app
+        .world_mut()
+        .spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntitySystemHull(SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                50.0,
+            )])),
+            Transform::from_xyz(20.0, 0.0, 0.0),
+        ))
+        .id();
+    app.update();
+    assert!(
+        find_arc_request(&app).is_some(),
+        "precondition: an out-of-arc target fires a request"
+    );
+
+    // Move the target directly ahead (into the fore arc) and confirm the
+    // emitter's condition no longer holds — the debounce state clears so a
+    // stale request stops standing.
+    app.world_mut()
+        .entity_mut(target)
+        .insert(Transform::from_xyz(0.0, 0.0, -20.0));
+    app.update();
+
+    let state = app.world().get::<WeaponsArcRequestState>(ship).unwrap();
+    assert!(
+        state.last.is_none(),
+        "once the target enters the family's arc, the request condition must clear"
+    );
+}
+
 /// Regression test for the unified `handle_fire_phaser`.
 ///
 /// Before unification, `handle_npc_beam_fire` always used the first entry

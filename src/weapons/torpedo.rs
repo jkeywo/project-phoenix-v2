@@ -84,8 +84,19 @@ impl Default for TorpedoConfig {
 pub struct Torpedo {
     pub uuid: String,
     pub x: f32,
+    /// Vertical (altitude) position in world space. `0.0` for a torpedo fired
+    /// by (and at) a Planar hull, so the 3D maths below collapses exactly to
+    /// the pre-#768 XZ behaviour (issue #768).
+    pub y: f32,
     pub z: f32,
     pub heading: f32,
+    /// Vertical steering angle in radians: the torpedo's climb/descent pitch
+    /// relative to the horizontal plane (issue #768). `0.0` = level flight,
+    /// positive = climbing (+Y). Rate-limited toward the target's elevation by
+    /// the same `TorpedoConfig::turn_rate` clamp the yaw uses, so there is no
+    /// new gameplay constant. Stays exactly `0.0` while the target is level
+    /// (or absent), collapsing movement to the 2D case bit-for-bit.
+    pub pitch: f32,
     pub lifespan_remaining: f32,
     pub target_uuid: Option<String>,
     /// UUID of the entity that fired this torpedo. Used by
@@ -105,21 +116,39 @@ pub struct Torpedo {
 }
 
 impl Torpedo {
-    pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32)>, config: &TorpedoConfig) {
+    pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32, f32)>, config: &TorpedoConfig) {
         if self.target_uuid.is_some() {
-            if let Some((tx, tz)) = target_pos {
+            if let Some((tx, ty, tz)) = target_pos {
                 let dx = tx - self.x;
                 let dz = tz - self.z;
                 let desired = (dx).atan2(-dz);
                 let delta = angle_diff(desired, self.heading);
                 let max_turn = config.turn_rate * dt;
                 self.heading += delta.clamp(-max_turn, max_turn);
+                // Vertical steering (issue #768): rotate the climb pitch toward
+                // the target's elevation, rate-limited by the SAME turn_rate
+                // clamp as the yaw. `pitch` lives in `[-pi/2, pi/2]` (the range
+                // of `atan2(dy, horizontal)`), so no angle wrapping is needed.
+                // When the target is level with the torpedo (`dy == 0`),
+                // `desired_pitch` is exactly `0.0` and pitch never leaves 0 —
+                // the movement below then collapses to the 2D case.
+                let dy = ty - self.y;
+                let horizontal = (dx * dx + dz * dz).sqrt();
+                let desired_pitch = dy.atan2(horizontal);
+                let dpitch = (desired_pitch - self.pitch).clamp(-max_turn, max_turn);
+                self.pitch += dpitch;
             }
         }
         let cos_h = self.heading.cos();
         let sin_h = self.heading.sin();
-        self.x += sin_h * config.speed * dt;
-        self.z -= cos_h * config.speed * dt;
+        // `cos_p == 1.0` and `sin_p == 0.0` exactly while pitch is 0, so the XZ
+        // integration is bit-identical to the pre-#768 planar path and Y stays
+        // put (issue #768, AC3).
+        let cos_p = self.pitch.cos();
+        let sin_p = self.pitch.sin();
+        self.x += sin_h * cos_p * config.speed * dt;
+        self.z -= cos_h * cos_p * config.speed * dt;
+        self.y += sin_p * config.speed * dt;
         self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
     }
 
@@ -405,8 +434,8 @@ pub enum LaunchResult {
 pub struct TorpedoTickResult {
     pub expired: Vec<String>,
     /// Torpedoes launched by burst-fire this tick.
-    /// Each entry is `(tube_id, uuid, x, z, heading)`.
-    pub burst_launched: Vec<(String, String, f32, f32, f32)>,
+    /// Each entry is `(tube_id, uuid, x, y, z, heading)` (issue #768 threads Y).
+    pub burst_launched: Vec<(String, String, f32, f32, f32, f32)>,
 }
 
 /// Pending burst-fire state for a single tube. Stored on `TorpedoSystem` so
@@ -420,14 +449,18 @@ pub struct TubeBurstState {
     pub timer: f32,
     /// Parameters captured at fire time for the burst shots.
     pub launch_x: f32,
+    /// Vertical launch origin captured at fire time (issue #768). `0.0` for a
+    /// Planar hull, so burst shots stay on the play plane.
+    pub launch_y: f32,
     pub launch_z: f32,
     pub launch_heading: f32,
     pub target_uuid: Option<String>,
     pub source_uuid: Option<String>,
-    /// World-XZ origin per authored barrel index (issue #766), captured at fire
-    /// time from the tube's barrel markers. Empty for a legacy single-barrel
-    /// launch, in which case burst shots fall back to `launch_x`/`launch_z`.
-    pub barrel_origins: Vec<(f32, f32)>,
+    /// World-XYZ origin per authored barrel index (issue #766/#768), captured at
+    /// fire time from the tube's barrel markers. Empty for a legacy single-barrel
+    /// launch, in which case burst shots fall back to
+    /// `launch_x`/`launch_y`/`launch_z`.
+    pub barrel_origins: Vec<(f32, f32, f32)>,
     /// The tube's flattened `(barrel_index, step_number)` firing sequence
     /// (issue #766), captured at fire time. Each burst shot draws its origin
     /// from the next entry, cycling. Empty ⇒ legacy single-origin burst.
@@ -666,24 +699,27 @@ impl TorpedoSystem {
     /// Returns `LaunchResult::TubeNotLoaded` when `loaded_count == 0`.
     /// After a successful launch `loaded_count` is set to 0 and `load_state`
     /// reset to `Unloaded`.
+    #[allow(clippy::too_many_arguments)]
     pub fn launch(
         &mut self,
         tube_id: &str,
         uuid: String,
         launch_x: f32,
+        launch_y: f32,
         launch_z: f32,
         launch_heading: f32,
         target_uuid: Option<String>,
         source_uuid: Option<String>,
     ) -> LaunchResult {
         // Legacy single-origin launch: no authored barrel origins, so every
-        // round leaves from `launch_x`/`launch_z` (ship centre or single
-        // marker) exactly as before issue #766.
+        // round leaves from `launch_x`/`launch_y`/`launch_z` (ship centre or
+        // single marker) exactly as before issue #766.
         self.launch_with_barrels(
             tube_id,
             uuid,
             &[],
             launch_x,
+            launch_y,
             launch_z,
             launch_heading,
             target_uuid,
@@ -716,8 +752,9 @@ impl TorpedoSystem {
         &mut self,
         tube_id: &str,
         uuid: String,
-        barrel_origins: &[(f32, f32)],
+        barrel_origins: &[(f32, f32, f32)],
         launch_x: f32,
+        launch_y: f32,
         launch_z: f32,
         launch_heading: f32,
         target_uuid: Option<String>,
@@ -737,27 +774,29 @@ impl TorpedoSystem {
         // never affects `count`).
         let sequence = self.tubes[idx].barrel_sequence();
         // Resolve the origin + (barrel, step) for a given 0-based volley round.
-        let resolve = |round: u32| -> ((f32, f32), u32, u32) {
+        let resolve = |round: u32| -> ((f32, f32, f32), u32, u32) {
             let (barrel, step) = sequence[(round as usize) % sequence.len()];
             let origin = barrel_origins
                 .get(barrel as usize)
                 .copied()
                 .or_else(|| barrel_origins.first().copied())
-                .unwrap_or((launch_x, launch_z));
+                .unwrap_or((launch_x, launch_y, launch_z));
             (origin, barrel, step)
         };
 
         self.tubes[idx].mark_fired(); // sets loaded_count = 0, load_state = Unloaded
 
         // Round 0: the immediate launch.
-        let ((origin_x, origin_z), barrel0, step0) = resolve(0);
+        let ((origin_x, origin_y, origin_z), barrel0, step0) = resolve(0);
         self.tubes[idx].active_barrels = vec![barrel0];
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
             uuid: uuid.clone(),
             x: origin_x,
+            y: origin_y,
             z: origin_z,
             heading: launch_heading,
+            pitch: 0.0,
             lifespan_remaining: lifespan,
             target_uuid: target_uuid.clone(),
             source_uuid: source_uuid.clone(),
@@ -774,6 +813,7 @@ impl TorpedoSystem {
                 pending: count_remaining,
                 timer: burst_interval,
                 launch_x,
+                launch_y,
                 launch_z,
                 launch_heading,
                 target_uuid,
@@ -792,7 +832,7 @@ impl TorpedoSystem {
     pub fn tick(
         &mut self,
         dt: f32,
-        target_positions: &std::collections::HashMap<String, (f32, f32)>,
+        target_positions: &std::collections::HashMap<String, (f32, f32, f32)>,
         next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
         let mut result = TorpedoTickResult::default();
@@ -859,7 +899,7 @@ impl TorpedoSystem {
         let burst_interval = self.config.burst_interval_secs;
         // Collect burst launches to avoid split borrows.
         let mut burst_torpedoes: Vec<Torpedo> = Vec::new();
-        let mut burst_events: Vec<(String, String, f32, f32, f32)> = Vec::new();
+        let mut burst_events: Vec<(String, String, f32, f32, f32, f32)> = Vec::new();
         let mut completed_bursts: Vec<usize> = Vec::new();
         // Per-tube pattern-state updates (tube_id, barrel, step) to apply after
         // the burst loop — the tubes and burst_states both live on `self`, so a
@@ -872,26 +912,29 @@ impl TorpedoSystem {
                 // Resolve this burst shot's origin from the barrel sequence
                 // captured at fire time (issue #766). A legacy single-origin
                 // burst (empty sequence/origins) falls back to launch_x/z.
-                let (origin_x, origin_z, barrel, step) = if burst.barrel_sequence.is_empty() {
-                    (burst.launch_x, burst.launch_z, 0u32, 0u32)
-                } else {
-                    let (barrel, step) = burst.barrel_sequence
-                        [(burst.next_shot_index as usize) % burst.barrel_sequence.len()];
-                    let (ox, oz) = burst
-                        .barrel_origins
-                        .get(barrel as usize)
-                        .copied()
-                        .or_else(|| burst.barrel_origins.first().copied())
-                        .unwrap_or((burst.launch_x, burst.launch_z));
-                    (ox, oz, barrel, step)
-                };
+                let (origin_x, origin_y, origin_z, barrel, step) =
+                    if burst.barrel_sequence.is_empty() {
+                        (burst.launch_x, burst.launch_y, burst.launch_z, 0u32, 0u32)
+                    } else {
+                        let (barrel, step) = burst.barrel_sequence
+                            [(burst.next_shot_index as usize) % burst.barrel_sequence.len()];
+                        let (ox, oy, oz) = burst
+                            .barrel_origins
+                            .get(barrel as usize)
+                            .copied()
+                            .or_else(|| burst.barrel_origins.first().copied())
+                            .unwrap_or((burst.launch_x, burst.launch_y, burst.launch_z));
+                        (ox, oy, oz, barrel, step)
+                    };
                 burst.next_shot_index += 1;
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
                     uuid: uuid.clone(),
                     x: origin_x,
+                    y: origin_y,
                     z: origin_z,
                     heading: burst.launch_heading,
+                    pitch: 0.0,
                     lifespan_remaining: lifespan,
                     target_uuid: burst.target_uuid.clone(),
                     source_uuid: burst.source_uuid.clone(),
@@ -902,6 +945,7 @@ impl TorpedoSystem {
                     burst.tube_id.clone(),
                     uuid,
                     origin_x,
+                    origin_y,
                     origin_z,
                     burst.launch_heading,
                 ));
@@ -964,6 +1008,7 @@ impl TorpedoSystem {
             source_uuid: removed.source_uuid,
             tube_id: removed.tube_id,
             impact_x: removed.x,
+            impact_y: removed.y,
             impact_z: removed.z,
         })
     }
@@ -1017,6 +1062,10 @@ pub struct TorpedoDetonation {
     /// It is the *torpedo's* position, not the firing ship's: a homing torpedo
     /// curves, and the arc it meets is the one it is nose-on to at detonation.
     pub impact_x: f32,
+    /// Vertical position at detonation (issue #768). `0.0` for a torpedo that
+    /// stayed on the play plane, so shield routing is unchanged for Planar
+    /// engagements.
+    pub impact_y: f32,
     pub impact_z: f32,
 }
 
@@ -1034,22 +1083,26 @@ impl TorpedoSystem {
     /// one); the caller is responsible for removing detonated torpedoes via
     /// [`Self::handle_collision`].
     ///
-    /// `targets` is a slice of `(uuid, x, z, radius)` tuples.
+    /// `targets` is a slice of `(uuid, x, y, z, radius)` tuples (issue #768
+    /// threads the target Y so vertical separation counts toward the 3D
+    /// distance). With every `y == 0` the `dy` term vanishes and the check
+    /// reduces exactly to the pre-#768 XZ comparison.
     pub fn find_detonation_hits(
         &self,
-        targets: &[(String, f32, f32, f32)],
+        targets: &[(String, f32, f32, f32, f32)],
     ) -> Vec<(String, String)> {
         let det = self.config.detonation_radius;
         let mut hits = Vec::new();
         for torpedo in &self.in_flight {
             let mut best: Option<(f32, &String)> = None;
-            for (uuid, tx, tz, radius) in targets {
+            for (uuid, tx, ty, tz, radius) in targets {
                 if torpedo.source_uuid.as_ref() == Some(uuid) {
                     continue;
                 }
                 let dx = tx - torpedo.x;
+                let dy = ty - torpedo.y;
                 let dz = tz - torpedo.z;
-                let dist_sq = dx * dx + dz * dz;
+                let dist_sq = dx * dx + dy * dy + dz * dz;
                 let threshold = det + radius;
                 if dist_sq <= threshold * threshold
                     && best.map(|(d, _)| dist_sq < d).unwrap_or(true)
@@ -1122,7 +1175,7 @@ mod tests {
         // to load (auto-unload fires when loaded_count > target_count).
         sys.tube_mut(id).unwrap().target_count = 1;
         assert!(sys.start_load(id));
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(load_time, &targets, &mut no_uuid);
     }
 
@@ -1147,7 +1200,7 @@ mod tests {
     #[test]
     fn launch_returns_launched_with_uuid() {
         let mut sys = loaded_system();
-        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(
             r,
             LaunchResult::Launched {
@@ -1160,7 +1213,7 @@ mod tests {
     #[test]
     fn launch_adds_torpedo_to_in_flight() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.in_flight.len(), 1);
         assert_eq!(sys.in_flight[0].uuid, "t1");
     }
@@ -1235,7 +1288,7 @@ mod tests {
     #[test]
     fn launch_does_not_change_torpedo_count() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         // Count was decremented at load time, not at launch
         assert_eq!(sys.torpedoes_remaining, 7);
     }
@@ -1250,7 +1303,7 @@ mod tests {
     #[test]
     fn launch_leaves_tube_unloaded_until_manual_load() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
         assert_eq!(
             sys.tube("fore_port").unwrap().load_state,
@@ -1260,7 +1313,7 @@ mod tests {
         // manual launch does NOT trigger an automatic reload on its own.
         // (Auto-management only reloads when target_count > loaded_count.)
         sys.tube_mut("fore_port").unwrap().target_count = 0;
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(sys.config.load_time, &targets, &mut no_uuid);
         assert_eq!(
             sys.tube("fore_port").unwrap().load_state,
@@ -1271,14 +1324,14 @@ mod tests {
     #[test]
     fn launch_from_unloaded_tube_returns_not_loaded() {
         let mut sys = default_system();
-        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::TubeNotLoaded);
     }
 
     #[test]
     fn launch_from_unknown_tube_returns_unknown() {
         let mut sys = default_system();
-        let r = sys.launch("dorsal", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        let r = sys.launch("dorsal", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::UnknownTube);
     }
 
@@ -1302,7 +1355,7 @@ mod tests {
                                                 // the timer fires we expect exactly one torpedo to return to the pool
                                                 // and no auto-reload to start.
         sys.tube_mut("fore_port").unwrap().target_count = 0;
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(
             sys.tube("fore_port").unwrap().load_time,
             &targets,
@@ -1336,9 +1389,18 @@ mod tests {
     #[test]
     fn can_launch_from_all_three_tubes_independently() {
         let mut sys = loaded_system();
-        let r1 = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let r2 = sys.launch("fore_starboard", "t2".into(), 0.0, 0.0, 0.0, None, None);
-        let r3 = sys.launch("aft", "t3".into(), 0.0, 0.0, 0.0, None, None);
+        let r1 = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        let r2 = sys.launch(
+            "fore_starboard",
+            "t2".into(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            None,
+        );
+        let r3 = sys.launch("aft", "t3".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(matches!(r1, LaunchResult::Launched { .. }));
         assert!(matches!(r2, LaunchResult::Launched { .. }));
         assert!(matches!(r3, LaunchResult::Launched { .. }));
@@ -1348,9 +1410,9 @@ mod tests {
     #[test]
     fn torpedo_with_no_target_flies_straight() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         let initial = sys.in_flight[0].heading;
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(0.1, &targets, &mut no_uuid);
         assert_eq!(sys.in_flight[0].heading, initial);
     }
@@ -1358,8 +1420,8 @@ mod tests {
     #[test]
     fn torpedo_moves_forward_in_straight_flight() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(1.0, &targets, &mut no_uuid);
         let t = &sys.in_flight[0];
         assert!(t.x.abs() < 0.01);
@@ -1375,11 +1437,12 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             Some("enemy".into()),
             None,
         );
         let mut targets = HashMap::new();
-        targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
+        targets.insert("enemy".into(), (20.0_f32, 0.0_f32, 0.0_f32));
         let h0 = sys.in_flight[0].heading;
         sys.tick(0.1, &targets, &mut no_uuid);
         assert!(sys.in_flight[0].heading > h0);
@@ -1398,11 +1461,12 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             Some("enemy".into()),
             None,
         );
         let mut targets = HashMap::new();
-        targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
+        targets.insert("enemy".into(), (20.0_f32, 0.0_f32, 0.0_f32));
         sys.tick(1.0, &targets, &mut no_uuid);
         assert!(sys.in_flight[0].heading <= PI / 4.0 + 0.001);
     }
@@ -1416,10 +1480,11 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             Some("enemy".into()),
             None,
         );
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let h0 = sys.in_flight[0].heading;
         sys.tick(0.5, &targets, &mut no_uuid);
         assert_eq!(sys.in_flight[0].heading, h0);
@@ -1438,12 +1503,13 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             Some("target-a".into()),
             None,
         );
         let mut targets = HashMap::new();
-        targets.insert("target-a".into(), (100.0_f32, 0.0_f32)); // hard right
-        targets.insert("target-b".into(), (0.0_f32, -100.0_f32)); // straight ahead
+        targets.insert("target-a".into(), (100.0_f32, 0.0_f32, 0.0_f32)); // hard right
+        targets.insert("target-b".into(), (0.0_f32, 0.0_f32, -100.0_f32)); // straight ahead
 
         let h0 = sys.in_flight[0].heading;
         sys.tick(0.1, &targets, &mut no_uuid);
@@ -1468,8 +1534,8 @@ mod tests {
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         load_tube(&mut sys, "fore_port");
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let r = sys.tick(5.1, &targets, &mut no_uuid);
         assert!(r.expired.contains(&"t1".to_string()));
         assert_eq!(sys.in_flight.len(), 0);
@@ -1482,8 +1548,8 @@ mod tests {
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         load_tube(&mut sys, "fore_port");
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let r = sys.tick(4.9, &targets, &mut no_uuid);
         assert!(!r.expired.contains(&"t1".to_string()));
         assert_eq!(sys.in_flight.len(), 1);
@@ -1492,7 +1558,7 @@ mod tests {
     #[test]
     fn collision_removes_torpedo_and_returns_damage() {
         let mut sys = loaded_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         let d = sys.handle_collision("t1");
         assert_eq!(d, Some(50));
         assert_eq!(sys.in_flight.len(), 0);
@@ -1513,7 +1579,7 @@ mod tests {
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         assert!(sys.start_load("fore_port"));
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(10.0, &targets, &mut no_uuid);
         assert!(sys.tube("fore_port").unwrap().is_loaded());
     }
@@ -1525,7 +1591,7 @@ mod tests {
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
         assert!(sys.start_load("fore_port"));
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(9.9, &targets, &mut no_uuid);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
     }
@@ -1544,9 +1610,9 @@ mod tests {
     #[test]
     fn find_detonation_hits_returns_empty_when_no_targets_in_range() {
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         // Target far away with small radius.
-        let targets = vec![("enemy".to_string(), 100.0, 100.0, 1.0)];
+        let targets = vec![("enemy".to_string(), 100.0, 0.0, 100.0, 1.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert!(hits.is_empty());
     }
@@ -1554,9 +1620,9 @@ mod tests {
     #[test]
     fn find_detonation_hits_reports_target_within_detonation_radius() {
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         // Target at (0, -4): distance 4, threshold 5+0 = 5.
-        let targets = vec![("enemy".to_string(), 0.0, -4.0, 0.0)];
+        let targets = vec![("enemy".to_string(), 0.0, 0.0, -4.0, 0.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "enemy".to_string())]);
     }
@@ -1565,8 +1631,8 @@ mod tests {
     fn find_detonation_hits_includes_target_radius_in_threshold() {
         // Detonation radius 1, target radius 10, distance 9 Ã¢â€ â€™ should hit.
         let mut sys = detonation_system(1.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
-        let targets = vec![("rock".to_string(), 0.0, -9.0, 10.0)];
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        let targets = vec![("rock".to_string(), 0.0, 0.0, -9.0, 10.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "rock".to_string())]);
     }
@@ -1574,10 +1640,10 @@ mod tests {
     #[test]
     fn find_detonation_hits_picks_nearest_when_multiple_in_range() {
         let mut sys = detonation_system(50.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         let targets = vec![
-            ("far".to_string(), 0.0, -40.0, 0.0),
-            ("near".to_string(), 0.0, -5.0, 0.0),
+            ("far".to_string(), 0.0, 0.0, -40.0, 0.0),
+            ("near".to_string(), 0.0, 0.0, -5.0, 0.0),
         ];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "near".to_string())]);
@@ -1593,10 +1659,11 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             /*target_uuid*/ None,
             /*source_uuid*/ None,
         );
-        let targets = vec![("raider".to_string(), 0.0, -3.0, 1.0)];
+        let targets = vec![("raider".to_string(), 0.0, 0.0, -3.0, 1.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "raider".to_string())]);
     }
@@ -1604,14 +1671,16 @@ mod tests {
     #[test]
     fn find_detonation_hits_handles_multiple_torpedoes_independently() {
         let mut sys = detonation_system(2.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         // Manually push a second torpedo so the test can focus on detonation
         // matching rather than tube load state.
         sys.in_flight.push(Torpedo {
             uuid: "t2".into(),
             x: 100.0,
+            y: 0.0,
             z: 100.0,
             heading: 0.0,
+            pitch: 0.0,
             lifespan_remaining: 10.0,
             target_uuid: None,
             source_uuid: None,
@@ -1619,8 +1688,8 @@ mod tests {
             shield_pierce: 0.0,
         });
         let targets = vec![
-            ("a".to_string(), 1.0, 0.0, 0.0),     // close to t1
-            ("b".to_string(), 101.0, 100.0, 0.0), // close to t2
+            ("a".to_string(), 1.0, 0.0, 0.0, 0.0),     // close to t1
+            ("b".to_string(), 101.0, 0.0, 100.0, 0.0), // close to t2
         ];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits.len(), 2);
@@ -1640,14 +1709,15 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             None,
             Some("player-ship".into()),
         );
         // Player ship sitting right on top of the torpedo, plus a raider
         // also in range further out.
         let targets = vec![
-            ("player-ship".to_string(), 0.0, 0.0, 5.0),
-            ("raider".to_string(), 0.0, -3.0, 1.0),
+            ("player-ship".to_string(), 0.0, 0.0, 0.0, 5.0),
+            ("raider".to_string(), 0.0, 0.0, -3.0, 1.0),
         ];
         let hits = sys.find_detonation_hits(&targets);
         // Should hit the raider, not the launcher.
@@ -1663,10 +1733,11 @@ mod tests {
             0.0,
             0.0,
             0.0,
+            0.0,
             None,
             Some("player-ship".into()),
         );
-        let targets = vec![("player-ship".to_string(), 0.0, 0.0, 5.0)];
+        let targets = vec![("player-ship".to_string(), 0.0, 0.0, 0.0, 5.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert!(hits.is_empty());
     }
@@ -1754,7 +1825,7 @@ mod tests {
         config.load_time = 5.0;
         let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
         sys.set_volley_target("t1", 2);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         // First tick starts loading torpedo #1.
         sys.tick(0.0, &targets, &mut no_uuid);
         assert_eq!(sys.torpedoes_remaining, 9);
@@ -1785,7 +1856,7 @@ mod tests {
         sys.torpedoes_remaining -= 3;
         let tube = sys.tube_mut("t1").unwrap();
         tube.loaded_count = 3;
-        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(matches!(
             result,
             LaunchResult::Launched {
@@ -1808,10 +1879,10 @@ mod tests {
         sys.torpedoes_remaining -= 3;
         let tube = sys.tube_mut("t1").unwrap();
         tube.loaded_count = 3;
-        sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.in_flight.len(), 1);
 
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let mut uuid_counter = 1u32;
         let mut next = || {
             let s = format!("uuid-{uuid_counter}");
@@ -1845,7 +1916,7 @@ mod tests {
         sys.torpedoes_remaining -= 2;
         let tube = sys.tube_mut("t1").unwrap();
         tube.loaded_count = 2;
-        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, None, None);
+        let result = sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(matches!(
             result,
             LaunchResult::Launched {
@@ -1872,7 +1943,7 @@ mod tests {
         }
         // Drop target to 1 â†’ should auto-unload one torpedo.
         sys.set_volley_target("t1", 1);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         // First tick starts unloading one.
         sys.tick(0.0, &targets, &mut no_uuid);
         assert!(matches!(
@@ -1911,7 +1982,7 @@ mod tests {
             tube.loaded_count = 2;
             tube.target_count = 0; // target is already 0
         }
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         // First tick should start unloading the first torpedo.
         sys.tick(0.0, &targets, &mut no_uuid);
         assert!(
@@ -2007,8 +2078,9 @@ mod tests {
         preload(&mut sys, "t1", 2);
 
         // Distinct origins per barrel so a torpedo's X identifies its barrel.
-        let origins = [(10.0, 0.0), (20.0, 0.0)];
-        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        let origins = [(10.0, 0.0, 0.0), (20.0, 0.0, 0.0)];
+        let r =
+            sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(matches!(
             r,
             LaunchResult::Launched {
@@ -2023,7 +2095,7 @@ mod tests {
         assert_eq!(sys.tube("t1").unwrap().pattern_step, 1);
 
         // Burst shot fires from barrel 1 after the burst interval.
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let mut next = burst_next();
         sys.tick(0.3, &targets, &mut next);
         assert_eq!(sys.in_flight.len(), 2);
@@ -2049,11 +2121,11 @@ mod tests {
         let mut sys = TorpedoSystem::from_configs(&[cfg], config);
         preload(&mut sys, "t1", 2);
 
-        let origins = [(10.0, 0.0), (20.0, 0.0)];
-        sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        let origins = [(10.0, 0.0, 0.0), (20.0, 0.0, 0.0)];
+        sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
         assert!((sys.in_flight[0].x - 10.0).abs() < 1e-4, "barrel 0 origin");
 
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let mut next = burst_next();
         sys.tick(0.3, &targets, &mut next);
         assert_eq!(sys.in_flight.len(), 2, "both barrels fire");
@@ -2078,8 +2150,9 @@ mod tests {
         preload(&mut sys, "t1", 1);
         let mag_before = sys.torpedoes_remaining;
 
-        let origins = [(10.0, 0.0), (20.0, 0.0)];
-        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        let origins = [(10.0, 0.0, 0.0), (20.0, 0.0, 0.0)];
+        let r =
+            sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(
             matches!(
                 r,
@@ -2119,8 +2192,9 @@ mod tests {
         preload(&mut sys, "t1", 2);
         let mag_before = sys.torpedoes_remaining;
 
-        let origins = [(10.0, 0.0)];
-        let r = sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, None, None);
+        let origins = [(10.0, 0.0, 0.0)];
+        let r =
+            sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
         assert!(matches!(
             r,
             LaunchResult::Launched {
@@ -2128,7 +2202,7 @@ mod tests {
                 ..
             }
         ));
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let mut next = burst_next();
         // Drive well past several burst intervals.
         sys.tick(0.3, &targets, &mut next);
@@ -2155,15 +2229,205 @@ mod tests {
         config.burst_interval_secs = 0.3;
         let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
         preload(&mut sys, "t1", 2);
-        sys.launch("t1", "u0".into(), 7.0, -3.0, 0.0, None, None);
+        sys.launch("t1", "u0".into(), 7.0, 0.0, -3.0, 0.0, None, None);
         assert!((sys.in_flight[0].x - 7.0).abs() < 1e-4);
         assert!((sys.in_flight[0].z - (-3.0)).abs() < 1e-4);
         // Legacy tube reports no pattern → no step indicator.
         assert_eq!(sys.tube("t1").unwrap().pattern_len(), 0);
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         let mut next = burst_next();
         sys.tick(0.3, &targets, &mut next);
         let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
         assert!((burst.x - 7.0).abs() < 1e-4, "burst from ship centre too");
+    }
+
+    // ── Full-3D torpedo flight (issue #768) ──────────────────────────────────
+
+    /// A torpedo fired level at a target ABOVE it climbs: its `y` and `pitch`
+    /// both increase as it homes toward the target's altitude. Vertical
+    /// separation therefore changes guidance (AC2).
+    #[test]
+    fn torpedo_climbs_toward_target_above() {
+        let mut sys = loaded_system();
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
+        // Target dead ahead (−Z) but 40 m up.
+        let mut targets = HashMap::new();
+        targets.insert("enemy".into(), (0.0_f32, 40.0_f32, -40.0_f32));
+        assert_eq!(sys.in_flight[0].y, 0.0);
+        assert_eq!(sys.in_flight[0].pitch, 0.0);
+        sys.tick(0.5, &targets, &mut no_uuid);
+        assert!(
+            sys.in_flight[0].pitch > 0.0,
+            "pitch should tilt up toward the higher target"
+        );
+        assert!(
+            sys.in_flight[0].y > 0.0,
+            "torpedo should gain altitude climbing toward the target"
+        );
+    }
+
+    /// Mirror of the climb case: a target BELOW drives a descent (negative
+    /// pitch, decreasing `y`).
+    #[test]
+    fn torpedo_descends_toward_target_below() {
+        let mut sys = loaded_system();
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
+        let mut targets = HashMap::new();
+        targets.insert("enemy".into(), (0.0_f32, -40.0_f32, -40.0_f32));
+        sys.tick(0.5, &targets, &mut no_uuid);
+        assert!(sys.in_flight[0].pitch < 0.0, "pitch should tilt down");
+        assert!(sys.in_flight[0].y < 0.0, "torpedo should lose altitude");
+    }
+
+    /// The vertical steering is rate-limited by the SAME `turn_rate` clamp as
+    /// the yaw: over one second the pitch cannot exceed `turn_rate` radians even
+    /// when the target sits straight overhead (desired pitch = +π/2).
+    #[test]
+    fn vertical_steering_is_rate_limited_by_turn_rate() {
+        let mut config = TorpedoConfig::default();
+        config.turn_rate = PI / 4.0;
+        let tubes = vec![cfg("fore_port", -30.0, 90.0)];
+        let mut sys = TorpedoSystem::from_configs(&tubes, config);
+        load_tube(&mut sys, "fore_port");
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
+        // Target directly overhead → desired pitch is +π/2, far beyond one
+        // second of turn budget.
+        let mut targets = HashMap::new();
+        targets.insert("enemy".into(), (0.0_f32, 1000.0_f32, 0.0_f32));
+        sys.tick(1.0, &targets, &mut no_uuid);
+        assert!(
+            sys.in_flight[0].pitch <= PI / 4.0 + 1e-4,
+            "pitch climb per second must be clamped to turn_rate"
+        );
+    }
+
+    /// Vertical separation changes collision: same XZ, a large ΔY leaves the
+    /// torpedo OUTSIDE the 3D detonation sphere (no hit), while a small ΔY is
+    /// inside it (hit). AC2 / AC1.
+    #[test]
+    fn vertical_separation_governs_3d_collision() {
+        let mut sys = detonation_system(5.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        // Same XZ as the torpedo (0,0), radius 0. ΔY = 20 ≫ det radius 5 → miss.
+        let far_up = vec![("blimp".to_string(), 0.0, 20.0, 0.0, 0.0)];
+        assert!(
+            sys.find_detonation_hits(&far_up).is_empty(),
+            "a torpedo 20 m below a target at the same XZ must NOT detonate"
+        );
+        // ΔY = 3 < det radius 5 → hit.
+        let near_up = vec![("blimp".to_string(), 0.0, 3.0, 0.0, 0.0)];
+        assert_eq!(
+            sys.find_detonation_hits(&near_up),
+            vec![("t1".to_string(), "blimp".to_string())],
+            "within the 3D radius the torpedo detonates"
+        );
+    }
+
+    /// The detonation payload carries the torpedo's vertical impact position, so
+    /// a torpedo that climbed reports a non-zero `impact_y` (AC1: 3D detonation).
+    #[test]
+    fn detonation_carries_vertical_impact_point() {
+        let mut sys = detonation_system(5.0);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
+        // Fly a while homing at a high target so the torpedo gains altitude.
+        let mut targets = HashMap::new();
+        targets.insert("enemy".into(), (0.0_f32, 100.0_f32, -60.0_f32));
+        sys.tick(1.0, &targets, &mut no_uuid);
+        sys.tick(1.0, &targets, &mut no_uuid);
+        let expected_y = sys.in_flight[0].y;
+        assert!(expected_y > 0.0, "torpedo should have climbed");
+        let det = sys.handle_collision_full("t1").unwrap();
+        assert!(
+            (det.impact_y - expected_y).abs() < 1e-4,
+            "impact_y must equal the torpedo's altitude at detonation"
+        );
+    }
+
+    /// Patterned launch preserves the barrel marker's Y: each authored barrel
+    /// origin is a full 3D point, so a round leaving a raised barrel spawns at
+    /// that altitude (AC4: patterned origins carry Y).
+    #[test]
+    fn patterned_origins_carry_barrel_y() {
+        let mut config = TorpedoConfig::default();
+        config.count = 10;
+        config.burst_interval_secs = 0.3;
+        let cfg = patterned_cfg(
+            "t1",
+            vec!["b0".into(), "b1".into()],
+            vec![barrel_step(&[0], 0.0), barrel_step(&[1], 0.5)],
+            2,
+        );
+        let mut sys = TorpedoSystem::from_configs(&[cfg], config);
+        preload(&mut sys, "t1", 2);
+        // Distinct Y per barrel so a torpedo's altitude identifies its barrel.
+        let origins = [(10.0, 2.0, 0.0), (20.0, -3.0, 0.0)];
+        sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
+        assert!(
+            (sys.in_flight[0].y - 2.0).abs() < 1e-4,
+            "immediate round keeps barrel 0's Y"
+        );
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+        let mut next = burst_next();
+        sys.tick(0.3, &targets, &mut next);
+        let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
+        assert!(
+            (burst.y - (-3.0)).abs() < 1e-4,
+            "burst round keeps barrel 1's Y"
+        );
+    }
+
+    /// AC3 planar collapse: with every Y at 0, the 3D distance check reduces
+    /// EXACTLY to the 2D one. This target sits 6 m astern (ΔZ only) with the
+    /// detonation radius at 5 — a boundary the 2D check also missed — proving no
+    /// spurious `dy` term crept in.
+    #[test]
+    fn planar_collision_matches_2d_when_all_y_zero() {
+        let mut sys = detonation_system(5.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
+        // distance 6 > 5 → miss, exactly as the pure XZ check would decide.
+        let miss = vec![("e".to_string(), 0.0, 0.0, -6.0, 0.0)];
+        assert!(sys.find_detonation_hits(&miss).is_empty());
+        // distance 4 < 5 → hit.
+        let hit = vec![("e".to_string(), 0.0, 0.0, -4.0, 0.0)];
+        assert_eq!(
+            sys.find_detonation_hits(&hit),
+            vec![("t1".to_string(), "e".to_string())]
+        );
     }
 }

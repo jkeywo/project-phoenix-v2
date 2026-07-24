@@ -230,7 +230,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Torpedo State
-      summary: Shared ammunition, per-tube load state, and in-flight torpedo guidance and detonation state.
+      summary: Shared ammunition, per-tube load state, and in-flight torpedo state with full 3D position (x/y/z), yaw+pitch guidance, and 3D proximity detonation carrying the vertical impact point (issue #768).
     architecture:
       classification: authoritative
       owner: torpedo-system
@@ -238,7 +238,7 @@ entities:
     implementation:
       status: declared
       paths: [src/weapons/torpedo.rs]
-      symbols: [TorpedoSystem, TorpedoTube, TubeBurstState]
+      symbols: [TorpedoSystem, TorpedoTube, TubeBurstState, Torpedo, TorpedoDetonation]
       tests: [cargo test]
 
   - component: tactical-weapons-projection
@@ -365,15 +365,40 @@ entities:
 
   - component: three-dimensional-torpedoes
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Three-Dimensional Torpedoes
-      summary: Torpedoes use full 3D position, guidance, collision, and detonation once ship vertical movement becomes simulation truth.
+      summary: Torpedoes use full 3D origin, movement, guidance, collision, and detonation now that ship vertical movement (#744) and patterned torpedo origins (#766) are simulation truth.
+      rationale:
+        - "3D position + vertical steering (issue #768). `Torpedo` gains `y` (altitude) and `pitch` (climb angle). `Torpedo::tick` keeps the unchanged `atan2(-dz)` yaw steering and adds a vertical term: it rotates `pitch` toward the target's elevation `atan2(dy, horizontal)`, rate-limited by the SAME `TorpedoConfig::turn_rate` clamp the yaw uses — no new gameplay constant was introduced. Movement decomposes the constant `speed` by pitch: `x += sin_yaw·cos_pitch·speed·dt`, `z -= cos_yaw·cos_pitch·speed·dt`, `y += sin_pitch·speed·dt`. Homing reads the target Y from the live (frozen combat-lock) snapshot, so vertical ship separation genuinely changes guidance."
+        - "3D collision + detonation. `find_detonation_hits` takes `(uuid, x, y, z, radius)` targets and tests `dx²+dy²+dz² <= (det_radius+target_radius)²`, so a torpedo far above a ship at the same XZ does not detonate while one within the 3D radius does. `TorpedoDetonation` carries `impact_y` alongside `impact_x`/`impact_z`. Shield-arc routing stays a horizontal-plane bearing (`attacker_bearing_relative` is XZ), so `impact_y` is not re-plumbed into the Bevy detonation struct — it has no arc-routing consumer."
+        - "Planar compatibility (AC3), bit-for-bit. All new vertical fields default to `0.0` in every constructor, the wire (`#[serde(default)]` on `TorpedoLaunched.y`), and test helpers. Ships read `physics.y` (already 0 for Planar hulls, #744) with NO per-hull branching. With ΔY=0, `cos_pitch == 1.0` and `sin_pitch == 0.0` exactly, so the XZ integration is identical to the pre-#768 path and `pitch` never leaves 0; `desired_pitch = atan2(0, h) = 0`. The full pre-existing torpedo suite passes unchanged."
+        - "Wire + renderer + client. `ServerMessage::TorpedoLaunched` gains `y` (serde-default, codec round-trip). `handle_fire_torpedo` threads `physics.y` and each barrel marker's `pos.y` (previously dropped) into `launch_with_barrels`, and broadcasts the immediate torpedo's real spawn Y. `sync_torpedo_pfx` renders at the torpedo's real `y` instead of a hardcoded plane. `gui/sim-state.js` stores `y` (defaulting to 0); the client does not dead-reckon flight."
     architecture:
       kind: weapon-system
       authority: authoritative
       replacement: torpedo-system
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/weapons/torpedo.rs
+        - src/console/weapons/torpedo.rs
+        - src/console/weapons/shared.rs
+        - src/core/messages.rs
+        - src/core/codec.rs
+        - src/server/pfx.rs
+        - gui/sim-state.js
+      symbols:
+        - Torpedo
+        - TorpedoDetonation
+        - launch_with_barrels
+        - find_detonation_hits
+        - build_torpedo_target_snapshot
+        - tick_torpedo_lifecycle
+        - handle_fire_torpedo
+        - sync_torpedo_pfx
+      tests: [cargo test, npx vitest run]
 
   - component: weapon-family-arc-bearing-coordination
     core:

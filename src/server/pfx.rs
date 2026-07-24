@@ -1200,14 +1200,16 @@ fn sync_torpedo_pfx(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut body_q: Query<&mut Transform, With<TorpedoBody>>,
 ) {
-    // Collect (uuid, x, z, heading) quadruples for every in-flight torpedo
+    // Collect (uuid, x, y, z, heading) tuples for every in-flight torpedo
     // across every ship. A single flat list makes the diff-against-tracker
     // trivial, and heading lets the flare orient correctly for homing
-    // torpedoes that curve mid-flight.
-    let mut all_in_flight: Vec<(String, f32, f32, f32)> = Vec::new();
+    // torpedoes that curve mid-flight. Y is the torpedo's real altitude
+    // (issue #768), so a climbing/descending torpedo renders off the play
+    // plane instead of being pinned to it; a Planar torpedo has y == 0.
+    let mut all_in_flight: Vec<(String, f32, f32, f32, f32)> = Vec::new();
     for torpedo_sys in ships_q.iter() {
         for t in &torpedo_sys.0.in_flight {
-            all_in_flight.push((t.uuid.clone(), t.x, t.z, t.heading));
+            all_in_flight.push((t.uuid.clone(), t.x, t.y, t.z, t.heading));
         }
     }
 
@@ -1233,8 +1235,8 @@ fn sync_torpedo_pfx(
     }
 
     for uuid in to_spawn {
-        if let Some((_, x, z, heading)) = all_in_flight.iter().find(|(u, ..)| u == &uuid) {
-            let pos = Vec3::new(*x, 0.1, *z);
+        if let Some((_, x, y, z, heading)) = all_in_flight.iter().find(|(u, ..)| u == &uuid) {
+            let pos = Vec3::new(*x, *y, *z);
             spawn_torpedo_pfx(
                 uuid,
                 pos,
@@ -1250,8 +1252,8 @@ fn sync_torpedo_pfx(
         }
     }
 
-    for (uuid, x, z, heading) in &all_in_flight {
-        let pos = Vec3::new(*x, 0.1, *z);
+    for (uuid, x, y, z, heading) in &all_in_flight {
+        let pos = Vec3::new(*x, *y, *z);
         update_torpedo_pfx(
             uuid,
             pos,

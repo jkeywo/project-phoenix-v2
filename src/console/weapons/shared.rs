@@ -224,13 +224,14 @@ impl BeamContext {
 /// in the same tick. It carries no state across frames.
 #[derive(Resource, Default)]
 pub struct TorpedoTargetSnapshot {
-    /// UUID → (x, z) positions for torpedo guidance, from live ECS
-    /// transforms with a `WorldResource` snapshot fallback.
-    pub target_positions: std::collections::HashMap<String, (f32, f32)>,
-    /// Proximity detonation target list (uuid, x, z, radius). Virtual
+    /// UUID → (x, y, z) positions for torpedo guidance, from live ECS
+    /// transforms with a `WorldResource` snapshot fallback. Y threaded for
+    /// full-3D torpedo homing (issue #768); `0.0` for Planar entities.
+    pub target_positions: std::collections::HashMap<String, (f32, f32, f32)>,
+    /// Proximity detonation target list (uuid, x, y, z, radius). Virtual
     /// entities (asteroid-field anchors, region trigger volumes) are
-    /// excluded.
-    pub targets: Vec<(String, f32, f32, f32)>,
+    /// excluded. Y threaded for 3D collision (issue #768).
+    pub targets: Vec<(String, f32, f32, f32, f32)>,
 }
 
 impl TorpedoTargetSnapshot {
@@ -337,8 +338,9 @@ mod tests {
     fn torpedo_target_snapshot_clear_empties_after_push() {
         let mut snap = TorpedoTargetSnapshot::default();
         snap.target_positions
-            .insert("uuid-1".to_string(), (1.0, 2.0));
-        snap.targets.push(("uuid-1".to_string(), 1.0, 2.0, 3.0));
+            .insert("uuid-1".to_string(), (1.0, 2.0, 3.0));
+        snap.targets
+            .push(("uuid-1".to_string(), 1.0, 2.0, 3.0, 4.0));
         assert_eq!(snap.target_positions.len(), 1);
         assert_eq!(snap.targets.len(), 1);
         snap.clear();

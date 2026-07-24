@@ -1108,6 +1108,13 @@ impl EntitySnapshot {
         self.position.map(|p| p[0]).unwrap_or(0.0)
     }
 
+    /// World-space Y coordinate (vertical / altitude). Returns 0.0 when
+    /// `position` is `None`. Used by 3D torpedo guidance and collision
+    /// (issue #768); `0.0` for Planar entities on the cruise plane.
+    pub fn y(&self) -> f32 {
+        self.position.map(|p| p[1]).unwrap_or(0.0)
+    }
+
     /// World-space Z coordinate (play-plane depth). Returns 0.0 when `position` is `None`.
     pub fn z(&self) -> f32 {
         self.position.map(|p| p[2]).unwrap_or(0.0)
@@ -1683,6 +1690,11 @@ pub enum ServerMessage {
         uuid: String,
         tube: TorpedoTube,
         x: f32,
+        /// Vertical launch position (issue #768). `#[serde(default)]` so a
+        /// pre-#768 planar message with no `y` decodes to `0.0`, keeping the
+        /// wire backward compatible.
+        #[serde(default)]
+        y: f32,
         z: f32,
         heading: f32,
     },

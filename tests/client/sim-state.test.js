@@ -297,9 +297,13 @@ describe('apply weapons / targets / shields', () => {
 describe('apply torpedoes / modifiers / power', () => {
   it('TorpedoLaunched appends and TorpedoDestroyed removes by uuid', () => {
     const s = new ClientSimState();
-    s.apply({ type: 'TorpedoLaunched', data: { uuid: 'tp1', tube: 'fore', x: 1, z: 2, heading: 0.5 } });
+    s.apply({ type: 'TorpedoLaunched', data: { uuid: 'tp1', tube: 'fore', x: 1, y: 7, z: 2, heading: 0.5 } });
     s.apply({ type: 'TorpedoLaunched', data: { uuid: 'tp2', tube: 'aft', x: 3, z: 4, heading: 1.0 } });
     expect(s.torpedoesInFlight).toHaveLength(2);
+    // Vertical launch position is stored (issue #768); a message with no `y`
+    // defaults to the play plane.
+    expect(s.torpedoesInFlight[0].y).toBe(7);
+    expect(s.torpedoesInFlight[1].y).toBe(0);
     s.apply({ type: 'TorpedoDestroyed', data: { uuid: 'tp1' } });
     expect(s.torpedoesInFlight.map(t => t.uuid)).toEqual(['tp2']);
   });

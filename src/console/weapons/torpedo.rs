@@ -376,7 +376,11 @@ pub(crate) fn handle_fire_torpedo(
             // shipped single-marker torpedo hulls are unchanged. Each barrel
             // marker resolves via the rig; an unresolved marker falls back to
             // ship centre.
-            let barrel_origins: Vec<(f32, f32)> = torpedo_sys
+            // Keep the marker's full 3D position — `pos.y` is no longer dropped
+            // (issue #768). A patterned-origin barrel therefore launches at its
+            // authored altitude, and the ship-centre fallback carries the hull's
+            // live `physics.y` (0 for Planar hulls).
+            let barrel_origins: Vec<(f32, f32, f32)> = torpedo_sys
                 .tube(tube_id.as_str())
                 .map(|t| t.barrels.clone())
                 .unwrap_or_default()
@@ -384,8 +388,8 @@ pub(crate) fn handle_fire_torpedo(
                 .map(|name| {
                     markers_opt
                         .and_then(|m| m.resolve_world_position(transform, name))
-                        .map(|pos| (pos.x, pos.z))
-                        .unwrap_or((physics.x, physics.z))
+                        .map(|pos| (pos.x, pos.y, pos.z))
+                        .unwrap_or((physics.x, physics.y, physics.z))
                 })
                 .collect();
             use crate::torpedo::LaunchResult;
@@ -394,6 +398,7 @@ pub(crate) fn handle_fire_torpedo(
                 uuid.clone(),
                 &barrel_origins,
                 physics.x,
+                physics.y,
                 physics.z,
                 launch_heading,
                 homing_uuid.clone(),
@@ -408,13 +413,13 @@ pub(crate) fn handle_fire_torpedo(
                     // The immediate torpedo's real spawn origin (barrel marker
                     // or ship centre) so the broadcast matches the sim. Burst
                     // rounds carry their own origins via `burst_launched`.
-                    let (launch_x, launch_z) = torpedo_sys
+                    let (launch_x, launch_y, launch_z) = torpedo_sys
                         .in_flight
                         .iter()
                         .rev()
                         .find(|t| t.uuid == launched_uuid)
-                        .map(|t| (t.x, t.z))
-                        .unwrap_or((physics.x, physics.z));
+                        .map(|t| (t.x, t.y, t.z))
+                        .unwrap_or((physics.x, physics.y, physics.z));
                     if let Some(ref mut msgs) = balance_events {
                         msgs.write(crate::balance::BalanceEvent::WeaponFired {
                             shooter: source_uuid.clone().filter(|u| !u.is_empty()),
@@ -428,6 +433,7 @@ pub(crate) fn handle_fire_torpedo(
                             uuid: launched_uuid,
                             tube: tube_id.clone(),
                             x: launch_x,
+                            y: launch_y,
                             z: launch_z,
                             heading: launch_heading,
                         },
@@ -598,26 +604,34 @@ pub(crate) fn build_torpedo_target_snapshot(
 
     // Build target positions from *live* ECS transforms, falling back to the
     // (stale) WorldResource snapshot for entities not currently in the ECS.
-    let target_positions: std::collections::HashMap<String, (f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32)> =
+    let target_positions: std::collections::HashMap<String, (f32, f32, f32)> = {
+        let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
             std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
-            map.insert(u.0.clone(), (t.translation.x, t.translation.z));
+            map.insert(
+                u.0.clone(),
+                (t.translation.x, t.translation.y, t.translation.z),
+            );
         }
         for (u, t) in entity_q.iter() {
-            map.insert(u.0.clone(), (t.translation.x, t.translation.z));
+            map.insert(
+                u.0.clone(),
+                (t.translation.x, t.translation.y, t.translation.z),
+            );
         }
         // Fill remaining entries from WorldResource snapshot for completeness.
         for e in world.0.entities.iter() {
-            map.entry(e.uuid.clone()).or_insert_with(|| (e.x(), e.z()));
+            map.entry(e.uuid.clone())
+                .or_insert_with(|| (e.x(), e.y(), e.z()));
         }
         map
     };
 
-    // Proximity detonation target list (uuid, x, z, radius). Built once and
-    // shared across every ship's `find_detonation_hits` call.
-    let targets: Vec<(String, f32, f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
+    // Proximity detonation target list (uuid, x, y, z, radius). Built once and
+    // shared across every ship's `find_detonation_hits` call. Y threaded for 3D
+    // collision (issue #768).
+    let targets: Vec<(String, f32, f32, f32, f32)> = {
+        let mut map: std::collections::HashMap<String, (f32, f32, f32, f32)> =
             std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
             let radius = world
@@ -627,7 +641,10 @@ pub(crate) fn build_torpedo_target_snapshot(
                 .find(|e| e.uuid == u.0)
                 .map(|e| e.radius_or_zero())
                 .unwrap_or(0.0);
-            map.insert(u.0.clone(), (t.translation.x, t.translation.z, radius));
+            map.insert(
+                u.0.clone(),
+                (t.translation.x, t.translation.y, t.translation.z, radius),
+            );
         }
         for (u, t) in entity_q.iter() {
             if virtual_uuids.contains(&u.0) || virtual_snapshot_uuids.contains(&u.0) {
@@ -640,17 +657,20 @@ pub(crate) fn build_torpedo_target_snapshot(
                 .find(|e| e.uuid == u.0)
                 .map(|e| e.radius_or_zero())
                 .unwrap_or(0.0);
-            map.insert(u.0.clone(), (t.translation.x, t.translation.z, radius));
+            map.insert(
+                u.0.clone(),
+                (t.translation.x, t.translation.y, t.translation.z, radius),
+            );
         }
         for e in world.0.entities.iter() {
             if virtual_uuids.contains(&e.uuid) || virtual_snapshot_uuids.contains(&e.uuid) {
                 continue;
             }
             map.entry(e.uuid.clone())
-                .or_insert_with(|| (e.x(), e.z(), e.radius_or_zero()));
+                .or_insert_with(|| (e.x(), e.y(), e.z(), e.radius_or_zero()));
         }
         map.into_iter()
-            .map(|(uuid, (x, z, r))| (uuid, x, z, r))
+            .map(|(uuid, (x, y, z, r))| (uuid, x, y, z, r))
             .collect()
     };
 
@@ -765,6 +785,11 @@ pub(crate) fn tick_torpedo_lifecycle(
         /// `source_uuid` does.
         impact_x: f32,
         impact_z: f32,
+        // NB: the torpedo's vertical impact position rides on the pure-model
+        // `TorpedoDetonation.impact_y` (issue #768). It is deliberately NOT
+        // re-plumbed here: shield-arc routing is a horizontal-plane bearing
+        // (`attacker_bearing_relative` is XZ), and the explosion VFX messages
+        // carry only x/z, so this internal struct has no consumer for it.
     }
     let mut detonations: Vec<Detonation> = Vec::new();
     let mut any_ship_component = false;
@@ -780,13 +805,14 @@ pub(crate) fn tick_torpedo_lifecycle(
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
             ));
         }
-        for (tube, uuid, x, z, heading) in result.burst_launched {
+        for (tube, uuid, x, y, z, heading) in result.burst_launched {
             outbox.0.push((
                 Target::All,
                 ServerMessage::TorpedoLaunched {
                     uuid,
                     tube,
                     x,
+                    y,
                     z,
                     heading,
                 },
@@ -826,13 +852,14 @@ pub(crate) fn tick_torpedo_lifecycle(
                 ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
             ));
         }
-        for (tube, uuid, x, z, heading) in result.burst_launched {
+        for (tube, uuid, x, y, z, heading) in result.burst_launched {
             outbox.0.push((
                 Target::All,
                 ServerMessage::TorpedoLaunched {
                     uuid,
                     tube,
                     x,
+                    y,
                     z,
                     heading,
                 },

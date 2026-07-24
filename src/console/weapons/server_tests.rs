@@ -1657,6 +1657,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
             0.0,
             0.0,
             0.0,
+            0.0,
             None,
             Some(npc_uuid.to_string()),
         );
@@ -3055,8 +3056,10 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     let torpedo = Torpedo {
         uuid: "test-torp-1".into(),
         x: 1.0, // 1 m away from player at origin — within detonation_radius
+        y: 0.0,
         z: 0.0,
         heading: 0.0,
+        pitch: 0.0,
         lifespan_remaining: 30.0,
         target_uuid: Some("player-ship".into()),
         source_uuid: None, // no source → no self-detonation exclusion
@@ -3211,8 +3214,10 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     let torpedo = Torpedo {
         uuid: "test-torp-astern".into(),
         x: start_x,
+        y: 0.0,
         z: start_z,
         heading: 0.0,
+        pitch: 0.0,
         lifespan_remaining: 30.0,
         target_uuid: Some("player-ship".into()),
         source_uuid: None,
@@ -7455,8 +7460,10 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
     enemy_torpedoes.in_flight.push(crate::torpedo::Torpedo {
         uuid: "torpedo-uuid".into(),
         x: 0.0,
+        y: 0.0,
         z: 0.0,
         heading: 0.0,
+        pitch: 0.0,
         lifespan_remaining: 10.0,
         target_uuid: Some("test-local-ship".into()),
         source_uuid: Some("enemy-uuid".into()),

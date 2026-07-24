@@ -4878,9 +4878,9 @@ fire_arc_deg = 90.0
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         assert!(sys.start_load("fore"));
-        let targets: HashMap<String, (f32, f32)> = HashMap::new();
+        let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
         sys.tick(sys.config.load_time, &targets, &mut || "test".into());
-        sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
 
         let det = sys.handle_collision_full("t1").unwrap();

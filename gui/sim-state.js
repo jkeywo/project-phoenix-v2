@@ -267,8 +267,11 @@ export class ClientSimState {
         break;
       }
       case 'TorpedoLaunched':
+        // `y` defaults to 0 so a pre-#768 planar message (no `y` field) keeps
+        // the torpedo on the play plane. The client does not dead-reckon
+        // torpedo flight, so this stored launch position is the whole record.
         this.torpedoesInFlight.push({
-          uuid: d.uuid, x: d.x, z: d.z, heading: d.heading, tube: d.tube,
+          uuid: d.uuid, x: d.x, y: d.y != null ? d.y : 0, z: d.z, heading: d.heading, tube: d.tube,
         });
         break;
       case 'TorpedoDestroyed':

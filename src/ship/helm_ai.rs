@@ -718,6 +718,7 @@ pub(crate) fn helm_ai_decision(
 ///   - the target is already inside some carried arc AND that arc reaches it
 ///     (the family can fire — the same in-range-and-in-arc geometry the emitter
 ///     uses to decide whether to ask at all).
+///
 /// Only while the target is in reach of some arc but no arc bears does it
 /// steer.
 fn apply_arc_bearing_request(

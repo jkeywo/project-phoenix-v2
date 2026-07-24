@@ -504,6 +504,7 @@ mod tests {
                     uuid: "torpedo-uuid-1".into(),
                     tube: "fore_starboard".to_string(),
                     x: 10.5,
+                    y: 3.25,
                     z: -20.0,
                     heading: 1.57,
                 },

@@ -5,6 +5,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { weaponReadinessView } from '../weapon-readiness.js';
 
 export class PhBlastersControls extends HTMLElement {
   #state = null;
@@ -27,6 +28,10 @@ export class PhBlastersControls extends HTMLElement {
     .bar-fill.charge { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-fill.cooldown { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .status { font-size: 0.5rem; letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
+    .bank-row.blocked .status { color: var(--fire); }
+    .bank-row.unavailable .status { color: var(--ink-faint); }
+    .bank-row.ready .status { color: var(--loaded); }
     .bar-row { display: flex; align-items: center; gap: 0.4rem; padding-left: 2.9rem; }
     .bar-label { font-size: 0.55rem; color: var(--ink-dim); min-width: 2rem; }
     .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
@@ -89,6 +94,9 @@ export class PhBlastersControls extends HTMLElement {
         badge.className = 'auto-badge';
         badge.textContent = t('console.common.auto');
         top.appendChild(badge);
+        const status = document.createElement('span');
+        status.className = 'status';
+        top.appendChild(status);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
@@ -163,10 +171,25 @@ export class PhBlastersControls extends HTMLElement {
       const isCharging = !isCooling && chargeProgress > 0;
 
       const btn = row.querySelector('.btn');
-      btn.disabled = isCooling;
+      // Shared blocking-reason path (issue #764). When the server publishes a
+      // `readiness` contract it drives the block label (in `.status`) and the
+      // button enablement; otherwise fall back to the cooldown-only derivation.
+      const rv = weaponReadinessView(bank.readiness);
+      const status = row.querySelector('.status');
+      if (rv.present) {
+        status.textContent = rv.label;
+        row.className = 'bank-row ' + (rv.unavailable ? 'unavailable' : rv.ready ? 'ready' : 'blocked');
+        // A charge in progress is a valid mid-fire state, not a block — keep the
+        // button live so mouseup/touchend can release the shot.
+        btn.disabled = !rv.ready && !isCharging;
+      } else {
+        status.textContent = '';
+        row.className = 'bank-row';
+        btn.disabled = isCooling;
+      }
       // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
-      btn.className = 'btn ' + (isCharging ? 'tactical' : isCooling ? 'disabled' : 'armed');
-      btn.querySelector('.led').className = 'led' + (isCharging ? ' amber keep' : isCooling ? '' : ' on');
+      btn.className = 'btn ' + (isCharging ? 'tactical' : btn.disabled ? 'disabled' : 'armed');
+      btn.querySelector('.led').className = 'led' + (isCharging ? ' amber keep' : btn.disabled ? '' : ' on');
       btn.querySelector('.label').textContent = isCharging ? t('component.blasters.firing')
         : isCooling ? t('console.common.cooldown')
         : hasCharge ? t('component.blasters.charge')

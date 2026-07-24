@@ -76,6 +76,69 @@ describe('PhTorpedoControls', () => {
     expect(queryText(el, '#magazine')).toBe('6 / 20');
   });
 
+  // ── Shared weapon readiness contract (issue #764) ──────────────────────
+  // Torpedo tubes render the same status label + row class as the phaser and
+  // blaster panels for the shared blocking cases.
+
+  function tubeWith(reason, extra) {
+    return {
+      id: 'fore_port',
+      label: 'Fore Port',
+      volley_max: 2,
+      loaded_count: reason === 'NoAmmo' || reason === 'Loading' ? 0 : 1,
+      target_count: 2,
+      state: reason === 'Loading' ? 'loading' : 'loaded',
+      readiness: {
+        ready: reason === 'Ready',
+        blocking_reason: reason,
+        target_range: 100,
+        target_arc: 5,
+        ...extra,
+      },
+    };
+  }
+
+  it('renders READY state and marks the tube ready', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('Ready')], magazine: { current: 6, max: 20 }, target_uuid: 'x' };
+    expect(tubeRow(el, 'fore_port').classList.contains('ready')).toBe(true);
+    expect(fireBtn(el, 'fore_port').disabled).toBe(false);
+  });
+
+  it('renders OUT OF RANGE block with the shared label', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('OutOfRange')], magazine: { current: 6, max: 20 } };
+    expect(tubeRow(el, 'fore_port').classList.contains('blocked')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_range'));
+  });
+
+  it('renders OUT OF ARC block with the shared label', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('OutOfArc')], magazine: { current: 6, max: 20 } };
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_arc'));
+  });
+
+  it('renders LOADING block with the shared label', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('Loading')], magazine: { current: 6, max: 20 } };
+    expect(queryText(el, '.status')).toBe(t('console.common.loading'));
+  });
+
+  it('renders NO AMMO block with the shared label', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('NoAmmo', { target_range: null, target_arc: null })], magazine: { current: 0, max: 20 } };
+    expect(queryText(el, '.status')).toBe(t('console.common.no_ammo'));
+  });
+
+  it('renders OFFLINE as an unavailable state and disables fire', () => {
+    const { el } = setup();
+    el.state = { tubes: [tubeWith('Offline')], magazine: { current: 6, max: 20 }, target_uuid: 'x' };
+    const row = tubeRow(el, 'fore_port');
+    expect(row.classList.contains('unavailable')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.offline'));
+    expect(fireBtn(el, 'fore_port').disabled).toBe(true);
+  });
+
   it('renders a tube with its label and one slot per volley_max', () => {
     const { el } = setup();
     el.state = {

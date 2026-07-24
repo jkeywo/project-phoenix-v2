@@ -192,6 +192,66 @@ describe('PhPhasersControls', () => {
     expect(rows2[0].dataset.id).toBe('aft');
   });
 
+  // ── Shared weapon readiness contract (issue #764) ──────────────────────
+  // The same observable blocking cases the server publishes (see
+  // src/console/weapons/blackboard.rs + blaster.rs model tests): Ready,
+  // NoTarget, OutOfRange, OutOfArc, Offline.
+
+  function readyBank(reason, extra) {
+    return {
+      id: 'fore',
+      label: 'Fore',
+      fire_ready: reason === 'Ready',
+      on_cooldown: reason === 'Cooldown',
+      readiness: {
+        ready: reason === 'Ready',
+        blocking_reason: reason,
+        target_range: 20,
+        target_arc: 5,
+        ...extra,
+      },
+    };
+  }
+
+  it('renders READY state: enables fire and marks the row ready', () => {
+    const { el } = setup();
+    el.state = { banks: [readyBank('Ready')], target_valid: true, mode: 'Manual' };
+    const row = el.shadowRoot.querySelector('.bank-row');
+    expect(row.classList.contains('ready')).toBe(true);
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(false);
+  });
+
+  it('renders OUT OF RANGE block: shows the shared label and disables fire', () => {
+    const { el } = setup();
+    el.state = { banks: [readyBank('OutOfRange')], target_valid: true, mode: 'Manual' };
+    const row = el.shadowRoot.querySelector('.bank-row');
+    expect(row.classList.contains('blocked')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_range'));
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(true);
+  });
+
+  it('renders OUT OF ARC block with the shared label', () => {
+    const { el } = setup();
+    el.state = { banks: [readyBank('OutOfArc')], target_valid: true, mode: 'Manual' };
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_arc'));
+    expect(el.shadowRoot.querySelector('.bank-row').classList.contains('blocked')).toBe(true);
+  });
+
+  it('renders NO TARGET block with the shared label', () => {
+    const { el } = setup();
+    el.state = { banks: [readyBank('NoTarget', { target_range: null, target_arc: null })], target_valid: false, mode: 'Manual' };
+    expect(queryText(el, '.status')).toBe(t('console.common.no_target'));
+  });
+
+  it('renders OFFLINE as an unavailable state and disables fire', () => {
+    const { el } = setup();
+    el.state = { banks: [readyBank('Offline')], target_valid: true, mode: 'Manual' };
+    const row = el.shadowRoot.querySelector('.bank-row');
+    expect(row.classList.contains('unavailable')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.offline'));
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(true);
+  });
+
   it('removes surplus rows when banks are removed', () => {
     const { el } = setup();
     el.state = {

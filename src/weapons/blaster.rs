@@ -401,7 +401,43 @@ impl BlasterSystem {
     }
 
     /// Snapshot state for the `WeaponsUpdate` broadcast.
-    pub fn bank_state(&self) -> crate::core::messages::BlasterBankState {
+    ///
+    /// `target` is the shooter's frozen combat-lock target position (world XZ),
+    /// or `None` when no target is locked. Range/arc/no-target blocking is
+    /// derived here from the bank's own `range`/`facing_deg`/`fire_arc_deg`
+    /// config using the same [`crate::weapons::phaser::target_geometry`] the
+    /// fire path uses, so the readiness contract cannot diverge from the fire
+    /// gate (issue #764). `is_online` reflects hull-damage offline state.
+    pub fn bank_state(
+        &self,
+        ship_x: f32,
+        ship_z: f32,
+        ship_yaw: f32,
+        target: Option<(f32, f32)>,
+        is_online: bool,
+    ) -> crate::core::messages::BlasterBankState {
+        let geometry = target.map(|(tx, tz)| {
+            crate::weapons::phaser::target_geometry(
+                tx,
+                tz,
+                ship_x,
+                ship_z,
+                ship_yaw,
+                self.config.range,
+                self.config.facing_deg,
+                self.config.fire_arc_deg,
+            )
+        });
+        // "Loading" for a blaster is the charge phase or an in-progress volley:
+        // both mean the bank cannot accept a fresh fire command yet.
+        let loading = self.volley.charging || self.volley.pending_volley > 0;
+        let readiness = crate::core::messages::WeaponReadiness::evaluate(
+            is_online,
+            self.volley.on_cooldown,
+            loading,
+            false,
+            geometry,
+        );
         crate::core::messages::BlasterBankState {
             id: self.config.id.clone(),
             fire_ready: self.is_fire_ready(),
@@ -410,6 +446,7 @@ impl BlasterSystem {
             pending_volley: self.volley.pending_volley,
             charge_progress: self.charge_progress(),
             has_charge: self.config.charge_time_secs > 0.0,
+            readiness,
         }
     }
 }
@@ -743,10 +780,86 @@ mod tests {
     #[test]
     fn bank_state_reflects_current_state() {
         let sys = make_system();
-        let state = sys.bank_state();
+        let state = sys.bank_state(0.0, 0.0, 0.0, None, true);
         assert!(state.fire_ready);
         assert!(!state.on_cooldown);
         assert_eq!(state.pending_volley, 0);
+    }
+
+    // ── Readiness contract (issue #764) ──────────────────────────────────────
+    use crate::core::messages::WeaponBlockReason;
+
+    /// Bank in range + arc, off cooldown, online → Ready with populated geometry.
+    #[test]
+    fn bank_state_ready_when_in_range_and_arc() {
+        // fore bank, facing 0°, 90° arc, range 35. Target straight ahead at -Z,
+        // 10 units away (ship forward is -Z at yaw 0).
+        let sys = make_system();
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -10.0)), true);
+        assert!(state.readiness.ready);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::Ready);
+        let range = state.readiness.target_range.expect("range present");
+        assert!((range - 10.0).abs() < 0.01, "range {range}");
+        let arc = state.readiness.target_arc.expect("arc present");
+        assert!(arc.abs() < 0.01, "arc offset {arc}");
+    }
+
+    #[test]
+    fn bank_state_no_target_blocks() {
+        let sys = make_system();
+        let state = sys.bank_state(0.0, 0.0, 0.0, None, true);
+        assert!(!state.readiness.ready);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::NoTarget);
+        assert!(state.readiness.target_range.is_none());
+    }
+
+    #[test]
+    fn bank_state_out_of_range_blocks() {
+        // Target dead ahead but 100 units away — bank range is 35.
+        let sys = make_system();
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -100.0)), true);
+        assert_eq!(
+            state.readiness.blocking_reason,
+            WeaponBlockReason::OutOfRange
+        );
+        assert!(!state.readiness.ready);
+    }
+
+    #[test]
+    fn bank_state_out_of_arc_blocks() {
+        // Target in range (10 units) but directly behind (+Z) — outside the
+        // fore bank's 90° arc centred on 0°.
+        let sys = make_system();
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, 10.0)), true);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::OutOfArc);
+        assert!(!state.readiness.ready);
+    }
+
+    #[test]
+    fn bank_state_offline_blocks_even_with_valid_target() {
+        let sys = make_system();
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -10.0)), false);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::Offline);
+        assert!(!state.readiness.ready);
+        // Geometry is still populated while offline.
+        assert!(state.readiness.target_range.is_some());
+    }
+
+    #[test]
+    fn bank_state_cooldown_blocks() {
+        let mut sys = make_system();
+        sys.volley.on_cooldown = true;
+        sys.volley.cooldown_remaining = 1.5;
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -10.0)), true);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::Cooldown);
+    }
+
+    #[test]
+    fn bank_state_charging_reports_loading() {
+        let mut sys = make_charging_system();
+        assert!(sys.request_charge_start());
+        let state = sys.bank_state(0.0, 0.0, 0.0, Some((0.0, -10.0)), true);
+        assert_eq!(state.readiness.blocking_reason, WeaponBlockReason::Loading);
     }
 
     #[test]
@@ -925,7 +1038,7 @@ mod tests {
     #[test]
     fn bank_state_includes_charge_progress_and_has_charge() {
         let sys = make_charging_system();
-        let state = sys.bank_state();
+        let state = sys.bank_state(0.0, 0.0, 0.0, None, true);
         assert_eq!(state.charge_progress, 0.0);
         assert!(
             state.has_charge,
@@ -933,7 +1046,7 @@ mod tests {
         );
 
         let instant = make_system();
-        let istate = instant.bank_state();
+        let istate = instant.bank_state(0.0, 0.0, 0.0, None, true);
         assert_eq!(istate.charge_progress, 0.0);
         assert!(
             !istate.has_charge,

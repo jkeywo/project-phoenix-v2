@@ -16,6 +16,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { weaponReadinessView } from '../weapon-readiness.js';
 
 export class PhTorpedoControls extends HTMLElement {
   #state = null;
@@ -34,6 +35,10 @@ export class PhTorpedoControls extends HTMLElement {
     .tube-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; padding: 0.3rem 0; }
     .tube-row + .tube-row { border-top: 1px solid var(--line-faint); }
     .tube-row .lbl { min-width: 4rem; color: var(--ink-dim); flex-shrink: 0; }
+    .tube-row .status { font-size: 0.5rem; letter-spacing: 0.15em; color: var(--ink-dim); flex-shrink: 0; }
+    .tube-row.blocked .status { color: var(--fire); }
+    .tube-row.unavailable .status { color: var(--ink-faint); }
+    .tube-row.ready .status { color: var(--loaded); }
     .tube-controls { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
     .torp-slots { display: flex; gap: 0.2rem; align-items: center; }
     .torp-slot {
@@ -86,6 +91,10 @@ export class PhTorpedoControls extends HTMLElement {
     lbl.className = 'lbl';
     row.appendChild(lbl);
 
+    const status = document.createElement('span');
+    status.className = 'status';
+    row.appendChild(status);
+
     const slotsEl = document.createElement('div');
     slotsEl.className = 'torp-slots';
 
@@ -128,7 +137,7 @@ export class PhTorpedoControls extends HTMLElement {
     controls.appendChild(fireBtn);
     row.appendChild(controls);
 
-    return { row, lbl, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [] };
+    return { row, lbl, status, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [] };
   }
 
   // Rebuild slot <div> elements when volley_max changes.
@@ -231,7 +240,21 @@ export class PhTorpedoControls extends HTMLElement {
 
       const loadedCount = typeof tube.loaded_count === 'number' ? tube.loaded_count : (tube.loaded ? 1 : 0);
       const targetCount = typeof tube.target_count === 'number' ? tube.target_count : 0;
-      const canFire = loadedCount > 0;
+
+      // Shared blocking-reason path (issue #764). The `readiness` contract, when
+      // present, drives the status label + row class (equivalent to the phaser
+      // and blaster panels). A torpedo can still be dumb-fired at no lock, so
+      // the fire button gates on loaded rounds + the tube not being offline —
+      // the offline (unavailable) state is the one that disables firing.
+      const rv = weaponReadinessView(tube.readiness);
+      if (rv.present) {
+        els.status.textContent = rv.label;
+        els.row.className = 'tube-row ' + (rv.unavailable ? 'unavailable' : rv.ready ? 'ready' : 'blocked');
+      } else {
+        els.status.textContent = '';
+        els.row.className = 'tube-row';
+      }
+      const canFire = loadedCount > 0 && !(rv.present && rv.unavailable);
 
       els.minusBtn.disabled = targetCount <= 0;
       els.plusBtn.disabled = targetCount >= vollMax;

@@ -401,6 +401,7 @@ mod tests {
                         fire_ready: true,
                         on_cooldown: false,
                         cooldown_remaining: 0.0,
+                        readiness: WeaponReadiness::default(),
                     }],
                     tubes: vec![TorpedoTubeState {
                         id: "fore_port".to_string(),
@@ -413,6 +414,7 @@ mod tests {
                         loaded_count: 2,
                         target_count: 3,
                         load_progress: 1.0,
+                        readiness: WeaponReadiness::default(),
                     }],
                     torpedo_count: 10,
                     phaser_mode: PhaserMode::Auto,
@@ -1336,10 +1338,76 @@ mod tests {
                 loaded_count: 2,
                 target_count: 4,
                 load_progress: 0.65,
+                readiness: WeaponReadiness::default(),
             }],
             torpedo_count: 8,
             phaser_mode: PhaserMode::Auto,
             blasters: vec![],
+            phaser_frequency: 0.5,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    /// Shared weapon readiness contract (issue #764): each family's per-instance
+    /// state carries a `WeaponReadiness` that round-trips with its blocking
+    /// reason + range/arc intact, across all three families in one message.
+    #[test]
+    fn weapon_readiness_contract_round_trips_for_all_families() {
+        use crate::messages::{
+            BlasterBankState, PhaserBankState, PhaserMode, TorpedoTubeState, WeaponBlockReason,
+            WeaponReadiness,
+        };
+        let msg = ServerMessage::WeaponsUpdate {
+            target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            target_name: Some("Raider".into()),
+            banks: vec![PhaserBankState {
+                id: "port".into(),
+                fire_ready: false,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+                readiness: WeaponReadiness {
+                    ready: false,
+                    blocking_reason: WeaponBlockReason::OutOfArc,
+                    target_range: Some(42.0),
+                    target_arc: Some(120.0),
+                },
+            }],
+            tubes: vec![TorpedoTubeState {
+                id: "fore".into(),
+                loaded: false,
+                reload_secs: 3.0,
+                state: "loading".into(),
+                progress: 0.5,
+                load_time: 10.0,
+                volley_max: 2,
+                loaded_count: 0,
+                target_count: 2,
+                load_progress: 0.5,
+                readiness: WeaponReadiness {
+                    ready: false,
+                    blocking_reason: WeaponBlockReason::Loading,
+                    target_range: Some(100.0),
+                    target_arc: Some(10.0),
+                },
+            }],
+            torpedo_count: 4,
+            phaser_mode: PhaserMode::Manual,
+            blasters: vec![BlasterBankState {
+                id: "starboard".into(),
+                fire_ready: true,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+                pending_volley: 0,
+                charge_progress: 0.0,
+                has_charge: false,
+                readiness: WeaponReadiness {
+                    ready: true,
+                    blocking_reason: WeaponBlockReason::Ready,
+                    target_range: Some(12.5),
+                    target_arc: Some(3.0),
+                },
+            }],
             phaser_frequency: 0.5,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

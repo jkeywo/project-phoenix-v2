@@ -254,8 +254,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/weapons/mod.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
-      symbols: [weapons_update_broadcaster]
+      paths: [src/console/weapons/mod.rs, src/console/weapons/blackboard.rs, gui/weapon-readiness.js, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js]
+      symbols: [weapons_update_broadcaster, compute_current_weapons_update, publish_weapons_core_blackboard]
       tests: [cargo test, npx vitest run]
 
   - component: phaser-attack-target-lock
@@ -292,15 +292,42 @@ entities:
 
   - component: weapon-readiness-feedback-policy
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Weapon Readiness Feedback Policy
       summary: Phaser, blaster, and torpedo projections expose a consistent readiness, target-range, target-arc, and blocking-reason contract to Tactical.
+      rationale:
+        - "One wire contract for all three families (issue #764). `WeaponReadiness { ready, blocking_reason, target_range, target_arc }` + the `WeaponBlockReason` enum (Ready/NoTarget/OutOfRange/OutOfArc/Cooldown/Loading/NoAmmo/Offline) is embedded in every family's per-instance state — `PhaserBankState`, `TorpedoTubeState`, `BlasterBankState` — so all three publish the SAME contract instead of ad-hoc bools."
+        - "Single evaluation path. `WeaponReadiness::evaluate` resolves the blocking reason from a priority order (Offline > Cooldown > Loading > NoAmmo > NoTarget > OutOfRange > OutOfArc > Ready); geometry (`WeaponTargetGeometry`) is computed once by the pure `weapons::phaser::target_geometry` reusing the same sq-dist range test + `in_arc` bearing math the fire paths use, so readiness can never diverge from the authoritative fire gate. `ready == (blocking_reason == Ready)` is an invariant of `evaluate`."
+        - "Blaster asymmetry closed (AC3). `BlasterSystem::bank_state` now threads the frozen combat-lock target position + ship physics + per-bank offline state, so blaster range/arc/no-target/cooldown/charge(loading)/offline become observable via the contract — previously computed only inside the fire path and never surfaced."
+        - "Client convergence (AC2). One shared JS path — `gui/weapon-readiness.js` maps `blocking_reason` → a string-id label + ready/blocked/unavailable row class — feeds `ph-phasers-controls.js`, `ph-blasters-controls.js`, `ph-torpedo-controls.js`, so each family renders equivalent ready / blocked(reason) / unavailable states. Labels are `console.common.*` string ids, never inline English."
+        - "Client and server cover the same observable blocking cases (AC4): the pure `blaster.rs` model tests (ready/no-target/out-of-range/out-of-arc/cooldown/loading/offline), the `server_tests.rs` phaser + torpedo projection tests, the codec round-trip, and the Vitest panel + `buildWeaponsConsoleState` tests all assert on the same reasons."
     architecture:
       kind: projection-policy
       authority: authoritative
       reads: [weapons-target-state, phaser-beam-state, blaster-projectile-state, torpedo-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/core/messages.rs
+        - src/weapons/phaser.rs
+        - src/weapons/blaster.rs
+        - src/console/weapons/blackboard.rs
+        - gui/weapon-readiness.js
+        - gui/components/ph-phasers-controls.js
+        - gui/components/ph-blasters-controls.js
+        - gui/components/ph-torpedo-controls.js
+      symbols:
+        - WeaponReadiness
+        - WeaponBlockReason
+        - WeaponTargetGeometry
+        - target_geometry
+        - build_bank_states
+        - build_tube_states
+        - tube_readiness
+        - bank_state
+      tests: [cargo test, npx vitest run]
 
   - component: three-dimensional-torpedoes
     core:

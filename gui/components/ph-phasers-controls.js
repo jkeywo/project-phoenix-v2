@@ -5,6 +5,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { weaponReadinessView } from '../weapon-readiness.js';
 
 export class PhPhasersControls extends HTMLElement {
   #state = null;
@@ -24,6 +25,10 @@ export class PhPhasersControls extends HTMLElement {
     .cooldown-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.3s ease; }
     .cooldown-fill.cooling { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .status { font-size: 0.5rem; letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
+    .bank-row.blocked .status { color: var(--fire); }
+    .bank-row.unavailable .status { color: var(--ink-faint); }
+    .bank-row.ready .status { color: var(--loaded); }
     .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; }
     .mode-toggle:hover { border-color: var(--ink); color: var(--ink); }
     .mode-toggle.auto { border-color: var(--reloading); color: var(--reloading); }
@@ -97,6 +102,9 @@ export class PhPhasersControls extends HTMLElement {
         badge.className = 'auto-badge';
         badge.textContent = t('console.common.auto');
         row.appendChild(badge);
+        const status = document.createElement('span');
+        status.className = 'status';
+        row.appendChild(status);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn';
@@ -128,8 +136,23 @@ export class PhPhasersControls extends HTMLElement {
 
       row.querySelector('.auto-badge').style.display = 'none';
 
+      // Shared blocking-reason path (issue #764). When the server publishes a
+      // `readiness` contract, it is authoritative for the block label + button
+      // enablement; without it (legacy states) fall back to the old derivation.
+      const rv = weaponReadinessView(bank.readiness);
       const btn = row.querySelector('.btn');
-      const ready = !auto && targetValid && fireReady && !onCooldown;
+      const status = row.querySelector('.status');
+      let ready;
+      if (rv.present) {
+        ready = !auto && rv.ready;
+        // In Auto mode the bank fires itself; show AUTO rather than a block.
+        status.textContent = auto ? t('console.common.auto') : rv.label;
+        row.className = 'bank-row ' + (auto ? '' : rv.unavailable ? 'unavailable' : rv.ready ? 'ready' : 'blocked');
+      } else {
+        ready = !auto && targetValid && fireReady && !onCooldown;
+        status.textContent = '';
+        row.className = 'bank-row';
+      }
       btn.disabled = !ready;
       btn.className = 'btn' + (ready ? ' armed' : ' disabled');
       btn.querySelector('.led').className = 'led' + (ready ? ' on' : '');

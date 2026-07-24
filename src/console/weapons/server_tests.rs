@@ -789,6 +789,150 @@ fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
     );
 }
 
+// ── Shared weapon readiness contract (issue #764) ──────────────────────
+//
+// The phaser bank's `readiness` field must publish the same observable
+// blocking cases the client renders (AC4): Ready when in range + arc, and the
+// correct `WeaponBlockReason` for no-target and out-of-range. Blaster range /
+// arc / no-target / cooldown / loading / offline coverage lives in the pure
+// `blaster.rs` model tests; these exercise the server projection end to end.
+
+/// Read the LocalShip's published Weapons blackboard `banks` (deterministic
+/// every tick, unlike the diff-gated WeaponsUpdate broadcast).
+fn local_weapons_banks(app: &mut App) -> Vec<crate::messages::PhaserBankState> {
+    let entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("a LocalShip must exist");
+    weapons_blackboard_of(app, entity)
+        .expect("LocalShip must publish a Weapons blackboard")
+        .banks
+}
+
+/// Read the LocalShip's published Weapons blackboard `tubes`.
+fn local_weapons_tubes(app: &mut App) -> Vec<crate::messages::TorpedoTubeState> {
+    let entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("a LocalShip must exist");
+    weapons_blackboard_of(app, entity)
+        .expect("LocalShip must publish a Weapons blackboard")
+        .tubes
+}
+
+#[test]
+fn torpedo_readiness_unloaded_tube_blocks_on_loading_or_no_ammo() {
+    use crate::messages::WeaponBlockReason;
+    let mut app = test_app();
+    setup_weapons_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    tick(&mut app);
+
+    let tubes = local_weapons_tubes(&mut app);
+    assert!(!tubes.is_empty(), "the test ship declares torpedo tubes");
+    // Freshly started tubes carry no loaded round, so the shared contract must
+    // report a loading/magazine blocking reason — never Ready (issue #764).
+    for tube in &tubes {
+        assert!(!tube.readiness.ready, "unloaded tube must not be Ready");
+        assert!(
+            matches!(
+                tube.readiness.blocking_reason,
+                WeaponBlockReason::Loading
+                    | WeaponBlockReason::NoAmmo
+                    | WeaponBlockReason::NoTarget
+                    | WeaponBlockReason::Offline
+            ),
+            "unloaded tube must map onto a loading/ammo/target/offline reason, got {:?}",
+            tube.readiness.blocking_reason
+        );
+    }
+}
+
+fn set_target(app: &mut App) {
+    push(
+        app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        },
+    );
+}
+
+#[test]
+fn phaser_readiness_ready_when_target_in_range_and_arc() {
+    use crate::messages::WeaponBlockReason;
+    let mut app = test_app();
+    setup_weapons_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    set_target(&mut app);
+    tick(&mut app);
+    tick(&mut app);
+
+    let banks = local_weapons_banks(&mut app);
+    let ready = banks
+        .iter()
+        .find(|b| b.readiness.blocking_reason == WeaponBlockReason::Ready)
+        .expect("at least one bank should report Ready for an in-range forward target");
+    assert!(ready.readiness.ready);
+    assert!(
+        ready.readiness.target_range.is_some(),
+        "a locked target must populate target_range"
+    );
+    assert!(ready.readiness.target_arc.is_some());
+}
+
+#[test]
+fn phaser_readiness_no_target_blocks_with_no_target_reason() {
+    use crate::messages::WeaponBlockReason;
+    let mut app = test_app();
+    setup_weapons_world(&mut app, 0.0, -20.0);
+    start_game_with_weapons(&mut app);
+    // No SetTarget sent — every bank must report NoTarget.
+    tick(&mut app);
+
+    let banks = local_weapons_banks(&mut app);
+    assert!(!banks.is_empty());
+    assert!(
+        banks
+            .iter()
+            .all(|b| b.readiness.blocking_reason == WeaponBlockReason::NoTarget),
+        "every bank must report NoTarget when nothing is locked"
+    );
+    assert!(banks.iter().all(|b| !b.readiness.ready));
+    assert!(banks.iter().all(|b| b.readiness.target_range.is_none()));
+}
+
+#[test]
+fn phaser_readiness_out_of_range_blocks_with_out_of_range_reason() {
+    use crate::messages::WeaponBlockReason;
+    let mut app = test_app();
+    // Target dead ahead but beyond phaser range.
+    setup_weapons_world(&mut app, 0.0, -50.0);
+    start_game_with_weapons(&mut app);
+    set_target(&mut app);
+    tick(&mut app);
+    tick(&mut app);
+
+    let banks = local_weapons_banks(&mut app);
+    assert!(
+        banks
+            .iter()
+            .all(|b| b.readiness.blocking_reason == WeaponBlockReason::OutOfRange),
+        "every bank must report OutOfRange for a beyond-range forward target, got {:?}",
+        banks
+            .iter()
+            .map(|b| b.readiness.blocking_reason)
+            .collect::<Vec<_>>()
+    );
+    // Range/arc geometry is still populated while blocked.
+    assert!(banks.iter().all(|b| b.readiness.target_range.is_some()));
+}
+
 // ── FirePhaser / beam lifecycle tests ──────────────────────────────────
 
 #[test]

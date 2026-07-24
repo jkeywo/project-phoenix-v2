@@ -381,6 +381,26 @@ describe('buildWeaponsConsoleState', () => {
     expect(s.torpedo_count).toBe(3);
   });
 
+  it('forwards the shared weapon readiness contract for all three families (issue #764)', () => {
+    const s = parse(buildWeaponsConsoleState({
+      blackboards: {
+        'tactical': {
+          target_uuid: 'tgt-1',
+          banks: [{ id: 'port', fire_ready: false, on_cooldown: false, cooldown_remaining: 0,
+            readiness: { ready: false, blocking_reason: 'OutOfArc', target_range: 42, target_arc: 120 } }],
+          tubes: [{ id: 'fore', loaded: false, readiness: { ready: false, blocking_reason: 'Loading', target_range: 100, target_arc: 10 } }],
+          blasters: [{ id: 'stbd', fire_ready: true, readiness: { ready: true, blocking_reason: 'Ready', target_range: 12, target_arc: 3 } }],
+          phaser_mode: 'Manual',
+        },
+      },
+    }));
+    expect(s.banks[0].readiness.blocking_reason).toBe('OutOfArc');
+    expect(s.banks[0].readiness.target_range).toBe(42);
+    expect(s.tubes[0].readiness.blocking_reason).toBe('Loading');
+    expect(s.blasters[0].readiness.blocking_reason).toBe('Ready');
+    expect(s.blasters[0].readiness.ready).toBe(true);
+  });
+
   it('derives target_name from the locked server blip when no explicit name is stored', () => {
     const s = parse(buildWeaponsConsoleState({
       weaponsTarget: 'srv-1',

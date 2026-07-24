@@ -259,6 +259,41 @@ pub fn in_arc(radar_x: f32, radar_y: f32, facing_deg: f32, arc_deg: f32) -> bool
     angle_diff(bearing, facing).abs() <= half
 }
 
+/// Compute the shared [`crate::messages::WeaponTargetGeometry`] for one weapon
+/// instance from a world-space target, the shooter's physics, and the weapon's
+/// effective range + fire arc (issue #764).
+///
+/// Pure and Bevy-free: reuses `ship_local` + the same sq-dist range test and
+/// `in_arc` bearing math the phaser/blaster fire paths already use, so the
+/// readiness projection can never diverge from the authoritative fire gate.
+#[allow(clippy::too_many_arguments)]
+pub fn target_geometry(
+    target_x: f32,
+    target_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    effective_range: f32,
+    facing_deg: f32,
+    fire_arc_deg: f32,
+) -> crate::messages::WeaponTargetGeometry {
+    let (rx, ry) = ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
+    let dx = target_x - ship_x;
+    let dz = target_z - ship_z;
+    let range = (dx * dx + dz * dz).sqrt();
+    let in_range = dx * dx + dz * dz <= effective_range * effective_range;
+    let bearing = rx.atan2(ry);
+    let facing = facing_deg.to_radians();
+    let arc_offset = angle_diff(bearing, facing).abs();
+    let in_arc = arc_offset <= fire_arc_deg.to_radians() * 0.5;
+    crate::messages::WeaponTargetGeometry {
+        range,
+        arc_offset_deg: arc_offset.to_degrees(),
+        in_range,
+        in_arc,
+    }
+}
+
 /// Signed angular difference `a − b` wrapped to `[−π, π]`.
 fn angle_diff(a: f32, b: f32) -> f32 {
     let mut d = a - b;

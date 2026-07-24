@@ -155,6 +155,65 @@ describe('PhBlastersControls', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  // ── Shared weapon readiness contract (issue #764) ──────────────────────
+  // Mirrors the same observable blocking cases the pure blaster model reports
+  // (src/weapons/blaster.rs bank_state tests): Ready / NoTarget / OutOfRange /
+  // OutOfArc / Cooldown / Loading / Offline.
+
+  function blasterBank(reason, extra) {
+    return {
+      id: 'fore',
+      label: 'Fore',
+      on_cooldown: reason === 'Cooldown',
+      charge_progress: 0,
+      has_charge: false,
+      readiness: {
+        ready: reason === 'Ready',
+        blocking_reason: reason,
+        target_range: 12,
+        target_arc: 4,
+        ...extra,
+      },
+    };
+  }
+
+  it('renders READY state and enables the fire button', () => {
+    const { el } = setup();
+    el.state = { banks: [blasterBank('Ready')] };
+    const row = el.shadowRoot.querySelector('.bank-row');
+    expect(row.classList.contains('ready')).toBe(true);
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(false);
+  });
+
+  it('renders OUT OF RANGE block with the shared label and disables fire', () => {
+    const { el } = setup();
+    el.state = { banks: [blasterBank('OutOfRange')] };
+    expect(el.shadowRoot.querySelector('.bank-row').classList.contains('blocked')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_range'));
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(true);
+  });
+
+  it('renders OUT OF ARC block with the shared label', () => {
+    const { el } = setup();
+    el.state = { banks: [blasterBank('OutOfArc')] };
+    expect(queryText(el, '.status')).toBe(t('console.common.out_of_arc'));
+  });
+
+  it('renders NO TARGET block with the shared label', () => {
+    const { el } = setup();
+    el.state = { banks: [blasterBank('NoTarget', { target_range: null, target_arc: null })] };
+    expect(queryText(el, '.status')).toBe(t('console.common.no_target'));
+  });
+
+  it('renders OFFLINE as an unavailable state and disables fire', () => {
+    const { el } = setup();
+    el.state = { banks: [blasterBank('Offline')] };
+    const row = el.shadowRoot.querySelector('.bank-row');
+    expect(row.classList.contains('unavailable')).toBe(true);
+    expect(queryText(el, '.status')).toBe(t('console.common.offline'));
+    expect(el.shadowRoot.querySelector('.btn').disabled).toBe(true);
+  });
+
   it('reconciles banks by id', () => {
     const { el } = setup();
     el.state = {

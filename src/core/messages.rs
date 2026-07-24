@@ -202,6 +202,123 @@ pub struct SystemId(pub String);
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PowerGroupId(pub String);
 
+/// The single reason a weapon instance (phaser bank, torpedo tube, blaster
+/// bank) cannot fire this tick — the shared blocking-reason vocabulary all
+/// three families publish (issue #764).
+///
+/// `Ready` is the not-blocked state. The remaining variants are the union of
+/// every blocking case across the three families; a family that has no concept
+/// of a given reason (e.g. phasers have no magazine, so never `NoAmmo`) simply
+/// never emits it. The JS panels switch on the serialised variant name to pick
+/// the shared display label, so the names are wire-stable.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum WeaponBlockReason {
+    /// Not blocked — the weapon can fire this tick.
+    #[default]
+    Ready,
+    /// No target is locked.
+    NoTarget,
+    /// A target is locked but beyond this weapon's effective range.
+    OutOfRange,
+    /// A target is locked and in range but outside this weapon's fire arc.
+    OutOfArc,
+    /// The weapon is in its post-shot / post-volley cooldown.
+    Cooldown,
+    /// The weapon is loading / charging and cannot fire yet (torpedo tube
+    /// mid-load, blaster mid-charge or mid-volley).
+    Loading,
+    /// The weapon has no ammunition available (empty torpedo magazine).
+    NoAmmo,
+    /// The weapon is offline — disabled or destroyed by hull damage.
+    Offline,
+}
+
+/// Shared readiness + blocking contract published by every weapon family so
+/// Tactical renders equivalent ready / blocked / unavailable feedback for
+/// phasers, blasters, and torpedoes (issue #764).
+///
+/// `ready == (blocking_reason == WeaponBlockReason::Ready)` is an invariant
+/// upheld by [`WeaponReadiness::evaluate`]. `target_range` / `target_arc` carry
+/// the authoritative geometry whenever a target is locked, regardless of the
+/// blocking reason, so the client can show range/arc telemetry even while
+/// blocked (e.g. out of arc but in range).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct WeaponReadiness {
+    /// True when the weapon can fire this tick (target in range + arc, off
+    /// cooldown, loaded/charged, online).
+    pub ready: bool,
+    /// Why the weapon cannot fire (`Ready` when it can).
+    pub blocking_reason: WeaponBlockReason,
+    /// Distance to the locked target in world units, when a target is locked.
+    pub target_range: Option<f32>,
+    /// Absolute angular offset (degrees) between the target bearing and this
+    /// weapon's fire-arc centre, when a target is locked.
+    pub target_arc: Option<f32>,
+}
+
+/// Authoritative target geometry for one weapon instance, used by
+/// [`WeaponReadiness::evaluate`]. Computed by each producer from the frozen
+/// combat-lock target position + the ship physics + the weapon's own
+/// range/arc config, so the three families share one evaluation path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeaponTargetGeometry {
+    /// Distance to the target in world units.
+    pub range: f32,
+    /// Absolute angular offset (degrees) between the target bearing and the
+    /// weapon's fire-arc centre.
+    pub arc_offset_deg: f32,
+    /// True when `range` is within the weapon's effective range.
+    pub in_range: bool,
+    /// True when the target is inside the weapon's fire arc.
+    pub in_arc: bool,
+}
+
+impl WeaponReadiness {
+    /// Resolve the shared readiness contract from a weapon's current state.
+    ///
+    /// Blocking-reason priority (system state dominates target state): `Offline`
+    /// → `Cooldown` → `Loading` → `NoAmmo` → `NoTarget` → `OutOfRange` →
+    /// `OutOfArc` → `Ready`. `target_range` / `target_arc` are populated from
+    /// `target` whenever one is supplied, even when a higher-priority reason
+    /// blocks the shot.
+    ///
+    /// Family-specific inputs a family does not have are passed as `false`
+    /// (phasers/blasters never set `no_ammo`; phasers/torpedoes never set a
+    /// charge as `loading` unless mid-load).
+    pub fn evaluate(
+        online: bool,
+        on_cooldown: bool,
+        loading: bool,
+        no_ammo: bool,
+        target: Option<WeaponTargetGeometry>,
+    ) -> Self {
+        let target_range = target.map(|g| g.range);
+        let target_arc = target.map(|g| g.arc_offset_deg);
+        let reason = if !online {
+            WeaponBlockReason::Offline
+        } else if on_cooldown {
+            WeaponBlockReason::Cooldown
+        } else if loading {
+            WeaponBlockReason::Loading
+        } else if no_ammo {
+            WeaponBlockReason::NoAmmo
+        } else {
+            match target {
+                None => WeaponBlockReason::NoTarget,
+                Some(g) if !g.in_range => WeaponBlockReason::OutOfRange,
+                Some(g) if !g.in_arc => WeaponBlockReason::OutOfArc,
+                Some(_) => WeaponBlockReason::Ready,
+            }
+        };
+        Self {
+            ready: reason == WeaponBlockReason::Ready,
+            blocking_reason: reason,
+            target_range,
+            target_arc,
+        }
+    }
+}
+
 /// Per-bank state broadcast to the Tactical operator as part of `WeaponsUpdate`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankState {
@@ -213,6 +330,9 @@ pub struct PhaserBankState {
     pub on_cooldown: bool,
     /// Seconds remaining on the cooldown timer (0.0 when ready).
     pub cooldown_remaining: f32,
+    /// Shared readiness + blocking-reason contract (issue #764).
+    #[serde(default)]
+    pub readiness: WeaponReadiness,
 }
 
 /// Per-tube state broadcast to the Tactical operator as part of `WeaponsUpdate`.
@@ -245,6 +365,9 @@ pub struct TorpedoTubeState {
     /// next torpedo. 0.0 when idle.
     #[serde(default)]
     pub load_progress: f32,
+    /// Shared readiness + blocking-reason contract (issue #764).
+    #[serde(default)]
+    pub readiness: WeaponReadiness,
 }
 
 fn default_tube_volley_max_wire() -> u32 {
@@ -273,6 +396,9 @@ pub struct BlasterBankState {
     /// the fire button to hold-to-fire mode.
     #[serde(default)]
     pub has_charge: bool,
+    /// Shared readiness + blocking-reason contract (issue #764).
+    #[serde(default)]
+    pub readiness: WeaponReadiness,
 }
 
 /// Static, per-bank configuration sent to clients in `Welcome` so the

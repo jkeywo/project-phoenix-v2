@@ -98,40 +98,19 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .map(|cd| cd.per_bank.clone())
             .unwrap_or_default()
     };
-    let tubes: Vec<TorpedoTubeState> = {
-        // Per-entity component on `LocalShip` is authoritative (#832): every ship
-        // with a `[torpedoes]` block carries its own `TorpedoSystemResource`
-        // component; a ship without one legitimately has no tubes.
-        let raw_tubes: Vec<crate::torpedo::TorpedoTube> = {
-            let mut q = world
-                .query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
-            q.single(world)
-                .ok()
-                .map(|ts| ts.0.tubes.clone())
-                .unwrap_or_default()
-        };
-        raw_tubes
-            .iter()
-            .map(|t| {
-                let remaining = match &t.load_state {
-                    crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                    | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
-                    _ => 0.0,
-                };
-                TorpedoTubeState {
-                    id: t.id.clone(),
-                    loaded: t.is_loaded(),
-                    reload_secs: remaining,
-                    state: t.load_state.label().to_string(),
-                    progress: t.load_state.progress(),
-                    load_time: t.load_time,
-                    volley_max: t.volley_max,
-                    loaded_count: t.loaded_count,
-                    target_count: t.target_count,
-                    load_progress: t.load_progress(),
-                }
-            })
-            .collect()
+    // Per-entity component on `LocalShip` is authoritative (#832): every ship
+    // with a `[torpedoes]` block carries its own `TorpedoSystemResource`
+    // component; a ship without one legitimately has no tubes. Raw tubes +
+    // effective homing range are captured here; the `TorpedoTubeState` list
+    // (with the readiness contract) is built below, once `target_live_pos` and
+    // the offline probe are resolved.
+    let (raw_tubes, torpedo_effective_range): (Vec<crate::torpedo::TorpedoTube>, f32) = {
+        let mut q =
+            world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
+        q.single(world)
+            .ok()
+            .map(|ts| (ts.0.tubes.clone(), ts.0.config.speed * ts.0.config.lifespan))
+            .unwrap_or_default()
     };
     let torpedo_count = {
         // Per-entity component on `LocalShip` is authoritative (#832).
@@ -223,56 +202,161 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         }
     };
 
+    // Per-system offline state for the LocalShip, used by the phaser, blaster,
+    // and torpedo readiness contracts below. Cloned once as owned data so the
+    // probe closure does not hold a borrow on `world` (which the queries below
+    // need mutably).
+    let local_control: Option<crate::ship::control_source::ControlSourceResolver> = {
+        let mut q =
+            world.query_filtered::<&ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+        q.single(world).ok().map(|cs| cs.0.clone())
+    };
+    let ship_offline = |sysid: Option<crate::messages::SystemId>| -> bool {
+        match sysid {
+            None => false,
+            Some(id) => local_control
+                .as_ref()
+                .map(|c| c.is_offline(&id))
+                .unwrap_or(false),
+        }
+    };
+
+    // Blaster bank states, with the shared readiness contract (issue #764).
+    // Computed here where ship physics + the frozen combat-lock target position
+    // are already resolved, rather than re-querying in the broadcaster.
+    let blasters: Vec<BlasterBankState> = {
+        let raw: Vec<crate::blaster::BlasterSystem> = {
+            let mut q = world
+                .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
+            q.single(world)
+                .ok()
+                .map(|r| r.0.clone())
+                .unwrap_or_default()
+        };
+        raw.iter()
+            .map(|b| {
+                let is_online =
+                    !ship_offline(crate::system_registry::blaster_bank_system_id(&b.config.id));
+                b.bank_state(ship_x, ship_z, ship_yaw, target_live_pos, is_online)
+            })
+            .collect()
+    };
+
+    // Torpedo tube states, with the shared readiness contract (issue #764).
+    let physics = ShipPhysics {
+        x: ship_x,
+        z: ship_z,
+        yaw: ship_yaw,
+        ..Default::default()
+    };
+    let tubes: Vec<TorpedoTubeState> = raw_tubes
+        .iter()
+        .map(|t| {
+            let remaining = match &t.load_state {
+                crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                _ => 0.0,
+            };
+            let is_online = !ship_offline(crate::system_registry::torpedo_tube_system_id(&t.id));
+            let readiness = tube_readiness(
+                t,
+                torpedo_effective_range,
+                physics,
+                target_live_pos,
+                is_online,
+            );
+            TorpedoTubeState {
+                id: t.id.clone(),
+                loaded: t.is_loaded(),
+                reload_secs: remaining,
+                state: t.load_state.label().to_string(),
+                progress: t.load_state.progress(),
+                load_time: t.load_time,
+                volley_max: t.volley_max,
+                loaded_count: t.loaded_count,
+                target_count: t.target_count,
+                load_progress: t.load_progress(),
+                readiness,
+            }
+        })
+        .collect();
+
     let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
         let effective_phaser_range =
             crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
-        let fire_ready = match target_live_pos {
-            None => false,
-            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+        // Default (no-config) bank is a 180° forward arc, facing 0 — matches
+        // `radar::is_fire_ready_with_range`.
+        let geometry = target_live_pos.map(|(tx, tz)| {
+            crate::weapons::phaser::target_geometry(
                 tx,
                 tz,
                 ship_x,
                 ship_z,
                 ship_yaw,
                 effective_phaser_range,
-            ),
-        };
+                0.0,
+                180.0,
+            )
+        });
         let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
+        let on_cooldown = beam_active || cd > 0.0;
+        let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(""));
+        let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+        let readiness = crate::messages::WeaponReadiness::evaluate(
+            is_online,
+            on_cooldown,
+            false,
+            false,
+            geometry,
+        );
         vec![PhaserBankState {
             id: String::new(),
             fire_ready,
-            on_cooldown: beam_active || cd > 0.0,
+            on_cooldown,
             cooldown_remaining: cd,
+            readiness,
         }]
     } else {
         banks_config
             .iter()
             .map(|b| {
-                let bank_ready = match target_live_pos {
-                    None => false,
-                    Some((tx, tz)) => {
-                        let bank_base_range = if b.beam_range > 0.0 {
-                            b.beam_range
-                        } else {
-                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                        };
-                        let effective_bank_range = bank_base_range * radar_range_mult;
-                        let (rx, ry) =
-                            crate::weapons::phaser::ship_local(tx, tz, ship_x, ship_z, ship_yaw);
-                        let range_ok = (tx - ship_x).powi(2) + (tz - ship_z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
-                    }
+                let bank_base_range = if b.beam_range > 0.0 {
+                    b.beam_range
+                } else {
+                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
+                let effective_bank_range = bank_base_range * radar_range_mult;
+                let geometry = target_live_pos.map(|(tx, tz)| {
+                    crate::weapons::phaser::target_geometry(
+                        tx,
+                        tz,
+                        ship_x,
+                        ship_z,
+                        ship_yaw,
+                        effective_bank_range,
+                        b.facing_deg,
+                        b.fire_arc_deg,
+                    )
+                });
                 let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
                 let beam_on_this_bank =
                     beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                let on_cooldown = beam_on_this_bank || cd > 0.0;
+                let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(&b.id));
+                let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+                let readiness = crate::messages::WeaponReadiness::evaluate(
+                    is_online,
+                    on_cooldown,
+                    false,
+                    false,
+                    geometry,
+                );
                 PhaserBankState {
                     id: b.id.clone(),
-                    fire_ready: bank_ready,
-                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    fire_ready,
+                    on_cooldown,
                     cooldown_remaining: cd,
+                    readiness,
                 }
             })
             .collect()
@@ -285,7 +369,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         tubes,
         torpedo_count,
         phaser_mode,
-        blasters: Vec::new(), // Populated by weapons_update_broadcaster from BlasterSystemResource.
+        blasters,
         phaser_frequency,
     }
 }
@@ -295,16 +379,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
         crate::core::broadcast::Audience::HoldingWeapons,
         crate::core::broadcast::Cadence::Hz(10.0),
         |world: &mut World| {
-            let mut current = compute_current_weapons_update(world);
-
-            // Collect blaster bank states from the LocalShip's BlasterSystemResource.
-            {
-                let mut q = world
-                    .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
-                if let Ok(blaster_res) = q.single(world) {
-                    current.blasters = blaster_res.0.iter().map(|b| b.bank_state()).collect();
-                }
-            }
+            let current = compute_current_weapons_update(world);
 
             let is_first_tick = world.resource::<WeaponsUpdateFirstTick>().0;
             if !is_first_tick {
@@ -385,27 +460,53 @@ fn build_bank_states(
     radar_range_mult: f32,
     physics: ShipPhysics,
     target_live_pos: Option<(f32, f32)>,
+    control_sources: Option<&ShipSystemControlSources>,
 ) -> Vec<PhaserBankState> {
+    // Per-bank offline probe (issue #764). `None` control sources (test paths
+    // with no Ship component) treat every bank as online, matching the
+    // `is_online` fallback the fine-blackboard publishers already use.
+    let bank_online = |bank_id: &str| -> bool {
+        match (
+            control_sources,
+            crate::system_registry::phaser_bank_system_id(bank_id),
+        ) {
+            (Some(cs), Some(id)) => !cs.0.is_offline(&id),
+            _ => true,
+        }
+    };
     if combat_config.0.banks.is_empty() {
         let effective_range =
             crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE * radar_range_mult;
-        let fire_ready = match target_live_pos {
-            None => false,
-            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+        // Default (no-config) bank is a 180° forward arc, facing 0 — matches
+        // `radar::is_fire_ready_with_range`.
+        let geometry = target_live_pos.map(|(tx, tz)| {
+            crate::weapons::phaser::target_geometry(
                 tx,
                 tz,
                 physics.x,
                 physics.z,
                 physics.yaw,
                 effective_range,
-            ),
-        };
+                0.0,
+                180.0,
+            )
+        });
         let cd = cooldown.bank_remaining_secs("");
+        let on_cooldown = beam_active || cd > 0.0;
+        let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+        let readiness = crate::messages::WeaponReadiness::evaluate(
+            bank_online(""),
+            on_cooldown,
+            false,
+            false,
+            geometry,
+        );
         vec![PhaserBankState {
             id: String::new(),
             fire_ready,
-            on_cooldown: beam_active || cd > 0.0,
+            on_cooldown,
             cooldown_remaining: cd,
+            readiness,
         }]
     } else {
         combat_config
@@ -413,35 +514,41 @@ fn build_bank_states(
             .banks
             .iter()
             .map(|b| {
-                let bank_ready = match target_live_pos {
-                    None => false,
-                    Some((tx, tz)) => {
-                        let bank_base_range = if b.beam_range > 0.0 {
-                            b.beam_range
-                        } else {
-                            crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                        };
-                        let effective_bank_range = bank_base_range * radar_range_mult;
-                        let (rx, ry) = crate::weapons::phaser::ship_local(
-                            tx,
-                            tz,
-                            physics.x,
-                            physics.z,
-                            physics.yaw,
-                        );
-                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
-                    }
+                let bank_base_range = if b.beam_range > 0.0 {
+                    b.beam_range
+                } else {
+                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
+                let effective_bank_range = bank_base_range * radar_range_mult;
+                let geometry = target_live_pos.map(|(tx, tz)| {
+                    crate::weapons::phaser::target_geometry(
+                        tx,
+                        tz,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
+                        effective_bank_range,
+                        b.facing_deg,
+                        b.fire_arc_deg,
+                    )
+                });
                 let cd = cooldown.bank_remaining_secs(b.id.as_str());
                 let beam_on_this_bank = beam_active && active_beam_bank == Some(b.id.as_str());
+                let on_cooldown = beam_on_this_bank || cd > 0.0;
+                let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
+                let readiness = crate::messages::WeaponReadiness::evaluate(
+                    bank_online(&b.id),
+                    on_cooldown,
+                    false,
+                    false,
+                    geometry,
+                );
                 PhaserBankState {
                     id: b.id.clone(),
-                    fire_ready: bank_ready,
-                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    fire_ready,
+                    on_cooldown,
                     cooldown_remaining: cd,
+                    readiness,
                 }
             })
             .collect()
@@ -453,7 +560,15 @@ fn build_bank_states(
 /// Shared by `publish_weapons_core_blackboard` (for `WeaponsBlackboard::tubes`)
 /// and `publish_torpedo_tube_blackboards` (for the per-tube fine blackboards)
 /// for the same order-freedom reason as [`build_bank_states`].
-fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeState> {
+fn build_tube_states(
+    torpedo_sys: &TorpedoSystemResource,
+    physics: ShipPhysics,
+    target_live_pos: Option<(f32, f32)>,
+    control_sources: Option<&ShipSystemControlSources>,
+) -> Vec<TorpedoTubeState> {
+    // A homing torpedo's effective reach is its cruise speed × lifespan — the
+    // authoritative range the readiness contract reports (issue #764).
+    let effective_range = torpedo_sys.0.config.speed * torpedo_sys.0.config.lifespan;
     torpedo_sys
         .0
         .tubes
@@ -464,6 +579,14 @@ fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeStat
                 | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
                 _ => 0.0,
             };
+            let is_online = match (
+                control_sources,
+                crate::system_registry::torpedo_tube_system_id(&t.id),
+            ) {
+                (Some(cs), Some(id)) => !cs.0.is_offline(&id),
+                _ => true,
+            };
+            let readiness = tube_readiness(t, effective_range, physics, target_live_pos, is_online);
             TorpedoTubeState {
                 id: t.id.clone(),
                 loaded: t.is_loaded(),
@@ -475,9 +598,42 @@ fn build_tube_states(torpedo_sys: &TorpedoSystemResource) -> Vec<TorpedoTubeStat
                 loaded_count: t.loaded_count,
                 target_count: t.target_count,
                 load_progress: t.load_progress(),
+                readiness,
             }
         })
         .collect()
+}
+
+/// Shared torpedo-tube readiness projection (issue #764). Reused by the inline
+/// broadcaster/resync builder in [`compute_current_weapons_update`] and by
+/// [`build_tube_states`] so the tube contract cannot diverge between the two.
+///
+/// Range/arc use the tube's own `facing_deg`/`fire_arc_deg` (the same values
+/// the torpedo fire path checks at launch) against the effective homing range.
+/// A tube with a loaded round is gated on target range/arc; an empty tube
+/// reports `Loading` while a round is loading and `NoAmmo` otherwise.
+fn tube_readiness(
+    tube: &crate::torpedo::TorpedoTube,
+    effective_range: f32,
+    physics: ShipPhysics,
+    target_live_pos: Option<(f32, f32)>,
+    is_online: bool,
+) -> crate::messages::WeaponReadiness {
+    let geometry = target_live_pos.map(|(tx, tz)| {
+        crate::weapons::phaser::target_geometry(
+            tx,
+            tz,
+            physics.x,
+            physics.z,
+            physics.yaw,
+            effective_range,
+            tube.facing_deg,
+            tube.fire_arc_deg,
+        )
+    });
+    let loading = tube.loaded_count == 0 && tube.load_state.label() == "loading";
+    let no_ammo = tube.loaded_count == 0 && !loading;
+    crate::messages::WeaponReadiness::evaluate(is_online, false, loading, no_ammo, geometry)
 }
 
 /// Publish each ship's core Weapons blackboard from current sim state.
@@ -529,6 +685,7 @@ pub(crate) fn publish_weapons_core_blackboard(
             Option<&BlasterSystemResource>,
             Option<&ShipPhysics>,
             Option<&crate::modifiers::ShipModifiers>,
+            Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
         ),
@@ -551,6 +708,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         blaster_res,
         ship_physics,
         modifiers,
+        control_sources,
         mut entity_bbs,
         is_local,
     ) in ship_q.iter_mut()
@@ -668,9 +826,11 @@ pub(crate) fn publish_weapons_core_blackboard(
             radar_range_mult,
             physics,
             target_live_pos,
+            control_sources,
         );
 
-        let tubes: Vec<TorpedoTubeState> = build_tube_states(torpedo_sys);
+        let tubes: Vec<TorpedoTubeState> =
+            build_tube_states(torpedo_sys, physics, target_live_pos, control_sources);
 
         // ── Client render data (LocalShip only) ──────────────────────────────
         // Phaser mode + arc geometry are drawn by the browser Tactical console
@@ -688,9 +848,29 @@ pub(crate) fn publish_weapons_core_blackboard(
             torpedo_arcs = ship_config.0.torpedo_tubes.clone();
         }
 
-        // Blaster bank states from this ship's own BlasterSystemResource.
+        // Blaster bank states from this ship's own BlasterSystemResource, with
+        // the shared readiness contract (issue #764) derived from this ship's
+        // physics + frozen combat-lock target position + per-bank offline state.
         let blasters: Vec<BlasterBankState> = blaster_res
-            .map(|r| r.0.iter().map(|b| b.bank_state()).collect())
+            .map(|r| {
+                r.0.iter()
+                    .map(|b| {
+                        let is_online = control_sources
+                            .and_then(|cs| {
+                                crate::system_registry::blaster_bank_system_id(&b.config.id)
+                                    .map(|id| !cs.0.is_offline(&id))
+                            })
+                            .unwrap_or(true);
+                        b.bank_state(
+                            physics.x,
+                            physics.z,
+                            physics.yaw,
+                            target_live_pos,
+                            is_online,
+                        )
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         let bb = WeaponsBlackboard {
@@ -943,6 +1123,7 @@ pub(crate) fn publish_phaser_bank_blackboards(
             radar_range_mult,
             physics,
             target_live_pos,
+            control_sources,
         );
 
         for bank_state in &banks {
@@ -992,7 +1173,10 @@ pub(crate) fn publish_torpedo_tube_blackboards(
             }
         };
 
-        let tubes = build_tube_states(torpedo_sys);
+        // This system feeds only the fine `TorpedoTubeBlackboard`, which does
+        // not carry the readiness contract, so the tube states' readiness field
+        // is unused here — pass no physics/target (default geometry).
+        let tubes = build_tube_states(torpedo_sys, ShipPhysics::default(), None, control_sources);
         for tube_state in &tubes {
             let Some(tube_sysid) = crate::system_registry::torpedo_tube_system_id(&tube_state.id)
             else {

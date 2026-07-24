@@ -81,7 +81,7 @@ entities:
 
   - component: editor-mod-pack-exporter
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Editor Mod Pack Exporter
       summary: Builds a TOML-only ZIP and required manifest from selected validated authored files for use by a server-page mod upload.
@@ -89,7 +89,34 @@ entities:
       kind: authoring-exporter
       authority: local
       reads: [editor-draft-state, editor-validation-state]
-      depends_on: [editor-save-admission]
+      # Reuses the save-admission primitive (partitionFindings) at the export
+      # chokepoint. That primitive lives in editor/validation.js, a file
+      # co-owned by the validation service, admission gate, and validation
+      # state, so the edge is not attributable to a single unambiguous file —
+      # classified may_depend_on rather than a direct observable depends_on.
+      may_depend_on: [editor-save-admission]
+    implementation:
+      status: confirmed
+      paths:
+        - editor/mod-pack-export.js
+        - editor/tests/mod-pack-export.test.js
+      tests: [npm run test:editor]
+    evidence:
+      - kind: test
+        reference: AC1 archive contains only allowed paths plus the required manifest
+        summary: The exported store-only ZIP carries only whitelisted authored TOML paths and always includes the generated scenarios.toml manifest.
+      - kind: test
+        reference: AC3 a definite authoring error blocks the export
+        summary: A file with error-severity findings refuses the whole export through the same partitionFindings admission gate a save uses.
+      - kind: test
+        reference: AC3 warnings do NOT block the export and are surfaced
+        summary: Warning-severity findings pass through and are reported, never blocking the export.
+      - kind: test
+        reference: AC2 manifest root-world validated against selected content — missing world blocks
+        summary: A manifest root world absent from the selected files is a blocking finding, mirroring validate_manifest's resolve_world semantics.
+      - kind: test
+        reference: AC5 the produced archive is a parseable store-only ZIP whose manifest re-parses
+        summary: The hand-rolled store-only ZIP round-trips and its manifest re-parses through the shared content-pack schema.
 
   - component: host-mod-pack-upload
     core:

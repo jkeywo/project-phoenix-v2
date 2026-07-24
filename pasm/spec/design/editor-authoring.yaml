@@ -36,7 +36,7 @@ entities:
 
   - verb: export-mod-pack
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Export Mod Pack
       summary: Export selected authored TOML files and a manifest naming selectable root scenarios as a ZIP mod pack suitable for a host to apply before scenario selection.
@@ -46,6 +46,10 @@ entities:
       inputs: [selected authored TOML files]
       resolution: local-validation-gate
       outputs: [TOML-only ZIP mod pack, selectable scenario manifest]
+    implementation:
+      status: confirmed
+      paths: [editor/mod-pack-export.js, editor/tests/mod-pack-export.test.js]
+      tests: [npm run test:editor]
 
   - verb: upload-mod-pack
     core:
@@ -86,7 +90,7 @@ entities:
 
   - mechanic: mod-pack-scenario-manifest
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Mod Pack Scenario Manifest
       summary: A mod pack carries a required manifest that explicitly names the root world files it contributes to scenario selection. Other included world files remain supporting content only.
@@ -95,6 +99,10 @@ entities:
       participating_roles: [scenario-author, host-mod-pack-operator]
       resolution: host-authoritative-validation
       outputs: [explicit selectable mod scenario list]
+    implementation:
+      status: confirmed
+      paths: [editor/mod-pack-export.js, editor/tests/mod-pack-export.test.js]
+      tests: [npm run test:editor]
 
   - mechanic: unified-scenario-manifest
     core:

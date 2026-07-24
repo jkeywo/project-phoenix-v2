@@ -524,4 +524,68 @@ world = "assets/worlds/story.toml"
             .unwrap();
         assert_eq!(default.ships.len(), 2);
     }
+
+    // -- exported mod-pack manifest ------------------------------------------
+
+    /// The editor mod-pack exporter (issue #759) writes its `scenarios.toml`
+    /// with the SAME `[[scenario]]` schema this module parses — that is the
+    /// shared content-pack validation surface the upload path (#760) reuses.
+    /// A manifest shaped exactly like the exporter's `buildManifestToml`
+    /// output must parse and validate cleanly against the pack's own worlds.
+    #[test]
+    fn exported_mod_pack_manifest_parses_and_validates() {
+        // Byte-for-byte the shape smol-toml emits for the exporter's
+        // `{ scenario: [{ id, world, label? }] }` (see editor/mod-pack-export.js
+        // buildManifestToml): one entry with a label, one without.
+        let manifest_toml = concat!(
+            "[[scenario]]\n",
+            "id = \"default\"\n",
+            "world = \"assets/worlds/default.toml\"\n",
+            "label = \"Default\"\n\n",
+            "[[scenario]]\n",
+            "id = \"skirmish\"\n",
+            "world = \"assets/worlds/skirmish.toml\"\n",
+        );
+
+        let m = parse_manifest(manifest_toml).expect("exported manifest must parse");
+        assert_eq!(m.scenarios.len(), 2);
+        assert_eq!(m.scenarios[0].label.as_deref(), Some("Default"));
+        assert_eq!(m.scenarios[1].label, None);
+
+        // The pack ships both referenced root worlds — resolve_world reads the
+        // pack contents, exactly as an upload would resolve within the archive.
+        let mut pack = HashMap::new();
+        pack.insert(
+            "assets/worlds/default.toml".to_string(),
+            "[global]\ntitle = \"world.default.title\"\n".to_string(),
+        );
+        pack.insert(
+            "assets/worlds/skirmish.toml".to_string(),
+            "[global]\ntitle = \"world.skirmish.title\"\n".to_string(),
+        );
+
+        let findings = validate_manifest(&m, manifest_toml, resolver(pack));
+        assert!(
+            findings.is_empty(),
+            "exported mod-pack manifest must validate cleanly: {findings:?}"
+        );
+    }
+
+    /// A mod-pack manifest whose root world is absent from the pack must be a
+    /// blocking `missing-scenario-world` finding on the same surface — the
+    /// editor exporter refuses this case before writing, and the host upload
+    /// must reject it too.
+    #[test]
+    fn exported_manifest_with_unresolved_world_is_rejected() {
+        let manifest_toml = concat!(
+            "[[scenario]]\n",
+            "id = \"ghost\"\n",
+            "world = \"assets/worlds/ghost.toml\"\n",
+        );
+        let m = parse_manifest(manifest_toml).unwrap();
+        let findings = validate_manifest(&m, manifest_toml, resolver(HashMap::new()));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, "missing-scenario-world");
+        assert!(findings[0].is_error());
+    }
 }

@@ -2637,6 +2637,28 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(ai_cfg.clone());
             commands.insert_resource(ai_cfg);
 
+            // Shields focus AI policy (issue #783) — player-ship half of the
+            // per-entity pattern in `spawner.rs`. Authored
+            // `[shields_console.ai_policy]` drives `ai_shield_focus`'s gate and
+            // supplies the authored windows/thresholds; absent, the canonical
+            // default policy (which reproduces today's decisions) is synthesised.
+            // Validated already in `EntityConfig::from_toml`.
+            let shields_focus_policy = match config
+                .shields_console
+                .as_ref()
+                .and_then(|sc| sc.ai_policy.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_shields_focus_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            commands
+                .entity(spawned)
+                .insert(crate::ship::shields::ShieldsFocusAiPolicy(
+                    shields_focus_policy,
+                ));
+
             // Sensors AI config — the player-ship half of the same per-entity
             // pattern (issue #738 follow-up). `ai_frequency_hint` reads only the
             // Component, and the spawner attaches one to every entity with a

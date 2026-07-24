@@ -109,6 +109,16 @@ pub enum AiPolicyVerb {
     /// policy is a data-authored arbiter layered on top, and never becomes a second
     /// writer of `torpedoes_remaining`.
     GrantTorpedoRound,
+    /// Focus a shield arc this tick (the `shield_focus` channel of the Shields
+    /// fine system, issue #783). A value-less action verb, the shields twin of
+    /// [`AiPolicyVerb::FirePhaser`]: *which* of the four arcs is focused is NOT
+    /// carried here — it comes from the host's retained arc-ranking kernel
+    /// (`tick_shield_focus_ai`, damage-concentration primary with health-imbalance
+    /// fallback) reading the authored windows/thresholds from this policy's
+    /// `param` map. Its presence tells the host to run that kernel and emit the
+    /// same admitted `SetShieldArcFocus` a human Shields operator does; its
+    /// absence ("hold"/idle) leaves the current focus where it is.
+    FocusShieldArc,
 }
 
 /// One inline stateless policy rule.
@@ -621,5 +631,53 @@ mod tests {
         let mut f = AiFacts::new();
         f.set("in_flight", 5.0);
         assert_eq!(p.resolve_channel("torpedo_magazine_grant", &f, &[]), None);
+    }
+
+    // ── Shields focus channel (issue #783) ───────────────────────────────────
+
+    /// The value-less `focus_shield_arc` verb resolves on its own `shield_focus`
+    /// channel when a concentration guard fires, and an explicit idle holds it —
+    /// the gate half of #783 (WHICH arc is the retained kernel's call, not the
+    /// verb's). Mirrors the weapon-bank fire-verb tests.
+    #[test]
+    fn shield_focus_verb_resolves_when_guard_fires_and_idle_holds() {
+        let mut params = AiParams::new();
+        params.set("damage_pct_threshold", 50.0);
+        let p = AiPolicy {
+            params,
+            rules: vec![AiPolicyRule {
+                priority: 10,
+                channel: "shield_focus".into(),
+                when: parse_predicate("fact(recent_damage_pct_max) >= param(damage_pct_threshold)")
+                    .unwrap(),
+                verb: AiPolicyVerb::FocusShieldArc,
+            }],
+            idle: false,
+        };
+        // Concentrated recent damage (80% on one arc) → act.
+        let mut concentrated = AiFacts::new();
+        concentrated.set("recent_damage_pct_max", 80.0);
+        assert_eq!(
+            p.resolve_channel("shield_focus", &concentrated, &[]),
+            Some(&AiPolicyVerb::FocusShieldArc)
+        );
+        // Diffuse damage (below the threshold) → hold.
+        let mut diffuse = AiFacts::new();
+        diffuse.set("recent_damage_pct_max", 20.0);
+        assert_eq!(p.resolve_channel("shield_focus", &diffuse, &[]), None);
+        // Empty facts (no seeding) → guard is false → hold, never a spurious act.
+        assert_eq!(
+            p.resolve_channel("shield_focus", &AiFacts::new(), &[]),
+            None
+        );
+        // An explicit idle policy holds the channel regardless of damage.
+        let idle = AiPolicy {
+            idle: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            idle.resolve_channel("shield_focus", &concentrated, &[]),
+            None
+        );
     }
 }

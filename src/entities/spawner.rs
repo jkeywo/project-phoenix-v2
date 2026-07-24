@@ -543,6 +543,26 @@ pub fn spawn_entity(
                 })
                 .unwrap_or_default(),
         );
+        // Shields focus AI policy (issue #783) — the inline stateless
+        // `shield_focus` policy from `[shields_console.ai_policy]` if authored,
+        // else the canonical default (which reproduces today's decisions, kernel
+        // and all). Attached to every ship so `ai_shield_focus` resolves a
+        // data-authored gate + reads the authored windows/thresholds from the
+        // policy `param` map rather than the retired `ai_cfg.*` reads. `to_policy`
+        // cannot fail here: the block was validated in `EntityConfig::from_toml`.
+        let shields_focus_policy = match config
+            .shields_console
+            .as_ref()
+            .and_then(|sc| sc.ai_policy.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_shields_focus_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::shields::ShieldsFocusAiPolicy(
+            shields_focus_policy,
+        ));
         // Captain AI policy (issue #775) — the inline stateless Red Alert
         // policy from `[captain_console.ai]` if authored, else the canonical
         // default. Attached to every ship (player + NPC come through their own

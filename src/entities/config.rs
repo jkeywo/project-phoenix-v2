@@ -1852,6 +1852,43 @@ pub const TORPEDO_MAGAZINE_CHANNELS: &[&str] = &[TORPEDO_MAGAZINE_CHANNEL];
 /// The registered verbs a torpedo magazine policy may emit (issue #782).
 pub const TORPEDO_MAGAZINE_VERBS: &[&str] = &[TORPEDO_MAGAZINE_GRANT_VERB];
 
+// ── Shields focus fine-system AI policy channel/verb (issue #783) ─────────────
+//
+// The Shields fine system focuses ONE of the ship's four arcs at a time. The
+// #783 conversion keeps the retained arc-ranking kernel (`tick_shield_focus_ai`:
+// damage-concentration primary, health-imbalance fallback) as the 4-way argmax
+// and lifts only the AUTHORED windows/thresholds and the gate (whether to act)
+// into an inline stateless policy. The `focus_shield_arc` verb is value-less —
+// which arc wins is the kernel's call from the host context, never the verb
+// (AGENTS.md rule #11: the concentration %, windows, and health ratio are policy
+// `param`s, not literals). This is the channel/verb model of #775/#779–#782, not
+// the #776 selector: shield arcs are a fixed 4-set of in-ship indices, not UUID
+// entities, so there is nothing for a candidate-source selector to union.
+
+/// The `shield_focus` output channel: the Shields fine system's focus-an-arc axis.
+pub const SHIELD_FOCUS_CHANNEL: &str = "shield_focus";
+/// The `focus_shield_arc` verb. Its presence tells the host to run the retained
+/// arc-ranking kernel and emit the same admitted `SetShieldArcFocus` a human
+/// Shields operator does; its absence ("hold"/idle) leaves the focus where it is.
+pub const SHIELD_FOCUS_VERB: &str = "focus_shield_arc";
+
+/// The registered output channels a Shields focus policy may drive (issue #783).
+pub const SHIELD_FOCUS_CHANNELS: &[&str] = &[SHIELD_FOCUS_CHANNEL];
+/// The registered verbs a Shields focus policy may emit (issue #783).
+pub const SHIELD_FOCUS_VERBS: &[&str] = &[SHIELD_FOCUS_VERB];
+
+/// Authored policy-parameter name: the maximum recent-damage window (seconds)
+/// the kernel measures concentration over. Read host-side from the Shields focus
+/// policy `param` map (issue #783); the kernel's arg equivalent of the retained
+/// typed `ShieldsAiConfigToml::damage_window_secs` knob.
+pub const SHIELD_FOCUS_DAMAGE_WINDOW_PARAM: &str = "damage_window_secs";
+/// Authored policy-parameter name: the minimum window (seconds) floor.
+pub const SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM: &str = "min_damage_window_secs";
+/// Authored policy-parameter name: the concentration threshold (0–100).
+pub const SHIELD_FOCUS_DAMAGE_PCT_PARAM: &str = "damage_pct_threshold";
+/// Authored policy-parameter name: the health-imbalance fallback ratio (0–100).
+pub const SHIELD_FOCUS_HEALTH_RATIO_PARAM: &str = "health_ratio_threshold";
+
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
 /// Candidate source: the ship's frozen combat lock (Tactical's designated
@@ -2378,6 +2415,11 @@ impl FineSystemAiConfigToml {
                 TORPEDO_LOAD_VERB => crate::ai::policy::AiPolicyVerb::LoadTorpedo,
                 TORPEDO_LAUNCH_VERB => crate::ai::policy::AiPolicyVerb::LaunchTorpedo,
                 TORPEDO_MAGAZINE_GRANT_VERB => crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
+                // Shields focus action verb (issue #783): value-less, like the
+                // weapon-bank verbs. The `value` field is ignored — which of the
+                // four arcs is focused comes from the retained ranking kernel in
+                // the host context, not the policy.
+                SHIELD_FOCUS_VERB => crate::ai::policy::AiPolicyVerb::FocusShieldArc,
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2576,6 +2618,67 @@ pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
             verb: PHASER_FIRE_VERB.to_string(),
             value: false,
         }],
+    }
+}
+
+/// The canonical default Shields focus policy synthesised for ships that do not
+/// author `[shields_console.ai_policy]` (issue #783).
+///
+/// Two rules on the `shield_focus` channel, both emitting the value-less
+/// `focus_shield_arc` verb: a priority-10 DAMAGE rule that fires when the most
+/// concentrated arc's recent incoming-damage share reaches the authored
+/// `damage_pct_threshold`, and a priority-0 IMBALANCE FALLBACK rule guarded
+/// `true`. Because the fallback is unconditional, the retained arc-ranking kernel
+/// (`tick_shield_focus_ai`) still runs every tick exactly as it did before #783 —
+/// so OMITTING the block reproduces today's decisions bit-for-bit (baseline
+/// preservation). The kernel owns the 4-way argmax (damage-concentration primary,
+/// health-imbalance fallback); this policy owns only the authored numbers and the
+/// gate. All four params are seeded from the retained typed `default_shields_ai_*`
+/// values so the kernel reads the same windows/thresholds it always did. An
+/// explicit `idle` is the opt-out.
+pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert(
+        SHIELD_FOCUS_DAMAGE_WINDOW_PARAM.to_string(),
+        default_shields_ai_damage_window_secs(),
+    );
+    param.insert(
+        SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM.to_string(),
+        default_shields_ai_min_damage_window_secs(),
+    );
+    param.insert(
+        SHIELD_FOCUS_DAMAGE_PCT_PARAM.to_string(),
+        default_shields_ai_damage_pct_threshold(),
+    );
+    param.insert(
+        SHIELD_FOCUS_HEALTH_RATIO_PARAM.to_string(),
+        default_shields_ai_health_ratio_threshold(),
+    );
+    FineSystemAiConfigToml {
+        idle: false,
+        param,
+        rule: vec![
+            FineSystemAiRuleToml {
+                priority: 10,
+                channel: SHIELD_FOCUS_CHANNEL.to_string(),
+                // The concentration fact is a percentage (0–100) so it compares
+                // directly against the authored `damage_pct_threshold` — the
+                // predicate grammar has no arithmetic, so the host seeds the fact
+                // already scaled.
+                when: format!(
+                    "fact(recent_damage_pct_max) >= param({SHIELD_FOCUS_DAMAGE_PCT_PARAM})"
+                ),
+                verb: SHIELD_FOCUS_VERB.to_string(),
+                value: false,
+            },
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: SHIELD_FOCUS_CHANNEL.to_string(),
+                when: "true".to_string(),
+                verb: SHIELD_FOCUS_VERB.to_string(),
+                value: false,
+            },
+        ],
     }
 }
 
@@ -2799,6 +2902,18 @@ pub struct ShieldsConsoleConfig {
     /// AI tuning parameters for the shields focus controller.
     #[serde(default)]
     pub ai: Option<ShieldsAiConfigToml>,
+    /// Inline stateless AI policy for the Shields focus fine system (issue
+    /// #783), loaded from `[shields_console.ai_policy]`. Sibling to `ai`: the
+    /// typed `ai` knobs remain the fallback default source, while this block —
+    /// when authored — carries the same four numbers as `param(...)` entries
+    /// (`damage_window_secs`, `min_damage_window_secs`, `damage_pct_threshold`,
+    /// `health_ratio_threshold`) plus the prioritised rules that gate whether the
+    /// retained arc-ranking kernel acts. Absent, the canonical
+    /// [`default_shields_focus_ai_config`] is synthesised at spawn (baseline
+    /// preservation). Validated in [`crate::entities::config::EntityConfig::from_toml`]
+    /// against [`SHIELD_FOCUS_CHANNELS`] / [`SHIELD_FOCUS_VERBS`].
+    #[serde(default)]
+    pub ai_policy: Option<FineSystemAiConfigToml>,
 }
 
 fn default_focus_bonus_max_hp() -> i32 {
@@ -2836,6 +2951,7 @@ impl Default for ShieldsConsoleConfig {
             base: None,
             frequency: default_shield_frequency(),
             ai: None,
+            ai_policy: None,
         }
     }
 }
@@ -3757,6 +3873,22 @@ impl EntityConfig {
                 )
                 .map_err(SerdeError::custom)?;
             }
+        }
+
+        // Validate an authored inline Shields focus AI policy before world
+        // activation (issue #783). The Shields fine system drives its single
+        // `shield_focus` channel with its single value-less `focus_shield_arc`
+        // verb. A wrong-axis verb (e.g. a fire verb), an unknown channel, an
+        // unparseable guard, and undeclared `param(...)` references fail the
+        // entity load here, before any live tick — mirroring the helm/weapon
+        // validation blocks above.
+        if let Some(ai) = config
+            .shields_console
+            .as_ref()
+            .and_then(|sc| sc.ai_policy.as_ref())
+        {
+            validate_fine_system_ai_policy(ai, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS)
+                .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Sensors target selector before world
@@ -6858,6 +6990,124 @@ value = false
 "#;
         let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
         assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    // ── Shields focus AI policy (issue #783) ─────────────────────────────────
+
+    #[test]
+    fn default_shields_focus_policy_validates_and_resolves() {
+        let s = default_shields_focus_ai_config();
+        assert!(
+            validate_fine_system_ai_policy(&s, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS).is_ok()
+        );
+        let sp = s.to_policy().expect("shields focus default resolves");
+        // Baseline: a priority-10 damage rule + a priority-0 imbalance fallback.
+        assert!(!sp.idle);
+        assert_eq!(sp.rules.len(), 2);
+        // All four authored numbers seeded as params.
+        assert!(sp.params.get(SHIELD_FOCUS_DAMAGE_WINDOW_PARAM).is_some());
+        assert!(sp
+            .params
+            .get(SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM)
+            .is_some());
+        assert!(sp.params.get(SHIELD_FOCUS_DAMAGE_PCT_PARAM).is_some());
+        assert!(sp.params.get(SHIELD_FOCUS_HEALTH_RATIO_PARAM).is_some());
+    }
+
+    #[test]
+    fn shields_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Warden"
+
+[shields_console.ai_policy]
+param = { damage_window_secs = 6.0, min_damage_window_secs = 2.0, damage_pct_threshold = 60.0, health_ratio_threshold = 40.0 }
+
+[[shields_console.ai_policy.rule]]
+priority = 10
+channel = "shield_focus"
+when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
+verb = "focus_shield_arc"
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "shield_focus"
+when = "true"
+verb = "focus_shield_arc"
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("shields ai_policy must parse + validate");
+        let ai = cfg
+            .shields_console
+            .as_ref()
+            .and_then(|sc| sc.ai_policy.as_ref())
+            .expect("shields_console.ai_policy present");
+        assert_eq!(ai.param.get("damage_window_secs"), Some(&6.0));
+        assert_eq!(ai.param.get("health_ratio_threshold"), Some(&40.0));
+        let policy = ai.to_policy().expect("policy resolves");
+        assert_eq!(policy.rules.len(), 2);
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::FocusShieldArc
+        );
+    }
+
+    #[test]
+    fn shields_idle_ai_policy_parses_from_toml() {
+        let toml = r#"
+name = "Passive"
+
+[shields_console.ai_policy]
+idle = true
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("shields idle ai_policy must parse");
+        let ai = cfg.shields_console.unwrap().ai_policy.unwrap();
+        assert!(ai.to_policy().unwrap().idle);
+    }
+
+    #[test]
+    fn shields_ai_policy_rejects_wrong_verb_at_load() {
+        // A fire verb on the shield_focus channel is an authoring error caught by
+        // the from_toml validation loop, before any live tick.
+        let toml = r#"
+name = "Bad"
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "shield_focus"
+when = "true"
+verb = "fire_phaser"
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn shields_ai_policy_rejects_unknown_channel_at_load() {
+        let toml = r#"
+name = "Bad2"
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "true"
+verb = "focus_shield_arc"
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    #[test]
+    fn shields_ai_policy_rejects_undeclared_param_at_load() {
+        let toml = r#"
+name = "Bad3"
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "shield_focus"
+when = "fact(recent_damage_pct_max) >= param(nonexistent)"
+verb = "focus_shield_arc"
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("undeclared parameter"), "got: {err}");
     }
 
     // ── Torpedo tube + magazine AI policy (issue #782) ───────────────────────

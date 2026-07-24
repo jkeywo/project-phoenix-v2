@@ -159,6 +159,23 @@ impl Default for ShieldsAiConfigResource {
     }
 }
 
+/// Per-ship inline stateless AI policy for the Shields focus fine system
+/// (issue #783), the shields twin of [`crate::ship::helm_ai::HelmEnginesAiPolicy`]
+/// / [`crate::console::captain::server::CaptainAiPolicy`].
+///
+/// Built at spawn from `[shields_console.ai_policy]` if authored, else the
+/// canonical [`crate::entities::config::default_shields_focus_ai_config`] (the
+/// default reproduces today's decisions — see that fn). Read by
+/// [`crate::console_ai::server::ai_shield_focus`]: the host seeds bounded per-arc
+/// recent-damage facts ([`crate::console_ai::seed_shields_focus_facts`]) and
+/// resolves this policy on the `shield_focus` channel. On `focus_shield_arc`
+/// (act) the retained arc-ranking kernel picks and emits the arc; on `None`
+/// (idle/hold) the host emits nothing. The authored windows/thresholds flow into
+/// the kernel from this policy's `param` map, so the policy owns the authored
+/// numbers while the kernel owns the 4-way argmax.
+#[derive(Component, Default, Clone, Debug)]
+pub struct ShieldsFocusAiPolicy(pub crate::ai::policy::AiPolicy);
+
 /// Per-facing notification state for the shields coordination emitter.
 ///
 /// Indexed by facing index (usize). Both flags reset when a facing comes back

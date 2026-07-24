@@ -735,6 +735,100 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
     ShieldFocusAiOutput::ClearFocus
 }
 
+/// Seed the per-tick policy fact snapshot for the Shields focus decision (issue
+/// #783), modelled on [`crate::console::weapons::beam::seed_phaser_bank_facts`].
+///
+/// This is THE piece that exposes BOUNDED RECENT INCOMING-DAMAGE facts by shield
+/// arc (AC1) and closes the #779 empty-facts sharp edge for the Shields policy:
+/// without seeding, a `fact(...)` guard validates but never fires. Every reading
+/// is computed from the ALREADY-PRUNED window the caller built (records older
+/// than `damage_window_secs` are gone before this runs) — "bounded" means we read
+/// only that window and add NO new unbounded accumulator. The window matches the
+/// kernel's concentration window exactly (`max(damage_window_secs,
+/// min_damage_window_secs)`), so the facts describe the same slice the retained
+/// argmax ranks over.
+///
+/// Facts emitted:
+///   - `recent_damage_<arc-id>` — per-arc damage summed over the window (AC1).
+///   - `recent_damage_total` — total window damage across all arcs.
+///   - `recent_damage_fraction_max` / `recent_damage_pct_max` — the most
+///     concentrated arc's share of the total (0–1 and 0–100). The concentration
+///     signal the authored damage rule gates on (AC2).
+///   - `health_fraction_min_ratio` / `health_ratio_pct` — the lowest arc's
+///     normalized health as a ratio of the second-lowest (0–1 and 0–100). The
+///     shield-health imbalance signal used only as the authored FALLBACK (AC3).
+///
+/// Pure and Bevy-free (AGENTS.md rule #10): the host resolves the live per-arc
+/// state before calling this, so the policy evaluates over real readings while
+/// `policy.rs` stays free of ECS types.
+pub fn seed_shields_focus_facts(
+    facings: &[crate::shield::ShieldFacingSnapshot],
+    damage_history: &[Vec<DamageRecord>],
+    damage_window_secs: f32,
+    min_damage_window_secs: f32,
+    current_time_secs: f32,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+
+    // Same window the kernel measures concentration over.
+    let window = damage_window_secs.max(min_damage_window_secs);
+    let effective_start = current_time_secs - window;
+
+    let mut total: i32 = 0;
+    let mut max_arc: i32 = 0;
+    for (idx, facing) in facings.iter().enumerate() {
+        let arc_sum: i32 = damage_history
+            .get(idx)
+            .map(|records| {
+                records
+                    .iter()
+                    .filter(|r| r.timestamp >= effective_start && r.timestamp <= current_time_secs)
+                    .map(|r| r.amount)
+                    .sum()
+            })
+            .unwrap_or(0);
+        // Per-arc bounded recent-damage fact, keyed by the stable arc id (for a
+        // canonical 4-arc ship: `recent_damage_fore/port/aft/starboard`).
+        if !facing.id.is_empty() {
+            facts.set(&format!("recent_damage_{}", facing.id), arc_sum as f64);
+        }
+        total += arc_sum;
+        max_arc = max_arc.max(arc_sum);
+    }
+
+    facts.set("recent_damage_total", total as f64);
+    let fraction_max = if total > 0 {
+        max_arc as f64 / total as f64
+    } else {
+        0.0
+    };
+    facts.set("recent_damage_fraction_max", fraction_max);
+    facts.set("recent_damage_pct_max", fraction_max * 100.0);
+
+    // Health-imbalance fallback signal: lowest normalized health as a ratio of
+    // the second-lowest (the same comparison the kernel's fallback branch makes).
+    let mut normalized: Vec<f32> = facings
+        .iter()
+        .map(|f| {
+            if f.max_hp > 0 {
+                f.hp as f32 / f.max_hp as f32
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    normalized.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if normalized.len() >= 2 {
+        let lowest = normalized[0];
+        let second = normalized[1];
+        let ratio = if second > 0.0 { lowest / second } else { 1.0 };
+        facts.set("health_fraction_min_ratio", ratio as f64);
+        facts.set("health_ratio_pct", (ratio * 100.0) as f64);
+    }
+
+    facts
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1782,6 +1876,141 @@ mod tests {
         assert_eq!(
             tick_shield_focus_ai(&input),
             ShieldFocusAiOutput::Focus { facing_index: 1 }
+        );
+    }
+
+    // ── #783 policy-param equivalence + seeded facts ─────────────────────────
+
+    #[test]
+    fn default_focus_policy_params_equal_the_typed_knobs() {
+        // Baseline preservation: the canonical default policy seeds its four
+        // `param`s from the retained typed `default_shields_ai_*()` values, so a
+        // ship that omits `[shields_console.ai_policy]` feeds the kernel exactly
+        // the windows/thresholds it always did.
+        let policy = crate::entities::config::default_shields_focus_ai_config()
+            .to_policy()
+            .unwrap();
+        let typed = crate::ship::shields::ShieldsAiConfigResource::default();
+        assert_eq!(
+            policy
+                .params
+                .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM),
+            Some(typed.damage_window_secs as f64)
+        );
+        assert_eq!(
+            policy
+                .params
+                .get(crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM),
+            Some(typed.min_damage_window_secs as f64)
+        );
+        assert_eq!(
+            policy
+                .params
+                .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM),
+            Some(typed.damage_pct_threshold as f64)
+        );
+        assert_eq!(
+            policy
+                .params
+                .get(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM),
+            Some(typed.health_ratio_threshold as f64)
+        );
+    }
+
+    #[test]
+    fn params_sourced_windows_produce_the_same_kernel_decision_as_typed_knobs() {
+        // The kernel is unchanged: feeding it windows/thresholds read from the
+        // default policy `param` map yields the identical decision to feeding the
+        // typed defaults directly, over a concentrated-damage scenario.
+        let policy = crate::entities::config::default_shields_focus_ai_config()
+            .to_policy()
+            .unwrap();
+        let p = |name: &str| policy.params.get(name).unwrap() as f32;
+
+        let mut history = empty_history(4);
+        history[1].push(DamageRecord {
+            timestamp: 1.0,
+            amount: 80,
+        });
+        history[0].push(DamageRecord {
+            timestamp: 1.0,
+            amount: 10,
+        });
+        let facings = vec![
+            make_snap("Fore", 90, 100, false),
+            make_snap("Port", 90, 100, false),
+            make_snap("Aft", 90, 100, false),
+            make_snap("Starboard", 90, 100, false),
+        ];
+
+        let params_input = ShieldFocusAiInput {
+            facings: facings.clone(),
+            shields_is_low: true,
+            damage_history: history.clone(),
+            damage_window_secs: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM),
+            min_damage_window_secs: p(
+                crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM,
+            ),
+            damage_pct_threshold: p(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM),
+            health_ratio_threshold: p(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM),
+            current_time_secs: 4.0,
+        };
+        let typed_input = make_input(facings, true, history, 4.0);
+
+        assert_eq!(
+            tick_shield_focus_ai(&params_input),
+            tick_shield_focus_ai(&typed_input)
+        );
+        assert_eq!(
+            tick_shield_focus_ai(&params_input),
+            ShieldFocusAiOutput::Focus { facing_index: 1 }
+        );
+    }
+
+    #[test]
+    fn seed_shields_focus_facts_exposes_bounded_per_arc_damage() {
+        // AC1: per-arc recent-damage facts computed from the pruned window only.
+        // Port (idx 1) took a concentrated hit inside the window; a stale hit on
+        // Fore at t=0.0 falls OUTSIDE [current-window, current] and must NOT
+        // count (bounded — no unbounded accumulation).
+        let mut history = empty_history(4);
+        history[1].push(DamageRecord {
+            timestamp: 3.0,
+            amount: 60,
+        });
+        history[0].push(DamageRecord {
+            timestamp: 3.0,
+            amount: 20,
+        });
+        history[0].push(DamageRecord {
+            timestamp: 0.0, // stale: outside the [1.0, 5.0] window
+            amount: 999,
+        });
+        let facings = vec![
+            make_snap("Fore", 80, 100, false),
+            make_snap("Port", 40, 100, false),
+            make_snap("Aft", 100, 100, false),
+            make_snap("Starboard", 100, 100, false),
+        ];
+        // window = max(4.0, 1.0) = 4.0 → [1.0, 5.0].
+        let facts = seed_shields_focus_facts(&facings, &history, 4.0, 1.0, 5.0);
+
+        assert_eq!(facts.get("recent_damage_port"), Some(60.0));
+        assert_eq!(
+            facts.get("recent_damage_fore"),
+            Some(20.0),
+            "the stale t=0.0 hit on Fore must be excluded from the bounded window"
+        );
+        assert_eq!(facts.get("recent_damage_aft"), Some(0.0));
+        assert_eq!(facts.get("recent_damage_total"), Some(80.0));
+        // Concentration: Port 60 of 80 = 75%.
+        assert_eq!(facts.get("recent_damage_pct_max"), Some(75.0));
+        assert_eq!(facts.get("recent_damage_fraction_max"), Some(0.75));
+        // Health-imbalance fallback signal: lowest 0.4 (Port) / second 0.8 (Fore).
+        let ratio = facts.get("health_fraction_min_ratio").unwrap();
+        assert!(
+            (ratio - 0.5).abs() < 1e-6,
+            "min/second health ratio should be 0.5"
         );
     }
 }

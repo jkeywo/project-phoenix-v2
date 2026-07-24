@@ -179,7 +179,7 @@ pub(crate) fn ai_shield_focus(
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::shields::ShipShields,
             &mut crate::ship::shields::ShieldsDamageHistory,
-            Option<&crate::ship::shields::ShieldsAiConfigResource>,
+            Option<&crate::ship::shields::ShieldsFocusAiPolicy>,
             &mut crate::ship::shields::PendingShieldsThreatBearing,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
@@ -197,7 +197,7 @@ pub(crate) fn ai_shield_focus(
         control_sources,
         shields,
         mut damage_history,
-        ai_config_comp,
+        focus_policy_comp,
         mut pending_threat,
         ship_config,
         mut admitted,
@@ -270,21 +270,49 @@ pub(crate) fn ai_shield_focus(
             continue; // Threat bearing takes priority over damage analysis
         }
 
-        // Per-ship tuning only (issue #738). This used to fall back to the
-        // global `ShieldsAiConfigResource` Resource, which `server_app` writes
-        // from the PLAYER ship's `[shields_console.ai]` TOML — so an NPC with
-        // no `[shields_console.ai]` section silently inherited the player
-        // ship's shield-AI tuning. The fallback is now the serde-side default
-        // (the same values `ShieldsAiConfigResource::default()` supplies while
-        // parsing a ship TOML that omits the section).
-        let default_ai_cfg;
-        let ai_cfg: &crate::ship::shields::ShieldsAiConfigResource = match ai_config_comp {
-            Some(c) => c,
+        // Per-ship inline stateless Shields focus policy (issue #783). The
+        // authored windows/thresholds live in the policy `param` map (seeded from
+        // the retained typed `ShieldsAiConfigToml` defaults when the block is
+        // omitted), and the policy gates WHETHER the retained arc-ranking kernel
+        // acts this tick. A ship without the component (bare fixtures) falls back
+        // to the canonical default policy, which reproduces today's decisions.
+        let default_policy;
+        let policy: &crate::ai::policy::AiPolicy = match focus_policy_comp {
+            Some(p) => &p.0,
             None => {
-                default_ai_cfg = crate::ship::shields::ShieldsAiConfigResource::default();
-                &default_ai_cfg
+                default_policy = crate::entities::config::default_shields_focus_ai_config()
+                    .to_policy()
+                    .unwrap_or_default();
+                &default_policy
             }
         };
+
+        // Authored windows/thresholds, read from the policy `param` map INSTEAD of
+        // the typed `ai_cfg.*` (issue #783). Absent params fall back to the
+        // retained typed defaults so a hand-built policy that omits one still
+        // behaves — but the canonical default seeds all four.
+        let cfg_default = crate::ship::shields::ShieldsAiConfigResource::default();
+        let damage_window_secs = policy
+            .params
+            .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_WINDOW_PARAM)
+            .map(|v| v as f32)
+            .unwrap_or(cfg_default.damage_window_secs);
+        let min_damage_window_secs = policy
+            .params
+            .get(crate::entities::config::SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM)
+            .map(|v| v as f32)
+            .unwrap_or(cfg_default.min_damage_window_secs);
+        let damage_pct_threshold = policy
+            .params
+            .get(crate::entities::config::SHIELD_FOCUS_DAMAGE_PCT_PARAM)
+            .map(|v| v as f32)
+            .unwrap_or(cfg_default.damage_pct_threshold);
+        let health_ratio_threshold = policy
+            .params
+            .get(crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM)
+            .map(|v| v as f32)
+            .unwrap_or(cfg_default.health_ratio_threshold);
+
         let facings = &shields.0.facings;
 
         // Single-arc ships have nothing to focus.
@@ -324,20 +352,39 @@ pub(crate) fn ai_shield_focus(
         }
 
         // Prune records outside the damage window.
-        damage_history.prune_old(current_time, ai_cfg.damage_window_secs);
+        damage_history.prune_old(current_time, damage_window_secs);
 
         // ── Build AI input ──────────────────────────────────────────────────
         let facings_snapshot: Vec<_> = facings.iter().map(|f| f.snapshot()).collect();
         let shields_is_low = true; // Rating gate deferred to per-ship AiTuning
 
+        // ── Resolve the authored policy gate (issue #783) ───────────────────
+        // Seed BOUNDED per-arc recent-damage facts from the already-pruned
+        // window, then resolve the `shield_focus` channel. `focus_shield_arc`
+        // (act) → run the retained ranking kernel; `None` (idle/hold) → emit
+        // nothing this tick.
+        let facts = crate::console_ai::seed_shields_focus_facts(
+            &facings_snapshot,
+            &damage_history.arcs,
+            damage_window_secs,
+            min_damage_window_secs,
+            current_time,
+        );
+        let acts =
+            policy.resolve_channel(crate::entities::config::SHIELD_FOCUS_CHANNEL, &facts, &[])
+                == Some(&crate::ai::policy::AiPolicyVerb::FocusShieldArc);
+        if !acts {
+            continue;
+        }
+
         let input = crate::console_ai::ShieldFocusAiInput {
             facings: facings_snapshot,
             shields_is_low,
             damage_history: damage_history.arcs.clone(),
-            damage_window_secs: ai_cfg.damage_window_secs,
-            min_damage_window_secs: ai_cfg.min_damage_window_secs,
-            damage_pct_threshold: ai_cfg.damage_pct_threshold,
-            health_ratio_threshold: ai_cfg.health_ratio_threshold,
+            damage_window_secs,
+            min_damage_window_secs,
+            damage_pct_threshold,
+            health_ratio_threshold,
             current_time_secs: current_time,
         };
 
@@ -1254,7 +1301,8 @@ mod tests {
     use crate::messages::{AdmittedCommands, CoordinationPayload};
     use crate::ship::control_source::ControlSource;
     use crate::ship::shields::{
-        PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory, ShipShields,
+        PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory,
+        ShieldsFocusAiPolicy, ShipShields,
     };
     use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
     use crate::weapons_plugin::TacticalRadarSelection;
@@ -1309,6 +1357,7 @@ mod tests {
             ai_shield_control_sources(),
             AdmittedCommands::default(),
             AiHighFidelity,
+            default_focus_policy(),
         ));
 
         app
@@ -1344,6 +1393,57 @@ mod tests {
             );
         }
         control_sources
+    }
+
+    /// The canonical default Shields focus policy (issue #783) — reproduces
+    /// today's decisions, kernel and all. Bare-`App` fixtures may omit the
+    /// component (the host falls back to this same policy), but attaching it
+    /// explicitly documents the wiring and lets a test swap in an authored one.
+    fn default_focus_policy() -> ShieldsFocusAiPolicy {
+        ShieldsFocusAiPolicy(
+            crate::entities::config::default_shields_focus_ai_config()
+                .to_policy()
+                .unwrap(),
+        )
+    }
+
+    /// A Shields focus policy whose health-imbalance fallback threshold is `pct`
+    /// (0–100), every other authored number left at the default. Proves
+    /// per-entity policy `param`s drive the decision (issue #783).
+    fn focus_policy_with_health_ratio(pct: f32) -> ShieldsFocusAiPolicy {
+        let mut cfg = crate::entities::config::default_shields_focus_ai_config();
+        cfg.param.insert(
+            crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM.to_string(),
+            pct,
+        );
+        ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
+    }
+
+    /// A Shields focus policy that declares an explicit idle — the host must
+    /// take no AI focus action regardless of damage (issue #783 gate).
+    fn idle_focus_policy() -> ShieldsFocusAiPolicy {
+        ShieldsFocusAiPolicy(crate::ai::policy::AiPolicy {
+            idle: true,
+            ..Default::default()
+        })
+    }
+
+    /// A Shields focus policy with a SINGLE rule guarded on the seeded
+    /// `recent_damage_total` fact and NO unconditional fallback — so the retained
+    /// kernel runs only when the bounded recent-damage fact clears the gate.
+    /// Proves the `fact(...)` guard actually fires (facts are seeded, closing the
+    /// #779 empty-facts sharp edge).
+    fn damage_only_focus_policy() -> ShieldsFocusAiPolicy {
+        let mut cfg = crate::entities::config::default_shields_focus_ai_config();
+        cfg.param.insert("min_recent_damage".to_string(), 0.0);
+        cfg.rule = vec![crate::entities::config::FineSystemAiRuleToml {
+            priority: 10,
+            channel: crate::entities::config::SHIELD_FOCUS_CHANNEL.to_string(),
+            when: "fact(recent_damage_total) > param(min_recent_damage)".to_string(),
+            verb: crate::entities::config::SHIELD_FOCUS_VERB.to_string(),
+            value: false,
+        }];
+        ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
     }
 
     fn focused_facing(app: &App, e: Entity) -> Option<usize> {
@@ -1417,6 +1517,7 @@ mod tests {
                 ai_shield_control_sources(),
                 AdmittedCommands::default(),
                 AiHighFidelity,
+                default_focus_policy(),
             ))
             .id();
 
@@ -1440,33 +1541,25 @@ mod tests {
     }
 
     #[test]
-    fn npc_shield_ai_reads_its_own_tuning_not_the_player_ships_global_resource() {
-        // Issue #738 isolation: `ai_shield_focus` used to resolve its tuning as
-        // `per_entity_component.unwrap_or(&*global_resource)`, and `server_app`
-        // writes that global Resource from the PLAYER ship's
-        // `[shields_console.ai]` TOML. An NPC without the component therefore
-        // ran the player's thresholds.
-        //
-        // Here the global Resource carries a permissive 90% health-ratio rule
-        // and the per-entity components carry the parse-time default (50%). One
-        // arc sits at 60/100 with the rest full: 0.6 < 0.9 focuses, 0.6 < 0.5
-        // does not. So the global tuning is observable — and must not be what
-        // the NPC uses.
+    fn shield_ai_reads_its_own_policy_params_per_entity() {
+        // Issue #783 isolation: the authored windows/thresholds now live in each
+        // ship's own `ShieldsFocusAiPolicy` `param` map, read per-entity in the
+        // host. A ship carrying a permissive 90% health-ratio param must focus a
+        // 60/100 arc (0.6 < 0.9 · 1.0), while a ship on the default 50% policy
+        // must not (0.6 < 0.5 · 1.0 is false) — proving one ship's authored
+        // tuning never bleeds onto another (the #738 isolation guarantee, now
+        // carried by the per-entity policy rather than a global Resource).
         let mut app = shield_test_app();
-        let npc = ship_entity(&mut app);
-        app.insert_resource(ShieldsAiConfigResource {
-            health_ratio_threshold: 90.0,
-            ..Default::default()
-        });
+        // The base fixture ship carries the DEFAULT policy (50%).
+        let defaulted = ship_entity(&mut app);
 
-        // A second ship that DOES carry the permissive tuning as its own
-        // per-entity component, proving the 60/100 arc is focusable at all.
         let config = crate::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
             regen_per_sec: 0.0,
             offline_duration: 10.0,
         };
+        // A second ship carrying the permissive tuning as its own policy param.
         let tuned = app
             .world_mut()
             .spawn((
@@ -1477,14 +1570,11 @@ mod tests {
                 ai_shield_control_sources(),
                 AdmittedCommands::default(),
                 AiHighFidelity,
-                ShieldsAiConfigResource {
-                    health_ratio_threshold: 90.0,
-                    ..Default::default()
-                },
+                focus_policy_with_health_ratio(90.0),
             ))
             .id();
 
-        for e in [npc, tuned] {
+        for e in [defaulted, tuned] {
             let mut entity_mut = app.world_mut().entity_mut(e);
             let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
             shields.0.facings[0].hp = 60;
@@ -1494,13 +1584,13 @@ mod tests {
         assert_eq!(
             focused_facing(&app, tuned),
             Some(0),
-            "a ship carrying the permissive tuning on its own entity must focus the weak arc"
+            "a ship carrying the permissive health-ratio param must focus the weak arc"
         );
         assert_eq!(
-            focused_facing(&app, npc),
+            focused_facing(&app, defaulted),
             None,
-            "an NPC without its own shields-AI tuning must fall back to the parse-time \
-             default, never to the global Resource holding the player ship's tuning"
+            "a ship on the default policy must not focus a 60/100 arc — one ship's \
+             authored params must never bleed onto another"
         );
     }
 
@@ -1792,6 +1882,93 @@ mod tests {
                 .0,
             None,
             "pending threat bearing must be consumed (taken) once applied"
+        );
+    }
+
+    #[test]
+    fn authored_focus_policy_drives_focus_via_its_params() {
+        // An authored (non-default) policy carrying a permissive 90% health-ratio
+        // param focuses a 60/100 arc the default 50% policy would leave alone —
+        // observable proof the authored windows/thresholds route through the
+        // policy `param` map into the retained kernel (issue #783 AC2/AC4).
+        let mut app = shield_test_app();
+        let e = ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(focus_policy_with_health_ratio(90.0));
+
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 60; // 0.6 < 0.9·1.0 → focus under 90%, not 50%
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(0),
+            "an authored permissive policy must focus the weak arc its params allow"
+        );
+    }
+
+    #[test]
+    fn idle_focus_policy_takes_no_ai_focus_even_under_damage() {
+        // The gate: an idle policy resolves the `shield_focus` channel to None,
+        // so the host emits nothing even when an arc is heavily damaged and the
+        // kernel would otherwise focus it (issue #783 AC4 idle opt-out).
+        let mut app = shield_test_app();
+        let e = ship_entity(&mut app);
+        app.world_mut().entity_mut(e).insert(idle_focus_policy());
+
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 20; // heavy damage the default would focus
+        }
+        app.update();
+
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "an idle Shields focus policy must suppress all AI focus changes"
+        );
+    }
+
+    #[test]
+    fn fact_guarded_focus_rule_fires_only_when_recent_damage_is_seeded() {
+        // #779 empty-facts guard: a policy whose ONLY rule is guarded on the
+        // seeded `recent_damage_total` fact (no unconditional fallback) must NOT
+        // act on a quiet ship, but MUST act once a real hit seeds the fact —
+        // proving `seed_shields_focus_facts` populates the window so a `fact(...)`
+        // guard can fire at all.
+        let mut app = shield_test_app();
+        app.add_systems(Update, clear_admitted_each_tick.before(ai_shield_focus));
+        let e = ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(damage_only_focus_policy());
+
+        // Tick 1: baseline observation, no damage recorded yet — the fact-guarded
+        // rule finds `recent_damage_total = 0` and does not fire.
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "with no recent damage the fact-guarded rule must not fire"
+        );
+
+        // Tick 2: a real hit on facing 1 seeds `recent_damage_total > 0`; the
+        // guard fires, the kernel runs, and the hit arc is focused.
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[1].hp = 60;
+        }
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(1),
+            "a seeded recent-damage fact must let the guarded rule fire and focus the hit arc"
         );
     }
 

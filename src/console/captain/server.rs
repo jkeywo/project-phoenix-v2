@@ -294,7 +294,10 @@ fn operate_captain_ai(
                 // Captain's red_alert channel, but the match must stay exhaustive.
                 | crate::ai::policy::AiPolicyVerb::LoadTorpedo
                 | crate::ai::policy::AiPolicyVerb::LaunchTorpedo
-                | crate::ai::policy::AiPolicyVerb::GrantTorpedoRound => None,
+                | crate::ai::policy::AiPolicyVerb::GrantTorpedoRound
+                // Shields focus verb (issue #783) never resolves on the
+                // Captain's red_alert channel, but the match must stay exhaustive.
+                | crate::ai::policy::AiPolicyVerb::FocusShieldArc => None,
             });
 
         if let Some(should_be_red_alert) = should_be_red_alert {

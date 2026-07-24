@@ -213,6 +213,37 @@ pub struct AiFacts {
     values: HashMap<String, f64>,
 }
 
+/// Which of the three evaluation contexts a `fact(...)` atom reads (issue #776).
+///
+/// The bare `fact(name)` keyword resolves to [`FactContext::SelfCtx`] for
+/// #775 back-compat (e.g. `fact(secs_since_combat)` is a self reading). The
+/// per-system target selector adds `candidate_fact(name)` and `target_fact(name)`
+/// so an eligibility/score expression can compare the candidate under
+/// consideration and the currently-retained target against self.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FactContext {
+    /// The operating ship itself (`self_fact(...)` or bare `fact(...)`).
+    SelfCtx,
+    /// The candidate contact being scored (`candidate_fact(...)`).
+    Candidate,
+    /// The currently-retained selected target (`target_fact(...)`).
+    Target,
+}
+
+/// The three typed-fact sets one selector evaluation reads (issue #776).
+///
+/// `self_facts` describe the operating ship (position-derived readings,
+/// faction, authored `power_rating`), `candidate_facts` the contact being
+/// scored, and `target_facts` the currently-retained selection. Any set may be
+/// empty; an absent fact in any context evaluates a comparison `false` (never a
+/// panic), the same absent-fact contract [`AiFacts`] already carries.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiFactSet {
+    pub self_facts: AiFacts,
+    pub candidate_facts: AiFacts,
+    pub target_facts: AiFacts,
+}
+
 impl AiFacts {
     pub fn new() -> Self {
         Self::default()
@@ -226,6 +257,13 @@ impl AiFacts {
     /// Read a fact reading; `None` when the fact is absent this tick.
     pub fn get(&self, name: &str) -> Option<f64> {
         self.values.get(name).copied()
+    }
+
+    /// Iterate the present `(name, value)` readings. Used by the target
+    /// selector to fold multiple sources' candidate facts into one entry
+    /// (issue #776). Order is unspecified (backed by a `HashMap`).
+    pub fn iter(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.values.iter().map(|(k, v)| (k.as_str(), *v))
     }
 }
 
@@ -287,8 +325,11 @@ pub enum Predicate {
         rhs: i64,
     },
     /// `fact(name) CMP operand` — typed AI fact compared to a literal or a
-    /// named parameter (issue #775).
+    /// named parameter (issue #775). The `context` selects which of the three
+    /// selector fact sets the reading comes from (issue #776); bare `fact(...)`
+    /// parses as [`FactContext::SelfCtx`] for #775 back-compat.
     Fact {
+        context: FactContext,
         name: String,
         op: CmpOp,
         rhs: Operand,
@@ -317,10 +358,55 @@ impl Predicate {
     /// makes the comparison `false` — never a panic (the diagnostic-Err /
     /// no-panic contract that content validation depends on).
     pub fn evaluate_with(&self, facts: &AiFacts, params: &AiParams, chain: &[&FlagStore]) -> bool {
+        // A single-context (#775) evaluation is a selector evaluation whose
+        // candidate/target sets are empty: bare `fact(...)` reads SELF, and any
+        // stray candidate/target atom simply finds no reading → false.
+        let empty = AiFacts::default();
+        self.evaluate_ctx(facts, &empty, &empty, params, chain)
+    }
+
+    /// Evaluate against the three selector fact contexts (self / candidate /
+    /// target), named parameters, and a read-only flag chain (issue #776).
+    ///
+    /// This is the per-system target-selector entry point. Every context obeys
+    /// the same absent-fact-→-false, no-panic contract as [`evaluate_with`].
+    pub fn evaluate_selector(
+        &self,
+        facts: &AiFactSet,
+        params: &AiParams,
+        chain: &[&FlagStore],
+    ) -> bool {
+        self.evaluate_ctx(
+            &facts.self_facts,
+            &facts.candidate_facts,
+            &facts.target_facts,
+            params,
+            chain,
+        )
+    }
+
+    fn evaluate_ctx(
+        &self,
+        self_facts: &AiFacts,
+        candidate_facts: &AiFacts,
+        target_facts: &AiFacts,
+        params: &AiParams,
+        chain: &[&FlagStore],
+    ) -> bool {
         match self {
             Predicate::Flag { name } => flag_in_chain(chain, name),
             Predicate::Counter { name, op, rhs } => op.apply(counter_in_chain(chain, name), *rhs),
-            Predicate::Fact { name, op, rhs } => {
+            Predicate::Fact {
+                context,
+                name,
+                op,
+                rhs,
+            } => {
+                let facts = match context {
+                    FactContext::SelfCtx => self_facts,
+                    FactContext::Candidate => candidate_facts,
+                    FactContext::Target => target_facts,
+                };
                 match (facts.get(name), rhs.resolve(params)) {
                     (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
                     // Absent fact or unresolved parameter → false, never panic.
@@ -328,12 +414,16 @@ impl Predicate {
                 }
             }
             Predicate::Bool(b) => *b,
-            Predicate::Not(inner) => !inner.evaluate_with(facts, params, chain),
+            Predicate::Not(inner) => {
+                !inner.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
+            }
             Predicate::And(a, b) => {
-                a.evaluate_with(facts, params, chain) && b.evaluate_with(facts, params, chain)
+                a.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
+                    && b.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
             }
             Predicate::Or(a, b) => {
-                a.evaluate_with(facts, params, chain) || b.evaluate_with(facts, params, chain)
+                a.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
+                    || b.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
             }
         }
     }
@@ -372,6 +462,9 @@ enum Token {
     Flag,
     Counter,
     Fact,
+    SelfFact,
+    CandidateFact,
+    TargetFact,
     Param,
     Bool(bool),
     Cmp(CmpOp),
@@ -510,6 +603,9 @@ impl<'a> Tokeniser<'a> {
                 "flag" => Token::Flag,
                 "counter" => Token::Counter,
                 "fact" => Token::Fact,
+                "self_fact" => Token::SelfFact,
+                "candidate_fact" => Token::CandidateFact,
+                "target_fact" => Token::TargetFact,
                 "param" => Token::Param,
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),
@@ -648,24 +744,13 @@ impl Parser {
                 };
                 Ok(Predicate::Counter { name, op, rhs })
             }
-            Some((Token::Fact, _)) => {
-                self.expect(&Token::LParen, "'(' after 'fact'")?;
-                let name = self.expect_name("name inside fact(...)")?;
-                self.expect(&Token::RParen, "')' to close fact(...)")?;
-                let op = match self.bump() {
-                    Some((Token::Cmp(op), _)) => op,
-                    Some((t, p)) => {
-                        return Err(format!(
-                        "Expected comparison operator after fact(...) but got {t:?} at position {p}"
-                    ))
-                    }
-                    None => return Err(
-                        "Expected comparison operator after fact(...) but reached end of predicate"
-                            .into(),
-                    ),
-                };
-                let rhs = self.parse_operand()?;
-                Ok(Predicate::Fact { name, op, rhs })
+            Some((Token::Fact, _)) => self.parse_fact_atom(FactContext::SelfCtx, "fact"),
+            Some((Token::SelfFact, _)) => self.parse_fact_atom(FactContext::SelfCtx, "self_fact"),
+            Some((Token::CandidateFact, _)) => {
+                self.parse_fact_atom(FactContext::Candidate, "candidate_fact")
+            }
+            Some((Token::TargetFact, _)) => {
+                self.parse_fact_atom(FactContext::Target, "target_fact")
             }
             Some((Token::Bool(b), _)) => Ok(Predicate::Bool(b)),
             Some((t, p)) => Err(format!("Unexpected token {t:?} at position {p}")),
@@ -673,6 +758,35 @@ impl Parser {
                 "Unexpected end of predicate at position {pos}; expected an atom"
             )),
         }
+    }
+
+    /// Parse a `<kw>(name) CMP operand` atom for one of the three fact
+    /// contexts (issue #776). `kw` is the keyword already consumed, used only
+    /// for diagnostics so `candidate_fact(...)` errors read naturally.
+    fn parse_fact_atom(&mut self, context: FactContext, kw: &str) -> Result<Predicate, String> {
+        self.expect(&Token::LParen, "'(' after fact keyword")?;
+        let name = self.expect_name("name inside fact(...)")?;
+        self.expect(&Token::RParen, "')' to close fact(...)")?;
+        let op = match self.bump() {
+            Some((Token::Cmp(op), _)) => op,
+            Some((t, p)) => {
+                return Err(format!(
+                    "Expected comparison operator after {kw}(...) but got {t:?} at position {p}"
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "Expected comparison operator after {kw}(...) but reached end of predicate"
+                ))
+            }
+        };
+        let rhs = self.parse_operand()?;
+        Ok(Predicate::Fact {
+            context,
+            name,
+            op,
+            rhs,
+        })
     }
 
     /// Parse the right-hand side of a `fact(...) CMP` comparison: a numeric
@@ -708,6 +822,9 @@ impl Parser {
             Some((Token::Flag, _)) => Ok("flag".to_string()),
             Some((Token::Counter, _)) => Ok("counter".to_string()),
             Some((Token::Fact, _)) => Ok("fact".to_string()),
+            Some((Token::SelfFact, _)) => Ok("self_fact".to_string()),
+            Some((Token::CandidateFact, _)) => Ok("candidate_fact".to_string()),
+            Some((Token::TargetFact, _)) => Ok("target_fact".to_string()),
             Some((Token::Param, _)) => Ok("param".to_string()),
             Some((t, p)) => Err(format!("Expected {ctx} but got {t:?} at position {p}")),
             None => Err(format!("Expected {ctx} but reached end of predicate")),
@@ -1084,6 +1201,7 @@ mod tests {
         assert_eq!(
             pred,
             Predicate::Fact {
+                context: FactContext::SelfCtx,
                 name: "secs_since_combat".into(),
                 op: CmpOp::Lt,
                 rhs: Operand::Number(10.0),
@@ -1097,6 +1215,7 @@ mod tests {
         assert_eq!(
             pred,
             Predicate::Fact {
+                context: FactContext::SelfCtx,
                 name: "secs_since_combat".into(),
                 op: CmpOp::Lt,
                 rhs: Operand::Param("combat_window_secs".into()),
@@ -1199,11 +1318,132 @@ mod tests {
         assert_eq!(
             p,
             Predicate::Fact {
+                context: FactContext::SelfCtx,
                 name: "x".into(),
                 op: CmpOp::Ge,
                 rhs: Operand::Number(5.0),
             }
         );
         assert!(p.evaluate_with(&facts_with(&[("x", 5.0)]), &AiParams::new(), &[]));
+    }
+
+    // --- Three-context selector grammar (issue #776) -----------------------
+
+    fn factset(
+        self_pairs: &[(&str, f64)],
+        candidate_pairs: &[(&str, f64)],
+        target_pairs: &[(&str, f64)],
+    ) -> AiFactSet {
+        AiFactSet {
+            self_facts: facts_with(self_pairs),
+            candidate_facts: facts_with(candidate_pairs),
+            target_facts: facts_with(target_pairs),
+        }
+    }
+
+    #[test]
+    fn parse_bare_fact_is_self_context() {
+        // #775 back-compat: bare `fact(...)` still parses as the SELF context.
+        let p = parse_predicate("fact(secs_since_combat) < 10").unwrap();
+        assert!(matches!(
+            p,
+            Predicate::Fact {
+                context: FactContext::SelfCtx,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_three_context_fact_keywords() {
+        for (src, ctx) in [
+            ("self_fact(power_rating) >= 5", FactContext::SelfCtx),
+            ("candidate_fact(hostile) > 0", FactContext::Candidate),
+            ("target_fact(distance) < 100", FactContext::Target),
+        ] {
+            let p = parse_predicate(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+            assert!(
+                matches!(p, Predicate::Fact { context, .. } if context == ctx),
+                "{src} should parse in context {ctx:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn selector_reads_each_context_independently() {
+        // The same fact name resolves to a different value per context.
+        let p = parse_predicate("candidate_fact(dist) < self_fact(dist)");
+        // `self_fact(dist)` is not a valid operand rhs — operands are numbers or
+        // param(...). So compare candidate vs a param instead.
+        assert!(p.is_err(), "a fact atom is not a valid comparison operand");
+
+        let p = parse_predicate(
+            "candidate_fact(hostile) > 0 and candidate_fact(dist) < target_fact(dist)",
+        );
+        assert!(p.is_err(), "target_fact is likewise not a valid operand");
+
+        // The supported shape: each context compared to a literal / param.
+        let p = parse_predicate(
+            "self_fact(power_rating) >= param(min_rating) and candidate_fact(hostile) > 0 and target_fact(locked) > 0",
+        )
+        .unwrap();
+        let params = params_with(&[("min_rating", 4.0)]);
+        // All three contexts satisfy their clause.
+        assert!(p.evaluate_selector(
+            &factset(
+                &[("power_rating", 5.0)],
+                &[("hostile", 1.0)],
+                &[("locked", 1.0)]
+            ),
+            &params,
+            &[],
+        ));
+        // Candidate not hostile → whole conjunction false.
+        assert!(!p.evaluate_selector(
+            &factset(
+                &[("power_rating", 5.0)],
+                &[("hostile", 0.0)],
+                &[("locked", 1.0)]
+            ),
+            &params,
+            &[],
+        ));
+        // Self power rating below the authored floor → false.
+        assert!(!p.evaluate_selector(
+            &factset(
+                &[("power_rating", 3.0)],
+                &[("hostile", 1.0)],
+                &[("locked", 1.0)]
+            ),
+            &params,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn absent_candidate_and_target_facts_evaluate_false() {
+        // A candidate/target atom with no reading in that context is false,
+        // never a panic — the same contract SELF facts already carry.
+        let p = parse_predicate("candidate_fact(hidden) > 0").unwrap();
+        assert!(!p.evaluate_selector(&AiFactSet::default(), &AiParams::new(), &[]));
+        let p = parse_predicate("target_fact(anything) >= 1").unwrap();
+        assert!(!p.evaluate_selector(&AiFactSet::default(), &AiParams::new(), &[]));
+    }
+
+    #[test]
+    fn evaluate_with_treats_bare_fact_as_self_and_ignores_other_contexts() {
+        // The #775 entry point still evaluates bare `fact(...)` as SELF and a
+        // stray candidate atom (no candidate context supplied) reads false.
+        let p = parse_predicate("fact(x) >= 1 and not candidate_fact(y) > 0").unwrap();
+        assert!(p.evaluate_with(&facts_with(&[("x", 2.0)]), &AiParams::new(), &[]));
+    }
+
+    #[test]
+    fn context_fact_keywords_usable_as_flag_names() {
+        // The new keywords remain legal flag/counter names (unquoted).
+        let s = store_with(&[("candidate_fact", 1)]);
+        assert!(parse_predicate("flag(candidate_fact)")
+            .unwrap()
+            .evaluate(&[&s]));
     }
 }

@@ -3,6 +3,7 @@ pub mod faction;
 pub mod lod;
 pub mod patrol_cursor;
 pub mod policy;
+pub mod selector;
 pub mod server;
 
 pub use core::{

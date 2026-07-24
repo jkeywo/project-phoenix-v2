@@ -71,6 +71,34 @@ impl Default for SensorsAiConfigResource {
     }
 }
 
+/// Per-ship resolved Sensors target selector (issue #776).
+///
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
+/// authored `[sensors_console.selector]` or the canonical
+/// [`crate::entities::config::default_sensors_target_selector_config`] default —
+/// plus the authored ship `power_rating`, which `operate_sensors_ai` exposes to
+/// the selector's expressions as `self_fact(power_rating)`. Attached at spawn
+/// alongside `SensorsAiConfigResource` / `CaptainAiPolicy`; ships without one
+/// fall back to the default selector inside `operate_sensors_ai`.
+#[derive(Component, Clone, Debug)]
+pub struct SensorsTargetSelector {
+    /// The resolved ranking policy.
+    pub selector: crate::ai::selector::TargetSelector,
+    /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
+    pub power_rating: Option<f32>,
+}
+
+impl Default for SensorsTargetSelector {
+    fn default() -> Self {
+        Self {
+            selector: crate::entities::config::default_sensors_target_selector_config()
+                .to_selector()
+                .unwrap_or_default(),
+            power_rating: None,
+        }
+    }
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
 pub struct ShipSensorsPlugin;
@@ -610,6 +638,31 @@ fn emit_sensors_ai_command(
     )
 }
 
+/// Build a [`crate::ai::selector::SelectorCandidate`] for a detectable,
+/// hostile contact surfaced by one Sensors source (issue #776).
+///
+/// Every source the Sensors host feeds is a target the ship is meant to engage,
+/// so each candidate carries `detectable = 1` and `hostile = 1` (the default
+/// selector's eligibility guard) plus the `source_*` marker its score term
+/// keys on. When the same UUID comes from more than one source the selector's
+/// dedup folds the markers together, so a combat lock that is also the nearest
+/// radar hostile scores on both terms.
+fn detectable_candidate(
+    uuid: &str,
+    position: [f32; 3],
+    source_fact: &str,
+) -> crate::ai::selector::SelectorCandidate {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("detectable", 1.0);
+    facts.set("hostile", 1.0);
+    facts.set(source_fact, 1.0);
+    crate::ai::selector::SelectorCandidate {
+        uuid: uuid.to_string(),
+        position,
+        facts,
+    }
+}
+
 /// Per-entity AI decide loop for the Sensors system. Loops over all ship
 /// entities where the Sensors system is `ControlSource::Ai`.
 ///
@@ -652,6 +705,10 @@ fn emit_sensors_ai_command(
 /// change, the same as a human selection through the applier.
 pub fn operate_sensors_ai(
     sessions: Res<crate::lobby::Sessions>,
+    // Shared 10 Hz AI cadence latch (AGENTS.md rule #7), mirroring
+    // `operate_captain_ai`. `Option<Res<_>>` so bare-`App` fixtures without
+    // `AiPlugin` still pass parameter validation; absent ⇒ evaluate every tick.
+    ai_ready: Option<Res<crate::ai::server::AiSnapshotReady>>,
     mut ships: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
@@ -663,6 +720,7 @@ pub fn operate_sensors_ai(
             Option<&crate::ai::server::AiProfile>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::entity_spawner::FactionComponent>,
+            Option<&SensorsTargetSelector>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -704,7 +762,16 @@ pub fn operate_sensors_ai(
         Without<crate::server_app::Ship>,
     >,
 ) {
+    // Gate on the deterministic 10 Hz base cadence (AGENTS.md rule #7).
+    if !ai_ready.map(|r| r.0).unwrap_or(true) {
+        return;
+    }
     let console_range = ship_config.0.sensors_radar_range;
+
+    // Canonical fallback selector for any ship missing an attached component
+    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
+    // spawn. Built once per tick, not per ship.
+    let default_selector = SensorsTargetSelector::default();
 
     // Build the shared candidate snapshot once (world state is the same for
     // every ship this tick). Each entry: (uuid, [x, y, z], faction).
@@ -731,6 +798,7 @@ pub fn operate_sensors_ai(
         ai_profile,
         ship_config_comp,
         self_faction,
+        target_selector,
         mut admitted,
     ) in &mut ships
     {
@@ -740,6 +808,7 @@ pub fn operate_sensors_ai(
         if !policy.operate_ai {
             continue;
         }
+        let selector_comp = target_selector.unwrap_or(&default_selector);
 
         let range = effective_sensor_range(ai_profile, console_range, modifiers);
         let range_sq = range * range;
@@ -756,67 +825,64 @@ pub fn operate_sensors_ai(
             dx * dx + dz * dz <= range_sq
         };
 
-        // ── Decide (logic unchanged; Combat Lock now read from the frozen
-        // viewscreen blackboard rather than the retired TacticalRadarSelection — #829) ──
+        // ── Build candidate sources for the data-driven target selector (#776) ──
+        // Each source contributes contacts already pre-filtered to this ship's
+        // live, damage-scaled horizon (the host owns the live gate — AC5). The
+        // selector then unions + dedups them by identity, applies the authored
+        // eligibility + additive utility, and retains the current target within
+        // the authored switch margin. The three tiers of the retired hardcoded
+        // decide (combat-lock mirror ≫ named objective ≫ nearest hostile) are
+        // now the three registered sources, ordered by additive score weight.
+        use crate::ai::selector::{SelectorCandidate, SelfContext};
+        let mut candidates: Vec<SelectorCandidate> = Vec::new();
+
+        // Combat Lock read from the frozen viewscreen blackboard (#829).
         let viewscreen_bb = blackboards
             .0
             .get(&crate::system_registry::viewscreen_system_id());
-        let decided: Option<String> = 'decide: {
-            // Priorities 1 & 2 both read the frozen viewscreen blackboard; when
-            // it is absent the ship falls straight through to the independent
-            // nearest-hostile tier below rather than deciding `None`.
-            if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
-                // Priority 1: mirror the combat target (frozen Combat Lock).
-                if let Some(target_uuid) = bb.combat_lock.as_deref() {
-                    if entity_q
-                        .iter()
-                        .any(|(u, _, tf)| u.0 == *target_uuid && in_range(tf))
-                    {
-                        break 'decide Some(target_uuid.to_string());
-                    }
+        if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+            // Source: combat-lock — mirror Tactical's designated firing target.
+            if let Some(target_uuid) = bb.combat_lock.as_deref() {
+                if let Some(pos) = entity_q.iter().find_map(|(u, _, tf)| {
+                    (u.0 == *target_uuid && in_range(tf)).then(|| tf.translation.to_array())
+                }) {
+                    candidates.push(detectable_candidate(target_uuid, pos, "source_combat_lock"));
                 }
+            }
 
-                // Priority 2: scan scored objectives for a named Destroy target.
-                for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
-                    if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
-                        if target.is_empty() {
-                            continue;
-                        }
-                        let uuid = runtime
-                            .as_ref()
-                            .and_then(|rt| rt.name_to_uuid.get(target).cloned())
-                            .or_else(|| {
-                                entity_q.iter().find_map(|(u, name, _)| {
-                                    (u.0 == *target || name.is_some_and(|n| n.0 == *target))
-                                        .then(|| u.0.clone())
-                                })
-                            });
-                        // Resolving the name is not the same as seeing the ship.
-                        // A target that exists but sits beyond this hull's sensor
-                        // range stays unlocked, and we keep scanning lower-scored
-                        // objectives for something actually detectable.
-                        if let Some(uuid) = uuid {
-                            let detectable = entity_q
-                                .iter()
-                                .any(|(u, _, tf)| u.0 == uuid && in_range(tf));
-                            if detectable {
-                                break 'decide Some(uuid);
-                            }
+            // Source: objective-destroy — named Destroy targets in the pool.
+            // Resolving a name is not the same as seeing the ship, so each
+            // candidate is still gated on the live horizon.
+            for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
+                if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
+                    if target.is_empty() {
+                        continue;
+                    }
+                    let uuid = runtime
+                        .as_ref()
+                        .and_then(|rt| rt.name_to_uuid.get(target).cloned())
+                        .or_else(|| {
+                            entity_q.iter().find_map(|(u, name, _)| {
+                                (u.0 == *target || name.is_some_and(|n| n.0 == *target))
+                                    .then(|| u.0.clone())
+                            })
+                        });
+                    if let Some(uuid) = uuid {
+                        if let Some(pos) = entity_q.iter().find_map(|(u, _, tf)| {
+                            (u.0 == uuid && in_range(tf)).then(|| tf.translation.to_array())
+                        }) {
+                            candidates.push(detectable_candidate(&uuid, pos, "source_objective"));
                         }
                     }
                 }
             }
+        }
 
-            // Priority 3: independent nearest-hostile selection (issue #746).
-            // Needs this ship's own faction and a registry to judge hostility;
-            // without either there is nothing to select. `find_nearest_hostile`
-            // returns the globally-nearest enemy, so a single range check on its
-            // result is sufficient — if the closest hostile is beyond the
-            // horizon, every hostile is.
-            let (Some(self_faction), Some(registry)) = (self_faction, faction_registry.as_ref())
-            else {
-                break 'decide None;
-            };
+        // Source: radar-contacts — this ship's own nearest faction-hostile
+        // (issue #746). Needs this ship's faction and a registry to judge
+        // hostility; `find_nearest_hostile` returns the globally-nearest enemy,
+        // so a single horizon check on its result suffices.
+        if let (Some(self_faction), Some(registry)) = (self_faction, faction_registry.as_ref()) {
             let self_faction_uuid = self_faction.0;
             let self_uuid = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
             let entities: Vec<crate::ai::AiWorldEntity> = hostile_candidates
@@ -838,18 +904,33 @@ pub fn operate_sensors_ai(
                 self_faction: Some(self_faction_uuid),
                 ..crate::ai::WorldView::default()
             };
-            let Some(found) = crate::ai::find_nearest_hostile(&world_view, &registry.0) else {
-                break 'decide None;
-            };
-            // Map the parsed UUID back to the candidate's own id string and
-            // gate on the damage-scaled horizon before designating it.
-            hostile_candidates
-                .iter()
-                .find(|(u, pos, _)| {
+            if let Some(found) = crate::ai::find_nearest_hostile(&world_view, &registry.0) {
+                if let Some((u, pos, _)) = hostile_candidates.iter().find(|(u, pos, _)| {
                     uuid::Uuid::parse_str(u).ok() == Some(found) && in_range_pos(*pos)
-                })
-                .map(|(u, _, _)| u.clone())
+                }) {
+                    candidates.push(detectable_candidate(u, *pos, "source_radar"));
+                }
+            }
+        }
+
+        // Self context: position (horizon filter) + authored power rating,
+        // exposed to the selector expressions as `self_fact(power_rating)` (AC2).
+        let mut self_facts = crate::world::flags::AiFacts::new();
+        if let Some(pr) = selector_comp.power_rating {
+            self_facts.set("power_rating", pr as f64);
+        }
+        let self_ctx = SelfContext {
+            position: [physics.x, 0.0, physics.z],
+            facts: self_facts,
         };
+
+        // Retain the current selection through the authored switch margin (AC3);
+        // an invalid current target fails eligibility and is replaced this same
+        // tick (AC4).
+        let decided =
+            selector_comp
+                .selector
+                .select(&self_ctx, &candidates, sensors_target.0.as_deref(), &[]);
 
         // ── Emit on change only ────────────────────────────────────────────
         if decided == sensors_target.0 {
@@ -2329,6 +2410,100 @@ mod tests {
             selection_of(&mut app, &ship_b_uuid).as_deref(),
             Some(enemy_b.as_str()),
             "ship B must pick its own hostile — no cross-ship leakage"
+        );
+    }
+
+    // ── Issue #776 tests: data-driven selector + authored power rating ───────
+
+    /// AC2/AC7: an authored selector gates eligibility on the ship's own
+    /// authored power rating via `self_fact(power_rating)`. An under-rated ship
+    /// selects nothing even with a hostile in horizon; raising the rating makes
+    /// the same contact eligible and the pick flows through an admitted
+    /// `SetScienceTarget` (an observable output).
+    #[test]
+    fn ai_sensors_selector_gates_on_authored_power_rating() {
+        let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
+        let enemy = uuid::Uuid::new_v4().to_string();
+        spawn_faction_contact(&mut app, &enemy, 60.0, 0.0, harrow);
+
+        let mut cfg = crate::entities::config::default_sensors_target_selector_config();
+        cfg.param.insert("min_rating".into(), 5.0);
+        cfg.eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0 \
+             and self_fact(power_rating) >= param(min_rating)"
+            .into();
+        let selector = cfg.to_selector().unwrap();
+
+        let ship = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            q.single(app.world()).unwrap()
+        };
+
+        // Under-rated: nothing eligible.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(SensorsTargetSelector {
+                selector: selector.clone(),
+                power_rating: Some(3.0),
+            });
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "an under-rated ship must select nothing under the authored gate"
+        );
+
+        // Sufficiently rated: the same contact is now eligible and selected.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(SensorsTargetSelector {
+                selector,
+                power_rating: Some(6.0),
+            });
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(enemy.as_str()),
+            "raising the rating above the floor makes the contact eligible"
+        );
+        assert!(
+            admitted_sensors_payloads(&mut app).iter().any(|p| matches!(
+                p,
+                SystemControlPayload::SetScienceTarget { uuid } if uuid == &enemy
+            )),
+            "the selection must flow through an admitted SetScienceTarget"
+        );
+    }
+
+    /// AC6: a selected contact drives the existing advisory `TargetDesignation`
+    /// on the channel-3 bus for Tactical — the same applier a human selection
+    /// uses. Here an AI ship independently designates its nearest hostile.
+    #[test]
+    fn ai_sensors_selection_drives_target_designation_advisory() {
+        use crate::messages::CoordinationPayload;
+        let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
+        // The advisory is emitted by `handle_sensors_messages`; add a sink.
+        app.init_resource::<EnqueueLog>().add_systems(
+            bevy::app::Update,
+            collect_enqueues.after(handle_sensors_messages),
+        );
+        let enemy = uuid::Uuid::new_v4().to_string();
+        spawn_faction_contact(&mut app, &enemy, 60.0, 0.0, harrow);
+
+        tick_sensors_ai(&mut app);
+
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(enemy.as_str())
+        );
+        let log = app.world().resource::<EnqueueLog>();
+        assert!(
+            log.0.iter().any(|e| matches!(
+                &e.payload,
+                CoordinationPayload::TargetDesignation { uuid, .. } if uuid == &enemy
+            )),
+            "the AI selection must designate its contact to Tactical (channel-3 advisory)"
         );
     }
 

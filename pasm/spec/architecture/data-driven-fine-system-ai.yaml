@@ -19,7 +19,7 @@ entities:
 
   - component: ai-policy-expression-runtime
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: AI Policy Expression Runtime
       summary: Extends the world-trigger predicate grammar with typed AI facts, explicit self/candidate/target contexts, read-only world flags and counters, ship power rating, named parameters, and bounded history operators.
@@ -27,6 +27,7 @@ entities:
         - AI authoring should mirror the repository's existing predicate syntax instead of introducing a second expression style.
         - Scenario flags and counters are useful doctrine inputs but remain read-only to fine-system policies.
         - Registered typed facts preserve validation without allowing arbitrary scripts or component access.
+        - "Issue #776 landed the three explicit contexts and authored ship power rating: bare fact(...) stays SELF for #775 back-compat, self_fact/candidate_fact/target_fact select the self, candidate, and currently-retained-target fact sets, and power_rating is a seeded SELF fact. Bounded-history operators remain proposed — no author needs them yet."
     architecture:
       kind: expression-service
       authority: authoritative
@@ -40,10 +41,15 @@ entities:
         - hazard-assessment-state
         - recent-combat-activity-state
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/world/flags.rs]
+      symbols: [evaluate_selector, AiFactSet, FactContext, Predicate]
+      tests: [cargo test]
 
   - component: per-system-target-ranking-policy
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Per-System Target Ranking Policy
       summary: Unions registered candidate sources, filters candidates with typed policy expressions, applies additive authored utility, retains valid targets within a switch margin, and deterministically replaces invalid targets.
@@ -51,6 +57,7 @@ entities:
         - Sensors, Tactical, Helm actuators, and other fine systems need different ranking policies over shared authoritative contacts and objectives.
         - Sensors designation remains advisory; another system may favour and copy it only through its own eligibility and ranking policy.
         - Stable UUID tie-breaking and authored switch margins prevent query-order dependence and target oscillation.
+        - "Issue #776 landed the reusable selector as a Bevy-free sibling of the #775 channel policy (TargetSelector::select in src/ai/selector.rs): union+dedup by UUID, planar-horizon filter, self/candidate/target eligibility, additive score, switch-margin hysteresis, smallest-UUID tie-break. Sensors is the first host — operate_sensors_ai feeds the combat-lock/objective-destroy/radar-contacts sources and emits the existing admitted SetScienceTarget/ClearScienceTarget, never exceeding Sensors authority."
     architecture:
       kind: selection-policy
       authority: authoritative
@@ -65,10 +72,15 @@ entities:
       owns: [fine-system-ai-policy-state]
       writes: [fine-system-ai-policy-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ai/selector.rs, src/world/flags.rs, src/ship/sensors.rs, src/entities/config.rs]
+      symbols: [TargetSelector, select, validate_fine_system_ai_selector, operate_sensors_ai]
+      tests: [cargo test]
 
   - state: fine-system-ai-policy-state
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Fine-System AI Policy State
       summary: Private per-fine-system active state, typed local memory, deterministic random occurrence counts, selected target, and bounded history required by the inline policy.
@@ -76,6 +88,7 @@ entities:
         - Policy state is private and cannot become a hidden ship-wide state machine.
         - Cross-system behaviour observes public authoritative simulation facts rather than another policy's state name or memory.
         - Policies reset when AI gains control and when an unavailable system recovers.
+        - "Issue #776 realizes the selected-target facet: the Sensors selector's retained pick is the ship's own SensorRadarSelection, recomputed each eligible tick and held through the authored switch margin. Typed local memory, deterministic random occurrence counts, and bounded history remain proposed facets for future policy kinds."
     architecture:
       classification: authoritative
       owner: per-system-target-ranking-policy
@@ -142,7 +155,7 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/config.rs]
-      symbols: [validate_fine_system_ai_policy]
+      symbols: [validate_fine_system_ai_policy, validate_fine_system_ai_selector]
       tests: [cargo test]
 
   - component: legacy-ai-doctrine-retirement

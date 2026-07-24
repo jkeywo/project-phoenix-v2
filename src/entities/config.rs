@@ -1617,6 +1617,201 @@ pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
 /// The `set_red_alert` verb: the one typed verb the Captain policy emits.
 pub const CAPTAIN_SET_RED_ALERT_VERB: &str = "set_red_alert";
 
+// ── Per-system target selector sources (issue #776) ───────────────────────────
+
+/// Candidate source: the ship's frozen combat lock (Tactical's designated
+/// firing target), surfaced to the Sensors selector as the highest-priority
+/// tier so Sensors mirrors what Tactical is engaging.
+pub const SELECTOR_SOURCE_COMBAT_LOCK: &str = "combat-lock";
+/// Candidate source: named `Destroy` objective targets resolved from the
+/// scored objective pool.
+pub const SELECTOR_SOURCE_OBJECTIVE_DESTROY: &str = "objective-destroy";
+/// Candidate source: faction-hostile radar contacts inside the ship's horizon.
+pub const SELECTOR_SOURCE_RADAR_CONTACTS: &str = "radar-contacts";
+
+/// The registered candidate sources the Sensors target selector may union.
+pub const SENSORS_SELECTOR_SOURCES: &[&str] = &[
+    SELECTOR_SOURCE_COMBAT_LOCK,
+    SELECTOR_SOURCE_OBJECTIVE_DESTROY,
+    SELECTOR_SOURCE_RADAR_CONTACTS,
+];
+
+/// Parse-time fallbacks for the default Sensors selector (AGENTS.md rule #11
+/// parse-defaults only). Authors override every one via `[sensors_console.selector]`
+/// fields or its `param` table, so no gameplay value is pinned into a live tick.
+///
+/// `HORIZON` is deliberately large: the Sensors host owns the live,
+/// damage-scaled horizon and pre-filters candidates to it (`effective_sensor_range`),
+/// so the selector's own horizon is a static outer bound, not the live gate.
+const DEFAULT_SELECTOR_HORIZON: f32 = 1.0e9;
+const DEFAULT_SELECTOR_SWITCH_MARGIN: f32 = 0.0;
+const DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT: f32 = 1000.0;
+const DEFAULT_SELECTOR_OBJECTIVE_WEIGHT: f32 = 100.0;
+const DEFAULT_SELECTOR_RADAR_WEIGHT: f32 = 1.0;
+
+/// One authored additive utility term (`[[sensors_console.selector.score]]`,
+/// issue #776): a guard expression plus the weight it contributes to a
+/// candidate's score when it fires.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoreTermToml {
+    /// Guard expression over self/candidate/target fact contexts; the term
+    /// contributes `weight` when it evaluates `true`.
+    pub when: String,
+    /// Weight added to the candidate's score when `when` fires. An authored
+    /// field (AGENTS.md rule #11 permits authored gameplay values in TOML).
+    pub weight: f32,
+}
+
+/// Inline per-system target selector for an AI-capable fine system that owns a
+/// target (`[sensors_console.selector]`, issue #776).
+///
+/// Sibling to [`FineSystemAiConfigToml`]: where the #775 policy resolves a
+/// verb per output channel, the selector answers "which entity is my target?".
+/// It unions authored candidate `sources`, filters inside `horizon`, keeps
+/// candidates whose `eligibility` guard fires, sums the additive `score`,
+/// retains the current target within `switch_margin`, and returns the winning
+/// contact — all as a pure function of the immutable per-tick snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FineSystemAiSelectorToml {
+    /// Named numeric parameters referenced by the eligibility/score guards.
+    #[serde(default)]
+    pub param: std::collections::HashMap<String, f32>,
+    /// Registered candidate-source ids this selector unions.
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// Effective horizon (planar distance) beyond which candidates are dropped.
+    pub horizon: f32,
+    /// Hysteresis margin: the current target is retained while its score is
+    /// within this margin of the best candidate's score.
+    pub switch_margin: f32,
+    /// Candidate eligibility guard over self/candidate/target fact contexts.
+    pub eligibility: String,
+    /// Additive utility terms summed per eligible candidate.
+    #[serde(default)]
+    pub score: Vec<ScoreTermToml>,
+}
+
+impl FineSystemAiSelectorToml {
+    /// Resolve this authored block into the pure typed
+    /// [`crate::ai::selector::TargetSelector`] the runtime consumes.
+    ///
+    /// Returns a diagnostic `Err` on an unparseable eligibility/score guard;
+    /// call [`validate_fine_system_ai_selector`] first at content-load time so
+    /// this never fails after world activation.
+    pub fn to_selector(&self) -> Result<crate::ai::selector::TargetSelector, String> {
+        let mut params = crate::world::flags::AiParams::new();
+        for (k, v) in &self.param {
+            params.set(k, *v as f64);
+        }
+        let eligibility = crate::world::flags::parse_predicate(&self.eligibility)?;
+        let mut score = Vec::with_capacity(self.score.len());
+        for term in &self.score {
+            let when = crate::world::flags::parse_predicate(&term.when)?;
+            score.push(crate::ai::selector::ScoreTerm {
+                when,
+                weight: term.weight as f64,
+            });
+        }
+        Ok(crate::ai::selector::TargetSelector {
+            params,
+            sources: self.sources.clone(),
+            horizon: self.horizon,
+            switch_margin: self.switch_margin,
+            eligibility,
+            score,
+        })
+    }
+}
+
+/// The canonical default Sensors target selector synthesised for ships that do
+/// not author `[sensors_console.selector]` (issue #776).
+///
+/// Reproduces the retired hardcoded Sensors tiers as data: prefer the combat
+/// lock, then a named objective target, then a radar hostile, all restricted
+/// to detectable, hostile contacts. All weights/horizon/margin are named
+/// parameters or parse-time defaults, so a designer can retune without Rust.
+pub fn default_sensors_target_selector_config() -> FineSystemAiSelectorToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert(
+        "combat_lock_weight".to_string(),
+        DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT,
+    );
+    param.insert(
+        "objective_weight".to_string(),
+        DEFAULT_SELECTOR_OBJECTIVE_WEIGHT,
+    );
+    param.insert("radar_weight".to_string(), DEFAULT_SELECTOR_RADAR_WEIGHT);
+    FineSystemAiSelectorToml {
+        param,
+        sources: SENSORS_SELECTOR_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        horizon: DEFAULT_SELECTOR_HORIZON,
+        switch_margin: DEFAULT_SELECTOR_SWITCH_MARGIN,
+        // Only detectable, hostile contacts are eligible — this is the
+        // hidden/friendly drop (AC4), expressed over the candidate context.
+        eligibility: "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0".to_string(),
+        score: vec![
+            ScoreTermToml {
+                when: "candidate_fact(source_combat_lock) > 0".to_string(),
+                weight: DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_objective) > 0".to_string(),
+                weight: DEFAULT_SELECTOR_OBJECTIVE_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(source_radar) > 0".to_string(),
+                weight: DEFAULT_SELECTOR_RADAR_WEIGHT,
+            },
+        ],
+    }
+}
+
+/// Validate an inline per-system target selector before world activation
+/// (issue #776), mirroring [`validate_fine_system_ai_policy`].
+///
+/// Rejects:
+///   - an unknown candidate source id,
+///   - an unparseable `eligibility` or score `when` expression,
+///   - a `param(...)` reference to a parameter the author never declared.
+pub fn validate_fine_system_ai_selector(
+    cfg: &FineSystemAiSelectorToml,
+    valid_sources: &[&str],
+) -> Result<(), String> {
+    for src in &cfg.sources {
+        if !valid_sources.contains(&src.as_str()) {
+            return Err(format!(
+                "target selector references unknown source '{src}' (valid: {valid_sources:?})"
+            ));
+        }
+    }
+    let check_params = |pred: &crate::world::flags::Predicate, what: &str| -> Result<(), String> {
+        let mut refs = Vec::new();
+        pred.referenced_params(&mut refs);
+        for name in refs {
+            if !cfg.param.contains_key(&name) {
+                return Err(format!(
+                    "target selector {what} references undeclared parameter '{name}'"
+                ));
+            }
+        }
+        Ok(())
+    };
+    let eligibility = crate::world::flags::parse_predicate(&cfg.eligibility)
+        .map_err(|e| format!("target selector has invalid `eligibility` expression: {e}"))?;
+    check_params(&eligibility, "eligibility")?;
+    for (idx, term) in cfg.score.iter().enumerate() {
+        let when = crate::world::flags::parse_predicate(&term.when)
+            .map_err(|e| format!("target selector score term {idx} has invalid `when`: {e}"))?;
+        check_params(&when, &format!("score term {idx}"))?;
+    }
+    Ok(())
+}
+
 /// One authored inline policy rule (`[[captain_console.ai.rule]]`, issue #775).
 ///
 /// A rule binds a `priority` and an output `channel` to a `when` predicate
@@ -2327,6 +2522,11 @@ pub struct SensorsConsoleConfig {
     /// Loaded from `[sensors_console.ai]`.
     #[serde(default)]
     pub ai: Option<SensorsAiConfigToml>,
+    /// Inline per-system target selector (issue #776). Loaded from
+    /// `[sensors_console.selector]`; absent ⇒ the canonical
+    /// [`default_sensors_target_selector_config`] is synthesised at spawn.
+    #[serde(default)]
+    pub selector: Option<FineSystemAiSelectorToml>,
 }
 
 /// AI tuning parameters for the Sensors frequency-hint controller
@@ -2704,6 +2904,20 @@ impl EntityConfig {
                 &[CAPTAIN_SET_RED_ALERT_VERB],
             )
             .map_err(SerdeError::custom)?;
+        }
+
+        // Validate an authored inline Sensors target selector before world
+        // activation (issue #776). Unknown sources, unparseable
+        // eligibility/score expressions, and undeclared `param(...)` references
+        // are deterministic content errors surfaced through serde so the entity
+        // fails to load before any live tick evaluates it.
+        if let Some(sel) = config
+            .sensors_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+        {
+            validate_fine_system_ai_selector(sel, SENSORS_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
         }
 
         // Clamp target_speed in every doctrine entry.
@@ -5751,6 +5965,91 @@ value = true
             }],
         };
         assert!(cfg.to_policy().is_err());
+    }
+
+    // ── Sensors target selector schema + validation (issue #776) ─────────────
+
+    fn sensors_selector_toml() -> &'static str {
+        r##"
+[sensors_console.selector]
+horizon = 4000.0
+switch_margin = 25.0
+sources = ["combat-lock", "objective-destroy", "radar-contacts"]
+eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+
+[sensors_console.selector.param]
+lock_weight = 900.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_combat_lock) > 0"
+weight = 900.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1.0
+"##
+    }
+
+    #[test]
+    fn sensors_selector_parses_and_resolves_to_typed_selector() {
+        let config = EntityConfig::from_toml(sensors_selector_toml()).expect("parse must succeed");
+        let sel = config
+            .sensors_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+            .expect("selector section present");
+        let resolved = sel.to_selector().expect("selector resolves");
+        assert_eq!(resolved.horizon, 4000.0);
+        assert_eq!(resolved.switch_margin, 25.0);
+        assert_eq!(resolved.score.len(), 2);
+        assert!(validate_fine_system_ai_selector(sel, SENSORS_SELECTOR_SOURCES).is_ok());
+    }
+
+    #[test]
+    fn default_sensors_selector_is_valid_and_resolves() {
+        let cfg = default_sensors_target_selector_config();
+        assert!(validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).is_ok());
+        let resolved = cfg.to_selector().expect("default selector resolves");
+        assert_eq!(resolved.score.len(), 3);
+    }
+
+    #[test]
+    fn selector_unknown_source_is_rejected() {
+        let mut cfg = default_sensors_target_selector_config();
+        cfg.sources.push("mystery-source".into());
+        let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("mystery-source"), "got: {err}");
+    }
+
+    #[test]
+    fn selector_unparseable_eligibility_is_rejected() {
+        let mut cfg = default_sensors_target_selector_config();
+        cfg.eligibility = "candidate_fact(hostile) >".into();
+        let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("eligibility"), "got: {err}");
+    }
+
+    #[test]
+    fn selector_undeclared_param_reference_is_rejected() {
+        let mut cfg = default_sensors_target_selector_config();
+        cfg.eligibility = "self_fact(power_rating) >= param(never_declared)".into();
+        let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("never_declared"), "got: {err}");
+    }
+
+    #[test]
+    fn selector_bad_content_fails_entity_load() {
+        let bad = r##"
+[sensors_console.selector]
+horizon = 100.0
+switch_margin = 0.0
+sources = ["not-a-real-source"]
+eligibility = "candidate_fact(detectable) > 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad).is_err(),
+            "unknown selector source must fail from_toml before world activation"
+        );
     }
 
     #[test]

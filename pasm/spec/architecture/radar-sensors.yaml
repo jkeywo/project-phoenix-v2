@@ -188,6 +188,7 @@ entities:
         - "Issue #828 (admission symmetry, following the #824 helm / #826 shields precedent): operate_sensors_ai keeps its selection logic but no longer writes sensors-target-state directly. It emits through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token, validated against that entity's own ControlSourceResolver (operate_ai must hold); sensors-target-controller applies it later the same tick. Emit-on-change means an AI selection now produces exactly one channel-3 target designation per change — previously the AI bypassed the applier and produced none."
         - "Issue #746 added the independent horizon-limited hostile-selection tier (priority 3, the fallback below the combat-lock mirror and Destroy-objective tiers). When neither higher tier yields a detectable target, operate_sensors_ai builds a WorldView over the ship's own faction/position snapshot and calls ai::core::find_nearest_hostile, gating the result on the same damage-scaled effective_sensor_range as the other tiers. The pick is advisory only — it flows through the same SetScienceTarget path a human uses and never mutates weapons-target-state, so Tactical keeps firing-target authority. A selected hostile that leaves the (possibly damage-shrunken) horizon or despawns yields no tier and is dropped via ClearScienceTarget."
         - "This entity absorbs the formerly separate sensors-target-selection-ai proposal: gating, horizon, selection, and emission are all one system (operate_sensors_ai)."
+        - "Issue #776 generalized the three hardcoded priority tiers into the data-driven per-system-target-ranking-policy: operate_sensors_ai now feeds combat-lock / objective-destroy / radar-contacts as registered candidate sources into a per-ship SensorsTargetSelector (authored [sensors_console.selector] or the canonical default) and emits its pick as the same admitted SetScienceTarget/ClearScienceTarget. Sensors target AUTHORITY is unchanged — the selection stays advisory to Tactical (channel-3 TargetDesignation) and never writes weapons-target-state."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -196,8 +197,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/sensors.rs, src/ai/core.rs]
-      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range, find_nearest_hostile]
+      paths: [src/ship/sensors.rs, src/ai/core.rs, src/ai/selector.rs]
+      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range, find_nearest_hostile, SensorsTargetSelector]
       tests: [cargo test]
 
   - component: sensors-target-selection-ai

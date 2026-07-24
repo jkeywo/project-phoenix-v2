@@ -2656,6 +2656,28 @@ fn spawn_game_start_entities(
                     .unwrap_or_default(),
             );
 
+            // Sensors target selector (issue #776) — the player-ship half of the
+            // per-entity pattern. Authored `[sensors_console.selector]` drives
+            // `operate_sensors_ai`'s ranking under Backfill; absent, the
+            // canonical default selector is synthesised. Validated already in
+            // `EntityConfig::from_toml`.
+            let sensors_selector = config
+                .sensors_console
+                .as_ref()
+                .and_then(|sc| sc.selector.as_ref())
+                .map(|s| s.to_selector().unwrap_or_default())
+                .unwrap_or_else(|| {
+                    crate::entities::config::default_sensors_target_selector_config()
+                        .to_selector()
+                        .unwrap_or_default()
+                });
+            commands
+                .entity(spawned)
+                .insert(crate::ship::sensors::SensorsTargetSelector {
+                    selector: sensors_selector,
+                    power_rating: config.power_rating.map(|r| r as f32),
+                });
+
             // Captain AI policy (issue #775) — the player ship half of the
             // per-entity pattern above. Authored `[captain_console.ai]` drives
             // `operate_captain_ai`; absent, the canonical default policy is

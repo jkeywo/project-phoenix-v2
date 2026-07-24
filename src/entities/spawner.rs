@@ -452,6 +452,26 @@ pub fn spawn_entity(
                 })
                 .unwrap_or_default(),
         );
+        // Sensors target selector (issue #776) — the per-system ranking policy
+        // `operate_sensors_ai` runs to pick the science target. From
+        // `[sensors_console.selector]` if authored, else the canonical default.
+        // `to_selector` cannot fail here: the block was validated in
+        // `EntityConfig::from_toml`. Power rating is exposed to the selector as
+        // `self_fact(power_rating)`.
+        let sensors_selector = config
+            .sensors_console
+            .as_ref()
+            .and_then(|sc| sc.selector.as_ref())
+            .map(|s| s.to_selector().unwrap_or_default())
+            .unwrap_or_else(|| {
+                crate::entities::config::default_sensors_target_selector_config()
+                    .to_selector()
+                    .unwrap_or_default()
+            });
+        entity_commands.insert(crate::ship::sensors::SensorsTargetSelector {
+            selector: sensors_selector,
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying
         // a `[behaviour]` block, alongside the sensors block above and inside

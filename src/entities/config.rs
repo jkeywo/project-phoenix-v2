@@ -1384,6 +1384,107 @@ pub struct PowerAiConfigToml {
     /// after it disengages.
     #[serde(default = "default_red_alert_battery_recharge_pct")]
     pub red_alert_battery_recharge_pct: f32,
+    /// Data-authored per-group rules (issue #762). When this array is
+    /// non-empty it fully drives the power AI and the flat `movement_*` /
+    /// `red_alert_*` fields above are ignored; when it is empty those flat
+    /// fields synthesise the two canonical legacy rules (back-compat).
+    #[serde(default)]
+    pub rule: Vec<PowerAiRuleToml>,
+}
+
+impl PowerAiConfigToml {
+    /// Resolve this `[power.ai]` block into the pure per-rule list the
+    /// evaluator consumes (issue #762).
+    ///
+    /// Prefers the authored `[[power.ai.rule]]` array; falls back to
+    /// synthesising the two canonical rules (helm←thrust, weapons←red alert)
+    /// from the flat legacy fields so existing ship TOMLs keep working.
+    pub fn to_ai_rules(&self) -> Vec<crate::console_ai::PowerAiRule> {
+        if !self.rule.is_empty() {
+            return self.rule.iter().map(PowerAiRuleToml::to_rule).collect();
+        }
+        vec![
+            crate::console_ai::PowerAiRule {
+                group: crate::modifiers::power_system::HELM_POWER_GROUP.to_string(),
+                trigger: crate::console_ai::PowerRuleTrigger::Thrust {
+                    threshold: self.movement_thrust_threshold,
+                },
+                min_battery_reserve: self.movement_battery_engage_min_pct,
+                battery_recharge_pct: self.movement_battery_recharge_pct,
+                engage_delay_secs: self.movement_engage_delay_secs,
+                nudge: 1,
+            },
+            crate::console_ai::PowerAiRule {
+                group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
+                min_battery_reserve: self.red_alert_battery_engage_min_pct,
+                battery_recharge_pct: self.red_alert_battery_recharge_pct,
+                engage_delay_secs: self.red_alert_engage_delay_secs,
+                nudge: 1,
+            },
+        ]
+    }
+}
+
+/// One authored `[[power.ai.rule]]` entry (issue #762).
+///
+/// `trigger` is a string tag: `"thrust"` arms on sustained forward thrust
+/// (using `thrust_threshold`); `"red_alert"` arms while the ship is at red
+/// alert. Each rule carries its own `min_battery_reserve` floor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerAiRuleToml {
+    /// Target power group id (must be an authored `[power_groups.*]` key).
+    pub group: String,
+    /// Trigger tag: `"thrust"` or `"red_alert"`.
+    pub trigger: String,
+    /// Thrust (0.0-1.0) above which a `"thrust"` trigger arms. Ignored by
+    /// other triggers.
+    #[serde(default = "default_movement_thrust_threshold")]
+    pub thrust_threshold: f32,
+    /// Seconds the trigger must persist before engaging.
+    #[serde(default = "default_rule_engage_delay_secs")]
+    pub engage_delay_secs: f32,
+    /// Battery floor (0.0-100.0) below which this rule can never engage.
+    #[serde(default = "default_rule_min_battery_reserve")]
+    pub min_battery_reserve: f32,
+    /// Battery % that must be reached to re-arm after a disengage.
+    #[serde(default = "default_red_alert_battery_recharge_pct")]
+    pub battery_recharge_pct: f32,
+    /// Allocation delta applied to the group on engage (removed on disengage).
+    #[serde(default = "default_rule_nudge")]
+    pub nudge: i16,
+}
+
+impl PowerAiRuleToml {
+    fn to_rule(&self) -> crate::console_ai::PowerAiRule {
+        let trigger = match self.trigger.as_str() {
+            "red_alert" => crate::console_ai::PowerRuleTrigger::RedAlert,
+            // "thrust" and any unrecognised tag fall back to a thrust trigger
+            // (the parse-time default). Data authors get the flat threshold.
+            _ => crate::console_ai::PowerRuleTrigger::Thrust {
+                threshold: self.thrust_threshold,
+            },
+        };
+        crate::console_ai::PowerAiRule {
+            group: self.group.clone(),
+            trigger,
+            min_battery_reserve: self.min_battery_reserve,
+            battery_recharge_pct: self.battery_recharge_pct,
+            engage_delay_secs: self.engage_delay_secs,
+            nudge: self.nudge,
+        }
+    }
+}
+
+fn default_rule_engage_delay_secs() -> f32 {
+    3.0
+}
+fn default_rule_min_battery_reserve() -> f32 {
+    50.0
+}
+fn default_rule_nudge() -> i16 {
+    1
 }
 
 fn default_movement_thrust_threshold() -> f32 {

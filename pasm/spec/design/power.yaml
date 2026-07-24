@@ -48,10 +48,10 @@ entities:
 
   - decision: ai-power-allocation-rules
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: AI Power Allocation Rules
-      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches; each rule declares the minimum battery reserve at which it may apply.
+      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches; each rule declares the minimum battery reserve at which it may apply. Implemented in issue #762 — ai_power_allocation iterates PowerAiConfigResource.rules (authored as [[power.ai.rule]] TOML) and tick_power_rule refuses to engage any rule below its own min_battery_reserve floor.
     game_design:
       enforcement_links: [authored-power-ai-rule-evaluator]
       owner_role: power-ai-operator-role
@@ -84,13 +84,18 @@ entities:
 
   - mechanic: authored-power-group-ai-rules
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Authored Power Group AI Rules
-      summary: Each authored power group supplies data-defined AI rules that select its allocation from current ship conditions. Every rule declares a minimum battery reserve below which it cannot apply, preventing routine brownouts.
+      summary: Each authored power group supplies data-defined AI rules that select its allocation from current ship conditions. Every rule declares a minimum battery reserve below which it cannot apply, preventing routine brownouts. Rules are authored as [[power.ai.rule]] TOML entries (target group, trigger, min_battery_reserve, engage/recharge timers, nudge); the reactor is seeded from all authored [power_groups.*] at spawn so any authored group is allocatable, and rest allocations are kept sustainable so idle ships never brown out.
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
       participating_roles: [power-ai-operator-role]
       reads: [power-grid-information, power-brownout-information]
       resolution: host-authoritative
       outputs: [rule-derived group allocations]
+    implementation:
+      status: declared
+      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
+      symbols: [tick_power_rule, PowerAiRule, PowerRuleTrigger, PowerAiConfigToml, ai_power_allocation, authored_power_group_seed]
+      tests: [cargo test]

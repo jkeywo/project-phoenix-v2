@@ -466,6 +466,129 @@ pub fn tick_power_red_alert_rule(
     tick_power_movement_rule(state, &movement_input)
 }
 
+// ── Data-authored power rules (issue #762) ──────────────────────────────────
+//
+// Generalises the two hardcoded rule blocks (movement→helm, red-alert→weapons)
+// that used to live in `console_ai::server::ai_power_allocation` into a single
+// per-rule evaluator. Each authored rule targets one power group, declares its
+// own battery floor (`min_battery_reserve`), and reuses the exact
+// `EngageState` / `tick_power_movement_rule` hysteresis so the timer/battery
+// semantics are unchanged — only the source of the trigger and thresholds
+// moves from hardcoded fields to TOML.
+
+/// What condition arms an authored power rule.
+///
+/// This is the only place the rule vocabulary is hardcoded — the *set* of
+/// rules, their target groups, and their floors are all authored in TOML.
+/// Adding a new trigger kind is an intentional code change (a new sensor the
+/// AI can read), not a balance tweak.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PowerRuleTrigger {
+    /// Armed while forward thrust ≥ `threshold` (0.0–1.0).
+    Thrust { threshold: f32 },
+    /// Armed while the ship is at red alert.
+    RedAlert,
+}
+
+/// A single data-authored power-allocation rule (issue #762).
+///
+/// Each rule nudges one power group's allocation by `nudge` when its trigger
+/// has been sustained for `engage_delay_secs` **and** the battery is at or
+/// above `min_battery_reserve` — the per-rule floor below which the rule can
+/// never engage (AC2). Disengagement is immediate on battery/condition drop,
+/// with re-arming gated on `battery_recharge_pct`, exactly as the legacy
+/// movement/red-alert rules behaved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PowerAiRule {
+    /// Target power group id string (e.g. "helm", "weapons", "ops").
+    pub group: String,
+    /// Condition that arms this rule.
+    pub trigger: PowerRuleTrigger,
+    /// Battery floor (0.0–100.0). The rule cannot engage while battery is
+    /// below this, and disengages if battery falls below it while engaged.
+    pub min_battery_reserve: f32,
+    /// Battery % that must be reached to re-arm after a disengage.
+    pub battery_recharge_pct: f32,
+    /// Seconds the trigger must persist before engaging.
+    pub engage_delay_secs: f32,
+    /// Allocation delta applied to `group` on engage (and removed on
+    /// disengage). Typically `1`.
+    pub nudge: i16,
+}
+
+impl PowerAiRule {
+    /// The two canonical rules the hardcoded blocks used to implement, now
+    /// expressed as data. Used as the parse-time back-compat default for a
+    /// ship whose `[power.ai]` block carries the flat legacy fields (or no
+    /// `[[power.ai.rule]]` array at all).
+    pub fn legacy_defaults() -> Vec<PowerAiRule> {
+        vec![
+            PowerAiRule {
+                group: crate::modifiers::power_system::HELM_POWER_GROUP.to_string(),
+                trigger: PowerRuleTrigger::Thrust { threshold: 0.7 },
+                min_battery_reserve: 50.0,
+                battery_recharge_pct: 100.0,
+                engage_delay_secs: 3.0,
+                nudge: 1,
+            },
+            PowerAiRule {
+                group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                trigger: PowerRuleTrigger::RedAlert,
+                min_battery_reserve: 10.0,
+                battery_recharge_pct: 100.0,
+                engage_delay_secs: 3.0,
+                nudge: 1,
+            },
+        ]
+    }
+}
+
+/// Per-tick sensor readings shared by every rule on a ship.
+#[derive(Clone, Debug)]
+pub struct PowerRuleInput {
+    /// Current forward thrust (0.0–1.0), from the latest `HelmInput`.
+    pub thrust: f32,
+    /// Whether red alert is active.
+    pub red_alert: bool,
+    /// Current battery percentage (0.0–100.0).
+    pub battery_pct: f32,
+    /// Seconds elapsed this frame.
+    pub dt: f32,
+    /// When `false`, any pending engage is cancelled and `NoChange` returned
+    /// (mirrors the retired Low/Full complexity gate). The Bevy caller passes
+    /// `true` while the reactor is AI-operated.
+    pub enabled: bool,
+}
+
+/// Advance one authored rule's `EngageState` by a tick.
+///
+/// Reuses [`tick_power_movement_rule`] verbatim: the rule's trigger is reduced
+/// to a boolean "armed" signal, fed in as saturated thrust past a fixed 0.5
+/// threshold, and the rule's own `min_battery_reserve` is passed as the
+/// `battery_engage_min_pct` floor. This keeps a single hysteresis engine for
+/// every rule while giving each rule an independent battery floor (AC2).
+pub fn tick_power_rule(
+    state: &mut EngageState,
+    rule: &PowerAiRule,
+    input: &PowerRuleInput,
+) -> PowerEngageOutput {
+    let armed = match &rule.trigger {
+        PowerRuleTrigger::Thrust { threshold } => input.thrust >= *threshold,
+        PowerRuleTrigger::RedAlert => input.red_alert,
+    };
+    let movement_input = PowerMovementInput {
+        thrust: if armed { 1.0 } else { 0.0 },
+        thrust_threshold: 0.5,
+        engage_delay_secs: rule.engage_delay_secs,
+        battery_engage_min_pct: rule.min_battery_reserve,
+        battery_recharge_pct: rule.battery_recharge_pct,
+        battery_pct: input.battery_pct,
+        dt: input.dt,
+        power_is_low: input.enabled,
+    };
+    tick_power_movement_rule(state, &movement_input)
+}
+
 // ── Shields AI ────────────────────────────────────────────────────────────
 
 /// Input for the shield focus AI decision function.
@@ -1256,6 +1379,137 @@ mod tests {
             EngageState::Engaged,
             "red alert rule should be Engaged"
         );
+    }
+
+    // ── Data-authored rule evaluator (issue #762) ─────────────────────────
+
+    fn thrust_rule(group: &str, min_reserve: f32) -> PowerAiRule {
+        PowerAiRule {
+            group: group.to_string(),
+            trigger: PowerRuleTrigger::Thrust { threshold: 0.7 },
+            min_battery_reserve: min_reserve,
+            battery_recharge_pct: 100.0,
+            engage_delay_secs: 3.0,
+            nudge: 1,
+        }
+    }
+
+    fn red_alert_rule(group: &str, min_reserve: f32) -> PowerAiRule {
+        PowerAiRule {
+            group: group.to_string(),
+            trigger: PowerRuleTrigger::RedAlert,
+            min_battery_reserve: min_reserve,
+            battery_recharge_pct: 100.0,
+            engage_delay_secs: 3.0,
+            nudge: 1,
+        }
+    }
+
+    fn rule_input(thrust: f32, red_alert: bool, battery_pct: f32, dt: f32) -> PowerRuleInput {
+        PowerRuleInput {
+            thrust,
+            red_alert,
+            battery_pct,
+            dt,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn rule_engages_just_above_its_configured_floor() {
+        // AC2 reserve boundary: a rule with a 50% floor engages at 50.0.
+        let rule = thrust_rule("helm", 50.0);
+        let mut state = EngageState::Idle;
+        // 4s ≥ 3s delay in a single tick, battery exactly at the floor.
+        let out = tick_power_rule(&mut state, &rule, &rule_input(0.9, false, 50.0, 4.0));
+        assert_eq!(out, PowerEngageOutput::Engage);
+        assert_eq!(state, EngageState::Engaged);
+    }
+
+    #[test]
+    fn rule_cannot_engage_just_below_its_configured_floor() {
+        // AC2 reserve boundary: the SAME rule cannot even start counting at
+        // 49.9%, one tenth of a percent under its own floor.
+        let rule = thrust_rule("helm", 50.0);
+        let mut state = EngageState::Idle;
+        let out = tick_power_rule(&mut state, &rule, &rule_input(0.9, false, 49.9, 4.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "must not count below the floor");
+    }
+
+    #[test]
+    fn per_rule_floor_is_independent_across_rules() {
+        // Two rules on the same trigger but DIFFERENT floors: at 30% battery a
+        // 10%-floor rule engages while a 50%-floor rule stays idle. Proves the
+        // floor is per-rule, not a shared system-wide threshold.
+        let low_floor = red_alert_rule("weapons", 10.0);
+        let high_floor = red_alert_rule("shields", 50.0);
+        let mut low_state = EngageState::Idle;
+        let mut high_state = EngageState::Idle;
+
+        let low_out = tick_power_rule(
+            &mut low_state,
+            &low_floor,
+            &rule_input(0.0, true, 30.0, 4.0),
+        );
+        let high_out = tick_power_rule(
+            &mut high_state,
+            &high_floor,
+            &rule_input(0.0, true, 30.0, 4.0),
+        );
+
+        assert_eq!(
+            low_out,
+            PowerEngageOutput::Engage,
+            "10% floor engages at 30%"
+        );
+        assert_eq!(
+            high_out,
+            PowerEngageOutput::NoChange,
+            "50% floor cannot engage at 30%"
+        );
+    }
+
+    #[test]
+    fn conflicting_rules_on_same_group_both_evaluate_independently() {
+        // Two rules competing for the SAME group ("weapons"): one armed by
+        // thrust, one by red alert. Each keeps its own EngageState, so their
+        // engage/disengage decisions do not clobber one another. Here thrust is
+        // high but battery (40%) is below the thrust rule's 50% floor, while
+        // red alert is active and battery is above the red-alert rule's 10%
+        // floor — so only the red-alert rule engages.
+        let thrust = thrust_rule("weapons", 50.0);
+        let red = red_alert_rule("weapons", 10.0);
+        let mut thrust_state = EngageState::Idle;
+        let mut red_state = EngageState::Idle;
+
+        let input = rule_input(0.9, true, 40.0, 4.0);
+        let thrust_out = tick_power_rule(&mut thrust_state, &thrust, &input);
+        let red_out = tick_power_rule(&mut red_state, &red, &input);
+
+        assert_eq!(
+            thrust_out,
+            PowerEngageOutput::NoChange,
+            "thrust rule gated out by its own 50% floor at 40% battery"
+        );
+        assert_eq!(
+            red_out,
+            PowerEngageOutput::Engage,
+            "red-alert rule engages on the same group under its 10% floor"
+        );
+    }
+
+    #[test]
+    fn disabled_input_cancels_pending_engage() {
+        // Preserves the human-control yield: when the reactor is not AI-operated
+        // the caller passes enabled=false and any pending engage resets.
+        let rule = thrust_rule("helm", 50.0);
+        let mut state = EngageState::Counting { elapsed_secs: 2.9 };
+        let mut input = rule_input(0.9, false, 80.0, 1.0);
+        input.enabled = false;
+        let out = tick_power_rule(&mut state, &rule, &input);
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle);
     }
 
     // ── Shields AI ────────────────────────────────────────────────────────

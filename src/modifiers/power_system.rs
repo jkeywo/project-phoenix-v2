@@ -110,6 +110,37 @@ impl PowerSystem {
         }
     }
 
+    /// Construct a `PowerSystem` seeded from a ship's authored power groups
+    /// (issue #762). Each `(group, level)` is inserted at the given level,
+    /// clamped to `[1, 4]`, in the order supplied — so a ship that authors an
+    /// `ops` group beyond the canonical three gets it seeded and therefore
+    /// allocatable (otherwise `set_group_allocation` returns `UnknownGroup`
+    /// and any authored rule targeting it silently no-ops).
+    ///
+    /// Falls back to [`Self::seeded_with_defaults`] (the canonical `helm` /
+    /// `weapons` / `sensors` at level 2) when `groups` is empty, so ships and
+    /// fixtures without a `[power_groups.*]` block are unchanged.
+    pub fn from_authored_groups(battery_charge: f32, groups: &[(PowerGroupId, u8)]) -> Self {
+        if groups.is_empty() {
+            return Self::seeded_with_defaults(battery_charge);
+        }
+        let mut map = HashMap::with_capacity(groups.len());
+        let mut order = Vec::with_capacity(groups.len());
+        for (id, level) in groups {
+            if map.contains_key(id) {
+                continue;
+            }
+            map.insert(id.clone(), (*level).clamp(1, 4));
+            order.push(id.clone());
+        }
+        Self {
+            groups: map,
+            order,
+            battery_charge,
+            locked: false,
+        }
+    }
+
     /// Total allocation across all groups.
     pub fn total(&self) -> u8 {
         self.groups.values().copied().sum()

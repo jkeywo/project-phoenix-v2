@@ -265,6 +265,12 @@ pub fn spawn_entity(
                 crate::ship::control_source::ControlSource::Ai,
             );
         }
+        // Seed the reactor from the ship's authored power groups (issue #762)
+        // BEFORE `ship_config` is moved into the entity, so authored groups
+        // beyond the canonical three (e.g. `ops`) are allocatable rather than
+        // returning `UnknownGroup`. Empty for ships with no `[power_groups.*]`.
+        let power_group_seed =
+            crate::power_plugin::authored_power_group_seed(&ship_config.0.power_groups);
         // Seed ShipPhysics from the spawn position so the per-entity helm loop
         // starts with the correct initial state rather than (0, 0).
         let ship_physics = crate::ship_state::ShipPhysics {
@@ -337,7 +343,10 @@ pub fn spawn_entity(
         entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());
         entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());
         entity_commands.insert(crate::power_plugin::ShipPowerSystem(
-            crate::modifiers::power_system::PowerSystem::default(),
+            crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                crate::modifiers::power_system::PowerConfig::default().capacity,
+                &power_group_seed,
+            ),
         ));
         // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
         // `[power]` TOML block get `PowerConfigResource::default()` /
@@ -357,15 +366,13 @@ pub fn spawn_entity(
             None => crate::power_plugin::PowerConfigResource::default(),
         };
         entity_commands.insert(power_config);
+        // Data-authored power AI rules (issue #762). `to_ai_rules` prefers the
+        // ship's `[[power.ai.rule]]` array and otherwise synthesises the two
+        // canonical legacy rules from the flat `[power.ai]` fields, so NPCs
+        // without a block still fall back to the parse-time default.
         let power_ai_config = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
             Some(ai) => crate::power_plugin::PowerAiConfigResource {
-                movement_thrust_threshold: ai.movement_thrust_threshold,
-                movement_engage_delay_secs: ai.movement_engage_delay_secs,
-                movement_battery_engage_min_pct: ai.movement_battery_engage_min_pct,
-                movement_battery_recharge_pct: ai.movement_battery_recharge_pct,
-                red_alert_engage_delay_secs: ai.red_alert_engage_delay_secs,
-                red_alert_battery_engage_min_pct: ai.red_alert_battery_engage_min_pct,
-                red_alert_battery_recharge_pct: ai.red_alert_battery_recharge_pct,
+                rules: ai.to_ai_rules(),
             },
             None => crate::power_plugin::PowerAiConfigResource::default(),
         };

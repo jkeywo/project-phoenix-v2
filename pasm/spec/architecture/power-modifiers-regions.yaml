@@ -13,8 +13,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/power.rs, src/ship/config.rs]
-      symbols: [handle_power_messages, tick_power_system]
+      paths: [src/ship/power.rs, src/ship/config.rs, src/modifiers/power_system.rs]
+      symbols: [handle_power_messages, tick_power_system, authored_power_group_seed, from_authored_groups]
       tests: [cargo test, tests/smoke/power-console.spec.ts]
 
   - state: ship-power-state
@@ -54,19 +54,26 @@ entities:
 
   - component: authored-power-ai-rule-evaluator
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Authored Power AI Rule Evaluator
-      summary: Future per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule carries its own minimum permitted battery reserve, so allocation planning avoids avoidable brownouts without a fixed global emergency mode. The current precursor (ai_power_allocation) emits an admitted SetPowerGroupAllocation system-control-command rather than mutating power state directly.
+      summary: Per-ship Power AI that evaluates data-defined rules for every authored power group. Each rule targets one power group and carries its own minimum permitted battery reserve (min_battery_reserve), so a rule can never engage below its own floor and allocation planning avoids avoidable brownouts without a fixed global emergency mode. ai_power_allocation iterates the ship's authored PowerAiConfigResource.rules and emits an admitted SetPowerGroupAllocation system-control-command per engage/disengage rather than mutating power state directly.
       rationale:
-        - "Issue #693 implemented a narrower precursor, ai_power_allocation (src/console_ai/server.rs), rather than this fully generic evaluator: it runs exactly two hardcoded rules (a movement rule reallocating to the helm group, and a red-alert rule reallocating to the weapons group), each with its own timer/hysteresis config, not an arbitrary per-authored-group rule set. This entity remains the target design for the generalized version."
-        - "Issue #831 (admission symmetry): ai_power_allocation no longer writes ship-power-state through a private PowerReactorIntents component drained by a paired integrate_power_state adapter. It now emits an admitted SetPowerGroupAllocation system-control-command through command_admission::validate_and_admit (its ship's own ai:<uuid> token, checked against operate_ai on the reactor), which ship-power-controller's handle_power_messages applies. The evaluator therefore sends a command; it does not mutate power state directly."
+        - "Issue #762 generalized the two hardcoded blocks into this evaluator. The pure engine tick_power_rule (src/console_ai/core.rs) reduces each authored rule's trigger (Thrust{threshold}/RedAlert) to an armed signal and reuses the tick_power_movement_rule EngageState hysteresis, passing the rule's own min_battery_reserve as the engage floor. Rules are authored as [[power.ai.rule]] entries in the ship TOML; PowerAiConfigToml::to_ai_rules resolves them (falling back to the two canonical legacy rules synthesised from the flat [power.ai] fields for back-compat). ShipPowerAiState holds one EngageState per rule keyed by a stable per-rule slot key."
+        - "Issue #762 (seeding reconciliation): PowerSystem::from_authored_groups seeds every authored [power_groups.*] group (e.g. ops) at spawn — via authored_power_group_seed in spawner.rs and server_app.rs — so a rule targeting an authored group is allocatable rather than returning UnknownGroup. The four alliance hulls rest their four groups at a sustainable total (<=6) so idle ships recharge and neither the brownout advisory nor the emergency lock fires unprovoked."
+        - "Issue #693 implemented a narrower precursor, ai_power_allocation, that ran exactly two hardcoded rules (movement->helm, red-alert->weapons). Issue #762 retired those hardcoded blocks; the two rules now exist only as data (the parse-time back-compat default)."
+        - "Issue #831 (admission symmetry): ai_power_allocation no longer writes ship-power-state through a private PowerReactorIntents component drained by a paired integrate_power_state adapter. It emits an admitted SetPowerGroupAllocation system-control-command through command_admission::validate_and_admit (its ship's own ai:<uuid> token, checked against operate_ai on the reactor), which ship-power-controller's handle_power_messages applies — the single applier for the human and AI paths alike. The evaluator therefore sends a command; it does not mutate power state directly and never branches on control source after admission."
     architecture:
       kind: ai-operator
       authority: authoritative
       reads: [ship-power-state, system-control-source-state, ship-system-blackboards-state]
       sends: [system-control-command]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/modifiers/power_system.rs]
+      symbols: [tick_power_rule, PowerAiRule, PowerRuleTrigger, ai_power_allocation, PowerAiConfigResource, ShipPowerAiState, authored_power_group_seed]
+      tests: [cargo test]
 
   - state: ship-modifier-state
     core:

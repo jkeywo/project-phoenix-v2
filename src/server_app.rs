@@ -2393,6 +2393,12 @@ fn spawn_game_start_entities(
             } else {
                 crate::ship_plugin::load_ship_config_from_disk()
             };
+            // Seed the reactor from the player ship's authored power groups
+            // (issue #762) before `ship_config` is moved into the entity, so
+            // authored groups beyond the canonical three (e.g. `ops`) are
+            // allocatable. Empty for a config with no `[power_groups.*]`.
+            let power_group_seed =
+                crate::power_plugin::authored_power_group_seed(&ship_config.0.power_groups);
             let (initial_control_sources, initial_active_ratings) = {
                 let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
                 let mut active_ratings: std::collections::HashMap<StationId, String> =
@@ -2484,7 +2490,10 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_state::ShipPhaserFrequency::default())
                 .insert(crate::navigation_plugin::NavigationWaypoint::default())
                 .insert(crate::power_plugin::ShipPowerSystem(
-                    crate::modifiers::power_system::PowerSystem::default(),
+                    crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                        crate::modifiers::power_system::PowerConfig::default().capacity,
+                        &power_group_seed,
+                    ),
                 ))
                 .insert(crate::ship_plugin::LastHelmInput::default())
                 // Per-ship impulse drive state (audit follow-up). Every
@@ -2775,13 +2784,7 @@ fn spawn_game_start_entities(
             // a value on the player ship. Dual-writes the Resource.
             let ai_cfg = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
                 Some(ai) => PowerAiConfigResource {
-                    movement_thrust_threshold: ai.movement_thrust_threshold,
-                    movement_engage_delay_secs: ai.movement_engage_delay_secs,
-                    movement_battery_engage_min_pct: ai.movement_battery_engage_min_pct,
-                    movement_battery_recharge_pct: ai.movement_battery_recharge_pct,
-                    red_alert_engage_delay_secs: ai.red_alert_engage_delay_secs,
-                    red_alert_battery_engage_min_pct: ai.red_alert_battery_engage_min_pct,
-                    red_alert_battery_recharge_pct: ai.red_alert_battery_recharge_pct,
+                    rules: ai.to_ai_rules(),
                 },
                 None => PowerAiConfigResource::default(),
             };

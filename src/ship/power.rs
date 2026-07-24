@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::console_ai::PowerAiRule;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     CoordinationPayload, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard,
@@ -57,52 +58,34 @@ impl Default for PowerMultiplierResource {
 
 /// TOML-loaded configuration for the power AI controller.
 ///
-/// Loaded from `[power.ai]` in the ship entity TOML and inserted as a resource
-/// at startup by the entity spawner. The fields mirror the `[power.ai]` TOML
-/// keys; defaults are used when the section is absent.
+/// Loaded from `[power.ai]` in the ship entity TOML and inserted as a
+/// per-entity component at spawn. Since issue #762 this is a list of
+/// data-authored [`PowerAiRule`]s — one per authored `[[power.ai.rule]]`
+/// entry — rather than the two hardcoded system categories (movement→helm,
+/// red-alert→weapons) it replaced. Each rule targets an authored power group
+/// and carries its own battery floor (`min_battery_reserve`).
 ///
-/// Repurposed by issue #693: the old 4-field absolute-set tuning (used by the
-/// now-deleted `operate_power_ai`) is replaced by the 7 fields the
-/// timer/hysteresis-based `console_ai::tick_power_movement_rule` /
-/// `tick_power_red_alert_rule` pure functions need.
+/// The parse layer (`entities::config::PowerAiConfigToml::to_ai_rules`) keeps
+/// the flat legacy `[power.ai]` fields working: a ship whose block has no
+/// `[[power.ai.rule]]` array synthesises the two canonical rules from those
+/// fields, so old TOMLs and the `Default` impl below behave exactly as before.
 ///
 /// Dual-derives `Resource` (legacy global fallback used by tests) and
 /// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
 #[derive(Resource, Component, Clone, Debug)]
 pub struct PowerAiConfigResource {
-    /// Thrust level (0.0–1.0) above which the movement rule considers the
-    /// ship actively driving.
-    pub movement_thrust_threshold: f32,
-    /// Seconds of sustained thrust required before the movement rule
-    /// engages the helm power overflow.
-    pub movement_engage_delay_secs: f32,
-    /// Battery percentage (0.0–100.0) required to engage the helm power
-    /// overflow.
-    pub movement_battery_engage_min_pct: f32,
-    /// Battery percentage (0.0–100.0) required to re-arm the movement rule
-    /// after it disengages.
-    pub movement_battery_recharge_pct: f32,
-    /// Seconds red alert must persist before the red-alert rule engages the
-    /// weapons power overflow.
-    pub red_alert_engage_delay_secs: f32,
-    /// Battery percentage (0.0–100.0) required to engage the weapons power
-    /// overflow on red alert.
-    pub red_alert_battery_engage_min_pct: f32,
-    /// Battery percentage (0.0–100.0) required to re-arm the red-alert rule
-    /// after it disengages.
-    pub red_alert_battery_recharge_pct: f32,
+    /// The authored (or legacy-synthesised) rules this ship's power AI runs.
+    pub rules: Vec<PowerAiRule>,
 }
 
 impl Default for PowerAiConfigResource {
+    /// Back-compat default: the two canonical rules the hardcoded blocks used
+    /// to implement (helm←sustained thrust, weapons←red alert). Preserves the
+    /// behaviour of every fixture and NPC that spawns without a `[power.ai]`
+    /// block.
     fn default() -> Self {
         Self {
-            movement_thrust_threshold: 0.7,
-            movement_engage_delay_secs: 3.0,
-            movement_battery_engage_min_pct: 50.0,
-            movement_battery_recharge_pct: 100.0,
-            red_alert_engage_delay_secs: 3.0,
-            red_alert_battery_engage_min_pct: 10.0,
-            red_alert_battery_recharge_pct: 100.0,
+            rules: PowerAiRule::legacy_defaults(),
         }
     }
 }
@@ -116,10 +99,11 @@ impl Default for PowerAiConfigResource {
 // applies, the single applier for human and AI commands alike — mirroring the
 // shields #826 retirement of `ShieldArcIntents` / `integrate_shield_state`.
 
-/// Per-ship persistent state for the two timer/hysteresis-based power AI
-/// rules. `tick_power_movement_rule` and `tick_power_red_alert_rule` each
-/// need their own independent `EngageState` (confirmed by `console_ai::core`'s
-/// own tests, which use two separate local `state` variables).
+/// Per-ship persistent state for the data-authored power AI rules (issue
+/// #762). Each authored rule needs its own independent `EngageState`, so this
+/// is a map keyed by the rule's stable slot key (`"<index>:<group>"`, minted
+/// by `ai_power_allocation`). Replaces the fixed `{movement, red_alert}` pair
+/// that assumed exactly the two hardcoded rules.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
 /// that marker at every spawn/promote site (see `ai::server::lod_ai_ships`
@@ -128,8 +112,8 @@ impl Default for PowerAiConfigResource {
 /// state after the intent transport retired in issue #831.
 #[derive(Component, Default, Clone, Debug)]
 pub struct ShipPowerAiState {
-    pub movement: crate::console_ai::EngageState,
-    pub red_alert: crate::console_ai::EngageState,
+    /// Per-rule engage state, keyed by the rule's stable slot key.
+    pub rules: std::collections::HashMap<String, crate::console_ai::EngageState>,
 }
 
 /// Debounce state for power brownout coordination advisories (issue #678).
@@ -163,6 +147,40 @@ pub fn power_group_label(group_id: &str) -> &'static str {
 /// legacy call-site shape.
 pub fn power_level_for(ps: &PowerSystem, group: &PowerGroupId) -> u8 {
     power_level_for_group(ps, group)
+}
+
+/// Build a deterministic seed list for
+/// [`PowerSystem::from_authored_groups`](crate::modifiers::power_system::PowerSystem::from_authored_groups)
+/// from a ship's authored `[power_groups.*]` config (issue #762).
+///
+/// The canonical groups (`helm`, `weapons`, `sensors`) come first in their
+/// stable [`POWER_GROUP_ORDER`], then any extra authored groups (e.g. `ops`)
+/// sorted by id, each seeded at its authored `default_level`. Returns an empty
+/// vec when there are no authored groups so the caller falls back to the
+/// canonical default seeding (unchanged behaviour for NPCs / fixtures without a
+/// `[power_groups.*]` block).
+pub fn authored_power_group_seed(
+    power_groups: &std::collections::HashMap<PowerGroupId, crate::ship::config::PowerGroupConfig>,
+) -> Vec<(PowerGroupId, u8)> {
+    if power_groups.is_empty() {
+        return Vec::new();
+    }
+    let mut seed: Vec<(PowerGroupId, u8)> = Vec::with_capacity(power_groups.len());
+    for &name in POWER_GROUP_ORDER {
+        let id = PowerGroupId(name.to_string());
+        if let Some(cfg) = power_groups.get(&id) {
+            seed.push((id, cfg.default_level));
+        }
+    }
+    let mut extra: Vec<(&PowerGroupId, &crate::ship::config::PowerGroupConfig)> = power_groups
+        .iter()
+        .filter(|(id, _)| !POWER_GROUP_ORDER.contains(&id.0.as_str()))
+        .collect();
+    extra.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    for (id, cfg) in extra {
+        seed.push((id.clone(), cfg.default_level));
+    }
+    seed
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────

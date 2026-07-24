@@ -525,19 +525,12 @@ fn ai_power_allocation(
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
-        let power_is_low = true; // Rating gate deferred to per-ship AiTuning
 
         let battery_pct = if cfg.0.capacity > 0.0 {
             (power.0.battery_charge / cfg.0.capacity) * 100.0
         } else {
             0.0
         };
-
-        let helm_id =
-            crate::messages::PowerGroupId(crate::modifiers::power_system::HELM_POWER_GROUP.into());
-        let weapons_id = crate::messages::PowerGroupId(
-            crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
-        );
 
         // Emit an admitted `SetPowerGroupAllocation` toward the reactor for a
         // ±1 nudge on `group`, but only when the clamped target level actually
@@ -585,49 +578,46 @@ fn ai_power_allocation(
                 );
             };
 
-        // ── Movement rule → helm group ───────────────────────────────────
-        let movement_input = crate::console_ai::PowerMovementInput {
+        // ── Data-authored per-group rules (issue #762) ───────────────────
+        //
+        // Iterate the ship's authored rules instead of the two hardcoded
+        // movement→helm / red-alert→weapons blocks. Each rule carries its own
+        // battery floor (`min_battery_reserve`); the pure `tick_power_rule`
+        // engine (reusing the same `EngageState` hysteresis) will not engage
+        // below that floor (AC2), so allocation only rises when the battery can
+        // sustain it — avoiding preventable brownouts (AC3). Humans keep
+        // control because we already `continue`d above when `operate_ai` is
+        // false; the emitted command funnels through the same
+        // `handle_power_messages` applier as human input (no source branch).
+        let rule_input = crate::console_ai::PowerRuleInput {
             thrust,
-            thrust_threshold: ai_cfg.movement_thrust_threshold,
-            engage_delay_secs: ai_cfg.movement_engage_delay_secs,
-            battery_engage_min_pct: ai_cfg.movement_battery_engage_min_pct,
-            battery_recharge_pct: ai_cfg.movement_battery_recharge_pct,
-            battery_pct,
-            dt,
-            power_is_low,
-        };
-        let movement_output =
-            crate::console_ai::tick_power_movement_rule(&mut ai_state.movement, &movement_input);
-        match movement_output {
-            crate::console_ai::PowerEngageOutput::Engage => {
-                emit_delta(&helm_id, 1, "sustained thrust", &mut admitted);
-            }
-            crate::console_ai::PowerEngageOutput::Disengage => {
-                emit_delta(&helm_id, -1, "thrust/battery lapsed", &mut admitted);
-            }
-            crate::console_ai::PowerEngageOutput::NoChange => {}
-        }
-
-        // ── Red-alert rule → weapons group ───────────────────────────────
-        let red_alert_input = crate::console_ai::PowerRedAlertInput {
             red_alert,
-            engage_delay_secs: ai_cfg.red_alert_engage_delay_secs,
-            battery_engage_min_pct: ai_cfg.red_alert_battery_engage_min_pct,
-            battery_recharge_pct: ai_cfg.red_alert_battery_recharge_pct,
             battery_pct,
             dt,
-            power_is_low,
+            // Already gated on `operate_ai` above; the reactor is AI-driven.
+            enabled: true,
         };
-        let red_alert_output =
-            crate::console_ai::tick_power_red_alert_rule(&mut ai_state.red_alert, &red_alert_input);
-        match red_alert_output {
-            crate::console_ai::PowerEngageOutput::Engage => {
-                emit_delta(&weapons_id, 1, "red alert", &mut admitted);
+        for (index, rule) in ai_cfg.rules.iter().enumerate() {
+            // Stable per-rule slot key so two rules targeting the same group
+            // (e.g. thrust and red-alert both nudging weapons) keep independent
+            // engage timers.
+            let key = format!("{index}:{}", rule.group);
+            let state = ai_state.rules.entry(key).or_default();
+            let output = crate::console_ai::tick_power_rule(state, rule, &rule_input);
+            let group_id = crate::messages::PowerGroupId(rule.group.clone());
+            let reason = match &rule.trigger {
+                crate::console_ai::PowerRuleTrigger::Thrust { .. } => "thrust rule",
+                crate::console_ai::PowerRuleTrigger::RedAlert => "red-alert rule",
+            };
+            match output {
+                crate::console_ai::PowerEngageOutput::Engage => {
+                    emit_delta(&group_id, rule.nudge, reason, &mut admitted);
+                }
+                crate::console_ai::PowerEngageOutput::Disengage => {
+                    emit_delta(&group_id, -rule.nudge, reason, &mut admitted);
+                }
+                crate::console_ai::PowerEngageOutput::NoChange => {}
             }
-            crate::console_ai::PowerEngageOutput::Disengage => {
-                emit_delta(&weapons_id, -1, "red alert cleared", &mut admitted);
-            }
-            crate::console_ai::PowerEngageOutput::NoChange => {}
         }
     }
 }
@@ -2166,9 +2156,18 @@ station = "sensors"
         // tuning but not under the parse-time 3.0s default.
         let mut app = power_test_app();
         let npc = power_ship_entity(&mut app);
+        // Eager 0.5s red-alert rule as a GLOBAL resource — `ai_power_allocation`
+        // must NOT fall back to it for a ship that carries no per-entity tuning.
+        let eager_rules = vec![crate::console_ai::PowerAiRule {
+            group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+            trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
+            min_battery_reserve: 10.0,
+            battery_recharge_pct: 100.0,
+            engage_delay_secs: 0.5,
+            nudge: 1,
+        }];
         app.insert_resource(crate::ship::power::PowerAiConfigResource {
-            red_alert_engage_delay_secs: 0.5,
-            ..Default::default()
+            rules: eager_rules.clone(),
         });
 
         let mut tuned_sources = ShipSystemControlSources::default();
@@ -2189,10 +2188,7 @@ station = "sensors"
                 crate::ship::power::ShipPowerAiState::default(),
                 crate::messages::AdmittedCommands::default(),
                 AiHighFidelity,
-                crate::ship::power::PowerAiConfigResource {
-                    red_alert_engage_delay_secs: 0.5,
-                    ..Default::default()
-                },
+                crate::ship::power::PowerAiConfigResource { rules: eager_rules },
             ))
             .id();
 
@@ -2464,6 +2460,162 @@ station = "sensors"
                     if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
             )),
             "a saturated weapons allocation (already at 4) must not re-admit a no-op"
+        );
+    }
+
+    #[test]
+    fn two_ships_with_different_authored_rules_allocate_independently() {
+        // AC1 + AC4 per-ship isolation: two AI ships carry DIFFERENT authored
+        // rules — one boosts `helm` on thrust, the other boosts `sensors` on
+        // thrust. Under identical sustained thrust each ship nudges only its
+        // own authored group, and neither touches the other's, proving the
+        // rules are per-ship data (not a shared hardcoded category set).
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .init_resource::<crate::ship::power::PowerAiConfigResource>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    ai_power_allocation.before(crate::ship::power::handle_power_messages),
+                    crate::ship::power::handle_power_messages,
+                ),
+            );
+
+        let spawn_ruled = |app: &mut App, group: &str| -> Entity {
+            let mut cs = ShipSystemControlSources::default();
+            cs.0.set(
+                crate::system_registry::power_reactor_system_id(),
+                ControlSource::Ai,
+            );
+            let helm = crate::ship_plugin::LastHelmInput {
+                thrust: 0.9,
+                ..Default::default()
+            };
+            app.world_mut()
+                .spawn((
+                    crate::server_app::Ship,
+                    cs,
+                    crate::ship::power::ShipPowerSystem(
+                        crate::modifiers::power_system::PowerSystem::default(),
+                    ),
+                    crate::ship_state::ShipRedAlert::default(),
+                    helm,
+                    crate::ship::power::ShipPowerAiState::default(),
+                    crate::messages::AdmittedCommands::default(),
+                    AiHighFidelity,
+                    crate::ship::power::PowerAiConfigResource {
+                        rules: vec![crate::console_ai::PowerAiRule {
+                            group: group.to_string(),
+                            trigger: crate::console_ai::PowerRuleTrigger::Thrust { threshold: 0.7 },
+                            min_battery_reserve: 50.0,
+                            battery_recharge_pct: 100.0,
+                            engage_delay_secs: 3.0,
+                            nudge: 1,
+                        }],
+                    },
+                ))
+                .id()
+        };
+
+        let helm_ship = spawn_ruled(&mut app, crate::modifiers::power_system::HELM_POWER_GROUP);
+        let sensors_ship = spawn_ruled(
+            &mut app,
+            crate::modifiers::power_system::SENSORS_POWER_GROUP,
+        );
+
+        power_tick_with_dt(&mut app, 4.0);
+
+        // Ship A boosted helm, left sensors alone.
+        assert_eq!(
+            power_level(
+                &app,
+                helm_ship,
+                crate::modifiers::power_system::HELM_POWER_GROUP
+            ),
+            3,
+            "helm-ruled ship must raise its own helm group"
+        );
+        assert_eq!(
+            power_level(
+                &app,
+                helm_ship,
+                crate::modifiers::power_system::SENSORS_POWER_GROUP
+            ),
+            2,
+            "helm-ruled ship must NOT touch sensors"
+        );
+        // Ship B boosted sensors, left helm alone.
+        assert_eq!(
+            power_level(
+                &app,
+                sensors_ship,
+                crate::modifiers::power_system::SENSORS_POWER_GROUP
+            ),
+            3,
+            "sensors-ruled ship must raise its own sensors group"
+        );
+        assert_eq!(
+            power_level(
+                &app,
+                sensors_ship,
+                crate::modifiers::power_system::HELM_POWER_GROUP
+            ),
+            2,
+            "sensors-ruled ship must NOT touch helm"
+        );
+    }
+
+    #[test]
+    fn conflicting_rules_on_same_group_converge_without_error() {
+        // AC4 conflicting rules at the system level: one ship authors TWO rules
+        // that both target `weapons` (thrust and red alert). Both fire this
+        // tick; the emitted admitted commands funnel through the single applier
+        // and the group settles one step up (no double-apply, no error).
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::ship::power::PowerAiConfigResource {
+                rules: vec![
+                    crate::console_ai::PowerAiRule {
+                        group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                        trigger: crate::console_ai::PowerRuleTrigger::Thrust { threshold: 0.7 },
+                        min_battery_reserve: 50.0,
+                        battery_recharge_pct: 100.0,
+                        engage_delay_secs: 3.0,
+                        nudge: 1,
+                    },
+                    crate::console_ai::PowerAiRule {
+                        group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
+                        trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
+                        min_battery_reserve: 10.0,
+                        battery_recharge_pct: 100.0,
+                        engage_delay_secs: 3.0,
+                        nudge: 1,
+                    },
+                ],
+            });
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .unwrap()
+            .thrust = 0.9;
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        power_tick_with_dt(&mut app, 4.0);
+
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            3,
+            "two rules on weapons both engage and converge to a single +1 step"
         );
     }
 

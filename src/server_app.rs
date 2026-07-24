@@ -2737,6 +2737,40 @@ fn spawn_game_start_entities(
                 .entity(spawned)
                 .insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
 
+            // Helm Engines/Steering AI policies (issue #779) — player-ship half
+            // of the per-entity pattern in `spawner.rs`. Authored
+            // `[helm_console.engines_ai]` / `[helm_console.steering_ai]` drive
+            // `ai_helm_thrust`/`ai_helm_steering`; absent, the canonical defaults
+            // are synthesised. Validated already in `EntityConfig::from_toml`.
+            let engines_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.engines_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_engines_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            let steering_ai_policy = match config
+                .helm_console
+                .as_ref()
+                .and_then(|h| h.steering_ai.as_ref())
+            {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_steering_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
+            };
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmEnginesAiPolicy(engines_ai_policy));
+            commands
+                .entity(spawned)
+                .insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
+                    steering_ai_policy,
+                ));
+
             // Shields damage history — per-ship Component tracking HP deltas
             // for the AI damage-concentration algorithm. Initialised empty; resized
             // lazily by operate_shields_ai to match the ship's arc count.

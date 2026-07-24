@@ -1010,6 +1010,46 @@ pub(crate) fn detect_reached_objective_completion(
 // beside last tick's stale human steering — cannot be observed;
 // `helm_ai_last_input_pair_is_not_torn` pins the result.
 
+/// Per-ship inline stateless **Engines** AI policy (issue #779).
+///
+/// Attached to every ship at spawn: from the ship's `[helm_console.engines_ai]`
+/// block when authored, otherwise the canonical
+/// [`crate::entities::config::default_engines_ai_config`] policy. Read by
+/// [`ai_helm_thrust`], which resolves its `longitudinal` channel over a per-tick
+/// fact snapshot to decide *whether* to actuate the planner's desired travel —
+/// the DECISION now flows through a data-authored policy verb instead of an
+/// unconditional hardcoded branch. The continuous thrust magnitude still comes
+/// from the shared `DesiredMotion` planner fact (issue #741).
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmEnginesAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Per-ship inline stateless **Steering** AI policy (issue #779). Mirror of
+/// [`HelmEnginesAiPolicy`] for the `yaw` channel: from
+/// `[helm_console.steering_ai]` when authored, else
+/// [`crate::entities::config::default_steering_ai_config`]. Read by
+/// [`ai_helm_steering`] to decide whether to actuate the planner's desired
+/// facing.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmSteeringAiPolicy(pub crate::ai::policy::AiPolicy);
+
+/// Resolve a helm fine-system policy's single mode channel to a bare "actuate
+/// this tick?" boolean (issue #779).
+///
+/// The policy is a pure fact→verb(mode) map: it returns the channel's mode verb
+/// when a guard fires and `None` ("hold") otherwise. This collapses that to the
+/// host's decision — emit the planner-decoded scalar, or emit nothing — without
+/// letting the continuous magnitude leak into the policy. `expected` is the mode
+/// verb this channel is allowed to carry (validated at load), so a mismatched
+/// verb resolves to "hold" defensively rather than actuating on a wrong axis.
+fn helm_policy_actuates(
+    policy: &crate::ai::policy::AiPolicy,
+    channel: &str,
+    facts: &crate::world::flags::AiFacts,
+    expected: &crate::ai::policy::AiPolicyVerb,
+) -> bool {
+    policy.resolve_channel(channel, facts, &[]) == Some(expected)
+}
+
 /// Per-axis helm AI: throttle. Decides the throttle for ships whose
 /// helm-thrust system is AI-operated and emits it as an admitted `SetThrust`
 /// into the ship's own `AdmittedCommands` (issues #800, #704, #824) —
@@ -1031,12 +1071,22 @@ pub(crate) fn ai_helm_thrust(
             &ShipSystemControlSources,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&HelmEnginesAiPolicy>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    for (entity, sources, entity_uuid, ship_config, mut admitted) in ships.iter_mut() {
+    // Canonical fallback for any ship missing an attached policy component (bare
+    // `App` unit fixtures). Real ships always carry one, authored or
+    // synthesised, attached at spawn. Built once per tick, not per ship —
+    // mirrors `operate_captain_ai`.
+    let default_policy = crate::entities::config::default_engines_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    for (entity, sources, entity_uuid, ship_config, engines_policy, mut admitted) in
+        ships.iter_mut()
+    {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
             .0
@@ -1053,6 +1103,22 @@ pub(crate) fn ai_helm_thrust(
         let Some(sp) = plan.ships.get(&entity) else {
             continue;
         };
+        // Resolve the data-authored #779 Engines policy's `longitudinal` mode
+        // verb to decide WHETHER to actuate this tick. The stateless policy is a
+        // pure fact→mode map; the continuous magnitude below still comes from
+        // the planner fact, so no geometry lives in the policy (AGENTS.md #11).
+        // A "hold" resolution (no rule fires / explicit idle) emits nothing and
+        // the throttle coasts on its last input.
+        let policy = engines_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        let facts = crate::world::flags::AiFacts::new();
+        if !helm_policy_actuates(
+            policy,
+            crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
+            &facts,
+            &crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
+        ) {
+            continue;
+        }
         let thrust =
             crate::ai::decode_thrust_from_velocity(sp.motion.desired_velocity_local.to_array());
 
@@ -1092,14 +1158,28 @@ pub(crate) fn ai_helm_steering(
             &ShipPhysics,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&HelmSteeringAiPolicy>,
             Option<&mut PendingArcBearingRequest>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    for (entity, sources, physics, entity_uuid, ship_config, mut pending_bearing, mut admitted) in
-        ships.iter_mut()
+    // Canonical fallback for ships missing an attached policy (bare-`App`
+    // fixtures); built once per tick — mirrors `ai_helm_thrust`.
+    let default_policy = crate::entities::config::default_steering_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    for (
+        entity,
+        sources,
+        physics,
+        entity_uuid,
+        ship_config,
+        steering_policy,
+        mut pending_bearing,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
@@ -1117,6 +1197,21 @@ pub(crate) fn ai_helm_steering(
         let (Some(sp), Some(sf)) = (plan.ships.get(&entity), frame.ships.get(&entity)) else {
             continue;
         };
+
+        // Resolve the data-authored #779 Steering policy's `yaw` mode verb to
+        // decide WHETHER to actuate this tick (see `ai_helm_thrust` for the
+        // mode-verb rationale). "Hold" emits nothing and yaw coasts on its last
+        // input — including any pending arc-bearing this axis owns.
+        let policy = steering_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        let facts = crate::world::flags::AiFacts::new();
+        if !helm_policy_actuates(
+            policy,
+            crate::entities::config::HELM_YAW_CHANNEL,
+            &facts,
+            &crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+        ) {
+            continue;
+        }
 
         let mut steering =
             crate::ai::decode_steering_from_facing(sp.motion.desired_facing_local.to_array());
@@ -2086,6 +2181,203 @@ mod tests {
         // this test. #702 made `operate_helm` pure, so there is no commit to
         // observe and no half-dead-AI failure mode to guard: a system that runs
         // computes its axis from the shared surfaces and writes it, full stop.
+    }
+
+    // ── #779: data-authored Engines/Steering policy spine ────────────────────
+
+    /// Attach an authored Engines policy to the ship (overriding the spawn
+    /// default the hosts fall back to).
+    fn attach_engines_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
+        let ship = find_ship_entity(app);
+        let policy = cfg.to_policy().expect("engines policy resolves");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(HelmEnginesAiPolicy(policy));
+    }
+
+    /// Attach an authored Steering policy to the ship.
+    fn attach_steering_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
+        let ship = find_ship_entity(app);
+        let policy = cfg.to_policy().expect("steering policy resolves");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(HelmSteeringAiPolicy(policy));
+    }
+
+    /// AC1/AC3/AC4: with the canonical default Engines *and* Steering policies
+    /// explicitly attached — the same policies spawn synthesises — a Reach
+    /// objective produces both actuator inputs and drives the ship toward its
+    /// destination. The DECISION to actuate now flows through the resolved mode
+    /// verb; the continuous magnitude still comes from the planner.
+    #[test]
+    fn authored_default_policy_actuates_travel_toward_reach_anchor() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        // Anchor off the starboard bow so both axes must engage.
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+        attach_engines_policy(&mut app, crate::entity_config::default_engines_ai_config());
+        attach_steering_policy(&mut app, crate::entity_config::default_steering_ai_config());
+
+        tick(&mut app);
+
+        assert!(
+            get_thrust_input(&mut app) > 0.0,
+            "the authored Engines policy resolving `actuate_desired_travel` must emit forward SetThrust"
+        );
+        assert!(
+            get_steering_input(&mut app) > 0.0,
+            "the authored Steering policy resolving `actuate_desired_facing` must emit SetSteering toward the starboard anchor"
+        );
+
+        // AC4: the ship actually closes on its destination — several ticks of
+        // forward travel build speed and move it downrange through the shared
+        // actuator path (not a coarse direct write).
+        let start = get_ship_physics(&mut app);
+        for _ in 0..30 {
+            tick(&mut app);
+        }
+        let end = get_ship_physics(&mut app);
+        assert!(
+            end.forward_speed > 0.0,
+            "the ship must build forward speed under the authored policy; got {end:?}"
+        );
+        let moved = ((end.x - start.x).powi(2) + (end.z - start.z).powi(2)).sqrt();
+        assert!(
+            moved > 0.0,
+            "the ship must make positional progress toward its Reach destination; \
+             start=({},{}) end=({},{})",
+            start.x,
+            start.z,
+            end.x,
+            end.z
+        );
+    }
+
+    /// AC1: the policy is a real gate, not decoration. An Engines policy whose
+    /// only rule never fires (`when = false`) resolves to "hold" on the
+    /// `longitudinal` channel, so `ai_helm_thrust` emits nothing even though the
+    /// Reach objective and the planner both want forward travel — while an
+    /// unchanged default Steering policy still turns the ship. This is the seam
+    /// #794 will exploit to retire the hardcoded planner branch.
+    #[test]
+    fn engines_policy_that_never_fires_holds_thrust_but_not_steering() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+
+        let hold = crate::entity_config::FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![crate::entity_config::FineSystemAiRuleToml {
+                priority: 0,
+                channel: crate::entity_config::HELM_LONGITUDINAL_CHANNEL.into(),
+                when: "false".into(),
+                verb: crate::entity_config::HELM_ACTUATE_DESIRED_TRAVEL_VERB.into(),
+                value: false,
+            }],
+        };
+        attach_engines_policy(&mut app, hold);
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_thrust_input(&mut app),
+            0.0,
+            "an Engines policy whose guard never fires must hold thrust: no SetThrust emitted"
+        );
+        assert!(
+            get_steering_input(&mut app) > 0.0,
+            "Steering is independently authored and still actuates — the two systems are separable"
+        );
+    }
+
+    /// AC1 mirror on the yaw axis: an explicit-idle Steering policy holds the
+    /// facing while the default Engines policy still throttles.
+    #[test]
+    fn idle_steering_policy_holds_yaw_but_not_thrust() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+        attach_steering_policy(
+            &mut app,
+            crate::entity_config::FineSystemAiConfigToml {
+                idle: true,
+                ..Default::default()
+            },
+        );
+
+        tick(&mut app);
+
+        assert_eq!(
+            get_steering_input(&mut app),
+            0.0,
+            "an idle Steering policy resolves no verb → yaw holds, no SetSteering emitted"
+        );
+        assert!(
+            get_thrust_input(&mut app) > 0.0,
+            "the default Engines policy still actuates travel"
+        );
+    }
+
+    /// AC6: human takeover preserves input authority, and Backfill reacquisition
+    /// restores AI actuation without any lifecycle carry-over (the policy is
+    /// stateless, so reacquisition is a clean resolve, not a resumed machine).
+    /// Under the same authored default policy throughout, the emit tracks the
+    /// per-axis control source tick to tick.
+    #[test]
+    fn human_takeover_and_backfill_reacquisition_track_input_authority() {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        attach_engines_policy(&mut app, crate::entity_config::default_engines_ai_config());
+        attach_steering_policy(&mut app, crate::entity_config::default_steering_ai_config());
+
+        // Backfill: both axes AI → the policy actuates.
+        set_per_axis_helm_ai(&mut app);
+        tick(&mut app);
+        assert!(
+            get_thrust_input(&mut app) > 0.0 && get_steering_input(&mut app) > 0.0,
+            "AI-operated axes under the authored policy must actuate"
+        );
+
+        // Human takeover: both axes handed back to a human. The AI hosts must
+        // not write the intent — input authority is the human's.
+        set_helm_control_source(&mut app, ControlSource::Human);
+        // The intent components retain their last value; zero them so a stale
+        // read cannot masquerade as a fresh AI write, then confirm the AI leaves
+        // them at zero.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship::helm::ThrustInput::default(),
+            crate::ship::helm::SteeringInput::default(),
+        ));
+        tick(&mut app);
+        assert_eq!(
+            get_thrust_input(&mut app),
+            0.0,
+            "under human takeover the AI Engines host must not write thrust"
+        );
+        assert_eq!(
+            get_steering_input(&mut app),
+            0.0,
+            "under human takeover the AI Steering host must not write yaw"
+        );
+
+        // Backfill reacquisition: hand the axes back to AI. The stateless policy
+        // resolves cleanly and actuation resumes the same tick — no reset needed.
+        set_per_axis_helm_ai(&mut app);
+        tick(&mut app);
+        assert!(
+            get_thrust_input(&mut app) > 0.0 && get_steering_input(&mut app) > 0.0,
+            "reacquired AI axes must re-actuate immediately under the same stateless policy"
+        );
     }
 
     /// Regression (issue #701 review, finding 1): `ai_helm_thrust` and

@@ -807,6 +807,19 @@ pub struct HelmConsoleConfig {
     /// When absent, ShipPhysicsConfig defaults are used.
     #[serde(default)]
     pub lateral_thrust: Option<LateralThrustConfig>,
+    /// Inline stateless AI policy for the **Engines** (longitudinal thrust)
+    /// fine system, from `[helm_console.engines_ai]` (issue #779). Absent ⇒ the
+    /// canonical [`default_engines_ai_config`] (unconditional actuate) is
+    /// synthesised at spawn. Drives the `longitudinal` channel with the
+    /// `actuate_desired_travel` mode verb.
+    #[serde(default)]
+    pub engines_ai: Option<FineSystemAiConfigToml>,
+    /// Inline stateless AI policy for the **Steering** (yaw) fine system, from
+    /// `[helm_console.steering_ai]` (issue #779). Absent ⇒ the canonical
+    /// [`default_steering_ai_config`] is synthesised at spawn. Drives the `yaw`
+    /// channel with the `actuate_desired_facing` mode verb.
+    #[serde(default)]
+    pub steering_ai: Option<FineSystemAiConfigToml>,
 }
 
 /// What vertical movement capability the ship has.
@@ -1625,6 +1638,28 @@ pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
 /// The `set_red_alert` verb: the one typed verb the Captain policy emits.
 pub const CAPTAIN_SET_RED_ALERT_VERB: &str = "set_red_alert";
 
+// ── Helm fine-system AI policy channels/verbs (issue #779) ────────────────────
+//
+// Engines and Steering are the first *continuous* fine actuators to move onto
+// the data-authored #775 policy spine. Each drives a single output channel with
+// a single value-less **mode** verb: the verb decides *whether* to actuate this
+// tick, while the continuous thrust/yaw magnitude stays sourced from the shared
+// `DesiredMotion` planner fact (AGENTS.md rule #11 — no geometry pinned here).
+
+/// The `longitudinal` output channel: the Engines fine system's thrust axis.
+pub const HELM_LONGITUDINAL_CHANNEL: &str = "longitudinal";
+/// The `actuate_desired_travel` verb: the Engines mode verb. Its presence tells
+/// the host to emit `SetThrust` with the scalar decoded from the planner's
+/// `desired_velocity_local`; its absence ("hold") emits nothing.
+pub const HELM_ACTUATE_DESIRED_TRAVEL_VERB: &str = "actuate_desired_travel";
+
+/// The `yaw` output channel: the Steering fine system's turn axis.
+pub const HELM_YAW_CHANNEL: &str = "yaw";
+/// The `actuate_desired_facing` verb: the Steering mode verb. Its presence tells
+/// the host to emit `SetSteering` with the scalar decoded from the planner's
+/// `desired_facing_local`; its absence ("hold") emits nothing.
+pub const HELM_ACTUATE_DESIRED_FACING_VERB: &str = "actuate_desired_facing";
+
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
 /// Candidate source: the ship's frozen combat lock (Tactical's designated
@@ -2120,6 +2155,15 @@ impl FineSystemAiConfigToml {
             let when = crate::world::flags::parse_predicate(&r.when)?;
             let verb = match r.verb.as_str() {
                 CAPTAIN_SET_RED_ALERT_VERB => crate::ai::policy::AiPolicyVerb::SetRedAlert(r.value),
+                // Helm continuous-actuator mode verbs (issue #779): value-less;
+                // the `value` field is ignored — the magnitude lives in the
+                // planner fact, not the policy.
+                HELM_ACTUATE_DESIRED_TRAVEL_VERB => {
+                    crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
+                }
+                HELM_ACTUATE_DESIRED_FACING_VERB => {
+                    crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
+                }
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2169,6 +2213,47 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 value: false,
             },
         ],
+    }
+}
+
+/// The canonical default Engines (longitudinal thrust) policy synthesised for
+/// ships that do not author `[helm_console.engines_ai]` (issue #779).
+///
+/// One unconditional rule on the `longitudinal` channel: always actuate the
+/// planner's desired travel. This reproduces the pre-#779 behaviour, where
+/// `ai_helm_thrust` emitted `SetThrust` every tick — but now the *decision* to
+/// actuate flows through a data-authored policy verb a designer can gate, rather
+/// than a hardcoded unconditional branch. The continuous magnitude still comes
+/// from `DesiredMotion`, so no thrust value is pinned in Rust.
+pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_LONGITUDINAL_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ACTUATE_DESIRED_TRAVEL_VERB.to_string(),
+            value: false,
+        }],
+    }
+}
+
+/// The canonical default Steering (yaw) policy synthesised for ships that do
+/// not author `[helm_console.steering_ai]` (issue #779). Mirror of
+/// [`default_engines_ai_config`] on the `yaw` channel: always actuate the
+/// planner's desired facing.
+pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_YAW_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ACTUATE_DESIRED_FACING_VERB.to_string(),
+            value: false,
+        }],
     }
 }
 
@@ -3160,6 +3245,31 @@ impl EntityConfig {
                 &[CAPTAIN_SET_RED_ALERT_VERB],
             )
             .map_err(SerdeError::custom)?;
+        }
+
+        // Validate authored inline Engines/Steering AI policies before world
+        // activation (issue #779). These are the first continuous fine
+        // actuators on the #775 spine: Engines drives the `longitudinal`
+        // channel, Steering the `yaw` channel, each with its own single mode
+        // verb. Unknown channels/verbs, unparseable guards, and undeclared
+        // parameter references fail the entity load here, before any live tick.
+        if let Some(hc) = config.helm_console.as_ref() {
+            if let Some(ai) = hc.engines_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_LONGITUDINAL_CHANNEL],
+                    &[HELM_ACTUATE_DESIRED_TRAVEL_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
+            if let Some(ai) = hc.steering_ai.as_ref() {
+                validate_fine_system_ai_policy(
+                    ai,
+                    &[HELM_YAW_CHANNEL],
+                    &[HELM_ACTUATE_DESIRED_FACING_VERB],
+                )
+                .map_err(SerdeError::custom)?;
+            }
         }
 
         // Validate an authored inline Sensors target selector before world
@@ -6250,6 +6360,140 @@ value = true
             }],
         };
         assert!(cfg.to_policy().is_err());
+    }
+
+    // ── Helm Engines/Steering AI policy (issue #779) ─────────────────────────
+
+    const ENGINES_CHANNELS: &[&str] = &[HELM_LONGITUDINAL_CHANNEL];
+    const ENGINES_VERBS: &[&str] = &[HELM_ACTUATE_DESIRED_TRAVEL_VERB];
+    const STEERING_CHANNELS: &[&str] = &[HELM_YAW_CHANNEL];
+    const STEERING_VERBS: &[&str] = &[HELM_ACTUATE_DESIRED_FACING_VERB];
+
+    #[test]
+    fn default_helm_policies_validate_and_resolve() {
+        let eng = default_engines_ai_config();
+        assert!(validate_fine_system_ai_policy(&eng, ENGINES_CHANNELS, ENGINES_VERBS).is_ok());
+        let eng_policy = eng.to_policy().expect("engines policy resolves");
+        assert_eq!(
+            eng_policy.resolve_channel(
+                HELM_LONGITUDINAL_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel),
+            "the default Engines policy actuates desired travel unconditionally"
+        );
+
+        let steer = default_steering_ai_config();
+        assert!(validate_fine_system_ai_policy(&steer, STEERING_CHANNELS, STEERING_VERBS).is_ok());
+        let steer_policy = steer.to_policy().expect("steering policy resolves");
+        assert_eq!(
+            steer_policy.resolve_channel(
+                HELM_YAW_CHANNEL,
+                &crate::world::flags::AiFacts::new(),
+                &[]
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing),
+        );
+    }
+
+    #[test]
+    fn authored_helm_policies_parse_and_resolve_to_typed_policy() {
+        let toml = r#"
+name = "Test Cruiser"
+
+[helm_console]
+max_speed = 30.0
+
+[helm_console.engines_ai]
+param = { arrival_radius = 5.0 }
+
+[[helm_console.engines_ai.rule]]
+priority = 10
+channel = "longitudinal"
+when = "fact(distance_to_dest) > param(arrival_radius)"
+verb = "actuate_desired_travel"
+
+[helm_console.steering_ai]
+idle = true
+"#;
+        let cfg = EntityConfig::from_toml(toml).expect("parse must succeed");
+        let hc = cfg.helm_console.as_ref().expect("helm_console present");
+        let engines = hc.engines_ai.as_ref().expect("engines_ai present");
+        assert_eq!(engines.param.get("arrival_radius"), Some(&5.0));
+        let engines_policy = engines.to_policy().expect("engines policy resolves");
+        assert_eq!(engines_policy.rules.len(), 1);
+        // An explicit idle Steering policy is a legal declaration (a ship whose
+        // Steering never AI-actuates), distinct from silence.
+        let steering = hc.steering_ai.as_ref().expect("steering_ai present");
+        assert!(steering.to_policy().expect("steering resolves").idle);
+    }
+
+    #[test]
+    fn unknown_helm_engines_verb_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: HELM_LONGITUDINAL_CHANNEL.into(),
+                // The Steering verb on the Engines channel is unknown here.
+                verb: HELM_ACTUATE_DESIRED_FACING_VERB.into(),
+                when: "true".into(),
+                value: false,
+            }],
+        };
+        let err =
+            validate_fine_system_ai_policy(&cfg, ENGINES_CHANNELS, ENGINES_VERBS).unwrap_err();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn helm_wrong_channel_is_rejected() {
+        // The Captain's `red_alert` channel is not a valid Steering channel.
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: Default::default(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 1,
+                channel: CAPTAIN_RED_ALERT_CHANNEL.into(),
+                verb: HELM_ACTUATE_DESIRED_FACING_VERB.into(),
+                when: "true".into(),
+                value: false,
+            }],
+        };
+        let err =
+            validate_fine_system_ai_policy(&cfg, STEERING_CHANNELS, STEERING_VERBS).unwrap_err();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_helm_verb_rejected_at_entity_load() {
+        let toml = r#"
+name = "BadHelm"
+[helm_console]
+max_speed = 30.0
+[helm_console.engines_ai]
+[[helm_console.engines_ai.rule]]
+priority = 1
+channel = "longitudinal"
+when = "true"
+verb = "warp_speed"
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn empty_helm_engines_declaration_is_rejected_as_silence() {
+        let toml = r#"
+name = "SilentHelm"
+[helm_console]
+max_speed = 30.0
+[helm_console.engines_ai]
+"#;
+        let err = EntityConfig::from_toml(toml).unwrap_err().to_string();
+        assert!(err.contains("empty") || err.contains("idle"), "got: {err}");
     }
 
     // ── Sensors target selector schema + validation (issue #776) ─────────────

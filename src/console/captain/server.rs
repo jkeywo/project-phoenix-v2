@@ -275,8 +275,13 @@ fn operate_captain_ai(
                 &facts,
                 &[],
             )
-            .map(|verb| match verb {
-                crate::ai::policy::AiPolicyVerb::SetRedAlert(b) => *b,
+            .and_then(|verb| match verb {
+                crate::ai::policy::AiPolicyVerb::SetRedAlert(b) => Some(*b),
+                // The Captain drives only the `red_alert` channel; helm
+                // continuous-actuator mode verbs (issue #779) never resolve on
+                // it, but the match must stay exhaustive.
+                crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
+                | crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing => None,
             });
 
         if let Some(should_be_red_alert) = should_be_red_alert {

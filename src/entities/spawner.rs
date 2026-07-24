@@ -549,6 +549,37 @@ pub fn spawn_entity(
                 .unwrap_or_default(),
         };
         entity_commands.insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
+        // Helm Engines/Steering AI policies (issue #779) — the inline stateless
+        // longitudinal/yaw policies from `[helm_console.engines_ai]` /
+        // `[helm_console.steering_ai]` if authored, else the canonical defaults.
+        // Attached to every ship so `ai_helm_thrust`/`ai_helm_steering` resolve a
+        // data-authored mode verb rather than actuating unconditionally.
+        // `to_policy` cannot fail here: both blocks were validated in
+        // `EntityConfig::from_toml`.
+        let engines_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.engines_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_engines_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmEnginesAiPolicy(engines_ai_policy));
+        let steering_ai_policy = match config
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.steering_ai.as_ref())
+        {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_steering_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
+        };
+        entity_commands.insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
+            steering_ai_policy,
+        ));
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and

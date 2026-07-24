@@ -818,6 +818,7 @@ entities:
         - "Issue #824 (admission symmetry): the per-axis systems no longer write intent components directly. Each emits SetThrust / SetSteering / StartImpulseCharge / CancelImpulse through the shared command_admission::validate_and_admit seam using its ship's own ai:<uuid> token (AiTokenRegistry-registered for NPCs; a synthetic ai: token for the backfilled player ship), validated against that entity's own ControlSourceResolver. The write into the per-entity AdmittedCommands is direct and same-tick — not a round-trip through the inbound queue, which would add a one-tick lag to every NPC trajectory. Ship-aware admit_system_commands applies the same seam to network ai: tokens, resolving them through AiTokenRegistry to the owning entity's AdmittedCommands."
         - Helm AI does not synthesize human helm messages in the shipped code path.
         - This is a temporary implementation shape relative to the intended design, where fine helm systems should read a shared desired-motion surface and set the same typed actuator inputs a player can set, according to capability.
+        - "Issue #779 began that transition for the travel axes: ai_helm_thrust / ai_helm_steering now resolve a data-authored #775 policy verb catalogue (helm-engines-ai-operator / helm-steering-ai-operator) to decide WHETHER to actuate, with the continuous magnitude still sourced from the shared DesiredMotion planner fact. The plan_helm_travel geometry is unchanged here; retiring the hardcoded planner branch entirely is the coordinated tail #794."
         - "Issue #801 completed the per-axis split: each system gates on its own declared helm-thrust / helm-steering / helm-impulse system's operate_ai policy. The dead coarse helm fallbacks and helm_control_policy are deleted; a whole-helm judgement (e.g. arc-bearing) derives from the per-axis declarations via helm_axes_operate_ai, never from a coarse system."
         - "Issue #803 decoupled the decision cadence from the host frame rate: all per-axis AI helm systems run only on the shared AI-helm sim tick (see ai-helm-tick-cadence), a determinism prerequisite for P2P lockstep (PRD #620)."
     architecture:
@@ -967,7 +968,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Engines AI Operator
-      summary: Fine-system operator that converts shared actuator input into forward or reverse thrust, slowing for arrival and collision avoidance according to ship capability and sensitivity.
+      summary: Data-authored #775 fine system whose stateless policy resolves a longitudinal-channel mode verb (actuate_desired_travel) to decide whether to actuate this tick; when it fires, the host emits SetThrust with the continuous magnitude decoded from the shared DesiredMotion planner fact, slowing for arrival and collision avoidance according to ship capability.
+      rationale:
+        - "Issue #779 (AC1): Engines is the first continuous fine actuator moved onto the authored #775 policy spine. The DECISION to actuate flows through HelmEnginesAiPolicy (attached at spawn from [helm_console.engines_ai], else default_engines_ai_config) resolving the longitudinal channel to the actuate_desired_travel mode verb, replacing the pre-#779 unconditional hardcoded branch in ai_helm_thrust."
+        - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar. The forward/reverse magnitude stays sourced from DesiredMotion.desired_velocity_local, decoded by decode_thrust_from_velocity, so no geometry lives in the Bevy-free policy. A 'hold' resolution (no rule fires / explicit idle) emits nothing and the throttle coasts."
+        - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetThrust a human sets, through emit_helm_ai_command; the per-axis operate_ai gate preserves human-takeover / backfill authority. Policy is stateless, so reacquisition needs no lifecycle reset."
+        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794 (see legacy-ai-doctrine-retirement)."
     architecture:
       kind: service
       authority: authoritative
@@ -975,6 +981,7 @@ entities:
         - helm-actuator-input-state
         - hazard-assessment-state
         - impulse-manoeuvre-policy-state
+        - desired-motion-state
       writes:
         - authoritative-ship-motion-state
       runs_in:
@@ -985,8 +992,14 @@ entities:
         - src/ship/helm_ai.rs
         - src/ship/physics_systems.rs
         - src/ai/core.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
       symbols:
         - ai_helm_thrust
+        - HelmEnginesAiPolicy
+        - HELM_LONGITUDINAL_CHANNEL
+        - HELM_ACTUATE_DESIRED_TRAVEL_VERB
+        - default_engines_ai_config
         - decode_thrust_from_velocity
         - integrate_ship_physics
       tests:
@@ -997,7 +1010,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Steering AI Operator
-      summary: Fine-system operator that converts shared actuator input and desired facing into ship rotation, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
+      summary: Data-authored #775 fine system whose stateless policy resolves a yaw-channel mode verb (actuate_desired_facing) to decide whether to actuate this tick; when it fires, the host emits SetSteering with the continuous magnitude decoded from the shared DesiredMotion desired-facing fact, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
+      rationale:
+        - "Issue #779 (AC1): Steering is authored independently of Engines. The DECISION to actuate flows through HelmSteeringAiPolicy (attached at spawn from [helm_console.steering_ai], else default_steering_ai_config) resolving the yaw channel to the actuate_desired_facing mode verb, replacing the pre-#779 unconditional branch in ai_helm_steering. Arc-bearing remains a facing override this axis owns on top."
+        - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar; the yaw magnitude stays sourced from DesiredMotion.desired_facing_local, decoded by decode_steering_from_facing. desired_facing_local stays a distinct public fact from desired_velocity_local (AC5). A 'hold' resolution emits nothing and yaw coasts."
+        - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
+        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
       kind: service
       authority: authoritative
@@ -1015,8 +1033,14 @@ entities:
         - src/ship/helm_ai.rs
         - src/ship/physics_systems.rs
         - src/ai/core.rs
+        - src/ai/policy.rs
+        - src/entities/config.rs
       symbols:
         - ai_helm_steering
+        - HelmSteeringAiPolicy
+        - HELM_YAW_CHANNEL
+        - HELM_ACTUATE_DESIRED_FACING_VERB
+        - default_steering_ai_config
         - decode_steering_from_facing
         - integrate_ship_physics
       tests:

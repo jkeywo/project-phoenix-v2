@@ -10,6 +10,8 @@ entities:
         - Stateless systems should not acquire artificial lifecycle states merely to use the common evaluator.
         - Designer-tunable behaviour values belong in entity TOML rather than Rust branches or hidden runtime defaults.
         - Reusable behaviour fragments may compose into entity TOML before validation, but the runtime receives only the owning system's fully resolved inline policy.
+        - "Issue #775 shipped the Captain schema slice: [captain_console.ai] with the red_alert boolean channel and set_red_alert verb, plus explicit idle and canonical-default synthesis (default_captain_ai_config)."
+        - "Issue #779 extended the schema to the Helm travel axes: [helm_console.engines_ai] (longitudinal channel, actuate_desired_travel verb) and [helm_console.steering_ai] (yaw channel, actuate_desired_facing verb), each with idle/canonical-default synthesis (default_engines_ai_config / default_steering_ai_config). These are value-less MODE verbs — the FineSystemAiRuleToml value field is ignored because the continuous thrust/yaw magnitude lives in the DesiredMotion planner fact, never in the authored payload."
     architecture:
       kind: configuration-schema
       authority: authoritative
@@ -107,6 +109,8 @@ entities:
         - All fine systems must observe one consistent tick snapshot rather than partially applied decisions from earlier systems.
         - Typed verbs restricted by system kind preserve AI and human input symmetry and prevent arbitrary simulation writes.
         - Resolving the highest-priority matching rule per channel keeps each tick's decision a pure function of the snapshot with no retained policy state.
+        - "Issue #775 landed the runtime with Captain Red Alert as the first host (operate_captain_ai resolving the boolean red_alert channel to the set_red_alert verb)."
+        - "Issue #779 added the Helm travel axes as the first CONTINUOUS-actuator hosts. Engines (ai_helm_thrust, longitudinal channel, actuate_desired_travel verb) and Steering (ai_helm_steering, yaw channel, actuate_desired_facing verb) are authored independently via HelmEnginesAiPolicy / HelmSteeringAiPolicy. Because thrust/yaw are continuous geometry values, not fixed payloads, the policy verbs are value-less MODE verbs: resolve_channel selects whether to actuate this tick, and the host reads the continuous magnitude from the shared DesiredMotion planner fact (decode_thrust_from_velocity / decode_steering_from_facing). A None resolution means 'hold' — no command emitted. This keeps src/ai/policy.rs Bevy-free with no geometry and no state machine. They run on the shared ai_helm_tick cadence (see ai-policy-tick-scheduler)."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -115,12 +119,13 @@ entities:
         - ship-station-system-topology-state
         - ship-system-blackboards-state
         - world-snapshot-state
+        - desired-motion-state
       sends: [system-control-command]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/ai/policy.rs, src/world/flags.rs]
-      symbols: [operate_captain_ai, resolve_channel, evaluate_with]
+      paths: [src/console/captain/server.rs, src/ship/helm_ai.rs, src/ai/policy.rs, src/world/flags.rs]
+      symbols: [operate_captain_ai, ai_helm_thrust, ai_helm_steering, HelmEnginesAiPolicy, HelmSteeringAiPolicy, resolve_channel, evaluate_with]
       tests: [cargo test]
 
   - component: ai-policy-tick-scheduler
@@ -149,6 +154,7 @@ entities:
       rationale:
         - Missing policies, contradictory idle declarations, invalid references, and forbidden outputs are deterministic content errors.
         - Validating expressions, channels, verbs, and parameters up front keeps authored content errors out of the live tick loop.
+        - "The single validate_fine_system_ai_policy(cfg, valid_channels, valid_verbs) checker is reused per host with that host's channel/verb constants: Captain (#775) passes red_alert/set_red_alert; Engines (#779) passes longitudinal/actuate_desired_travel and Steering passes yaw/actuate_desired_facing. Authoring the wrong axis's verb on a channel, or an unknown helm verb, fails the entity load in EntityConfig::from_toml before any live tick."
     architecture:
       kind: configuration-validator
       authority: authoritative
@@ -158,7 +164,7 @@ entities:
     implementation:
       status: declared
       paths: [src/entities/config.rs]
-      symbols: [validate_fine_system_ai_policy, validate_fine_system_ai_selector]
+      symbols: [validate_fine_system_ai_policy, validate_fine_system_ai_selector, HELM_LONGITUDINAL_CHANNEL, HELM_ACTUATE_DESIRED_TRAVEL_VERB, HELM_YAW_CHANNEL, HELM_ACTUATE_DESIRED_FACING_VERB]
       tests: [cargo test]
 
   - component: legacy-ai-doctrine-retirement
@@ -170,6 +176,7 @@ entities:
       rationale:
         - Combat Test behaviour must exercise the same authoring model as all other AI rather than becoming a scenario-specific code path.
         - Maintaining two AI policy formats would split authority and make behaviour difficult to audit.
+        - "Issue #779 migrated the Helm Engines and Steering travel axes as the first fine systems whose ACTUATION DECISION flows through an authored policy verb (helm-engines-ai-operator / helm-steering-ai-operator). The continuous-value geometry in plan_helm_travel (arrival/avoidance/arc-bearing) is deliberately NOT removed here — the mode verb only decides whether to actuate; the planner remains the single source of the continuous target. Retiring the hardcoded plan_helm_travel decision branch entirely is the coordinated tail #794, so this component stays proposed."
     architecture:
       kind: migration-policy
       authority: authoritative

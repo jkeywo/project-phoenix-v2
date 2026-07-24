@@ -19,10 +19,33 @@ use crate::world::flags::{AiFacts, AiParams, FlagStore, Predicate};
 /// Verbs are restricted to a closed set per system kind so AI output stays on
 /// the same admitted-command path a human uses (AGENTS.md rule #6). The
 /// stateless Captain Red Alert slice needs exactly one verb.
+///
+/// ## Mode verbs for continuous actuators (issue #779)
+///
+/// The Helm's Engines and Steering are *continuous* actuators: the scalar
+/// thrust/yaw comes from geometry (`DesiredMotion.desired_velocity_local` /
+/// `desired_facing_local`, computed by the planner), not from a fixed payload a
+/// designer can author. Putting that scalar in the verb would duplicate the
+/// planner and smuggle geometry into this Bevy-free policy module. Instead the
+/// policy selects a reactive *mode* per channel — a value-less verb that says
+/// *whether* to actuate this tick — and the host reads the continuous magnitude
+/// from the planner fact when the mode says "actuate". `resolve_channel`
+/// returning `None` (no rule fired, or an explicit idle) means "hold": the host
+/// emits nothing and the actuator coasts on its last input.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AiPolicyVerb {
     /// Drive the ship's Red Alert to `active` (the `red_alert` channel).
     SetRedAlert(bool),
+    /// Actuate the planner's desired longitudinal travel this tick (the
+    /// `longitudinal` channel of the Engines fine system). A mode verb: the
+    /// continuous forward/reverse magnitude is decoded from the shared
+    /// `DesiredMotion.desired_velocity_local`, not carried here.
+    ActuateDesiredTravel,
+    /// Actuate the planner's desired facing this tick (the `yaw` channel of the
+    /// Steering fine system). A mode verb: the continuous yaw magnitude is
+    /// decoded from the shared `DesiredMotion.desired_facing_local`, not carried
+    /// here.
+    ActuateDesiredFacing,
 }
 
 /// One inline stateless policy rule.
@@ -161,6 +184,72 @@ mod tests {
         let p = combat_window_policy();
         assert_eq!(
             p.resolve_channel("shields", &facts_since_combat(1.0), &[]),
+            None
+        );
+    }
+
+    // ── Helm continuous-actuator mode verbs (issue #779) ─────────────────────
+
+    /// A ship-idle helm policy: an authored guard can hold the actuator by not
+    /// firing on its channel, distinct from an unconditional "always actuate".
+    fn engines_hold_when_arrived_policy() -> AiPolicy {
+        let mut params = AiParams::new();
+        params.set("arrival_radius", 5.0);
+        AiPolicy {
+            params,
+            rules: vec![AiPolicyRule {
+                // Actuate only while farther than the arrival radius; inside it
+                // no rule fires, so the channel resolves to None ("hold").
+                priority: 10,
+                channel: "longitudinal".into(),
+                when: parse_predicate("fact(distance_to_dest) > param(arrival_radius)").unwrap(),
+                verb: AiPolicyVerb::ActuateDesiredTravel,
+            }],
+            idle: false,
+        }
+    }
+
+    #[test]
+    fn longitudinal_mode_verb_resolves_when_guard_fires() {
+        let p = engines_hold_when_arrived_policy();
+        let mut facts = AiFacts::new();
+        facts.set("distance_to_dest", 100.0);
+        assert_eq!(
+            p.resolve_channel("longitudinal", &facts, &[]),
+            Some(&AiPolicyVerb::ActuateDesiredTravel),
+        );
+    }
+
+    #[test]
+    fn longitudinal_channel_holds_when_no_rule_fires() {
+        let p = engines_hold_when_arrived_policy();
+        let mut facts = AiFacts::new();
+        facts.set("distance_to_dest", 1.0);
+        // Inside the arrival radius nothing fires → hold (None), NOT an idle
+        // policy and NOT a scalar-zero verb.
+        assert_eq!(p.resolve_channel("longitudinal", &facts, &[]), None);
+    }
+
+    #[test]
+    fn yaw_channel_resolves_its_own_mode_verb_independently() {
+        // Engines and Steering are independent systems: a policy authored for
+        // one channel resolves nothing on the other.
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "yaw".into(),
+                when: parse_predicate("true").unwrap(),
+                verb: AiPolicyVerb::ActuateDesiredFacing,
+            }],
+            idle: false,
+        };
+        assert_eq!(
+            p.resolve_channel("yaw", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::ActuateDesiredFacing),
+        );
+        assert_eq!(
+            p.resolve_channel("longitudinal", &AiFacts::new(), &[]),
             None
         );
     }

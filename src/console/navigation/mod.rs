@@ -2034,4 +2034,94 @@ mod tests {
             "Human Navigation must not operate AI"
         );
     }
+
+    // ── Host teleport-to-waypoint override (issue #770) ────────────────────
+    //
+    // These exercise the host-only debug override against a real LocalShip
+    // entity: the query shape mirrors `drain_teleport_to_waypoint` (which is
+    // wasm-gated and so cannot run under native `cargo test`), and the move
+    // itself goes through the pure, testable `apply_teleport_to_waypoint`.
+
+    /// The teleport override snaps the LocalShip's authoritative planar position
+    /// onto the shared waypoint while leaving its altitude unchanged, and the
+    /// existence predicate the disable-gate reads is `Some` while a waypoint is
+    /// set.
+    #[test]
+    fn host_teleport_moves_local_ship_to_waypoint() {
+        use crate::server::bridge::apply_teleport_to_waypoint;
+
+        let mut world = World::new();
+        let ship = world
+            .spawn((
+                crate::server_app::LocalShip,
+                crate::ship_state::ShipPhysics {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                    ..Default::default()
+                },
+                NavigationWaypoint::new(WaypointMode::Free { x: 111.0, z: 222.0 }),
+            ))
+            .id();
+
+        // Existence predicate (AC2) — a waypoint is set.
+        assert!(world
+            .get::<NavigationWaypoint>(ship)
+            .unwrap()
+            .mode()
+            .is_some());
+
+        // Mirror `drain_teleport_to_waypoint`'s query + apply.
+        let mut q = world.query_filtered::<(
+            &mut crate::ship_state::ShipPhysics,
+            &NavigationWaypoint,
+        ), With<crate::server_app::LocalShip>>();
+        for (mut physics, waypoint) in q.iter_mut(&mut world) {
+            assert!(apply_teleport_to_waypoint(&mut physics, waypoint));
+        }
+
+        let physics = world.get::<crate::ship_state::ShipPhysics>(ship).unwrap();
+        assert_eq!(physics.x, 111.0);
+        assert_eq!(physics.z, 222.0);
+        assert_eq!(physics.y, 5.0, "altitude must be preserved");
+    }
+
+    /// With no waypoint the existence predicate reads `None` (the panel disables
+    /// the control) and the teleport apply is a no-op.
+    #[test]
+    fn host_teleport_disabled_and_noop_without_waypoint() {
+        use crate::server::bridge::apply_teleport_to_waypoint;
+
+        let mut world = World::new();
+        let ship = world
+            .spawn((
+                crate::server_app::LocalShip,
+                crate::ship_state::ShipPhysics {
+                    x: 3.0,
+                    y: 1.0,
+                    z: 4.0,
+                    ..Default::default()
+                },
+                NavigationWaypoint::default(),
+            ))
+            .id();
+
+        // Existence predicate (AC2) — no waypoint, so the control is disabled.
+        assert!(world
+            .get::<NavigationWaypoint>(ship)
+            .unwrap()
+            .mode()
+            .is_none());
+
+        let mut q = world.query_filtered::<(
+            &mut crate::ship_state::ShipPhysics,
+            &NavigationWaypoint,
+        ), With<crate::server_app::LocalShip>>();
+        for (mut physics, waypoint) in q.iter_mut(&mut world) {
+            assert!(!apply_teleport_to_waypoint(&mut physics, waypoint));
+        }
+
+        let physics = world.get::<crate::ship_state::ShipPhysics>(ship).unwrap();
+        assert_eq!((physics.x, physics.y, physics.z), (3.0, 1.0, 4.0));
+    }
 }

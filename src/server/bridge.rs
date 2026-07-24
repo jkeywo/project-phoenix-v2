@@ -105,6 +105,43 @@ pub fn apply_pending_toggles(
     pause_changed
 }
 
+// ── Host teleport-to-waypoint override (issue #770) ─────────────────────────
+//
+// A deliberate host-only simulation override: snap the LocalShip's
+// authoritative position onto the shared Navigation waypoint. Unlike a client
+// helm command it does NOT go through command admission — it directly sets
+// `ShipPhysics.{x,z}`, a discontinuous jump contrasted with the helm's velocity
+// integration. Kept free of `target_arch = "wasm32"` (though it does touch Bevy
+// component types, which compile natively) so the logic is unit-testable under
+// plain `cargo test` without a wasm target — the wasm glue (thread-local,
+// `wasm_bindgen` export, the Bevy drain system) is gated below.
+
+/// Apply a pending teleport-to-waypoint to one ship's physics.
+///
+/// Reads the ship's `NavigationWaypoint` snapshot (which resolves BOTH Free and
+/// Anchored modes to a live x/z) and, when a waypoint exists, sets the ship's
+/// planar position to it. Returns `true` when a teleport happened, `false` when
+/// there was no waypoint (a no-op).
+///
+/// `physics.y` (altitude) is left UNCHANGED on purpose: `WaypointMode` is
+/// X/Z-only and carries no altitude, so keeping the ship's current height is the
+/// least-surprising behaviour — the ship slides across to the waypoint without
+/// changing altitude (issue #768 allows ships to sit at nonzero Y).
+pub fn apply_teleport_to_waypoint(
+    physics: &mut crate::ship_state::ShipPhysics,
+    waypoint: &crate::console::navigation::NavigationWaypoint,
+) -> bool {
+    match waypoint.snapshot() {
+        Some(snapshot) => {
+            physics.x = snapshot.x;
+            physics.z = snapshot.z;
+            // physics.y deliberately unchanged — see the doc comment.
+            true
+        }
+        None => false,
+    }
+}
+
 // ── Thread-local state ─────────────────────────────────────────────────────
 //
 // WASM is single-threaded; RefCell is safe here.
@@ -175,6 +212,20 @@ thread_local! {
     /// `drain_force_start` each `PreUpdate` frame to transition directly to
     /// `InProgress` without any connected players (fully AI-crewed ship).
     static PENDING_FORCE_START: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pending host teleport-to-waypoint request from
+    /// `wasm_teleport_to_waypoint()` (issue #770). Drained by
+    /// `drain_teleport_to_waypoint` each `PreUpdate` frame: a deliberate
+    /// host-only simulation override that snaps the LocalShip's authoritative
+    /// position to the shared Navigation waypoint. NOT routed through command
+    /// admission — this is a direct sim mutation, the point of the control.
+    static PENDING_TELEPORT_TO_WAYPOINT: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Whether the LocalShip currently has a shared Navigation waypoint set.
+    /// Written each tick by `publish_waypoint_existence`, read back by
+    /// `wasm_has_navigation_waypoint()` so the host Debug panel can disable the
+    /// teleport control when there is nowhere to teleport to (issue #770, AC2).
+    static HAS_NAVIGATION_WAYPOINT: RefCell<bool> = const { RefCell::new(false) };
 
     /// The single Host Channel callback registered by the host page (issue
     /// #818). Signature: `callback(name: string, payload: any)` where `name`
@@ -522,6 +573,8 @@ pub fn wasm_init() {
             drain_disconnects,
             drain_debug_toggles,
             drain_force_start,
+            drain_teleport_to_waypoint,
+            publish_waypoint_existence,
         ),
     )
     .add_systems(PostUpdate, (flush_outbound, flush_host_channels));
@@ -818,6 +871,28 @@ pub fn set_entity_inspector_string(text: String) {
 #[wasm_bindgen]
 pub fn wasm_force_start() {
     PENDING_FORCE_START.with(|v| *v.borrow_mut() = true);
+}
+
+/// Called by JS (host Debug panel) to teleport the local ship onto the shared
+/// Navigation waypoint (issue #770). A host-only simulation override, not a
+/// client command: it sets a pending flag consumed by
+/// `drain_teleport_to_waypoint` on the next `PreUpdate`, which directly writes
+/// the LocalShip's authoritative `ShipPhysics.{x,z}`. Deliberately bypasses
+/// command admission — this is a debug override, never replicated to clients.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_teleport_to_waypoint() {
+    PENDING_TELEPORT_TO_WAYPOINT.with(|v| *v.borrow_mut() = true);
+}
+
+/// Called by JS each animation frame to check whether the LocalShip currently
+/// has a shared Navigation waypoint (issue #770, AC2). The host Debug panel
+/// disables the teleport control while this returns `false`. Reads back the
+/// value maintained by `publish_waypoint_existence`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_has_navigation_waypoint() -> bool {
+    HAS_NAVIGATION_WAYPOINT.with(|v| *v.borrow())
 }
 
 // ── Config Preload Exports ──────────────────────────────────────────────────
@@ -1247,6 +1322,49 @@ fn drain_force_start(
     }
 }
 
+/// Drains the pending host teleport-to-waypoint flag each frame (issue #770).
+/// When set, snaps the LocalShip's authoritative `ShipPhysics.{x,z}` onto the
+/// shared Navigation waypoint via [`apply_teleport_to_waypoint`]. A no-op when
+/// no waypoint is set. Writing `ShipPhysics` is sufficient for propagation:
+/// `sync_ship_position` copies it into `Transform` and the sim-state broadcaster
+/// sends the new position next tick — no bespoke broadcast path.
+#[cfg(target_arch = "wasm32")]
+fn drain_teleport_to_waypoint(
+    mut ship_q: Query<
+        (
+            &mut crate::ship_state::ShipPhysics,
+            &crate::console::navigation::NavigationWaypoint,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+) {
+    let requested = PENDING_TELEPORT_TO_WAYPOINT.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if !requested {
+        return;
+    }
+    for (mut physics, waypoint) in ship_q.iter_mut() {
+        apply_teleport_to_waypoint(&mut physics, waypoint);
+    }
+}
+
+/// Mirrors the LocalShip's Navigation-waypoint existence into a thread-local
+/// each frame so `wasm_has_navigation_waypoint()` can read it back (issue #770,
+/// AC2). Pure read; no gameplay effect.
+#[cfg(target_arch = "wasm32")]
+fn publish_waypoint_existence(
+    ship_q: Query<
+        &crate::console::navigation::NavigationWaypoint,
+        With<crate::server_app::LocalShip>,
+    >,
+) {
+    let has = ship_q.iter().next().is_some_and(|w| w.mode().is_some());
+    HAS_NAVIGATION_WAYPOINT.with(|v| *v.borrow_mut() = has);
+}
+
 /// Reads outbound messages each frame and forwards them to the JS callback.
 #[cfg(target_arch = "wasm32")]
 fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
@@ -1382,7 +1500,66 @@ fn flush_host_channels(
 // `cargo test` on native, with no Bevy App and no wasm_bindgen involved.
 #[cfg(test)]
 mod tests {
-    use super::{apply_pending_toggles, host_channels, DebugToggleKind};
+    use super::{
+        apply_pending_toggles, apply_teleport_to_waypoint, host_channels, DebugToggleKind,
+    };
+    use crate::console::navigation::{NavigationWaypoint, WaypointMode};
+    use crate::ship_state::ShipPhysics;
+
+    /// Teleport onto a Free waypoint sets `x`/`z` and leaves `y` unchanged.
+    #[test]
+    fn teleport_sets_xz_and_preserves_y() {
+        let mut physics = ShipPhysics {
+            x: 1.0,
+            y: 42.0,
+            z: 2.0,
+            ..Default::default()
+        };
+        let waypoint = NavigationWaypoint::new(WaypointMode::Free { x: 120.0, z: -45.0 });
+
+        let teleported = apply_teleport_to_waypoint(&mut physics, &waypoint);
+
+        assert!(teleported, "a waypoint exists, so a teleport should happen");
+        assert_eq!(physics.x, 120.0);
+        assert_eq!(physics.z, -45.0);
+        assert_eq!(physics.y, 42.0, "altitude must be left unchanged");
+    }
+
+    /// An Anchored waypoint teleports to its live-cached x/z.
+    #[test]
+    fn teleport_uses_anchored_snapshot_position() {
+        let mut physics = ShipPhysics::default();
+        let waypoint = NavigationWaypoint::new(WaypointMode::Anchored {
+            source_uuid: "target-1".into(),
+            last_x: 75.0,
+            last_z: -150.0,
+        });
+
+        let teleported = apply_teleport_to_waypoint(&mut physics, &waypoint);
+
+        assert!(teleported);
+        assert_eq!(physics.x, 75.0);
+        assert_eq!(physics.z, -150.0);
+    }
+
+    /// With no waypoint set the teleport is a no-op and reports `false`.
+    #[test]
+    fn teleport_without_waypoint_is_a_noop() {
+        let mut physics = ShipPhysics {
+            x: 7.0,
+            y: 3.0,
+            z: 9.0,
+            ..Default::default()
+        };
+        let waypoint = NavigationWaypoint::default();
+
+        let teleported = apply_teleport_to_waypoint(&mut physics, &waypoint);
+
+        assert!(!teleported, "no waypoint means nothing to teleport to");
+        assert_eq!(physics.x, 7.0);
+        assert_eq!(physics.y, 3.0);
+        assert_eq!(physics.z, 9.0);
+    }
 
     /// The Host Channel name table (issue #818) must have no duplicates —
     /// the JS dispatcher in `server.html` keys its handlers by these names.

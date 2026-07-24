@@ -174,7 +174,7 @@ entities:
 
   - component: host-debug-waypoint-teleport
     core:
-      status: proposed
+      status: implemented
       confidence: confirmed
       title: Host Debug Waypoint Teleport
       summary: Server-page Debug action that is enabled only when the authoritative shared Navigation waypoint exists and immediately places the local ship at that waypoint.
@@ -184,3 +184,8 @@ entities:
       reads: [navigation-waypoint-state]
       writes: [authoritative-ship-motion-state]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [server.html, src/server/bridge.rs, src/console/navigation/mod.rs, src/ship/state.rs]
+      symbols: [wasm_teleport_to_waypoint, wasm_has_navigation_waypoint, drain_teleport_to_waypoint]
+      tests: [cargo test]

@@ -792,6 +792,14 @@
     }
     .debug-action:hover { background: #223; border-color: #558; }
     .debug-action.active { background: #224; border-color: #66c; color: #ccf; }
+    /* Disabled host override (e.g. teleport with no shared waypoint). */
+    .debug-action:disabled, .debug-action.disabled {
+      opacity: 0.35; cursor: not-allowed;
+      background: #1a1a1a; border-color: #333; color: #555;
+    }
+    .debug-action:disabled:hover, .debug-action.disabled:hover {
+      background: #1a1a1a; border-color: #333;
+    }
     /* Tab bar (right of actions) */
     #debug-tabs {
       display: flex; flex-direction: row;
@@ -1115,6 +1123,7 @@
             <button class="debug-action" data-action="wireframes" title="Toggle region wireframes">🌐</button>
             <button class="debug-action" data-action="godmode" title="God mode (no damage)">🛡</button>
             <button class="debug-action" data-action="instagib" title="Instagib (100x damage)">⚡</button>
+            <button class="debug-action" data-action="teleport-waypoint" title="Teleport ship to Navigation waypoint" disabled>📍</button>
           </div>
           <div id="debug-tabs">
             <button class="debug-tab active" data-tab="0">Mod</button>
@@ -2606,6 +2615,8 @@ function finishInit() {
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;
   window.wasm_get_instagib = wasmBindings.wasm_get_instagib;
+  window.wasm_teleport_to_waypoint = wasmBindings.wasm_teleport_to_waypoint;
+  window.wasm_has_navigation_waypoint = wasmBindings.wasm_has_navigation_waypoint;
 
   // ── QR toggle (bottom-left invisible button for mid-game join) ───────
   document.getElementById('qr-toggle-btn').addEventListener('click', function() {
@@ -2899,6 +2910,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
       var content = document.getElementById('debug-content');
       var tabs = document.querySelectorAll('.debug-tab');
       var actions = document.querySelectorAll('.debug-action');
+      var teleportBtn = document.querySelector('.debug-action[data-action="teleport-waypoint"]');
       var panelOpen = false;
       var activeTab = 0;
       // Track resource ON/OFF state (all 4 are toggled together)
@@ -2992,6 +3004,12 @@ window.addEventListener('TrunkApplicationStarted', () => {
                 btn.classList.toggle('active', wasm_get_instagib());
               }
               break;
+            case 'teleport-waypoint':
+              // Host-only sim override: fire-and-forget (like pause/wireframes).
+              // Guarded by the disabled state, but re-check to be safe.
+              if (btn.disabled) break;
+              if (typeof wasm_teleport_to_waypoint === 'function') wasm_teleport_to_waypoint();
+              break;
           }
         });
       });
@@ -3018,6 +3036,13 @@ window.addEventListener('TrunkApplicationStarted', () => {
       function rafLoop() {
         if (panelOpen && typeof dataGetters[activeTab] === 'function') {
           content.textContent = dataGetters[activeTab]();
+        }
+        // Host teleport override (issue #770, AC2): disabled while there is no
+        // shared Navigation waypoint to teleport to.
+        if (teleportBtn && typeof wasm_has_navigation_waypoint === 'function') {
+          var hasWaypoint = wasm_has_navigation_waypoint();
+          teleportBtn.disabled = !hasWaypoint;
+          teleportBtn.classList.toggle('disabled', !hasWaypoint);
         }
         requestAnimationFrame(rafLoop);
       }

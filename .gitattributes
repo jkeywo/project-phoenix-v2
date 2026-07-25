@@ -1,0 +1,37 @@
+# Normalize line endings: LF in the repository, always. This repo is edited on
+# Windows and consumed by CI on Linux; without this, the same file exists as two
+# different byte sequences depending on who checked it out, and every cross-repo
+# diff (comparing against vellum, or vendoring from it) is noise.
+#
+# Determinism fixtures make this load-bearing rather than cosmetic: a fingerprint
+# taken over content must not depend on which machine checked the content out.
+# See vellum's docs/handbook/determinism.md — that bug has been shipped once.
+* text=auto
+
+# Text, LF in the working tree as well as in the repository.
+*.rs text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.csv text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.wgsl text eol=lf
+*.txt text eol=lf
+
+# Windows-only helper scripts keep CRLF; cmd.exe is the consumer.
+*.bat text eol=crlf
+
+# Binary assets — never touched, never diffed as text.
+*.png binary
+*.webp binary
+*.glb binary
+*.mp3 binary
+*.ttf binary
+*.wasm binary

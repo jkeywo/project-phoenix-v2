@@ -19,17 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      # Shared step, fleet-standard: uv setup, uv sync, pasm validate, pasm scan.
+      # Keeps this repo's invocation from drifting from the rest of the fleet.
+      - name: Validate PASM model
+        uses: jkeywo/vellum/actions/pasm-validate@eb367a5dbc095c684af88db40c5af929a5e09c0b
         with:
-          enable-cache: true
+          spec-path: pasm/spec
+          scan: gate
 
       - name: Run PASM tests
         run: uv run pytest -q tests/pasm
 
-      - name: Validate PASM model
-        run: uv run pasm validate
-
+      # Not covered by the composite action: traceability is phoenix's own
+      # report, and the artifact shape below is consumed by this repo's tooling.
       - name: Generate revision-linked PASM reports
         run: |
           mkdir -p target/pasm
@@ -51,13 +53,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: native
+      # Shared step: toolchain + cache. rust-toolchain.toml pins the channel at
+      # cargo time, so this installs components and warms the cache. The action
+      # exposes no shared-key; rust-cache's default key is per-job, and each of
+      # these keys had exactly one job, so the caches stay separate as before.
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@eb367a5dbc095c684af88db40c5af929a5e09c0b
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
@@ -80,15 +81,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust (stable + wasm32)
-        uses: dtolnay/rust-toolchain@stable
+      # Shared step: toolchain + cache. The wasm target is also declared in
+      # rust-toolchain.toml; passed here too so the action is self-describing.
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@eb367a5dbc095c684af88db40c5af929a5e09c0b
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: wasm
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev

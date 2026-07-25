@@ -8265,8 +8265,16 @@ when = "state_time >= param(surge_dwell_secs)"
             let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
                 ids,
-                vec!["acquire", "inbound", "escape", "recover", "reenter"],
-                "{name} authors the five-state pass + recovery machine"
+                vec![
+                    "acquire",
+                    "inbound",
+                    "escape",
+                    "recover",
+                    "reenter",
+                    "pressed_pivot",
+                    "pressed_pass",
+                ],
+                "{name} authors the pass + recovery + pressed machine (issue #789)"
             );
             assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
             let policy = ai.to_policy().expect("must decode");
@@ -8291,12 +8299,13 @@ when = "state_time >= param(surge_dwell_secs)"
         assert!(verbs.contains(&HELM_HOLD_RECOVERY_ORBIT_VERB));
         assert!(verbs.contains(&HELM_PIVOT_TO_REENGAGE_VERB));
 
-        // Issue #788, AC7: neither recovery state authors a boost rule. The
-        // absence is the doctrine — a pivot flown with the drive lit is not the
-        // "normal-speed pass" the hull is supposed to be starting — and an
-        // absence is exactly the kind of content that gets helpfully filled in.
+        // Issue #788, AC7 / issue #789, AC4: none of the recovery states, and
+        // not the pressed PASS, authors a boost rule. The absence is the
+        // doctrine — a pass flown with the drive lit is not the "normal-speed
+        // pass" the hull is supposed to be making — and an absence is exactly
+        // the kind of content that gets helpfully filled in.
         let boost = hc.boost_ai.as_ref().unwrap();
-        for id in ["recover", "reenter"] {
+        for id in ["recover", "reenter", "pressed_pass"] {
             let state = boost
                 .state
                 .iter()
@@ -8304,9 +8313,196 @@ when = "state_time >= param(surge_dwell_secs)"
                 .unwrap_or_else(|| panic!("boost_ai must declare '{id}'"));
             assert!(
                 state.rule.is_empty(),
-                "boost_ai '{id}' must author NO rule: boost stays cold through recovery"
+                "boost_ai '{id}' must author NO rule: boost is cancelled before the pass"
             );
         }
+    }
+
+    /// Issue #789, AC4, as content: the pressed PIVOT is the one state outside
+    /// the escape that lights the drive, and the hull's boost genuinely
+    /// *increases* turn authority rather than trading it away.
+    ///
+    /// The second half is load-bearing and is not obvious from the doctrine
+    /// alone: `apply_ship_physics` multiplies `max_yaw_rate` by
+    /// `steering_multiplier`, so a hull authoring a value below 1.0 would boost
+    /// its pivot into turning SLOWER. Nothing in the state machine can detect
+    /// that; only this pin can.
+    #[test]
+    fn harrow_destroyer_boosts_the_pressed_pivot_with_a_drive_that_turns_harder() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+
+        let pivot = hc
+            .boost_ai
+            .as_ref()
+            .unwrap()
+            .state
+            .iter()
+            .find(|s| s.id == "pressed_pivot")
+            .expect("boost_ai must declare 'pressed_pivot'");
+        assert_eq!(
+            pivot.rule.len(),
+            1,
+            "the pressed pivot lights the drive with exactly one rule"
+        );
+        assert_eq!(pivot.rule[0].verb, HELM_ENGAGE_BOOST_VERB);
+        assert!(
+            !pivot.rule[0].when.contains("speed_fraction"),
+            "the pivot is flown at ZERO throttle, so a minimum-speed guard would \
+             refuse the one case this state exists for; got `{}`",
+            pivot.rule[0].when
+        );
+
+        let boost = hc
+            .boost
+            .as_ref()
+            .expect("[helm_console.boost] is mandatory");
+        assert!(
+            boost.steering_multiplier > 1.0,
+            "boost must INCREASE the pivot's turn authority — physics multiplies \
+             max_yaw_rate by this — got {}",
+            boost.steering_multiplier
+        );
+    }
+
+    /// Issue #789, AC1/AC3/AC5, as content, on all three machines.
+    ///
+    /// Each conjunct here is doing distinct work and each has a distinct failure
+    /// mode if dropped, so they are asserted individually rather than as one
+    /// string match:
+    ///
+    /// * the two pressed facts — drop either and the branch fires on a ship that
+    ///   is escaping cleanly, or one that is nowhere near the target's guns;
+    /// * the shield conjunct — drop it and a destroyer with its shields UP
+    ///   abandons the ordinary pass cycle to jab at a range it never needed to
+    ///   leave;
+    /// * a higher priority than the recovery branch — equal or lower and the
+    ///   pressed branch is unreachable, silently, because `recover`'s guard is a
+    ///   strict subset of it.
+    #[test]
+    fn harrow_destroyer_presses_on_failed_progress_inside_the_targets_reach() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+            ("boost_ai", hc.boost_ai.as_ref().unwrap()),
+        ] {
+            let escape = ai.state.iter().find(|s| s.id == "escape").unwrap();
+            let pressed = escape
+                .transition
+                .iter()
+                .find(|t| t.to == "pressed_pivot")
+                .unwrap_or_else(|| {
+                    panic!("{name}: the escape must be able to reach the pressed arm")
+                });
+            for required in [
+                crate::ship::helm_ai::SEPARATION_PROGRESS_FACT,
+                crate::ship::helm_ai::INSIDE_THREAT_RANGE_FACT,
+                crate::ship::helm_ai::PRESSED_MIN_PROGRESS_PARAM,
+                crate::ship::helm_ai::SHIELD_FRACTION_FACT,
+            ] {
+                assert!(
+                    pressed.when.contains(required),
+                    "{name}: the pressed guard must reference `{required}`, got `{}`",
+                    pressed.when
+                );
+            }
+            let recover = escape
+                .transition
+                .iter()
+                .find(|t| t.to == "recover")
+                .unwrap_or_else(|| panic!("{name}: the escape must still reach recovery"));
+            assert!(
+                pressed.priority > recover.priority,
+                "{name}: the pressed branch must outrank recovery ({} vs {}) or it can \
+                 never fire — recovery's guard is a subset of it",
+                pressed.priority,
+                recover.priority
+            );
+
+            // AC3: the way OUT of the pressed loop is the ordinary escape, and
+            // neither pressed state waits on a shield threshold or a held
+            // distance the way recovery does.
+            for id in ["pressed_pivot", "pressed_pass"] {
+                let state = ai
+                    .state
+                    .iter()
+                    .find(|s| s.id == id)
+                    .unwrap_or_else(|| panic!("{name} must declare '{id}'"));
+                for transition in &state.transition {
+                    assert!(
+                        !transition
+                            .when
+                            .contains(crate::ship::helm_ai::SAFE_DISTANCE_HELD_FACT)
+                            && !transition.when.contains("reentry_shield_fraction"),
+                        "{name} '{id}': pressed behaviour abandons the shield threshold and \
+                         the standoff ring — it may not wait on either, got `{}`",
+                        transition.when
+                    );
+                }
+            }
+            assert!(
+                ai.state
+                    .iter()
+                    .find(|s| s.id == "pressed_pass")
+                    .unwrap()
+                    .transition
+                    .iter()
+                    .any(|t| t.to == "escape"),
+                "{name}: every short pass must end in another real escape attempt"
+            );
+        }
+    }
+
+    /// Issue #789: the SHORT pass is short because of an authored scalar, and it
+    /// is a different scalar from the ordinary pass's.
+    ///
+    /// Authoring the same number twice would make this arm indistinguishable
+    /// from a re-run of the ordinary inbound leg while still passing every
+    /// structural assertion above.
+    #[test]
+    fn harrow_destroyer_breaks_off_the_pressed_pass_sooner_than_an_ordinary_one() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .unwrap()
+            .steering_ai
+            .as_ref()
+            .unwrap();
+        for required in crate::ship::helm_ai::PRESSED_PARAMS {
+            assert!(
+                steering.param.contains_key(*required),
+                "steering_ai must author `{required}`: the host gates the whole pressed \
+                 arm on all four together"
+            );
+        }
+        let pressed = steering
+            .param
+            .get(crate::ship::helm_ai::PRESSED_HYSTERESIS_PARAM)
+            .copied()
+            .unwrap();
+        let ordinary = steering
+            .param
+            .get("closest_approach_hysteresis")
+            .copied()
+            .unwrap();
+        assert!(
+            pressed > 0.0 && pressed < ordinary,
+            "the pressed pass must break off sooner than an ordinary one \
+             ({pressed} vs {ordinary}) — equal values make it the same pass"
+        );
+        // ...and the two history windows are independently authored lengths.
+        let pressed_window = steering
+            .param
+            .get(crate::ship::helm_ai::PRESSED_WINDOW_TICKS_PARAM)
+            .copied()
+            .unwrap();
+        assert!(
+            pressed_window > 1.0 && pressed_window.is_finite(),
+            "the progress window must be a real, finite bound, got {pressed_window}"
+        );
     }
 
     /// Issue #788, AC6: re-entry is gated on BOTH the shield fraction and the

@@ -14,9 +14,12 @@
 #   acquire  ──(target inside commit_range)──▶  inbound
 #   inbound  ──(closest approach detected)───▶  escape
 #   escape   ──(dwell done, shields intact)──▶  acquire
-#   escape   ──(dwell done, shields down)───▶   recover
+#   escape   ──(dwell done, shields down, escape WORKED)─▶  recover
+#   escape   ──(dwell done, shields down, escape FAILED)─▶  pressed_pivot
 #   recover  ──(shields back AND distance held)▶ reenter
 #   reenter  ──(pivot complete)──────────────▶  acquire
+#   pressed_pivot ──(pivot dwell done)───────▶  pressed_pass
+#   pressed_pass  ──(closest approach, short)─▶ escape
 #
 # * INBOUND is flown at a flat, normal approach throttle, with Steering
 #   re-solving the facing against the target's CURRENT position every tick — the
@@ -59,6 +62,34 @@
 #   pivots onto the target with the drive cold, and starts an ordinary
 #   normal-speed pass — no boost, because boost is the escape's accelerant and
 #   this is an approach.
+# * PRESSED (issue #789) is what happens when the recovery above is not on
+#   offer, because the player will not let it be. Standing off needs the
+#   destroyer to actually GET away first, and against an aggressive opponent who
+#   simply follows it out, the escape leg ends with the hull still inside the
+#   other ship's guns and no further from them than when it started. Breaking
+#   off then is not a recovery, it is a slow death at a fixed range.
+#
+#   So at the end of every escape the machine asks a second question after the
+#   shield one: did that escape actually WORK? The answer is a trend, not a
+#   level — the net separation gained across the `pressed_window_ticks` history
+#   window — and it is asked only while still inside the target's own
+#   direct-fire reach, because distance that does not matter is not distance
+#   worth measuring. Gained less than `pressed_min_progress` while still under
+#   the guns, and the destroyer stops trying to leave.
+#
+#   What it does instead is fight at the range it is stuck at. It abandons the
+#   standoff ring and the `reentry_shield_fraction` threshold outright — both
+#   are things you wait for, and waiting is what is killing it — and instead
+#   BOOSTS a thrust-cut pivot (boost multiplies `max_yaw_rate`, so the drive is
+#   spent on turning authority rather than on a run it cannot win), then makes a
+#   short normal-speed attack pass. The pass breaks off on its own, smaller
+#   `pressed_closest_approach_hysteresis`: it is a jab, not a run-in from range.
+#
+#   Every short pass ends in the ordinary `escape` state, so every one of them is
+#   another honest attempt to get out, and the moment one of them opens real
+#   distance the machine drops straight back into the recovery doctrine above.
+#   The pressed loop is a response to being pinned, not a mode the hull has to be
+#   talked out of.
 #
 # Shared hazard avoidance still bends the escape (it is a steering force folded
 # into the same pure arm), and bending it changes no pass state at all. It bends
@@ -135,8 +166,19 @@ max_bank_deg = 22.0
 # a destroyer that makes the pass and then dawdles away from it.
 [helm_console.boost]
 multiplier = 2.4
-steering_multiplier = 0.6
+# Above 1.0 since issue #789, and load-bearing: the drive multiplies
+# `max_yaw_rate` as well as speed, and the pressed doctrine spends it on a
+# thrust-cut pivot rather than on a run. A pinned destroyer's scarcest resource
+# is how fast it can bring the bow back round, so `1.8 * 0.55 = 0.99 rad/s`
+# roughly halves the time that pivot takes. (It also makes the escape leg's own
+# hazard avoidance bite harder, which is free — the escape flies a frozen
+# heading inside a deadband, so it commands no yaw of its own to amplify.)
+steering_multiplier = 1.8
 active_duration = 5.0
+# The battery drains partially and recharges whenever the drive is cold, so a
+# pressed destroyer that spends `pressed_pivot_secs` of it on each pivot and
+# recharges through each short pass runs a progressively tighter boost budget
+# the longer it stays pinned. That is intended: being pressed should cost.
 recharge_duration = 14.0
 
 # ── Engines (longitudinal) doctrine ───────────────────────────────────────────
@@ -181,6 +223,22 @@ recover_shield_fraction = 0.15
 reentry_shield_fraction = 0.75
 # How long (seconds) the cut-thrust pivot runs before the next pass begins.
 reenter_pivot_secs = 1.5
+# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
+# World units of separation the escape must have GAINED across the pressed
+# history window for it to count as working. Deliberately below what an
+# unboosted escape covers in that window (26 u/s over 1.467 s is 38.1 units), so a
+# destroyer that is merely coasting still reads as escaping; only one that is
+# being MATCHED falls under it.
+pressed_min_progress = 30.0
+# How long (seconds) the boosted, thrust-cut pivot runs before the short pass.
+# Short: the whole point is that this is faster than the ordinary
+# `reenter_pivot_secs` turn, because the drive is lit for it.
+pressed_pivot_secs = 1.2
+# The SHORT pass's own closest-approach hysteresis, in world units of re-opened
+# range. A third of the ordinary `closest_approach_hysteresis`, which is what
+# makes the pressed pass a jab rather than a second full run-in: the destroyer
+# breaks off almost the moment the gap stops shrinking.
+pressed_closest_approach_hysteresis = 2.0
 
 # Host-written private memory (issue #882: the host writes, the policy reads —
 # there is no authored write verb). `min_range_seen` starts effectively
@@ -243,6 +301,20 @@ id = "escape"
   # pass. Checking here rather than mid-escape is deliberate — the escape's
   # commitment is the doctrine's own invariant, and the shields are no more
   # recovered a second earlier.
+  #
+  # PRESSED (issue #789) takes priority over recovery because it answers a
+  # question recovery has already assumed the answer to: recovery is a plan that
+  # begins "get away from them", and this conjunct is the check that the getting
+  # away is possible at all. It shares the shield conjunct — a destroyer with its
+  # shields up has nothing to recover, so being followed is just combat — but
+  # deliberately carries no distance-held or shield-threshold conjunct of its
+  # own. Both are things the ordinary doctrine WAITS for, and the whole finding
+  # here is that waiting is not available.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "pressed_pivot"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
+
   [[helm_console.engines_ai.state.transition]]
   priority = 10
   to = "recover"
@@ -289,6 +361,56 @@ id = "reenter"
   priority = 0
   to = "acquire"
   when = "state_time >= param(reenter_pivot_secs)"
+
+# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
+#
+# Engines actuates the planner's desired travel in both states exactly as it
+# does everywhere else; which throttle that resolves to is the Steering axis's
+# yaw verb's business (`reengage_speed` for the pivot, `approach_speed` for the
+# pass), so this axis needs no knowledge that it is jabbing rather than closing.
+[[helm_console.engines_ai.state]]
+id = "pressed_pivot"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "pressed_pass"
+  when = "state_time >= param(pressed_pivot_secs)"
+
+[[helm_console.engines_ai.state]]
+id = "pressed_pass"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # The same closest-approach detector the ordinary inbound leg uses, on the
+  # same three conjuncts, differing in ONE authored scalar: the shorter
+  # `pressed_closest_approach_hysteresis`. That single substitution is what
+  # makes this a jab, and it is the reason the pressed pass needed no new host
+  # geometry at all.
+  #
+  # It ends in `escape` — the ordinary one — so every short pass is another real
+  # attempt to get out, and the escape's own end-of-dwell question decides
+  # whether the next thing is another jab or the recovery doctrine.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  # Target lost mid-jab: back to the ordinary acquire cycle. There is nothing
+  # left to be pressed BY.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
 
 # ── Steering (yaw) doctrine ───────────────────────────────────────────────────
 #
@@ -345,8 +467,28 @@ safe_ring_tolerance = 25.0
 # "maintained safe distance".
 safe_distance_window_ticks = 60.0
 # Throttle flown on the re-entry pivot. ZERO: the destroyer cuts thrust and
-# turns cold before it commits to the next run.
+# turns cold before it commits to the next run. The pressed pivot reuses this
+# same throttle — a stationary pivot is a stationary pivot — and differs only in
+# having the boost drive lit for it.
 reengage_speed = 0.0
+# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
+# Restated on this axis because its own guards reference them; content
+# validation rejects an undeclared `param(...)`.
+pressed_min_progress = 30.0
+pressed_pivot_secs = 1.2
+pressed_closest_approach_hysteresis = 2.0
+# Length of the separation-PROGRESS history, in shared AI ticks. The trend is
+# measured between the two ENDS of the window, so 45 samples span 44 tick
+# intervals — 1.467 seconds at the default 30 Hz helm cadence, not 1.5.
+# Its own window with its own length, not a reuse
+# of `safe_distance_window_ticks`: that one is tuned for "how long counts as a
+# maintained standoff before re-entry", this one for "how long a failing escape
+# takes to be obvious", and lengthening one has no business slowing the other.
+#
+# The HOST reads this by name (like the six recovery scalars above) along with
+# the three thresholds; omit any one of the four and it declines the pressed arm
+# outright and the hull flies the ordinary recovery doctrine.
+pressed_window_ticks = 45.0
 
 [helm_console.steering_ai.memory]
 min_range_seen = 1000000.0
@@ -404,6 +546,12 @@ id = "escape"
   when = "true"
   verb = "hold_committed_heading"
 
+  # See the Engines copy for why the pressed branch outranks recovery.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "pressed_pivot"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
+
   [[helm_console.steering_ai.state.transition]]
   priority = 10
   to = "recover"
@@ -450,6 +598,48 @@ id = "reenter"
   to = "acquire"
   when = "state_time >= param(reenter_pivot_secs)"
 
+# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
+#
+# NO fifth yaw verb, and that is the finding rather than a shortcut. The pressed
+# pivot is a thrust-cut turn onto the target, which is exactly what
+# `pivot_to_reengage` already means — the host pairs it with `reengage_speed`,
+# authored at zero — and the short pass is a normal-speed run at a moving
+# target, which is exactly what `actuate_desired_facing` already means. What
+# makes these states PRESSED is the boost rule on the Boost axis and the shorter
+# hysteresis on the way out, not a different way of steering.
+[[helm_console.steering_ai.state]]
+id = "pressed_pivot"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "pivot_to_reengage"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "pressed_pass"
+  when = "state_time >= param(pressed_pivot_secs)"
+
+[[helm_console.steering_ai.state]]
+id = "pressed_pass"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
 # ── Boost doctrine ────────────────────────────────────────────────────────────
 #
 # A third independent copy of the same machine. It transitions on the same
@@ -478,6 +668,10 @@ boost_min_speed_fraction = 0.3
 recover_shield_fraction = 0.15
 reentry_shield_fraction = 0.75
 reenter_pivot_secs = 1.5
+# ── Pressed thresholds (issue #789) ───────────────────────────────────────────
+pressed_min_progress = 30.0
+pressed_pivot_secs = 1.2
+pressed_closest_approach_hysteresis = 2.0
 
 [helm_console.boost_ai.memory]
 min_range_seen = 1000000.0
@@ -513,6 +707,14 @@ id = "escape"
   when = "state_time < param(escape_boost_secs) and fact(boost_available) > 0 and fact(speed_fraction) >= param(boost_min_speed_fraction)"
   verb = "engage_boost"
 
+  # See the Engines copy for why the pressed branch outranks recovery. This is a
+  # third independent copy of the machine over the same host-seeded facts, so it
+  # reaches the same leg on the same tick without reading either sibling.
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "pressed_pivot"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction) and fact(inside_threat_range) > 0 and fact(separation_progress) < param(pressed_min_progress)"
+
   [[helm_console.boost_ai.state.transition]]
   priority = 10
   to = "recover"
@@ -543,6 +745,52 @@ id = "reenter"
   priority = 0
   to = "acquire"
   when = "state_time >= param(reenter_pivot_secs)"
+
+# ── The pressed short-pass loop (issue #789) ──────────────────────────────────
+#
+# The ONE state in the whole doctrine that lights the drive for something other
+# than running away. Boost multiplies `max_yaw_rate` as well as speed, and this
+# pivot is flown on cut thrust, so every drop of it goes into how fast the bow
+# comes round — which is the only resource a pinned destroyer is actually short
+# of.
+[[helm_console.boost_ai.state]]
+id = "pressed_pivot"
+
+  # NO `speed_fraction` conjunct, unlike the escape's rule above, and the
+  # omission is the point: this pivot is deliberately flown at zero throttle, so
+  # the escape's "do not light the drive from a standstill" guard would refuse
+  # exactly the case this state exists for. The reason that guard exists —
+  # boost as a launch assist is wasted — does not apply when the drive is being
+  # spent on yaw rather than on speed.
+  [[helm_console.boost_ai.state.rule]]
+  priority = 0
+  channel = "boost"
+  when = "fact(boost_available) > 0"
+  verb = "engage_boost"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "pressed_pass"
+  when = "state_time >= param(pressed_pivot_secs)"
+
+# The CANCEL (issue #789, AC4). Like `recover` and `reenter`, this state authors
+# no boost rule at all: the channel holds, `ai_helm_boost`'s on-change release
+# fires the tick the pivot's rule stops firing, and the short pass runs in at
+# normal speed with the drive cold and recharging for the escape at the end of
+# it. An absence is exactly the kind of content that gets helpfully filled in,
+# so it is pinned by a parse test.
+[[helm_console.boost_ai.state]]
+id = "pressed_pass"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(pressed_closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
 
 # ── Weapons ───────────────────────────────────────────────────────────────────
 #

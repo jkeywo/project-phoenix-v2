@@ -1146,9 +1146,30 @@ pub struct HelmSteeringAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState
 pub struct HelmRecoveryHistory {
     /// Recent range readings, oldest first. Capacity is authored.
     pub ranges: crate::bounded_history::BoundedHistory,
-    /// Which target the readings belong to. A target switch clears the window:
+    /// A SECOND window over the same reading, with its own authored capacity
+    /// (issue #789) — the one the pressed detector measures separation
+    /// *progress* across.
+    ///
+    /// ## Why not reuse [`Self::ranges`]
+    ///
+    /// The two windows ask different questions of the same measurement and want
+    /// independent lengths. `ranges` answers a LEVEL question — "has every
+    /// sample stayed past the safe ring" — and its authored capacity
+    /// (`safe_distance_window_ticks`) is tuned for "how long counts as a
+    /// maintained standoff before re-entry is allowed". `separation` answers a
+    /// TREND question — "is this ship actually getting further away" — and its
+    /// capacity (`pressed_window_ticks`) is tuned for "how long a failing escape
+    /// takes to be obvious". Sharing one window would silently couple the two
+    /// tunings: lengthening the re-entry standoff would make the destroyer
+    /// slower to notice it is pinned, which is not a trade a designer asked for.
+    ///
+    /// Same target scope as `ranges`, same fold site, same bound — it is the
+    /// [`crate::bounded_history::BoundedHistory`] *type* being reused, not the
+    /// instance.
+    pub separation: crate::bounded_history::BoundedHistory,
+    /// Which target the readings belong to. A target switch clears BOTH windows:
     /// distances held against a ship that is no longer the threat say nothing
-    /// about the one that is.
+    /// about the one that is, and neither does distance opened from it.
     pub target: Option<uuid::Uuid>,
 }
 
@@ -1181,19 +1202,24 @@ pub struct HelmRecoveryHistory {
 /// every frame rate because both systems run on the shared `ai_helm_tick_ready`
 /// latch (AGENTS.md #7).
 ///
-/// The measured cost on the Harrow is 1.05 deg of extra yaw — 0.74 world units
-/// of lateral offset — against a 6-unit `closest_approach_hysteresis` and a
-/// 260-unit `commit_range`, so it can neither delay nor mis-fire the transition.
-/// It does NOT wash out afterwards, though, and that is the honest half of this
-/// note: 1.05 deg is 0.018 rad, just *inside* the Harrow's authored
-/// `tracking_deadband_rad` of 0.02, so the planner's `steer_toward` reads the
-/// residual as zero error and commands no correction. The escape therefore flies
-/// with a standing offset of up to 1.05 deg from the heading frozen in memory
-/// rather than converging onto it. That is within the hull's own authored
-/// tolerance for "on heading" by definition — the deadband IS that tolerance —
-/// but a hull authoring a deadband tighter than its one-tick yaw rate would see
-/// the planner steer the residual back out instead, which is a different (also
-/// correct) behaviour, not a bug in either.
+/// The measured cost on the Harrow is one AI tick of that hull's yaw rate —
+/// 0.55 rad/s at 30 Hz, so 1.05 deg, or 0.74 world units of lateral offset —
+/// against a 6-unit `closest_approach_hysteresis` and a 260-unit `commit_range`,
+/// so it can neither delay nor mis-fire the transition.
+///
+/// What happens to the residual AFTERWARDS depends on the hull, and the Harrow
+/// sits on both sides of the line depending on whether its drive is lit. 1.05
+/// deg is 0.018 rad, just *inside* its authored `tracking_deadband_rad` of 0.02,
+/// so an unboosted escape's `steer_toward` reads the residual as zero error and
+/// commands no correction: the leg flies with a standing offset from the frozen
+/// heading rather than converging onto it, which is within the hull's own
+/// authored tolerance for "on heading" by definition — the deadband IS that
+/// tolerance. While boost is engaged, though, `apply_ship_physics` multiplies
+/// the yaw rate by the authored `steering_multiplier` (1.8 since issue #789, for
+/// the pressed pivot's sake), so one tick is 1.89 deg — *outside* the deadband —
+/// and the planner steers the residual back out instead. Both are correct; the
+/// second is simply the case of a hull whose deadband is tighter than its
+/// one-tick yaw rate, and it converges rather than drifting.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct HelmPassSurface {
     /// The hull authors a complete fly-through doctrine AND both travel axes are
@@ -1341,6 +1367,51 @@ pub(crate) const SAFE_RANGE_FACT: &str = "safe_range";
 /// measurement detail the doctrine should not have to restate.
 pub(crate) const SAFE_DISTANCE_HELD_FACT: &str = "safe_distance_held";
 
+// ── Pressed-detection facts (issue #789) ─────────────────────────────────────
+//
+// Same scope and the same sharp edge as the four above: seeded by
+// `seed_pressed_facts`, which only `ai_policy_state_tick` calls, so they are
+// available to TRANSITION guards and NOT to a state's continuous rule guards.
+// `separation_progress` is the verdict of a bounded history window that must be
+// folded exactly once per shared tick — four per-axis actuator hosts each
+// folding it would advance it four times as fast, so the window would mean a
+// quarter of the span the designer authored. The shipped destroyer doctrine
+// authors both names in transitions only.
+
+/// How far this ship's separation from its target has NET changed across the
+/// authored `pressed_window_ticks` history window, world units — positive when
+/// the gap is opening.
+///
+/// Transition-scope only — see the note above.
+///
+/// This is the "progress" half of AC1, and it is deliberately a different
+/// measurement from [`SAFE_DISTANCE_HELD_FACT`] rather than a re-reading of it.
+/// `safe_distance_held` asks whether every sample stayed past a line, which a
+/// ship pinned at a *constant* 40 units answers "no" to just as flatly as one
+/// being steadily run down — but those are the same answer to the wrong
+/// question. A destroyer that cannot escape is one whose separation is not
+/// GROWING, and only the two ends of a window can say that.
+///
+/// Deliberately ABSENT (not zero) until the window is full, and absent for a
+/// hull that does not author the complete pressed parameter set, so a
+/// `fact(separation_progress) < …` guard reads false rather than firing
+/// permanently on a ship whose window has just been cleared — the reading a
+/// zero would give, and the worst possible moment to act on it.
+pub(crate) const SEPARATION_PROGRESS_FACT: &str = "separation_progress";
+/// `1.0` when this ship is inside its target's EFFECTIVE threat range — that
+/// is, inside [`TARGET_DIRECT_FIRE_RANGE_FACT`] — and `0.0` otherwise.
+///
+/// Transition-scope only — see the note above.
+///
+/// Derived host-side for the same reason [`SAFE_RANGE_FACT`] is: the predicate
+/// grammar compares one atom to a literal or a `param(...)`, so a comparison of
+/// two FACTS (this ship's range against that ship's reach) is the host's job.
+///
+/// An unarmed or fully-disarmed target has a reach of `0.0`, so this reads
+/// `0.0` at every range against one — which is the correct reading, not an edge
+/// case: a ship that cannot shoot cannot be pressing anybody.
+pub(crate) const INSIDE_THREAT_RANGE_FACT: &str = "inside_threat_range";
+
 /// Private-memory slot: the smallest range seen since this policy state was
 /// entered (issue #883). A running MINIMUM, folded every gated tick by the host —
 /// the exact mirror of [`PEAK_HAZARD_MEMORY`]'s running maximum, and the reason
@@ -1413,6 +1484,82 @@ pub(crate) const SAFE_RING_TOLERANCE_PARAM: &str = "safe_ring_tolerance";
 pub(crate) const SAFE_DISTANCE_WINDOW_TICKS_PARAM: &str = "safe_distance_window_ticks";
 /// Throttle fraction flown on the re-entry pivot. `0.0` cuts thrust for the turn.
 pub(crate) const REENGAGE_SPEED_PARAM: &str = "reengage_speed";
+
+/// Every scalar the shield-recovery arm needs, gated as ONE unit by
+/// [`recovery_params_authored`].
+///
+/// All six, not merely the four [`build_pass_surface`] reads for itself:
+/// `safe_ring_tolerance` and `safe_distance_window_ticks` are consumed by
+/// [`seed_recovery_facts`] instead, and a hull that omits either can never
+/// satisfy `fact(safe_distance_held)` — so admitting the arm without them would
+/// orbit for ever rather than decline.
+pub(crate) const RECOVERY_PARAMS: &[&str] = &[
+    SAFE_RANGE_MARGIN_PARAM,
+    ORBIT_SPEED_PARAM,
+    ORBIT_SPIRAL_GAIN_PARAM,
+    SAFE_RING_TOLERANCE_PARAM,
+    SAFE_DISTANCE_WINDOW_TICKS_PARAM,
+    REENGAGE_SPEED_PARAM,
+];
+
+/// Does this Steering policy author the complete recovery scalar set?
+///
+/// The one place the six-name question is asked, because two callers need the
+/// same answer and must not drift apart. [`build_pass_surface`] asks it to
+/// decide whether to publish `recover`/`reengage` at all; [`seed_pressed_facts`]
+/// asks it because the pressed pivot is FLOWN as the re-engage leg, so a hull
+/// that fails this check cannot fly the pressed arm either — see that function.
+fn recovery_params_authored(params: &crate::world::flags::AiParams) -> bool {
+    RECOVERY_PARAMS
+        .iter()
+        .all(|name| params.get(name).is_some())
+}
+
+// ── Authored pressed-doctrine params (issue #789) ────────────────────────────
+//
+// The four scalars the pressed short-pass arm is flown by. Like the recovery
+// six they are read off the STEERING policy, they have no default anywhere in
+// Rust, and the host gates on ALL of them together: see [`PRESSED_PARAMS`].
+
+/// Length of the separation-PROGRESS history, in shared AI ticks — the span the
+/// "am I actually getting away" question is asked over.
+///
+/// Its own parameter rather than a reuse of
+/// [`SAFE_DISTANCE_WINDOW_TICKS_PARAM`]: see [`HelmRecoveryHistory::separation`].
+pub(crate) const PRESSED_WINDOW_TICKS_PARAM: &str = "pressed_window_ticks";
+/// World units of separation the ship must have GAINED across that window for
+/// its escape to count as working. Below it, inside the target's own reach, the
+/// escape has failed and the ship is pressed.
+pub(crate) const PRESSED_MIN_PROGRESS_PARAM: &str = "pressed_min_progress";
+/// How long (seconds) the boosted, thrust-cut pivot runs before the short pass
+/// begins.
+pub(crate) const PRESSED_PIVOT_SECS_PARAM: &str = "pressed_pivot_secs";
+/// The SHORT pass's own closest-approach hysteresis: how far the range must
+/// re-open above the minimum seen before the pressed pass breaks off. Authored
+/// separately from — and smaller than — `closest_approach_hysteresis`, which is
+/// what makes a pressed pass a shorter pass rather than a re-run of the
+/// ordinary one.
+pub(crate) const PRESSED_HYSTERESIS_PARAM: &str = "pressed_closest_approach_hysteresis";
+
+/// The pressed arm's OWN four scalars, gated as one unit by
+/// [`seed_pressed_facts`] — which requires [`RECOVERY_PARAMS`] on top of these,
+/// because the pressed pivot is flown as the re-engage leg.
+///
+/// All four, not merely the one the host reads for itself. #788's review caught
+/// the mirror of this: a gate that required four of six params admitted a
+/// partially-authored hull into an arm it could never fly out of. The same trap
+/// is here — a hull authoring the window but not the progress threshold would
+/// have the host folding a measurement no guard can use, and one authoring the
+/// thresholds but not the window would fold a zero-length window and read
+/// "never pressed" for ever with nothing failing. Declining the whole arm on any
+/// one missing name leaves the hull flying the ordinary recovery doctrine, which
+/// is a behaviour a designer can actually see.
+pub(crate) const PRESSED_PARAMS: &[&str] = &[
+    PRESSED_WINDOW_TICKS_PARAM,
+    PRESSED_MIN_PROGRESS_PARAM,
+    PRESSED_PIVOT_SECS_PARAM,
+    PRESSED_HYSTERESIS_PARAM,
+];
 
 /// Private-memory slot: which way round the current recovery orbit runs,
 /// `+1.0` or `-1.0` (issue #788).
@@ -1656,6 +1803,10 @@ pub(crate) fn ai_policy_state_tick(
             &mut runtime.recovery,
             travel_target,
         );
+        // Pressed readings (issue #789): the SECOND bounded window's separation
+        // trend and the "inside the target's own reach" comparison. Folded here,
+        // once per shared tick, after the target scope above has been settled.
+        seed_pressed_facts(&mut facts, &steering_policy.params, &mut runtime.recovery);
 
         // ── Engines ──────────────────────────────────────────────────────────
         tick_policy_machine(
@@ -1965,22 +2116,15 @@ fn build_pass_surface(
     // authors the verb but omits a param publishes `recover = false` and flies
     // ordinary doctrine travel — the same "decline rather than invent" posture
     // the four params above take for the pass as a whole.
-    // All SIX are required, not just the four this surface reads itself:
-    // `safe_ring_tolerance` and `safe_distance_window_ticks` are consumed by
-    // `seed_recovery_facts`, and a hull that omits either can never satisfy
-    // `safe_distance_held` — so admitting the arm without them would orbit for
-    // ever rather than decline.
-    let recovery_params = (
-        steering_policy.params.get(SAFE_RANGE_MARGIN_PARAM),
+    // All SIX are required, not just the three this surface reads itself — see
+    // [`RECOVERY_PARAMS`], which is also what `seed_pressed_facts` gates on.
+    let (recover, reengage, orbit_speed, orbit_spiral_gain, reengage_speed) = match (
+        recovery_params_authored(&steering_policy.params),
         steering_policy.params.get(ORBIT_SPEED_PARAM),
         steering_policy.params.get(ORBIT_SPIRAL_GAIN_PARAM),
         steering_policy.params.get(REENGAGE_SPEED_PARAM),
-        steering_policy.params.get(SAFE_RING_TOLERANCE_PARAM),
-        steering_policy.params.get(SAFE_DISTANCE_WINDOW_TICKS_PARAM),
-    );
-    let (recover, reengage, orbit_speed, orbit_spiral_gain, reengage_speed) = match recovery_params
-    {
-        (Some(_), Some(orbit_speed), Some(gain), Some(reengage_speed), Some(_), Some(_)) => (
+    ) {
+        (true, Some(orbit_speed), Some(gain), Some(reengage_speed)) => (
             yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit),
             yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::PivotToReengage),
             orbit_speed as f32,
@@ -2173,9 +2317,11 @@ fn seed_recovery_facts(
         history.ranges.set_capacity(ticks.max(0.0).round() as usize);
     }
     // A target switch invalidates the history outright: distance held against a
-    // ship that is no longer the threat says nothing about the one that is.
+    // ship that is no longer the threat says nothing about the one that is —
+    // and neither does distance opened from it, so BOTH windows go (issue #789).
     if history.target != target {
         history.ranges.clear();
+        history.separation.clear();
         history.target = target;
     }
 
@@ -2205,6 +2351,92 @@ fn seed_recovery_facts(
     facts.set(SAFE_DISTANCE_HELD_FACT, if held { 1.0 } else { 0.0 });
 
     safe_range.map(|r| r as f32)
+}
+
+/// Fold the PRESSED readings into the shared fact snapshot and advance the
+/// separation-progress history (issue #789).
+///
+/// Called from [`ai_policy_state_tick`] alone, immediately after
+/// [`seed_recovery_facts`] — which owns the component's target scope and has
+/// already cleared both windows if the target changed. Folding a second window
+/// from the per-axis actuator hosts as well would advance it four times per
+/// shared tick, so the authored `pressed_window_ticks` would silently mean a
+/// quarter of the span it says.
+///
+/// Two facts, and the split between them is deliberate. The host derives the
+/// *measurements* — a comparison of two facts, and a trend across a bounded
+/// window, neither of which the predicate grammar can express — and the
+/// doctrine still owns every *decision*: how much progress counts as escaping is
+/// `param(pressed_min_progress)` in the hull's own TOML, not a number here
+/// (AGENTS.md #11).
+fn seed_pressed_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    params: &crate::world::flags::AiParams,
+    history: &mut HelmRecoveryHistory,
+) {
+    let target_valid = facts.get(TARGET_VALID_FACT).unwrap_or(0.0) > 0.0;
+    let range = facts.get(RANGE_TO_TARGET_FACT);
+
+    // "Effective player threat range" is the TARGET's own longest usable
+    // direct-fire reach — the same reading the standoff ring is derived from, so
+    // the two halves of the doctrine cannot disagree about how far the ship
+    // being fought can shoot. Always seeded, so a guard distinguishes "outside
+    // the threat" from "no reading" without either being absent.
+    let inside = target_valid
+        && range
+            .map(|r| r <= facts.get(TARGET_DIRECT_FIRE_RANGE_FACT).unwrap_or(0.0))
+            .unwrap_or(false);
+    facts.set(INSIDE_THREAT_RANGE_FACT, if inside { 1.0 } else { 0.0 });
+
+    // Decline rather than invent, on ALL TEN names together — the four in
+    // [`PRESSED_PARAMS`] and the six in [`RECOVERY_PARAMS`]. A declining hull
+    // keeps a zero-capacity window (no retention, no memory cost) and seeds no
+    // progress fact at all, so every pressed guard reads false and the ordinary
+    // recovery doctrine runs.
+    //
+    // The recovery six are load-bearing HERE, one level up from where they are
+    // obviously needed, and that is the whole reason this gate is not just
+    // `PRESSED_PARAMS`. The pressed pivot is flown as `FlyThroughLeg::Reengage`,
+    // which the planner only reaches when `HelmPassSurface::reengage` is true,
+    // and `build_pass_surface` only sets that when all six are authored. A hull
+    // admitted into the pressed arm without them would enter `pressed_pivot` and
+    // fall through to the INBOUND leg instead — a boosted, full-approach-throttle,
+    // hard-turning run straight at the enemy, which is strictly worse than the
+    // doctrine travel it would fly by declining. Nothing in content validation
+    // ties the `pivot_to_reengage` verb to those scalars, so this is the check.
+    if !recovery_params_authored(params)
+        || !PRESSED_PARAMS.iter().all(|name| params.get(name).is_some())
+    {
+        history.separation.set_capacity(0);
+        return;
+    }
+    // Re-applied every call for the same reason the recovery window's is: the
+    // authored value lives on the policy, which the `default()` component at
+    // spawn cannot see, and `set_capacity` is a no-op when unchanged.
+    history.separation.set_capacity(
+        params
+            .get(PRESSED_WINDOW_TICKS_PARAM)
+            .unwrap_or(0.0)
+            .max(0.0)
+            .round() as usize,
+    );
+
+    match (target_valid, range) {
+        (true, Some(range)) => {
+            history.separation.push(range);
+            // Absent until the window is full: a partly-filled window measures a
+            // shorter span than the authored one, so its progress reads low for
+            // no reason but youth — and "low progress" is the pressed reading.
+            if let Some(progress) = history.separation.net_change() {
+                facts.set(SEPARATION_PROGRESS_FACT, progress);
+            }
+        }
+        // Nothing visible to be escaping FROM. The window is emptied rather than
+        // frozen, so a target that reappears is measured from scratch instead of
+        // against a gap it never had, and the fact stays absent — a ship with no
+        // target is not pressed by it.
+        _ => history.separation.clear(),
+    }
 }
 
 /// Fold this fine system's OWN private memory into the shared fact snapshot
@@ -8639,6 +8871,12 @@ when = "state_time >= param(surge_dwell_secs)"
 
         // Hard to starboard — a bearing that would saturate a tracking solution.
         set_bogey(&mut app, uuid, [400.0, 0.0, -260.0], 0.0, 0.0);
+        // Put the hull exactly ON the frozen heading first, so the only thing
+        // that can command yaw this tick is the target. Left to fly, the boosted
+        // escape carries up to one tick of yaw rate as a residual (see the
+        // one-tick-offset note on `HelmPassSurface`), and this test would be
+        // measuring that convergence rather than the commitment it is about.
+        place_ship(&mut app, 0.0, -260.0, frozen, 20.0);
         tick(&mut app);
 
         assert_eq!(
@@ -8646,10 +8884,17 @@ when = "state_time >= param(surge_dwell_secs)"
             "escape",
             "nothing the target does may end the escape leg"
         );
+        // Asserted as a SIGN rather than as a magnitude, because the pin above
+        // makes the expected value exactly zero and an `abs() < tolerance` band
+        // around zero would pass for any regression small enough to be quiet.
+        // The bogey is hard to STARBOARD, so a leg that tracked it would command
+        // a saturated POSITIVE yaw — which this catches, while still admitting
+        // the free-flight case where the hull is converging back onto the frozen
+        // heading from the other side.
         assert!(
-            get_steering_input(&mut app).abs() < 0.05,
-            "the escape must fly the FROZEN heading, not turn back onto the target; \
-             got steering {}",
+            get_steering_input(&mut app) <= 0.0,
+            "the escape must fly the FROZEN heading, not turn back onto the target \
+             off the starboard beam; got steering {}",
             get_steering_input(&mut app)
         );
         assert!(
@@ -8755,12 +9000,21 @@ when = "state_time >= param(surge_dwell_secs)"
         let before_state = steering_state(&mut app);
         let before_heading = pass_surface(&mut app).escape_heading_rad;
 
-        // Clear escape first: nothing to avoid, so no yaw.
+        // Clear escape first: nothing to avoid, so no yaw. On the frozen heading
+        // exactly, so the baseline is not reading the boosted escape's own
+        // one-tick convergence residual (see `HelmPassSurface`).
         set_bogey(&mut app, uuid, [0.0, 0.0, -100.0], 0.0, 0.0);
+        place_ship(&mut app, 0.0, -260.0, before_heading, 20.0);
         tick(&mut app);
+        // A sign, not a band around zero: the pin above makes the expected value
+        // exactly zero, so `abs() < tolerance` would wave through any quiet
+        // regression. The bogey is dead ASTERN of the frozen heading, so a leg
+        // that tracked it would command a saturated positive yaw to haul the
+        // ship round; the negative half stays in scope for the free-flight case.
         assert!(
-            get_steering_input(&mut app).abs() < 0.05,
-            "baseline: an unobstructed escape commands no yaw"
+            get_steering_input(&mut app) <= 0.0,
+            "baseline: an unobstructed escape commands no yaw toward the target, got {}",
+            get_steering_input(&mut app)
         );
 
         // Drop a rock onto the projected escape path, keeping the bogey where
@@ -9034,6 +9288,28 @@ when = "state_time >= param(surge_dwell_secs)"
             .unwrap_or_else(|| panic!("the shipped hull must author `{name}`"))
     }
 
+    /// As [`authored_steering_param`], for the BOOST axis's own param table —
+    /// the machine that owns when the drive is lit, and so the one that authors
+    /// `boost_min_speed_fraction`.
+    fn authored_boost_param(name: &str) -> f32 {
+        let cfg = destroyer_hull();
+        cfg.helm_console
+            .as_ref()
+            .and_then(|hc| hc.boost_ai.as_ref())
+            .and_then(|ai| ai.param.get(name).copied())
+            .unwrap_or_else(|| panic!("the shipped hull's boost axis must author `{name}`"))
+    }
+
+    /// The hull's authored `max_speed`, so a test can turn an authored speed
+    /// FRACTION into the world-units speed `place_ship` takes.
+    fn authored_max_speed() -> f32 {
+        destroyer_hull()
+            .helm_console
+            .as_ref()
+            .expect("hull declares [helm_console]")
+            .max_speed
+    }
+
     /// A bogey that can shoot back — the reach a standoff ring is derived from.
     fn set_armed_bogey(app: &mut App, uuid: uuid::Uuid, pos: [f32; 3], reach: f32) {
         app.insert_resource(crate::ai::server::WorldSnapshot {
@@ -9092,6 +9368,23 @@ when = "state_time >= param(surge_dwell_secs)"
         }
     }
 
+    /// Where the destroyer sits out the escape dwell in [`run_to_recovery`],
+    /// with the bogey at `z = -200`: 120 units astern of it.
+    ///
+    /// The distance is pinned between two lines, and the fixture is only a
+    /// RECOVERY fixture while it stays between them:
+    ///
+    /// * beyond the bogey's own [`BOGEY_DIRECT_FIRE_REACH`] (90), so
+    ///   `inside_threat_range` reads false and the escape counts as having
+    ///   worked. Inside it — where this fixture sat before issue #789 — a
+    ///   stationary destroyer is by definition an escape that gained nothing
+    ///   under the enemy's guns, so the machine correctly takes the PRESSED
+    ///   branch instead and every assertion below is about the wrong doctrine;
+    /// * inside the safe ring by more than `safe_ring_tolerance`
+    ///   (`90 + 120 - 25 = 185`), so the distance history is full of breaches
+    ///   when recovery begins and re-entry is not already satisfied.
+    const RECOVERY_DWELL_Z: f32 = -320.0;
+
     /// Fly a complete pass against an ARMED bogey and sit out the authored
     /// escape dwell with the shields collapsed, leaving the machine in
     /// `recover` and the ship well inside the safe ring.
@@ -9099,11 +9392,16 @@ when = "state_time >= param(surge_dwell_secs)"
         run_to_recovery_omitting(&[])
     }
 
-    /// As [`run_to_recovery`], but flying a hull whose STEERING policy is
-    /// missing the named recovery `param`s.
-    fn run_to_recovery_omitting(omit: &[&str]) -> (App, uuid::Uuid) {
+    /// Fly one complete merge against an ARMED bogey of the given `reach` and
+    /// stop the instant the escape commits.
+    ///
+    /// The shared front half of every dwell fixture below: what separates a
+    /// recovery from a pressed run is only how the destroyer spends the escape
+    /// dwell that starts here, so sharing the approach keeps that the *only*
+    /// difference between them.
+    fn run_to_armed_escape(omit: &[&str], reach: f32) -> (App, uuid::Uuid) {
         let (mut app, uuid) = fly_through_app_omitting([0.0, 0.0, -200.0], omit);
-        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], reach);
         place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
         tick_twice(&mut app);
         assert_eq!(steering_state(&mut app), "inbound");
@@ -9112,10 +9410,17 @@ when = "state_time >= param(surge_dwell_secs)"
         place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
         tick(&mut app);
         assert_eq!(steering_state(&mut app), "escape");
-        // Sit out the dwell with the shields gone, parked 60 units from the
-        // bogey — well INSIDE the ring, so the distance history is full of
-        // breaches when recovery begins.
-        hold_and_tick(&mut app, 7.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+        (app, uuid)
+    }
+
+    /// As [`run_to_recovery`], but flying a hull whose STEERING policy is
+    /// missing the named recovery `param`s.
+    fn run_to_recovery_omitting(omit: &[&str]) -> (App, uuid::Uuid) {
+        let (mut app, uuid) = run_to_armed_escape(omit, BOGEY_DIRECT_FIRE_REACH);
+        // Sit out the dwell with the shields gone, parked at `RECOVERY_DWELL_Z`
+        // — see that constant for why the distance matters in two directions at
+        // once.
+        hold_and_tick(&mut app, 7.2, (0.0, RECOVERY_DWELL_Z, 0.0, 20.0), 0.0);
         (app, uuid)
     }
 
@@ -9163,7 +9468,7 @@ when = "state_time >= param(surge_dwell_secs)"
             // And it stays declined. The shipped hull is holding its ring
             // through this dwell, so a run that keeps ticking must not quietly
             // start orbiting a few ticks later.
-            hold_and_tick(&mut app, 3.0, (0.0, -260.0, 0.0, 20.0), 0.0);
+            hold_and_tick(&mut app, 3.0, (0.0, RECOVERY_DWELL_Z, 0.0, 20.0), 0.0);
             let pass = pass_surface(&mut app);
             assert!(
                 !pass.recover && !pass.reengage,
@@ -9309,7 +9614,7 @@ when = "state_time >= param(surge_dwell_secs)"
             tick(&mut app);
             place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
             tick(&mut app);
-            hold_and_tick(&mut app, 7.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+            hold_and_tick(&mut app, 7.2, (0.0, RECOVERY_DWELL_Z, 0.0, 20.0), 0.0);
             assert_eq!(steering_state(&mut app), "recover");
             pass_surface(&mut app).orbit_direction
         }
@@ -9517,5 +9822,570 @@ when = "state_time >= param(surge_dwell_secs)"
             !boost_is_active(&mut app),
             "an approach never boosts: acquire authors no boost rule"
         );
+    }
+
+    // ── The pressed short-pass fallback (issue #789) ─────────────────────────
+    //
+    // Same posture again: the SHIPPED hull's authored policies driven through a
+    // real ticking app, asserting only on the committed policy state, the
+    // published pass surface, the admitted actuator inputs, and the ship's boost
+    // state.
+    //
+    // The whole section turns on ONE distinction the fixtures have to keep
+    // honest, so it is worth stating plainly. A destroyer whose escape WORKED
+    // recovers; one whose escape FAILED presses. "Failed" is two things at once
+    // — it gained no ground AND it is still inside the guns — so every negative
+    // control below changes exactly one of those and holds the other, plus the
+    // shields, plus the dwell, constant.
+
+    /// Where the destroyer sits out the escape dwell to read as PRESSED: 60
+    /// units astern of the bogey, i.e. well INSIDE its
+    /// [`BOGEY_DIRECT_FIRE_REACH`] of 90, and stationary — an escape that ran
+    /// its full authored dwell and finished no further from the guns than it
+    /// started.
+    ///
+    /// The mirror of [`RECOVERY_DWELL_Z`], and the two differ in one thing only.
+    const PRESSED_DWELL_Z: f32 = -260.0;
+
+    /// A bogey that outranges the whole test arena.
+    ///
+    /// Exists so a control can open real distance and STILL be inside the
+    /// target's reach when the dwell ends. Against the ordinary 90-unit bogey
+    /// those two are physically inseparable — gaining ground from inside 90
+    /// units takes you outside them — so isolating the progress conjunct on its
+    /// own needs guns long enough that leaving them is not the same event as
+    /// getting away.
+    const LONG_REACH: f32 = 400.0;
+
+    /// As [`run_to_pressed`], but flying a hull whose STEERING policy is missing
+    /// the named `param`s.
+    fn run_to_pressed_omitting(omit: &[&str]) -> (App, uuid::Uuid) {
+        let (mut app, uuid) = run_to_armed_escape(omit, BOGEY_DIRECT_FIRE_REACH);
+        hold_and_tick(&mut app, 7.2, (0.0, PRESSED_DWELL_Z, 0.0, 20.0), 0.0);
+        (app, uuid)
+    }
+
+    /// Fly a complete pass against an armed bogey and sit out the escape dwell
+    /// pinned inside its reach with the shields gone, leaving the machine in
+    /// `pressed_pivot`.
+    fn run_to_pressed() -> (App, uuid::Uuid) {
+        run_to_pressed_omitting(&[])
+    }
+
+    /// Sit out `secs` of shared AI ticks while the ship OPENS the range from a
+    /// bogey at the origin end by `per_tick` world units every tick, holding its
+    /// shields at `shields`.
+    ///
+    /// The counterpart of [`hold_and_tick`]: that one pins a pose so a test is
+    /// not measuring drift, this one moves it deliberately so a test can measure
+    /// a TREND. Both pin the shields for the same reason.
+    fn withdraw_and_tick(app: &mut App, secs: f32, start_z: f32, per_tick: f32, shields: f32) {
+        let ticks = (secs * 30.0).ceil() as usize + 3;
+        for i in 0..ticks {
+            place_ship(app, 0.0, start_z - per_tick * i as f32, 0.0, 20.0);
+            set_shield_fraction(app, shields);
+            tick(app);
+        }
+    }
+
+    /// This ship's planar distance from `pos`, so a control can assert its own
+    /// geometric precondition instead of asserting it in a comment.
+    fn range_from(app: &mut App, pos: [f32; 3]) -> f32 {
+        let physics = *app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<Ship>>()
+            .single(app.world())
+            .expect("ship carries ShipPhysics");
+        let (dx, dz) = (physics.x - pos[0], physics.z - pos[2]);
+        (dx * dx + dz * dz).sqrt()
+    }
+
+    /// AC1, and the anti-trap for the two new facts: pressed detection is a
+    /// comparison of authored minimum separation PROGRESS across an authored
+    /// history window, taken only while inside the target's own effective threat
+    /// range.
+    ///
+    /// Both conjuncts get their own matched control, because either one alone
+    /// would be a fact nobody seeded reading false for ever — which would look
+    /// exactly like a destroyer that simply never presses, with nothing failing.
+    ///
+    /// (a) and (b) differ in ONE thing: whether the destroyer moved. Same bogey,
+    /// same reach, same shield collapse, same dwell, and (b) ends its dwell
+    /// STILL inside those guns — asserted, not assumed — so the threat-range
+    /// conjunct is identical in both and only the progress reading differs.
+    /// (c) then holds the progress at zero and moves the threat line instead.
+    #[test]
+    fn only_an_escape_that_gains_no_ground_under_the_guns_presses_the_destroyer() {
+        // (a) Pinned inside the reach for the whole dwell: the escape failed.
+        let (mut app, _uuid) = run_to_armed_escape(&[], LONG_REACH);
+        hold_and_tick(&mut app, 7.2, (0.0, PRESSED_DWELL_Z, 0.0, 20.0), 0.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "pressed_pivot",
+            "an escape that ran its full dwell and gained nothing, inside the target's \
+             own reach, must abandon recovery"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "pressed_pivot",
+            "Engines runs its own copy of the machine and must reach the same leg from \
+             the same facts, not by reading Steering's state"
+        );
+
+        // (b) The one-variable control: the same run, opening ground steadily
+        // across the window the detector measures, and still under those guns
+        // when the dwell expires.
+        //
+        // The per-tick step is DERIVED from the two authored scalars it has to
+        // beat rather than hand-picked against today's values: enough ground per
+        // tick that a full `pressed_window_ticks` window nets twice
+        // `pressed_min_progress`. Retuning either param moves this with it
+        // instead of quietly turning the control into a second copy of (a).
+        let per_tick = 2.0 * authored_steering_param(PRESSED_MIN_PROGRESS_PARAM)
+            / authored_steering_param(PRESSED_WINDOW_TICKS_PARAM);
+        let (mut app, _uuid) = run_to_armed_escape(&[], LONG_REACH);
+        withdraw_and_tick(&mut app, 7.2, -205.0, per_tick, 0.0);
+        assert!(
+            range_from(&mut app, [0.0, 0.0, -200.0]) < LONG_REACH,
+            "precondition: this control must still be INSIDE the target's reach, or it \
+             is testing the threat conjunct instead of the progress one — got {}",
+            range_from(&mut app, [0.0, 0.0, -200.0])
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "an escape that kept opening real distance WORKED: the destroyer takes the \
+             ordinary recovery doctrine even though it is still in range"
+        );
+
+        // (c) The other conjunct, alone: standing still again, but out beyond a
+        // reach that can no longer touch it. Distance that does not matter is
+        // not distance worth measuring.
+        let (mut app, _uuid) = run_to_recovery();
+        assert!(
+            range_from(&mut app, [0.0, 0.0, -200.0]) > BOGEY_DIRECT_FIRE_REACH,
+            "precondition: this control must be OUTSIDE the target's reach"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "a destroyer sitting still beyond the enemy's guns is not pinned — if this \
+             reads `pressed_pivot`, the threat-range conjunct is not being read"
+        );
+    }
+
+    /// AC2: taking a hit — even one that collapses the shields outright — does
+    /// not by itself press the destroyer.
+    ///
+    /// Structurally it cannot: there is no hit or damage EVENT fact anywhere in
+    /// this codebase, only `shield_fraction` as a level, so a detector built on
+    /// separation alone has nothing to fire on. This is the explicit negative
+    /// control for that, in the shape the recovery hand-off test uses — one run,
+    /// one fact moved, and the damage arriving as a discrete event partway
+    /// through an escape that is otherwise going perfectly well.
+    ///
+    /// The state is sampled on EVERY tick rather than only at the end, because
+    /// "never pressed" is the claim; a run that dipped into the pressed loop and
+    /// came back out would satisfy an end-state assertion and still be wrong.
+    #[test]
+    fn a_shield_collapse_alone_never_presses_the_destroyer() {
+        let (mut app, _uuid) = run_to_armed_escape(&[], LONG_REACH);
+
+        // The first half of the escape goes perfectly: shields up, ground being
+        // opened steadily.
+        let mut visited: Vec<String> = Vec::new();
+        let mut z = -205.0_f32;
+        for tick_index in 0..222 {
+            // THE HIT, once, at a single instant: full shields to none.
+            let shields = if tick_index < 90 { 1.0 } else { 0.0 };
+            place_ship(&mut app, 0.0, z, 0.0, 20.0);
+            set_shield_fraction(&mut app, shields);
+            tick(&mut app);
+            z -= 1.5;
+            visited.push(steering_state(&mut app));
+        }
+
+        assert!(
+            !visited.iter().any(|s| s.starts_with("pressed")),
+            "a destroyer that is opening ground the whole time must never press, \
+             whatever its shields do; it visited {:?}",
+            visited.iter().collect::<std::collections::BTreeSet<_>>()
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "the collapse still costs it the pass — it breaks off to the ordinary \
+             standoff — but that is the shield gate doing its job, not the pressed one"
+        );
+    }
+
+    /// AC4: the pressed pivot is a STATIONARY turn flown with the drive lit, and
+    /// the drive is cancelled before the normal-speed pass that follows.
+    ///
+    /// The cancel is the load-bearing half and it is authored as an absence —
+    /// `pressed_pass` declares no boost rule at all, so the channel holds and
+    /// `ai_helm_boost`'s on-change release fires. An absence is exactly the kind
+    /// of content that gets helpfully filled in, so it is asserted here through
+    /// the ship's real boost state as well as pinned in the hull's parse tests.
+    #[test]
+    fn the_pressed_pivot_boosts_a_stationary_turn_and_the_short_pass_does_not() {
+        let (mut app, _uuid) = run_to_pressed();
+        assert_eq!(steering_state(&mut app), "pressed_pivot");
+
+        let pass = pass_surface(&mut app);
+        assert!(
+            pass.reengage,
+            "the pivot is published as the re-engage leg, so the host pairs it with the \
+             authored reengage_speed"
+        );
+        assert!(!pass.recover, "and emphatically not as a standoff orbit");
+        assert_eq!(
+            get_thrust_input(&mut app),
+            authored_steering_param(REENGAGE_SPEED_PARAM),
+            "a STATIONARY pivot: the throttle is the authored re-engage fraction"
+        );
+        assert!(
+            boost_is_active(&mut app),
+            "the pivot is flown with the drive lit — that is what buys the extra yaw \
+             rate, and it is the one place outside the escape that boosts"
+        );
+
+        // The authored pivot dwell expires into the short pass...
+        let pivot_secs = authored_steering_param(PRESSED_PIVOT_SECS_PARAM);
+        hold_and_tick(
+            &mut app,
+            pivot_secs + 0.2,
+            (0.0, PRESSED_DWELL_Z, 0.0, 20.0),
+            0.0,
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "pressed_pass",
+            "the pivot ends on its own authored dwell"
+        );
+        assert!(
+            !boost_is_active(&mut app),
+            "...and the drive is CANCELLED for it: the short pass is a normal-speed \
+             pass, and it is recharging for the escape at the end of it"
+        );
+    }
+
+    /// AC5/AC7: the short pass runs in at NORMAL speed, tracks the target, and
+    /// breaks off into a straight boost-out escape on its own shorter authored
+    /// hysteresis.
+    ///
+    /// The break-off is the half that makes the pass *short*, and it is asserted
+    /// against a matched control rather than against a number: the same
+    /// re-opening — chosen to sit between the two authored hysteresis values —
+    /// commits the pressed pass and does NOT commit an ordinary inbound leg.
+    #[test]
+    fn the_short_pass_runs_in_at_normal_speed_and_breaks_off_sooner() {
+        let pressed_hysteresis = authored_steering_param(PRESSED_HYSTERESIS_PARAM);
+        let ordinary_hysteresis = authored_steering_param("closest_approach_hysteresis");
+        // Between the two, so it can only be read one way.
+        let reopen_by = (pressed_hysteresis + ordinary_hysteresis) / 2.0;
+        assert!(
+            pressed_hysteresis < reopen_by && reopen_by < ordinary_hysteresis,
+            "the hull must author a SHORTER pressed hysteresis for this pair to mean \
+             anything: {pressed_hysteresis} vs {ordinary_hysteresis}"
+        );
+
+        let (mut app, uuid) = run_to_pressed();
+        let pivot_secs = authored_steering_param(PRESSED_PIVOT_SECS_PARAM);
+        hold_and_tick(
+            &mut app,
+            pivot_secs + 0.2,
+            (0.0, PRESSED_DWELL_Z, 0.0, 20.0),
+            0.0,
+        );
+        assert_eq!(steering_state(&mut app), "pressed_pass");
+
+        // ── The motion ──────────────────────────────────────────────────────
+        // Abeam the bogey, so a real turn onto it is demanded and a "hold the
+        // last steering command" fallback would show up as zero. The range is
+        // unchanged, so nothing here can trip the break-off below.
+        let pass = pass_surface(&mut app);
+        place_ship(&mut app, 60.0, -200.0, 0.0, 20.0);
+        tick(&mut app);
+        tick(&mut app);
+        assert!(
+            pass.active && !pass.escape && !pass.recover && !pass.reengage,
+            "the short pass is published as an ordinary inbound leg — that is what \
+             makes it a normal-speed attack pass and not a fifth kind of manoeuvre"
+        );
+        assert!(
+            (get_thrust_input(&mut app) - pass.approach_speed).abs() < 1e-3,
+            "the short pass runs in at the authored APPROACH throttle ({}), not the \
+             escape throttle, got {}",
+            pass.approach_speed,
+            get_thrust_input(&mut app)
+        );
+        assert!(
+            get_steering_input(&mut app) < 0.0,
+            "and it tracks the target, which is off the port beam, got {}",
+            get_steering_input(&mut app)
+        );
+        assert!(
+            !boost_is_active(&mut app),
+            "still cold: a pass is not an escape"
+        );
+
+        // ── The break-off ───────────────────────────────────────────────────
+        // Back astern of the bogey and driving away from it, so the closing rate
+        // is negative, then let the range re-open by `reopen_by`.
+        place_ship(&mut app, 0.0, PRESSED_DWELL_Z, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "pressed_pass",
+            "an opening rate alone is not a closest approach on either doctrine"
+        );
+        place_ship(&mut app, 0.0, PRESSED_DWELL_Z - reopen_by, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "{reopen_by} units of re-opening is past the SHORT pass's authored \
+             hysteresis of {pressed_hysteresis}: the jab is over and the destroyer \
+             commits to another boost-out"
+        );
+        assert!(
+            pass_surface(&mut app).escape,
+            "and the published leg is the escape, flown from a heading frozen at this \
+             merge"
+        );
+
+        // ── The boost-out itself ────────────────────────────────────────────
+        // "Commits to another boost-out" is a claim about the DRIVE, not only
+        // about the state, so it is asserted through the ship's real boost
+        // state — and asserted as the authored behaviour rather than as
+        // "instantly". The escape's own rule carries
+        // `fact(speed_fraction) >= param(boost_min_speed_fraction)`, so a jab
+        // that broke off before the hull had rebuilt speed relights LATE, not
+        // never. Both sides of that authored line are checked, because only the
+        // pair distinguishes "waiting for speed" from "never lights at all".
+        let min_fraction = authored_boost_param("boost_min_speed_fraction");
+        let min_speed = min_fraction * authored_max_speed();
+        place_ship(
+            &mut app,
+            0.0,
+            PRESSED_DWELL_Z - reopen_by,
+            0.0,
+            min_speed * 0.5,
+        );
+        tick(&mut app);
+        assert!(
+            !boost_is_active(&mut app),
+            "under the authored {min_fraction} speed fraction the escape holds the \
+             drive: boost is an escape accelerant, not a launch assist"
+        );
+        place_ship(
+            &mut app,
+            0.0,
+            PRESSED_DWELL_Z - reopen_by,
+            0.0,
+            min_speed + 1.0,
+        );
+        tick(&mut app);
+        assert!(
+            boost_is_active(&mut app),
+            "once past the authored fraction the escape out of a pressed pass lights \
+             the drive like any other escape — the jab ends in a real attempt to leave"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "and nothing about the relight ends the escape leg"
+        );
+
+        // The matched control: the identical re-opening on an ORDINARY inbound
+        // leg is short of ITS authored hysteresis and commits nothing.
+        let (mut app, _uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
+        place_ship(&mut app, 0.0, PRESSED_DWELL_Z, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+        place_ship(&mut app, 0.0, PRESSED_DWELL_Z - reopen_by, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "the same {reopen_by} units is short of the ordinary {ordinary_hysteresis}-unit \
+             hysteresis — if this commits too, the pressed pass is not actually shorter"
+        );
+    }
+
+    /// AC3: while pressed, the destroyer waits for neither of the things the
+    /// recovery doctrine waits for.
+    ///
+    /// Both of recovery's re-entry conjuncts are handed to it mid-loop —
+    /// shields fully restored — and it neither switches to the standoff ring nor
+    /// jumps to the re-entry pivot. It finishes its own authored pivot dwell and
+    /// makes its pass, because being pinned is not a thing that gets better by
+    /// waiting.
+    #[test]
+    fn pressed_behaviour_waits_on_neither_the_shield_threshold_nor_the_ring() {
+        let (mut app, _uuid) = run_to_pressed();
+        let reentry_fraction = authored_steering_param("reentry_shield_fraction");
+
+        // Hand it the shield half of the recovery gate outright.
+        let mut visited: Vec<String> = Vec::new();
+        let pivot_secs = authored_steering_param(PRESSED_PIVOT_SECS_PARAM);
+        for _ in 0..((pivot_secs * 30.0).ceil() as usize + 3) {
+            place_ship(&mut app, 0.0, PRESSED_DWELL_Z, 0.0, 20.0);
+            set_shield_fraction(&mut app, 1.0);
+            tick(&mut app);
+            visited.push(steering_state(&mut app));
+            assert!(
+                !pass_surface(&mut app).recover,
+                "a pressed destroyer never publishes the standoff orbit"
+            );
+        }
+        assert!(
+            shield_fraction(&mut app) >= reentry_fraction,
+            "precondition: the shields really are back past the re-entry threshold"
+        );
+        assert!(
+            !visited.iter().any(|s| s == "recover" || s == "reenter"),
+            "restoring the shields must not pull a pressed destroyer into the recovery \
+             doctrine mid-loop; it visited {visited:?}"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "pressed_pass",
+            "it finishes the pivot it started and makes its pass"
+        );
+    }
+
+    /// AC6: the pressed loop is a response, not a mode. The moment one of its
+    /// escapes actually opens ground, the destroyer is back on the ordinary
+    /// recovery doctrine.
+    ///
+    /// This is the round trip end to end — recovery abandoned, pivot, short
+    /// pass, escape, recovery resumed — so it also pins that the pressed states
+    /// hand back to the SAME `escape` state the ordinary pass uses rather than
+    /// to a private copy of it.
+    #[test]
+    fn a_successful_escape_out_of_the_pressed_loop_resumes_the_recovery_doctrine() {
+        let reopen_by = authored_steering_param(PRESSED_HYSTERESIS_PARAM) + 1.0;
+        let (mut app, _uuid) = run_to_pressed();
+        assert_eq!(steering_state(&mut app), "pressed_pivot");
+
+        // Pivot → short pass → break-off into another escape attempt.
+        let pivot_secs = authored_steering_param(PRESSED_PIVOT_SECS_PARAM);
+        hold_and_tick(
+            &mut app,
+            pivot_secs + 0.2,
+            (0.0, PRESSED_DWELL_Z, 0.0, 20.0),
+            0.0,
+        );
+        assert_eq!(steering_state(&mut app), "pressed_pass");
+        place_ship(&mut app, 0.0, PRESSED_DWELL_Z - reopen_by, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(steering_state(&mut app), "escape");
+
+        // THIS escape works: it ends the dwell out beyond the target's reach,
+        // with the shields still gone.
+        hold_and_tick(&mut app, 7.2, (0.0, RECOVERY_DWELL_Z, 0.0, 20.0), 0.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "an escape that succeeded hands off to the ordinary standoff orbit, however \
+             many failed ones came before it"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "recover",
+            "and every axis comes back together, from the same facts"
+        );
+        assert!(
+            pass_surface(&mut app).recover,
+            "the published leg is the orbit again"
+        );
+    }
+
+    /// "Decline rather than invent", on all four pressed scalars.
+    ///
+    /// Each is genuinely load-bearing on its own and each fails differently if
+    /// admitted alone: without `pressed_window_ticks` the progress window keeps
+    /// its `Default` capacity of zero and can never report a trend; without
+    /// `pressed_min_progress` there is no line to compare that trend against;
+    /// without `pressed_pivot_secs` the pivot never ends; without
+    /// `pressed_closest_approach_hysteresis` the short pass never breaks off. A
+    /// hull admitted into the arm on three of the four would stall inside it —
+    /// strictly worse than never entering — so the host gates on all four
+    /// together and the hull flies its ordinary recovery doctrine instead.
+    ///
+    /// The shipped hull presses at this exact point (asserted above), so nothing
+    /// here passes for want of getting that far.
+    #[test]
+    fn a_hull_omitting_any_pressed_scalar_declines_the_whole_pressed_arm() {
+        for omitted in PRESSED_PARAMS {
+            let (mut app, _uuid) = run_to_pressed_omitting(&[omitted]);
+            assert_eq!(
+                steering_state(&mut app),
+                "recover",
+                "omitting `{omitted}` must decline the pressed arm outright and leave the \
+                 hull on the ordinary recovery doctrine"
+            );
+            assert_eq!(
+                engines_state(&mut app),
+                "recover",
+                "omitting `{omitted}` declines it on EVERY axis — the host's gate is over \
+                 the one shared fact snapshot, so the three machines cannot disagree"
+            );
+
+            // And it stays declined: a run that keeps ticking must not start
+            // pressing a few ticks later.
+            hold_and_tick(&mut app, 3.0, (0.0, PRESSED_DWELL_Z, 0.0, 20.0), 0.0);
+            assert!(
+                !steering_state(&mut app).starts_with("pressed"),
+                "omitting `{omitted}` must keep declining the arm"
+            );
+        }
+    }
+
+    /// ...and on all six RECOVERY scalars too, which is the same trap one level
+    /// up.
+    ///
+    /// The pressed pivot is not a fifth kind of manoeuvre: it is flown as
+    /// `FlyThroughLeg::Reengage`, and the planner only flies that leg when
+    /// `HelmPassSurface::reengage` is published, which `build_pass_surface` only
+    /// does when the whole recovery six are authored. A hull admitted into the
+    /// pressed arm on the four pressed scalars alone would therefore enter
+    /// `pressed_pivot` and have the planner fall through to the INBOUND leg —
+    /// boosted, at full approach throttle, turning hard, straight at the ship
+    /// that has it pinned. That is strictly worse than the doctrine travel such
+    /// a hull flew before the pressed arm existed, so the arm declines outright.
+    ///
+    /// Nothing in content validation ties the `pivot_to_reengage` verb to those
+    /// scalars, so the host's gate is the only thing that can catch it — and
+    /// this is the test that holds the gate in place.
+    #[test]
+    fn a_hull_omitting_any_recovery_scalar_declines_the_pressed_arm_too() {
+        for omitted in RECOVERY_PARAMS {
+            let (mut app, _uuid) = run_to_pressed_omitting(&[omitted]);
+            assert_eq!(
+                steering_state(&mut app),
+                "recover",
+                "omitting `{omitted}` must decline the pressed arm outright — a hull that \
+                 cannot publish the re-engage leg cannot fly the pressed pivot"
+            );
+            assert_eq!(
+                engines_state(&mut app),
+                "recover",
+                "omitting `{omitted}` declines it on EVERY axis, from the one shared fact \
+                 snapshot"
+            );
+
+            // And it stays declined, for the same reason the pressed-scalar
+            // case does: a run that keeps ticking must not start pressing a few
+            // ticks later.
+            hold_and_tick(&mut app, 3.0, (0.0, PRESSED_DWELL_Z, 0.0, 20.0), 0.0);
+            assert!(
+                !steering_state(&mut app).starts_with("pressed"),
+                "omitting `{omitted}` must keep declining the arm"
+            );
+        }
     }
 }

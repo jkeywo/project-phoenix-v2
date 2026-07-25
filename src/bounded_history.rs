@@ -148,6 +148,34 @@ impl BoundedHistory {
     pub fn all_at_least(&self, threshold: f64) -> bool {
         self.is_full() && self.samples.iter().all(|v| *v >= threshold)
     }
+
+    /// The NET change across a FULL window — newest sample minus oldest — or
+    /// `None` until the window is full (issue #789).
+    ///
+    /// The sibling of [`Self::all_at_least`], and the difference between them is
+    /// the difference between a *level* question and a *trend* one.
+    /// `all_at_least` answers "has every reading stayed past a line"; this
+    /// answers "which way, and how far, has the reading moved over the authored
+    /// span". A caller asking whether something is getting better or worse
+    /// cannot get that from a minimum, a maximum, or a single reading — it needs
+    /// the two ends of a bounded window.
+    ///
+    /// The fullness gate is not optional here either, and for a sharper reason
+    /// than `all_at_least`'s: over a partly-filled window this measures a
+    /// SHORTER span than the one the designer authored, so the answer would be
+    /// smaller in magnitude simply because less time had passed. A decision
+    /// taken from it would fire early, on less evidence than it asked for, and
+    /// would do so most reliably right after a `clear()` — exactly when the
+    /// caller knows least.
+    ///
+    /// Sign is the caller's to interpret: positive means the newest reading is
+    /// larger than the oldest.
+    pub fn net_change(&self) -> Option<f64> {
+        if !self.is_full() {
+            return None;
+        }
+        Some(self.samples.back()? - self.samples.front()?)
+    }
 }
 
 #[cfg(test)]
@@ -299,6 +327,72 @@ mod tests {
             "an idempotent re-author must not clear the history"
         );
         assert_eq!(w.len(), 3);
+    }
+
+    #[test]
+    fn net_change_is_the_newest_sample_minus_the_oldest() {
+        let mut w = BoundedHistory::new(3);
+        w.push(10.0);
+        w.push(20.0);
+        w.push(40.0);
+        assert_eq!(w.net_change(), Some(30.0));
+        // A reading that goes the OTHER way is a negative net change, not an
+        // absolute distance: the sign is the whole point of a trend.
+        w.push(5.0);
+        assert_eq!(w.net_change(), Some(-15.0), "20.0 is now the oldest sample");
+    }
+
+    #[test]
+    fn net_change_is_none_until_the_window_is_full() {
+        let mut w = BoundedHistory::new(3);
+        w.push(0.0);
+        assert_eq!(
+            w.net_change(),
+            None,
+            "a one-sample window has no span to measure across"
+        );
+        w.push(100.0);
+        assert_eq!(
+            w.net_change(),
+            None,
+            "two samples is still a SHORTER span than the authored three: answering \
+             here would report progress over a window nobody authored"
+        );
+        w.push(200.0);
+        assert_eq!(w.net_change(), Some(200.0));
+    }
+
+    /// The same property `all_at_least` has: a cleared window is not a full one,
+    /// so the trend goes unavailable until it has been re-earned.
+    #[test]
+    fn clearing_makes_the_net_change_unavailable_again() {
+        let mut w = BoundedHistory::new(2);
+        w.push(1.0);
+        w.push(9.0);
+        assert_eq!(w.net_change(), Some(8.0));
+        w.clear();
+        assert_eq!(w.net_change(), None);
+    }
+
+    #[test]
+    fn a_zero_capacity_window_never_reports_a_net_change() {
+        let mut w = BoundedHistory::new(0);
+        w.push(1.0);
+        w.push(2.0);
+        assert_eq!(w.net_change(), None);
+    }
+
+    #[test]
+    fn a_flat_window_reports_no_progress_rather_than_nothing() {
+        let mut w = BoundedHistory::new(3);
+        for _ in 0..3 {
+            w.push(50.0);
+        }
+        assert_eq!(
+            w.net_change(),
+            Some(0.0),
+            "a reading that has not moved is a MEASURED zero, not an absent answer"
+        );
     }
 
     #[test]

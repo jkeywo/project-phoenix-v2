@@ -76,16 +76,13 @@ pub fn test_app() -> App {
     app.world_mut().entity_mut(ship).insert((
         ShipModifiers::new(),
         ShipBoost::default(),
-        crate::ai_plugin::AiHighFidelity,
-        crate::console_ai_plugin::ShipFrequencyHintState::default(),
+        // The high-fidelity marker plus every per-ship AI component that travels
+        // with it (helm intents, frequency-hint state, the #882 policy runtime
+        // state), taken from the SAME definition both production spawn paths
+        // use — so this test twin cannot drift out of step with production.
+        crate::ai_plugin::ai_high_fidelity_components(),
     ));
     app.world_mut().entity_mut(ship).insert((
-        crate::ship::helm::ThrustInput::default(),
-        crate::ship::helm::SteeringInput::default(),
-        crate::ship::helm::LateralThrustInput::default(),
-        crate::ship::helm::VerticalThrustInput::default(),
-        crate::ship::helm::ImpulseCommand::default(),
-        crate::ship::helm::BoostCommand::default(),
         // The console-owned surfaces the AI helm derives its goals from
         // (issue #702). Production spawns all four on every ship; see
         // `HelmAiSurfaces`.

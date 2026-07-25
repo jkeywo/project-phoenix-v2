@@ -1065,6 +1065,218 @@ pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
 
+/// Per-ship runtime state for a STATEFUL Boost policy (issue #882) — the
+/// minimal host that proves the optional stateful path end to end.
+///
+/// Boost was chosen as the demonstrator because it is the smallest credible
+/// stateful axis in the game: its shipped default policy is *idle*, so nothing
+/// that ships today changes behaviour, and its host already resolves exactly
+/// one channel from an already-seeded fact snapshot. (The destroyer doctrine
+/// this spine exists for is issue #883, deliberately not built here.)
+///
+/// ## Why this is a separate component
+///
+/// [`HelmBoostAiPolicy`] is immutable authored data; taking it `&mut` to tick
+/// a state machine would dirty Bevy change-detection on the policy every tick.
+/// So the runtime state is its own sibling component.
+///
+/// ## Why it is per-fine-system, not per-ship
+///
+/// This component belongs to the Boost fine system ALONE, and there is
+/// deliberately no `ShipAiState`. That is the structural answer to AC3: the
+/// `memory(...)` / `state_time` bag handed to an evaluation is seeded from
+/// THIS component, so no sibling fine system's policy can observe it and no
+/// ship-wide state machine can form by accretion.
+///
+/// Inserted/removed alongside `AiHighFidelity` by `lod_ai_ships`, so a demoted
+/// ship drops its policy state and a re-promoted one starts from `initial`
+/// (AC5).
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmBoostAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
+
+/// The fact name the shared hazard surface is seeded under by
+/// [`seed_helm_actuator_facts`].
+pub(crate) const HAZARD_URGENCY_FACT: &str = "hazard_urgency";
+
+/// Private-memory slot: how many times this machine has entered a state that
+/// engages boost, since its last reset (issue #882).
+///
+/// Written by [`ai_policy_state_tick`] — the HOST — and read by authored
+/// guards as `memory(engagements)`. Host-writes / policy-reads is the same
+/// split #779 and #780 use for continuous magnitudes: the host owns the
+/// quantity, the policy owns the decision made from it. There is deliberately
+/// no authored *write* verb; a policy cannot mutate its own memory.
+pub(crate) const ENGAGEMENTS_MEMORY: &str = "engagements";
+
+/// Private-memory slot: the highest hazard urgency this ship has seen since
+/// the policy state last reset (issue #882), read as
+/// `memory(peak_hazard_urgency)`.
+///
+/// A running aggregate over ticks — the shape issue #883's closest-approach
+/// detector needs (`min_range_seen`, `prev_closing_rate`) — and the reason
+/// memory is not just a second name for `param`: no authored constant and no
+/// single-tick fact can express it.
+pub(crate) const PEAK_HAZARD_MEMORY: &str = "peak_hazard_urgency";
+
+/// The tick-derived clock the policy state machines measure `state_time`
+/// against (issue #882, AC4).
+///
+/// Advanced by exactly one increment of the authored AI-helm tick period each
+/// time [`ai_policy_state_tick`] runs — and that system runs under
+/// `run_if(ai_helm_tick_ready)`, the shared fixed-rate latch. It is therefore
+/// derived from the shared AI tick cadence and NOT from `Time::delta`: a 144 Hz
+/// host and a 60 Hz host advance policy state time identically, which is the
+/// whole point of the #803 latch and of PRD #620's determinism goal. Issue #784
+/// retired the last per-frame AI timer; nothing here reintroduces one.
+#[derive(Resource, Default)]
+pub(crate) struct AiPolicyTickClock(pub(crate) f64);
+
+/// Advance every stateful fine-system policy's state machine, ONCE per shared
+/// AI tick, and COMMIT the entered state before any output resolves this tick
+/// (issue #882).
+///
+/// Ordering (declared in `ship_plugin.rs`): `.after(helm_motion_planner)` so
+/// the hazard surface a transition guard reads is this tick's, and `.before`
+/// the per-axis actuator systems so the state they resolve their continuous
+/// outputs in is the state committed here — AC2's "the resulting state supplies
+/// continuous outputs immediately in the same tick". Runs under the same
+/// `run_if(ai_helm_tick_ready)` latch as those systems.
+///
+/// AC2's other half — at most ONE transition per eligible tick — is not
+/// enforced here at all: [`crate::ai::policy::AiPolicy::resolve_transition`]
+/// returns an `Option`, so this host has no way to chain two.
+///
+/// AC5 reset: a ship whose Boost system is not AI-operated, or whose boost
+/// capability is absent/disabled, is reset to `initial` every tick it stays
+/// that way. So the tick AI *gains* control — and the tick an unavailable
+/// system *recovers* — begins from the initial state with authored memory,
+/// never resuming a stale mid-manoeuvre state.
+///
+/// ## This host is also the WRITER of this fine system's private memory
+///
+/// There is no authored write verb and there never will be: a policy READS
+/// `memory(name)`, the host WRITES it. That is the same split #779/#780 use for
+/// continuous magnitudes (the planner owns the number, the policy owns the
+/// decision), and it is what makes memory more than a second spelling of
+/// `param` — the values are retained across ticks and only
+/// [`crate::ai::policy::AiPolicyRuntimeState::reset`] puts them back to their
+/// authored declarations. Two slots are written here, both named by the host,
+/// neither knowable from a single tick's facts:
+///
+/// * [`PEAK_HAZARD_MEMORY`] — a running maximum, folded every gated tick. This
+///   is the shape issue #883's closest-approach detector needs.
+/// * [`ENGAGEMENTS_MEMORY`] — incremented when a committed transition enters a
+///   state whose OWN rules engage boost. The host asks the policy what the
+///   entered state does on this system's channel, so the counter needs no
+///   knowledge of authored state names.
+pub(crate) fn ai_policy_state_tick(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
+    mut clock: ResMut<AiPolicyTickClock>,
+    mut ships: Query<
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&BoostConfigResource>,
+            Option<&ImpulseConfigResource>,
+            &HelmBoostAiPolicy,
+            &mut HelmBoostAiPolicyState,
+        ),
+        With<crate::ai_plugin::AiHighFidelity>,
+    >,
+) {
+    // One authored tick period per run — the shared cadence, never Time::delta.
+    let hz = world_config
+        .as_deref()
+        .map(|wc| wc.global.ai_helm_tick_hz)
+        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().ai_helm_tick_hz);
+    if hz > 0.0 {
+        clock.0 += 1.0 / hz as f64;
+    }
+    let now = clock.0;
+
+    for (entity, sources, physics, boost_cfg, impulse_cfg, policy, mut state) in ships.iter_mut() {
+        // Stateless policies never enter any of this (the shipped default Boost
+        // policy is idle and declares no machine).
+        if policy.0.machine().is_none() {
+            continue;
+        }
+        // AC5: not AI-operated, or the system is unavailable → hold at initial.
+        let operating = sources
+            .0
+            .policy_for(&crate::system_registry::helm_boost_system_id())
+            .operate_ai;
+        let available = boost_cfg.map(|c| c.enabled).unwrap_or(false);
+        if !operating || !available {
+            state.0 = crate::ai::policy::AiPolicyRuntimeState::reset(&policy.0, now);
+            continue;
+        }
+        // A state component that was never initialised (or whose authored
+        // machine changed) starts at `initial`.
+        if policy
+            .0
+            .machine()
+            .and_then(|m| m.state(&state.0.current))
+            .is_none()
+        {
+            state.0 = crate::ai::policy::AiPolicyRuntimeState::reset(&policy.0, now);
+        }
+
+        let facts = seed_helm_actuator_facts(
+            plan.ships.get(&entity).map(|sp| &sp.hazard),
+            impulse_cfg.is_some(),
+            true,
+            physics.y,
+        );
+        // ── Host-written private memory (issue #882) ─────────────────────────
+        //
+        // The HOST owns what goes into memory and the policy only READS it,
+        // exactly as #779/#780 split the planner (which owns continuous
+        // magnitudes) from the policy (which decides whether to actuate). A
+        // running maximum of the hazard the ship has faced since its last reset
+        // is the smallest honest example: it cannot be expressed as a `param`
+        // (it is not authored) nor as a `fact` (it is not a reading of THIS
+        // tick), so retention across ticks is doing real work.
+        let urgency = facts
+            .get(HAZARD_URGENCY_FACT)
+            .unwrap_or(0.0)
+            .max(state.0.memory.get(PEAK_HAZARD_MEMORY).unwrap_or(0.0));
+        state.0.memory.set(PEAK_HAZARD_MEMORY, urgency);
+
+        // The private bag is seeded from THIS fine system's own state component
+        // and nothing else (AC3).
+        let memory = state.0.memory_at(now);
+        if let Some(t) = policy
+            .0
+            .resolve_transition(&state.0.current, &facts, &memory, &[])
+        {
+            let to = t.to.clone();
+            state.0.enter(&to, now);
+            // Count the entries into a boost-ENGAGING state. The host asks the
+            // policy what the state it just entered does on this system's own
+            // channel, so the counter needs no knowledge of authored state
+            // names: any content whose entered state engages boost increments
+            // it. This survives the transition that produced it and every
+            // later tick, and only `AiPolicyRuntimeState::reset` clears it back
+            // to the authored declaration — which is the property that makes
+            // `memory(...)` different from `param(...)`.
+            let entered_memory = state.0.memory_at(now);
+            let engages = policy.0.resolve_channel_in_state(
+                &state.0.current,
+                crate::entities::config::HELM_BOOST_CHANNEL,
+                &facts,
+                &entered_memory,
+                &[],
+            ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
+            if engages {
+                let n = state.0.memory.get(ENGAGEMENTS_MEMORY).unwrap_or(0.0);
+                state.0.memory.set(ENGAGEMENTS_MEMORY, n + 1.0);
+            }
+        }
+    }
+}
+
 /// Resolve a helm fine-system policy's single mode channel to a bare "actuate
 /// this tick?" boolean (issue #779).
 ///
@@ -1101,7 +1313,7 @@ fn seed_helm_actuator_facts(
     let (urgency, moving_threat) = hazard
         .map(|h| (h.urgency, h.moving_hazard_threat))
         .unwrap_or((0.0, 0.0));
-    facts.set("hazard_urgency", urgency as f64);
+    facts.set(HAZARD_URGENCY_FACT, urgency as f64);
     facts.set("moving_hazard_threat", moving_threat as f64);
     facts.set("hazard_present", if urgency > 0.0 { 1.0 } else { 0.0 });
     facts.set(
@@ -1814,12 +2026,14 @@ pub(crate) fn ai_helm_boost(
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
             Option<&HelmBoostAiPolicy>,
+            Option<&HelmBoostAiPolicyState>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
+    clock: Res<AiPolicyTickClock>,
 ) {
     // Canonical fallback (idle) for ships missing an attached policy; built once
     // per tick — mirrors `ai_helm_thrust`.
@@ -1834,6 +2048,7 @@ pub(crate) fn ai_helm_boost(
         boost_cfg,
         impulse_cfg,
         boost_policy,
+        boost_state,
         entity_uuid,
         ship_config,
         mut admitted,
@@ -1869,12 +2084,29 @@ pub(crate) fn ai_helm_boost(
             physics.y,
         );
         let policy = boost_policy.map(|p| &p.0).unwrap_or(&default_policy);
-        let desired_active = helm_policy_actuates(
-            policy,
-            crate::entities::config::HELM_BOOST_CHANNEL,
-            &facts,
-            &crate::ai::policy::AiPolicyVerb::EngageBoost,
-        );
+        // Stateless (the shipped shape) resolves exactly as it always has.
+        // A policy that opted into the #882 machine instead resolves the SAME
+        // channel inside its current state — committed earlier this tick by
+        // `ai_policy_state_tick`, so the outputs are the new state's outputs
+        // immediately (AC2).
+        let desired_active = match (policy.machine(), boost_state) {
+            (Some(_), Some(state)) => {
+                policy.resolve_channel_in_state(
+                    &state.0.current,
+                    crate::entities::config::HELM_BOOST_CHANNEL,
+                    &facts,
+                    &state.0.memory_at(clock.0),
+                    &[],
+                ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost)
+            }
+            // No machine (or no state component yet) → the frozen stateless path.
+            _ => helm_policy_actuates(
+                policy,
+                crate::entities::config::HELM_BOOST_CHANNEL,
+                &facts,
+                &crate::ai::policy::AiPolicyVerb::EngageBoost,
+            ),
+        };
 
         // On-change only: `SetBoost` sets the desired active state, and the
         // shared integrator applies the transition; re-issuing an unchanged state
@@ -2558,6 +2790,9 @@ mod tests {
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         attach_engines_policy(&mut app, hold);
 
@@ -5578,6 +5813,7 @@ mod tests {
                 verb: crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
             }],
             idle: false,
+            machine: None,
         }
     }
 
@@ -5668,6 +5904,7 @@ mod tests {
                 verb: crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
             }],
             idle: false,
+            machine: None,
         };
         set_lateral_ai_policy(&mut app, never);
         tick_twice(&mut app);
@@ -5741,6 +5978,7 @@ mod tests {
                 verb: crate::ai::policy::AiPolicyVerb::EngageBoost,
             }],
             idle: false,
+            machine: None,
         }
     }
 
@@ -5789,6 +6027,404 @@ mod tests {
             !boost_command(&mut app),
             "the default idle boost policy must never engage boost (the pre-#780 \
              baseline: no AI boost)"
+        );
+    }
+
+    // ── AC8 demo host: the minimal stateful Boost policy (issue #882) ────────
+
+    /// The AC8 demonstrator, authored as TOML and decoded through the real
+    /// schema path so the test exercises content authoring, not a hand-built
+    /// typed value. Two states on the existing `boost` channel: `cruise` holds
+    /// boost and leaves for `surge` when the seeded hazard-urgency fact crosses
+    /// the AUTHORED `surge_urgency` param; `surge` engages boost unconditionally
+    /// and returns to `cruise` once `state_time` reaches the AUTHORED
+    /// `surge_dwell_secs`. Every threshold is an authored param (AGENTS.md #11)
+    /// — there is not a gameplay number in the Rust.
+    ///
+    /// It also READS the host-written private memory: `cruise` only surges
+    /// while `memory(engagements)` is under the authored `max_engagements` cap.
+    /// That closes the #882 loop — the host writes the slot on entering a
+    /// boost-engaging state, the authored guard reads it back on a later tick —
+    /// and it is why `memory(...)` is not just a second spelling of `param`.
+    fn stateful_boost_policy() -> crate::ai::policy::AiPolicy {
+        // A re-engagement cap far above anything these tests drive, so the
+        // demonstrator behaves exactly as it did before the memory read was
+        // authored; `stateful_boost_policy_capped` exercises the cap itself.
+        stateful_boost_policy_with("3.0", "99.0")
+    }
+
+    /// The demonstrator with its authored dwell and re-engagement cap supplied,
+    /// so a test can drive the memory read without a second copy of the TOML.
+    fn stateful_boost_policy_with(
+        surge_dwell_secs: &str,
+        max_engagements: &str,
+    ) -> crate::ai::policy::AiPolicy {
+        let src = format!(
+            r#"
+initial_state = "cruise"
+
+[param]
+surge_urgency = 0.0
+surge_dwell_secs = {surge_dwell_secs}
+max_engagements = {max_engagements}
+
+[memory]
+engagements = 0.0
+peak_hazard_urgency = 0.0
+
+[[state]]
+id = "cruise"
+
+[[state.transition]]
+priority = 10
+to = "surge"
+when = "fact(hazard_urgency) > param(surge_urgency) and fact(boost_available) > 0 and memory(engagements) < param(max_engagements)"
+
+[[state]]
+id = "surge"
+
+[[state.rule]]
+priority = 0
+channel = "boost"
+when = "true"
+verb = "engage_boost"
+
+[[state.transition]]
+priority = 0
+to = "cruise"
+when = "state_time >= param(surge_dwell_secs)"
+"#
+        );
+        let cfg: crate::entities::config::FineSystemAiConfigToml =
+            toml::from_str(&src).expect("the authored stateful boost policy parses");
+        assert!(
+            crate::entities::config::validate_fine_system_ai_policy(
+                &cfg,
+                &[crate::entities::config::HELM_BOOST_CHANNEL],
+                &[crate::entities::config::HELM_ENGAGE_BOOST_VERB],
+            )
+            .is_ok(),
+            "the demo policy must pass real content validation"
+        );
+        cfg.to_policy().expect("decodes to a typed machine")
+    }
+
+    fn boost_policy_state(app: &mut App) -> crate::ai::policy::AiPolicyRuntimeState {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<HelmBoostAiPolicyState>()
+            .expect("ship must carry HelmBoostAiPolicyState")
+            .0
+            .clone()
+    }
+
+    /// AC8 (+ AC1, AC2): the minimal stateful host end to end. The machine
+    /// starts in the authored initial state `cruise`, which holds boost. On the
+    /// tick its transition guard fires, `ai_policy_state_tick` commits `surge`
+    /// BEFORE `ai_helm_boost` resolves — so the entered state's continuous rule
+    /// engages boost through the same admitted `SetBoost` seam a human uses,
+    /// in that very tick.
+    #[test]
+    fn stateful_boost_policy_transitions_and_engages_in_the_same_tick() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        // Before any tick: nothing committed, nothing engaged.
+        assert!(!boost_command(&mut app));
+
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "surge",
+            "the hazard guard must carry the machine out of `cruise`"
+        );
+        assert!(
+            boost_command(&mut app),
+            "the entered state's continuous rule must engage boost through the \
+             admitted SetBoost seam in the same tick the transition committed"
+        );
+    }
+
+    /// AC2 (one transition per tick) at the host: `surge` can only return to
+    /// `cruise` after the authored dwell, so a machine cannot walk two edges in
+    /// one tick — the state is `surge`, never back at `cruise`, immediately
+    /// after the first transition.
+    #[test]
+    fn stateful_boost_policy_fires_at_most_one_transition_per_tick() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_twice(&mut app);
+        assert_eq!(boost_policy_state(&mut app).current, "surge");
+        // Several more ticks inside the authored dwell keep it there: the AI
+        // tick cadence is 30 Hz and the dwell is 3 s, so ~90 ticks would be
+        // needed. One tick can only ever advance one edge.
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "surge",
+            "no second edge may be walked while the authored dwell holds"
+        );
+    }
+
+    /// AC4: state time is derived from the shared AI tick cadence, not from
+    /// `Time::delta`. The clock advances by exactly one authored tick period
+    /// per gated run, so `entered_at_secs` and the state clock are reproducible
+    /// regardless of frame rate.
+    #[test]
+    fn stateful_policy_state_time_advances_on_the_shared_ai_tick() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_twice(&mut app);
+        let before = app.world().resource::<AiPolicyTickClock>().0;
+        tick_twice(&mut app);
+        let after = app.world().resource::<AiPolicyTickClock>().0;
+        assert!(
+            after > before,
+            "the tick-derived policy clock must advance on gated ticks"
+        );
+        let period = 1.0 / crate::entity_config::GlobalConfig::default().ai_helm_tick_hz as f64;
+        let advanced = after - before;
+        assert!(
+            (advanced % period).abs() < 1e-9 || ((advanced % period) - period).abs() < 1e-9,
+            "the clock must advance in whole authored tick periods, got {advanced}"
+        );
+    }
+
+    /// AC5: policy state resets when the system is unavailable, and again when
+    /// AI regains control — a recovered system never resumes a stale
+    /// mid-manoeuvre state.
+    #[test]
+    fn stateful_policy_state_resets_when_the_system_is_unavailable_and_on_recovery() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_twice(&mut app);
+        assert_eq!(boost_policy_state(&mut app).current, "surge");
+
+        // Boost becomes unavailable (the capability is stripped): the machine
+        // is put back to the authored initial state rather than left in
+        // `surge`, and boost stands down.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ship::components::BoostConfigResource>();
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "cruise",
+            "an unavailable system must reset its policy state"
+        );
+
+        // The system recovers: it restarts from `cruise` (proved above) and
+        // re-earns `surge` through its guard rather than resuming it.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship::components::BoostConfigResource {
+                enabled: true,
+                ..Default::default()
+            });
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "surge",
+            "on recovery the machine re-enters `surge` via its guard, from initial"
+        );
+    }
+
+    /// AC5 (the other half): a system NOT operated by AI holds at the authored
+    /// initial state, so the tick AI gains control begins from `initial`.
+    #[test]
+    fn stateful_policy_state_holds_at_initial_while_ai_does_not_operate_the_system() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        set_helm_control_source(&mut app, ControlSource::Human);
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "cruise",
+            "a human-operated system's policy state stays at initial"
+        );
+        assert!(!boost_command(&mut app));
+    }
+
+    /// AC7 at the HOST: the stateless boost path is untouched. The same host,
+    /// given a #775-shaped policy, still resolves through `resolve_channel` and
+    /// never touches the state component — which stays at its default.
+    #[test]
+    fn stateless_boost_policy_never_enters_the_state_machine_path() {
+        let mut app = boost_ai_app(Some(hazard_boost_policy()));
+        tick_twice(&mut app);
+        assert!(
+            boost_command(&mut app),
+            "the stateless hazard policy engages exactly as it did before #882"
+        );
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "",
+            "a stateless policy must leave the state component untouched"
+        );
+    }
+
+    // ── Host-written private memory (issue #882) ─────────────────────────────
+
+    fn boost_memory(app: &mut App, slot: &str) -> Option<f64> {
+        boost_policy_state(app).memory.get(slot)
+    }
+
+    /// Empty the world snapshot, so the shared plan carries no hazard and the
+    /// live `hazard_urgency` reading falls back to zero.
+    fn clear_snapshot(app: &mut App) {
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: Vec::new(),
+        });
+    }
+
+    /// Tick until the machine reaches `want`, so a test does not depend on
+    /// exactly which gated tick the shared plan first carries hazard.
+    fn tick_until_state(app: &mut App, want: &str) {
+        for _ in 0..8 {
+            if boost_policy_state(app).current == want {
+                return;
+            }
+            tick(app);
+        }
+        panic!(
+            "machine never reached `{want}` (stuck in `{}`)",
+            boost_policy_state(app).current
+        );
+    }
+
+    /// Finding 1's guard, at the host: the PRODUCTION player ship is a
+    /// `LocalShip`, and a `LocalShip` carrying a stateful boost policy must
+    /// actually transition. It only can if it carries `HelmBoostAiPolicyState`
+    /// — which it now takes from `ai_high_fidelity_components`, the one
+    /// definition both `lod_ai_ships` and `server_app::spawn_game_start_entities`
+    /// insert. Before that, the player ship silently had no state component,
+    /// `ai_policy_state_tick`'s non-optional query skipped it, and the host fell
+    /// through to the stateless arm with an empty top-level rule list: boost
+    /// never engaged, with no warning.
+    #[test]
+    fn local_ship_with_a_stateful_boost_policy_transitions_and_engages() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        let ship = find_ship_entity(&mut app);
+        assert!(
+            app.world()
+                .entity(ship)
+                .get::<crate::simulation::LocalShip>()
+                .is_some(),
+            "this is the player-ship spawn shape, not an NPC's"
+        );
+        assert!(
+            app.world()
+                .entity(ship)
+                .get::<HelmBoostAiPolicyState>()
+                .is_some(),
+            "the LocalShip must carry the per-fine-system policy state component"
+        );
+        tick_twice(&mut app);
+        assert_eq!(boost_policy_state(&mut app).current, "surge");
+        assert!(boost_command(&mut app));
+    }
+
+    /// The writer exists and its value PERSISTS across ticks.
+    ///
+    /// `peak_hazard_urgency` is a running maximum the host folds every tick. It
+    /// is not authored (so it cannot be a `param`) and it is not a reading of
+    /// this tick (so it cannot be a `fact`): retention is the whole content of
+    /// the slot. Later ticks whose hazard is lower must not lower it.
+    #[test]
+    fn host_written_memory_persists_across_ticks() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_until_state(&mut app, "surge");
+        let peak = boost_memory(&mut app, PEAK_HAZARD_MEMORY)
+            .expect("the host must have written the peak-hazard slot");
+        assert!(
+            peak > 0.0,
+            "the seeded moving hazard must have been recorded, got {peak}"
+        );
+
+        // Clear the hazard: this tick's reading is 0, but the retained maximum
+        // is not a reading of this tick.
+        clear_snapshot(&mut app);
+        tick_twice(&mut app);
+        tick_twice(&mut app);
+        assert_eq!(
+            boost_memory(&mut app, PEAK_HAZARD_MEMORY),
+            Some(peak),
+            "a retained maximum must survive ticks whose live reading is lower"
+        );
+    }
+
+    /// The written value SURVIVES a transition: `engagements` is incremented on
+    /// entering the boost-engaging `surge` state and is still there after the
+    /// machine walks the edge back to `cruise`. State time restarts on entry;
+    /// private memory deliberately does not.
+    #[test]
+    fn host_written_memory_survives_a_transition() {
+        // Zero dwell so `surge` returns to `cruise` as soon as it is re-eligible,
+        // and a cap high enough that the memory read never blocks the re-entry.
+        let mut app = boost_ai_app(Some(stateful_boost_policy_with("0.0", "99.0")));
+        tick_until_state(&mut app, "surge");
+        assert_eq!(
+            boost_memory(&mut app, ENGAGEMENTS_MEMORY),
+            Some(1.0),
+            "entering a boost-engaging state must increment the host-written slot"
+        );
+
+        // Walk the edge back to `cruise`. State time restarts; memory does not.
+        tick_until_state(&mut app, "cruise");
+        let state = boost_policy_state(&mut app);
+        assert_eq!(
+            state.memory.get(ENGAGEMENTS_MEMORY),
+            Some(1.0),
+            "private memory must survive the transition that follows it"
+        );
+    }
+
+    /// The POLICY reads what the host wrote. With the authored re-engagement cap
+    /// at one, the machine surges once, returns on the zero dwell, and can never
+    /// surge again — because `cruise`'s guard reads `memory(engagements)`. If
+    /// the slot were frozen at its declared 0.0 (i.e. behaviourally a `param`),
+    /// the machine would surge again immediately.
+    #[test]
+    fn authored_guard_reads_the_host_written_memory() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy_with("0.0", "1.0")));
+        tick_until_state(&mut app, "surge");
+        assert_eq!(boost_memory(&mut app, ENGAGEMENTS_MEMORY), Some(1.0));
+
+        // Back to cruise on the zero dwell...
+        tick_until_state(&mut app, "cruise");
+        // ...and the cap now holds it there, with the hazard still live.
+        for _ in 0..10 {
+            tick(&mut app);
+            assert_eq!(
+                boost_policy_state(&mut app).current,
+                "cruise",
+                "the authored cap must be read from host-written memory"
+            );
+        }
+    }
+
+    /// The reset CLEARS it. An unavailable system is reset to the authored
+    /// initial state AND the authored memory, so a recovered system never
+    /// resumes a stale count (AC5).
+    #[test]
+    fn host_written_memory_is_cleared_by_the_reset() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_until_state(&mut app, "surge");
+        assert_eq!(boost_memory(&mut app, ENGAGEMENTS_MEMORY), Some(1.0));
+        assert!(boost_memory(&mut app, PEAK_HAZARD_MEMORY).unwrap_or(0.0) > 0.0);
+
+        // Strip the capability → AC5 reset.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ship::components::BoostConfigResource>();
+        tick_twice(&mut app);
+        assert_eq!(boost_policy_state(&mut app).current, "cruise");
+        assert_eq!(
+            boost_memory(&mut app, ENGAGEMENTS_MEMORY),
+            Some(0.0),
+            "reset must restore the AUTHORED memory, not keep the drifted count"
+        );
+        assert_eq!(
+            boost_memory(&mut app, PEAK_HAZARD_MEMORY),
+            Some(0.0),
+            "every host-written slot goes back to its authored declaration"
         );
     }
 

@@ -1478,6 +1478,9 @@ mod tests {
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         }
         .to_policy()
         .unwrap()

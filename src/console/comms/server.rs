@@ -3564,6 +3564,9 @@ mod tests {
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         assert!(
             crate::entities::config::validate_fine_system_ai_policy(

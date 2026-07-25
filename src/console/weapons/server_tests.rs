@@ -7064,6 +7064,9 @@ fn attach_launch_policy(app: &mut App, when: &str) {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     };
     let mut map = std::collections::HashMap::new();
     map.insert("fore_port".to_string(), ai.to_policy().unwrap());
@@ -9955,6 +9958,9 @@ fn phaser_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
     .to_policy()
     .expect("valid phaser bank policy")

@@ -161,11 +161,71 @@ impl AiTokenRegistry {
 // `ObjectiveCursors` (the objective), `LastShipAttacker` (the world). Adding a
 // private mirror of any of them back re-creates the split brain — and the
 // helm/weapons targeting divergence — that removing it fixed.
+//
+// (Issue #882's `world::flags::AiPolicyMemory` is a DIFFERENT thing and is
+// deliberately named differently: it is owned by one fine system's policy
+// runtime, is only readable through that system's own `memory(...)` atoms, and
+// is not a ship-wide reasoning blob.)
 
 /// Marker component: entity is eligible for high-fidelity AI simulation.
 /// Entities without this marker run at reduced simulation fidelity.
 #[derive(Component)]
 pub struct AiHighFidelity;
+
+/// The per-ship AI components that MUST travel with [`AiHighFidelity`] — the
+/// single source of truth for both spawn paths.
+///
+/// ## Why this exists
+///
+/// A ship can acquire the marker by two entirely separate routes: NPCs through
+/// [`lod_ai_ships`] promotion, and the local player ship through
+/// `server_app::spawn_game_start_entities` (which does NOT go through
+/// `entities::spawner`). Three times now a new per-ship AI component has been
+/// added to one route and silently missed on the other — #785's
+/// `RepairTargetSelector`, #786's `CommsTargetSelector`, and #882's
+/// `HelmBoostAiPolicyState` — and each time the failure was SILENT: the system
+/// that queries the component non-optionally just skips the ship, or the host
+/// falls back to a stateless/default arm, with no warning and no error.
+///
+/// Naming the set ONCE, as a type alias plus a constructor, removes the class
+/// of bug rather than patching the instance: every site inserts
+/// [`ai_high_fidelity_components`] and the demote path removes
+/// `AiHighFidelityComponents`, so adding a component here reaches the player
+/// ship, every promoted NPC, and the test twin in `ship::test_support`
+/// together, and insert/remove can no longer drift apart.
+///
+/// The marker itself is a member so that "high fidelity" is one indivisible
+/// unit: there is no way to insert the marker without the components it implies.
+pub type AiHighFidelityComponents = (
+    AiHighFidelity,
+    crate::console_ai_plugin::ShipFrequencyHintState,
+    crate::ship::helm::ThrustInput,
+    crate::ship::helm::SteeringInput,
+    crate::ship::helm::LateralThrustInput,
+    crate::ship::helm::VerticalThrustInput,
+    crate::ship::helm::ImpulseCommand,
+    crate::ship::helm::BoostCommand,
+    crate::ship::helm_ai::HelmBoostAiPolicyState,
+);
+
+/// Build the [`AiHighFidelityComponents`] set at its defaults.
+///
+/// Every field is `default()`, which is also the AC5 reset for the #882 policy
+/// runtime state: a ship that (re-)enters high fidelity starts from the
+/// policy's authored initial state rather than resuming a stale one.
+pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
+    (
+        AiHighFidelity,
+        crate::console_ai_plugin::ShipFrequencyHintState::default(),
+        crate::ship::helm::ThrustInput::default(),
+        crate::ship::helm::SteeringInput::default(),
+        crate::ship::helm::LateralThrustInput::default(),
+        crate::ship::helm::VerticalThrustInput::default(),
+        crate::ship::helm::ImpulseCommand::default(),
+        crate::ship::helm::BoostCommand::default(),
+        crate::ship::helm_ai::HelmBoostAiPolicyState::default(),
+    )
+}
 
 /// AI personality and capability profile for NPC entities.
 #[derive(Component, Clone, Debug)]
@@ -710,41 +770,27 @@ fn lod_ai_ships(
             };
             match new_state {
                 LodState::High => {
-                    commands.entity(entity).insert(AiHighFidelity);
-                    // AI intent/state components scoped to AiHighFidelity
-                    // (issue #692, extended by #693 for power, #695 for
-                    // helm) — bundled alongside the marker so they stay
-                    // present exactly while the ship runs full-fidelity AI
-                    // decision systems.
+                    // The marker AND every AI intent/state component it implies
+                    // (issue #692, extended by #693 for power, #695 for helm,
+                    // #882 for the policy runtime state), from the ONE shared
+                    // definition the player-ship spawn also uses. Re-inserting
+                    // defaults on promotion IS the #882 AC5 "AI gains control"
+                    // reset — `ai_policy_state_tick` then puts the machine in
+                    // the policy's authored initial state on its first run.
+                    //
+                    // Power AI is stateless since issue #784 (the
+                    // `PowerAiPolicy` is attached at spawn, not LOD-scoped), so
+                    // no per-fidelity power state is in the set.
                     commands
                         .entity(entity)
-                        .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
-                    // Power AI is stateless since issue #784 (the `PowerAiPolicy`
-                    // is attached at spawn, not LOD-scoped), so no per-fidelity
-                    // power state is bundled here any more.
-                    commands.entity(entity).insert((
-                        crate::ship::helm::ThrustInput::default(),
-                        crate::ship::helm::SteeringInput::default(),
-                        crate::ship::helm::LateralThrustInput::default(),
-                        crate::ship::helm::VerticalThrustInput::default(),
-                        crate::ship::helm::ImpulseCommand::default(),
-                        crate::ship::helm::BoostCommand::default(),
-                    ));
+                        .insert(ai_high_fidelity_components());
                     commands.entity(entity).insert(timer_comp);
                 }
                 LodState::Low => {
-                    commands.entity(entity).remove::<AiHighFidelity>();
-                    commands
-                        .entity(entity)
-                        .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
-                    commands.entity(entity).remove::<(
-                        crate::ship::helm::ThrustInput,
-                        crate::ship::helm::SteeringInput,
-                        crate::ship::helm::LateralThrustInput,
-                        crate::ship::helm::VerticalThrustInput,
-                        crate::ship::helm::ImpulseCommand,
-                        crate::ship::helm::BoostCommand,
-                    )>();
+                    // Removed as the same unit that was inserted, so the two
+                    // halves cannot drift: a re-promoted ship cannot resume a
+                    // stale mid-manoeuvre policy state (issue #882 AC5).
+                    commands.entity(entity).remove::<AiHighFidelityComponents>();
                     commands.entity(entity).insert(timer_comp);
                 }
             }
@@ -1943,14 +1989,8 @@ mod tests {
                 LocalShip,
                 Transform::from_xyz(x, 0.0, z),
                 ShipPhysics::default(),
-                AiHighFidelity,
-                crate::console_ai_plugin::ShipFrequencyHintState::default(),
-                crate::ship::helm::ThrustInput::default(),
-                crate::ship::helm::SteeringInput::default(),
-                crate::ship::helm::LateralThrustInput::default(),
-                crate::ship::helm::VerticalThrustInput::default(),
-                crate::ship::helm::ImpulseCommand::default(),
-                crate::ship::helm::BoostCommand::default(),
+                // Same shared set the production player-ship spawn uses.
+                ai_high_fidelity_components(),
             ))
             .id()
     }
@@ -1973,6 +2013,55 @@ mod tests {
                 },
             ))
             .id()
+    }
+
+    /// The guard against the recurring spawn-path gap.
+    ///
+    /// Every per-ship AI component that must accompany `AiHighFidelity` is
+    /// named ONCE, in `AiHighFidelityComponents`, and every spawn path inserts
+    /// that set — so a component added there reaches the player ship
+    /// (`server_app::spawn_game_start_entities`), every promoted NPC
+    /// (`lod_ai_ships`) and the test twin (`ship::test_support`) at the same
+    /// time. This test pins what the set contains, so the components three
+    /// separate issues have now silently lost on one path or the other cannot
+    /// quietly leave it.
+    #[test]
+    fn the_high_fidelity_component_set_carries_every_per_ship_ai_component() {
+        let mut world = World::new();
+        let e = world.spawn(ai_high_fidelity_components()).id();
+        assert!(world.get::<AiHighFidelity>(e).is_some(), "the marker");
+        assert!(
+            world
+                .get::<crate::console_ai_plugin::ShipFrequencyHintState>(e)
+                .is_some(),
+            "frequency-hint state (issue #692)"
+        );
+        assert!(world.get::<crate::ship::helm::ThrustInput>(e).is_some());
+        assert!(world.get::<crate::ship::helm::SteeringInput>(e).is_some());
+        assert!(world
+            .get::<crate::ship::helm::LateralThrustInput>(e)
+            .is_some());
+        assert!(world
+            .get::<crate::ship::helm::VerticalThrustInput>(e)
+            .is_some());
+        assert!(world.get::<crate::ship::helm::ImpulseCommand>(e).is_some());
+        assert!(world.get::<crate::ship::helm::BoostCommand>(e).is_some());
+        assert!(
+            world
+                .get::<crate::ship::helm_ai::HelmBoostAiPolicyState>(e)
+                .is_some(),
+            "the #882 policy runtime state — the component the player ship was \
+             missing, which made `ai_policy_state_tick` skip it silently"
+        );
+
+        // Insert and remove are the same unit, so a demoted ship cannot keep
+        // half of it.
+        world.entity_mut(e).remove::<AiHighFidelityComponents>();
+        assert!(world.get::<AiHighFidelity>(e).is_none());
+        assert!(world
+            .get::<crate::ship::helm_ai::HelmBoostAiPolicyState>(e)
+            .is_none());
+        assert!(world.get::<crate::ship::helm::BoostCommand>(e).is_none());
     }
 
     #[test]

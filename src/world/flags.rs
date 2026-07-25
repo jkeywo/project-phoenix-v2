@@ -228,6 +228,21 @@ pub enum FactContext {
     Candidate,
     /// The currently-retained selected target (`target_fact(...)`).
     Target,
+    /// The owning fine system's *typed private memory* (`memory(name)`, issue
+    /// #882). Read from the [`AiPolicyMemory`] bag the OWNING system seeds for its
+    /// own evaluation and nothing else: a sibling fine system's seeding call
+    /// never populates this bag, so a policy physically cannot read another
+    /// system's memory. Absent name → comparison `false`, the same contract
+    /// every other context carries.
+    Memory,
+    /// The owning fine system's *state time* (`state_time`, issue #882): how
+    /// long, in shared-AI-tick-derived seconds, the policy has been in its
+    /// current state. Carried on the same [`AiPolicyMemory`] bag as `memory(...)`
+    /// but in its own field, so no authored memory name can collide with it.
+    /// The atom takes no argument; the `name` on the parsed
+    /// [`Predicate::Fact`] is the fixed literal `"state_time"` and is used for
+    /// diagnostics only.
+    StateTime,
 }
 
 /// The three typed-fact sets one selector evaluation reads (issue #776).
@@ -262,6 +277,67 @@ impl AiFacts {
     /// Iterate the present `(name, value)` readings. Used by the target
     /// selector to fold multiple sources' candidate facts into one entry
     /// (issue #776). Order is unspecified (backed by a `HashMap`).
+    pub fn iter(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.values.iter().map(|(k, v)| (k.as_str(), *v))
+    }
+}
+
+/// One fine system's *typed private memory* plus its state time (issue #882).
+///
+/// This is the only readable surface behind the `memory(name)` and `state_time`
+/// atoms. It is deliberately NOT part of [`AiFacts`]: facts are a shared,
+/// host-seeded snapshot of world readings that several systems may derive from
+/// the same surfaces, whereas this bag belongs to exactly one fine system's
+/// policy runtime. AC3 scoping is therefore structural — a system seeds its own
+/// bag from its own state component, so there is no path by which one fine
+/// system's evaluation observes another's memory, and no ship-wide state
+/// machine can form out of it.
+///
+/// Values are typed as `f64` for the same reason authored parameters are: the
+/// predicate grammar compares real-valued quantities. An absent name makes
+/// every comparison against it evaluate `false` (never a panic), matching
+/// [`AiFacts`]'s absent-fact contract.
+///
+/// Named `AiPolicyMemory`, NOT `AiMemory`: `AiMemory` is the per-ship
+/// private-reasoning blob issue #702 DELETED (see the notes in `ai::server` and
+/// `ai::core`), and reusing that name would make a history grep conflate the
+/// thing that was removed with the thing #882 introduced. They are not the same
+/// idea — the deleted one was ship-wide and mutated by coarse AI, this one is
+/// owned by exactly one fine system's policy runtime.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiPolicyMemory {
+    values: HashMap<String, f64>,
+    state_time_secs: f64,
+}
+
+impl AiPolicyMemory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Write one named private memory slot.
+    pub fn set(&mut self, name: &str, value: f64) {
+        self.values.insert(name.to_string(), value);
+    }
+
+    /// Read one named private memory slot; `None` when undeclared/unwritten.
+    pub fn get(&self, name: &str) -> Option<f64> {
+        self.values.get(name).copied()
+    }
+
+    /// Seconds spent in the current policy state. Advanced from the shared AI
+    /// tick cadence by the policy state runtime, never from a per-frame clock
+    /// (issue #882 AC4).
+    pub fn state_time_secs(&self) -> f64 {
+        self.state_time_secs
+    }
+
+    /// Set the state time. Called only by the policy state runtime.
+    pub fn set_state_time_secs(&mut self, secs: f64) {
+        self.state_time_secs = secs;
+    }
+
+    /// Iterate the present `(name, value)` slots. Order is unspecified.
     pub fn iter(&self) -> impl Iterator<Item = (&str, f64)> {
         self.values.iter().map(|(k, v)| (k.as_str(), *v))
     }
@@ -362,7 +438,32 @@ impl Predicate {
         // candidate/target sets are empty: bare `fact(...)` reads SELF, and any
         // stray candidate/target atom simply finds no reading → false.
         let empty = AiFacts::default();
-        self.evaluate_ctx(facts, &empty, &empty, params, chain)
+        self.evaluate_ctx(
+            facts,
+            &empty,
+            &empty,
+            &AiPolicyMemory::default(),
+            params,
+            chain,
+        )
+    }
+
+    /// Evaluate against typed facts, the owning fine system's private memory +
+    /// state time, named parameters, and a read-only flag chain (issue #882).
+    ///
+    /// This is the *stateful* fine-system policy entry point. It differs from
+    /// [`evaluate_with`] only in that `memory(...)` / `state_time` atoms find
+    /// readings; every other atom behaves identically, so a stateless
+    /// expression evaluated here gives the same answer it always did.
+    pub fn evaluate_stateful(
+        &self,
+        facts: &AiFacts,
+        memory: &AiPolicyMemory,
+        params: &AiParams,
+        chain: &[&FlagStore],
+    ) -> bool {
+        let empty = AiFacts::default();
+        self.evaluate_ctx(facts, &empty, &empty, memory, params, chain)
     }
 
     /// Evaluate against the three selector fact contexts (self / candidate /
@@ -380,6 +481,7 @@ impl Predicate {
             &facts.self_facts,
             &facts.candidate_facts,
             &facts.target_facts,
+            &AiPolicyMemory::default(),
             params,
             chain,
         )
@@ -390,6 +492,7 @@ impl Predicate {
         self_facts: &AiFacts,
         candidate_facts: &AiFacts,
         target_facts: &AiFacts,
+        memory: &AiPolicyMemory,
         params: &AiParams,
         chain: &[&FlagStore],
     ) -> bool {
@@ -402,28 +505,63 @@ impl Predicate {
                 op,
                 rhs,
             } => {
-                let facts = match context {
-                    FactContext::SelfCtx => self_facts,
-                    FactContext::Candidate => candidate_facts,
-                    FactContext::Target => target_facts,
+                // The private contexts (issue #882) read the owning system's
+                // own memory bag; the three world contexts read their fact set.
+                let lhs = match context {
+                    FactContext::SelfCtx => self_facts.get(name),
+                    FactContext::Candidate => candidate_facts.get(name),
+                    FactContext::Target => target_facts.get(name),
+                    FactContext::Memory => memory.get(name),
+                    FactContext::StateTime => Some(memory.state_time_secs()),
                 };
-                match (facts.get(name), rhs.resolve(params)) {
+                match (lhs, rhs.resolve(params)) {
                     (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
                     // Absent fact or unresolved parameter → false, never panic.
                     _ => false,
                 }
             }
             Predicate::Bool(b) => *b,
-            Predicate::Not(inner) => {
-                !inner.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
-            }
+            Predicate::Not(inner) => !inner.evaluate_ctx(
+                self_facts,
+                candidate_facts,
+                target_facts,
+                memory,
+                params,
+                chain,
+            ),
             Predicate::And(a, b) => {
-                a.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
-                    && b.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
+                a.evaluate_ctx(
+                    self_facts,
+                    candidate_facts,
+                    target_facts,
+                    memory,
+                    params,
+                    chain,
+                ) && b.evaluate_ctx(
+                    self_facts,
+                    candidate_facts,
+                    target_facts,
+                    memory,
+                    params,
+                    chain,
+                )
             }
             Predicate::Or(a, b) => {
-                a.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
-                    || b.evaluate_ctx(self_facts, candidate_facts, target_facts, params, chain)
+                a.evaluate_ctx(
+                    self_facts,
+                    candidate_facts,
+                    target_facts,
+                    memory,
+                    params,
+                    chain,
+                ) || b.evaluate_ctx(
+                    self_facts,
+                    candidate_facts,
+                    target_facts,
+                    memory,
+                    params,
+                    chain,
+                )
             }
         }
     }
@@ -447,6 +585,40 @@ impl Predicate {
             }
         }
     }
+
+    /// Collect every `memory(name)` referenced anywhere in the expression
+    /// (issue #882). Content validation uses this to reject a memory reference
+    /// the author never declared, and — together with
+    /// [`references_state_time`](Self::references_state_time) — to reject any
+    /// private reference inside a *stateless* policy (AC6).
+    pub fn referenced_memory(&self, out: &mut Vec<String>) {
+        match self {
+            Predicate::Fact { context, name, .. } if *context == FactContext::Memory => {
+                out.push(name.clone())
+            }
+            Predicate::Fact { .. }
+            | Predicate::Flag { .. }
+            | Predicate::Counter { .. }
+            | Predicate::Bool(_) => {}
+            Predicate::Not(inner) => inner.referenced_memory(out),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.referenced_memory(out);
+                b.referenced_memory(out);
+            }
+        }
+    }
+
+    /// True when the expression reads `state_time` anywhere (issue #882).
+    pub fn references_state_time(&self) -> bool {
+        match self {
+            Predicate::Fact { context, .. } => *context == FactContext::StateTime,
+            Predicate::Flag { .. } | Predicate::Counter { .. } | Predicate::Bool(_) => false,
+            Predicate::Not(inner) => inner.references_state_time(),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.references_state_time() || b.references_state_time()
+            }
+        }
+    }
 }
 
 // ── Tokeniser ─────────────────────────────────────────────────────────────
@@ -465,6 +637,11 @@ enum Token {
     SelfFact,
     CandidateFact,
     TargetFact,
+    /// `memory` — the owning fine system's private memory atom (issue #882).
+    Memory,
+    /// `state_time` — the owning fine system's state clock (issue #882). Unlike
+    /// every other fact keyword this one takes NO argument list.
+    StateTime,
     Param,
     Bool(bool),
     Cmp(CmpOp),
@@ -606,6 +783,8 @@ impl<'a> Tokeniser<'a> {
                 "self_fact" => Token::SelfFact,
                 "candidate_fact" => Token::CandidateFact,
                 "target_fact" => Token::TargetFact,
+                "memory" => Token::Memory,
+                "state_time" => Token::StateTime,
                 "param" => Token::Param,
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),
@@ -752,6 +931,33 @@ impl Parser {
             Some((Token::TargetFact, _)) => {
                 self.parse_fact_atom(FactContext::Target, "target_fact")
             }
+            // Private (issue #882): `memory(name) CMP operand` takes an
+            // argument like the world contexts; `state_time CMP operand` is a
+            // bare atom, so it skips the `(name)` step entirely.
+            Some((Token::Memory, _)) => self.parse_fact_atom(FactContext::Memory, "memory"),
+            Some((Token::StateTime, _)) => {
+                let op = match self.bump() {
+                    Some((Token::Cmp(op), _)) => op,
+                    Some((t, p)) => {
+                        return Err(format!(
+                            "Expected comparison operator after state_time but got {t:?} at position {p}"
+                        ))
+                    }
+                    None => {
+                        return Err(
+                            "Expected comparison operator after state_time but reached end of predicate"
+                                .into(),
+                        )
+                    }
+                };
+                let rhs = self.parse_operand()?;
+                Ok(Predicate::Fact {
+                    context: FactContext::StateTime,
+                    name: "state_time".to_string(),
+                    op,
+                    rhs,
+                })
+            }
             Some((Token::Bool(b), _)) => Ok(Predicate::Bool(b)),
             Some((t, p)) => Err(format!("Unexpected token {t:?} at position {p}")),
             None => Err(format!(
@@ -825,6 +1031,8 @@ impl Parser {
             Some((Token::SelfFact, _)) => Ok("self_fact".to_string()),
             Some((Token::CandidateFact, _)) => Ok("candidate_fact".to_string()),
             Some((Token::TargetFact, _)) => Ok("target_fact".to_string()),
+            Some((Token::Memory, _)) => Ok("memory".to_string()),
+            Some((Token::StateTime, _)) => Ok("state_time".to_string()),
             Some((Token::Param, _)) => Ok("param".to_string()),
             Some((t, p)) => Err(format!("Expected {ctx} but got {t:?} at position {p}")),
             None => Err(format!("Expected {ctx} but reached end of predicate")),
@@ -1445,5 +1653,115 @@ mod tests {
         assert!(parse_predicate("flag(candidate_fact)")
             .unwrap()
             .evaluate(&[&s]));
+    }
+
+    // ── Private memory + state time atoms (issue #882) ───────────────────────
+
+    fn memory_with(pairs: &[(&str, f64)], state_time: f64) -> AiPolicyMemory {
+        let mut m = AiPolicyMemory::new();
+        for (k, v) in pairs {
+            m.set(k, *v);
+        }
+        m.set_state_time_secs(state_time);
+        m
+    }
+
+    #[test]
+    fn memory_atom_reads_the_owning_systems_bag() {
+        let p = parse_predicate("memory(engagements) >= param(limit)").unwrap();
+        let mut params = AiParams::new();
+        params.set("limit", 2.0);
+        assert!(p.evaluate_stateful(
+            &AiFacts::new(),
+            &memory_with(&[("engagements", 3.0)], 0.0),
+            &params,
+            &[]
+        ));
+        assert!(!p.evaluate_stateful(
+            &AiFacts::new(),
+            &memory_with(&[("engagements", 1.0)], 0.0),
+            &params,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn state_time_atom_reads_the_state_clock() {
+        let p = parse_predicate("state_time >= 3.0").unwrap();
+        assert!(!p.evaluate_stateful(
+            &AiFacts::new(),
+            &memory_with(&[], 2.9),
+            &AiParams::new(),
+            &[]
+        ));
+        assert!(p.evaluate_stateful(
+            &AiFacts::new(),
+            &memory_with(&[], 3.0),
+            &AiParams::new(),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn absent_memory_evaluates_false_and_never_panics() {
+        // The absent-→-false / no-panic contract, on the private atoms too.
+        let p = parse_predicate("memory(never_written) > 0").unwrap();
+        assert!(!p.evaluate_stateful(
+            &AiFacts::new(),
+            &AiPolicyMemory::new(),
+            &AiParams::new(),
+            &[]
+        ));
+        // And through the STATELESS entry point, where no bag exists at all:
+        // a stateless policy can never read private state (content validation
+        // rejects that authoring outright — this is the belt to that braces).
+        assert!(!p.evaluate_with(&AiFacts::new(), &AiParams::new(), &[]));
+        assert!(!parse_predicate("state_time > 0").unwrap().evaluate_with(
+            &AiFacts::new(),
+            &AiParams::new(),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn memory_is_not_a_fact_and_a_fact_is_not_memory() {
+        // The two namespaces are disjoint: seeding `x` as a world fact does not
+        // satisfy `memory(x)`, and vice versa.
+        let mem_pred = parse_predicate("memory(x) > 0").unwrap();
+        let fact_pred = parse_predicate("fact(x) > 0").unwrap();
+        let facts = facts_with(&[("x", 5.0)]);
+        let memory = memory_with(&[("x", 5.0)], 0.0);
+        assert!(!mem_pred.evaluate_stateful(&facts, &AiPolicyMemory::new(), &AiParams::new(), &[]));
+        assert!(!fact_pred.evaluate_stateful(&AiFacts::new(), &memory, &AiParams::new(), &[]));
+        assert!(mem_pred.evaluate_stateful(&AiFacts::new(), &memory, &AiParams::new(), &[]));
+        assert!(fact_pred.evaluate_stateful(&facts, &AiPolicyMemory::new(), &AiParams::new(), &[]));
+    }
+
+    #[test]
+    fn private_atom_references_are_reportable_for_content_validation() {
+        let p = parse_predicate("memory(a) > 0 and (state_time < 5 or memory(b) == 1)").unwrap();
+        let mut refs = Vec::new();
+        p.referenced_memory(&mut refs);
+        refs.sort();
+        assert_eq!(refs, vec!["a".to_string(), "b".to_string()]);
+        assert!(p.references_state_time());
+
+        let stateless = parse_predicate("fact(x) > 0 and flag(y)").unwrap();
+        let mut refs = Vec::new();
+        stateless.referenced_memory(&mut refs);
+        assert!(refs.is_empty());
+        assert!(!stateless.references_state_time());
+    }
+
+    #[test]
+    fn private_keywords_remain_usable_as_flag_and_fact_names() {
+        // `memory` / `state_time` were legal identifiers before #882; a world
+        // trigger or fact that used them must keep parsing.
+        let s = store_with(&[("memory", 1), ("state_time", 1)]);
+        assert!(parse_predicate("flag(memory)").unwrap().evaluate(&[&s]));
+        assert!(parse_predicate("flag(state_time)").unwrap().evaluate(&[&s]));
+        assert!(parse_predicate("fact(state_time) > 0")
+            .unwrap()
+            .evaluate_with(&facts_with(&[("state_time", 4.0)]), &AiParams::new(), &[]));
     }
 }

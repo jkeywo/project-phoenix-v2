@@ -2658,24 +2658,84 @@ pub struct FineSystemAiRuleToml {
     pub response_index: u8,
 }
 
-/// Inline stateless AI policy for an AI-capable fine system
-/// (`[captain_console.ai]`, issue #775).
+/// One authored state of an inline STATEFUL policy
+/// (`[[<system>.ai.state]]`, issue #882).
 ///
-/// A system declares EITHER a policy (`param` + `rule`) OR an explicit
-/// `idle = true`. An empty declaration (`ai = {}`) is neither and is rejected
-/// by [`validate_fine_system_ai_policy`] — silence is not a valid declaration.
+/// A state carries its own continuous `rule` list — the very same
+/// [`FineSystemAiRuleToml`] the stateless path uses, so a rule's meaning does
+/// not change with where it is authored — and its own outgoing `transition`
+/// list. Note [`FineSystemAiRuleToml`] deliberately gained NO `state` field:
+/// it is `deny_unknown_fields`, and nesting rules under the state that owns
+/// them keeps a rule's owning state unambiguous.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FineSystemAiStateToml {
+    /// Unique state id within this policy; referenced by `initial_state` and
+    /// by every transition's `to`.
+    pub id: String,
+    /// Continuous per-channel rules that apply while this state is current.
+    #[serde(default)]
+    pub rule: Vec<FineSystemAiRuleToml>,
+    /// Outgoing transitions, at most one of which fires per eligible tick.
+    #[serde(default)]
+    pub transition: Vec<FineSystemAiTransitionToml>,
+}
+
+/// One authored transition out of the enclosing state
+/// (`[[<system>.ai.state.transition]]`, issue #882).
+///
+/// There is no `from`: the source is the state this table is nested in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FineSystemAiTransitionToml {
+    /// Higher wins; ties resolve to the earliest-authored transition.
+    pub priority: i32,
+    /// The state id entered when this transition fires.
+    pub to: String,
+    /// Guard expression; the transition becomes eligible when it evaluates
+    /// `true`. May read `memory(...)` and `state_time` as well as the usual
+    /// facts/flags/params.
+    pub when: String,
+}
+
+/// Inline AI policy for an AI-capable fine system
+/// (`[captain_console.ai]`, issues #775, #882).
+///
+/// A system declares EITHER a policy (`param` + `rule`, and optionally the
+/// #882 state machine) OR an explicit `idle = true`. An empty declaration
+/// (`ai = {}`) is neither and is rejected by
+/// [`validate_fine_system_ai_policy`] — silence is not a valid declaration.
+///
+/// ## Back-compat guarantee (issue #882)
+///
+/// Every field added by the stateful path is `#[serde(default)]`, so all
+/// twelve shipped stateless blocks parse byte-identically and decode to a
+/// policy whose `machine` is `None`. A block that authors no `state` never
+/// enters the transition code path at all.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FineSystemAiConfigToml {
-    /// Explicit idle marker. Mutually exclusive with `rule`.
+    /// Explicit idle marker. Mutually exclusive with `rule` and with `state`.
     #[serde(default)]
     pub idle: bool,
     /// Named numeric parameters referenced by rule guards.
     #[serde(default)]
     pub param: std::collections::HashMap<String, f32>,
-    /// Prioritised per-channel reactive rules.
+    /// Prioritised per-channel reactive rules (the stateless path).
     #[serde(default)]
     pub rule: Vec<FineSystemAiRuleToml>,
+    /// The state entered on reset. Required when — and rejected unless —
+    /// `state` is non-empty (issue #882).
+    #[serde(default)]
+    pub initial_state: Option<String>,
+    /// The declared states of the OPTIONAL state machine (issue #882).
+    /// Absent/empty ⇒ this is a stateless policy.
+    #[serde(default)]
+    pub state: Vec<FineSystemAiStateToml>,
+    /// Typed private memory declarations: name → initial value (issue #882).
+    /// Readable through the `memory(name)` atom by THIS fine system only.
+    #[serde(default)]
+    pub memory: std::collections::HashMap<String, f32>,
 }
 
 impl FineSystemAiConfigToml {
@@ -2690,74 +2750,121 @@ impl FineSystemAiConfigToml {
         for (k, v) in &self.param {
             params.set(k, *v as f64);
         }
-        let mut rules = Vec::with_capacity(self.rule.len());
-        for r in &self.rule {
-            let when = crate::world::flags::parse_predicate(&r.when)?;
-            let verb = match r.verb.as_str() {
-                CAPTAIN_SET_RED_ALERT_VERB => crate::ai::policy::AiPolicyVerb::SetRedAlert(r.value),
-                // Helm continuous-actuator mode verbs (issue #779): value-less;
-                // the `value` field is ignored — the magnitude lives in the
-                // planner fact, not the policy.
-                HELM_ACTUATE_DESIRED_TRAVEL_VERB => {
-                    crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
+        let rules = decode_rules(&self.rule)?;
+        // The OPTIONAL #882 state machine. No authored `state` tables ⇒ `None`,
+        // which is what every shipped stateless block decodes to.
+        let machine = if self.state.is_empty() {
+            None
+        } else {
+            let mut states = Vec::with_capacity(self.state.len());
+            for s in &self.state {
+                let mut transitions = Vec::with_capacity(s.transition.len());
+                for t in &s.transition {
+                    transitions.push(crate::ai::policy::AiPolicyTransition {
+                        priority: t.priority,
+                        to: t.to.clone(),
+                        when: crate::world::flags::parse_predicate(&t.when)?,
+                    });
                 }
-                HELM_ACTUATE_DESIRED_FACING_VERB => {
-                    crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
-                }
-                // Helm secondary-actuator mode verbs (issue #780): value-less,
-                // like the travel-axis verbs above.
-                HELM_ACTUATE_LATERAL_THRUST_VERB => {
-                    crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
-                }
-                HELM_ACTUATE_VERTICAL_THRUST_VERB => {
-                    crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
-                }
-                HELM_ENGAGE_IMPULSE_VERB => crate::ai::policy::AiPolicyVerb::EngageImpulse,
-                HELM_ENGAGE_BOOST_VERB => crate::ai::policy::AiPolicyVerb::EngageBoost,
-                // Weapon-bank action verbs (issue #781): value-less, like the
-                // helm mode verbs. The `value` field is ignored — the target and
-                // firing bank come from the host context, not the policy.
-                PHASER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FirePhaser,
-                BLASTER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FireBlaster,
-                // Torpedo tube + magazine action verbs (issue #782): value-less,
-                // like the weapon-bank verbs. The `value` field is ignored — the
-                // tube, volley target, combat lock, and magazine come from the
-                // host context, not the policy.
-                TORPEDO_LOAD_VERB => crate::ai::policy::AiPolicyVerb::LoadTorpedo,
-                TORPEDO_LAUNCH_VERB => crate::ai::policy::AiPolicyVerb::LaunchTorpedo,
-                TORPEDO_MAGAZINE_GRANT_VERB => crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
-                // Shields focus action verb (issue #783): value-less, like the
-                // weapon-bank verbs. The `value` field is ignored — which of the
-                // four arcs is focused comes from the retained ranking kernel in
-                // the host context, not the policy.
-                SHIELD_FOCUS_VERB => crate::ai::policy::AiPolicyVerb::FocusShieldArc,
-                // Power group allocation verb (issue #784): the FIRST verb to
-                // carry a magnitude. The absolute target level is the authored
-                // per-rule `level` payload, never an inline Rust number.
-                POWER_SET_ALLOCATION_VERB => {
-                    crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(r.level)
-                }
-                // Comms dialogue-response verb (issue #786): the SECOND
-                // value-carrying verb. Only the response INDEX rides the verb —
-                // WHICH message is being answered comes from the host context.
-                COMMS_RESPOND_VERB => {
-                    crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index)
-                }
-                other => return Err(format!("unknown ai policy verb '{other}'")),
-            };
-            rules.push(crate::ai::policy::AiPolicyRule {
-                priority: r.priority,
-                channel: r.channel.clone(),
-                when,
-                verb,
-            });
-        }
+                states.push(crate::ai::policy::AiPolicyState {
+                    id: s.id.clone(),
+                    rules: decode_rules(&s.rule)?,
+                    transitions,
+                });
+            }
+            Some(crate::ai::policy::AiPolicyMachine {
+                initial: self.initial_state.clone().ok_or_else(|| {
+                    "ai policy declares states but no `initial_state`".to_string()
+                })?,
+                initial_memory: self.initial_memory(),
+                states,
+            })
+        };
         Ok(crate::ai::policy::AiPolicy {
             params,
             rules,
             idle: self.idle,
+            machine,
         })
     }
+
+    /// The authored initial values of this policy's typed private memory
+    /// (issue #882), as the runtime bag a fresh state component starts from.
+    pub fn initial_memory(&self) -> crate::world::flags::AiPolicyMemory {
+        let mut m = crate::world::flags::AiPolicyMemory::new();
+        for (k, v) in &self.memory {
+            m.set(k, *v as f64);
+        }
+        m
+    }
+}
+
+/// Decode one authored rule list into typed policy rules (issue #882).
+///
+/// Shared by the top-level stateless `rule` list and by each state's own
+/// `rule` list, so a rule decodes identically wherever it is authored.
+fn decode_rules(
+    src: &[FineSystemAiRuleToml],
+) -> Result<Vec<crate::ai::policy::AiPolicyRule>, String> {
+    let mut rules = Vec::with_capacity(src.len());
+    for r in src {
+        let when = crate::world::flags::parse_predicate(&r.when)?;
+        rules.push(crate::ai::policy::AiPolicyRule {
+            priority: r.priority,
+            channel: r.channel.clone(),
+            when,
+            verb: decode_verb(r)?,
+        });
+    }
+    Ok(rules)
+}
+
+/// Decode one authored rule's `verb` (plus its payload fields) into the typed
+/// [`crate::ai::policy::AiPolicyVerb`] (issue #882 extraction; the match body
+/// is unchanged from #775–#786).
+fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVerb, String> {
+    Ok(match r.verb.as_str() {
+        CAPTAIN_SET_RED_ALERT_VERB => crate::ai::policy::AiPolicyVerb::SetRedAlert(r.value),
+        // Helm continuous-actuator mode verbs (issue #779): value-less;
+        // the `value` field is ignored — the magnitude lives in the
+        // planner fact, not the policy.
+        HELM_ACTUATE_DESIRED_TRAVEL_VERB => crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
+        HELM_ACTUATE_DESIRED_FACING_VERB => crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+        // Helm secondary-actuator mode verbs (issue #780): value-less,
+        // like the travel-axis verbs above.
+        HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+        HELM_ACTUATE_VERTICAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+        HELM_ENGAGE_IMPULSE_VERB => crate::ai::policy::AiPolicyVerb::EngageImpulse,
+        HELM_ENGAGE_BOOST_VERB => crate::ai::policy::AiPolicyVerb::EngageBoost,
+        // Weapon-bank action verbs (issue #781): value-less, like the
+        // helm mode verbs. The `value` field is ignored — the target and
+        // firing bank come from the host context, not the policy.
+        PHASER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FirePhaser,
+        BLASTER_FIRE_VERB => crate::ai::policy::AiPolicyVerb::FireBlaster,
+        // Torpedo tube + magazine action verbs (issue #782): value-less,
+        // like the weapon-bank verbs. The `value` field is ignored — the
+        // tube, volley target, combat lock, and magazine come from the
+        // host context, not the policy.
+        TORPEDO_LOAD_VERB => crate::ai::policy::AiPolicyVerb::LoadTorpedo,
+        TORPEDO_LAUNCH_VERB => crate::ai::policy::AiPolicyVerb::LaunchTorpedo,
+        TORPEDO_MAGAZINE_GRANT_VERB => crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
+        // Shields focus action verb (issue #783): value-less, like the
+        // weapon-bank verbs. The `value` field is ignored — which of the
+        // four arcs is focused comes from the retained ranking kernel in
+        // the host context, not the policy.
+        SHIELD_FOCUS_VERB => crate::ai::policy::AiPolicyVerb::FocusShieldArc,
+        // Power group allocation verb (issue #784): the FIRST verb to
+        // carry a magnitude. The absolute target level is the authored
+        // per-rule `level` payload, never an inline Rust number.
+        POWER_SET_ALLOCATION_VERB => {
+            crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(r.level)
+        }
+        // Comms dialogue-response verb (issue #786): the SECOND
+        // value-carrying verb. Only the response INDEX rides the verb —
+        // WHICH message is being answered comes from the host context.
+        COMMS_RESPOND_VERB => crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index),
+        other => return Err(format!("unknown ai policy verb '{other}'")),
+    })
 }
 
 /// The canonical default Captain Red Alert policy synthesised for ships that
@@ -2796,6 +2903,9 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 response_index: 0,
             },
         ],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2845,6 +2955,9 @@ pub fn default_comms_response_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: DEFAULT_COMMS_RESPONSE_INDEX,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2870,6 +2983,9 @@ pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2890,6 +3006,9 @@ pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2914,6 +3033,9 @@ pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2939,6 +3061,9 @@ pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2963,6 +3088,9 @@ pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -2979,6 +3107,9 @@ pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
         idle: true,
         param: std::collections::HashMap::new(),
         rule: Vec::new(),
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3006,6 +3137,9 @@ pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3071,6 +3205,9 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
                 response_index: 0,
             },
         ],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3171,6 +3308,9 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
                 response_index: 0,
             },
         ],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3192,6 +3332,9 @@ pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3229,6 +3372,9 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
                 response_index: 0,
             },
         ],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
@@ -3251,18 +3397,30 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
             level: 0,
             response_index: 0,
         }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
     }
 }
 
-/// Validate an inline stateless fine-system AI policy before world activation
-/// (issue #775), mirroring [`validate_phaser_banks`] et al.
+/// Validate an inline fine-system AI policy before world activation
+/// (issues #775, #882), mirroring [`validate_phaser_banks`] et al.
 ///
-/// Rejects:
-///   - a silent declaration (neither `idle` nor any `rule`),
-///   - a contradictory declaration (`idle = true` alongside rules),
+/// Rejects (stateless path, issue #775):
+///   - a silent declaration (neither `idle` nor any `rule` nor any `state`),
+///   - a contradictory declaration (`idle = true` alongside rules/states),
 ///   - an unparseable `when` guard (reusing `parse_predicate`'s diagnostic),
 ///   - an unknown output `channel` or `verb`,
 ///   - a `param(...)` reference to a parameter the author never declared.
+///
+/// Additionally rejects (stateful path, issue #882 AC6):
+///   - an `initial_state` naming a state that was never declared (and a
+///     `state` list with no `initial_state` at all),
+///   - a transition whose `to` names a state that was never declared,
+///   - duplicate state ids,
+///   - an unreachable state (no inbound transition and not the initial state),
+///   - a `memory(...)` or `state_time` reference in a STATELESS policy, and a
+///     `memory(...)` reference to a slot the author never declared.
 pub fn validate_fine_system_ai_policy(
     cfg: &FineSystemAiConfigToml,
     valid_channels: &[&str],
@@ -3272,35 +3430,153 @@ pub fn validate_fine_system_ai_policy(
         if !cfg.rule.is_empty() {
             return Err("ai policy declares idle = true but also carries rules".into());
         }
+        if !cfg.state.is_empty() {
+            return Err("ai policy declares idle = true but also carries states".into());
+        }
         return Ok(());
     }
-    if cfg.rule.is_empty() {
-        return Err("ai policy is empty: declare at least one rule or set idle = true".into());
+    if cfg.rule.is_empty() && cfg.state.is_empty() {
+        return Err(
+            "ai policy is empty: declare at least one rule or state, or set idle = true".into(),
+        );
     }
-    for (idx, r) in cfg.rule.iter().enumerate() {
+    let stateful = !cfg.state.is_empty();
+
+    // ── Per-rule checks, run unchanged over the top-level rules and over each
+    // state's own rules (issue #882 extends the loop's reach, not its body).
+    let check_rule = |what: &str, r: &FineSystemAiRuleToml| -> Result<(), String> {
         if !valid_channels.contains(&r.channel.as_str()) {
             return Err(format!(
-                "ai policy rule {idx} has unknown channel '{}' (valid: {valid_channels:?})",
+                "ai policy {what} has unknown channel '{}' (valid: {valid_channels:?})",
                 r.channel
             ));
         }
         if !valid_verbs.contains(&r.verb.as_str()) {
             return Err(format!(
-                "ai policy rule {idx} has unknown verb '{}' (valid: {valid_verbs:?})",
+                "ai policy {what} has unknown verb '{}' (valid: {valid_verbs:?})",
                 r.verb
             ));
         }
         let pred = crate::world::flags::parse_predicate(&r.when)
-            .map_err(|e| format!("ai policy rule {idx} has invalid `when` expression: {e}"))?;
-        let mut refs = Vec::new();
-        pred.referenced_params(&mut refs);
-        for name in refs {
-            if !cfg.param.contains_key(&name) {
+            .map_err(|e| format!("ai policy {what} has invalid `when` expression: {e}"))?;
+        check_policy_predicate(cfg, stateful, &pred, what)
+    };
+    for (idx, r) in cfg.rule.iter().enumerate() {
+        check_rule(&format!("rule {idx}"), r)?;
+    }
+
+    if !stateful {
+        return Ok(());
+    }
+
+    // ── State-graph checks (issue #882 AC6) ─────────────────────────────────
+    let mut seen: Vec<&str> = Vec::with_capacity(cfg.state.len());
+    for s in &cfg.state {
+        if seen.contains(&s.id.as_str()) {
+            return Err(format!("ai policy declares duplicate state id '{}'", s.id));
+        }
+        seen.push(&s.id);
+    }
+    let Some(initial) = cfg.initial_state.as_deref() else {
+        return Err("ai policy declares states but no `initial_state`".into());
+    };
+    if !seen.contains(&initial) {
+        return Err(format!(
+            "ai policy `initial_state` names undeclared state '{initial}' (declared: {seen:?})"
+        ));
+    }
+    for s in &cfg.state {
+        for (tidx, t) in s.transition.iter().enumerate() {
+            let what = format!("state '{}' transition {tidx}", s.id);
+            if !seen.contains(&t.to.as_str()) {
                 return Err(format!(
-                    "ai policy rule {idx} references undeclared parameter '{name}'"
+                    "ai policy {what} targets undeclared state '{}' (declared: {seen:?})",
+                    t.to
                 ));
             }
+            let pred = crate::world::flags::parse_predicate(&t.when)
+                .map_err(|e| format!("ai policy {what} has invalid `when` expression: {e}"))?;
+            check_policy_predicate(cfg, stateful, &pred, &what)?;
         }
+        for (idx, r) in s.rule.iter().enumerate() {
+            check_rule(&format!("state '{}' rule {idx}", s.id), r)?;
+        }
+    }
+    // Reachability is a FIXPOINT walk from `initial`, following transitions only
+    // out of states already known reachable. A single pass over every state's
+    // transitions would only catch zero-inbound orphans: a disconnected cluster
+    // (`initial = a`; `b -> c`; `c -> b`) is targeted by transitions and would
+    // pass, yet nothing can ever enter it. Every transition target is already
+    // known to name a declared state by the loop above, so this walk cannot
+    // wander off the graph.
+    let mut reachable: Vec<&str> = vec![initial];
+    let mut frontier: Vec<&str> = vec![initial];
+    while let Some(current) = frontier.pop() {
+        let Some(s) = cfg.state.iter().find(|s| s.id == current) else {
+            continue;
+        };
+        for t in &s.transition {
+            if !reachable.contains(&t.to.as_str()) {
+                reachable.push(&t.to);
+                frontier.push(&t.to);
+            }
+        }
+    }
+    for s in &cfg.state {
+        if !reachable.contains(&s.id.as_str()) {
+            return Err(format!(
+                "ai policy declares unreachable state '{}': it is neither the \
+                 initial state nor the target of any transition",
+                s.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Shared guard-expression checks for a policy predicate (issues #775, #882).
+///
+/// `param(...)` must be declared; `memory(...)` must be declared AND the policy
+/// must be stateful; `state_time` requires a stateful policy. The stateless
+/// rejections are AC6's "a memory or state-time reference in a stateless
+/// policy" — private state is meaningless without a state machine to own it,
+/// and silently reading `false` would be a trap.
+fn check_policy_predicate(
+    cfg: &FineSystemAiConfigToml,
+    stateful: bool,
+    pred: &crate::world::flags::Predicate,
+    what: &str,
+) -> Result<(), String> {
+    let mut refs = Vec::new();
+    pred.referenced_params(&mut refs);
+    for name in refs {
+        if !cfg.param.contains_key(&name) {
+            return Err(format!(
+                "ai policy {what} references undeclared parameter '{name}'"
+            ));
+        }
+    }
+    let mut mem_refs = Vec::new();
+    pred.referenced_memory(&mut mem_refs);
+    if !stateful && !mem_refs.is_empty() {
+        return Err(format!(
+            "ai policy {what} references memory('{}') but the policy declares no states: \
+             private memory requires a stateful policy",
+            mem_refs[0]
+        ));
+    }
+    for name in mem_refs {
+        if !cfg.memory.contains_key(&name) {
+            return Err(format!(
+                "ai policy {what} references undeclared memory '{name}'"
+            ));
+        }
+    }
+    if !stateful && pred.references_state_time() {
+        return Err(format!(
+            "ai policy {what} references state_time but the policy declares no states: \
+             state time requires a stateful policy"
+        ));
     }
     Ok(())
 }
@@ -7441,6 +7717,380 @@ value = false
         assert!(cfg.to_policy().is_ok());
     }
 
+    // ── Optional stateful policy schema (issue #882) ─────────────────────────
+
+    /// AC7 — THE back-compat guard. Every shipped stateless block still parses
+    /// AND decodes to a policy with NO machine, no states and no memory: the
+    /// #882 schema fields are all `#[serde(default)]`, so nothing an author
+    /// wrote before this issue changed meaning. Enumerates all fourteen
+    /// canonical defaults behind the twelve Group A hosts.
+    #[test]
+    fn every_shipped_stateless_default_still_parses_as_stateless() {
+        let shipped: Vec<(&str, FineSystemAiConfigToml)> = vec![
+            ("captain", default_captain_ai_config()),
+            ("comms_response", default_comms_response_ai_config()),
+            ("engines", default_engines_ai_config()),
+            ("steering", default_steering_ai_config()),
+            ("lateral", default_lateral_ai_config()),
+            ("vertical", default_vertical_ai_config()),
+            ("impulse", default_impulse_ai_config()),
+            ("boost", default_boost_ai_config()),
+            ("phaser_bank", default_phaser_bank_ai_config()),
+            ("blaster_bank", default_blaster_bank_ai_config()),
+            ("torpedo_tube", default_torpedo_tube_ai_config()),
+            ("torpedo_magazine", default_torpedo_magazine_ai_config()),
+            ("shields_focus", default_shields_focus_ai_config()),
+            ("power", default_power_ai_config()),
+        ];
+        for (name, cfg) in shipped {
+            assert!(
+                cfg.initial_state.is_none() && cfg.state.is_empty() && cfg.memory.is_empty(),
+                "{name}: a shipped default must declare no #882 state machine"
+            );
+            let policy = cfg
+                .to_policy()
+                .unwrap_or_else(|e| panic!("{name}: must decode: {e}"));
+            assert!(
+                policy.machine().is_none() && policy.initial_state().is_none(),
+                "{name}: a stateless block must decode to `machine: None`"
+            );
+            assert_eq!(
+                policy.rules.len(),
+                cfg.rule.len(),
+                "{name}: every authored rule still decodes to a top-level rule"
+            );
+        }
+    }
+
+    /// A minimal authored stateful block: `initial_state`, two states with
+    /// their own continuous rules, explicitly prioritised transitions, and a
+    /// typed private memory declaration (AC1).
+    fn stateful_boost_toml() -> &'static str {
+        r#"
+name = "Stateful"
+[helm_console.boost_ai]
+initial_state = "cruise"
+
+[helm_console.boost_ai.param]
+surge_urgency = 0.5
+surge_dwell_secs = 3.0
+max_engagements = 3.0
+
+[helm_console.boost_ai.memory]
+engagements = 0.0
+
+[[helm_console.boost_ai.state]]
+id = "cruise"
+
+[[helm_console.boost_ai.state.transition]]
+priority = 10
+to = "surge"
+when = "fact(hazard_urgency) > param(surge_urgency) and memory(engagements) < param(max_engagements)"
+
+[[helm_console.boost_ai.state]]
+id = "surge"
+
+[[helm_console.boost_ai.state.rule]]
+priority = 0
+channel = "boost"
+when = "true"
+verb = "engage_boost"
+
+[[helm_console.boost_ai.state.transition]]
+priority = 0
+to = "cruise"
+when = "state_time >= param(surge_dwell_secs)"
+"#
+    }
+
+    /// AC1: an authored stateful block round-trips through the TOML schema into
+    /// the typed machine, with per-state rules and prioritised transitions.
+    #[test]
+    fn stateful_policy_round_trips_from_toml_to_typed_machine() {
+        let cfg = EntityConfig::from_toml(stateful_boost_toml()).expect("parse must succeed");
+        let ai = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.boost_ai.as_ref())
+            .expect("helm_console.boost_ai present");
+        assert_eq!(ai.initial_state.as_deref(), Some("cruise"));
+        assert_eq!(ai.state.len(), 2);
+        assert_eq!(ai.memory.get("engagements"), Some(&0.0));
+
+        let policy = ai.to_policy().expect("policy resolves");
+        let machine = policy.machine().expect("machine decoded");
+        assert_eq!(machine.initial, "cruise");
+        assert_eq!(machine.states.len(), 2);
+        assert!(
+            policy.rules.is_empty(),
+            "a purely stateful policy carries no top-level rules"
+        );
+        let cruise = machine.state("cruise").expect("cruise declared");
+        assert!(cruise.rules.is_empty());
+        assert_eq!(cruise.transitions.len(), 1);
+        assert_eq!(cruise.transitions[0].to, "surge");
+        assert_eq!(cruise.transitions[0].priority, 10);
+        let surge = machine.state("surge").expect("surge declared");
+        assert_eq!(surge.rules.len(), 1);
+        assert_eq!(surge.rules[0].channel, HELM_BOOST_CHANNEL);
+        assert_eq!(
+            surge.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::EngageBoost
+        );
+        assert_eq!(machine.initial_memory.get("engagements"), Some(0.0));
+    }
+
+    /// Build a stateful policy config for the AC6 rejection cases directly, so
+    /// each rejection is isolated from TOML surface noise.
+    fn stateful_cfg(
+        initial: Option<&str>,
+        states: Vec<FineSystemAiStateToml>,
+    ) -> FineSystemAiConfigToml {
+        FineSystemAiConfigToml {
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: Vec::new(),
+            initial_state: initial.map(str::to_string),
+            state: states,
+            memory: std::collections::HashMap::new(),
+        }
+    }
+
+    fn boost_state(id: &str, to: &[&str]) -> FineSystemAiStateToml {
+        FineSystemAiStateToml {
+            id: id.to_string(),
+            rule: Vec::new(),
+            transition: to
+                .iter()
+                .map(|t| FineSystemAiTransitionToml {
+                    priority: 0,
+                    to: t.to_string(),
+                    when: "true".to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    /// AC6: an `initial_state` naming a state that was never declared.
+    #[test]
+    fn undeclared_initial_state_is_rejected() {
+        let cfg = stateful_cfg(Some("nowhere"), vec![boost_state("cruise", &[])]);
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("initial_state") && err.contains("nowhere"),
+            "got: {err}"
+        );
+    }
+
+    /// AC6: states declared with no `initial_state` at all is the same defect —
+    /// there is no entry point.
+    #[test]
+    fn states_without_an_initial_state_are_rejected() {
+        let cfg = stateful_cfg(None, vec![boost_state("cruise", &[])]);
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("initial_state"), "got: {err}");
+        // The decoder refuses it too, so a caller skipping validation cannot
+        // build a half-machine.
+        assert!(cfg.to_policy().is_err());
+    }
+
+    /// AC6: a transition targeting a state that was never declared.
+    #[test]
+    fn transition_to_undeclared_state_is_rejected() {
+        let cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &["surge"])]);
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("undeclared state") && err.contains("surge"),
+            "got: {err}"
+        );
+    }
+
+    /// AC6: duplicate state ids — "which `cruise` did you mean?" has no answer.
+    #[test]
+    fn duplicate_state_ids_are_rejected() {
+        let cfg = stateful_cfg(
+            Some("cruise"),
+            vec![boost_state("cruise", &[]), boost_state("cruise", &[])],
+        );
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("duplicate state id"), "got: {err}");
+    }
+
+    /// AC6: an unreachable state — neither the initial state nor any
+    /// transition's target. A self-loop does NOT make a state reachable.
+    #[test]
+    fn unreachable_state_is_rejected() {
+        let cfg = stateful_cfg(
+            Some("cruise"),
+            vec![
+                boost_state("cruise", &[]),
+                boost_state("orphan", &["orphan"]),
+            ],
+        );
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("unreachable state") && err.contains("orphan"),
+            "got: {err}"
+        );
+        // ...but wiring it up from the initial state makes it legal.
+        let ok = stateful_cfg(
+            Some("cruise"),
+            vec![
+                boost_state("cruise", &["orphan"]),
+                boost_state("orphan", &[]),
+            ],
+        );
+        assert!(validate_fine_system_ai_policy(&ok, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    /// AC6, the transitive case: a DISCONNECTED CLUSTER. `cruise` is the
+    /// initial state; `drift` and `wander` transition to each other but nothing
+    /// reaches either of them. Both are "the target of a transition", so a
+    /// single pass that credits every transition target regardless of whether
+    /// its source is itself reachable accepts this graph — which is exactly the
+    /// dead branch AC6 exists to reject. Reachability has to be a fixpoint walk
+    /// from `initial`.
+    #[test]
+    fn disconnected_state_cluster_is_rejected() {
+        let cfg = stateful_cfg(
+            Some("cruise"),
+            vec![
+                boost_state("cruise", &[]),
+                boost_state("drift", &["wander"]),
+                boost_state("wander", &["drift"]),
+            ],
+        );
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("unreachable state") && (err.contains("drift") || err.contains("wander")),
+            "got: {err}"
+        );
+        // Wiring ONE edge from the initial state into the cluster makes the
+        // whole cluster reachable — the walk is transitive, not one-hop.
+        let ok = stateful_cfg(
+            Some("cruise"),
+            vec![
+                boost_state("cruise", &["drift"]),
+                boost_state("drift", &["wander"]),
+                boost_state("wander", &["drift"]),
+            ],
+        );
+        assert!(validate_fine_system_ai_policy(&ok, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    /// AC6: a `memory(...)` reference in a STATELESS policy. Private memory has
+    /// no owner without a state machine, and reading a silent `false` would be
+    /// a trap rather than a diagnostic.
+    #[test]
+    fn memory_reference_in_a_stateless_policy_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 0,
+                channel: HELM_BOOST_CHANNEL.to_string(),
+                when: "memory(engagements) > 0".to_string(),
+                verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+                value: false,
+                level: 0,
+                response_index: 0,
+            }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
+        };
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("memory") && err.contains("no states"),
+            "got: {err}"
+        );
+    }
+
+    /// AC6: a `state_time` reference in a STATELESS policy — the same defect on
+    /// the other private atom.
+    #[test]
+    fn state_time_reference_in_a_stateless_policy_is_rejected() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 0,
+                channel: HELM_BOOST_CHANNEL.to_string(),
+                when: "state_time > 5".to_string(),
+                verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+                value: false,
+                level: 0,
+                response_index: 0,
+            }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
+        };
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("state_time") && err.contains("no states"),
+            "got: {err}"
+        );
+    }
+
+    /// An undeclared `memory(...)` slot is rejected in a STATEFUL policy too —
+    /// the same contract `param(...)` has carried since #775.
+    #[test]
+    fn undeclared_memory_slot_is_rejected_in_a_stateful_policy() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.state[0].transition = vec![FineSystemAiTransitionToml {
+            priority: 0,
+            to: "cruise".to_string(),
+            when: "memory(never_declared) > 0".to_string(),
+        }];
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("undeclared memory"), "got: {err}");
+    }
+
+    /// The existing per-rule channel/verb/param checks run unchanged over each
+    /// STATE's rules, not just the top-level list.
+    #[test]
+    fn per_state_rules_get_the_same_channel_and_verb_checks() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.state[0].rule = vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: "not_a_channel".to_string(),
+            when: "true".to_string(),
+            verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }];
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("unknown channel") && err.contains("state 'cruise' rule 0"),
+            "got: {err}"
+        );
+    }
+
+    /// `idle = true` alongside states is as contradictory as `idle` alongside
+    /// rules.
+    #[test]
+    fn idle_alongside_states_is_rejected() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.idle = true;
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("idle") && err.contains("states"), "got: {err}");
+    }
+
+    /// The authored stateful block validates end to end through the real
+    /// content-load path (`EntityConfig::from_toml` runs the validator).
+    #[test]
+    fn authored_stateful_block_passes_content_validation() {
+        let cfg = EntityConfig::from_toml(stateful_boost_toml()).expect("parse must succeed");
+        let ai = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.boost_ai.as_ref())
+            .expect("boost_ai present");
+        assert!(validate_fine_system_ai_policy(ai, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
     #[test]
     fn empty_ai_declaration_is_rejected_as_silence() {
         // `[captain_console.ai]` with neither `idle` nor a rule is silence.
@@ -8028,6 +8678,9 @@ value = false
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
         assert!(err.contains("idle"), "got: {err}");
@@ -8066,6 +8719,9 @@ value = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
         assert!(err.contains("unknown channel"), "got: {err}");
@@ -8085,6 +8741,9 @@ value = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
         assert!(err.contains("unknown verb"), "got: {err}");
@@ -8104,6 +8763,9 @@ value = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
         assert!(err.contains("undeclared parameter"), "got: {err}");
@@ -8123,6 +8785,9 @@ value = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         assert!(cfg.to_policy().is_err());
     }
@@ -8209,6 +8874,9 @@ idle = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err =
             validate_fine_system_ai_policy(&cfg, ENGINES_CHANNELS, ENGINES_VERBS).unwrap_err();
@@ -8230,6 +8898,9 @@ idle = true
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err =
             validate_fine_system_ai_policy(&cfg, STEERING_CHANNELS, STEERING_VERBS).unwrap_err();
@@ -8378,6 +9049,9 @@ verb = "engage_impulse"
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
         assert!(err.contains("unknown verb"), "got: {err}");
@@ -8901,6 +9575,9 @@ eligibility = "candidate_fact(source_repair_request) > 0"
                 level: 3,
                 response_index: 2,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let policy = cfg.to_policy().expect("must resolve");
         assert_eq!(

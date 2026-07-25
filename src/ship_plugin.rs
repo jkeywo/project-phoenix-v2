@@ -19,9 +19,9 @@ pub(crate) use crate::ship::helm_admission::{
 };
 pub(crate) use crate::ship::helm_ai::{
     ai_helm_boost, ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust,
-    ai_helm_tick_ready, ai_helm_vertical_thrust, build_helm_ai_surfaces_frame,
-    detect_reached_objective_completion, helm_axes_operate_ai, tick_ai_helm_timer, AiHelmTickReady,
-    AiHelmTickTimer, HelmAiSurfacesFrame,
+    ai_helm_tick_ready, ai_helm_vertical_thrust, ai_policy_state_tick,
+    build_helm_ai_surfaces_frame, detect_reached_objective_completion, helm_axes_operate_ai,
+    tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer, AiPolicyTickClock, HelmAiSurfacesFrame,
 };
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::handle_impulse_messages;
@@ -70,7 +70,36 @@ impl Plugin for ShipPlugin {
                     .after(ai_helm_lateral_thrust)
                     .after(ai_helm_vertical_thrust)
                     .after(ai_helm_impulse)
-                    .after(ai_helm_boost),
+                    .after(ai_helm_boost)
+                    // The stateful-policy state tick (issue #882) is gated by
+                    // the same latch, so it too must consume the flag before
+                    // this system re-arms it.
+                    .after(ai_policy_state_tick),
+            )
+            // Tick-derived clock for stateful policy `state_time` (issue #882).
+            .init_resource::<AiPolicyTickClock>()
+            .add_systems(
+                Update,
+                // ONE state tick for every stateful fine-system policy. Ordered
+                // `.after(helm_motion_planner)` (its transition guards read the
+                // hazard surface the planner publishes this tick) and `.before`
+                // every per-axis actuator system, so the state it COMMITS is the
+                // state those systems resolve their continuous outputs in —
+                // AC2's same-tick guarantee. Under the shared
+                // `run_if(ai_helm_tick_ready)` latch so state time advances on
+                // the fixed AI cadence, never per frame (AC4).
+                ai_policy_state_tick
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(crate::lobby::LobbySystemSet)
+                    .after(crate::sim_sets::AiTickLabel)
+                    .after(helm_motion_planner)
+                    .before(ai_helm_thrust)
+                    .before(ai_helm_steering)
+                    .before(ai_helm_lateral_thrust)
+                    .before(ai_helm_vertical_thrust)
+                    .before(ai_helm_impulse)
+                    .before(ai_helm_boost)
+                    .run_if(ai_helm_tick_ready),
             )
             .add_systems(
                 Update,

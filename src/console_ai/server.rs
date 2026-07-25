@@ -2313,6 +2313,9 @@ station = "sensors"
             idle: false,
             param: params.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             rule: rules,
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         PowerAiPolicy(cfg.to_policy().expect("power policy decodes"))
     }
@@ -3135,6 +3138,9 @@ station = "sensors"
                 level: 0,
                 response_index: 0,
             }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
         };
         let mut map = std::collections::HashMap::new();
         map.insert("fore_port".to_string(), ai.to_policy().unwrap());

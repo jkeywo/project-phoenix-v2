@@ -2445,14 +2445,14 @@ fn spawn_game_start_entities(
                 .entity(spawned)
                 .insert(Ship)
                 .insert(LocalShip)
-                .insert(crate::ai_plugin::AiHighFidelity)
-                .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
-                .insert(crate::ship::helm::ThrustInput::default())
-                .insert(crate::ship::helm::SteeringInput::default())
-                .insert(crate::ship::helm::LateralThrustInput::default())
-                .insert(crate::ship::helm::VerticalThrustInput::default())
-                .insert(crate::ship::helm::ImpulseCommand::default())
-                .insert(crate::ship::helm::BoostCommand::default())
+                // The player ship is permanently high-fidelity (`lod_ai_ships`
+                // never evaluates `LocalShip`), so it takes the marker and the
+                // components that travel with it from the SAME shared
+                // definition the NPC promotion path uses. Spelling the set out
+                // here again is how #785's RepairTargetSelector, #786's
+                // CommsTargetSelector and #882's HelmBoostAiPolicyState each
+                // silently missed the player ship.
+                .insert(crate::ai_plugin::ai_high_fidelity_components())
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)

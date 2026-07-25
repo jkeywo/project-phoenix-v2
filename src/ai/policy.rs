@@ -1,18 +1,48 @@
-//! Pure, Bevy-free stateless AI fine-system policy runtime (issue #775).
+//! Pure, Bevy-free AI fine-system policy runtime (issues #775, #882).
 //!
-//! An AI-capable fine system declares an *inline stateless policy*: a set of
-//! prioritised reactive rules, each bound to a named *output channel*, guarded
-//! by a `when` predicate over typed facts, read-only world flags/counters, and
-//! authored named parameters. For each output channel the runtime resolves the
-//! single highest-priority rule whose guard fires and emits that channel's
-//! typed verb. No private memory, no lifecycle state — the decision is a pure
+//! An AI-capable fine system declares an *inline policy*: a set of prioritised
+//! reactive rules, each bound to a named *output channel*, guarded by a `when`
+//! predicate over typed facts, read-only world flags/counters, and authored
+//! named parameters. For each output channel the runtime resolves the single
+//! highest-priority rule whose guard fires and emits that channel's typed verb.
+//!
+//! ## Two paths, one spine
+//!
+//! **Stateless (issue #775) — the default, and what all twelve Group A hosts
+//! use.** No private memory, no lifecycle state: the decision is a pure
 //! function of the immutable per-tick snapshot handed in.
+//! [`AiPolicy::resolve_channel`] is that path and its behaviour is frozen.
+//!
+//! **Stateful (issue #882) — strictly opt-in.** A policy MAY additionally
+//! declare an [`AiPolicyMachine`]: an initial state and a set of named
+//! [`AiPolicyState`]s, each with its own continuous rules and its own
+//! explicitly prioritised [`AiPolicyTransition`]s. Inside a state the
+//! resolution rules are *identical* — same channel scan, same
+//! strictly-greater-priority/earliest-authored tie-break — because both paths
+//! call the same [`best_in`] helper. At most ONE transition fires per eligible
+//! tick: [`AiPolicy::resolve_transition`] returns an `Option`, so that is a
+//! property of the evaluator rather than of host discipline.
+//!
+//! A policy whose `machine` is `None` never touches any of this: no state, no
+//! memory, no transition scan. The stateless twelve are byte-identical.
+//!
+//! ## What the machine deliberately is NOT
+//!
+//! Private memory and state time are read through the `memory(name)` /
+//! `state_time` atoms off an [`AiPolicyMemory`] bag the OWNING fine system seeds from
+//! its OWN per-fine-system state component. There is no ship-wide state
+//! machine and no shared memory: a sibling system's evaluation call simply
+//! never populates this bag, so cross-system reads are structurally impossible
+//! rather than merely discouraged.
+//!
+//! State time is advanced by the host from the shared AI tick cadence, never a
+//! per-frame clock or a policy-owned `Timer` (AGENTS.md #7).
 //!
 //! This module owns the *typed* policy (already parsed + validated); the TOML
 //! schema and content validation live in `entities::config`, and the predicate
 //! grammar lives in `world::flags`.
 
-use crate::world::flags::{AiFacts, AiParams, FlagStore, Predicate};
+use crate::world::flags::{AiFacts, AiParams, AiPolicyMemory, FlagStore, Predicate};
 
 /// The typed output a fired rule applies to its channel.
 ///
@@ -165,8 +195,73 @@ pub struct AiPolicyRule {
     pub verb: AiPolicyVerb,
 }
 
-/// An inline stateless fine-system policy: authored parameters plus the rule
-/// set, or an explicit idle declaration.
+/// One explicitly prioritised transition out of the enclosing state (issue
+/// #882).
+///
+/// `from` is not a field: a transition is authored *inside* the state it leaves,
+/// so the source is the enclosing [`AiPolicyState`] and cannot drift out of
+/// sync with it. Priority uses the same strictly-greater /
+/// earliest-authored-wins tie-break as channel rules, so "which of two eligible
+/// transitions fires" has exactly one answer and it does not depend on
+/// container iteration order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiPolicyTransition {
+    /// Higher wins; ties resolve to the earliest-authored transition.
+    pub priority: i32,
+    /// The state id this transition enters.
+    pub to: String,
+    /// Guard predicate; the transition is eligible when this evaluates `true`.
+    pub when: Predicate,
+}
+
+/// One named state of an [`AiPolicyMachine`] (issue #882).
+///
+/// A state carries its own *continuous* rules — resolved exactly like the
+/// stateless top-level rule set, on the same channels, with the same
+/// priority semantics — and its own outgoing transitions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiPolicyState {
+    /// Unique id within the machine, referenced by `initial` and by every
+    /// transition's `to`.
+    pub id: String,
+    /// Continuous per-channel rules that apply while this state is current.
+    pub rules: Vec<AiPolicyRule>,
+    /// Outgoing transitions, evaluated once per eligible tick.
+    pub transitions: Vec<AiPolicyTransition>,
+}
+
+/// The opt-in state machine half of a policy (issue #882).
+///
+/// Held as a single `Option` on [`AiPolicy`] rather than as several sibling
+/// fields, so a stateless policy is exactly "`machine: None`" — one condition
+/// to test, one line to author at the many exhaustive construction sites, and
+/// no way to end up with half a machine.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiPolicyMachine {
+    /// The state entered on reset (AI gains control, or an unavailable system
+    /// recovers). Validated at content load to name a declared state.
+    pub initial: String,
+    /// The authored initial values of this policy's typed private memory. Held
+    /// on the MACHINE rather than on [`AiPolicy`] because private memory only
+    /// exists for a stateful policy — content validation rejects a
+    /// `memory(...)` reference in a stateless one — and because it makes
+    /// [`AiPolicyRuntimeState::reset`] self-contained: the host can rebuild a
+    /// clean runtime state from the policy alone, with no second lookup into
+    /// authored TOML at reset time.
+    pub initial_memory: AiPolicyMemory,
+    /// The declared states, in authored order.
+    pub states: Vec<AiPolicyState>,
+}
+
+impl AiPolicyMachine {
+    /// Look up a state by id.
+    pub fn state(&self, id: &str) -> Option<&AiPolicyState> {
+        self.states.iter().find(|s| s.id == id)
+    }
+}
+
+/// An inline fine-system policy: authored parameters plus the rule set (or an
+/// explicit idle declaration), and OPTIONALLY an [`AiPolicyMachine`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AiPolicy {
     /// Authored named parameters referenced by rule guards.
@@ -177,6 +272,44 @@ pub struct AiPolicy {
     /// an empty rule set so "silence" (an ambiguous declaration) is rejected by
     /// content validation while a deliberate idle is accepted.
     pub idle: bool,
+    /// The OPTIONAL state machine (issue #882). `None` — the shape every
+    /// shipped policy has — means this is a stateless policy and none of the
+    /// state/transition/memory code is ever entered.
+    pub machine: Option<AiPolicyMachine>,
+}
+
+/// Scan one rule slice for the winning verb on `channel` (issue #882).
+///
+/// Extracted verbatim from [`AiPolicy::resolve_channel`]'s original loop so the
+/// stateless path and the per-state path resolve channels through ONE
+/// implementation: identical guard evaluation, identical strictly-greater
+/// priority comparison, identical earliest-authored tie-break. The stateless
+/// path passes an empty [`AiPolicyMemory`] (its policies may not reference private
+/// state at all — content validation rejects that), which makes this call
+/// behaviourally indistinguishable from the pre-#882 loop.
+fn best_in<'a>(
+    rules: &'a [AiPolicyRule],
+    channel: &str,
+    facts: &AiFacts,
+    memory: &AiPolicyMemory,
+    params: &AiParams,
+    flags: &[&FlagStore],
+) -> Option<&'a AiPolicyVerb> {
+    let mut best: Option<&AiPolicyRule> = None;
+    for rule in rules {
+        if rule.channel != channel {
+            continue;
+        }
+        if !rule.when.evaluate_stateful(facts, memory, params, flags) {
+            continue;
+        }
+        // Strictly-greater keeps the earliest-authored rule on ties.
+        match best {
+            Some(b) if rule.priority <= b.priority => {}
+            _ => best = Some(rule),
+        }
+    }
+    best.map(|r| &r.verb)
 }
 
 impl AiPolicy {
@@ -187,6 +320,10 @@ impl AiPolicy {
     /// and returns the highest-priority survivor's verb (earliest-authored on
     /// a tie). `None` when no rule fires (or the policy is idle) — the caller
     /// then applies no output to that channel.
+    ///
+    /// This is the STATELESS path and its behaviour is frozen (issue #882): it
+    /// scans `self.rules` only, never consults `self.machine`, and cannot read
+    /// private memory or state time.
     pub fn resolve_channel(
         &self,
         channel: &str,
@@ -196,21 +333,140 @@ impl AiPolicy {
         if self.idle {
             return None;
         }
-        let mut best: Option<&AiPolicyRule> = None;
-        for rule in &self.rules {
-            if rule.channel != channel {
+        best_in(
+            &self.rules,
+            channel,
+            facts,
+            &AiPolicyMemory::default(),
+            &self.params,
+            flags,
+        )
+    }
+
+    /// The opt-in state machine, when this policy declares one (issue #882).
+    pub fn machine(&self) -> Option<&AiPolicyMachine> {
+        self.machine.as_ref()
+    }
+
+    /// The id of the state a fresh (or reset) runtime enters (issue #882).
+    /// `None` for a stateless policy.
+    pub fn initial_state(&self) -> Option<&str> {
+        self.machine.as_ref().map(|m| m.initial.as_str())
+    }
+
+    /// Resolve the winning verb for one output channel *within a named state*
+    /// (issue #882).
+    ///
+    /// Scans that state's continuous rules through the same [`best_in`] helper
+    /// the stateless path uses, so priority and tie-break semantics are
+    /// uniform across both paths. `None` when the policy is idle, declares no
+    /// machine, names no such state, or no rule in that state fires.
+    pub fn resolve_channel_in_state(
+        &self,
+        state: &str,
+        channel: &str,
+        facts: &AiFacts,
+        memory: &AiPolicyMemory,
+        flags: &[&FlagStore],
+    ) -> Option<&AiPolicyVerb> {
+        if self.idle {
+            return None;
+        }
+        let state = self.machine.as_ref()?.state(state)?;
+        best_in(&state.rules, channel, facts, memory, &self.params, flags)
+    }
+
+    /// Resolve AT MOST ONE outgoing transition from `state` this tick
+    /// (issue #882, AC2).
+    ///
+    /// Returning an `Option` is *how* one-transition-per-tick is enforced:
+    /// the evaluator picks the single highest-priority eligible transition
+    /// (earliest-authored on a tie, strictly-greater comparison — the same
+    /// rule channel resolution uses) and the host commits that one. A host
+    /// cannot accidentally chain transitions within a tick, because there is
+    /// no API that returns more than one.
+    ///
+    /// `None` when the policy is idle, declares no machine, names no such
+    /// state, or no transition guard fires (the machine simply stays put).
+    pub fn resolve_transition(
+        &self,
+        state: &str,
+        facts: &AiFacts,
+        memory: &AiPolicyMemory,
+        flags: &[&FlagStore],
+    ) -> Option<&AiPolicyTransition> {
+        if self.idle {
+            return None;
+        }
+        let state = self.machine.as_ref()?.state(state)?;
+        let mut best: Option<&AiPolicyTransition> = None;
+        for t in &state.transitions {
+            if !t.when.evaluate_stateful(facts, memory, &self.params, flags) {
                 continue;
             }
-            if !rule.when.evaluate_with(facts, &self.params, flags) {
-                continue;
-            }
-            // Strictly-greater keeps the earliest-authored rule on ties.
             match best {
-                Some(b) if rule.priority <= b.priority => {}
-                _ => best = Some(rule),
+                Some(b) if t.priority <= b.priority => {}
+                _ => best = Some(t),
             }
         }
-        best.map(|r| &r.verb)
+        best
+    }
+}
+
+/// The per-fine-system runtime state of a stateful policy (issue #882).
+///
+/// Deliberately a SEPARATE value from [`AiPolicy`]: the policy is immutable
+/// authored data shared for the life of the entity, while this mutates every
+/// tick. Hosts hold it in a per-fine-system Bevy component sibling to the
+/// policy component — never inside the policy component (which would dirty
+/// change detection on the authored data every tick) and never in one
+/// ship-wide aggregate (which is exactly the hidden ship-wide state machine
+/// AC3 forbids).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiPolicyRuntimeState {
+    /// The currently-entered state id.
+    pub current: String,
+    /// The tick-derived clock reading at which `current` was entered. State
+    /// time is `now - entered_at_secs`, where `now` comes from the shared AI
+    /// tick cadence, never `Time::delta` (AC4).
+    pub entered_at_secs: f64,
+    /// This fine system's typed private memory. Seeded into evaluation as the
+    /// `memory(...)` / `state_time` bag and readable by nothing else.
+    pub memory: AiPolicyMemory,
+}
+
+impl AiPolicyRuntimeState {
+    /// A runtime state freshly entered into `policy`'s initial state at `now`,
+    /// with memory reset to the policy's authored declarations.
+    ///
+    /// This is the AC5 reset: the host calls it when AI gains control of the
+    /// system and when an unavailable system recovers, so a stateful policy
+    /// never resumes mid-manoeuvre on stale state.
+    pub fn reset(policy: &AiPolicy, now_secs: f64) -> Self {
+        Self {
+            current: policy.initial_state().unwrap_or_default().to_string(),
+            entered_at_secs: now_secs,
+            memory: policy
+                .machine()
+                .map(|m| m.initial_memory.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The evaluation bag for this tick: private memory with `state_time`
+    /// filled in from the tick-derived clock.
+    pub fn memory_at(&self, now_secs: f64) -> AiPolicyMemory {
+        let mut m = self.memory.clone();
+        m.set_state_time_secs((now_secs - self.entered_at_secs).max(0.0));
+        m
+    }
+
+    /// Commit an entered state, restarting the state clock. Called by the
+    /// host's single state-tick system BEFORE any output resolves this tick,
+    /// so every fine system observes the committed state (AC2).
+    pub fn enter(&mut self, state: &str, now_secs: f64) {
+        self.current = state.to_string();
+        self.entered_at_secs = now_secs;
     }
 }
 
@@ -246,6 +502,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         }
     }
 
@@ -309,6 +566,7 @@ mod tests {
                 verb: AiPolicyVerb::ActuateDesiredTravel,
             }],
             idle: false,
+            machine: None,
         }
     }
 
@@ -346,6 +604,7 @@ mod tests {
                 verb: AiPolicyVerb::ActuateDesiredFacing,
             }],
             idle: false,
+            machine: None,
         };
         assert_eq!(
             p.resolve_channel("yaw", &AiFacts::new(), &[]),
@@ -394,6 +653,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         };
         assert_eq!(
             p.resolve_channel("lateral", &AiFacts::new(), &[]),
@@ -432,6 +692,7 @@ mod tests {
                 verb: AiPolicyVerb::EngageBoost,
             }],
             idle: false,
+            machine: None,
         };
         // Available but calm → no fire (hold).
         let mut calm = AiFacts::new();
@@ -476,6 +737,7 @@ mod tests {
                 verb: AiPolicyVerb::FirePhaser,
             }],
             idle: false,
+            machine: None,
         };
         // Ready in every dimension → fire.
         let mut ready = AiFacts::new();
@@ -512,6 +774,7 @@ mod tests {
                 verb: AiPolicyVerb::FireBlaster,
             }],
             idle: false,
+            machine: None,
         };
         assert_eq!(
             firing.resolve_channel("blaster_fire", &AiFacts::new(), &[]),
@@ -552,6 +815,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         };
         // Both fire at equal priority; the earliest-authored rule wins.
         assert_eq!(
@@ -583,6 +847,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         }
     }
 
@@ -649,6 +914,7 @@ mod tests {
                 verb: AiPolicyVerb::GrantTorpedoRound,
             }],
             idle: false,
+            machine: None,
         };
         // Few in flight → grant.
         let mut f = AiFacts::new();
@@ -683,6 +949,7 @@ mod tests {
                 verb: AiPolicyVerb::FocusShieldArc,
             }],
             idle: false,
+            machine: None,
         };
         // Concentrated recent damage (80% on one arc) → act.
         let mut concentrated = AiFacts::new();
@@ -752,6 +1019,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         };
 
         // Thrusting hard, battery healthy → helm elevates to 3.
@@ -809,6 +1077,7 @@ mod tests {
                 },
             ],
             idle: false,
+            machine: None,
         };
 
         let mut routine = AiFacts::new();
@@ -846,6 +1115,7 @@ mod tests {
                 verb: AiPolicyVerb::RespondToMessage(0),
             }],
             idle: true,
+            machine: None,
         };
         assert_eq!(
             p.resolve_channel("comms_respond", &AiFacts::new(), &[]),
@@ -866,6 +1136,7 @@ mod tests {
                 verb: AiPolicyVerb::RespondToMessage(2),
             }],
             idle: false,
+            machine: None,
         };
         let empty = FlagStore::new();
         assert_eq!(
@@ -883,5 +1154,393 @@ mod tests {
         let mut expected = FlagStore::new();
         expected.set_flag("cleared_to_answer");
         assert_eq!(set, expected);
+    }
+
+    // ── Optional stateful path (issue #882) ──────────────────────────────────
+
+    /// A two-state boost machine: `cruise` holds, `surge` engages. It leaves
+    /// `cruise` when the hazard fact crosses an authored threshold, and returns
+    /// once it has been surging for the authored dwell (the `state_time` atom).
+    /// Both transitions out of `cruise` are authored so priority is exercised.
+    fn two_state_boost_machine() -> AiPolicy {
+        let mut params = AiParams::new();
+        params.set("surge_urgency", 0.5);
+        params.set("surge_dwell_secs", 3.0);
+        AiPolicy {
+            params,
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "cruise".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "cruise".into(),
+                        // No rule fires here: cruising holds boost.
+                        rules: Vec::new(),
+                        transitions: vec![AiPolicyTransition {
+                            priority: 10,
+                            to: "surge".into(),
+                            when: parse_predicate(
+                                "fact(hazard_urgency) > param(surge_urgency) \
+                                 and fact(boost_available) > 0",
+                            )
+                            .unwrap(),
+                        }],
+                    },
+                    AiPolicyState {
+                        id: "surge".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "boost".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::EngageBoost,
+                        }],
+                        transitions: vec![AiPolicyTransition {
+                            priority: 0,
+                            to: "cruise".into(),
+                            when: parse_predicate("state_time >= param(surge_dwell_secs)").unwrap(),
+                        }],
+                    },
+                ],
+            }),
+        }
+    }
+
+    fn urgent_facts() -> AiFacts {
+        let mut f = AiFacts::new();
+        f.set("hazard_urgency", 0.9);
+        f.set("boost_available", 1.0);
+        f
+    }
+
+    fn calm_facts() -> AiFacts {
+        let mut f = AiFacts::new();
+        f.set("hazard_urgency", 0.0);
+        f.set("boost_available", 1.0);
+        f
+    }
+
+    /// AC7 — THE invariant. A stateless policy resolves EXACTLY as it did
+    /// before #882 existed: `machine: None` means the transition/state/memory
+    /// code is never entered, and every channel answer is unchanged. This is
+    /// the regression guard the twelve shipped Group A hosts rest on.
+    #[test]
+    fn stateless_policy_resolution_is_unchanged_by_the_optional_machine() {
+        let p = combat_window_policy();
+        assert!(
+            p.machine().is_none(),
+            "a #775-shaped policy declares no machine"
+        );
+        assert_eq!(p.initial_state(), None);
+
+        // Every stateless answer this module already pins, re-asserted through
+        // the post-#882 `best_in` helper.
+        assert_eq!(
+            p.resolve_channel("red_alert", &facts_since_combat(3.0), &[]),
+            Some(&AiPolicyVerb::SetRedAlert(true))
+        );
+        assert_eq!(
+            p.resolve_channel("red_alert", &facts_since_combat(30.0), &[]),
+            Some(&AiPolicyVerb::SetRedAlert(false))
+        );
+        assert_eq!(
+            p.resolve_channel("red_alert", &AiFacts::new(), &[]),
+            Some(&AiPolicyVerb::SetRedAlert(false))
+        );
+        assert_eq!(p.resolve_channel("shields", &AiFacts::new(), &[]), None);
+
+        // The stateful entry points are inert on a stateless policy: they
+        // cannot resolve anything, whatever state id or memory is offered.
+        let mut memory = AiPolicyMemory::new();
+        memory.set("anything", 99.0);
+        memory.set_state_time_secs(1000.0);
+        assert_eq!(
+            p.resolve_channel_in_state(
+                "red_alert",
+                "red_alert",
+                &facts_since_combat(3.0),
+                &memory,
+                &[]
+            ),
+            None,
+            "a stateless policy has no states to resolve in"
+        );
+        assert_eq!(
+            p.resolve_transition("red_alert", &facts_since_combat(3.0), &memory, &[]),
+            None,
+            "a stateless policy has no transitions to fire"
+        );
+    }
+
+    /// AC1 + AC9 (initial state): a fresh runtime state enters the authored
+    /// initial state with the authored memory, and that state's own continuous
+    /// rules are what resolve.
+    #[test]
+    fn runtime_state_starts_in_the_authored_initial_state() {
+        let p = two_state_boost_machine();
+        assert_eq!(p.initial_state(), Some("cruise"));
+        let st = AiPolicyRuntimeState::reset(&p, 100.0);
+        assert_eq!(st.current, "cruise");
+        assert_eq!(st.entered_at_secs, 100.0);
+        // `cruise` authors no boost rule → the channel holds even while urgent.
+        assert_eq!(
+            p.resolve_channel_in_state("cruise", "boost", &urgent_facts(), &st.memory, &[]),
+            None
+        );
+        // `surge` authors an unconditional one.
+        assert_eq!(
+            p.resolve_channel_in_state("surge", "boost", &calm_facts(), &st.memory, &[]),
+            Some(&AiPolicyVerb::EngageBoost)
+        );
+        // An undeclared state resolves nothing rather than panicking.
+        assert_eq!(
+            p.resolve_channel_in_state("nowhere", "boost", &urgent_facts(), &st.memory, &[]),
+            None
+        );
+    }
+
+    /// AC2 (one transition per tick) + same-tick outputs: `resolve_transition`
+    /// returns AT MOST ONE transition — that is the enforcement, not host
+    /// discipline — and the entered state's continuous rules answer
+    /// immediately, in the very same tick, with no intervening evaluation.
+    #[test]
+    fn one_transition_per_tick_and_the_entered_state_outputs_immediately() {
+        let p = two_state_boost_machine();
+        let mut st = AiPolicyRuntimeState::reset(&p, 0.0);
+        let facts = urgent_facts();
+
+        // Tick 1: cruise holds boost until the transition is resolved...
+        assert_eq!(
+            p.resolve_channel_in_state(&st.current, "boost", &facts, &st.memory_at(0.0), &[]),
+            None
+        );
+        let t = p
+            .resolve_transition(&st.current, &facts, &st.memory_at(0.0), &[])
+            .expect("the urgency guard fires");
+        assert_eq!(t.to, "surge");
+        st.enter(&t.to, 0.0);
+        // ...and the moment it is committed, THIS SAME TICK, the new state's
+        // continuous output is live (AC2).
+        assert_eq!(
+            p.resolve_channel_in_state(&st.current, "boost", &facts, &st.memory_at(0.0), &[]),
+            Some(&AiPolicyVerb::EngageBoost)
+        );
+
+        // Still the same tick: the `surge → cruise` guard is `state_time >= 3`,
+        // and state time is 0 here, so nothing chains. Even if it did fire, the
+        // API returns ONE transition — a host cannot walk two in a tick.
+        assert_eq!(
+            p.resolve_transition(&st.current, &facts, &st.memory_at(0.0), &[]),
+            None
+        );
+    }
+
+    /// AC9 (deterministic priority ties): two eligible transitions out of one
+    /// state resolve by strictly-greater priority, and an exact tie resolves to
+    /// the EARLIEST-AUTHORED transition — the same rule channel resolution
+    /// uses, so the two halves of the spine can never disagree.
+    #[test]
+    fn transition_priority_and_ties_are_deterministic() {
+        let machine = |a: i32, b: i32| AiPolicy {
+            params: AiParams::new(),
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "start".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "start".into(),
+                        rules: Vec::new(),
+                        transitions: vec![
+                            AiPolicyTransition {
+                                priority: a,
+                                to: "first".into(),
+                                when: parse_predicate("true").unwrap(),
+                            },
+                            AiPolicyTransition {
+                                priority: b,
+                                to: "second".into(),
+                                when: parse_predicate("true").unwrap(),
+                            },
+                        ],
+                    },
+                    AiPolicyState {
+                        id: "first".into(),
+                        rules: Vec::new(),
+                        transitions: Vec::new(),
+                    },
+                    AiPolicyState {
+                        id: "second".into(),
+                        rules: Vec::new(),
+                        transitions: Vec::new(),
+                    },
+                ],
+            }),
+        };
+        let m = AiPolicyMemory::new();
+        // Higher priority wins regardless of authored order.
+        assert_eq!(
+            machine(0, 10)
+                .resolve_transition("start", &AiFacts::new(), &m, &[])
+                .map(|t| t.to.as_str()),
+            Some("second")
+        );
+        assert_eq!(
+            machine(10, 0)
+                .resolve_transition("start", &AiFacts::new(), &m, &[])
+                .map(|t| t.to.as_str()),
+            Some("first")
+        );
+        // An exact tie goes to the earliest-authored transition.
+        assert_eq!(
+            machine(5, 5)
+                .resolve_transition("start", &AiFacts::new(), &m, &[])
+                .map(|t| t.to.as_str()),
+            Some("first")
+        );
+    }
+
+    /// AC9 (monotonic state time): state time is `now - entered_at`, it grows
+    /// monotonically while the state is held, it RESTARTS on entering a state,
+    /// and it is never negative even if a clock reading arrives out of order.
+    #[test]
+    fn state_time_is_monotonic_within_a_state_and_restarts_on_entry() {
+        let p = two_state_boost_machine();
+        let mut st = AiPolicyRuntimeState::reset(&p, 10.0);
+        assert_eq!(st.memory_at(10.0).state_time_secs(), 0.0);
+        assert_eq!(st.memory_at(11.0).state_time_secs(), 1.0);
+        assert_eq!(st.memory_at(12.5).state_time_secs(), 2.5);
+        // Never negative — an absent/behind reading clamps rather than panics.
+        assert_eq!(st.memory_at(9.0).state_time_secs(), 0.0);
+
+        st.enter("surge", 20.0);
+        assert_eq!(
+            st.memory_at(20.0).state_time_secs(),
+            0.0,
+            "entering a state restarts its clock"
+        );
+        // The dwell guard out of `surge` is `state_time >= param(3)`: it holds
+        // below the dwell and fires at/after it.
+        let facts = calm_facts();
+        assert_eq!(
+            p.resolve_transition("surge", &facts, &st.memory_at(22.9), &[]),
+            None
+        );
+        assert_eq!(
+            p.resolve_transition("surge", &facts, &st.memory_at(23.0), &[])
+                .map(|t| t.to.as_str()),
+            Some("cruise")
+        );
+    }
+
+    /// AC3 (memory scoping): `memory(...)` reads ONLY the bag handed to this
+    /// evaluation. A different fine system's bag — or no bag at all — simply
+    /// finds no reading and the guard evaluates `false`, never a panic and
+    /// never another system's value. There is no API through which a policy
+    /// could reach a bag it was not given, which is the structural half of
+    /// "cannot become a ship-wide state machine".
+    #[test]
+    fn memory_is_scoped_to_the_bag_the_owning_system_seeds() {
+        let mut params = AiParams::new();
+        params.set("armed_threshold", 1.0);
+        let p = AiPolicy {
+            params,
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "idle".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![AiPolicyState {
+                    id: "idle".into(),
+                    rules: vec![AiPolicyRule {
+                        priority: 0,
+                        channel: "boost".into(),
+                        when: parse_predicate("memory(armed) >= param(armed_threshold)").unwrap(),
+                        verb: AiPolicyVerb::EngageBoost,
+                    }],
+                    transitions: Vec::new(),
+                }],
+            }),
+        };
+        // This system's own bag, armed → the rule fires.
+        let mut own = AiPolicyMemory::new();
+        own.set("armed", 1.0);
+        assert_eq!(
+            p.resolve_channel_in_state("idle", "boost", &AiFacts::new(), &own, &[]),
+            Some(&AiPolicyVerb::EngageBoost)
+        );
+        // A SIBLING system's bag — same slot name, different owner — is simply
+        // never handed in; all this system can be given is its own. Standing in
+        // for that, an empty bag (what a system with no memory of its own has)
+        // resolves the guard false.
+        assert_eq!(
+            p.resolve_channel_in_state(
+                "idle",
+                "boost",
+                &AiFacts::new(),
+                &AiPolicyMemory::new(),
+                &[]
+            ),
+            None
+        );
+        // A memory slot is not a fact and a fact is not a memory slot: seeding
+        // `armed` as a world FACT does not satisfy a `memory(armed)` guard.
+        let mut facts = AiFacts::new();
+        facts.set("armed", 1.0);
+        assert_eq!(
+            p.resolve_channel_in_state("idle", "boost", &facts, &AiPolicyMemory::new(), &[]),
+            None
+        );
+    }
+
+    /// An idle declaration wins over an authored machine on every entry point —
+    /// "the AI does not operate this system" is absolute, exactly as it is on
+    /// the stateless path.
+    #[test]
+    fn idle_holds_every_stateful_entry_point() {
+        let p = AiPolicy {
+            idle: true,
+            ..two_state_boost_machine()
+        };
+        let m = AiPolicyMemory::new();
+        assert_eq!(
+            p.resolve_channel_in_state("surge", "boost", &urgent_facts(), &m, &[]),
+            None
+        );
+        assert_eq!(
+            p.resolve_transition("cruise", &urgent_facts(), &m, &[]),
+            None
+        );
+    }
+
+    /// AC5 reset semantics at the pure layer: a reset returns the runtime to
+    /// the authored initial state, restarts the clock, and restores authored
+    /// memory — whatever state or memory it had drifted into.
+    #[test]
+    fn reset_returns_to_initial_state_and_authored_memory() {
+        let mut p = two_state_boost_machine();
+        if let Some(m) = p.machine.as_mut() {
+            m.initial_memory.set("engagements", 0.0);
+        }
+        let mut st = AiPolicyRuntimeState::reset(&p, 0.0);
+        st.enter("surge", 5.0);
+        st.memory.set("engagements", 7.0);
+        assert_eq!(st.current, "surge");
+        assert_eq!(st.memory.get("engagements"), Some(7.0));
+
+        // Re-bind OVER the drifted value: the assertions below have to be about
+        // the value that actually drifted, not about a pristine second runtime
+        // built alongside it — otherwise "restores the AUTHORED memory, not the
+        // drifted runtime value" is not exercised at all.
+        st = AiPolicyRuntimeState::reset(&p, 42.0);
+        assert_eq!(st.current, "cruise");
+        assert_eq!(st.entered_at_secs, 42.0);
+        assert_eq!(
+            st.memory.get("engagements"),
+            Some(0.0),
+            "reset restores the AUTHORED memory, not the drifted runtime value"
+        );
     }
 }

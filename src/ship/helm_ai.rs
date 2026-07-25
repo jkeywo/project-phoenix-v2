@@ -1094,9 +1094,172 @@ pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmBoostAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
 
+/// Per-ship runtime state for a STATEFUL Engines policy (issue #883).
+///
+/// The Engines twin of [`HelmBoostAiPolicyState`], and separate from it for the
+/// same structural reason: private memory belongs to ONE fine system. The
+/// destroyer's Engines, Steering and Boost each run their own copy of the
+/// fly-through machine over the same host-seeded facts, so they reach the same
+/// leg on the same tick *independently* — there is no ship-wide pass state that
+/// one of them owns and the others read.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
+
+/// Per-ship runtime state for a STATEFUL Steering policy (issue #883). The
+/// Steering twin of [`HelmEnginesAiPolicyState`]; this is the one whose current
+/// state decides which leg [`HelmPassSurface`] publishes, because the yaw
+/// channel is the axis that carries the two different facing verbs.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmSteeringAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
+
+/// The host's per-tick, read-only publication of a ship's fly-through pass
+/// (issue #883), written by [`ai_policy_state_tick`] and consumed by
+/// `helm_motion_planner`.
+///
+/// ## Why it exists, and why it is not a state machine
+///
+/// The escape leg has to be expressed as a DESIRED FACING fed through the shared
+/// motion planner rather than as a raw steering override, or the #780 hazard
+/// contribution would no longer compose onto it (AC3). The planner is therefore
+/// the thing that must know which leg is being flown — but the planner may not
+/// know authored state NAMES, and it must not re-resolve three policies itself.
+///
+/// So this component carries the *derived* answer: whether the pass is running,
+/// which leg, the frozen heading, and the authored manoeuvre scalars, all
+/// resolved once by the host that already holds the policies and their state.
+/// It decides nothing; it is the motion-plan surface's sibling, in the same way
+/// `HelmMotionPlan` is a derived publication rather than an authority. Every
+/// field traces to authored ship data or to host-written private memory.
+///
+/// ## The one-tick offset
+///
+/// `ai_policy_state_tick` runs `.after(helm_motion_planner)` (its boost guards
+/// read this tick's hazard surface — issue #882), so the planner consumes the
+/// surface published on the PREVIOUS AI tick. At the authored AI-helm cadence
+/// that delays the heading freeze by one tick and nothing else: the frozen value
+/// itself is captured at the transition instant, and it is deterministic at
+/// every frame rate because both systems run on the shared `ai_helm_tick_ready`
+/// latch (AGENTS.md #7).
+///
+/// The measured cost on the Harrow is 1.05 deg of extra yaw — 0.74 world units
+/// of lateral offset — against a 6-unit `closest_approach_hysteresis` and a
+/// 260-unit `commit_range`, so it can neither delay nor mis-fire the transition.
+/// It does NOT wash out afterwards, though, and that is the honest half of this
+/// note: 1.05 deg is 0.018 rad, just *inside* the Harrow's authored
+/// `tracking_deadband_rad` of 0.02, so the planner's `steer_toward` reads the
+/// residual as zero error and commands no correction. The escape therefore flies
+/// with a standing offset of up to 1.05 deg from the heading frozen in memory
+/// rather than converging onto it. That is within the hull's own authored
+/// tolerance for "on heading" by definition — the deadband IS that tolerance —
+/// but a hull authoring a deadband tighter than its one-tick yaw rate would see
+/// the planner steer the residual back out instead, which is a different (also
+/// correct) behaviour, not a bug in either.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct HelmPassSurface {
+    /// The hull authors a complete fly-through doctrine AND both travel axes are
+    /// AI-operated. `false` — every hull that ships today — means the planner
+    /// uses the ordinary `plan_helm_travel` arm and nothing changes.
+    pub active: bool,
+    /// `true` once the Steering machine's current state answers the `yaw`
+    /// channel with `hold_committed_heading`: the facing solution is closed and
+    /// the ship is flying [`Self::escape_heading_rad`].
+    pub escape: bool,
+    /// The heading (radians) the host froze at the last committed transition,
+    /// read out of the Steering system's own `memory(escape_heading_rad)`.
+    pub escape_heading_rad: f32,
+    /// Authored throttle fraction for the inbound leg (Engines `param`).
+    pub approach_speed: f32,
+    /// Authored throttle fraction for the escape leg (Engines `param`).
+    pub escape_speed: f32,
+    /// Authored steering deadband, radians (Steering `param`).
+    pub tracking_deadband_rad: f32,
+    /// Authored steering saturation angle, radians (Steering `param`).
+    pub tracking_full_steer_rad: f32,
+}
+
 /// The fact name the shared hazard surface is seeded under by
 /// [`seed_helm_actuator_facts`].
 pub(crate) const HAZARD_URGENCY_FACT: &str = "hazard_urgency";
+
+// ── Target-relative travel facts (issue #883, AC5) ───────────────────────────
+//
+// #779 shipped the two TRAVEL axes with `AiFacts::new()` — an empty snapshot, so
+// every `fact(...)` guard on `longitudinal`/`yaw` validated and then never
+// fired. #780 closed that hole for the four SECONDARY axes by seeding hazard and
+// availability facts; these constants and `seed_helm_travel_facts` close it for
+// the travel axes, which is what a doctrine reasoning about a moving target
+// needs. All of it is computed HOST-side from the frame's merged view and
+// `ShipPhysics`, so `policy.rs` stays Bevy-free (AGENTS.md #10).
+
+/// Planar distance to the ship's current target, world units.
+pub(crate) const RANGE_TO_TARGET_FACT: &str = "range_to_target";
+/// Rate at which the range is shrinking, world units/s. Positive closing,
+/// negative opening — the sign flip IS closest approach.
+pub(crate) const CLOSING_RATE_FACT: &str = "closing_rate";
+/// Signed bearing to the target, radians, starboard positive.
+pub(crate) const BEARING_TO_TARGET_FACT: &str = "bearing_to_target";
+/// `1.0` when the ship has a target its own helm view can actually see.
+pub(crate) const TARGET_VALID_FACT: &str = "target_valid";
+/// Current forward speed as a fraction of the hull's authored `max_speed`.
+pub(crate) const SPEED_FRACTION_FACT: &str = "speed_fraction";
+/// How far the range has re-opened above the minimum this policy state has seen:
+/// `range_to_target - memory(min_range_seen)`.
+///
+/// DERIVED per fine system, because it folds a world reading against that
+/// system's OWN private memory. The predicate grammar compares one atom to a
+/// literal or a `param(...)` — deliberately, so guards stay a flat readable
+/// table — so the subtraction is the host's job, exactly as the continuous
+/// thrust magnitude is. The policy still owns the decision: it compares this
+/// against its authored `closest_approach_hysteresis`.
+pub(crate) const RANGE_ABOVE_MIN_SEEN_FACT: &str = "range_above_min_seen";
+
+/// Private-memory slot: the smallest range seen since this policy state was
+/// entered (issue #883). A running MINIMUM, folded every gated tick by the host —
+/// the exact mirror of [`PEAK_HAZARD_MEMORY`]'s running maximum, and the reason
+/// #882 built host-written memory in the first place: no single-tick fact and no
+/// authored constant can express it.
+pub(crate) const MIN_RANGE_SEEN_MEMORY: &str = "min_range_seen";
+/// Private-memory slot: the ship's heading (radians) at the instant this
+/// policy's last transition committed (issue #883).
+///
+/// This is what makes "commit to the current outward heading" mean the HEADING
+/// rather than the steering command. Written by the host on every commit, read
+/// by the host when the authored `hold_committed_heading` verb wins the yaw
+/// channel. There is no authored write verb, by #882's design.
+pub(crate) const ESCAPE_HEADING_MEMORY: &str = "escape_heading_rad";
+/// Private-memory slot: which TARGET [`MIN_RANGE_SEEN_MEMORY`] was accumulated
+/// against (issue #883).
+///
+/// The running minimum is scoped to the state, but a state can outlive a target:
+/// swap mid-`inbound` to a target that is further away and an unscoped fold
+/// would keep the dead target's minimum, so `range_above_min_seen` would jump
+/// straight past the authored hysteresis and fire a SPURIOUS closest approach on
+/// a ship that has not begun its run. Storing the identity alongside the minimum
+/// lets [`tick_policy_machine`] restart the fold on a target change.
+///
+/// Host-written and host-read only; no authored guard reads it (memory is `f64`,
+/// so it holds [`target_identity_fingerprint`]'s value rather than a uuid).
+pub(crate) const MIN_RANGE_TARGET_MEMORY: &str = "min_range_target";
+
+/// A stable numeric fingerprint of a target uuid, for [`MIN_RANGE_TARGET_MEMORY`].
+///
+/// Private memory is a `f64` bag, so the identity is carried as the uuid's low
+/// 48 bits — exactly representable in an `f64` mantissa, so the comparison is
+/// never approximate. Two distinct targets colliding needs a 1-in-2^48 match on
+/// randomly generated uuids, and the only consequence would be the pre-fix
+/// behaviour for that one pair.
+fn target_identity_fingerprint(uuid: uuid::Uuid) -> f64 {
+    (uuid.as_u128() as u64 & 0x0000_FFFF_FFFF_FFFF) as f64
+}
+
+/// Authored Engines `param` naming the inbound throttle fraction (issue #883).
+pub(crate) const APPROACH_SPEED_PARAM: &str = "approach_speed";
+/// Authored Engines `param` naming the escape-leg throttle fraction.
+pub(crate) const ESCAPE_SPEED_PARAM: &str = "escape_speed";
+/// Authored Steering `param` naming the tracking deadband, radians.
+pub(crate) const TRACKING_DEADBAND_PARAM: &str = "tracking_deadband_rad";
+/// Authored Steering `param` naming the tracking saturation angle, radians.
+pub(crate) const TRACKING_FULL_STEER_PARAM: &str = "tracking_full_steer_rad";
 
 /// Private-memory slot: how many times this machine has entered a state that
 /// engages boost, since its last reset (issue #882).
@@ -1169,8 +1332,21 @@ pub(crate) struct AiPolicyTickClock(pub(crate) f64);
 ///   state whose OWN rules engage boost. The host asks the policy what the
 ///   entered state does on this system's channel, so the counter needs no
 ///   knowledge of authored state names.
+///
+/// Issue #883 adds the two travel axes and two more host-written slots, folded
+/// for EVERY machine by [`tick_policy_machine`]:
+///
+/// * [`MIN_RANGE_SEEN_MEMORY`] — a running MINIMUM of `range_to_target`, scoped
+///   to the current state (the host resets it on every commit). Closest approach
+///   is then "the range has re-opened past the authored hysteresis", which one
+///   tick of retention is exactly enough to know and no single-tick fact can say.
+/// * [`ESCAPE_HEADING_MEMORY`] — the ship's yaw at the instant a transition
+///   commits, so the state that was just entered can fly a heading frozen at the
+///   merge rather than a heading that keeps being re-solved.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_policy_state_tick(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     mut clock: ResMut<AiPolicyTickClock>,
     mut ships: Query<
@@ -1178,10 +1354,23 @@ pub(crate) fn ai_policy_state_tick(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
+            Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
-            &HelmBoostAiPolicy,
+            // Optional for the same reason the per-axis hosts take them
+            // optionally: a bare-`App` fixture may attach only the policy it is
+            // testing. A ship missing one falls back to that axis's canonical
+            // default, which is stateless, so its machine tick returns
+            // immediately. Requiring all three here would instead make the whole
+            // QUERY fail to match and silently skip the ship — the same class of
+            // silent skip #883 added the `resolve_helm_channel` guard for.
+            Option<&HelmEnginesAiPolicy>,
+            Option<&HelmSteeringAiPolicy>,
+            Option<&HelmBoostAiPolicy>,
+            &mut HelmEnginesAiPolicyState,
+            &mut HelmSteeringAiPolicyState,
             &mut HelmBoostAiPolicyState,
+            &mut HelmPassSurface,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
@@ -1196,63 +1385,115 @@ pub(crate) fn ai_policy_state_tick(
     }
     let now = clock.0;
 
-    for (entity, sources, physics, boost_cfg, impulse_cfg, policy, mut state) in ships.iter_mut() {
-        // Stateless policies never enter any of this (the shipped default Boost
-        // policy is idle and declares no machine).
-        if policy.0.machine().is_none() {
-            continue;
-        }
-        // AC5: not AI-operated, or the system is unavailable → hold at initial.
-        let operating = sources
-            .0
-            .policy_for(&crate::system_registry::helm_boost_system_id())
-            .operate_ai;
-        let available = boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        if !operating || !available {
-            state.0 = crate::ai::policy::AiPolicyRuntimeState::reset(&policy.0, now);
-            continue;
-        }
-        // A state component that was never initialised (or whose authored
-        // machine changed) starts at `initial`.
-        if policy
-            .0
-            .machine()
-            .and_then(|m| m.state(&state.0.current))
-            .is_none()
-        {
-            state.0 = crate::ai::policy::AiPolicyRuntimeState::reset(&policy.0, now);
-        }
+    // Canonical (stateless) fallbacks for a ship missing an attached policy;
+    // built once per tick, mirroring the per-axis hosts.
+    let default_engines = crate::entities::config::default_engines_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    let default_steering = crate::entities::config::default_steering_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+    let default_boost = crate::entities::config::default_boost_ai_config()
+        .to_policy()
+        .unwrap_or_default();
 
-        let facts = seed_helm_actuator_facts(
+    for (
+        entity,
+        sources,
+        physics,
+        physics_cfg,
+        boost_cfg,
+        impulse_cfg,
+        engines_policy,
+        steering_policy,
+        boost_policy,
+        mut engines_state,
+        mut steering_state,
+        mut boost_state,
+        mut pass,
+    ) in ships.iter_mut()
+    {
+        let engines_policy = engines_policy.map(|p| &p.0).unwrap_or(&default_engines);
+        let steering_policy = steering_policy.map(|p| &p.0).unwrap_or(&default_steering);
+        let boost_policy = boost_policy.map(|p| &p.0).unwrap_or(&default_boost);
+
+        // One fact snapshot per ship per tick, shared by all three machines —
+        // they must reason about the SAME world or they would reach different
+        // legs. Private memory is what stays per-system (AC3): the derived
+        // memory fact is folded in separately, inside each machine's own tick.
+        let mut facts = seed_helm_actuator_facts(
             plan.ships.get(&entity).map(|sp| &sp.hazard),
             impulse_cfg.is_some(),
-            true,
+            boost_cfg.map(|c| c.enabled).unwrap_or(false),
             physics.y,
         );
-        // ── Host-written private memory (issue #882) ─────────────────────────
-        //
-        // The HOST owns what goes into memory and the policy only READS it,
-        // exactly as #779/#780 split the planner (which owns continuous
-        // magnitudes) from the policy (which decides whether to actuate). A
-        // running maximum of the hazard the ship has faced since its last reset
-        // is the smallest honest example: it cannot be expressed as a `param`
-        // (it is not authored) nor as a `fact` (it is not a reading of THIS
-        // tick), so retention across ticks is doing real work.
-        let urgency = facts
-            .get(HAZARD_URGENCY_FACT)
-            .unwrap_or(0.0)
-            .max(state.0.memory.get(PEAK_HAZARD_MEMORY).unwrap_or(0.0));
-        state.0.memory.set(PEAK_HAZARD_MEMORY, urgency);
+        // The identity of the target the geometry above was seeded from. The
+        // running range minimum is scoped to it, so a mid-state target switch
+        // restarts the fold rather than inheriting a stranger's minimum.
+        let travel_target = seed_helm_travel_facts(
+            &mut facts,
+            frame.ships.get(&entity),
+            physics,
+            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
+        );
 
-        // The private bag is seeded from THIS fine system's own state component
-        // and nothing else (AC3).
-        let memory = state.0.memory_at(now);
-        if let Some(t) = policy
+        // ── Engines ──────────────────────────────────────────────────────────
+        tick_policy_machine(
+            engines_policy,
+            &mut engines_state.0,
+            sources
+                .0
+                .policy_for(&crate::system_registry::helm_thrust_system_id())
+                .operate_ai,
+            &facts,
+            travel_target,
+            now,
+            physics.yaw,
+            |_| {},
+        );
+
+        // ── Steering ─────────────────────────────────────────────────────────
+        tick_policy_machine(
+            steering_policy,
+            &mut steering_state.0,
+            sources
+                .0
+                .policy_for(&crate::system_registry::helm_steering_system_id())
+                .operate_ai,
+            &facts,
+            travel_target,
+            now,
+            physics.yaw,
+            |_| {},
+        );
+
+        // ── Boost ────────────────────────────────────────────────────────────
+        // Availability is part of this axis's AC5 reset gate: an absent or
+        // feature-disabled boost holds the machine at `initial`.
+        let boost_operable = sources
             .0
-            .resolve_transition(&state.0.current, &facts, &memory, &[])
-        {
-            let to = t.to.clone();
-            state.0.enter(&to, now);
+            .policy_for(&crate::system_registry::helm_boost_system_id())
+            .operate_ai
+            && boost_cfg.map(|c| c.enabled).unwrap_or(false);
+        let entered = tick_policy_machine(
+            boost_policy,
+            &mut boost_state.0,
+            boost_operable,
+            &facts,
+            travel_target,
+            now,
+            physics.yaw,
+            // Boost's own extra host-written slot (issue #882): a running
+            // maximum of the hazard faced since the last reset.
+            |memory| {
+                let urgency = facts
+                    .get(HAZARD_URGENCY_FACT)
+                    .unwrap_or(0.0)
+                    .max(memory.get(PEAK_HAZARD_MEMORY).unwrap_or(0.0));
+                memory.set(PEAK_HAZARD_MEMORY, urgency);
+            },
+        );
+        if entered.is_some() {
             // Count the entries into a boost-ENGAGING state. The host asks the
             // policy what the state it just entered does on this system's own
             // channel, so the counter needs no knowledge of authored state
@@ -1261,19 +1502,200 @@ pub(crate) fn ai_policy_state_tick(
             // later tick, and only `AiPolicyRuntimeState::reset` clears it back
             // to the authored declaration — which is the property that makes
             // `memory(...)` different from `param(...)`.
-            let entered_memory = state.0.memory_at(now);
-            let engages = policy.0.resolve_channel_in_state(
-                &state.0.current,
+            let engages = resolve_helm_channel(
+                boost_policy,
+                Some(&boost_state.0),
                 crate::entities::config::HELM_BOOST_CHANNEL,
                 &facts,
-                &entered_memory,
-                &[],
+                now,
             ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
             if engages {
-                let n = state.0.memory.get(ENGAGEMENTS_MEMORY).unwrap_or(0.0);
-                state.0.memory.set(ENGAGEMENTS_MEMORY, n + 1.0);
+                let n = boost_state.0.memory.get(ENGAGEMENTS_MEMORY).unwrap_or(0.0);
+                boost_state.0.memory.set(ENGAGEMENTS_MEMORY, n + 1.0);
             }
         }
+
+        // ── Publish the derived fly-through pass surface (issue #883) ────────
+        *pass = build_pass_surface(
+            engines_policy,
+            steering_policy,
+            &steering_state.0,
+            sources,
+            &facts,
+            now,
+        );
+    }
+}
+
+/// Advance ONE fine system's policy machine by one shared AI tick (issue #883,
+/// generalised from #882's Boost-only body).
+///
+/// Returns the state entered when a transition committed this tick.
+///
+/// Everything a *fly-through* needs beyond #882 is the two host-written slots
+/// folded here, and both are deliberately generic rather than doctrine-specific:
+///
+/// * [`MIN_RANGE_SEEN_MEMORY`] is a running minimum **scoped to the current
+///   state AND to the current target's identity**. The host resets it to the
+///   current range on every commit, and restarts the fold whenever `target`
+///   differs from the one it was accumulated against
+///   ([`MIN_RANGE_TARGET_MEMORY`]). The state scoping is what lets a machine
+///   cycle through repeated attack runs without the host knowing a single
+///   authored state name; the identity scoping is what stops a mid-state target
+///   switch — to a further ship, say — synthesising a `range_above_min_seen`
+///   spike out of the previous target's minimum and firing a closest approach
+///   the ship never flew.
+/// * [`ESCAPE_HEADING_MEMORY`] is written on every commit, so any state can be
+///   authored to fly the heading captured at the transition that entered it.
+///
+/// A stateless policy — every hull that ships today — returns immediately
+/// without touching memory, state, or the transition scan.
+#[allow(clippy::too_many_arguments)]
+fn tick_policy_machine<F>(
+    policy: &crate::ai::policy::AiPolicy,
+    state: &mut crate::ai::policy::AiPolicyRuntimeState,
+    operable: bool,
+    facts: &crate::world::flags::AiFacts,
+    // The target this tick's `range_to_target` was seeded from, as returned by
+    // `seed_helm_travel_facts`.
+    target: Option<uuid::Uuid>,
+    now: f64,
+    yaw: f32,
+    fold_extra_memory: F,
+) -> Option<String>
+where
+    F: FnOnce(&mut crate::world::flags::AiPolicyMemory),
+{
+    // Stateless policies never enter any of this.
+    policy.machine()?;
+    // AC5: not AI-operated, or the system is unavailable → hold at initial, so
+    // the tick AI *gains* control begins from the authored initial state rather
+    // than resuming a stale mid-manoeuvre one.
+    if !operable {
+        *state = crate::ai::policy::AiPolicyRuntimeState::reset(policy, now);
+        return None;
+    }
+    // A state component that was never initialised (or whose authored machine
+    // changed) starts at `initial`.
+    if policy
+        .machine()
+        .and_then(|m| m.state(&state.current))
+        .is_none()
+    {
+        *state = crate::ai::policy::AiPolicyRuntimeState::reset(policy, now);
+    }
+
+    fold_extra_memory(&mut state.memory);
+
+    // Running minimum of the range, scoped to the state AND to the target's
+    // identity (see the doc comment). A target switch restarts the fold at this
+    // tick's range: carrying the previous target's minimum forward would let a
+    // swap to a further ship read as a huge `range_above_min_seen` and fire a
+    // closest approach that never happened.
+    if let Some(range) = facts.get(RANGE_TO_TARGET_FACT) {
+        if facts.get(TARGET_VALID_FACT).unwrap_or(0.0) > 0.0 {
+            let fingerprint = target.map(target_identity_fingerprint);
+            let same_target = fingerprint == state.memory.get(MIN_RANGE_TARGET_MEMORY);
+            let folded = if same_target {
+                state
+                    .memory
+                    .get(MIN_RANGE_SEEN_MEMORY)
+                    .map_or(range, |min| min.min(range))
+            } else {
+                range
+            };
+            state.memory.set(MIN_RANGE_SEEN_MEMORY, folded);
+            if let Some(fingerprint) = fingerprint {
+                state.memory.set(MIN_RANGE_TARGET_MEMORY, fingerprint);
+            }
+        }
+    }
+
+    // The private bag is seeded from THIS fine system's own state component and
+    // nothing else (AC3) — including the memory-derived fact.
+    let mut facts_with_memory = facts.clone();
+    seed_memory_derived_facts(&mut facts_with_memory, &state.memory);
+    let memory = state.memory_at(now);
+    let to = policy
+        .resolve_transition(&state.current, &facts_with_memory, &memory, &[])?
+        .to
+        .clone();
+    state.enter(&to, now);
+
+    // Commit-time host writes. The heading is captured from THIS tick's yaw, so
+    // "the current outward heading" means the heading at the merge instant.
+    state.memory.set(ESCAPE_HEADING_MEMORY, yaw as f64);
+    // Re-scope the running minimum to the state just entered.
+    if let Some(range) = facts.get(RANGE_TO_TARGET_FACT) {
+        state.memory.set(MIN_RANGE_SEEN_MEMORY, range);
+    }
+    Some(to)
+}
+
+/// Derive this tick's [`HelmPassSurface`] from the two travel-axis policies and
+/// the Steering machine's committed state (issue #883).
+///
+/// The leg is read off the AUTHORED yaw verb — `hold_committed_heading` means
+/// escape — so this host never learns an authored state name and a designer can
+/// call the states anything. The surface only goes `active` when the hull
+/// authors a complete manoeuvre parameter set on both travel axes AND both axes
+/// are AI-operated: a partial authoring falls back to ordinary doctrine travel
+/// rather than flying a pass with invented numbers (AGENTS.md #11 — there is no
+/// default for any of these values anywhere in Rust).
+fn build_pass_surface(
+    engines_policy: &crate::ai::policy::AiPolicy,
+    steering_policy: &crate::ai::policy::AiPolicy,
+    steering_state: &crate::ai::policy::AiPolicyRuntimeState,
+    sources: &ShipSystemControlSources,
+    facts: &crate::world::flags::AiFacts,
+    now: f64,
+) -> HelmPassSurface {
+    let travel_axes_ai = sources
+        .0
+        .policy_for(&crate::system_registry::helm_thrust_system_id())
+        .operate_ai
+        && sources
+            .0
+            .policy_for(&crate::system_registry::helm_steering_system_id())
+            .operate_ai;
+    let authored = steering_policy.machine().is_some() && engines_policy.machine().is_some();
+    let (
+        Some(approach_speed),
+        Some(escape_speed),
+        Some(tracking_deadband_rad),
+        Some(tracking_full_steer_rad),
+    ) = (
+        engines_policy.params.get(APPROACH_SPEED_PARAM),
+        engines_policy.params.get(ESCAPE_SPEED_PARAM),
+        steering_policy.params.get(TRACKING_DEADBAND_PARAM),
+        steering_policy.params.get(TRACKING_FULL_STEER_PARAM),
+    )
+    else {
+        return HelmPassSurface::default();
+    };
+    if !authored || !travel_axes_ai {
+        return HelmPassSurface::default();
+    }
+
+    let escape = resolve_helm_channel(
+        steering_policy,
+        Some(steering_state),
+        crate::entities::config::HELM_YAW_CHANNEL,
+        facts,
+        now,
+    ) == Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading);
+
+    HelmPassSurface {
+        active: true,
+        escape,
+        escape_heading_rad: steering_state
+            .memory
+            .get(ESCAPE_HEADING_MEMORY)
+            .unwrap_or(0.0) as f32,
+        approach_speed: approach_speed as f32,
+        escape_speed: escape_speed as f32,
+        tracking_deadband_rad: tracking_deadband_rad as f32,
+        tracking_full_steer_rad: tracking_full_steer_rad as f32,
     }
 }
 
@@ -1295,12 +1717,14 @@ fn helm_policy_actuates(
     policy.resolve_channel(channel, facts, &[]) == Some(expected)
 }
 
-/// Seed the per-tick policy fact snapshot for a secondary helm actuator host
-/// (issue #780). This is THE piece that resolves the #779 empty-facts sharp
-/// edge: the travel-axis hosts pass an empty `AiFacts`, so a `fact(...)`
-/// guard validates but never fires; the secondary hosts instead seed hazard and
+/// Seed the per-tick policy fact snapshot for a helm actuator host (issue
+/// #780). This is THE piece that resolves the #779 empty-facts sharp edge: a
+/// host that passes an empty `AiFacts` leaves every `fact(...)` guard validating
+/// at load and then never firing, so each host seeds hazard and
 /// capability/availability facts here so authored guards (AC5/AC6) actually
-/// evaluate. Facts are read from the shared `HazardAssessment` the planner
+/// evaluate. #883 closed the last gap by routing the two travel-axis hosts
+/// through this seeder as well, so no helm host resolves against an empty
+/// snapshot. Facts are read from the shared `HazardAssessment` the planner
 /// already published — no re-scan (AC2) — and from host-side capability, keeping
 /// `policy.rs` Bevy-free (AGENTS.md #10).
 fn seed_helm_actuator_facts(
@@ -1325,6 +1749,134 @@ fn seed_helm_actuator_facts(
     facts
 }
 
+/// Seed the TARGET-RELATIVE travel facts (issue #883, AC5) — the sibling of
+/// [`seed_helm_actuator_facts`] that closes the #779 empty-facts gap for the two
+/// travel axes.
+///
+/// The target is the same one the helm already pursues (`destroy_target` falling
+/// back to the Weapons combat lock), resolved against the frame's MERGED view —
+/// the same surface `helm_ai_decision` steers by, so a guard can never fire on a
+/// target the travel solution cannot see. An unresolvable target seeds
+/// `target_valid = 0` and no geometry at all, so a `fact(range_to_target) < …`
+/// guard reads absent (false) rather than a stale or invented number.
+///
+/// [`crate::ai::AiWorldEntity`] has no velocity field, so the closing rate's
+/// relative velocity is reconstructed from `(yaw, forward_speed)` for BOTH
+/// parties inside the pure [`crate::ai::target_relative_motion`]; nothing about
+/// that geometry lives here.
+///
+/// Returns the uuid of the target the geometry was actually seeded from, or
+/// `None` when there was none to resolve. That is the identity
+/// [`tick_policy_machine`] scopes its running range minimum to, and returning it
+/// from here is what guarantees the two can never disagree about *which* target
+/// this tick's `range_to_target` belongs to.
+fn seed_helm_travel_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    frame_ship: Option<&HelmAiShipFrame>,
+    physics: &ShipPhysics,
+    max_speed: f32,
+) -> Option<uuid::Uuid> {
+    // Always seeded, so an authored guard distinguishes "no target" from
+    // "target at range 0" without either reading as absent.
+    facts.set(TARGET_VALID_FACT, 0.0);
+    if max_speed > 0.0 {
+        facts.set(
+            SPEED_FRACTION_FACT,
+            (physics.forward_speed / max_speed) as f64,
+        );
+    }
+
+    let sf = frame_ship?;
+    let uuid = sf.destroy_target.or(sf.weapons_target)?;
+    let target = sf.merged_view.entities.iter().find(|e| e.uuid == uuid)?;
+
+    let motion = crate::ai::target_relative_motion(
+        [physics.x, physics.y, physics.z],
+        physics.yaw,
+        physics.forward_speed,
+        target.position,
+        target.yaw,
+        target.forward_speed,
+    );
+    facts.set(TARGET_VALID_FACT, 1.0);
+    facts.set(RANGE_TO_TARGET_FACT, motion.range as f64);
+    facts.set(CLOSING_RATE_FACT, motion.closing_rate as f64);
+    facts.set(BEARING_TO_TARGET_FACT, motion.bearing_rad as f64);
+    Some(uuid)
+}
+
+/// Fold this fine system's OWN private memory into the shared fact snapshot
+/// (issue #883).
+///
+/// [`RANGE_ABOVE_MIN_SEEN_FACT`] is the only derived fact, and it is derived
+/// per-system on purpose: `min_range_seen` is private memory, so two siblings
+/// looking at the same world can legitimately hold different minima and must not
+/// see each other's. Seeded only when both halves are present, so an
+/// unfolded/undeclared minimum leaves the guard reading absent (false).
+fn seed_memory_derived_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    memory: &crate::world::flags::AiPolicyMemory,
+) {
+    if let (Some(range), Some(min)) = (
+        facts.get(RANGE_TO_TARGET_FACT),
+        memory.get(MIN_RANGE_SEEN_MEMORY),
+    ) {
+        facts.set(RANGE_ABOVE_MIN_SEEN_FACT, range - min);
+    }
+}
+
+/// Resolve one helm fine system's single mode channel, on whichever of the two
+/// policy paths the authored content chose (issues #779, #882, #883).
+///
+/// A stateless policy (`machine: None` — every hull that ships today) takes the
+/// frozen `resolve_channel` path. A policy that opted into the #882 machine
+/// resolves the SAME channel inside the state `ai_policy_state_tick` committed
+/// earlier this tick, so an entered state's outputs are live immediately.
+///
+/// ## The loud middle case
+///
+/// `(Some(machine), None)` — content declares a machine but the ship carries no
+/// runtime-state component — silently fell back to the stateless path before
+/// #883. That is precisely the failure mode of #882's blocking bug (a per-ship
+/// AI component reaching one spawn path and not the other), and it had now
+/// recurred three times. The `debug_assert!` makes a fourth recurrence stop the
+/// test suite instead of quietly degrading a doctrine to its stateless shadow.
+/// Release builds still degrade rather than panic — a live scenario should not
+/// die over it — but they can no longer do so unnoticed in development.
+fn resolve_helm_channel<'a>(
+    policy: &'a crate::ai::policy::AiPolicy,
+    state: Option<&crate::ai::policy::AiPolicyRuntimeState>,
+    channel: &str,
+    facts: &crate::world::flags::AiFacts,
+    now_secs: f64,
+) -> Option<&'a crate::ai::policy::AiPolicyVerb> {
+    match (policy.machine(), state) {
+        (Some(_), Some(st)) => {
+            let mut facts = facts.clone();
+            seed_memory_derived_facts(&mut facts, &st.memory);
+            policy.resolve_channel_in_state(
+                &st.current,
+                channel,
+                &facts,
+                &st.memory_at(now_secs),
+                &[],
+            )
+        }
+        (Some(_), None) => {
+            debug_assert!(
+                false,
+                "fine system channel '{channel}' has a STATEFUL authored policy but the ship \
+                 carries no policy-state component: the machine cannot run and this would \
+                 silently degrade to the stateless path. Every per-ship AI component must be \
+                 declared in ai_high_fidelity_components() (src/ai/server.rs), never inserted \
+                 by hand on one spawn path"
+            );
+            policy.resolve_channel(channel, facts, &[])
+        }
+        (None, _) => policy.resolve_channel(channel, facts, &[]),
+    }
+}
+
 /// Per-axis helm AI: throttle. Decides the throttle for ships whose
 /// helm-thrust system is AI-operated and emits it as an admitted `SetThrust`
 /// into the ship's own `AdmittedCommands` (issues #800, #704, #824) —
@@ -1337,16 +1889,26 @@ fn seed_helm_actuator_facts(
 /// Decodes only its own axis from the shared motion plan (built this tick by
 /// `helm_motion_planner` from the pure `plan_helm_travel` decision, see the
 /// module note).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_thrust(
+    frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
+    clock: Res<AiPolicyTickClock>,
     mut ships: Query<
         (
             Entity,
             &ShipSystemControlSources,
+            &ShipPhysics,
+            Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            // Availability of the two optional drives, seeded honestly into the
+            // fact snapshot below (see the `seed_helm_actuator_facts` call).
+            Option<&BoostConfigResource>,
+            Option<&ImpulseConfigResource>,
             Option<&HelmEnginesAiPolicy>,
+            Option<&HelmEnginesAiPolicyState>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
@@ -1359,8 +1921,19 @@ pub(crate) fn ai_helm_thrust(
     let default_policy = crate::entities::config::default_engines_ai_config()
         .to_policy()
         .unwrap_or_default();
-    for (entity, sources, entity_uuid, ship_config, engines_policy, mut admitted) in
-        ships.iter_mut()
+    for (
+        entity,
+        sources,
+        physics,
+        physics_cfg,
+        entity_uuid,
+        ship_config,
+        boost_cfg,
+        impulse_cfg,
+        engines_policy,
+        engines_state,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         // Gate on our own axis alone (issue #800) — see the module note above.
         if !sources
@@ -1384,14 +1957,40 @@ pub(crate) fn ai_helm_thrust(
         // the planner fact, so no geometry lives in the policy (AGENTS.md #11).
         // A "hold" resolution (no rule fires / explicit idle) emits nothing and
         // the throttle coasts on its last input.
+        //
+        // Issue #883 (AC5) closes the #779 empty-facts gap on this axis: the
+        // snapshot below is really seeded — hazard/availability from the shared
+        // surfaces, target-relative motion from the frame's merged view — so a
+        // `fact(...)` guard on `longitudinal` evaluates against the world
+        // instead of validating and never firing.
+        //
+        // The availability pair is seeded from the ship's OWN config resources,
+        // exactly as `ai_policy_state_tick` and `ai_helm_boost` seed it. Passing
+        // a hardcoded `false` here would have been the #779 trap one fact
+        // narrower: a guard on `fact(boost_available)` would validate at load
+        // and then read 0 for ever, which is silently wrong in the same way an
+        // absent fact is.
         let policy = engines_policy.map(|p| &p.0).unwrap_or(&default_policy);
-        let facts = crate::world::flags::AiFacts::new();
-        if !helm_policy_actuates(
+        let mut facts = seed_helm_actuator_facts(
+            Some(&sp.hazard),
+            impulse_cfg.is_some(),
+            boost_cfg.map(|c| c.enabled).unwrap_or(false),
+            physics.y,
+        );
+        seed_helm_travel_facts(
+            &mut facts,
+            frame.ships.get(&entity),
+            physics,
+            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
+        );
+        if resolve_helm_channel(
             policy,
+            engines_state.map(|s| &s.0),
             crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
             &facts,
-            &crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
-        ) {
+            clock.0,
+        ) != Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel)
+        {
             continue;
         }
         let thrust =
@@ -1422,18 +2021,25 @@ pub(crate) fn ai_helm_thrust(
 /// `ai_helm_steering_retreats_toward_anchor` pins that behaviour through this
 /// system, and `ai_helm_steering_retreat_with_unknown_anchor_falls_through`
 /// pins the other side of it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_steering(
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
+    clock: Res<AiPolicyTickClock>,
     mut ships: Query<
         (
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
+            Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            // Availability of the two optional drives — see `ai_helm_thrust`.
+            Option<&BoostConfigResource>,
+            Option<&ImpulseConfigResource>,
             Option<&HelmSteeringAiPolicy>,
+            Option<&HelmSteeringAiPolicyState>,
             Option<&mut PendingArcBearingRequest>,
             &mut crate::messages::AdmittedCommands,
         ),
@@ -1449,9 +2055,13 @@ pub(crate) fn ai_helm_steering(
         entity,
         sources,
         physics,
+        physics_cfg,
         entity_uuid,
         ship_config,
+        boost_cfg,
+        impulse_cfg,
         steering_policy,
+        steering_state,
         mut pending_bearing,
         mut admitted,
     ) in ships.iter_mut()
@@ -1477,14 +2087,42 @@ pub(crate) fn ai_helm_steering(
         // decide WHETHER to actuate this tick (see `ai_helm_thrust` for the
         // mode-verb rationale). "Hold" emits nothing and yaw coasts on its last
         // input — including any pending arc-bearing this axis owns.
+        //
+        // Issue #883 gives this channel a SECOND mode verb and (AC5) a really
+        // seeded fact snapshot. `hold_committed_heading` actuates exactly like
+        // `actuate_desired_facing` here — both emit the planner's decoded yaw —
+        // because the difference between them was already resolved upstream:
+        // the planner solved the facing against the FROZEN heading rather than
+        // against the moving target. That is deliberate. Overriding
+        // `SteeringInput` here instead would bypass the planner, and #780's
+        // hazard contribution would stop composing onto the escape (AC3).
+        // The availability pair is seeded honestly from the ship's own config
+        // resources — see the note in `ai_helm_thrust`.
         let policy = steering_policy.map(|p| &p.0).unwrap_or(&default_policy);
-        let facts = crate::world::flags::AiFacts::new();
-        if !helm_policy_actuates(
-            policy,
-            crate::entities::config::HELM_YAW_CHANNEL,
-            &facts,
-            &crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
-        ) {
+        let mut facts = seed_helm_actuator_facts(
+            Some(&sp.hazard),
+            impulse_cfg.is_some(),
+            boost_cfg.map(|c| c.enabled).unwrap_or(false),
+            physics.y,
+        );
+        seed_helm_travel_facts(
+            &mut facts,
+            frame.ships.get(&entity),
+            physics,
+            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
+        );
+        let actuates = matches!(
+            resolve_helm_channel(
+                policy,
+                steering_state.map(|s| &s.0),
+                crate::entities::config::HELM_YAW_CHANNEL,
+                &facts,
+                clock.0,
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing)
+                | Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading)
+        );
+        if !actuates {
             continue;
         }
 
@@ -2015,6 +2653,7 @@ pub(crate) fn ai_helm_vertical_thrust(
 /// current `ShipBoost`, so it does not re-issue `SetBoost` every tick.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_boost(
+    frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
@@ -2022,6 +2661,7 @@ pub(crate) fn ai_helm_boost(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
+            Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&ShipBoost>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
@@ -2044,6 +2684,7 @@ pub(crate) fn ai_helm_boost(
         entity,
         sources,
         physics,
+        physics_cfg,
         boost_comp,
         boost_cfg,
         impulse_cfg,
@@ -2077,36 +2718,36 @@ pub(crate) fn ai_helm_boost(
         // Authored manoeuvre policy (issue #780, AC6): resolve the `boost`
         // channel over a fact snapshot seeded from the shared hazard surface and
         // availability. Fires ⇒ engage; holds ⇒ release.
-        let facts = seed_helm_actuator_facts(
+        // Issue #883 also seeds the target-relative travel facts here, so an
+        // authored escape-leg boost rule can guard on the pass geometry (range,
+        // closing rate, speed fraction) and not just on hazard/state time.
+        let mut facts = seed_helm_actuator_facts(
             plan.ships.get(&entity).map(|sp| &sp.hazard),
             impulse_cfg.is_some(),
             true,
             physics.y,
+        );
+        seed_helm_travel_facts(
+            &mut facts,
+            frame.ships.get(&entity),
+            physics,
+            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
         );
         let policy = boost_policy.map(|p| &p.0).unwrap_or(&default_policy);
         // Stateless (the shipped shape) resolves exactly as it always has.
         // A policy that opted into the #882 machine instead resolves the SAME
         // channel inside its current state — committed earlier this tick by
         // `ai_policy_state_tick`, so the outputs are the new state's outputs
-        // immediately (AC2).
-        let desired_active = match (policy.machine(), boost_state) {
-            (Some(_), Some(state)) => {
-                policy.resolve_channel_in_state(
-                    &state.0.current,
-                    crate::entities::config::HELM_BOOST_CHANNEL,
-                    &facts,
-                    &state.0.memory_at(clock.0),
-                    &[],
-                ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost)
-            }
-            // No machine (or no state component yet) → the frozen stateless path.
-            _ => helm_policy_actuates(
-                policy,
-                crate::entities::config::HELM_BOOST_CHANNEL,
-                &facts,
-                &crate::ai::policy::AiPolicyVerb::EngageBoost,
-            ),
-        };
+        // immediately (AC2). The shared helper also carries the #883
+        // silent-degradation guard for the "machine declared, state component
+        // missing" case that used to fall through unnoticed.
+        let desired_active = resolve_helm_channel(
+            policy,
+            boost_state.map(|s| &s.0),
+            crate::entities::config::HELM_BOOST_CHANNEL,
+            &facts,
+            clock.0,
+        ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
 
         // On-change only: `SetBoost` sets the desired active state, and the
         // shared integrator applies the transition; re-issuing an unchanged state
@@ -7269,6 +7910,667 @@ when = "state_time >= param(surge_dwell_secs)"
             helm_ai_radar_range(&empty_bbs, Some(&helm_section), None, false),
             800.0,
             "a ship with no Helm entry must fall back to its authored radar range"
+        );
+    }
+
+    // ── The Harrow Destroyer fly-through attack pass (issue #883) ────────────
+    //
+    // These drive the SHIPPED hull's authored policies through a real ticking
+    // app, so they fail on the content as well as on the code. Every assertion
+    // below is about something observable — an admitted actuator input, the
+    // ship's boost state, the committed policy state — never about an internal
+    // computation.
+    //
+    // Positions are set directly rather than flown, because flying a 200-unit
+    // approach at 200 ms per tick would take dozens of ticks and pin nothing
+    // extra: the interesting events are the merge and the tick after it, and
+    // setting the pose reaches them exactly and deterministically.
+
+    const BOGEY: &str = "bogey";
+
+    fn destroyer_hull() -> crate::entity_config::EntityConfig {
+        crate::entity_config::EntityConfig::from_toml(include_str!(
+            "../../assets/entities/ship_harrow_destroyer.toml"
+        ))
+        .expect("the shipped destroyer hull must parse")
+    }
+
+    /// Put a single named target into the world snapshot at `pos`, heading
+    /// `yaw` at `speed`. The heading and speed matter: the closing rate is
+    /// reconstructed from them, so a target with its own velocity is a
+    /// genuinely different problem from a stationary one.
+    fn set_bogey(app: &mut App, uuid: uuid::Uuid, pos: [f32; 3], yaw: f32, speed: f32) {
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid,
+                name: Some(BOGEY.into()),
+                position: pos,
+                yaw: Some(yaw),
+                forward_speed: speed,
+                radius: 3.0,
+                size_rating: 3.0,
+                movable: true,
+                dangerous: true,
+                ..Default::default()
+            }],
+        });
+    }
+
+    /// A ship carrying the shipped destroyer's three authored policy machines,
+    /// its physics envelope, and an enabled boost drive — the same components
+    /// `entities::spawner` would attach — hunting a single named bogey.
+    fn fly_through_app(bogey_pos: [f32; 3]) -> (App, uuid::Uuid) {
+        let mut app = test_app();
+        let cfg = destroyer_hull();
+        let hc = cfg
+            .helm_console
+            .clone()
+            .expect("hull declares [helm_console]");
+        let boost = hc
+            .boost
+            .clone()
+            .expect("hull declares [helm_console.boost]");
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert((
+            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
+            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
+            HelmBoostAiPolicy(hc.boost_ai.as_ref().unwrap().to_policy().unwrap()),
+            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
+                max_speed: hc.max_speed,
+                max_reverse_speed: hc.max_reverse_speed,
+                acceleration: hc.acceleration,
+                deceleration: hc.deceleration,
+                max_yaw_rate: hc.max_yaw_rate,
+                ..crate::ship_physics::ShipPhysicsConfig::new()
+            }),
+            BoostConfigResource {
+                enabled: true,
+                multiplier: boost.multiplier,
+                steering_multiplier: boost.steering_multiplier,
+                active_duration: boost.active_duration,
+                recharge_duration: boost.recharge_duration,
+            },
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective(BOGEY, 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let uuid = uuid::Uuid::new_v4();
+        set_bogey(&mut app, uuid, bogey_pos, 0.0, 0.0);
+        (app, uuid)
+    }
+
+    fn steering_state(app: &mut App) -> String {
+        app.world_mut()
+            .query::<&HelmSteeringAiPolicyState>()
+            .single(app.world())
+            .expect("ship carries HelmSteeringAiPolicyState")
+            .0
+            .current
+            .clone()
+    }
+
+    fn engines_state(app: &mut App) -> String {
+        app.world_mut()
+            .query::<&HelmEnginesAiPolicyState>()
+            .single(app.world())
+            .expect("ship carries HelmEnginesAiPolicyState")
+            .0
+            .current
+            .clone()
+    }
+
+    fn pass_surface(app: &mut App) -> HelmPassSurface {
+        *app.world_mut()
+            .query::<&HelmPassSurface>()
+            .single(app.world())
+            .expect("ship carries HelmPassSurface")
+    }
+
+    fn boost_is_active(app: &mut App) -> bool {
+        app.world_mut()
+            .query::<&ShipBoost>()
+            .single(app.world())
+            .expect("ship carries ShipBoost")
+            .0
+            .is_active()
+    }
+
+    /// Fly the ship to a pose directly. Used to place it at the merge and past
+    /// it — see the module note above.
+    fn place_ship(app: &mut App, x: f32, z: f32, yaw: f32, speed: f32) {
+        set_ship_physics(
+            app,
+            ShipPhysics {
+                x,
+                z,
+                yaw,
+                forward_speed: speed,
+                ..Default::default()
+            },
+        );
+    }
+
+    /// AC5, stated as behaviour rather than as a fact dump: the machine's
+    /// `acquire → inbound` guard reads `fact(range_to_target)`, so the axis only
+    /// commits to a run once the target is inside the authored `commit_range`.
+    ///
+    /// Before #883 the two travel axes were handed `AiFacts::new()` — an EMPTY
+    /// snapshot — so this guard would have validated at load and then been false
+    /// for ever, and the machine could never have left its initial state. That
+    /// this test can distinguish "far" from "near" at all is the proof the
+    /// travel axes now see seeded facts.
+    #[test]
+    fn travel_axis_facts_are_seeded_so_the_commit_range_guard_actually_gates() {
+        // Authored `commit_range` is 260; put the bogey well beyond it.
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -900.0]);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "acquire",
+            "a target beyond commit_range must not start a run"
+        );
+        assert_eq!(engines_state(&mut app), "acquire");
+
+        // Bring it inside the authored commit range.
+        set_bogey(&mut app, uuid, [0.0, 0.0, -150.0], 0.0, 0.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "inside commit_range the machine must commit to the run — if this reads \
+             `acquire` the travel axis is seeing empty facts again"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "inbound",
+            "Engines runs its OWN copy of the machine and must reach the same leg \
+             from the same facts, not by reading Steering's state"
+        );
+    }
+
+    /// AC1: the inbound leg is flown at the authored approach throttle, flat,
+    /// and Steering tracks the target continuously.
+    ///
+    /// The throttle assertion is the one that separates this from
+    /// `helm_destroy`: at 60 units from a target whose `maintain_range` is 40,
+    /// the shared Destroy arm would be deep in its decel ramp and commanding a
+    /// small fraction of `target_speed`. The pass commands its full authored
+    /// approach fraction.
+    #[test]
+    fn inbound_leg_holds_the_authored_approach_speed_and_tracks_the_target() {
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        // Two ticks: the first publishes the pass surface, the second is the
+        // first planner pass that consumes it (see `HelmPassSurface`).
+        tick_twice(&mut app);
+        tick(&mut app);
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.active, "the destroyer must be flying an authored pass");
+        assert!(!pass.escape, "still inbound");
+        assert!(
+            (get_thrust_input(&mut app) - pass.approach_speed).abs() < 1e-3,
+            "inbound throttle must be the flat authored approach fraction ({}), got {}",
+            pass.approach_speed,
+            get_thrust_input(&mut app)
+        );
+
+        // Dead ahead: nothing to correct.
+        place_ship(&mut app, 0.0, 0.0, 0.0, 15.0);
+        set_bogey(&mut app, uuid, [0.0, 0.0, -200.0], 0.0, 0.0);
+        tick(&mut app);
+        tick(&mut app);
+        assert!(
+            get_steering_input(&mut app).abs() < 0.05,
+            "a target dead ahead needs no turn, got {}",
+            get_steering_input(&mut app)
+        );
+
+        // The target MOVES off the starboard bow: the facing solution is
+        // re-derived, so the ship turns after it.
+        place_ship(&mut app, 0.0, 0.0, 0.0, 15.0);
+        set_bogey(&mut app, uuid, [180.0, 0.0, -100.0], 0.0, 0.0);
+        tick(&mut app);
+        assert!(
+            get_steering_input(&mut app) > 0.0,
+            "Steering must keep tracking a MOVING target while inbound, got {}",
+            get_steering_input(&mut app)
+        );
+    }
+
+    /// Drive one full merge: approach, pass through the closest point, and open
+    /// out again. Leaves the app in the `escape` leg for the tests below.
+    fn run_to_escape() -> (App, uuid::Uuid) {
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        // Commit to the run.
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+
+        // THE MERGE: the ship is right on top of the bogey, so the host folds a
+        // small `min_range_seen` into every axis's private memory. Still
+        // closing, so nothing transitions yet.
+        place_ship(&mut app, 0.0, -195.0, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "at the merge itself the range is still shrinking: not yet closest approach"
+        );
+
+        // PAST IT: the ship has flown through and the range is opening again,
+        // well past the authored hysteresis.
+        place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
+        tick(&mut app);
+        (app, uuid)
+    }
+
+    /// AC2: closest approach ends target tracking and commits Engines, Steering
+    /// and Boost to the heading held at the merge.
+    ///
+    /// All three axes must arrive together — and they do it by each running
+    /// their own machine over the same seeded facts, which is why the assertion
+    /// is over both travel states and the published leg rather than over one
+    /// shared flag.
+    #[test]
+    fn closest_approach_commits_every_axis_to_the_outward_heading() {
+        let (mut app, _uuid) = run_to_escape();
+
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "the closing rate went negative and the range opened past the authored \
+             hysteresis: that is closest approach"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "escape",
+            "Engines must reach the escape leg independently, from the same facts"
+        );
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.escape, "the published leg must be the escape");
+        assert!(
+            pass.escape_heading_rad.abs() < 1e-3,
+            "the frozen heading must be the yaw held AT the merge (0), got {}",
+            pass.escape_heading_rad
+        );
+    }
+
+    /// AC2's fly-through half, and the reason `hold_committed_heading` exists as
+    /// a verb rather than as a bare "hold".
+    ///
+    /// Once committed, the target is swung hard onto the beam. A tracking axis
+    /// would haul the ship round after it — straight back into the ship it just
+    /// passed. The committed axis flies its frozen heading and ignores it.
+    #[test]
+    fn the_escape_leg_ignores_the_target_and_flies_the_frozen_heading() {
+        let (mut app, uuid) = run_to_escape();
+        let frozen = pass_surface(&mut app).escape_heading_rad;
+
+        // Hard to starboard — a bearing that would saturate a tracking solution.
+        set_bogey(&mut app, uuid, [400.0, 0.0, -260.0], 0.0, 0.0);
+        tick(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "nothing the target does may end the escape leg"
+        );
+        assert!(
+            get_steering_input(&mut app).abs() < 0.05,
+            "the escape must fly the FROZEN heading, not turn back onto the target; \
+             got steering {}",
+            get_steering_input(&mut app)
+        );
+        assert!(
+            (pass_surface(&mut app).escape_heading_rad - frozen).abs() < 1e-3,
+            "the frozen heading must not be re-derived while the leg runs"
+        );
+        // ...and it is still driving away under power.
+        assert!(
+            get_thrust_input(&mut app) > 0.0,
+            "the escape leg never brakes"
+        );
+    }
+
+    /// The escape leg outlives its target — which in combat is the ORDINARY
+    /// case, because the pass is what kills the target.
+    ///
+    /// `plan_fly_through_pass` never reads `target_pos` on the escape leg, and
+    /// neither escape state carries a `target_valid < 1` transition (only
+    /// `inbound` does), so a destroyer that has committed must keep flying the
+    /// frozen heading at the authored escape throttle with nothing in the world
+    /// at all. Gating the escape on a resolvable target instead dropped it back
+    /// to ordinary doctrine travel, which — with no objective geometry left —
+    /// commands zero thrust and zero yaw: the hull brakes to a standstill in the
+    /// middle of its escape while the Boost machine, independent of the planner,
+    /// keeps the drive lit for the remaining dwell.
+    #[test]
+    fn the_escape_leg_survives_its_target_dying() {
+        let (mut app, _uuid) = run_to_escape();
+        let escape_speed = pass_surface(&mut app).escape_speed;
+        let frozen = pass_surface(&mut app).escape_heading_rad;
+
+        // The target is destroyed: nothing left in the world to resolve, so the
+        // frame has no destroy target and no merged-view entity for it.
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: Vec::new(),
+        });
+        // Put the hull off the frozen heading by well more than the authored
+        // deadband, so "still solving against the frozen heading" is observable
+        // as a real correction rather than as a deadbanded zero.
+        place_ship(&mut app, 0.0, -260.0, frozen + 0.3, 20.0);
+        tick_twice(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "only the authored dwell ends the escape — a dead target must not"
+        );
+        assert!(
+            pass_surface(&mut app).active && pass_surface(&mut app).escape,
+            "the published surface must still be an active escape leg"
+        );
+        assert!(
+            (get_thrust_input(&mut app) - escape_speed).abs() < 1e-3,
+            "the escape must still be flown at the authored escape throttle ({escape_speed}), \
+             got {} — a target-gated escape brakes the destroyer to a standstill",
+            get_thrust_input(&mut app)
+        );
+        assert!(
+            get_steering_input(&mut app).abs() > 0.05,
+            "the escape must still SOLVE against the frozen heading with the hull \
+             0.3 rad off it, got steering {}",
+            get_steering_input(&mut app)
+        );
+        assert!(
+            (pass_surface(&mut app).escape_heading_rad - frozen).abs() < 1e-3,
+            "and the frozen heading itself is untouched by the target's death"
+        );
+    }
+
+    /// AC8's boost-out: the authored escape rule lights the drive through the
+    /// same admitted `SetBoost` a human sends, and only on the escape leg.
+    #[test]
+    fn the_escape_leg_boosts_out_and_the_approach_does_not() {
+        let (mut app, _uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+        assert!(
+            !boost_is_active(&mut app),
+            "the approach is flown at normal speed: boost stays cold"
+        );
+
+        let (mut app, _uuid) = run_to_escape();
+        tick(&mut app);
+        assert_eq!(steering_state(&mut app), "escape");
+        assert!(
+            boost_is_active(&mut app),
+            "the escape leg must engage boost through the shared admitted SetBoost path"
+        );
+    }
+
+    /// AC3: shared hazard avoidance BENDS the escape without changing any pass
+    /// state.
+    ///
+    /// This is why the frozen heading is expressed as a desired FACING through
+    /// the motion planner rather than as a raw `SteeringInput` override: the
+    /// #780 hazard contribution is folded into the same pure arm, so it still
+    /// composes. A raw override would fly the destroyer straight through the
+    /// rock.
+    #[test]
+    fn a_hazard_bends_the_escape_without_changing_the_pass_state() {
+        let (mut app, uuid) = run_to_escape();
+        let before_state = steering_state(&mut app);
+        let before_heading = pass_surface(&mut app).escape_heading_rad;
+
+        // Clear escape first: nothing to avoid, so no yaw.
+        set_bogey(&mut app, uuid, [0.0, 0.0, -100.0], 0.0, 0.0);
+        tick(&mut app);
+        assert!(
+            get_steering_input(&mut app).abs() < 0.05,
+            "baseline: an unobstructed escape commands no yaw"
+        );
+
+        // Drop a rock onto the projected escape path, keeping the bogey where
+        // it was so the only new thing in the world is the hazard.
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid,
+                    name: Some(BOGEY.into()),
+                    position: [0.0, 0.0, -100.0],
+                    yaw: Some(0.0),
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::new_v4(),
+                    name: Some("rock".into()),
+                    position: [4.0, 0.0, -320.0],
+                    yaw: None,
+                    radius: 8.0,
+                    size_rating: 8.0,
+                    movable: false,
+                    dangerous: true,
+                    ..Default::default()
+                },
+            ],
+        });
+        tick(&mut app);
+
+        assert!(
+            get_steering_input(&mut app).abs() > 0.0,
+            "a hazard on the escape path must bend the escape"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            before_state,
+            "avoidance is a steering force, NOT an input to the pass state machine"
+        );
+        assert!(
+            pass_surface(&mut app).escape,
+            "and the published leg is unchanged"
+        );
+        assert!(
+            (pass_surface(&mut app).escape_heading_rad - before_heading).abs() < 1e-3,
+            "bending the escape must not rewrite the committed heading"
+        );
+    }
+
+    /// The running range minimum is scoped to the TARGET as well as to the
+    /// state, so a mid-`inbound` target switch cannot fire a closest approach
+    /// the destroyer never flew.
+    ///
+    /// The machine calls closest approach from `range_above_min_seen`, i.e.
+    /// `range_to_target - memory(min_range_seen)`. Fold that across a target
+    /// swap and the minimum belongs to a different ship: pick up a new contact
+    /// further out and the subtraction reads as a huge re-opening, every
+    /// conjunct of the authored guard passes at once, and the destroyer commits
+    /// to an escape from a target it has not even closed on yet.
+    ///
+    /// The two halves below differ ONLY in whether the bogey keeps its uuid, so
+    /// this pins the identity scoping specifically and not merely "no commit".
+    #[test]
+    fn a_mid_inbound_target_switch_does_not_fire_a_spurious_closest_approach() {
+        // Positive control: the SAME target, first close and then far astern.
+        // That is a genuine fly-through, and it must still commit.
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -50.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+        set_bogey(&mut app, uuid, [0.0, 0.0, 200.0], 0.0, 0.0);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "the same target, now 200 units astern of a ship still driving away \
+             from it, IS a closest approach"
+        );
+
+        // The real case: a DIFFERENT ship inherits the bogey role mid-run, and
+        // it happens to be further out than the minimum the previous target
+        // accumulated. Nothing about the destroyer's own run has changed.
+        let (mut app, _uuid) = fly_through_app([0.0, 0.0, -50.0]);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+        set_bogey(&mut app, uuid::Uuid::new_v4(), [0.0, 0.0, 200.0], 0.0, 0.0);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "inbound",
+            "a target SWITCH restarts the range fold: the old target's minimum must \
+             not synthesise a range_above_min_seen spike and commit the escape"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "inbound",
+            "Engines runs its own copy of the machine over its own private memory \
+             and must be scoped the same way"
+        );
+        assert!(
+            !pass_surface(&mut app).escape,
+            "and no escape leg is published"
+        );
+    }
+
+    /// A stateless policy for one travel channel whose single rule is gated on
+    /// `fact(boost_available)` and nothing else — so whether the axis actuates
+    /// at all is a direct readout of what the host seeded that fact to.
+    fn boost_availability_gated_policy(
+        channel: &str,
+        verb: crate::ai::policy::AiPolicyVerb,
+    ) -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: channel.into(),
+                when: crate::world::flags::parse_predicate("fact(boost_available) > 0").unwrap(),
+                verb,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// A ship chasing a Reach anchor off the starboard bow, with the travel-axis
+    /// policy `policy` attached and boost capability present or absent.
+    fn availability_fact_app(policy: impl Bundle, boost_enabled: Option<bool>) -> App {
+        let mut app = test_app();
+        let anchor = "station-alpha";
+        set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+        app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+        set_per_axis_helm_ai(&mut app);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert(policy);
+        if let Some(enabled) = boost_enabled {
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ship::components::BoostConfigResource {
+                    enabled,
+                    ..Default::default()
+                });
+        }
+        app
+    }
+
+    /// The #779 empty-facts trap, one fact narrower: `ai_helm_thrust` and
+    /// `ai_helm_steering` used to pass a HARDCODED `false` for both availability
+    /// facts, so a travel-axis guard on `fact(boost_available)` validated at load
+    /// and then read 0 for ever — silently wrong in exactly the way an absent
+    /// fact is. They now seed it from the ship's own `BoostConfigResource`, as
+    /// `ai_policy_state_tick` and `ai_helm_boost` already did.
+    #[test]
+    fn a_travel_axis_guard_reads_the_real_boost_availability() {
+        // ── Engines ─────────────────────────────────────────────────────────
+        let mut available = availability_fact_app(
+            HelmEnginesAiPolicy(boost_availability_gated_policy(
+                crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
+            )),
+            Some(true),
+        );
+        tick(&mut available);
+        assert!(
+            get_thrust_input(&mut available) > 0.0,
+            "an Engines guard on fact(boost_available) must fire on a ship that HAS \
+             an enabled boost drive; got thrust {}",
+            get_thrust_input(&mut available)
+        );
+
+        let mut unavailable = availability_fact_app(
+            HelmEnginesAiPolicy(boost_availability_gated_policy(
+                crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
+            )),
+            None,
+        );
+        tick(&mut unavailable);
+        assert_eq!(
+            get_thrust_input(&mut unavailable),
+            0.0,
+            "and must NOT fire on a ship with no boost drive — the fact is a real \
+             reading of capability, not a constant"
+        );
+
+        // ── Steering ────────────────────────────────────────────────────────
+        let mut available = availability_fact_app(
+            HelmSteeringAiPolicy(boost_availability_gated_policy(
+                crate::entities::config::HELM_YAW_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+            )),
+            Some(true),
+        );
+        tick(&mut available);
+        assert!(
+            get_steering_input(&mut available).abs() > 0.0,
+            "a Steering guard on fact(boost_available) must fire on a ship that HAS \
+             an enabled boost drive; got steering {}",
+            get_steering_input(&mut available)
+        );
+
+        let mut unavailable = availability_fact_app(
+            HelmSteeringAiPolicy(boost_availability_gated_policy(
+                crate::entities::config::HELM_YAW_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+            )),
+            Some(false),
+        );
+        tick(&mut unavailable);
+        assert_eq!(
+            get_steering_input(&mut unavailable),
+            0.0,
+            "a feature-DISABLED boost drive reads unavailable too, exactly as it does \
+             on the boost axis itself"
+        );
+    }
+
+    /// AC5's reset, on the new axes: a travel axis that is not AI-operated holds
+    /// its machine at the authored initial state, so the tick AI gains control
+    /// never resumes a stale mid-pass leg.
+    #[test]
+    fn a_human_held_travel_axis_holds_its_machine_at_initial() {
+        let (mut app, _uuid) = run_to_escape();
+        assert_eq!(steering_state(&mut app), "escape");
+
+        set_helm_control_source(&mut app, ControlSource::Human);
+        tick(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "acquire",
+            "a human-flown axis resets to the authored initial state"
+        );
+        assert_eq!(engines_state(&mut app), "acquire");
+        assert!(
+            !pass_surface(&mut app).active,
+            "and the planner stops being offered a pass at all"
         );
     }
 }

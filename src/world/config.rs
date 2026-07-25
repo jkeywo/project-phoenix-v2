@@ -3739,7 +3739,10 @@ entity    = "raider"
     #[test]
     fn parse_world_combat_test_toml_parses_and_carries_8_waves() {
         // (#475) The combat-test scenario must parse and contain:
-        //   - 16 on_timer wave-spawn triggers (8 base + 8 conditional ship_power extras)
+        //   - 17 on_timer wave-spawn triggers (8 base + 8 conditional ship_power
+        //     extras + the #883 Harrow Destroyer fly-through wave, which is
+        //     unconditional because the doctrine it demonstrates should be seen
+        //     at every ship power)
         //   - 1 on_all_destroyed victory trigger
         //   - 1 on_destroyed starbase defeat trigger
         //   - 8 on_destroyed wave objective-completion triggers
@@ -3748,15 +3751,16 @@ entity    = "raider"
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
 
-        // Count timer triggers (waves): 8 base + 8 conditional ship_power extras.
+        // Count timer triggers (waves): 8 base + 8 conditional ship_power extras
+        // + the #883 destroyer wave.
         let timer_count = cfg
             .triggers
             .iter()
             .filter(|t| matches!(t.condition, TriggerCondition::OnTimer { .. }))
             .count();
         assert_eq!(
-            timer_count, 16,
-            "combat_test must have 16 wave-spawn timers (8 base + 8 conditional)"
+            timer_count, 17,
+            "combat_test must have 17 wave-spawn timers (8 base + 8 conditional + the #883 destroyer pass)"
         );
 
         // OnAllDestroyed victory trigger present with all 8 wave names.
@@ -4160,10 +4164,15 @@ message = "."
 
     #[test]
     fn entity_template_paths_combat_test_includes_wave_templates() {
-        // (#475) Pin the exact bug: combat_test.toml references three
-        // wave templates (destroyer, cruiser, battleship) only inside
-        // [[trigger.action]] spawn_entity blocks. All three must appear
-        // in the preload list.
+        // (#475) Pin the exact bug: combat_test.toml references its
+        // wave templates only inside [[trigger.action]] spawn_entity
+        // blocks. All of them must appear in the preload list — a
+        // template that is spawned but not preloaded pops in late.
+        //
+        // (#883) `ship_harrow_destroyer` joins the list: it is the
+        // fly-through interceptor wave, and it is the one hull whose
+        // helm behaviour is authored content rather than shared code,
+        // so a missed preload would be especially visible.
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
         let paths = entity_template_paths(&cfg);
@@ -4171,6 +4180,7 @@ message = "."
             "assets/entities/pirate_raider.toml",
             "assets/entities/ship_harrow_patrol.toml",
             "assets/entities/ship_harrow_warhawk.toml",
+            "assets/entities/ship_harrow_destroyer.toml",
         ] {
             assert!(
                 paths.contains(&required.to_string()),

@@ -1629,6 +1629,19 @@ pub const HELM_YAW_CHANNEL: &str = "yaw";
 /// the host to emit `SetSteering` with the scalar decoded from the planner's
 /// `desired_facing_local`; its absence ("hold") emits nothing.
 pub const HELM_ACTUATE_DESIRED_FACING_VERB: &str = "actuate_desired_facing";
+/// The `hold_committed_heading` verb: the Steering fine system's SECOND mode
+/// verb (issue #883). Its presence tells the host to fly the heading frozen in
+/// this system's own `memory(escape_heading_rad)` at the last committed
+/// transition, rather than re-solving the facing against a moving target.
+/// Distinct from a "hold" (no rule fires), which holds the last steering
+/// COMMAND and would keep a non-zero yaw turning for ever.
+pub const HELM_HOLD_COMMITTED_HEADING_VERB: &str = "hold_committed_heading";
+
+/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883).
+pub const HELM_STEERING_VERBS: &[&str] = &[
+    HELM_ACTUATE_DESIRED_FACING_VERB,
+    HELM_HOLD_COMMITTED_HEADING_VERB,
+];
 
 // ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
 //
@@ -2830,6 +2843,9 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // planner fact, not the policy.
         HELM_ACTUATE_DESIRED_TRAVEL_VERB => crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
         HELM_ACTUATE_DESIRED_FACING_VERB => crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+        // The frozen-heading Steering mode verb (issue #883): also value-less —
+        // the heading is host-written private memory, not an authored constant.
+        HELM_HOLD_COMMITTED_HEADING_VERB => crate::ai::policy::AiPolicyVerb::HoldCommittedHeading,
         // Helm secondary-actuator mode verbs (issue #780): value-less,
         // like the travel-axis verbs above.
         HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
@@ -3409,6 +3425,8 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
 /// Rejects (stateless path, issue #775):
 ///   - a silent declaration (neither `idle` nor any `rule` nor any `state`),
 ///   - a contradictory declaration (`idle = true` alongside rules/states),
+///   - a MIXED declaration: top-level `rule`s alongside `state`s (issue #883) —
+///     a machine resolves only in-state, so those rules are silently dead,
 ///   - an unparseable `when` guard (reusing `parse_predicate`'s diagnostic),
 ///   - an unknown output `channel` or `verb`,
 ///   - a `param(...)` reference to a parameter the author never declared.
@@ -3439,6 +3457,25 @@ pub fn validate_fine_system_ai_policy(
         return Err(
             "ai policy is empty: declare at least one rule or state, or set idle = true".into(),
         );
+    }
+    // A policy is EITHER stateless (top-level `rule`) or a machine (`state`),
+    // never both (issue #883, carried forward from the #882 review). A machine
+    // resolves EXCLUSIVELY through `resolve_channel_in_state`, so top-level
+    // rules on a stateful policy are silently dead code — and worse, the
+    // `stateful` flag below makes a `memory(...)` reference inside one VALIDATE
+    // while always evaluating false at runtime, because the stateless scan hands
+    // `best_in` an empty memory bag. Both failures are silent, which is exactly
+    // the class of defect #882's blocking bug belonged to, so the shape is
+    // rejected at load rather than merely discouraged.
+    if !cfg.rule.is_empty() && !cfg.state.is_empty() {
+        return Err(format!(
+            "ai policy declares both top-level rules ({}) and states ({}): a stateful \
+             policy resolves only inside its current state, so the top-level rules \
+             would never fire. Move them into the state(s) that should own them, or \
+             delete the state machine",
+            cfg.rule.len(),
+            cfg.state.len()
+        ));
     }
     let stateful = !cfg.state.is_empty();
 
@@ -4588,12 +4625,8 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             }
             if let Some(ai) = hc.steering_ai.as_ref() {
-                validate_fine_system_ai_policy(
-                    ai,
-                    &[HELM_YAW_CHANNEL],
-                    &[HELM_ACTUATE_DESIRED_FACING_VERB],
-                )
-                .map_err(SerdeError::custom)?;
+                validate_fine_system_ai_policy(ai, &[HELM_YAW_CHANNEL], HELM_STEERING_VERBS)
+                    .map_err(SerdeError::custom)?;
             }
             // Secondary helm fine-actuator policies (issue #780): each drives its
             // own single channel with its own single mode verb. Wrong-axis verbs,
@@ -8076,6 +8109,215 @@ when = "state_time >= param(surge_dwell_secs)"
         cfg.idle = true;
         let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
         assert!(err.contains("idle") && err.contains("states"), "got: {err}");
+    }
+
+    /// Issue #883, carried forward from the #882 review: a policy declaring BOTH
+    /// top-level rules and states is rejected outright.
+    ///
+    /// Before this, the shape validated and then quietly did nothing useful: a
+    /// machine resolves exclusively through `resolve_channel_in_state`, so the
+    /// top-level rules were dead code that looked live. Worse, `stateful` is
+    /// computed from the presence of states, so a `memory(...)` reference in one
+    /// of those dead top-level rules PASSED validation and then evaluated false
+    /// for ever (the stateless scan hands `best_in` an empty memory bag). Two
+    /// silent failures in one shape — the same class as #882's blocking bug.
+    #[test]
+    fn a_policy_with_both_top_level_rules_and_states_is_rejected() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.rule = vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_BOOST_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }];
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("both top-level rules") && err.contains("states"),
+            "got: {err}"
+        );
+    }
+
+    /// The rejection above must not catch either honest shape: a purely
+    /// stateless policy and a purely stateful one both still validate. (Every
+    /// shipped default is the former; the destroyer's three policies are the
+    /// latter.)
+    #[test]
+    fn rule_xor_state_leaves_both_honest_shapes_valid() {
+        let stateless = default_boost_ai_config();
+        assert!(validate_fine_system_ai_policy(&stateless, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+        let stateful = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        assert!(stateful.rule.is_empty(), "the fixture must be state-only");
+        assert!(validate_fine_system_ai_policy(&stateful, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    // ── The Harrow Destroyer hull (issue #883) ───────────────────────────────
+
+    const HARROW_DESTROYER_TOML: &str =
+        include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+
+    /// AC4, both halves. Forward blasters are PRESENT and correctly forward
+    /// (narrow arc dead ahead); torpedoes are ABSENT — no magazine, no tubes,
+    /// and no torpedo system entry.
+    ///
+    /// The absence is asserted explicitly because it is content that is very
+    /// easy to "helpfully" restore: every other armed NPC hull in the set has a
+    /// `[torpedoes]` block, so copying one as a starting point re-adds it
+    /// silently, and nothing else in the suite would notice.
+    #[test]
+    fn harrow_destroyer_carries_forward_blasters_and_no_torpedoes() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML)
+            .expect("the destroyer hull must pass content validation");
+
+        let wc = cfg
+            .weapons_console
+            .as_ref()
+            .expect("the hull declares [weapons_console]");
+        assert!(
+            !wc.blaster_banks.is_empty(),
+            "the destroyer's whole armament is its forward blasters"
+        );
+        for bank in &wc.blaster_banks {
+            assert_eq!(
+                bank.facing_deg, 0.0,
+                "bank '{}' must face dead ahead: a fly-through fires off the bow",
+                bank.id
+            );
+            assert!(
+                bank.fire_arc_deg > 0.0 && bank.fire_arc_deg <= 90.0,
+                "bank '{}' must be a NARROW forward arc, got {}",
+                bank.id,
+                bank.fire_arc_deg
+            );
+        }
+        assert!(
+            wc.phaser_banks.is_empty(),
+            "the destroyer is blaster-armed only"
+        );
+
+        // The absence assertion (AC4).
+        assert!(
+            cfg.torpedoes.is_none(),
+            "the destroyer must carry NO torpedo magazine"
+        );
+        let ship_config = cfg
+            .ship_config
+            .as_ref()
+            .expect("the hull declares [[system]] blocks");
+        for system in &ship_config.systems {
+            assert!(
+                !system.kind.contains("torpedo"),
+                "the destroyer must declare no torpedo system, found '{:?}' ({})",
+                system.id,
+                system.kind
+            );
+        }
+    }
+
+    /// The doctrine itself: all three travel axes author a STATEFUL policy, the
+    /// two yaw mode verbs are both used, and boost is authored — the block
+    /// without which `ai_helm_boost` returns before it does anything and the
+    /// escape leg silently loses its back half.
+    #[test]
+    fn harrow_destroyer_authors_the_fly_through_machine_on_all_three_axes() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let hc = cfg
+            .helm_console
+            .as_ref()
+            .expect("the hull declares [helm_console]");
+        assert!(
+            hc.boost.is_some(),
+            "[helm_console.boost] is mandatory: without it the spawner inserts a \
+             DISABLED BoostConfigResource and ai_helm_boost stands down"
+        );
+
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref()),
+            ("steering_ai", hc.steering_ai.as_ref()),
+            ("boost_ai", hc.boost_ai.as_ref()),
+        ] {
+            let ai = ai.unwrap_or_else(|| panic!("{name} must be authored"));
+            assert!(
+                ai.rule.is_empty(),
+                "{name} must be state-only (rule XOR state)"
+            );
+            assert_eq!(
+                ai.state.len(),
+                3,
+                "{name} authors the three-state pass machine"
+            );
+            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            let policy = ai.to_policy().expect("must decode");
+            assert!(
+                policy.machine().is_some(),
+                "{name} must decode to a machine"
+            );
+        }
+
+        // The yaw channel carries BOTH mode verbs, and which one wins is the
+        // whole doctrine: tracking while inbound, frozen heading on the escape.
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let verbs: Vec<&str> = steering
+            .state
+            .iter()
+            .flat_map(|s| s.rule.iter())
+            .map(|r| r.verb.as_str())
+            .collect();
+        assert!(verbs.contains(&HELM_ACTUATE_DESIRED_FACING_VERB));
+        assert!(verbs.contains(&HELM_HOLD_COMMITTED_HEADING_VERB));
+    }
+
+    /// AC6: every manoeuvre threshold the doctrine flies by is an authored
+    /// `param`, and the host-side pass surface can find the four it reads by
+    /// name. A rename in either direction lights this up — which matters,
+    /// because the host's response to a missing param is to decline the pass
+    /// entirely and quietly fall back to ordinary doctrine travel.
+    #[test]
+    fn harrow_destroyer_authors_every_manoeuvre_threshold_as_a_param() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        let engines = hc.engines_ai.as_ref().unwrap();
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let boost = hc.boost_ai.as_ref().unwrap();
+
+        for required in [
+            crate::ship::helm_ai::APPROACH_SPEED_PARAM,
+            crate::ship::helm_ai::ESCAPE_SPEED_PARAM,
+        ] {
+            assert!(
+                engines.param.contains_key(required),
+                "engines_ai must author `{required}`"
+            );
+        }
+        for required in [
+            crate::ship::helm_ai::TRACKING_DEADBAND_PARAM,
+            crate::ship::helm_ai::TRACKING_FULL_STEER_PARAM,
+        ] {
+            assert!(
+                steering.param.contains_key(required),
+                "steering_ai must author `{required}`"
+            );
+        }
+        // Shared manoeuvre thresholds — every axis's guards reference them, so
+        // every axis declares them (validation rejects an undeclared reference).
+        for ai in [engines, steering, boost] {
+            for required in [
+                "commit_range",
+                "closing_rate_epsilon",
+                "closest_approach_hysteresis",
+                "escape_duration_secs",
+            ] {
+                assert!(ai.param.contains_key(required), "must author `{required}`");
+            }
+            assert!(
+                ai.memory
+                    .contains_key(crate::ship::helm_ai::MIN_RANGE_SEEN_MEMORY),
+                "the closest-approach detector's running minimum must be declared"
+            );
+        }
+        assert!(boost.param.contains_key("escape_boost_secs"));
     }
 
     /// The authored stateful block validates end to end through the real

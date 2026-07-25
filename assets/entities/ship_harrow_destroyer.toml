@@ -1,0 +1,453 @@
+# Harrow Destroyer — the fly-through attack pass (issue #883)
+#
+# The first hull whose HELM BEHAVIOUR is authored rather than inherited. Every
+# other NPC flies the shared `plan_helm_travel` doctrine, whose Destroy arm
+# (`helm_destroy`) is a brake-and-orbit station-keeper: close, decelerate
+# through a decel zone, park at 80% of weapons range and re-face the target so
+# the forward arc bears. That is a perfectly good gunship and a terrible
+# interceptor.
+#
+# This hull does the opposite. It runs a three-state machine on the #882
+# stateful policy spine — independently on Engines, on Steering and on Boost —
+# that flies a classic strafing pass:
+#
+#   acquire  ──(target inside commit_range)──▶  inbound
+#   inbound  ──(closest approach detected)───▶  escape
+#   escape   ──(authored escape dwell)───────▶  acquire
+#
+# * INBOUND is flown at a flat, normal approach throttle, with Steering
+#   re-solving the facing against the target's CURRENT position every tick — the
+#   target moves, so the tracking must too. Nothing brakes.
+# * CLOSEST APPROACH is detected from the closing rate crossing from + to −,
+#   confirmed against the running minimum range the host folds into private
+#   memory. One tick of retention is exactly what a "the gap stopped shrinking"
+#   test needs and exactly what no single-tick fact can express.
+# * ESCAPE closes the facing solution: Steering switches to the second yaw mode
+#   verb, `hold_committed_heading`, and flies the heading the host froze at the
+#   merge. Engines stay on full escape throttle and Boost lights for the
+#   authored window. The target can turn, run, or die — the escape does not care.
+#
+# Shared hazard avoidance still bends the escape (it is a steering force folded
+# into the same pure arm), and bending it changes no pass state at all.
+#
+# ARMAMENT: forward blasters, and deliberately NO torpedoes. A ship that crosses
+# the merge at full throttle has a fraction of a second of firing solution;
+# fixed forward blasters are the weapon that suits it, and a torpedo magazine it
+# could never bring to bear would be dead tonnage. The absence is load-bearing
+# content, pinned by a parse test.
+
+name = "entity.ship_harrow_destroyer.name"
+tags = ["ship", "npc", "enemy"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "entity.ship_harrow_destroyer.target.description"
+
+# Lighter than the Lancer: this hull trades staying power for the speed and turn
+# rate the pass depends on.
+[hull]
+hull_integrity = 900.0
+
+# Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
+# so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
+[[shield_arc]]
+id = "all"
+label = "entity.ship_harrow_destroyer.shield_arc.all.label"
+center_deg = 0
+width_deg = 360
+max_hp = 40
+regen_per_sec = 1.0
+
+[collider]
+shape = "Capsule"
+radius = 3.0
+length = 9.0
+
+[radar_appearance]
+colour = [0.95, 0.45, 0.1]
+size = 9.0
+icon = "destroyer"
+
+[mesh]
+model = "assets/models/dynasty_battleship.glb"
+shape = "cuboid"
+size = [6.0, 2.5, 12.0]
+colour = [0.95, 0.45, 0.1]
+
+# Fast and agile. `max_speed` is what the seeded `speed_fraction` fact is
+# measured against, and `max_yaw_rate` is what makes continuous target tracking
+# on the inbound leg actually converge before the merge.
+[helm_console]
+max_speed = 26.0
+max_reverse_speed = 8.0
+acceleration = 9.0
+deceleration = 12.0
+max_yaw_rate = 0.55
+max_bank_deg = 22.0
+
+# MANDATORY for this hull, not decoration: the spawner only inserts an ENABLED
+# `BoostConfigResource` when `[helm_console.boost]` is authored, and
+# `ai_helm_boost` returns immediately without one. The escape leg's boost is the
+# whole back half of the doctrine, so omitting this block would silently produce
+# a destroyer that makes the pass and then dawdles away from it.
+[helm_console.boost]
+multiplier = 2.4
+steering_multiplier = 0.6
+active_duration = 5.0
+recharge_duration = 14.0
+
+# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
+#
+# The three states differ only in the throttle the host reads for them
+# (`approach_speed` while acquiring/inbound, `escape_speed` on the way out) —
+# the rule is the same unconditional "actuate the planner's desired travel" in
+# all three, because a pass never coasts.
+[helm_console.engines_ai]
+initial_state = "acquire"
+
+# EVERY manoeuvre threshold this hull flies by is authored here. There is no
+# default for any of them anywhere in Rust: a hull that omits them simply never
+# flies a pass (the host declines to publish the pass surface) rather than
+# falling back to an invented number.
+[helm_console.engines_ai.param]
+# Throttle fraction flown while closing. "Normal speed" — not flat out, so the
+# boosted escape reads as a distinct change of pace.
+approach_speed = 0.85
+# Throttle fraction flown outbound.
+escape_speed = 1.0
+# The destroyer only commits to a run once the target is this close; further out
+# it is still lining up.
+commit_range = 260.0
+# Closing rate (world units/s) below which the range counts as OPENING. Slightly
+# negative rather than zero so sensor jitter at the merge cannot flip the test.
+closing_rate_epsilon = -0.5
+# How far (world units) the range must re-open above the minimum seen this state
+# before closest approach is called. The confirmation half of the detector: it
+# rejects a momentary negative blip that has not actually opened any distance.
+closest_approach_hysteresis = 6.0
+# How long (seconds) the escape leg runs before the destroyer turns back for
+# another pass.
+escape_duration_secs = 7.0
+
+# Host-written private memory (issue #882: the host writes, the policy reads —
+# there is no authored write verb). `min_range_seen` starts effectively
+# infinite so the first folded range always wins the minimum.
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.engines_ai.state]]
+id = "inbound"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # CLOSEST APPROACH. Three conjuncts, each doing distinct work:
+  #   target_valid          — never call a merge against a target we cannot see
+  #   closing_rate < eps    — the gap has started opening (the + to − crossing)
+  #   range_above_min_seen  — and it has opened far enough to be real, measured
+  #                           against the running minimum in private memory
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  # Target lost mid-run: abandon the pass rather than merging on a ghost.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.engines_ai.state]]
+id = "escape"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # Only the authored dwell ends the escape. Nothing about the target may cut it
+  # short — that is what "commits to the outward heading" means.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
+#
+# The axis that carries the actual difference between the two legs. `acquire`
+# and `inbound` author `actuate_desired_facing` — re-solve against the moving
+# target every tick. `escape` authors `hold_committed_heading` — fly the frozen
+# heading and stop looking at the target at all.
+#
+# Note this is NOT the same as letting the yaw channel resolve to "hold". A hold
+# holds the last steering COMMAND; a non-zero yaw at the merge instant would
+# keep the destroyer turning through the escape and curl it straight back into
+# the target it just passed.
+[helm_console.steering_ai]
+initial_state = "acquire"
+
+[helm_console.steering_ai.param]
+commit_range = 260.0
+closing_rate_epsilon = -0.5
+closest_approach_hysteresis = 6.0
+escape_duration_secs = 7.0
+# Steering response. The deadband stops the hull hunting around a solved bearing
+# at the merge; the saturation angle is tighter than the shared patrol default so
+# the destroyer turns hard onto a tracking solution rather than easing onto it.
+tracking_deadband_rad = 0.02
+tracking_full_steer_rad = 0.5
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.steering_ai.state]]
+id = "inbound"
+
+  # Continuous tracking of a MOVING target: the facing is re-solved from the
+  # target's current position on every gated tick (AC1).
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.steering_ai.state]]
+id = "escape"
+
+  # THE commitment (AC2). The heading was frozen by the host at the instant this
+  # transition committed; hazard avoidance may still bend it (AC3), the target
+  # may not.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_committed_heading"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+# ── Boost doctrine ────────────────────────────────────────────────────────────
+#
+# A third independent copy of the same machine. It transitions on the same
+# host-seeded facts as the other two, so it reaches `escape` on the same tick —
+# by agreeing about the world, not by reading a shared pass state. `acquire` and
+# `inbound` author no boost rule at all, so the channel holds and boost stays
+# cold for the whole approach.
+[helm_console.boost_ai]
+initial_state = "acquire"
+
+[helm_console.boost_ai.param]
+commit_range = 260.0
+closing_rate_epsilon = -0.5
+closest_approach_hysteresis = 6.0
+escape_duration_secs = 7.0
+# How long into the escape leg the boost burns. Shorter than the escape itself,
+# so the destroyer coasts the last stretch and the drive is recharging before it
+# turns back in.
+escape_boost_secs = 4.0
+# Do not light the drive from near-standstill (e.g. straight after a collision
+# scrub); boost is an escape accelerant, not a launch assist.
+boost_min_speed_fraction = 0.3
+
+[helm_console.boost_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.boost_ai.state]]
+id = "acquire"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.boost_ai.state]]
+id = "inbound"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.boost_ai.state]]
+id = "escape"
+
+  [[helm_console.boost_ai.state.rule]]
+  priority = 0
+  channel = "boost"
+  when = "state_time < param(escape_boost_secs) and fact(boost_available) > 0 and fact(speed_fraction) >= param(boost_min_speed_fraction)"
+  verb = "engage_boost"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+# ── Weapons ───────────────────────────────────────────────────────────────────
+#
+# Forward blasters only. Field set copied from `alliance_destroyer.toml`'s
+# forward banks, narrowed to a single pair firing dead ahead: a fly-through has
+# a firing window measured in fractions of a second, and it happens straight off
+# the bow.
+[weapons_console]
+
+[[weapons_console.blaster_banks]]
+id = "harrow-lance-port"
+facing_deg = 0
+fire_arc_deg = 45
+volley_count = 3
+volley_interval_secs = 0.35
+cooldown_secs = 4
+projectile_speed = 70
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 12
+shield_pierce = 0.15
+range = 60
+
+[[weapons_console.blaster_banks]]
+id = "harrow-lance-starboard"
+facing_deg = 0
+fire_arc_deg = 45
+volley_count = 3
+volley_interval_secs = 0.35
+cooldown_secs = 4
+projectile_speed = 70
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 12
+shield_pierce = 0.15
+range = 60
+
+# NOTE the deliberate absence: there is no `[torpedoes]` table, no
+# `[[torpedoes.tubes]]`, and no torpedo `[[system]]` entry anywhere below. See
+# the header. `harrow_destroyer_carries_forward_blasters_and_no_torpedoes` in
+# `src/entities/config.rs` pins it, because an absence is exactly the kind of
+# content that gets "helpfully" filled back in.
+
+[comms]
+range = 800.0
+
+[ai_profile]
+aggression = 1.0
+# Wide enough that the destroyer sees its target well outside `commit_range` and
+# spends real time in `acquire` lining the run up.
+sensor_range = 400.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Destroy only, like the Lancer. The doctrine entry supplies the objective the
+# helm surfaces score; the *manoeuvre* is the policy machine's, not this
+# section's — `target_speed`/`maintain_range` here only apply on the fallback
+# path (no pass target visible), where ordinary doctrine travel resumes.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.ship_harrow_destroyer.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 40.0
+target_speed   = 0.9
+maintain_range = 40.0
+
+# Ship systems. No stations on this hull, so every system is ownerless and
+# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+# Declared because the doctrine's escape leg engages it. `ai_helm_boost` gates on
+# this system's control source AND on the `[helm_console.boost]` block above.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+ai_only = true
+
+[[system]]
+id = "blaster-harrow-lance-port"
+kind = "blaster_bank"
+ai_only = true
+
+[[system]]
+id = "blaster-harrow-lance-starboard"
+kind = "blaster_bank"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

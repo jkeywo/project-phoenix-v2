@@ -76,6 +76,27 @@ pub enum AiPolicyVerb {
     /// decoded from the shared `DesiredMotion.desired_facing_local`, not carried
     /// here.
     ActuateDesiredFacing,
+    /// Fly the heading the host FROZE at the last committed transition (the
+    /// `yaw` channel's second mode verb, issue #883).
+    ///
+    /// The sibling of [`AiPolicyVerb::ActuateDesiredFacing`], and the difference
+    /// between them is the whole point of the fly-through doctrine.
+    /// `actuate_desired_facing` means "solve the facing against the world this
+    /// tick" — a moving target keeps being tracked. `hold_committed_heading`
+    /// means "the facing solution is CLOSED: fly the heading recorded in this
+    /// system's own `memory(escape_heading_rad)`".
+    ///
+    /// Note this is emphatically NOT the same as resolving to `None` ("hold").
+    /// Holding the channel holds the last admitted *steering command*, and a
+    /// non-zero yaw at the merge instant would keep the ship turning for ever.
+    /// This verb holds the *heading*, which is what "commits to the current
+    /// outward heading" actually requires.
+    ///
+    /// Like every other mode verb it carries no magnitude: the frozen heading is
+    /// host-written private memory, and the host still feeds it through the
+    /// shared motion planner, so hazard avoidance composes onto the escape
+    /// exactly as it composes onto any other travel solution.
+    HoldCommittedHeading,
     /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
     /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
     /// starboard/port magnitude comes from the shared hazard assessment weighted
@@ -1512,6 +1533,191 @@ mod tests {
         assert_eq!(
             p.resolve_transition("cruise", &urgent_facts(), &m, &[]),
             None
+        );
+    }
+
+    // ── Fly-through attack pass doctrine (issue #883) ────────────────────────
+
+    /// The Steering half of the destroyer's fly-through doctrine, in the shape
+    /// the hull TOML authors it: three states, and — the load-bearing part —
+    /// TWO DIFFERENT verbs on the ONE `yaw` channel. `inbound` re-solves the
+    /// facing against the moving target every tick; `escape` closes the
+    /// solution and flies the frozen heading.
+    fn fly_through_steering_machine() -> AiPolicy {
+        let mut params = AiParams::new();
+        params.set("commit_range", 120.0);
+        params.set("closing_rate_epsilon", -0.05);
+        params.set("closest_approach_hysteresis", 4.0);
+        params.set("escape_duration_secs", 6.0);
+        let mut initial_memory = AiPolicyMemory::new();
+        initial_memory.set("min_range_seen", 100_000.0);
+        AiPolicy {
+            params,
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "acquire".into(),
+                initial_memory,
+                states: vec![
+                    AiPolicyState {
+                        id: "acquire".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "yaw".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::ActuateDesiredFacing,
+                        }],
+                        transitions: vec![AiPolicyTransition {
+                            priority: 10,
+                            to: "inbound".into(),
+                            when: parse_predicate(
+                                "fact(target_valid) > 0 and \
+                                 fact(range_to_target) <= param(commit_range)",
+                            )
+                            .unwrap(),
+                        }],
+                    },
+                    AiPolicyState {
+                        id: "inbound".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "yaw".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::ActuateDesiredFacing,
+                        }],
+                        transitions: vec![
+                            AiPolicyTransition {
+                                priority: 20,
+                                to: "escape".into(),
+                                when: parse_predicate(
+                                    "fact(target_valid) > 0 and \
+                                     fact(closing_rate) < param(closing_rate_epsilon) and \
+                                     fact(range_above_min_seen) > \
+                                     param(closest_approach_hysteresis)",
+                                )
+                                .unwrap(),
+                            },
+                            AiPolicyTransition {
+                                priority: 10,
+                                to: "acquire".into(),
+                                when: parse_predicate("fact(target_valid) < 1").unwrap(),
+                            },
+                        ],
+                    },
+                    AiPolicyState {
+                        id: "escape".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "yaw".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::HoldCommittedHeading,
+                        }],
+                        transitions: vec![AiPolicyTransition {
+                            priority: 0,
+                            to: "acquire".into(),
+                            when: parse_predicate("state_time >= param(escape_duration_secs)")
+                                .unwrap(),
+                        }],
+                    },
+                ],
+            }),
+        }
+    }
+
+    /// Facts as the host seeds them mid-approach: valid target, closing, and the
+    /// range still at (or below) the running minimum.
+    fn inbound_facts(range: f64, closing_rate: f64, above_min: f64) -> AiFacts {
+        let mut f = AiFacts::new();
+        f.set("target_valid", 1.0);
+        f.set("range_to_target", range);
+        f.set("closing_rate", closing_rate);
+        f.set("range_above_min_seen", above_min);
+        f
+    }
+
+    /// AC1/AC2 as an FSM property: the pass tracks while closing, and flips to
+    /// the frozen-heading verb only once the range has opened past the authored
+    /// hysteresis AND the closing rate has gone negative. Neither condition
+    /// alone fires it — a momentary negative blip inside the hysteresis band is
+    /// exactly the false positive the running minimum exists to reject.
+    #[test]
+    fn closest_approach_flips_the_yaw_channel_from_tracking_to_frozen() {
+        let p = fly_through_steering_machine();
+        let mut st = AiPolicyRuntimeState::reset(&p, 0.0);
+        assert_eq!(st.current, "acquire");
+
+        // Target comes inside the commit range -> inbound.
+        let t = p
+            .resolve_transition("acquire", &inbound_facts(100.0, 12.0, 0.0), &st.memory, &[])
+            .expect("commit-range guard fires");
+        assert_eq!(t.to, "inbound");
+        st.enter(&t.to, 0.0);
+
+        // Closing hard: tracking verb, no transition.
+        let closing = inbound_facts(40.0, 12.0, 0.0);
+        assert_eq!(
+            p.resolve_channel_in_state("inbound", "yaw", &closing, &st.memory, &[]),
+            Some(&AiPolicyVerb::ActuateDesiredFacing)
+        );
+        assert_eq!(
+            p.resolve_transition("inbound", &closing, &st.memory, &[]),
+            None
+        );
+
+        // Range opening but still inside the hysteresis band: NOT yet closest
+        // approach. This is the guard doing real work.
+        let blip = inbound_facts(12.0, -0.5, 1.0);
+        assert_eq!(
+            p.resolve_transition("inbound", &blip, &st.memory, &[]),
+            None
+        );
+
+        // Opened past the authored hysteresis with a negative closing rate.
+        let past = inbound_facts(16.0, -9.0, 5.0);
+        let t = p
+            .resolve_transition("inbound", &past, &st.memory, &[])
+            .expect("closest approach fires");
+        assert_eq!(t.to, "escape");
+        st.enter(&t.to, 10.0);
+
+        // Same tick: the yaw channel now answers with the FROZEN-heading verb.
+        assert_eq!(
+            p.resolve_channel_in_state("escape", "yaw", &past, &st.memory_at(10.0), &[]),
+            Some(&AiPolicyVerb::HoldCommittedHeading),
+            "past closest approach the facing solution is closed, not merely held"
+        );
+    }
+
+    /// The escape leg does not re-acquire because the target moved: only the
+    /// authored dwell ends it. A target swinging back into a hard closing rate
+    /// mid-escape leaves the state — and therefore the frozen heading — alone.
+    #[test]
+    fn escape_leg_is_ended_by_its_authored_dwell_not_by_the_target() {
+        let p = fly_through_steering_machine();
+        let mut st = AiPolicyRuntimeState::reset(&p, 0.0);
+        st.enter("escape", 0.0);
+
+        let target_closing_again = inbound_facts(30.0, 25.0, 0.0);
+        assert_eq!(
+            p.resolve_transition("escape", &target_closing_again, &st.memory_at(1.0), &[]),
+            None,
+            "nothing about the target may cut the escape short"
+        );
+        assert_eq!(
+            p.resolve_channel_in_state(
+                "escape",
+                "yaw",
+                &target_closing_again,
+                &st.memory_at(1.0),
+                &[]
+            ),
+            Some(&AiPolicyVerb::HoldCommittedHeading)
+        );
+        // Only the authored dwell releases it.
+        assert_eq!(
+            p.resolve_transition("escape", &target_closing_again, &st.memory_at(6.0), &[])
+                .map(|t| t.to.as_str()),
+            Some("acquire")
         );
     }
 

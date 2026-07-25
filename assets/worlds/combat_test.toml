@@ -319,6 +319,27 @@ when       = "counter(ship_power) >= 90"
       zero_gates = [{ condition = "not_attacked" }] },
   ] } }
 
+# Wave 1c: Harrow Destroyer at t=20 (issue #883).
+#
+# The scenario's only fly-through interceptor, and the reason it is here: every
+# other wave flies the shared brake-and-orbit Destroy doctrine, so a pass that
+# does NOT brake is visible against them at a glance. It is dropped away from
+# the other spawn anchors so its inbound leg is a long clean run.
+#
+# Its doctrine is left as the hull authors it — no `overrides.behaviour` — since
+# the manoeuvre lives in the hull's `[helm_console.*_ai]` policy machines rather
+# than in the doctrine entry, and overriding the doctrine here would not change
+# how it flies.
+[[trigger]]
+condition = "on_timer"
+after_secs = 20.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
+  name          = "wave_1c"
+  position      = [1100.0, 0.0, -300.0]
+
 # Wave 2: destroyer at t=45
 [[trigger]]
 condition = "on_timer"

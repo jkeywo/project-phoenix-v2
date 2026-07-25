@@ -1003,6 +1003,9 @@ entities:
         - "Issue #779 (AC1): Engines is the first continuous fine actuator moved onto the authored #775 policy spine. The DECISION to actuate flows through HelmEnginesAiPolicy (attached at spawn from [helm_console.engines_ai], else default_engines_ai_config) resolving the longitudinal channel to the actuate_desired_travel mode verb, replacing the pre-#779 unconditional hardcoded branch in ai_helm_thrust."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar. The forward/reverse magnitude stays sourced from DesiredMotion.desired_velocity_local, decoded by decode_thrust_from_velocity, so no geometry lives in the Bevy-free policy. A 'hold' resolution (no rule fires / explicit idle) emits nothing and the throttle coasts."
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetThrust a human sets, through emit_helm_ai_command; the per-axis operate_ai gate preserves human-takeover / backfill authority. Policy is stateless, so reacquisition needs no lifecycle reset."
+        - "Issue #883 (AC5) CLOSED the #779 empty-facts gap on this axis. ai_helm_thrust constructed AiFacts::new() literally — an EMPTY snapshot — so any fact(...) guard on the longitudinal channel validated at load and was then false for ever. It now seeds the same hazard/availability snapshot #780 gave the secondary axes PLUS the new target-relative travel facts (seed_helm_travel_facts: target_valid, range_to_target, closing_rate, bearing_to_target, speed_fraction), computed host-side from the frame merged view and ShipPhysics so policy.rs stays Bevy-free. Engines may now also declare a #882 STATE MACHINE (HelmEnginesAiPolicyState, resolved through the shared resolve_helm_channel seam); every shipped hull remains stateless and unchanged."
+        - "Issue #883 also seeds this host's AVAILABILITY facts honestly. ai_helm_thrust used to pass a hardcoded false for impulse_available and boost_available while ai_policy_state_tick and ai_helm_boost read them from the ship's own ImpulseConfigResource / BoostConfigResource — the #779 empty-facts trap one fact narrower, since a longitudinal guard on fact(boost_available) validated at load and then read 0 for ever. Both are now taken from those resources, because an absent fact and a fact pinned to 0 are equally silently-wrong to a guard."
+        - "Issue #883 also gave this axis a second travel arm. When the ship publishes an active HelmPassSurface, helm_motion_planner sources desired motion from the pure plan_fly_through_pass instead of plan_helm_travel: a flat authored approach/escape throttle with NO decel ramp. Only the INBOUND leg of that arm is gated on a resolvable target; the ESCAPE leg reads no target at all and runs on the frozen heading even after the target dies or leaves radar. helm_destroy was not reused or mode-flagged for this — it brakes at stop_dist and re-faces, which is a station-keeping orbit, the opposite of a pass."
         - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794 (see legacy-ai-doctrine-retirement)."
     architecture:
       kind: service
@@ -1027,6 +1030,12 @@ entities:
       symbols:
         - ai_helm_thrust
         - HelmEnginesAiPolicy
+        - HelmEnginesAiPolicyState
+        - HelmPassSurface
+        - seed_helm_travel_facts
+        - target_relative_motion
+        - plan_fly_through_pass
+        - resolve_helm_channel
         - HELM_LONGITUDINAL_CHANNEL
         - HELM_ACTUATE_DESIRED_TRAVEL_VERB
         - default_engines_ai_config
@@ -1045,6 +1054,9 @@ entities:
         - "Issue #779 (AC1): Steering is authored independently of Engines. The DECISION to actuate flows through HelmSteeringAiPolicy (attached at spawn from [helm_console.steering_ai], else default_steering_ai_config) resolving the yaw channel to the actuate_desired_facing mode verb, replacing the pre-#779 unconditional branch in ai_helm_steering. Arc-bearing remains a facing override this axis owns on top."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar; the yaw magnitude stays sourced from DesiredMotion.desired_facing_local, decoded by decode_steering_from_facing. desired_facing_local stays a distinct public fact from desired_velocity_local (AC5). A 'hold' resolution emits nothing and yaw coasts."
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
+        - "Issue #883 (AC5) closed the same empty-facts gap here: ai_helm_steering seeds the hazard/availability snapshot plus the target-relative travel facts before resolving, so a yaw guard actually evaluates."
+        - "Issue #883 seeds this host's availability facts (impulse_available / boost_available) from the ship's own config resources rather than the hardcoded false ai_helm_steering used to pass — see the same note on ai_helm_thrust."
+        - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
         - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
       kind: service
@@ -1068,6 +1080,11 @@ entities:
       symbols:
         - ai_helm_steering
         - HelmSteeringAiPolicy
+        - HelmSteeringAiPolicyState
+        - HELM_HOLD_COMMITTED_HEADING_VERB
+        - HELM_STEERING_VERBS
+        - seed_helm_travel_facts
+        - resolve_helm_channel
         - HELM_YAW_CHANNEL
         - HELM_ACTUATE_DESIRED_FACING_VERB
         - default_steering_ai_config
@@ -1195,6 +1212,8 @@ entities:
       summary: New per-axis boost decide system whose stateless policy resolves the boost-channel engage_boost mode verb to decide whether to engage boost this tick; it emits an admitted SetBoost through the SAME command-admission seam a human uses, on-change only, when the boost feature is available.
       rationale:
         - "Issue #780 introduced AI boost for the first time. HelmBoostAiPolicy (attached at spawn from [helm_console.boost_ai], else default_boost_ai_config — explicit idle, no AI boost) resolves the boost channel to the engage_boost mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts). Fires ⇒ engage; holds ⇒ release. The idle default preserves the pre-#780 baseline (no AI boost) exactly."
+        - "Issue #882 made Boost the demonstrator for the OPTIONAL stateful path, and issue #883 made it the first axis to use one in shipped content. ai_helm_boost now resolves through the shared resolve_helm_channel seam: stateless policies take the frozen resolve_channel path, a policy declaring a machine resolves the same channel inside the state ai_policy_state_tick committed earlier this tick, and the (machine declared, state component missing) case carries a debug_assert! instead of silently degrading. Its facts also gained the #883 target-relative travel readings, so an escape-leg boost rule can guard on the pass geometry (range/closing rate/speed fraction) and not only on hazard and state time."
+        - "Issue #883 content note: [helm_console.boost] is MANDATORY for a hull whose doctrine boosts. The spawner only inserts an ENABLED BoostConfigResource when that block is authored, and this operator returns before doing anything without one — so omitting it produces a ship that runs its manoeuvre and silently loses the boost half of it. assets/entities/ship_harrow_destroyer.toml is the first Harrow hull to author it."
         - "Availability (AC6): boost capability is an ENABLED BoostConfigResource — absent or feature-disabled, the operator stands down and emits nothing (mirrors the shared applier's enabled-guard in process_helm_inputs)."
         - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Issue #881 retired the LocalShip-only handle_boost_messages into process_helm_inputs, so this operator's emission now applies on EVERY AI ship rather than only the local one; before #881 a non-local NPC's SetBoost was admitted and never applied. Ordering is now identical to the four sibling actuators — ai_helm_boost is .before(process_helm_inputs), which is itself .before(apply_helm_commands) and thus .before(tick_boost) — so the AI-emitted SetBoost is still applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the shared ai_helm_tick cadence (AGENTS.md #7)."
     architecture:
@@ -1221,6 +1240,9 @@ entities:
       symbols:
         - ai_helm_boost
         - HelmBoostAiPolicy
+        - HelmBoostAiPolicyState
+        - resolve_helm_channel
+        - seed_helm_travel_facts
         - HELM_BOOST_CHANNEL
         - HELM_ENGAGE_BOOST_VERB
         - default_boost_ai_config

@@ -793,6 +793,200 @@ fn helm_destroy(
     Some((thrust, steering))
 }
 
+// ── Target-relative motion + the fly-through attack pass (issue #883) ────────
+//
+// `helm_destroy` above is a **brake-and-orbit station-keeper**: it aims at an
+// offset approach point, ramps thrust down through a decel zone, and parks at
+// `stop_dist` re-facing the target so the forward phaser arc bears. That is the
+// exact opposite of a fly-through attack run, so #883 does NOT reuse it and
+// does NOT bolt a mode flag onto it. The pass gets its own pure decision arm
+// below — one that never brakes, never offsets the approach point, and whose
+// two legs differ only in *which direction they steer toward*.
+//
+// Both legs fold the shared `avoidance_steering` contribution in before the
+// final clamp, exactly as `helm_destroy` does (the `(base_steer + avoidance)
+// .clamp(-1, 1)` shape). That is what lets hazard avoidance BEND the escape
+// without any part of it touching the policy's pass state (AC3): avoidance is a
+// steering force here, never a state input.
+
+/// The target-relative motion readings a fly-through pass reasons about
+/// (issue #883), all measured in the XZ plane like the rest of the helm maths.
+///
+/// [`AiWorldEntity`] carries no velocity vector, so the relative velocity used
+/// for [`Self::closing_rate`] is *reconstructed* from each party's yaw and
+/// forward speed — the same reconstruction `avoidance_steering` performs for its
+/// projected positions.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TargetRelativeMotion {
+    /// Planar distance from the observer to the target (world units).
+    pub range: f32,
+    /// Rate at which `range` is shrinking (world units/s). **Positive while
+    /// closing, negative while opening** — so closest approach is the instant
+    /// this crosses from `+` to `-`.
+    pub closing_rate: f32,
+    /// Signed angle (radians) from the observer's forward vector to the range
+    /// vector; positive is starboard, matching [`steer_toward`]'s convention.
+    pub bearing_rad: f32,
+}
+
+/// Compute [`TargetRelativeMotion`] for one observer/target pair (issue #883).
+///
+/// `target_yaw` is `None` for an entity whose heading is unknown (an asteroid,
+/// or a snapshot entry with no yaw): its velocity then contributes nothing, so
+/// the closing rate degrades to the observer's own approach speed rather than
+/// silently inventing a heading.
+///
+/// A degenerate (near-zero) range yields all-zero readings rather than a NaN
+/// bearing — the no-panic contract the fact seeding depends on.
+pub fn target_relative_motion(
+    self_pos: [f32; 3],
+    self_yaw: f32,
+    self_speed: f32,
+    target_pos: [f32; 3],
+    target_yaw: Option<f32>,
+    target_speed: f32,
+) -> TargetRelativeMotion {
+    let dx = target_pos[0] - self_pos[0];
+    let dz = target_pos[2] - self_pos[2];
+    let range = (dx * dx + dz * dz).sqrt();
+    if range <= f32::EPSILON {
+        return TargetRelativeMotion::default();
+    }
+    let (ux, uz) = (dx / range, dz / range);
+
+    // Velocities reconstructed from (yaw, forward_speed) — see the struct note.
+    let self_vx = self_yaw.sin() * self_speed;
+    let self_vz = -self_yaw.cos() * self_speed;
+    let (tgt_vx, tgt_vz) = match target_yaw {
+        Some(y) => (y.sin() * target_speed, -y.cos() * target_speed),
+        None => (0.0, 0.0),
+    };
+
+    // d(range)/dt = relative_velocity · unit_range_vector; closing is its
+    // negation so "closing" reads positive.
+    let closing_rate = -((tgt_vx - self_vx) * ux + (tgt_vz - self_vz) * uz);
+
+    let fwd_x = self_yaw.sin();
+    let fwd_z = -self_yaw.cos();
+    let cross = fwd_x * uz - fwd_z * ux;
+    let dot = fwd_x * ux + fwd_z * uz;
+
+    TargetRelativeMotion {
+        range,
+        closing_rate,
+        bearing_rad: cross.atan2(dot),
+    }
+}
+
+/// Which leg of a fly-through attack pass the ship is flying (issue #883).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlyThroughLeg {
+    /// Closing on the target, steering is re-solved against the target's CURRENT
+    /// position every tick (it is a moving target).
+    Inbound,
+    /// Past closest approach: the heading is FROZEN. Nothing about the target
+    /// enters the steering solution any more — that is what "commits to the
+    /// current outward heading" means, and it is why the escape cannot be
+    /// dragged back around by a target that keeps moving.
+    Escape,
+}
+
+/// Inputs to [`plan_fly_through_pass`] (issue #883).
+///
+/// Every gameplay scalar here (`approach_speed`, `escape_speed`, the two
+/// steering-response angles, the avoidance tuning) arrives from authored ship
+/// data — there is no default and no fallback constant in this module, so
+/// AGENTS.md #11 holds by construction: omit the authoring and the host never
+/// selects this arm at all.
+pub struct FlyThroughPassInput<'a> {
+    pub leg: FlyThroughLeg,
+    pub self_pos: [f32; 3],
+    pub self_yaw: f32,
+    pub self_speed: f32,
+    pub self_radius: f32,
+    /// The target's current world position. Read only on the [`FlyThroughLeg::Inbound`] leg.
+    pub target_pos: [f32; 3],
+    /// The target's uuid, excluded from the avoidance scan so the ship does not
+    /// treat the ship it is attacking as an obstacle to swerve around — the same
+    /// exclusion `helm_destroy` makes.
+    pub target_uuid: Uuid,
+    /// The heading (radians) frozen at the closest-approach transition. Read
+    /// only on the [`FlyThroughLeg::Escape`] leg.
+    pub escape_heading_rad: f32,
+    /// Throttle fraction flown while inbound.
+    pub approach_speed: f32,
+    /// Throttle fraction flown on the escape leg.
+    pub escape_speed: f32,
+    /// Angular deadband below which the tracking solution commands no yaw.
+    pub tracking_deadband_rad: f32,
+    /// Angular error at which the tracking solution saturates to ±1.
+    pub tracking_full_steer_rad: f32,
+    pub entities: &'a [AiWorldEntity],
+    pub avoidance_buffer: f32,
+    pub avoidance_look_ahead_secs: f32,
+}
+
+/// The fly-through attack pass: `(thrust, steering)` for one tick (issue #883).
+///
+/// **No braking.** Thrust is the leg's authored throttle fraction, flat, for the
+/// whole leg. A pass that decelerated near the target would be an orbit, which
+/// is what `helm_destroy` already does and what this deliberately is not.
+///
+/// **Inbound tracks; escape does not.** The inbound leg re-derives the steering
+/// direction from the target's position every call, so a moving target is
+/// followed continuously (AC1). The escape leg derives it from
+/// `escape_heading_rad` alone (AC2) — the target could vanish or reverse and the
+/// escape would not notice.
+///
+/// **Avoidance bends both legs** (AC3): the shared repulsion steering is summed
+/// onto the leg's own steering and the result clamped, so a hazard curves the
+/// escape without the leg — or the caller's pass state — changing at all.
+pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
+    let (dir, thrust) = match input.leg {
+        FlyThroughLeg::Inbound => {
+            let dx = input.target_pos[0] - input.self_pos[0];
+            let dz = input.target_pos[2] - input.self_pos[2];
+            let dist = (dx * dx + dz * dz).sqrt();
+            let dir = if dist > f32::EPSILON {
+                [dx / dist, dz / dist]
+            } else {
+                // On top of the target: hold the current heading rather than
+                // dividing by ~0. The pass is over in any meaningful sense.
+                [input.self_yaw.sin(), -input.self_yaw.cos()]
+            };
+            (dir, input.approach_speed)
+        }
+        FlyThroughLeg::Escape => (
+            [
+                input.escape_heading_rad.sin(),
+                -input.escape_heading_rad.cos(),
+            ],
+            input.escape_speed,
+        ),
+    };
+
+    let base_steer = steer_toward(
+        input.self_yaw,
+        dir,
+        input.tracking_deadband_rad,
+        input.tracking_full_steer_rad,
+    );
+    let avoidance = avoidance_steering(
+        input.self_pos,
+        input.self_yaw,
+        input.self_speed,
+        input.self_radius,
+        input.target_uuid,
+        input.entities,
+        input.avoidance_buffer,
+        input.avoidance_look_ahead_secs,
+    );
+    (
+        thrust.clamp(-1.0, 1.0),
+        (base_steer + avoidance).clamp(-1.0, 1.0),
+    )
+}
+
 /// Resolve an authored objective target against the AI world view.
 ///
 /// The target may be the entity UUID string itself or the scenario/display name
@@ -3268,6 +3462,201 @@ mod tests {
         assert!(
             big.urgency > 0.0,
             "a hazard at or above self's size rating is never ignored"
+        );
+    }
+
+    // ── Target-relative motion + fly-through pass (issue #883) ───────────────
+
+    /// The closing rate is the signed rate of change of range: positive while
+    /// the gap shrinks, negative once it opens. Closest approach is exactly that
+    /// sign flip, which is what the destroyer doctrine's transition guard reads.
+    #[test]
+    fn closing_rate_is_positive_closing_and_negative_opening() {
+        // Ship at the origin at yaw 0 (forward = -Z), target 100 units ahead.
+        let closing =
+            target_relative_motion([0.0, 0.0, 0.0], 0.0, 10.0, [0.0, 0.0, -100.0], None, 0.0);
+        assert!((closing.range - 100.0).abs() < 1e-3);
+        assert!(
+            (closing.closing_rate - 10.0).abs() < 1e-3,
+            "flying straight at a stationary target closes at our own speed, got {}",
+            closing.closing_rate
+        );
+        assert!(
+            closing.bearing_rad.abs() < 1e-3,
+            "dead ahead is zero bearing"
+        );
+
+        // Same geometry, but the target is now ASTERN (we already flew past).
+        let opening =
+            target_relative_motion([0.0, 0.0, 0.0], 0.0, 10.0, [0.0, 0.0, 100.0], None, 0.0);
+        assert!(
+            opening.closing_rate < 0.0,
+            "a target astern of a forward-moving ship must be opening, got {}",
+            opening.closing_rate
+        );
+        assert!(
+            (opening.bearing_rad.abs() - std::f32::consts::PI).abs() < 1e-3,
+            "a target dead astern bears +/-pi"
+        );
+    }
+
+    /// `AiWorldEntity` carries no velocity, so the target's contribution to the
+    /// closing rate is reconstructed from its yaw + forward speed. A target
+    /// running away faster than we chase must read as OPENING even though we are
+    /// pointed straight at it — the case a range-only detector gets wrong.
+    #[test]
+    fn closing_rate_reconstructs_the_targets_own_velocity() {
+        // Both at yaw 0 (heading -Z); the target ahead of us and faster.
+        let m = target_relative_motion(
+            [0.0, 0.0, 0.0],
+            0.0,
+            5.0,
+            [0.0, 0.0, -50.0],
+            Some(0.0),
+            20.0,
+        );
+        assert!(
+            m.closing_rate < 0.0,
+            "a target outrunning us is opening the range, got {}",
+            m.closing_rate
+        );
+        // Target running head-on toward us (yaw pi => heading +Z).
+        let head_on = target_relative_motion(
+            [0.0, 0.0, 0.0],
+            0.0,
+            5.0,
+            [0.0, 0.0, -50.0],
+            Some(std::f32::consts::PI),
+            20.0,
+        );
+        assert!(
+            (head_on.closing_rate - 25.0).abs() < 1e-2,
+            "head-on closure is the sum of both speeds, got {}",
+            head_on.closing_rate
+        );
+    }
+
+    /// A target off the starboard bow bears positive; off the port bow,
+    /// negative — the same sign convention [`steer_toward`] uses, so a policy
+    /// guard on `bearing_to_target` and the steering solution cannot disagree
+    /// about which way "right" is.
+    #[test]
+    fn bearing_to_target_is_signed_starboard_positive() {
+        let starboard =
+            target_relative_motion([0.0, 0.0, 0.0], 0.0, 0.0, [50.0, 0.0, -50.0], None, 0.0);
+        assert!(starboard.bearing_rad > 0.0);
+        let port =
+            target_relative_motion([0.0, 0.0, 0.0], 0.0, 0.0, [-50.0, 0.0, -50.0], None, 0.0);
+        assert!(port.bearing_rad < 0.0);
+    }
+
+    /// Degenerate (co-located) geometry yields zeroes, never NaN — the seeding
+    /// path has no way to poison a policy guard with a NaN comparison.
+    #[test]
+    fn target_relative_motion_is_degenerate_safe() {
+        let m =
+            target_relative_motion([7.0, 0.0, -3.0], 1.2, 9.0, [7.0, 0.0, -3.0], Some(0.4), 4.0);
+        assert_eq!(m, TargetRelativeMotion::default());
+    }
+
+    fn pass_input(leg: FlyThroughLeg, entities: &[AiWorldEntity]) -> FlyThroughPassInput<'_> {
+        FlyThroughPassInput {
+            leg,
+            self_pos: [0.0, 0.0, 0.0],
+            self_yaw: 0.0,
+            self_speed: 10.0,
+            self_radius: 1.0,
+            target_pos: [60.0, 0.0, -60.0],
+            target_uuid: Uuid::nil(),
+            escape_heading_rad: 0.0,
+            approach_speed: 0.85,
+            escape_speed: 1.0,
+            tracking_deadband_rad: 0.03,
+            tracking_full_steer_rad: 0.6,
+            entities,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+        }
+    }
+
+    /// The inbound leg flies its authored approach throttle FLAT and steers at
+    /// the target's current position. Contrast `helm_destroy`, which would be
+    /// ramping thrust toward zero at the near range — the pass never brakes.
+    #[test]
+    fn inbound_leg_tracks_the_target_without_braking() {
+        let none: [AiWorldEntity; 0] = [];
+        let far = plan_fly_through_pass(&pass_input(FlyThroughLeg::Inbound, &none));
+        let mut near_input = pass_input(FlyThroughLeg::Inbound, &none);
+        near_input.target_pos = [3.0, 0.0, -3.0];
+        let near = plan_fly_through_pass(&near_input);
+        assert_eq!(
+            far.0, near.0,
+            "throttle must not fall off as the target gets closer: a fly-through \
+             pass does not decelerate into the merge"
+        );
+        assert!(
+            (far.0 - 0.85).abs() < 1e-6,
+            "throttle is the authored approach fraction"
+        );
+        assert!(
+            far.1 > 0.0,
+            "a target off the starboard bow must command a starboard turn"
+        );
+    }
+
+    /// The escape leg ignores the target completely: moving it to the opposite
+    /// side of the ship changes nothing, because the heading is frozen. This is
+    /// the observable difference between "hold the command" and "hold the
+    /// heading".
+    #[test]
+    fn escape_leg_flies_the_frozen_heading_and_ignores_the_target() {
+        let none: [AiWorldEntity; 0] = [];
+        let mut a = pass_input(FlyThroughLeg::Escape, &none);
+        a.target_pos = [500.0, 0.0, 0.0];
+        let mut b = pass_input(FlyThroughLeg::Escape, &none);
+        b.target_pos = [-500.0, 0.0, 0.0];
+        assert_eq!(
+            plan_fly_through_pass(&a),
+            plan_fly_through_pass(&b),
+            "the escape solution must not depend on the target at all"
+        );
+        // Already on the frozen heading (yaw 0 == heading 0) -> no yaw demanded.
+        assert_eq!(plan_fly_through_pass(&a).1, 0.0);
+        assert!((plan_fly_through_pass(&a).0 - 1.0).abs() < 1e-6);
+
+        // A frozen heading off to starboard turns the ship onto it and holds.
+        let mut turned = pass_input(FlyThroughLeg::Escape, &none);
+        turned.escape_heading_rad = 1.0;
+        assert!(plan_fly_through_pass(&turned).1 > 0.0);
+    }
+
+    /// AC3 at the pure layer: a hazard beside the escape path bends the escape
+    /// steering while the leg — the caller's pass state — is untouched. The arm
+    /// takes the leg as an INPUT and returns only actuator scalars, so avoidance
+    /// has no channel through which it could change the pass at all.
+    #[test]
+    fn hazard_bends_the_escape_without_changing_the_leg() {
+        let none: [AiWorldEntity; 0] = [];
+        let clear = plan_fly_through_pass(&pass_input(FlyThroughLeg::Escape, &none));
+        assert_eq!(clear.1, 0.0, "nothing to avoid: dead-ahead escape, no yaw");
+
+        // A rock just off the projected escape path (10 u/s * 3 s look-ahead
+        // puts our projection at z = -30).
+        let rock = [AiWorldEntity {
+            uuid: Uuid::new_v4(),
+            position: [3.0, 0.0, -30.0],
+            radius: 2.0,
+            size_rating: 2.0,
+            ..Default::default()
+        }];
+        let bent = plan_fly_through_pass(&pass_input(FlyThroughLeg::Escape, &rock));
+        assert!(
+            bent.1.abs() > 0.0,
+            "a hazard on the escape path must bend the escape steering"
+        );
+        assert_eq!(
+            bent.0, clear.0,
+            "avoidance bends the heading, it does not change the leg's throttle"
         );
     }
 }

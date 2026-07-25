@@ -108,13 +108,18 @@ pub(crate) fn helm_motion_planner(
             // target leaves the merged view (expiry), mirroring how
             // arc-bearing self-clears.
             Option<&mut crate::ship::components::DockingMotionIntent>,
+            // The derived fly-through pass surface (issue #883), published by
+            // `ai_policy_state_tick` from the ship's own Engines/Steering
+            // policies. Read-only here: the planner selects a decision arm from
+            // it, it decides nothing itself.
+            Option<&crate::ship::helm_ai::HelmPassSurface>,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
     plan.ships.clear();
 
-    for (entity, physics, behaviour_section, cursors, capability, mut docking_intent) in
+    for (entity, physics, behaviour_section, cursors, capability, mut docking_intent, pass) in
         ships.iter_mut()
     {
         // Only ships some helm axis is actually flying carry a frame entry;
@@ -126,26 +131,6 @@ pub(crate) fn helm_motion_planner(
         let vertical_mode = capability
             .map(|c| c.0.vertical_movement_mode)
             .unwrap_or_default();
-
-        // Objective travel decision: the same pure `plan_helm_travel` call the
-        // per-axis systems used to each make, made once here. No objective ->
-        // hold (zero throttle, face forward), exactly as the per-axis
-        // no-objective branch did.
-        let (thrust, steering) = if sf.has_objective {
-            helm_ai_decision(
-                &sf.merged_view,
-                &sf.scored,
-                behaviour_section,
-                &frame.anchors,
-                cursors,
-                sf.weapons_target,
-                sf.destroy_target,
-                sf.nav_waypoint,
-                sf.forward_speed,
-            )
-        } else {
-            (0.0, 0.0)
-        };
 
         // Ship-level hazard assessment over the radar-gated visible view.
         let avoidance_buffer = behaviour_section
@@ -167,6 +152,112 @@ pub(crate) fn helm_motion_planner(
             avoidance_look_ahead,
             hazard_ignore_size_ratio,
         );
+
+        // ── Objective travel decision ────────────────────────────────────────
+        //
+        // Normally the same pure `plan_helm_travel` call the per-axis systems
+        // used to each make, made once here. No objective -> hold (zero
+        // throttle, face forward), exactly as the per-axis no-objective branch
+        // did.
+        //
+        // A ship running an authored FLY-THROUGH pass (issue #883) takes a
+        // different pure arm instead: `plan_fly_through_pass`. That is a
+        // deliberate substitution rather than a mode flag on `helm_destroy` —
+        // `helm_destroy` brakes through a decel zone and parks at `stop_dist`
+        // re-facing the target, which is a station-keeping orbit and the exact
+        // opposite of a pass. Bending it into both shapes would have made one
+        // function answer two incompatible questions.
+        //
+        // Crucially the substitution happens HERE, in the planner, so the escape
+        // leg's frozen heading arrives as a DESIRED FACING. Everything
+        // downstream — the hazard force, the imminent-collision override below,
+        // the per-axis actuators — composes onto it unchanged (AC3), and the
+        // pass state is not an input to any of them.
+        //
+        // ## Only the INBOUND leg needs a target
+        //
+        // The inbound leg is a tracking solution: without a target it can
+        // actually resolve in this tick's merged view there is nothing to track,
+        // so it falls back to ordinary doctrine travel.
+        //
+        // The escape leg is target-FREE by construction — `plan_fly_through_pass`
+        // never reads `target_pos` on it, because the heading was frozen at the
+        // merge. Gating it on a live, visible target would be a silent
+        // dependency on the very thing the pass exists to destroy: the common
+        // combat case is that the run KILLS the target, and the ship would then
+        // drop back to the doctrine arm with no objective geometry, brake to a
+        // standstill, and stop holding the frozen heading — while the Boost
+        // machine, which is independent of the planner, kept the drive lit for
+        // the rest of the escape dwell. Neither escape state has a
+        // `target_valid < 1` transition, precisely because the authored doctrine
+        // says the target may "turn, run, or die — the escape does not care".
+        let pass = pass.copied().unwrap_or_default();
+        let pass_target = if pass.active {
+            sf.destroy_target
+                .or(sf.weapons_target)
+                .and_then(|uuid| sf.merged_view.entities.iter().find(|e| e.uuid == uuid))
+        } else {
+            None
+        };
+        let fly_pass =
+            |leg: crate::ai::FlyThroughLeg, target_pos: [f32; 3], target_uuid: uuid::Uuid| {
+                crate::ai::plan_fly_through_pass(&crate::ai::FlyThroughPassInput {
+                    leg,
+                    self_pos: [physics.x, physics.y, physics.z],
+                    self_yaw: physics.yaw,
+                    self_speed: physics.forward_speed,
+                    self_radius: sf.merged_view.self_radius,
+                    target_pos,
+                    target_uuid,
+                    escape_heading_rad: pass.escape_heading_rad,
+                    approach_speed: pass.approach_speed,
+                    escape_speed: pass.escape_speed,
+                    tracking_deadband_rad: pass.tracking_deadband_rad,
+                    tracking_full_steer_rad: pass.tracking_full_steer_rad,
+                    entities: &sf.merged_view.entities,
+                    avoidance_buffer,
+                    avoidance_look_ahead_secs: avoidance_look_ahead,
+                })
+            };
+        // Ordinary doctrine travel, byte-identical to the pre-#883 path.
+        let doctrine_travel = || {
+            helm_ai_decision(
+                &sf.merged_view,
+                &sf.scored,
+                behaviour_section,
+                &frame.anchors,
+                cursors,
+                sf.weapons_target,
+                sf.destroy_target,
+                sf.nav_waypoint,
+                sf.forward_speed,
+            )
+        };
+        let (thrust, steering) = match (sf.has_objective, pass.active) {
+            // Escape: flown from the frozen heading alone, whether or not the
+            // target still exists or is still visible.
+            (true, true) if pass.escape => fly_pass(
+                crate::ai::FlyThroughLeg::Escape,
+                // Unread on this leg. Our own position, so the field can never
+                // be a stale or invented world point even in a future misuse.
+                [physics.x, physics.y, physics.z],
+                // Used ONLY to exclude the target from the avoidance scan. A
+                // dead or unseen target excludes nothing, which is correct — it
+                // is no longer in `entities` either.
+                pass_target.map(|t| t.uuid).unwrap_or_else(uuid::Uuid::nil),
+            ),
+            // Inbound: needs a resolvable target, or there is nothing to track.
+            (true, true) => pass_target.map_or_else(doctrine_travel, |target| {
+                fly_pass(
+                    crate::ai::FlyThroughLeg::Inbound,
+                    target.position,
+                    target.uuid,
+                )
+            }),
+            // No pass authored / not active.
+            (true, false) => doctrine_travel(),
+            (false, _) => (0.0, 0.0),
+        };
 
         // Vertical intent is gated on the ship's authored movement mode: a
         // `Planar` hull can never be handed a vertical component. Bounded /

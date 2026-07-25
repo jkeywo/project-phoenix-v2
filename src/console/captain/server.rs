@@ -282,6 +282,9 @@ fn operate_captain_ai(
                 // it, but the match must stay exhaustive.
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
                 | crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
+                // The Steering frozen-heading mode verb (issue #883) is likewise
+                // a helm axis verb, never a red_alert one.
+                | crate::ai::policy::AiPolicyVerb::HoldCommittedHeading
                 | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
                 | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
                 | crate::ai::policy::AiPolicyVerb::EngageImpulse

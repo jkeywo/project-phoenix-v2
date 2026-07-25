@@ -206,6 +206,13 @@ pub type AiHighFidelityComponents = (
     crate::ship::helm::ImpulseCommand,
     crate::ship::helm::BoostCommand,
     crate::ship::helm_ai::HelmBoostAiPolicyState,
+    // Issue #883: the two travel axes gained their own policy runtime state, and
+    // the derived fly-through pass surface the motion planner reads. All three go
+    // through this set for the reason above — the destroyer doctrine would
+    // silently degrade to its stateless shadow on any spawn path that missed one.
+    crate::ship::helm_ai::HelmEnginesAiPolicyState,
+    crate::ship::helm_ai::HelmSteeringAiPolicyState,
+    crate::ship::helm_ai::HelmPassSurface,
 );
 
 /// Build the [`AiHighFidelityComponents`] set at its defaults.
@@ -224,6 +231,9 @@ pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
         crate::ship::helm::ImpulseCommand::default(),
         crate::ship::helm::BoostCommand::default(),
         crate::ship::helm_ai::HelmBoostAiPolicyState::default(),
+        crate::ship::helm_ai::HelmEnginesAiPolicyState::default(),
+        crate::ship::helm_ai::HelmSteeringAiPolicyState::default(),
+        crate::ship::helm_ai::HelmPassSurface::default(),
     )
 }
 

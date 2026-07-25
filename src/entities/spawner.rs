@@ -524,6 +524,28 @@ pub fn spawn_entity(
             selector: navigation_selector,
             power_rating: config.power_rating.map(|r| r as f32),
         });
+        // Repair target selector (issue #785) — the per-system ranking policy
+        // `operate_repair_ai` runs once per free repair team to rank the ship's
+        // damaged stations into ordinary admitted `DispatchRepairTeam` inputs.
+        // From `[repair.selector]` if authored, else the canonical default.
+        // `to_selector` cannot fail here: the block was validated in
+        // `EntityConfig::from_toml`. Attached to every AI-bearing ship, not only
+        // ships with a `[repair]` block — the teams component is what gates
+        // dispatch, and a ship that gains teams later still has its ranking.
+        let repair_selector = config
+            .repair
+            .as_ref()
+            .and_then(|rc| rc.selector.as_ref())
+            .map(|s| s.to_selector().unwrap_or_default())
+            .unwrap_or_else(|| {
+                crate::entities::config::default_repair_target_selector_config()
+                    .to_selector()
+                    .unwrap_or_default()
+            });
+        entity_commands.insert(crate::console::repair::server::RepairTargetSelector {
+            selector: repair_selector,
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying
         // a `[behaviour]` block, alongside the sensors block above and inside

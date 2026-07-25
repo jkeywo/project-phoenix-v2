@@ -64,7 +64,29 @@ impl RepairRequestQueue {
         }
     }
 
-    /// Pop the highest-severity entry (worst tier, then largest deficit).
+    /// Severity ordering shared by [`Self::pop_worst`] and [`Self::peek`]:
+    /// worst tier, then largest deficit, then SMALLEST station id.
+    ///
+    /// The station-id tie-break exists for AC4 determinism (issue #785).
+    /// `Iterator::max_by` returns the LAST maximum on a tie, so without it the
+    /// winner depended on `entries` insertion order — which is the order repair
+    /// requests happened to be delivered in. The smallest-key rule matches the
+    /// selector's documented tie-break, so the queue and the authored ranking
+    /// resolve ties the same way.
+    fn severity_cmp(a: &RepairQueueEntry, b: &RepairQueueEntry) -> std::cmp::Ordering {
+        a.tier
+            .cmp(&b.tier)
+            .then_with(|| {
+                a.deficit
+                    .partial_cmp(&b.deficit)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            // Reversed so the SMALLEST station id is the maximum on a full tie.
+            .then_with(|| b.station_id.cmp(&a.station_id))
+    }
+
+    /// Pop the highest-severity entry (worst tier, then largest deficit, then
+    /// smallest station id).
     pub fn pop_worst(&mut self) -> Option<RepairQueueEntry> {
         if self.entries.is_empty() {
             return None;
@@ -73,16 +95,7 @@ impl RepairRequestQueue {
             .entries
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.tier
-                    .partial_cmp(&b.tier)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| {
-                        a.deficit
-                            .partial_cmp(&b.deficit)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-            })
+            .max_by(|(_, a), (_, b)| Self::severity_cmp(a, b))
             .map(|(i, _)| i)
             .unwrap();
         Some(self.entries.swap_remove(idx))
@@ -104,16 +117,7 @@ impl RepairRequestQueue {
         if self.entries.is_empty() {
             return None;
         }
-        self.entries.iter().max_by(|a, b| {
-            a.tier
-                .partial_cmp(&b.tier)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    a.deficit
-                        .partial_cmp(&b.deficit)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-        })
+        self.entries.iter().max_by(|a, b| Self::severity_cmp(a, b))
     }
 }
 
@@ -123,18 +127,35 @@ pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
+        // The dispatch router registers itself in Physics, pinning its own
+        // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
+        super::dispatch::register_repair_dispatch(app);
         app.add_systems(
             Update,
             (
-                tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                // AC4 DETERMINISM (issue #785) — pin the remaining intra-Physics
+                // edge. `operate_repair_ai` (decide/emit) →
+                // `handle_dispatch_repair_team` + `handle_set_repair_priority`
+                // (apply) → `tick_repair_teams` (advance) must run in that order
+                // every tick. #830 pinned only the first edge, so
+                // `tick_repair_teams` stayed ambiguous against the applier even
+                // though both mutate `ShipRepairTeams`: Bevy's parallel executor
+                // then serialised them run-varyingly, and a dispatch landing
+                // BEFORE the tick let a `Returning { remaining }` slot hit
+                // `remaining <= 0` and flip straight to `Travelling` instead of
+                // staying `Returning`. That — not HashMap order — was the root
+                // cause of `all_busy_teams_ignore_further_dispatches` flaking.
+                // Production was weaker than its own `npc_repair_app` fixture,
+                // which already `.chain()`s the quartet; this closes the gap.
+                tick_repair_teams
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(super::dispatch::handle_dispatch_repair_team)
+                    .after(super::dispatch::handle_set_repair_priority),
                 operate_repair_ai.in_set(crate::sim_sets::SimSet::Physics),
                 publish_repair_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         )
         .add_plugins(repair_state_broadcaster());
-        // The dispatch router registers itself in Physics, pinning its own
-        // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
-        super::dispatch::register_repair_dispatch(app);
     }
 }
 
@@ -334,11 +355,264 @@ pub fn all_systems_in_station_are_operational(
 // longer resolves the fine system inline. See `operate_repair_ai` for why this
 // is a deliberate change of the healed-first heuristic, not an equivalence.
 
+// ── Authored repair-target ranking (issue #785) ────────────────────────────────
+
+/// The candidate key standing for [`crate::messages::RepairTarget::Core`] — the
+/// ownerless ship-wide repair bucket. Selector candidate identity is a plain
+/// `String` (nothing requires a real UUID), so Repair keys candidates on the
+/// STATION ID and the winning key IS the dispatch target. This is the one key
+/// that maps to `RepairTarget::Core` instead of `RepairTarget::Station(..)`; it
+/// is also the `SystemId` the router resolves `Core` to, so the two agree.
+pub const REPAIR_CORE_BUCKET_KEY: &str = "core";
+
+/// Per-ship resolved Repair target selector (issue #785).
+///
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
+/// authored `[repair.selector]` or the canonical
+/// [`crate::entities::config::default_repair_target_selector_config`] default —
+/// plus the authored ship `power_rating`, which [`operate_repair_ai`] exposes to
+/// the selector's expressions as `self_fact(power_rating)`. Attached at spawn
+/// beside the Sensors/Tactical/Navigation selectors; ships without one fall back
+/// to the default selector inside [`operate_repair_ai`] (bare-`App` fixtures).
+/// Mirrors [`crate::console::navigation::NavigationTargetSelector`].
+#[derive(Component, Clone, Debug)]
+pub struct RepairTargetSelector {
+    /// The resolved ranking policy.
+    pub selector: crate::ai::selector::TargetSelector,
+    /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
+    pub power_rating: Option<f32>,
+}
+
+impl Default for RepairTargetSelector {
+    fn default() -> Self {
+        Self {
+            selector: crate::entities::config::default_repair_target_selector_config()
+                .to_selector()
+                .unwrap_or_default(),
+            power_rating: None,
+        }
+    }
+}
+
+/// One repair candidate's observable readings, resolved host-side before the
+/// pure fact seed (AC1 — every field is authoritative observable damage or team
+/// availability; nothing here is private AI memory).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RepairCandidateReading {
+    /// [`DamageTier`] discriminant: Operational 0, Damaged 1, Disabled 2,
+    /// Destroyed 3. A structural enum ordinal, not a tunable value.
+    pub tier_ordinal: u8,
+    /// Absolute HP missing, as reported by the repair request (or, for the core
+    /// bucket, read off the hull).
+    pub deficit: f32,
+    /// Aggregate `1 - current/max` across every hull system the station owns.
+    /// For the ownerless `core` bucket — which owns no station and so has no
+    /// station-scan result — this is the hull's own `core` entry damage.
+    pub damage_fraction: f32,
+    /// The most damaged single system in the station — the one the router's
+    /// `resolve_repair_target` will actually send the team to. For the `core`
+    /// bucket this equals `damage_fraction` (it is a single hull entry).
+    pub worst_system_damage_fraction: f32,
+    /// How many hull systems the station owns (1 for the `core` bucket).
+    pub system_count: usize,
+    /// Whether this candidate is the ship-wide `core` bucket.
+    pub is_core: bool,
+    /// Whether a coordination-delivered `RepairRequest` currently names this
+    /// station. The canonical eligibility keys on this, so the AI ranks only
+    /// damage that was actually reported (issue #830 removed the raw hull poll).
+    pub source_repair_request: bool,
+    /// Whether a team is already Travelling to / Repairing this station, or an
+    /// earlier team in this same tick was just dispatched to it. The canonical
+    /// eligibility excludes these, which is what makes N free teams pick N
+    /// DISTINCT stations (AC2/AC4).
+    pub assigned: bool,
+}
+
+/// Seed one repair candidate's CANDIDATE-context facts (issue #785).
+///
+/// Pure and Bevy-free (AGENTS.md rule #10): the host resolves the live station
+/// damage before calling this, so the authored eligibility/score expressions
+/// evaluate over real readings. The #779 empty-facts lesson applies — every fact
+/// an authored guard can reference is seeded here, so a `candidate_fact(...)`
+/// guard actually fires instead of silently reading "absent → false".
+pub fn seed_repair_facts(reading: &RepairCandidateReading) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("tier_ordinal", reading.tier_ordinal as f64);
+    facts.set("deficit", reading.deficit as f64);
+    facts.set("damage_fraction", reading.damage_fraction as f64);
+    facts.set(
+        "worst_system_damage_fraction",
+        reading.worst_system_damage_fraction as f64,
+    );
+    facts.set("system_count", reading.system_count as f64);
+    facts.set("is_core", if reading.is_core { 1.0 } else { 0.0 });
+    facts.set(
+        "source_repair_request",
+        if reading.source_repair_request {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    facts.set(
+        "source_core_bucket",
+        if reading.is_core { 1.0 } else { 0.0 },
+    );
+    facts.set("assigned", if reading.assigned { 1.0 } else { 0.0 });
+    facts
+}
+
+/// Seed the operating ship's SELF-context facts for the repair selection
+/// (issue #785). Pure and Bevy-free, same contract as [`seed_repair_facts`].
+///
+/// The seeded facts, each an authored guard's vocabulary:
+///   - `free_team_count` — how many repair team slots are `Idle` this tick, i.e.
+///     how many selections `operate_repair_ai` will run.
+///   - `total_hull_health_fraction` — ship-wide `total_current / total_max`, so
+///     `1.0` is a pristine hull and `0.0` a flattened one. Named for HEALTH
+///     deliberately: the candidate-side `damage_fraction` is its INVERSE
+///     (`1 - current/max`, `0.0` pristine), and two similarly-named facts with
+///     opposite senses is exactly the authoring trap this name avoids.
+///   - `power_rating` — the authored ship power rating, absent (not zero) when
+///     the ship declares none, so `self_fact(power_rating)` guards do not fire
+///     on an unrated ship.
+///   - `red_alert` — 1.0 while the ship is at red alert, else 0.0.
+pub fn seed_repair_self_facts(
+    free_team_count: usize,
+    total_hull_health_fraction: f32,
+    power_rating: Option<f32>,
+    red_alert: bool,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set("free_team_count", free_team_count as f64);
+    facts.set(
+        "total_hull_health_fraction",
+        total_hull_health_fraction as f64,
+    );
+    facts.set("red_alert", if red_alert { 1.0 } else { 0.0 });
+    if let Some(pr) = power_rating {
+        facts.set("power_rating", pr as f64);
+    }
+    facts
+}
+
+/// The station a team slot is currently committed to, or `None` when the slot
+/// holds no commitment (`Idle`, or a target whose station cannot be resolved).
+///
+/// This is the ONLY carrier of Repair's retained selector pick: it is derived
+/// from the authoritative [`TeamSlot`] every tick and is never cached in an
+/// AI-owned component (the AC5 reset invariant — see [`operate_repair_ai`]).
+/// `Returning` deliberately does not count: the team has left, so its station is
+/// free to be re-picked, exactly as before #785.
+fn committed_station_for_slot(
+    slot: &TeamSlot,
+    config: &crate::ship_plugin::ShipConfigComponent,
+) -> Option<String> {
+    let system_id = match slot {
+        TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
+            system_id.as_ref()?
+        }
+        _ => return None,
+    };
+    if system_id.0 == REPAIR_CORE_BUCKET_KEY {
+        return Some(REPAIR_CORE_BUCKET_KEY.to_string());
+    }
+    config
+        .0
+        .system(system_id)
+        .and_then(|sc| sc.station.as_ref())
+        .map(|s| s.0.clone())
+}
+
+/// Aggregate a station's observable hull damage: `(damage_fraction,
+/// worst_system_damage_fraction, system_count)`.
+fn station_damage_readings(
+    station_id: &str,
+    hull: &crate::damage::SystemHull,
+    config: &crate::ship_plugin::ShipConfigComponent,
+) -> (f32, f32, usize) {
+    let mut total_max = 0.0_f32;
+    let mut total_current = 0.0_f32;
+    let mut worst = 0.0_f32;
+    let mut count = 0_usize;
+    for system in config
+        .0
+        .systems
+        .iter()
+        .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station_id))
+    {
+        let Some(entry) = hull.get(&system.id) else {
+            continue;
+        };
+        count += 1;
+        total_max += entry.max;
+        total_current += entry.current;
+        if entry.max > 0.0 {
+            worst = worst.max(1.0 - entry.current / entry.max);
+        }
+    }
+    let fraction = if total_max > 0.0 {
+        1.0 - total_current / total_max
+    } else {
+        0.0
+    };
+    (fraction, worst, count)
+}
+
 /// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
-/// Repair system is `ControlSource::Ai` and auto-dispatches idle teams to the
-/// station of each unassigned repair-queue entry (worst tier, then largest
-/// deficit). Ships with no per-entity `ShipRepairTeams` component silently
-/// skip — an NPC without a `[repair]` block simply has no teams to dispatch.
+/// Repair system is `ControlSource::Ai` and dispatches its idle teams to the
+/// stations the AUTHORED [`RepairTargetSelector`] ranks highest. Ships with no
+/// per-entity `ShipRepairTeams` component silently skip — an NPC without a
+/// `[repair]` block simply has no teams to dispatch.
+///
+/// # Authored ranking (issue #785)
+///
+/// The hardcoded `(tier desc, deficit desc)` comparator is RETIRED outright
+/// (the #784 Power shape, not the #783 Shields retained-kernel shape). Repair is
+/// the fourth host of the reusable #776 [`crate::ai::selector::TargetSelector`]
+/// and the first whose candidate identity is not an entity UUID: a
+/// `SelectorCandidate.uuid` is just a `String`, so Repair keys candidates on the
+/// STATION ID and the winning key IS the `RepairTarget`. No side-table is
+/// needed (contrast #778 Navigation's `uuid → WaypointMode` map). Ranking stays
+/// at STATION granularity because the typed input only addresses stations and
+/// the core bucket; which fine system inside the station heals first remains the
+/// shared `resolve_repair_target`'s call (§2 symmetry, #830). Per-system damage
+/// is exposed to the ranking as candidate FACTS, never as a new
+/// `RepairTarget` variant the human wire could not send.
+///
+/// This uses the selector rather than the #775 channel/verb policy because
+/// "eligibility + additive utility over a VARIABLE candidate set" is selector
+/// vocabulary. Shields (#783) stayed on channel/verb precisely because its arcs
+/// are a fixed 4-set of in-ship indices; Repair's damaged-station set changes
+/// every tick.
+///
+/// # Multi-team assignment — greedy sequential, deterministic by construction
+///
+/// Teams are visited in ASCENDING slot index. Before each selection the
+/// candidate set is rebuilt with the `assigned` fact set for every station a
+/// team is already committed to plus every station an earlier team in this same
+/// tick was just given, and the authored eligibility drops them — so N free
+/// teams pick N DISTINCT stations. Exclusion lives in a `BTreeSet` and the
+/// candidate vector is built in sorted station-id order, so no `HashMap`
+/// iteration order can reach the decision; residual score ties fall through to
+/// the selector's documented smallest-key tie-break. This is deliberately
+/// greedy-with-exclusion (matching the retired behaviour), not an optimal
+/// assignment.
+///
+/// # AC5 — no AI-owned state, so reset is automatic
+///
+/// Policies are stateless and #785 adds NO new AI state component. The two
+/// carriers of retained state are both authoritative:
+///   1. `RepairRequestQueue.entries`, pruned below the moment a station has no
+///      non-Operational / non-Destroyed system — so a completed repair's target
+///      disappears (AC4).
+///   2. The selector's hysteresis `current`, derived PER TICK from the
+///      authoritative [`TeamSlot`] via [`committed_station_for_slot`] and never
+///      cached. A completed repair returns the slot to `Idle` ⇒ `current` is
+///      `None` ⇒ the next selection starts from initial policy state.
+///
+/// Human takeover is the `operate_ai` gate below plus admission, which
+/// independently rejects an `ai:` emission on a human-held Repair system.
 ///
 /// After PRD #597 gap-5 closure: same code path for player Backfill AI and
 /// NPC AI. The only differentiator is `ShipSystemControlSources`
@@ -381,11 +655,18 @@ pub fn operate_repair_ai(
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&mut RepairRequestQueue>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&RepairTargetSelector>,
+            Option<&crate::ship_state::ShipRedAlert>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
+    // Canonical fallback selector for any ship missing an attached component
+    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
+    // spawn. Built once per tick, not per ship (mirrors `operate_navigation_ai`).
+    let default_selector = RepairTargetSelector::default();
+
     for (
         entity_uuid,
         sources,
@@ -393,6 +674,8 @@ pub fn operate_repair_ai(
         hull_comp,
         repair_queue_comp,
         config_comp,
+        target_selector,
+        red_alert_comp,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -411,6 +694,17 @@ pub fn operate_repair_ai(
         };
 
         rq.entries.retain(|entry| {
+            // The `core` bucket owns NO station in `ShipConfig` — validation
+            // actively forbids a station with that id, and `damage_sync` files
+            // ownerless systems under it — so the station-owned scan below would
+            // find zero systems and prune every core request. Prune it against
+            // its own hull entry instead, the same repairable-tier test.
+            if entry.station_id == REPAIR_CORE_BUCKET_KEY {
+                let t = hull
+                    .0
+                    .tier_for(&SystemId(REPAIR_CORE_BUCKET_KEY.to_string()));
+                return t != DamageTier::Operational && t != DamageTier::Destroyed;
+            }
             config
                 .0
                 .systems
@@ -424,75 +718,182 @@ pub fn operate_repair_ai(
                 })
         });
 
-        // Determine which stations already have at least one active team
-        // (Travelling or Repairing), so idle teams are directed to
-        // unassigned queue entries only (Option C).
-        let assigned_stations: std::collections::HashSet<String> = teams
-            .0
-            .slots()
-            .iter()
-            .filter_map(|slot| match slot {
-                TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
-                    system_id.as_ref().and_then(|sid| {
-                        config
-                            .0
-                            .system(sid)
-                            .and_then(|sc| sc.station.as_ref())
-                            .map(|s| s.0.clone())
-                    })
-                }
-                _ => None,
-            })
-            .collect();
-
-        // Sort entries by priority (worst tier, then largest deficit).
-        let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
-        sorted_entries.sort_by(|a, b| {
-            b.tier.cmp(&a.tier).then_with(|| {
-                b.deficit
-                    .partial_cmp(&a.deficit)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-        });
-
-        // Free team indices, consumed as we assign. Because emission does not
-        // mutate `teams` this tick (the applier does, in Physics after us),
-        // `lowest_free_team()` would return the same idx for every entry — so we
-        // draw from a locally-consumed list instead.
-        let mut free_teams = teams
+        // Free team indices, ASCENDING — the deterministic visit order (AC4).
+        // Emission does not mutate `teams` this tick (the applier does, later in
+        // Physics), so `lowest_free_team()` would return the same idx every
+        // time; we draw from a locally-consumed list instead.
+        let free_teams: Vec<usize> = teams
             .0
             .slots()
             .iter()
             .enumerate()
-            .filter_map(|(i, s)| matches!(s, TeamSlot::Idle).then_some(i));
+            .filter_map(|(i, s)| matches!(s, TeamSlot::Idle).then_some(i))
+            .collect();
+        if free_teams.is_empty() {
+            continue;
+        }
 
-        // Emit an admitted DispatchRepairTeam for each idle team → unassigned
-        // queue entry. Station-granular: the applier resolves the fine system.
-        let mut newly_assigned: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        // Stations already committed to by a Travelling/Repairing team. BTreeSet,
+        // never a HashSet: this set gates the authored eligibility, so its
+        // iteration order must never reach the decision.
+        let mut excluded: std::collections::BTreeSet<String> = teams
+            .0
+            .slots()
+            .iter()
+            .filter_map(|slot| committed_station_for_slot(slot, config))
+            .collect();
+
+        let selector_comp = target_selector.unwrap_or(&default_selector);
+
+        // ── Candidate readings, built in sorted station-id order (AC1) ────────
+        // Source `damaged-stations`: exactly the coordination-delivered repair
+        // requests. Issue #830 removed the raw hull poll and #785 does not bring
+        // it back — the AI ranks only damage that was actually reported. The
+        // per-station hull aggregate below is the authoritative observable
+        // detail those requests are ranked BY, not an extra discovery channel.
+        let mut sorted_entries: Vec<&RepairQueueEntry> = rq.entries.iter().collect();
+        sorted_entries.sort_by(|a, b| a.station_id.cmp(&b.station_id));
+
+        let mut readings: Vec<(String, RepairCandidateReading)> =
+            Vec::with_capacity(sorted_entries.len() + 1);
         for entry in &sorted_entries {
-            if assigned_stations.contains(&entry.station_id)
-                || newly_assigned.contains(&entry.station_id)
+            let (damage_fraction, worst, system_count) =
+                station_damage_readings(&entry.station_id, &hull.0, config);
+            readings.push((
+                entry.station_id.clone(),
+                RepairCandidateReading {
+                    tier_ordinal: entry.tier as u8,
+                    deficit: entry.deficit,
+                    damage_fraction,
+                    worst_system_damage_fraction: worst,
+                    system_count,
+                    is_core: entry.station_id == REPAIR_CORE_BUCKET_KEY,
+                    source_repair_request: true,
+                    assigned: false,
+                },
+            ));
+        }
+        // Source `core-bucket`: the ownerless ship-wide bucket, surfaced whenever
+        // the ship's hull actually carries a `core` entry. It carries
+        // `source_core_bucket` but no repair request of its own, so under the
+        // canonical eligibility it never independently selects — the same
+        // enrich-don't-steer shape as Navigation's `chart-contacts`.
+        let core_id = SystemId(REPAIR_CORE_BUCKET_KEY.to_string());
+        if let Some(core_entry) = hull.0.get(&core_id) {
+            let core_fraction = if core_entry.max > 0.0 {
+                1.0 - core_entry.current / core_entry.max
+            } else {
+                0.0
+            };
+            let core_reading = RepairCandidateReading {
+                tier_ordinal: hull.0.tier_for(&core_id) as u8,
+                deficit: (core_entry.max - core_entry.current).max(0.0),
+                damage_fraction: core_fraction,
+                worst_system_damage_fraction: core_fraction,
+                system_count: 1,
+                is_core: true,
+                source_repair_request: false,
+                assigned: false,
+            };
+            match readings
+                .iter_mut()
+                .find(|(key, _)| key == REPAIR_CORE_BUCKET_KEY)
             {
-                continue;
+                // A repair request already named `core`: keep its REPORTED tier
+                // and deficit (the coordination-delivered reading), but take the
+                // damage aggregates from the hull. `station_damage_readings`
+                // scans `config.systems` for `station == Some("core")` and a
+                // station with that id is FORBIDDEN by `ShipConfig` validation,
+                // so it necessarily returned `(0.0, 0.0, 0)` for this entry —
+                // leaving it seeded would zero `damage_fraction` /
+                // `worst_system_damage_fraction` / `system_count` and make every
+                // authored guard over them dead for the core bucket.
+                Some((_, existing)) => {
+                    existing.damage_fraction = core_reading.damage_fraction;
+                    existing.worst_system_damage_fraction =
+                        core_reading.worst_system_damage_fraction;
+                    existing.system_count = core_reading.system_count;
+                    existing.is_core = true;
+                }
+                None => readings.push((REPAIR_CORE_BUCKET_KEY.to_string(), core_reading)),
             }
-            let Some(idx) = free_teams.next() else {
+        }
+        readings.sort_by(|a, b| a.0.cmp(&b.0));
+
+        if readings.is_empty() {
+            continue;
+        }
+
+        // SELF context. Candidates all sit at the operating ship, so the planar
+        // horizon never gates; positions are the shared origin.
+        let total_max = hull.0.total_max();
+        let total_hull_health_fraction = if total_max > 0.0 {
+            hull.0.total_current() / total_max
+        } else {
+            1.0
+        };
+        let self_ctx = crate::ai::selector::SelfContext {
+            position: [0.0, 0.0, 0.0],
+            facts: seed_repair_self_facts(
+                free_teams.len(),
+                total_hull_health_fraction,
+                selector_comp.power_rating,
+                red_alert_comp.map(|ra| ra.0).unwrap_or(false),
+            ),
+        };
+
+        // ── Greedy sequential selection, one authored `select` per free team ──
+        for team_idx in free_teams {
+            let candidates: Vec<crate::ai::selector::SelectorCandidate> = readings
+                .iter()
+                .map(|(key, reading)| {
+                    let mut reading = reading.clone();
+                    reading.assigned = excluded.contains(key);
+                    crate::ai::selector::SelectorCandidate {
+                        uuid: key.clone(),
+                        position: [0.0, 0.0, 0.0],
+                        facts: seed_repair_facts(&reading),
+                    }
+                })
+                .collect();
+
+            // AC5: the retained pick is read back off the AUTHORITATIVE slot
+            // every tick, never from a cached AI field. An Idle slot — the only
+            // kind we dispatch — holds no commitment, so this is `None` and each
+            // selection starts from initial policy state.
+            let current = teams
+                .0
+                .slots()
+                .get(team_idx)
+                .and_then(|slot| committed_station_for_slot(slot, config));
+
+            let Some(winner) =
+                selector_comp
+                    .selector
+                    .select(&self_ctx, &candidates, current.as_deref(), &[])
+            else {
+                // Nothing eligible left this tick; later teams cannot do better
+                // over the same candidate set, so stop.
                 break;
+            };
+
+            let target = if winner == REPAIR_CORE_BUCKET_KEY {
+                crate::messages::RepairTarget::Core
+            } else {
+                crate::messages::RepairTarget::Station(crate::messages::StationId(winner.clone()))
             };
             emit_repair_ai_command(
                 entity_uuid,
                 crate::messages::SystemControlPayload::DispatchRepairTeam {
-                    team_idx: idx as u8,
-                    target: crate::messages::RepairTarget::Station(crate::messages::StationId(
-                        entry.station_id.clone(),
-                    )),
+                    team_idx: team_idx as u8,
+                    target,
                 },
                 sources,
                 &sessions,
                 config,
                 &mut admitted,
             );
-            newly_assigned.insert(entry.station_id.clone());
+            excluded.insert(winner);
         }
     }
 }
@@ -1528,5 +1929,553 @@ mod tests {
             "team 0 should have priority=2 after SetRepairPriority, got {:?}",
             teams.0.slots()[0]
         );
+    }
+
+    // ── Authored repair-target ranking (issue #785) ──────────────────────────
+    //
+    // AC6: every assertion below reads OBSERVABLE state — `TeamSlot` variants
+    // and their `system_id`, `RepairRequestQueue.entries`, and
+    // `EntitySystemHull` HP — never a `TargetSelector::select` return value.
+    // The selector's own semantics are unit-tested in `src/ai/selector.rs`.
+
+    /// Two stations, each owning one fine system, so a station dispatch resolves
+    /// to a distinct observable `system_id`.
+    fn two_station_config() -> crate::ship_plugin::ShipConfigComponent {
+        use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+        let sys = |id: &str, station: &str| SystemInstanceConfig {
+            id: SystemId(id.into()),
+            kind: "generic".into(),
+            station: Some(StationId(station.into())),
+            ai_only: false,
+            power_group: None,
+            marker: None,
+            config: None,
+        };
+        crate::ship_plugin::ShipConfigComponent(ShipConfig {
+            stations: vec![],
+            systems: vec![sys("alpha-sys", "alpha"), sys("bravo-sys", "bravo")],
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        })
+    }
+
+    /// Spawn a two-station NPC. `alpha_hp` / `bravo_hp` are absolute HP out of
+    /// 100, and each station gets a repair-request queue entry carrying the tier
+    /// the hull actually reports (the coordination-delivered reading the AI
+    /// ranks). `teams` is the team count. An optional authored selector is
+    /// attached as `RepairTargetSelector`; `None` exercises the canonical
+    /// default via the host fallback.
+    fn spawn_two_station_npc(
+        app: &mut App,
+        source: crate::ship::control_source::ControlSource,
+        alpha_hp: f32,
+        bravo_hp: f32,
+        teams: usize,
+        selector: Option<crate::entities::config::FineSystemAiSelectorToml>,
+    ) -> Entity {
+        use crate::ship::control_source::ControlSourceResolver;
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(repair_system_id(), source);
+
+        let mut hull = crate::damage::SystemHull::from_config(&[
+            (SystemId("alpha-sys".into()), 100.0_f32),
+            (SystemId("bravo-sys".into()), 100.0_f32),
+        ]);
+        hull.set_hp(&SystemId("alpha-sys".into()), alpha_hp);
+        hull.set_hp(&SystemId("bravo-sys".into()), bravo_hp);
+
+        let mut queue = RepairRequestQueue::default();
+        for (station, sid, hp) in [
+            ("alpha", "alpha-sys", alpha_hp),
+            ("bravo", "bravo-sys", bravo_hp),
+        ] {
+            let tier = hull.tier_for(&SystemId(sid.into()));
+            if tier == DamageTier::Operational || tier == DamageTier::Destroyed {
+                continue;
+            }
+            queue.push_or_merge(RepairQueueEntry {
+                station_id: station.into(),
+                station_label: station.into(),
+                tier,
+                deficit: 100.0 - hp,
+            });
+        }
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::entity_spawner::EntityUuid("npc-repair-2".into()),
+                ShipSystemControlSources(resolver),
+                ShipRepairTeams(crate::repair_teams::RepairTeams::new(teams)),
+                crate::entity_spawner::EntitySystemHull(hull),
+                crate::modifiers::ShipModifiers::new(),
+                queue,
+                two_station_config(),
+                crate::messages::AdmittedCommands::default(),
+            ))
+            .id();
+        if let Some(cfg) = selector {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(RepairTargetSelector {
+                    selector: cfg.to_selector().expect("test selector must parse"),
+                    power_rating: None,
+                });
+        }
+        entity
+    }
+
+    /// The observable target system of a team slot, if it has one.
+    fn slot_system(slot: &TeamSlot) -> Option<String> {
+        match slot {
+            TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
+                system_id.as_ref().map(|s| s.0.clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn team_systems(app: &App, entity: Entity) -> Vec<Option<String>> {
+        app.world()
+            .get::<ShipRepairTeams>(entity)
+            .expect("ship must carry ShipRepairTeams")
+            .0
+            .slots()
+            .iter()
+            .map(slot_system)
+            .collect()
+    }
+
+    /// AC2 baseline: with the canonical default selector the worst-tier station
+    /// wins, exactly as the retired `(tier desc, deficit desc)` comparator did.
+    #[test]
+    fn default_repair_selector_dispatches_worst_tier_station_first() {
+        let mut app = npc_repair_app();
+        // alpha 50/100 → Damaged; bravo 10/100 → Disabled (worse tier).
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            10.0,
+            1,
+            None,
+        );
+        app.update();
+
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("bravo-sys"),
+            "the worse-tier station must win the default ranking"
+        );
+    }
+
+    /// AC2: an AUTHORED eligibility changes which station is dispatched, proving
+    /// the decision comes from data and not from a Rust comparator. Here the
+    /// author restricts eligibility to the merely-Damaged tier, so the team goes
+    /// to `alpha` — the opposite of the default ranking asserted above.
+    #[test]
+    fn authored_repair_selector_drives_dispatch() {
+        use crate::entities::config::{FineSystemAiSelectorToml, ScoreTermToml};
+        let authored = FineSystemAiSelectorToml {
+            param: std::collections::HashMap::from([("tier_weight".to_string(), 10.0_f32)]),
+            sources: vec![crate::entities::config::SELECTOR_SOURCE_DAMAGED_STATIONS.to_string()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(source_repair_request) > 0 \
+                          and candidate_fact(assigned) < 1 \
+                          and candidate_fact(tier_ordinal) == 1"
+                .to_string(),
+            score: vec![ScoreTermToml {
+                when: "candidate_fact(tier_ordinal) >= 1".to_string(),
+                weight: 10.0,
+            }],
+        };
+
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            10.0,
+            1,
+            Some(authored),
+        );
+        app.update();
+
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("alpha-sys"),
+            "the authored eligibility must override the default worst-tier pick"
+        );
+    }
+
+    /// AC2/AC4: two free teams pick two DISTINCT stations in one tick — the
+    /// per-team exclusion, expressed through the authored `assigned` fact.
+    #[test]
+    fn two_free_teams_are_dispatched_to_distinct_stations() {
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            10.0,
+            2,
+            None,
+        );
+        app.update();
+
+        let systems = team_systems(&app, npc);
+        assert_eq!(
+            systems,
+            vec![Some("bravo-sys".to_string()), Some("alpha-sys".to_string())],
+            "ascending team indices must take the ranking in order, without \
+             both teams piling onto the same station"
+        );
+    }
+
+    /// AC4 determinism: two stations at the SAME tier and the SAME deficit must
+    /// resolve to the same station on every run — the selector's smallest-key
+    /// tie-break, not queue insertion order. Repeated across fresh apps because
+    /// a single run cannot observe executor variation.
+    #[test]
+    fn tied_repair_candidates_resolve_deterministically() {
+        for _ in 0..20 {
+            let mut app = npc_repair_app();
+            let npc = spawn_two_station_npc(
+                &mut app,
+                crate::ship::control_source::ControlSource::Ai,
+                50.0,
+                50.0,
+                1,
+                None,
+            );
+            app.update();
+            assert_eq!(
+                team_systems(&app, npc)[0].as_deref(),
+                Some("alpha-sys"),
+                "a full tie must always resolve to the smallest station id"
+            );
+        }
+    }
+
+    /// AC4 "completed targets removed": once a station's systems are back to
+    /// Operational its repair-request entry is pruned and no further team is
+    /// sent there. AC5 falls out of the same observation — the retained pick
+    /// lives only in the authoritative `TeamSlot`, so a healed station simply
+    /// stops being a candidate with no AI state to reset.
+    #[test]
+    fn repaired_station_entry_is_removed_and_not_redispatched() {
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            100.0,
+            1,
+            None,
+        );
+        app.update();
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("alpha-sys"),
+            "the only damaged station must be picked first"
+        );
+
+        // Heal alpha outright, then tick: the entry must vanish.
+        app.world_mut()
+            .get_mut::<crate::entity_spawner::EntitySystemHull>(npc)
+            .unwrap()
+            .0
+            .set_hp(&SystemId("alpha-sys".into()), 100.0);
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<RepairRequestQueue>(npc)
+                .unwrap()
+                .entries
+                .is_empty(),
+            "a fully repaired station's queue entry must be removed"
+        );
+
+        // Free every team and tick again: nothing is eligible, so nothing is sent.
+        app.world_mut().get_mut::<ShipRepairTeams>(npc).unwrap().0 =
+            crate::repair_teams::RepairTeams::new(1);
+        app.update();
+        assert!(
+            team_systems(&app, npc).iter().all(|s| s.is_none()),
+            "no team may be dispatched once every reported station is repaired"
+        );
+    }
+
+    /// The #779 EMPTY-FACTS lesson: candidate facts are really seeded, so an
+    /// authored `candidate_fact(...)` guard actually fires. The same selector is
+    /// run twice with only its threshold param moved across the observed
+    /// `damage_fraction` (0.5) — below it dispatches, above it does not.
+    #[test]
+    fn authored_candidate_fact_guard_fires_on_seeded_damage_fraction() {
+        use crate::entities::config::{FineSystemAiSelectorToml, ScoreTermToml};
+        let selector_with = |threshold: f32| FineSystemAiSelectorToml {
+            param: std::collections::HashMap::from([("min_damage".to_string(), threshold)]),
+            sources: vec![crate::entities::config::SELECTOR_SOURCE_DAMAGED_STATIONS.to_string()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(assigned) < 1 \
+                          and candidate_fact(damage_fraction) >= param(min_damage)"
+                .to_string(),
+            score: vec![ScoreTermToml {
+                when: "candidate_fact(damage_fraction) >= param(min_damage)".to_string(),
+                weight: 1.0,
+            }],
+        };
+
+        // Threshold below the seeded 0.5 damage fraction → the guard fires.
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            100.0,
+            1,
+            Some(selector_with(0.4)),
+        );
+        app.update();
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("alpha-sys"),
+            "a guard under the seeded damage_fraction must fire — if facts were \
+             empty this would never dispatch"
+        );
+
+        // Threshold above it → the same guard cannot fire, so nothing is sent.
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            100.0,
+            1,
+            Some(selector_with(0.9)),
+        );
+        app.update();
+        assert!(
+            team_systems(&app, npc)[0].is_none(),
+            "a guard above the seeded damage_fraction must not fire"
+        );
+    }
+
+    /// AC5 human takeover: with Repair human-held the AI never emits, so no team
+    /// leaves the bay however damaged the ship is.
+    #[test]
+    fn human_held_repair_stops_ai_dispatch() {
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Human,
+            50.0,
+            10.0,
+            2,
+            None,
+        );
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(
+            team_systems(&app, npc).iter().all(|s| s.is_none()),
+            "a human-held Repair system must not auto-dispatch"
+        );
+    }
+
+    /// AC3 + observable outcome: the authored ranking flows through the ordinary
+    /// typed input and the ordinary team-assignment path, so the picked
+    /// station's fine system actually gains HP.
+    #[test]
+    fn authored_ranking_restores_hull_through_the_normal_dispatch_path() {
+        let mut app = npc_repair_app();
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            10.0,
+            1,
+            None,
+        );
+        let before = app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .unwrap()
+            .0
+            .current_for(&SystemId("bravo-sys".into()))
+            .unwrap();
+        for _ in 0..200 {
+            app.update();
+        }
+        let after = app
+            .world()
+            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .unwrap()
+            .0
+            .current_for(&SystemId("bravo-sys".into()))
+            .unwrap();
+        assert!(
+            after > before,
+            "the ranked station's system must actually heal (before={before}, \
+             after={after})"
+        );
+    }
+
+    /// AC1/AC2 for the `core-bucket` source: a repair request naming the
+    /// ownerless `core` bucket dispatches `RepairTarget::Core` — observable as
+    /// the team slot's `core` system id — AND outranks a SAME-TIER but less
+    /// damaged real station.
+    ///
+    /// This is the regression that the station-owned reading path could not
+    /// see: `core` owns no station in `ShipConfig` (validation forbids one), so
+    /// the station scan reports `(0.0, 0.0, 0)` for it. Left seeded, the core
+    /// candidate scores nothing from the deficit ladder and the healthier
+    /// `helm` wins.
+    #[test]
+    fn core_bucket_request_outranks_less_damaged_same_tier_station() {
+        use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+
+        let mut app = npc_repair_app();
+        let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
+        resolver.set(
+            repair_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+
+        // `helm-sys` at 20/100 → Disabled, damage fraction 0.80, deficit 80.
+        // The ownerless `core` hull entry at 10/100 → Disabled, damage fraction
+        // 0.90, deficit 90. Same tier, so only the deficit ladder separates
+        // them — and only if the core candidate carries its real hull reading.
+        let mut hull = crate::damage::SystemHull::from_config(&[
+            (SystemId("helm-sys".into()), 100.0_f32),
+            (SystemId(REPAIR_CORE_BUCKET_KEY.into()), 100.0_f32),
+        ]);
+        hull.set_hp(&SystemId("helm-sys".into()), 20.0);
+        hull.set_hp(&SystemId(REPAIR_CORE_BUCKET_KEY.into()), 10.0);
+        assert_eq!(
+            hull.tier_for(&SystemId("helm-sys".into())),
+            DamageTier::Disabled
+        );
+        assert_eq!(
+            hull.tier_for(&SystemId(REPAIR_CORE_BUCKET_KEY.into())),
+            DamageTier::Disabled,
+            "the scenario only bites while both candidates share a tier"
+        );
+
+        let mut queue = RepairRequestQueue::default();
+        queue.push_or_merge(RepairQueueEntry {
+            station_id: "helm".into(),
+            station_label: "helm".into(),
+            tier: DamageTier::Disabled,
+            deficit: 80.0,
+        });
+        // `damage_sync` files an ownerless system's request under this id.
+        queue.push_or_merge(RepairQueueEntry {
+            station_id: REPAIR_CORE_BUCKET_KEY.into(),
+            station_label: REPAIR_CORE_BUCKET_KEY.into(),
+            tier: DamageTier::Disabled,
+            deficit: 90.0,
+        });
+
+        // NOTE: no station named `core` — `ShipConfig` validation forbids it,
+        // which is exactly why the core bucket needs its hull-side reading.
+        let config = crate::ship_plugin::ShipConfigComponent(ShipConfig {
+            stations: vec![],
+            systems: vec![SystemInstanceConfig {
+                id: SystemId("helm-sys".into()),
+                kind: "generic".into(),
+                station: Some(StationId("helm".into())),
+                ai_only: false,
+                power_group: None,
+                marker: None,
+                config: None,
+            }],
+            power_groups: Default::default(),
+            coordination_lag_secs: 2.0,
+        });
+
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::entity_spawner::EntityUuid("npc-repair-core".into()),
+                ShipSystemControlSources(resolver),
+                ShipRepairTeams(crate::repair_teams::RepairTeams::new(1)),
+                crate::entity_spawner::EntitySystemHull(hull),
+                crate::modifiers::ShipModifiers::new(),
+                queue,
+                config,
+                crate::messages::AdmittedCommands::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some(REPAIR_CORE_BUCKET_KEY),
+            "the more-damaged core bucket must win over the same-tier `helm` \
+             station, and must dispatch as RepairTarget::Core"
+        );
+    }
+
+    /// `pop_worst` / `peek` must not depend on queue insertion order when two
+    /// entries tie on tier and deficit (the residual `max_by` last-wins edge).
+    #[test]
+    fn queue_severity_tie_breaks_on_smallest_station_id() {
+        let entry = |station: &str| RepairQueueEntry {
+            station_id: station.into(),
+            station_label: station.into(),
+            tier: DamageTier::Damaged,
+            deficit: 10.0,
+        };
+        for order in [["alpha", "bravo"], ["bravo", "alpha"]] {
+            let mut rq = RepairRequestQueue::default();
+            for s in order {
+                rq.push_or_merge(entry(s));
+            }
+            assert_eq!(rq.peek().unwrap().station_id, "alpha");
+            assert_eq!(rq.pop_worst().unwrap().station_id, "alpha");
+        }
+    }
+
+    /// `seed_repair_facts` exposes every reading an authored guard can name.
+    #[test]
+    fn seed_repair_facts_exposes_observable_damage_readings() {
+        let facts = seed_repair_facts(&RepairCandidateReading {
+            tier_ordinal: 2,
+            deficit: 40.0,
+            damage_fraction: 0.4,
+            worst_system_damage_fraction: 0.6,
+            system_count: 3,
+            is_core: false,
+            source_repair_request: true,
+            assigned: false,
+        });
+        let near = |got: Option<f64>, want: f64| {
+            assert!(
+                got.is_some_and(|v| (v - want).abs() < 1e-6),
+                "expected ~{want}, got {got:?}"
+            );
+        };
+        assert_eq!(facts.get("tier_ordinal"), Some(2.0));
+        assert_eq!(facts.get("deficit"), Some(40.0));
+        near(facts.get("damage_fraction"), 0.4);
+        near(facts.get("worst_system_damage_fraction"), 0.6);
+        assert_eq!(facts.get("system_count"), Some(3.0));
+        assert_eq!(facts.get("is_core"), Some(0.0));
+        assert_eq!(facts.get("source_core_bucket"), Some(0.0));
+        assert_eq!(facts.get("source_repair_request"), Some(1.0));
+        assert_eq!(facts.get("assigned"), Some(0.0));
+
+        let self_facts = seed_repair_self_facts(2, 0.75, Some(3.0), true);
+        assert_eq!(self_facts.get("free_team_count"), Some(2.0));
+        near(self_facts.get("total_hull_health_fraction"), 0.75);
+        assert_eq!(self_facts.get("power_rating"), Some(3.0));
+        assert_eq!(self_facts.get("red_alert"), Some(1.0));
     }
 }

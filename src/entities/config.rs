@@ -1856,6 +1856,26 @@ pub const NAVIGATION_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_CHART_CONTACTS,
 ];
 
+/// Candidate source: stations the ship's coordination-delivered
+/// `RepairRequestQueue` reports as damaged (issue #785). This is the AC1
+/// "authoritative observable damage" surface: the Repair AI ranks only stations
+/// a `RepairRequest` actually delivered — issue #830 deliberately removed the
+/// raw hull poll, so a station nobody reported is not a candidate.
+pub const SELECTOR_SOURCE_DAMAGED_STATIONS: &str = "damaged-stations";
+/// Candidate source: the ownerless ship-wide `core` repair bucket (issue #785),
+/// the second [`crate::messages::RepairTarget`] variant. Surfaced as a candidate
+/// so an author can weight core repairs into the ranking; under the canonical
+/// policy it only becomes eligible once a `RepairRequest` names it, mirroring
+/// how `chart-contacts` enriches rather than independently steers Navigation.
+pub const SELECTOR_SOURCE_CORE_BUCKET: &str = "core-bucket";
+
+/// The registered candidate sources the Repair target selector may union
+/// (issue #785).
+pub const REPAIR_SELECTOR_SOURCES: &[&str] = &[
+    SELECTOR_SOURCE_DAMAGED_STATIONS,
+    SELECTOR_SOURCE_CORE_BUCKET,
+];
+
 /// Parse-time fallbacks for the default Tactical selector (AGENTS.md rule #11
 /// parse-defaults only). The retired tier order was
 /// `objective > retained > last-attacker > nearest`; each tier becomes an
@@ -1915,6 +1935,57 @@ const DEFAULT_SELECTOR_RADAR_WEIGHT: f32 = 1.0;
 const DEFAULT_NAV_OBJECTIVE_WEIGHT: f32 = 100.0;
 const DEFAULT_NAV_CHART_CONTACT_WEIGHT: f32 = 1.0;
 const DEFAULT_NAV_SWITCH_MARGIN: f32 = 0.0;
+
+/// Parse-time fallbacks for the default Repair selector (issue #785,
+/// AGENTS.md rule #11 parse-defaults only). The retired hardcoded Repair
+/// comparator sorted the repair-request queue by `(tier desc, deficit desc)`;
+/// here that becomes an additive utility over two ladders.
+///
+/// PRECEDENCE INVARIANT — tier STRICTLY dominates deficit. The tier ladder
+/// contributes `tier_weight` once per damage-tier ordinal step (Damaged = 1×,
+/// Disabled = 2×), while the deficit ladder contributes `deficit_weight` once
+/// per crossed damage-fraction band, so the maximum achievable deficit stack is
+///
+/// ```text
+///   3 × deficit_weight = 3 × 100 = 300  <  1000 = tier_weight
+/// ```
+///
+/// i.e. a single tier step always outranks the entire deficit ladder, exactly
+/// reproducing the retired comparator's "tier first, deficit only as the
+/// tie-break" ordering. Asserted in
+/// `default_repair_selector_tier_dominates_max_deficit_stack`.
+///
+/// The deficit ladder is a BANDED approximation of the retired continuous
+/// `deficit desc` tie-break, because an authored score term contributes a fixed
+/// weight when its boolean guard fires — the selector has no multiplicative
+/// term. Within one band the ranking falls through to the selector's documented
+/// smallest-key tie-break (station id), which is deterministic (AC4). Authors
+/// widen or narrow the bands via the `deficit_band_*` params without touching
+/// Rust.
+///
+/// WHY THE BANDS SIT INSIDE THE URGENT RANGE — do NOT "helpfully" realign them
+/// to the `DamageTier` thresholds (0.75 / 0.25 HP, `src/ship/damage.rs`). The
+/// deficit ladder only ever discriminates WITHIN one tier, because tier
+/// strictly dominates it. Bands placed AT the tier thresholds
+/// (0.25 / 0.5 / 0.75 damage fraction) are therefore all-or-nothing dead
+/// weight: every Disabled station is by definition above 0.75 damage, so all
+/// three bands fire for all of them and a station at 1/100 HP scores exactly
+/// what a station at 24/100 HP scores. Sitting inside the urgent range
+/// (0.80 / 0.90 / 0.95) instead, the ladder splits the Disabled tier into four
+/// buckets and the nearly-dead station actually outranks the barely-disabled
+/// one — which is the whole point of a tie-break. The Damaged tier's remaining
+/// span (0.25–0.75 damage) resolves on the deterministic station-id tie-break;
+/// an author who wants discrimination there re-points `deficit_band_low`.
+///
+/// `switch_margin` is 0: Repair's retained pick is the authoritative
+/// `TeamSlot`, and only Idle teams are dispatched, so there is no AI-side
+/// hysteresis to tune (see `operate_repair_ai`'s AC5 note).
+const DEFAULT_REPAIR_TIER_WEIGHT: f32 = 1000.0;
+const DEFAULT_REPAIR_DEFICIT_WEIGHT: f32 = 100.0;
+const DEFAULT_REPAIR_DEFICIT_BAND_LOW: f32 = 0.80;
+const DEFAULT_REPAIR_DEFICIT_BAND_MID: f32 = 0.90;
+const DEFAULT_REPAIR_DEFICIT_BAND_HIGH: f32 = 0.95;
+const DEFAULT_REPAIR_SWITCH_MARGIN: f32 = 0.0;
 
 /// One authored additive utility term (`[[sensors_console.selector.score]]`,
 /// issue #776): a guard expression plus the weight it contributes to a
@@ -2185,6 +2256,98 @@ pub fn default_navigation_target_selector_config() -> FineSystemAiSelectorToml {
             ScoreTermToml {
                 when: "candidate_fact(source_chart_contact) > 0".to_string(),
                 weight: DEFAULT_NAV_CHART_CONTACT_WEIGHT,
+            },
+        ],
+    }
+}
+
+/// The canonical default Repair target selector synthesised for ships that do
+/// not author `[repair.selector]` (issue #785).
+///
+/// Encodes the retired hardcoded Repair comparator as data. `operate_repair_ai`
+/// used to sort the repair-request queue by `(tier desc, deficit desc)` and hand
+/// the top unassigned station to the lowest free team; here the same ordering is
+/// an additive utility whose tier ladder strictly dominates its deficit ladder
+/// (see the PRECEDENCE INVARIANT on the constant block above).
+///
+/// Eligibility does the AC1 + AC2 work:
+///   - `source_repair_request > 0` — only stations coordination actually
+///     reported are ranked. This is what preserves the baseline: the
+///     `core-bucket` source is surfaced for authors but carries no repair
+///     request of its own, so by default it never independently selects (the
+///     same shape as Navigation's `chart-contacts`).
+///   - `assigned < 1` — a station a team is already Travelling to, Repairing,
+///     or that an earlier team in this same tick was just dispatched to, is
+///     excluded, so N free teams pick N DISTINCT stations (AC2/AC4).
+///
+/// All weights, bands and the switch margin are named parameters or parse-time
+/// defaults, so a designer retunes repair priority without Rust (rule #11).
+pub fn default_repair_target_selector_config() -> FineSystemAiSelectorToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert("tier_weight".to_string(), DEFAULT_REPAIR_TIER_WEIGHT);
+    param.insert("deficit_weight".to_string(), DEFAULT_REPAIR_DEFICIT_WEIGHT);
+    param.insert(
+        "deficit_band_low".to_string(),
+        DEFAULT_REPAIR_DEFICIT_BAND_LOW,
+    );
+    param.insert(
+        "deficit_band_mid".to_string(),
+        DEFAULT_REPAIR_DEFICIT_BAND_MID,
+    );
+    param.insert(
+        "deficit_band_high".to_string(),
+        DEFAULT_REPAIR_DEFICIT_BAND_HIGH,
+    );
+    FineSystemAiSelectorToml {
+        param,
+        sources: REPAIR_SELECTOR_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        // Repair candidates are the operating ship's OWN stations, so every
+        // candidate sits at the ship's position and the horizon never gates.
+        // Kept at the shared static outer bound for consistency with the other
+        // selector hosts.
+        horizon: DEFAULT_SELECTOR_HORIZON,
+        switch_margin: DEFAULT_REPAIR_SWITCH_MARGIN,
+        // AC2 eligibility: an unassigned, coordination-reported station whose
+        // damage is actually repairable. `tier_ordinal` is the DamageTier
+        // discriminant (Operational 0, Damaged 1, Disabled 2, Destroyed 3) — a
+        // structural enum ordinal, not a tunable gameplay value. Destroyed is
+        // excluded because a repair team alone cannot lift the latch.
+        eligibility: "candidate_fact(source_repair_request) > 0 \
+                      and candidate_fact(assigned) < 1 \
+                      and candidate_fact(tier_ordinal) > 0 \
+                      and candidate_fact(tier_ordinal) < 3"
+            .to_string(),
+        score: vec![
+            // Tier ladder — one `tier_weight` step per ordinal reached.
+            ScoreTermToml {
+                when: "candidate_fact(tier_ordinal) >= 1".to_string(),
+                weight: DEFAULT_REPAIR_TIER_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(tier_ordinal) >= 2".to_string(),
+                weight: DEFAULT_REPAIR_TIER_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(tier_ordinal) >= 3".to_string(),
+                weight: DEFAULT_REPAIR_TIER_WEIGHT,
+            },
+            // Deficit ladder — the banded stand-in for the retired continuous
+            // `deficit desc` tie-break. Bounded to 3 × deficit_weight so it can
+            // never overturn a tier step.
+            ScoreTermToml {
+                when: "candidate_fact(damage_fraction) >= param(deficit_band_low)".to_string(),
+                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(damage_fraction) >= param(deficit_band_mid)".to_string(),
+                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(damage_fraction) >= param(deficit_band_high)".to_string(),
+                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
             },
         ],
     }
@@ -3213,6 +3376,18 @@ pub struct RepairConfig {
     /// HP restored per second while a team is at a console.
     #[serde(default = "default_repair_rate_hp_per_sec")]
     pub repair_rate_hp_per_sec: f32,
+    /// Inline per-system target selector (issue #785). Loaded from
+    /// `[repair.selector]`; absent ⇒ the canonical
+    /// [`default_repair_target_selector_config`] is synthesised at spawn.
+    /// `operate_repair_ai` runs it once per free team to rank the ship's
+    /// damaged stations into ordinary admitted `DispatchRepairTeam` inputs.
+    ///
+    /// This is the first selector block that is NOT inside a `*_console`
+    /// section: repair teams are a ship-wide engineering capability whose
+    /// tunables already live under `[repair]`, so the selector joins them there
+    /// rather than inventing a `[repair_console]` table the wire never uses.
+    #[serde(default)]
+    pub selector: Option<FineSystemAiSelectorToml>,
 }
 
 fn default_repair_travel_duration_secs() -> f32 {
@@ -3228,6 +3403,7 @@ impl Default for RepairConfig {
             repair_team_count: 0,
             travel_duration_secs: default_repair_travel_duration_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
+            selector: None,
         }
     }
 }
@@ -3988,6 +4164,18 @@ impl EntityConfig {
             .and_then(|c| c.selector.as_ref())
         {
             validate_fine_system_ai_selector(sel, NAVIGATION_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
+        }
+
+        // Validate an authored inline Repair target selector before world
+        // activation (issue #785). Same deterministic content-error surface as
+        // the Sensors/Tactical/Navigation selectors above — `operate_repair_ai`
+        // emits admitted `DispatchRepairTeam` inputs from this ranking, so a
+        // malformed selector must fail the entity load rather than reach a live
+        // tick. `[repair.selector]` is the first selector block outside a
+        // `*_console` section.
+        if let Some(sel) = config.repair.as_ref().and_then(|c| c.selector.as_ref()) {
+            validate_fine_system_ai_selector(sel, REPAIR_SELECTOR_SOURCES)
                 .map_err(SerdeError::custom)?;
         }
 
@@ -8124,6 +8312,111 @@ eligibility = "candidate_fact(detectable) > 0"
             EntityConfig::from_toml(bad).is_err(),
             "unknown Tactical selector source must fail from_toml before world activation"
         );
+    }
+
+    // ── Repair selector (issue #785) ────────────────────────────────────────
+
+    /// BASELINE PRESERVATION: the default Repair selector reproduces the retired
+    /// `(tier desc, deficit desc)` comparator, so a single damage-tier step must
+    /// strictly dominate the entire deficit ladder.
+    #[test]
+    fn default_repair_selector_tier_dominates_max_deficit_stack() {
+        const {
+            // Three bands, each worth one `deficit_weight`.
+            let max_deficit_stack = 3.0 * DEFAULT_REPAIR_DEFICIT_WEIGHT;
+            assert!(max_deficit_stack < DEFAULT_REPAIR_TIER_WEIGHT);
+            // ...and it must survive hysteresis retention too.
+            assert!(max_deficit_stack < DEFAULT_REPAIR_TIER_WEIGHT - DEFAULT_REPAIR_SWITCH_MARGIN);
+            // The bands are a monotone ladder over the [0,1] damage fraction.
+            assert!(DEFAULT_REPAIR_DEFICIT_BAND_LOW < DEFAULT_REPAIR_DEFICIT_BAND_MID);
+            assert!(DEFAULT_REPAIR_DEFICIT_BAND_MID < DEFAULT_REPAIR_DEFICIT_BAND_HIGH);
+            assert!(DEFAULT_REPAIR_DEFICIT_BAND_HIGH < 1.0);
+            // ...and they sit INSIDE the urgent range, strictly above the
+            // Damaged→Disabled damage-fraction boundary (1 − 0.25 HP). Bands
+            // placed AT the tier thresholds all fire together for every
+            // Disabled station and discriminate nothing — see the const doc.
+            assert!(DEFAULT_REPAIR_DEFICIT_BAND_LOW > 1.0 - 0.25);
+        }
+    }
+
+    #[test]
+    fn default_repair_selector_config_validates() {
+        let cfg = default_repair_target_selector_config();
+        assert!(
+            validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).is_ok(),
+            "the canonical Repair selector must validate against its own sources"
+        );
+        assert!(
+            cfg.to_selector().is_ok(),
+            "the canonical Repair selector must resolve to a typed selector"
+        );
+    }
+
+    #[test]
+    fn repair_selector_rejects_unregistered_source() {
+        let mut cfg = default_repair_target_selector_config();
+        cfg.sources.push(SELECTOR_SOURCE_RADAR_CONTACTS.into());
+        let err = validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains(SELECTOR_SOURCE_RADAR_CONTACTS), "got: {err}");
+    }
+
+    #[test]
+    fn repair_selector_undeclared_param_is_rejected() {
+        let mut cfg = default_repair_target_selector_config();
+        cfg.eligibility = "candidate_fact(damage_fraction) >= param(nope)".to_string();
+        let err = validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("nope"), "got: {err}");
+    }
+
+    /// `[repair.selector]` is the first selector block outside a `*_console`
+    /// section; it parses, and bad content fails the entity load before any
+    /// live tick.
+    #[test]
+    fn repair_selector_parses_from_toml_and_bad_content_fails_entity_load() {
+        let good = r##"
+[repair]
+repair_team_count = 2
+
+[repair.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["damaged-stations", "core-bucket"]
+eligibility = "candidate_fact(source_repair_request) > 0"
+
+[[repair.selector.score]]
+when = "candidate_fact(tier_ordinal) >= 2"
+weight = 100.0
+"##;
+        let cfg = EntityConfig::from_toml(good).expect("valid [repair.selector] must parse");
+        let sel = cfg
+            .repair
+            .expect("repair section present")
+            .selector
+            .expect("selector present");
+        assert_eq!(sel.sources.len(), 2);
+        assert_eq!(sel.score.len(), 1);
+
+        let bad = r##"
+[repair]
+repair_team_count = 2
+
+[repair.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["not-a-real-source"]
+eligibility = "candidate_fact(source_repair_request) > 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad).is_err(),
+            "unknown Repair selector source must fail from_toml before world activation"
+        );
+    }
+
+    #[test]
+    fn repair_config_without_selector_defaults_to_none() {
+        let cfg = EntityConfig::from_toml("[repair]\nrepair_team_count = 2\n")
+            .expect("parse must succeed");
+        assert!(cfg.repair.expect("repair present").selector.is_none());
     }
 
     #[test]

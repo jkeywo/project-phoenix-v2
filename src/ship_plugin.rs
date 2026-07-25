@@ -24,7 +24,7 @@ pub(crate) use crate::ship::helm_ai::{
     AiHelmTickTimer, HelmAiSurfacesFrame,
 };
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
-pub use crate::ship::impulse_boost_systems::{handle_boost_messages, handle_impulse_messages};
+pub use crate::ship::impulse_boost_systems::handle_impulse_messages;
 pub(crate) use crate::ship::impulse_boost_systems::{tick_boost, tick_impulse};
 pub(crate) use crate::ship::physics_systems::{
     apply_helm_commands, integrate_ship_physics, sync_ship_position,
@@ -129,7 +129,6 @@ impl Plugin for ShipPlugin {
                     apply_helm_commands
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(handle_impulse_messages)
-                        .after(handle_boost_messages)
                         .after(process_helm_inputs)
                         .before(tick_impulse)
                         .before(tick_boost),
@@ -160,18 +159,6 @@ impl Plugin for ShipPlugin {
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(process_helm_inputs),
                     handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
-                    // Boost applier: since #780 it runs in `Physics` `.after`
-                    // `ai_helm_boost` (registered below) so the per-axis boost AI's
-                    // admitted `SetBoost` — emitted in `Physics` after the planner —
-                    // is consumed the SAME tick it is emitted, the same way
-                    // `process_helm_inputs` applies the other AI-emitted helm
-                    // commands. A human `SetBoost` (admitted before `Input`) is
-                    // still present in `AdmittedCommands` here, so the human path is
-                    // unchanged; `apply_helm_commands` keeps its `.after` edge so
-                    // the boost transition still lands before `tick_boost`.
-                    handle_boost_messages
-                        .in_set(crate::sim_sets::SimSet::Physics)
-                        .after(ai_helm_boost),
                     // Sole helm-path writer of ShipPhysics (issues #695, #699):
                     // reads the intent components written by
                     // `process_helm_inputs` (human/admission) and the per-axis
@@ -287,14 +274,18 @@ impl Plugin for ShipPlugin {
                 .run_if(ai_helm_tick_ready),
         );
 
-        // Per-axis helm AI: boost (issue #780). Same shape as its siblings —
-        // gated on the shared AI-helm sim tick, `.after(AiTickLabel)` for the
-        // decision frame, and `.before(handle_boost_messages)` so its emitted
-        // admitted `SetBoost` is turned into a `BoostCommand` this tick (the
-        // human boost path — `handle_boost_messages` — is the applier of admitted
-        // boost commands). It reads the planner's `HelmMotionPlan` hazard facts,
-        // so it also runs `.after(helm_motion_planner)`. Registered separately
-        // because the main tuple is at Bevy's 20-element limit.
+        // Per-axis helm AI: boost (issues #780, #881). Same shape as its
+        // siblings — gated on the shared AI-helm sim tick, `.after(AiTickLabel)`
+        // for the decision frame, and `.before(process_helm_inputs)` so its
+        // emitted admitted `SetBoost` is turned into a `BoostCommand` this tick.
+        // Since #881 that applier is `process_helm_inputs` for EVERY ship rather
+        // than the retired LocalShip-only `handle_boost_messages`, so a
+        // non-local NPC's boost decision now actually lands; the same-tick
+        // property is preserved because `apply_helm_commands` is
+        // `.after(process_helm_inputs)` and `.before(tick_boost)`. It reads the
+        // planner's `HelmMotionPlan` hazard facts, so it also runs
+        // `.after(helm_motion_planner)`. Registered separately because the main
+        // tuple is at Bevy's 20-element limit.
         app.add_systems(
             Update,
             ai_helm_boost
@@ -302,7 +293,7 @@ impl Plugin for ShipPlugin {
                 .after(crate::lobby::LobbySystemSet)
                 .after(crate::sim_sets::AiTickLabel)
                 .after(helm_motion_planner)
-                .before(handle_boost_messages)
+                .before(process_helm_inputs)
                 .run_if(ai_helm_tick_ready),
         );
 

@@ -39,8 +39,9 @@ pub(crate) fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Trans
 /// tick would fight any *other* code path (including test harnesses) that
 /// sets `ShipImpulse`/`ShipBoost` directly without going through the
 /// intent-command pipeline. Only a tick where the intent was actually
-/// written (by `ai_helm_impulse`'s AI decision, `handle_impulse_messages`,
-/// or `handle_boost_messages`) triggers a transition; `start_charge`/
+/// written (by `handle_impulse_messages`' hull-damage cancel, or by
+/// `process_helm_inputs` applying an admitted impulse/boost payload from
+/// either a human or an AI operator) triggers a transition; `start_charge`/
 /// `cancel_charge` and `activate`/`deactivate` are themselves idempotent,
 /// so re-applying an intent that happens to already match current state is
 /// harmless.
@@ -75,9 +76,11 @@ pub(crate) fn apply_helm_commands(
             }
         }
         if let (Some(mut boost), Some(cmd)) = (boost, boost_cmd) {
-            // Same insertion-tick exclusion as above; currently latent for
-            // boost since no AI path admits `ShipBoost` for NPCs, but kept
-            // consistent for when that changes.
+            // Same insertion-tick exclusion as above. Since issue #881 this
+            // is live for NPCs too: `process_helm_inputs` applies an admitted
+            // `SetBoost`/`ToggleBoost` for every ship, so a non-local
+            // `AiHighFidelity` NPC's boost policy engages here in the same
+            // tick it was decided.
             if cmd.is_changed() && !cmd.is_added() {
                 if cmd.0 {
                     boost.0.activate();

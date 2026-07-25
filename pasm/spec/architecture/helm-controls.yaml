@@ -101,11 +101,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Helm Control Router
-      summary: Authoritative per-entity applier that turns every ship's own admitted thrust, steering, lateral-thrust, and impulse commands into that ship's intent components; a separate shared integrator applies that intent to ship physics and drive state.
+      summary: Authoritative per-entity applier that turns every ship's own admitted thrust, steering, lateral-thrust, impulse, and boost commands into that ship's intent components; a separate shared integrator applies that intent to ship physics and drive state.
       rationale:
         - "Issue #824 (admission symmetry, pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md section 2): process_helm_inputs is per-entity — it loops every ship carrying AdmittedCommands and the intent bundle and applies admitted helm payloads to that ship's intents. An admitted command applies regardless of source: the per-axis operate_ai gates the router used to carry are deleted, because authority is checked once at admission (human tokens at the network gate, the per-axis helm AI's emissions through the shared validate_and_admit seam). Nothing downstream of admission branches on human-vs-AI."
         - "Issue #801 split the helm wire per axis: SetThrust targets the helm-thrust system and SetSteering targets helm-steering, replacing the combined HelmInput payload that targeted a coarse helm system. Admission is therefore per-axis, which fixes the #701 mismatch where a coarse-admitted human HelmInput fought a per-axis AI thrust write. The coarse helm and tactical systems were deleted; every wire target now names a declared system."
         - "Impulse and boost are separate host-owned drive states with their own declared systems since #801: impulse commands target helm-impulse and boost commands target the new helm-boost system. Since #824 the admitted StartImpulseCharge/CancelImpulse loop lives in process_helm_inputs for every ship (with the same BlocksImpulse region gate the human path always had); handle_impulse_messages retains only the LocalShip hull-damage auto-cancel, ordered earlier in the tick so an admitted command can still override it."
+        - "Issue #881 completed the same retirement for boost: handle_boost_messages was deleted and its admitted SetBoost/ToggleBoost loop folded into process_helm_inputs, so boost now applies for EVERY AI ship through this shared input arbiter rather than only the LocalShip. The old applier was filtered With<LocalShip> and read a single entity, so the admitted SetBoost that the helm-boost AI operator (#780) emits for a non-local AiHighFidelity NPC was admitted and then silently dropped. BoostCommand now has exactly one writer, the enabled BoostConfigResource guard is unchanged (a hull authoring no boost ignores the payload), and ToggleBoost's read-modify-write against the ship's own ShipBoost is identical for human and AI origins — nothing downstream of admission branches on origin (AGENTS.md #6). Same-tick ordering is preserved: ai_helm_boost is .before(process_helm_inputs) like its four siblings, and apply_helm_commands is .after(process_helm_inputs) and .before(tick_boost)."
         - "Issue #695 split admission from physics integration: the router only writes ThrustInput/SteeringInput/LateralThrustInput/ImpulseCommand/BoostCommand intent components instead of mutating ShipPhysics/ShipImpulse/ShipBoost directly. The shared integrate_ship_physics and apply_helm_commands systems in src/ship_plugin.rs perform the actual integration for any AiHighFidelity ship (the LocalShip and promoted NPCs alike), so the same intent surface serves both the human and helm-ai-operator paths."
         - "The 30 Hz HelmInputTimer sampling gate was deleted by #824: AdmittedCommands is cleared every tick at admission, so a sampling gate would silently drop AI commands emitted on frames the timer skipped. Commands apply the tick they are admitted."
     architecture:
@@ -150,7 +151,6 @@ entities:
         - register_helm_dispatch
         - process_helm_inputs
         - handle_impulse_messages
-        - handle_boost_messages
         - integrate_ship_physics
         - apply_helm_commands
         - compute_physics
@@ -1195,8 +1195,8 @@ entities:
       summary: New per-axis boost decide system whose stateless policy resolves the boost-channel engage_boost mode verb to decide whether to engage boost this tick; it emits an admitted SetBoost through the SAME command-admission seam a human uses, on-change only, when the boost feature is available.
       rationale:
         - "Issue #780 introduced AI boost for the first time. HelmBoostAiPolicy (attached at spawn from [helm_console.boost_ai], else default_boost_ai_config — explicit idle, no AI boost) resolves the boost channel to the engage_boost mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts). Fires ⇒ engage; holds ⇒ release. The idle default preserves the pre-#780 baseline (no AI boost) exactly."
-        - "Availability (AC6): boost capability is an ENABLED BoostConfigResource — absent or feature-disabled, the operator stands down and emits nothing (mirrors the human handle_boost_messages enabled-guard)."
-        - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Since #780 handle_boost_messages runs in Physics .after(ai_helm_boost) so the AI-emitted SetBoost is applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the shared ai_helm_tick cadence (AGENTS.md #7)."
+        - "Availability (AC6): boost capability is an ENABLED BoostConfigResource — absent or feature-disabled, the operator stands down and emits nothing (mirrors the shared applier's enabled-guard in process_helm_inputs)."
+        - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Issue #881 retired the LocalShip-only handle_boost_messages into process_helm_inputs, so this operator's emission now applies on EVERY AI ship rather than only the local one; before #881 a non-local NPC's SetBoost was admitted and never applied. Ordering is now identical to the four sibling actuators — ai_helm_boost is .before(process_helm_inputs), which is itself .before(apply_helm_commands) and thus .before(tick_boost) — so the AI-emitted SetBoost is still applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the shared ai_helm_tick cadence (AGENTS.md #7)."
     architecture:
       kind: service
       authority: authoritative
@@ -1215,7 +1215,7 @@ entities:
       paths:
         - src/ship/helm_ai.rs
         - src/ship/helm_ai_emit.rs
-        - src/ship/impulse_boost_systems.rs
+        - src/ship/helm_admission.rs
         - src/ai/policy.rs
         - src/entities/config.rs
       symbols:
@@ -1224,7 +1224,7 @@ entities:
         - HELM_BOOST_CHANNEL
         - HELM_ENGAGE_BOOST_VERB
         - default_boost_ai_config
-        - handle_boost_messages
+        - process_helm_inputs
         - seed_helm_actuator_facts
       tests:
         - cargo test

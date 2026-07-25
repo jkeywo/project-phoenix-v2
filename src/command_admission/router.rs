@@ -281,7 +281,7 @@ mod tests {
             sr::HELM_STEERING_SYSTEM_ID,  // helm: process_helm_inputs
             sr::HELM_IMPULSE_SYSTEM_ID,   // helm: process_helm_inputs
             sr::LATERAL_THRUST_SYSTEM_ID, // helm: process_helm_inputs
-            sr::HELM_BOOST_SYSTEM_ID,     // helm: handle_boost_messages
+            sr::HELM_BOOST_SYSTEM_ID,     // helm: process_helm_inputs
             sr::TACTICAL_RADAR_SYSTEM_ID, // weapons: tactical radar selection
             sr::PHASER_CONTROL_SYSTEM_ID, // weapons: phaser control
             sr::REPAIR_SYSTEM_ID,         // repair: handle_dispatch_repair_team

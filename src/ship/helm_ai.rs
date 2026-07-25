@@ -1788,8 +1788,9 @@ pub(crate) fn ai_helm_vertical_thrust(
 /// Per-axis helm AI: boost drive (issue #780). Decides engage/release for ships
 /// whose `helm-boost` system is AI-operated and emits it as an admitted
 /// `SetBoost { active }` into the ship's own `AdmittedCommands` — the SAME seam
-/// a human `SetBoost`/`ToggleBoost` passes through (`handle_boost_messages`),
-/// preserving human/AI symmetry (AGENTS.md #6).
+/// a human `SetBoost`/`ToggleBoost` passes through (`process_helm_inputs`,
+/// which since issue #881 applies boost for EVERY ship, not just the
+/// `LocalShip`), preserving human/AI symmetry (AGENTS.md #6).
 ///
 /// Modelled on [`ai_helm_impulse`]: discrete and on-change. Availability (AC6) is
 /// the presence of an *enabled* [`BoostConfigResource`] — no config, or a
@@ -1849,8 +1850,8 @@ pub(crate) fn ai_helm_boost(
 
         // Availability (AC6): the feature must be present AND enabled. No
         // BoostConfigResource, or one with the feature disabled, means no boost
-        // capability — emit nothing (mirrors the human `handle_boost_messages`
-        // enabled-guard).
+        // capability — emit nothing (mirrors the shared applier's
+        // `enabled`-guard in `process_helm_inputs`).
         let (Some(boost), Some(cfg)) = (boost_comp, boost_cfg) else {
             continue;
         };

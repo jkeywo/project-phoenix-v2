@@ -1,13 +1,12 @@
 use bevy::prelude::*;
 
 use crate::lobby::Sessions;
-use crate::messages::{AdmittedCommands, SystemControlPayload};
 use crate::server_app::{LocalShip, Ship};
 use crate::ship::components::{
     BoostConfigResource, ImpulseConfigResource, LastHelmInput, ShipConfigComponent,
     ShipSystemControlSources,
 };
-use crate::ship::helm::{BoostCommand, ImpulseCommand};
+use crate::ship::helm::ImpulseCommand;
 use crate::ship::helm_ai::helm_axes_operate_ai;
 use crate::simulation::{ShipBoost, ShipImpulse};
 
@@ -68,48 +67,13 @@ pub(crate) fn tick_impulse(
     }
 }
 
-/// Admission-only (issue #695): turns admitted `ToggleBoost`/`SetBoost`
-/// messages into a `BoostCommand` intent (the desired active state),
-/// rather than mutating `ShipBoost` directly. The shared
-/// `integrate_ship_physics` system applies the actual `activate`/
-/// `deactivate` transition (which itself enforces the battery-empty guard,
-/// same as the old direct `toggle()`/`activate()` calls did). No-op when
-/// the feature is disabled for this ship, matching the old behavior.
-pub fn handle_boost_messages(
-    ship_query: Query<
-        (&AdmittedCommands, Option<&BoostConfigResource>, &ShipBoost),
-        With<LocalShip>,
-    >,
-    mut boost_cmd_q: Query<&mut BoostCommand, With<LocalShip>>,
-) {
-    let Some((admitted, entity_cfg, entity_boost)) = ship_query.iter().next() else {
-        return;
-    };
-    let enabled = entity_cfg.map(|c| c.enabled).unwrap_or(false);
-    if !enabled {
-        return;
-    }
-    let mut desired_active = entity_boost.0.is_active();
-    let mut changed = false;
-    for cmd in admitted.for_target(crate::system_registry::HELM_BOOST_SYSTEM_ID) {
-        match &cmd.payload {
-            SystemControlPayload::ToggleBoost => {
-                desired_active = !desired_active;
-                changed = true;
-            }
-            SystemControlPayload::SetBoost { active } => {
-                desired_active = *active;
-                changed = true;
-            }
-            _ => {}
-        }
-    }
-    if changed {
-        if let Some(mut cmd_comp) = boost_cmd_q.iter_mut().next() {
-            cmd_comp.0 = desired_active;
-        }
-    }
-}
+// `handle_boost_messages` was retired by issue #881 into
+// `ship::helm_admission::process_helm_inputs`, the shared per-entity applier
+// that already carried the impulse payloads (issue #824 did the same
+// retirement for `handle_impulse_messages`' admission loop). It was
+// `With<LocalShip>` and read a single entity, so the admitted `SetBoost` that
+// `ai_helm_boost` (#780) emits for a non-local `AiHighFidelity` NPC never
+// reached `BoostCommand`. `BoostCommand` now has exactly one writer.
 
 fn normalized_boost_drain_factor(thrust: f32, steering: f32) -> f32 {
     thrust.clamp(-1.0, 1.0).abs() + steering.clamp(-1.0, 1.0).abs()
@@ -167,7 +131,7 @@ mod tests {
     use crate::entity_config::EntityConfig;
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::messages::ClientMessage;
+    use crate::messages::{ClientMessage, SystemControlPayload};
     use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;

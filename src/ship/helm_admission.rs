@@ -5,10 +5,12 @@ use crate::messages::{
 };
 use crate::region_plugin::RegionMembership;
 use crate::server_app::LocalShip;
-use crate::ship::components::{LastHelmInput, ShipSystemControlSources};
+use crate::ship::components::{BoostConfigResource, LastHelmInput, ShipSystemControlSources};
 use crate::ship::helm::{
-    ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
+    BoostCommand, ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput,
+    VerticalThrustInput,
 };
+use crate::simulation::ShipBoost;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -70,6 +72,16 @@ fn entity_inside_blocks_impulse(
 /// had. Hull-damage auto-cancel stays in `handle_impulse_messages`, which
 /// runs earlier (`SimSet::Input`) so an admitted command can still override
 /// it within the same tick — matching the old sequential order.
+///
+/// Boost `SetBoost`/`ToggleBoost` are applied here for every ship too (issue
+/// #881), following the same retirement #824 did for impulse: the old
+/// `handle_boost_messages` was `With<LocalShip>` and read a single entity, so
+/// the admitted `SetBoost` `ai_helm_boost` (#780) emits for a *non-local*
+/// `AiHighFidelity` NPC was admitted and then silently dropped. `BoostCommand`
+/// now has exactly one writer, and nothing below admission branches on origin
+/// (AGENTS.md #6). The `enabled` guard is unchanged — an absent or
+/// feature-disabled `BoostConfigResource` means the hull authors no boost, and
+/// the payload is ignored.
 pub(crate) fn process_helm_inputs(
     membership: Option<Res<RegionMembership>>,
     region_query: Query<&crate::entity_spawner::RegionEffectsSection>,
@@ -82,6 +94,9 @@ pub(crate) fn process_helm_inputs(
         Option<&mut LateralThrustInput>,
         Option<&mut VerticalThrustInput>,
         Option<&mut ImpulseCommand>,
+        Option<&mut BoostCommand>,
+        Option<&BoostConfigResource>,
+        Option<&ShipBoost>,
         Has<LocalShip>,
     )>,
 ) {
@@ -94,6 +109,9 @@ pub(crate) fn process_helm_inputs(
         mut lateral_in,
         mut vertical_in,
         mut impulse_cmd,
+        mut boost_cmd,
+        boost_cfg,
+        ship_boost,
         is_local,
     ) in ships.iter_mut()
     {
@@ -102,6 +120,18 @@ pub(crate) fn process_helm_inputs(
         if admitted.0.is_empty() {
             continue;
         }
+
+        // Boost capability gate, evaluated once per ship: a hull that authors no
+        // `[helm_console.boost]` (or authors it disabled) has no boost system to
+        // command. Mirrors the retired `handle_boost_messages` guard exactly.
+        let boost_enabled = boost_cfg.map(|c| c.enabled).unwrap_or(false);
+        // Accumulated across this tick's admitted boost payloads so a
+        // `ToggleBoost` pair cancels out, then written ONCE at the end — the
+        // retired applier's shape. Left `None` when no boost payload was
+        // admitted so `BoostCommand` is not touched, which matters:
+        // `apply_helm_commands` transitions on `Ref::is_changed`, and a
+        // write-every-tick would fight code that sets `ShipBoost` directly.
+        let mut desired_boost: Option<bool> = None;
 
         for cmd in admitted.0.iter() {
             match (&cmd.target.0, &cmd.payload) {
@@ -185,7 +215,33 @@ pub(crate) fn process_helm_inputs(
                         ic.0 = crate::impulse::ImpulsePhase::Idle;
                     }
                 }
+                // Boost (issue #881). The `enabled` guard lives in the arm
+                // guard, so a payload for a boost-less hull falls through to
+                // `_ => {}` — the same no-op the retired applier's early
+                // return produced.
+                (t, SystemControlPayload::SetBoost { active })
+                    if t.as_str() == crate::system_registry::HELM_BOOST_SYSTEM_ID
+                        && boost_enabled =>
+                {
+                    desired_boost = Some(*active);
+                }
+                (t, SystemControlPayload::ToggleBoost)
+                    if t.as_str() == crate::system_registry::HELM_BOOST_SYSTEM_ID
+                        && boost_enabled =>
+                {
+                    // Read-modify-write against this ship's live `ShipBoost`,
+                    // or against an earlier payload in the same tick.
+                    let current = desired_boost
+                        .unwrap_or_else(|| ship_boost.map(|b| b.0.is_active()).unwrap_or(false));
+                    desired_boost = Some(!current);
+                }
                 _ => {}
+            }
+        }
+
+        if let Some(active) = desired_boost {
+            if let Some(bc) = boost_cmd.as_deref_mut() {
+                bc.0 = active;
             }
         }
     }
@@ -600,6 +656,188 @@ mod tests {
             thrust_input_of(&app, npc),
             0.0,
             "an ai: token must be refused when the owning ship's helm-thrust is human-held"
+        );
+    }
+
+    // ── Boost applies on every AI ship, not only the local one (issue #881) ──
+
+    /// AC1/AC5 (issue #881): an admitted `SetBoost` on a NON-`LocalShip`
+    /// `AiHighFidelity` NPC reaches `BoostCommand` and engages `ShipBoost` in
+    /// the same tick. Before #881 the only `SetBoost` → `BoostCommand`
+    /// converter was `handle_boost_messages`, filtered `With<LocalShip>` and
+    /// reading a single entity, so `ai_helm_boost`'s admitted `SetBoost` for a
+    /// non-local NPC was admitted and then silently dropped.
+    #[test]
+    fn admitted_set_boost_engages_a_non_local_npc() {
+        let mut app = test_app();
+
+        // A boost-capable NPC with the helm-boost system on AI. No
+        // `ShipPhysics`, so `ai_helm_boost` itself skips this entity — the
+        // only boost writer under test is the shared applier.
+        let mut sources = ShipSystemControlSources::default();
+        sources.0.set(
+            crate::system_registry::helm_boost_system_id(),
+            ControlSource::Ai,
+        );
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::ai_plugin::AiHighFidelity,
+                crate::ship::components::ShipConfigComponent::default(),
+                sources,
+                crate::messages::AdmittedCommands::default(),
+                crate::ship::components::BoostConfigResource {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ShipBoost::default(),
+                BoostCommand::default(),
+            ))
+            .id();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(&uuid, npc);
+        let token = format!("ai:{uuid}");
+
+        assert!(!app.world().entity(npc).get::<BoostCommand>().unwrap().0);
+
+        // Burn one tick so the spawn-tick `is_added` exclusion in
+        // `apply_helm_commands` is behind us, exactly as it is for a
+        // LOD-promoted NPC in production.
+        tick(&mut app);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_boost_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            },
+        );
+        tick(&mut app);
+
+        assert!(
+            app.world().entity(npc).get::<BoostCommand>().unwrap().0,
+            "an admitted SetBoost must reach a non-LocalShip NPC's BoostCommand"
+        );
+        assert!(
+            app.world()
+                .entity(npc)
+                .get::<ShipBoost>()
+                .unwrap()
+                .0
+                .is_active(),
+            "the NPC's BoostCommand must engage ShipBoost in the same tick"
+        );
+    }
+
+    /// AC2 (issue #881): `ToggleBoost` behaves identically for an AI origin —
+    /// nothing downstream of admission branches on who sent it.
+    #[test]
+    fn admitted_toggle_boost_engages_a_non_local_npc() {
+        let mut app = test_app();
+
+        let mut sources = ShipSystemControlSources::default();
+        sources.0.set(
+            crate::system_registry::helm_boost_system_id(),
+            ControlSource::Ai,
+        );
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::ai_plugin::AiHighFidelity,
+                crate::ship::components::ShipConfigComponent::default(),
+                sources,
+                crate::messages::AdmittedCommands::default(),
+                crate::ship::components::BoostConfigResource {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ShipBoost::default(),
+                BoostCommand::default(),
+            ))
+            .id();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(&uuid, npc);
+        let token = format!("ai:{uuid}");
+
+        tick(&mut app);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_boost_system_id(),
+                payload: SystemControlPayload::ToggleBoost,
+            },
+        );
+        tick(&mut app);
+
+        assert!(
+            app.world().entity(npc).get::<BoostCommand>().unwrap().0,
+            "ToggleBoost from an AI origin must engage the NPC's boost, same as a human's"
+        );
+    }
+
+    /// AC3 (issue #881): a hull that authors no boost is unaffected — the
+    /// `enabled` guard is unchanged by the applier relocation.
+    #[test]
+    fn admitted_set_boost_is_ignored_without_an_enabled_boost_config() {
+        let mut app = test_app();
+
+        let mut sources = ShipSystemControlSources::default();
+        sources.0.set(
+            crate::system_registry::helm_boost_system_id(),
+            ControlSource::Ai,
+        );
+        let npc = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Ship,
+                crate::ai_plugin::AiHighFidelity,
+                crate::ship::components::ShipConfigComponent::default(),
+                sources,
+                crate::messages::AdmittedCommands::default(),
+                // No BoostConfigResource at all: no authored boost.
+                ShipBoost::default(),
+                BoostCommand::default(),
+            ))
+            .id();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .resource_mut::<crate::ai::server::AiTokenRegistry>()
+            .register_with_entity(&uuid, npc);
+        let token = format!("ai:{uuid}");
+
+        tick(&mut app);
+
+        push(
+            &mut app,
+            &token,
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::helm_boost_system_id(),
+                payload: SystemControlPayload::SetBoost { active: true },
+            },
+        );
+        tick(&mut app);
+
+        assert!(
+            !app.world().entity(npc).get::<BoostCommand>().unwrap().0,
+            "a hull authoring no boost must ignore SetBoost"
+        );
+        assert!(
+            !app.world()
+                .entity(npc)
+                .get::<ShipBoost>()
+                .unwrap()
+                .0
+                .is_active(),
+            "a hull authoring no boost must never engage ShipBoost"
         );
     }
 

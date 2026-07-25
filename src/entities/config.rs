@@ -1535,168 +1535,6 @@ fn default_cinematic_yaw_follow_rate() -> f32 {
     45.0
 }
 
-/// AI tuning parameters for the power reactor AI controller (issue #693).
-///
-/// Loaded from `[power.ai]` in the ship entity TOML. Feeds the
-/// timer/hysteresis-based `console_ai::tick_power_movement_rule` /
-/// `tick_power_red_alert_rule` pure functions via
-/// `crate::ship::power::PowerAiConfigResource`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PowerAiConfigToml {
-    /// Thrust level (0.0-1.0) above which the movement rule considers the
-    /// ship actively driving.
-    #[serde(default = "default_movement_thrust_threshold")]
-    pub movement_thrust_threshold: f32,
-    /// Seconds of sustained thrust required before the movement rule
-    /// engages the helm power overflow.
-    #[serde(default = "default_movement_engage_delay_secs")]
-    pub movement_engage_delay_secs: f32,
-    /// Battery percentage (0.0-100.0) required to engage the helm power
-    /// overflow.
-    #[serde(default = "default_movement_battery_engage_min_pct")]
-    pub movement_battery_engage_min_pct: f32,
-    /// Battery percentage (0.0-100.0) required to re-arm the movement rule
-    /// after it disengages.
-    #[serde(default = "default_movement_battery_recharge_pct")]
-    pub movement_battery_recharge_pct: f32,
-    /// Seconds red alert must persist before the red-alert rule engages the
-    /// weapons power overflow.
-    #[serde(default = "default_red_alert_engage_delay_secs")]
-    pub red_alert_engage_delay_secs: f32,
-    /// Battery percentage (0.0-100.0) required to engage the weapons power
-    /// overflow on red alert.
-    #[serde(default = "default_red_alert_battery_engage_min_pct")]
-    pub red_alert_battery_engage_min_pct: f32,
-    /// Battery percentage (0.0-100.0) required to re-arm the red-alert rule
-    /// after it disengages.
-    #[serde(default = "default_red_alert_battery_recharge_pct")]
-    pub red_alert_battery_recharge_pct: f32,
-    /// Data-authored per-group rules (issue #762). When this array is
-    /// non-empty it fully drives the power AI and the flat `movement_*` /
-    /// `red_alert_*` fields above are ignored; when it is empty those flat
-    /// fields synthesise the two canonical legacy rules (back-compat).
-    #[serde(default)]
-    pub rule: Vec<PowerAiRuleToml>,
-}
-
-impl PowerAiConfigToml {
-    /// Resolve this `[power.ai]` block into the pure per-rule list the
-    /// evaluator consumes (issue #762).
-    ///
-    /// Prefers the authored `[[power.ai.rule]]` array; falls back to
-    /// synthesising the two canonical rules (helm←thrust, weapons←red alert)
-    /// from the flat legacy fields so existing ship TOMLs keep working.
-    pub fn to_ai_rules(&self) -> Vec<crate::console_ai::PowerAiRule> {
-        if !self.rule.is_empty() {
-            return self.rule.iter().map(PowerAiRuleToml::to_rule).collect();
-        }
-        vec![
-            crate::console_ai::PowerAiRule {
-                group: crate::modifiers::power_system::HELM_POWER_GROUP.to_string(),
-                trigger: crate::console_ai::PowerRuleTrigger::Thrust {
-                    threshold: self.movement_thrust_threshold,
-                },
-                min_battery_reserve: self.movement_battery_engage_min_pct,
-                battery_recharge_pct: self.movement_battery_recharge_pct,
-                engage_delay_secs: self.movement_engage_delay_secs,
-                nudge: 1,
-            },
-            crate::console_ai::PowerAiRule {
-                group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-                trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
-                min_battery_reserve: self.red_alert_battery_engage_min_pct,
-                battery_recharge_pct: self.red_alert_battery_recharge_pct,
-                engage_delay_secs: self.red_alert_engage_delay_secs,
-                nudge: 1,
-            },
-        ]
-    }
-}
-
-/// One authored `[[power.ai.rule]]` entry (issue #762).
-///
-/// `trigger` is a string tag: `"thrust"` arms on sustained forward thrust
-/// (using `thrust_threshold`); `"red_alert"` arms while the ship is at red
-/// alert. Each rule carries its own `min_battery_reserve` floor.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PowerAiRuleToml {
-    /// Target power group id (must be an authored `[power_groups.*]` key).
-    pub group: String,
-    /// Trigger tag: `"thrust"` or `"red_alert"`.
-    pub trigger: String,
-    /// Thrust (0.0-1.0) above which a `"thrust"` trigger arms. Ignored by
-    /// other triggers.
-    #[serde(default = "default_movement_thrust_threshold")]
-    pub thrust_threshold: f32,
-    /// Seconds the trigger must persist before engaging.
-    #[serde(default = "default_rule_engage_delay_secs")]
-    pub engage_delay_secs: f32,
-    /// Battery floor (0.0-100.0) below which this rule can never engage.
-    #[serde(default = "default_rule_min_battery_reserve")]
-    pub min_battery_reserve: f32,
-    /// Battery % that must be reached to re-arm after a disengage.
-    #[serde(default = "default_red_alert_battery_recharge_pct")]
-    pub battery_recharge_pct: f32,
-    /// Allocation delta applied to the group on engage (removed on disengage).
-    #[serde(default = "default_rule_nudge")]
-    pub nudge: i16,
-}
-
-impl PowerAiRuleToml {
-    fn to_rule(&self) -> crate::console_ai::PowerAiRule {
-        let trigger = match self.trigger.as_str() {
-            "red_alert" => crate::console_ai::PowerRuleTrigger::RedAlert,
-            // "thrust" and any unrecognised tag fall back to a thrust trigger
-            // (the parse-time default). Data authors get the flat threshold.
-            _ => crate::console_ai::PowerRuleTrigger::Thrust {
-                threshold: self.thrust_threshold,
-            },
-        };
-        crate::console_ai::PowerAiRule {
-            group: self.group.clone(),
-            trigger,
-            min_battery_reserve: self.min_battery_reserve,
-            battery_recharge_pct: self.battery_recharge_pct,
-            engage_delay_secs: self.engage_delay_secs,
-            nudge: self.nudge,
-        }
-    }
-}
-
-fn default_rule_engage_delay_secs() -> f32 {
-    3.0
-}
-fn default_rule_min_battery_reserve() -> f32 {
-    50.0
-}
-fn default_rule_nudge() -> i16 {
-    1
-}
-
-fn default_movement_thrust_threshold() -> f32 {
-    0.7
-}
-fn default_movement_engage_delay_secs() -> f32 {
-    3.0
-}
-fn default_movement_battery_engage_min_pct() -> f32 {
-    50.0
-}
-fn default_movement_battery_recharge_pct() -> f32 {
-    100.0
-}
-fn default_red_alert_engage_delay_secs() -> f32 {
-    3.0
-}
-fn default_red_alert_battery_engage_min_pct() -> f32 {
-    10.0
-}
-fn default_red_alert_battery_recharge_pct() -> f32 {
-    100.0
-}
-
 // ── Inline stateless fine-system AI policy (issue #775) ───────────────────────
 
 /// Parse-time fallback for the Captain Red Alert combat window, in seconds.
@@ -1706,6 +1544,32 @@ fn default_red_alert_battery_recharge_pct() -> f32 {
 /// `[captain_console.ai]`. Authors override it via the named
 /// `combat_window_secs` parameter, so no gameplay value is pinned in Rust.
 pub const DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS: f32 = 10.0;
+
+// ── Parse-time defaults for the synthesised Power allocation policy (#784) ────
+//
+// Sanctioned by AGENTS.md rule #11 as parse-defaults + vocabulary only: they
+// seed the synthesised [`default_power_ai_config`] for ships that do not author
+// `[power.ai_policy]`, reproducing the retired stateful engine's baseline. A
+// ship authoring the block overrides all of these with its own `param` reserves
+// and per-rule `level` payloads, so no gameplay value is pinned in Rust.
+
+/// Forward-thrust level (0.0–1.0) above which the default helm-elevation rule
+/// fires. Matches the retired `movement_thrust_threshold` default.
+pub const DEFAULT_POWER_THRUST_THRESHOLD: f32 = 0.7;
+/// Minimum battery reserve (0–100) for the default helm-elevation rule. Matches
+/// the retired `movement_battery_engage_min_pct` default.
+pub const DEFAULT_POWER_HELM_RESERVE: f32 = 50.0;
+/// Minimum battery reserve (0–100) for the default weapons-elevation rule.
+/// Matches the retired `red_alert_battery_engage_min_pct` default.
+pub const DEFAULT_POWER_WEAPONS_RESERVE: f32 = 10.0;
+/// Absolute allocation level the default elevate rules raise their group to.
+/// The canonical groups seed at level 2, so this reproduces the retired `+1`
+/// nudge (2 → 3) as an absolute target.
+pub const DEFAULT_POWER_ELEVATED_LEVEL: u8 = 3;
+/// Absolute allocation level the default baseline (fallback) rules hold their
+/// group at — the canonical seeded level, so a calm ship's baseline emit is a
+/// no-op the host skips.
+pub const DEFAULT_POWER_BASELINE_LEVEL: u8 = 2;
 
 /// The `red_alert` output channel: the one channel the Captain policy drives.
 pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
@@ -1888,6 +1752,48 @@ pub const SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM: &str = "min_damage_window_secs";
 pub const SHIELD_FOCUS_DAMAGE_PCT_PARAM: &str = "damage_pct_threshold";
 /// Authored policy-parameter name: the health-imbalance fallback ratio (0–100).
 pub const SHIELD_FOCUS_HEALTH_RATIO_PARAM: &str = "health_ratio_threshold";
+
+// ── Power group allocation fine-system AI policy verb (issue #784) ────────────
+//
+// The Power reactor fine system allocates the ship's battery budget across the
+// ship's AUTHORED power groups. The #784 conversion moves Power onto the same
+// inline stateless `FineSystemAiConfigToml` spine as #779–#783, with two
+// novelties: (1) the output CHANNELS are the ship's `[power_groups.*]` keys —
+// dynamic per-ship data, not a fixed const slice — so the valid-channel set is
+// built at load from ship data (AC1 "no fixed catalogue"); (2) the
+// `set_power_group_allocation` verb is the FIRST verb to carry a MAGNITUDE — an
+// absolute target level — in its payload (every prior verb was value-less or the
+// boolean `set_red_alert`). The applier re-clamps to the per-group `[1, max]`
+// range and the ship-wide `total <= 8` cap, so an absolute level is safe and
+// idempotent; the host skips the emit when `level == current`.
+
+/// The `set_power_group_allocation` verb: set the rule's power group to an
+/// absolute target level. Its magnitude is the authored per-rule `level`
+/// payload — never an inline Rust number (AGENTS.md rule #11).
+pub const POWER_SET_ALLOCATION_VERB: &str = "set_power_group_allocation";
+
+/// Authored policy-parameter name: the forward-thrust level (0.0–1.0) above
+/// which the default helm-elevation rule considers the ship actively driving.
+pub const POWER_THRUST_THRESHOLD_PARAM: &str = "thrust_threshold";
+/// Authored policy-parameter name: the minimum battery reserve (0–100) the
+/// default helm-elevation rule requires before raising helm power (AC2).
+pub const POWER_HELM_RESERVE_PARAM: &str = "min_reserve_helm";
+/// Authored policy-parameter name: the minimum battery reserve (0–100) the
+/// default weapons-elevation rule requires before raising weapons power (AC2).
+pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
+/// Authored policy-parameter name: the (zero) reserve the default LOWERING
+/// baseline rules reference so every rule declares a reserve (AC2) without ever
+/// gating a de-allocation, which can never cause a brownout.
+pub const POWER_BASELINE_RESERVE_PARAM: &str = "min_reserve_baseline";
+
+/// Host-seeded fact name: current battery charge as a percentage (0–100). The
+/// reserve guard `fact(battery_pct) >= param(min_reserve_*)` reads this; it is
+/// the stateless brownout-avoidance predicate (AC5).
+pub const POWER_BATTERY_PCT_FACT: &str = "battery_pct";
+/// Host-seeded fact name: latest forward thrust (0.0–1.0) from `LastHelmInput`.
+pub const POWER_THRUST_FACT: &str = "thrust";
+/// Host-seeded fact name: red-alert state as `1.0`/`0.0`.
+pub const POWER_RED_ALERT_FACT: &str = "red_alert";
 
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
@@ -2345,6 +2251,11 @@ pub struct FineSystemAiRuleToml {
     /// Boolean output value for boolean-channel verbs. Defaults to `false`.
     #[serde(default)]
     pub value: bool,
+    /// Magnitude payload for value-carrying verbs (issue #784). Currently the
+    /// absolute target level for `set_power_group_allocation`; ignored by
+    /// value-less and boolean verbs. Defaults to `0`.
+    #[serde(default)]
+    pub level: u8,
 }
 
 /// Inline stateless AI policy for an AI-capable fine system
@@ -2420,6 +2331,12 @@ impl FineSystemAiConfigToml {
                 // four arcs is focused comes from the retained ranking kernel in
                 // the host context, not the policy.
                 SHIELD_FOCUS_VERB => crate::ai::policy::AiPolicyVerb::FocusShieldArc,
+                // Power group allocation verb (issue #784): the FIRST verb to
+                // carry a magnitude. The absolute target level is the authored
+                // per-rule `level` payload, never an inline Rust number.
+                POWER_SET_ALLOCATION_VERB => {
+                    crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(r.level)
+                }
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2460,6 +2377,7 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 when: "fact(secs_since_combat) < param(combat_window_secs)".to_string(),
                 verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
                 value: true,
+                level: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2467,6 +2385,7 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 when: "true".to_string(),
                 verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
                 value: false,
+                level: 0,
             },
         ],
     }
@@ -2491,6 +2410,7 @@ pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: HELM_ACTUATE_DESIRED_TRAVEL_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2509,6 +2429,7 @@ pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: HELM_ACTUATE_DESIRED_FACING_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2531,6 +2452,7 @@ pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: HELM_ACTUATE_LATERAL_THRUST_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2554,6 +2476,7 @@ pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: HELM_ACTUATE_VERTICAL_THRUST_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2576,6 +2499,7 @@ pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: HELM_ENGAGE_IMPULSE_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2617,6 +2541,7 @@ pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: PHASER_FIRE_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2670,6 +2595,7 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
                 ),
                 verb: SHIELD_FOCUS_VERB.to_string(),
                 value: false,
+                level: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2677,6 +2603,103 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
                 when: "true".to_string(),
                 verb: SHIELD_FOCUS_VERB.to_string(),
                 value: false,
+                level: 0,
+            },
+        ],
+    }
+}
+
+/// The canonical default Power allocation policy synthesised for ships that do
+/// not author `[power.ai_policy]` (issue #784).
+///
+/// Reproduces the retired stateful engine's two behaviours as inline stateless
+/// per-group rules with reserve guards, so OMITTING the block preserves baseline
+/// behaviour:
+///   - `helm`: a priority-10 rule that elevates helm power to level 3 while
+///     forward thrust is sustained AND the battery is at or above the authored
+///     `min_reserve_helm` floor, with a priority-0 `true` fallback that holds
+///     helm at its baseline level 2.
+///   - `weapons`: the same shape keyed on red alert with a `min_reserve_weapons`
+///     floor.
+///
+/// Every rule declares a MINIMUM PERMITTED BATTERY RESERVE (AC2): the elevate
+/// rules gate on `fact(battery_pct) >= param(min_reserve_*)`, and the baseline
+/// rules — which only ever LOWER allocation — carry a `0` reserve param so they
+/// too declare one while never being able to cause a brownout. Because an
+/// elevate guard cannot fire below its reserve, allocation never rises when the
+/// battery can't sustain it (AC5 brownout avoidance) — replacing the retired
+/// global emergency exception with per-rule reserve guards.
+///
+/// The magnitudes (3 elevated, 2 baseline) and thresholds are parse-time
+/// defaults + vocabulary in Rust (sanctioned by AGENTS.md rule #11); a ship that
+/// authors `[power.ai_policy]` overrides them entirely with its own `level`
+/// payloads and `param` reserves. Groups the ship authors but this default does
+/// not name (e.g. `sensors`, `ops`) resolve to `None` and hold their seeded
+/// level.
+pub fn default_power_ai_config() -> FineSystemAiConfigToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert(
+        POWER_THRUST_THRESHOLD_PARAM.to_string(),
+        DEFAULT_POWER_THRUST_THRESHOLD,
+    );
+    param.insert(
+        POWER_HELM_RESERVE_PARAM.to_string(),
+        DEFAULT_POWER_HELM_RESERVE,
+    );
+    param.insert(
+        POWER_WEAPONS_RESERVE_PARAM.to_string(),
+        DEFAULT_POWER_WEAPONS_RESERVE,
+    );
+    // A shared zero-reserve param the lowering baseline rules reference so every
+    // rule declares a reserve (AC2) without ever gating a de-allocation.
+    param.insert(POWER_BASELINE_RESERVE_PARAM.to_string(), 0.0);
+    let helm = crate::modifiers::power_system::HELM_POWER_GROUP;
+    let weapons = crate::modifiers::power_system::WEAPONS_POWER_GROUP;
+    FineSystemAiConfigToml {
+        idle: false,
+        param,
+        rule: vec![
+            FineSystemAiRuleToml {
+                priority: 10,
+                channel: helm.to_string(),
+                when: format!(
+                    "fact({POWER_THRUST_FACT}) >= param({POWER_THRUST_THRESHOLD_PARAM}) \
+                     and fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_HELM_RESERVE_PARAM})"
+                ),
+                verb: POWER_SET_ALLOCATION_VERB.to_string(),
+                value: false,
+                level: DEFAULT_POWER_ELEVATED_LEVEL,
+            },
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: helm.to_string(),
+                when: format!(
+                    "fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_BASELINE_RESERVE_PARAM})"
+                ),
+                verb: POWER_SET_ALLOCATION_VERB.to_string(),
+                value: false,
+                level: DEFAULT_POWER_BASELINE_LEVEL,
+            },
+            FineSystemAiRuleToml {
+                priority: 10,
+                channel: weapons.to_string(),
+                when: format!(
+                    "fact({POWER_RED_ALERT_FACT}) > 0 \
+                     and fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_WEAPONS_RESERVE_PARAM})"
+                ),
+                verb: POWER_SET_ALLOCATION_VERB.to_string(),
+                value: false,
+                level: DEFAULT_POWER_ELEVATED_LEVEL,
+            },
+            FineSystemAiRuleToml {
+                priority: 0,
+                channel: weapons.to_string(),
+                when: format!(
+                    "fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_BASELINE_RESERVE_PARAM})"
+                ),
+                verb: POWER_SET_ALLOCATION_VERB.to_string(),
+                value: false,
+                level: DEFAULT_POWER_BASELINE_LEVEL,
             },
         ],
     }
@@ -2697,6 +2720,7 @@ pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: BLASTER_FIRE_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2722,6 +2746,7 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
                 when: "true".to_string(),
                 verb: TORPEDO_LOAD_VERB.to_string(),
                 value: false,
+                level: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2729,6 +2754,7 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
                 when: "true".to_string(),
                 verb: TORPEDO_LAUNCH_VERB.to_string(),
                 value: false,
+                level: 0,
             },
         ],
     }
@@ -2750,6 +2776,7 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
             when: "true".to_string(),
             verb: TORPEDO_MAGAZINE_GRANT_VERB.to_string(),
             value: false,
+            level: 0,
         }],
     }
 }
@@ -2811,9 +2838,20 @@ pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
     pub emergency_threshold: f32,
-    /// AI tuning parameters loaded from `[power.ai]`.
+    /// Inline stateless AI policy for the Power reactor fine system (issue
+    /// #784), loaded from `[power.ai_policy]`. Replaces the retired stateful
+    /// `[power.ai]` engine (`PowerAiConfigToml` + `EngageState` hysteresis).
+    /// Each authored `[[power.ai_policy.rule]]` binds a `priority` and a power
+    /// GROUP `channel` to a `when` guard and the value-carrying
+    /// `set_power_group_allocation` verb (its `level` payload the absolute
+    /// target). Every allocation rule declares a minimum battery reserve as a
+    /// `param(...)` referenced by its guard (AC2). Absent, the canonical
+    /// [`default_power_ai_config`] is synthesised at spawn (baseline
+    /// preservation). Validated in [`EntityConfig::from_toml`] against
+    /// [`POWER_SET_ALLOCATION_VERB`] and a valid-channel set built dynamically
+    /// from the ship's `[power_groups.*]` keys (AC1 — no fixed catalogue).
     #[serde(default)]
-    pub ai: Option<PowerAiConfigToml>,
+    pub ai_policy: Option<FineSystemAiConfigToml>,
 }
 
 /// AI tuning parameters for the shields focus controller.
@@ -3888,6 +3926,25 @@ impl EntityConfig {
             .and_then(|sc| sc.ai_policy.as_ref())
         {
             validate_fine_system_ai_policy(ai, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS)
+                .map_err(SerdeError::custom)?;
+        }
+
+        // Validate an authored inline Power allocation policy before world
+        // activation (issue #784). Unlike every fine system above, the Power
+        // reactor has NO fixed channel catalogue: its output channels are the
+        // ship's AUTHORED `[power_groups.*]` keys, so the valid-channel set is
+        // built dynamically from ship data here (AC1 "no fixed system
+        // catalogue"). The single verb is the value-carrying
+        // `set_power_group_allocation`. A rule targeting a non-authored group,
+        // a wrong verb, an unparseable guard, or an undeclared `param(...)`
+        // reserve fails the entity load here, before any live tick.
+        if let Some(ai) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
+            let valid_channels: Vec<&str> = config
+                .ship_config
+                .as_ref()
+                .map(|sc| sc.power_groups.keys().map(|g| g.0.as_str()).collect())
+                .unwrap_or_default();
+            validate_fine_system_ai_policy(ai, &valid_channels, &[POWER_SET_ALLOCATION_VERB])
                 .map_err(SerdeError::custom)?;
         }
 
@@ -7050,6 +7107,169 @@ verb = "focus_shield_arc"
         );
     }
 
+    // ── Power allocation AI policy (issue #784) ──────────────────────────────
+
+    /// Minimal ship TOML carrying authored `[power_groups.*]` plus a
+    /// `[power.ai_policy]` block, used by the power-policy load tests.
+    fn power_policy_toml(rules: &str) -> String {
+        format!(
+            r#"
+name = "Reactorer"
+
+[power]
+capacity = 90
+rates = [ 5, 4, 3, 2, -2, -5 ]
+emergency_threshold = 22
+
+[power.ai_policy.param]
+thrust_threshold = 0.7
+min_reserve_helm = 50.0
+
+{rules}
+
+[power_groups.helm]
+label = "HELM"
+default_level = 2
+
+[power_groups.weapons]
+label = "WEAPONS"
+default_level = 2
+
+[power_groups.sensors]
+label = "SENSORS"
+default_level = 1
+
+[power_groups.ops]
+label = "OPS"
+default_level = 1
+"#
+        )
+    }
+
+    #[test]
+    fn default_power_policy_validates_and_resolves() {
+        // The synthesised default reproduces the retired engine as four rules
+        // (helm elevate + baseline, weapons elevate + baseline), all emitting the
+        // value-carrying allocation verb, and every rule declares a reserve param.
+        let cfg = default_power_ai_config();
+        // Validated against the canonical group channels.
+        assert!(validate_fine_system_ai_policy(
+            &cfg,
+            &["helm", "weapons", "sensors"],
+            &[POWER_SET_ALLOCATION_VERB]
+        )
+        .is_ok());
+        let p = cfg.to_policy().expect("default power policy resolves");
+        assert!(!p.idle);
+        assert_eq!(p.rules.len(), 4);
+        // The elevate rules carry the absolute magnitude in the verb payload.
+        assert!(p.rules.iter().any(|r| r.verb
+            == crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(
+                DEFAULT_POWER_ELEVATED_LEVEL
+            )));
+        assert!(cfg.param.contains_key(POWER_HELM_RESERVE_PARAM));
+        assert!(cfg.param.contains_key(POWER_WEAPONS_RESERVE_PARAM));
+    }
+
+    #[test]
+    fn power_ai_policy_parses_and_decodes_magnitude_verb_from_toml() {
+        let toml = power_policy_toml(
+            r#"[[power.ai_policy.rule]]
+priority = 10
+channel = "helm"
+when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "ops"
+when = "true"
+verb = "set_power_group_allocation"
+level = 1"#,
+        );
+        let cfg = EntityConfig::from_toml(&toml).expect("power ai_policy must parse + validate");
+        let ai = cfg
+            .power
+            .as_ref()
+            .and_then(|p| p.ai_policy.as_ref())
+            .expect("power.ai_policy present");
+        let policy = ai.to_policy().expect("policy resolves");
+        assert_eq!(policy.rules.len(), 2);
+        // The magnitude decodes into the verb payload (AC: absolute level).
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(3)
+        );
+    }
+
+    #[test]
+    fn power_ai_policy_rejects_non_authored_group_channel() {
+        // AC1: channels are validated against the ship's AUTHORED power groups.
+        // A rule targeting a group the ship does not author fails the load.
+        let toml = power_policy_toml(
+            r#"[[power.ai_policy.rule]]
+priority = 0
+channel = "shields"
+when = "true"
+verb = "set_power_group_allocation"
+level = 2"#,
+        );
+        let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    #[test]
+    fn power_ai_policy_rejects_wrong_verb_at_load() {
+        let toml = power_policy_toml(
+            r#"[[power.ai_policy.rule]]
+priority = 0
+channel = "helm"
+when = "true"
+verb = "focus_shield_arc"
+level = 2"#,
+        );
+        let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("unknown verb"), "got: {err}");
+    }
+
+    #[test]
+    fn power_ai_policy_rejects_undeclared_reserve_param() {
+        // AC2 / AC6: a guard referencing an undeclared min-reserve param fails.
+        let toml = power_policy_toml(
+            r#"[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3"#,
+        );
+        let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("undeclared parameter"), "got: {err}");
+    }
+
+    #[test]
+    fn power_ai_policy_rejects_unparseable_guard() {
+        let toml = power_policy_toml(
+            r#"[[power.ai_policy.rule]]
+priority = 0
+channel = "helm"
+when = "fact(thrust) >>> broken"
+verb = "set_power_group_allocation"
+level = 2"#,
+        );
+        let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("invalid `when`"), "got: {err}");
+    }
+
+    #[test]
+    fn power_ai_policy_rejects_empty_declaration() {
+        let toml = power_policy_toml("");
+        // `[power.ai_policy.param]` present but no rule and no idle → silence.
+        let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("ai policy is empty"), "got: {err}");
+    }
+
     #[test]
     fn shields_idle_ai_policy_parses_from_toml() {
         let toml = r#"
@@ -7282,6 +7502,7 @@ value = false
                 when: "true".into(),
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
+                level: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7318,6 +7539,7 @@ value = true
                 when: "true".into(),
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
+                level: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7335,6 +7557,7 @@ value = true
                 when: "true".into(),
                 verb: "launch_torpedoes".into(),
                 value: true,
+                level: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7352,6 +7575,7 @@ value = true
                 when: "fact(secs_since_combat) < param(combat_window_secs)".into(),
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
+                level: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7369,6 +7593,7 @@ value = true
                 when: "true".into(),
                 verb: "nope".into(),
                 value: true,
+                level: 0,
             }],
         };
         assert!(cfg.to_policy().is_err());
@@ -7453,6 +7678,7 @@ idle = true
                 verb: HELM_ACTUATE_DESIRED_FACING_VERB.into(),
                 when: "true".into(),
                 value: false,
+                level: 0,
             }],
         };
         let err =
@@ -7472,6 +7698,7 @@ idle = true
                 verb: HELM_ACTUATE_DESIRED_FACING_VERB.into(),
                 when: "true".into(),
                 value: false,
+                level: 0,
             }],
         };
         let err =
@@ -7618,6 +7845,7 @@ verb = "engage_impulse"
                 verb: HELM_ENGAGE_IMPULSE_VERB.into(),
                 when: "true".into(),
                 value: false,
+                level: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();

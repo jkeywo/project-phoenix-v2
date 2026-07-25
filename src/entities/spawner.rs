@@ -366,17 +366,21 @@ pub fn spawn_entity(
             None => crate::power_plugin::PowerConfigResource::default(),
         };
         entity_commands.insert(power_config);
-        // Data-authored power AI rules (issue #762). `to_ai_rules` prefers the
-        // ship's `[[power.ai.rule]]` array and otherwise synthesises the two
-        // canonical legacy rules from the flat `[power.ai]` fields, so NPCs
-        // without a block still fall back to the parse-time default.
-        let power_ai_config = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
-            Some(ai) => crate::power_plugin::PowerAiConfigResource {
-                rules: ai.to_ai_rules(),
-            },
-            None => crate::power_plugin::PowerAiConfigResource::default(),
+        // Inline stateless Power allocation AI policy (issue #784) — from the
+        // ship's `[power.ai_policy]` block if authored, else the canonical
+        // `default_power_ai_config` (which reproduces the retired stateful
+        // engine's helm←thrust / weapons←red-alert behaviour with reserve
+        // guards). Attached to every ship so `ai_power_allocation` resolves a
+        // data-authored per-group policy rather than the retired
+        // `PowerAiConfigResource` + `ShipPowerAiState` hysteresis. `to_policy`
+        // cannot fail here: the block was validated in `EntityConfig::from_toml`.
+        let power_ai_policy = match config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
+            Some(ai) => ai.to_policy().unwrap_or_default(),
+            None => crate::entities::config::default_power_ai_config()
+                .to_policy()
+                .unwrap_or_default(),
         };
-        entity_commands.insert(power_ai_config);
+        entity_commands.insert(crate::power_plugin::PowerAiPolicy(power_ai_policy));
         // Per-entity power multipliers. Seeded from any per-console TOML
         // `power_multipliers` blocks (helm_console/weapons_console/sensors_console)
         // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage

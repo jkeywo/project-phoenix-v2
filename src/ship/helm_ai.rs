@@ -2554,6 +2554,7 @@ mod tests {
                 when: "false".into(),
                 verb: crate::entity_config::HELM_ACTUATE_DESIRED_TRAVEL_VERB.into(),
                 value: false,
+                level: 0,
             }],
         };
         attach_engines_policy(&mut app, hold);

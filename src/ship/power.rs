@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use crate::console_ai::PowerAiRule;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{
     CoordinationPayload, InterSystemPayload, InterSystemQueue, PowerBatteryBlackboard,
@@ -54,66 +53,82 @@ impl Default for PowerMultiplierResource {
     }
 }
 
-// ── AI config ─────────────────────────────────────────────────────────────────
+// ── AI policy (issue #784) ──────────────────────────────────────────────────
 
-/// TOML-loaded configuration for the power AI controller.
+/// Per-ship inline stateless Power allocation policy (issue #784).
 ///
-/// Loaded from `[power.ai]` in the ship entity TOML and inserted as a
-/// per-entity component at spawn. Since issue #762 this is a list of
-/// data-authored [`PowerAiRule`]s — one per authored `[[power.ai.rule]]`
-/// entry — rather than the two hardcoded system categories (movement→helm,
-/// red-alert→weapons) it replaced. Each rule targets an authored power group
-/// and carries its own battery floor (`min_battery_reserve`).
+/// From the ship's `[power.ai_policy]` block when authored, otherwise the
+/// canonical [`crate::entities::config::default_power_ai_config`] policy
+/// (which reproduces the retired stateful engine's helm←thrust / weapons←red
+/// alert behaviour with reserve guards). Read by
+/// `console_ai::server::ai_power_allocation`, which for each of the ship's
+/// AUTHORED power groups resolves that group's channel over an immutable
+/// per-tick fact snapshot and emits the winning `set_power_group_allocation`
+/// verb's absolute level as an admitted `SetPowerGroupAllocation` — the same
+/// admitted command a human Power operator sends.
 ///
-/// The parse layer (`entities::config::PowerAiConfigToml::to_ai_rules`) keeps
-/// the flat legacy `[power.ai]` fields working: a ship whose block has no
-/// `[[power.ai.rule]]` array synthesises the two canonical rules from those
-/// fields, so old TOMLs and the `Default` impl below behave exactly as before.
-///
-/// Dual-derives `Resource` (legacy global fallback used by tests) and
-/// `Component` (per-entity storage on each ship — PR 6 migration, see PRD #597).
-#[derive(Resource, Component, Clone, Debug)]
-pub struct PowerAiConfigResource {
-    /// The authored (or legacy-synthesised) rules this ship's power AI runs.
-    pub rules: Vec<PowerAiRule>,
-}
+/// This RETIRES the bespoke stateful `PowerAiConfigResource` +
+/// `ShipPowerAiState` (`EngageState` hysteresis) from #762: the decision is now
+/// a pure function of the per-tick snapshot, with no private timer state
+/// (AGENTS.md rule #7). Attached to every ship at spawn (player + NPC).
+#[derive(Component, Clone, Debug, Default)]
+pub struct PowerAiPolicy(pub crate::ai::policy::AiPolicy);
 
-impl Default for PowerAiConfigResource {
-    /// Back-compat default: the two canonical rules the hardcoded blocks used
-    /// to implement (helm←sustained thrust, weapons←red alert). Preserves the
-    /// behaviour of every fixture and NPC that spawns without a `[power.ai]`
-    /// block.
-    fn default() -> Self {
-        Self {
-            rules: PowerAiRule::legacy_defaults(),
-        }
+/// Seed the immutable per-tick fact snapshot the Power allocation policy
+/// resolves each authored power group's channel against (issue #784).
+///
+/// Pure and Bevy-free (AGENTS.md rule #10): the host reads live state and passes
+/// primitives in. Seeds the BROAD fact set so authored guards can read ship,
+/// threat, objective, and system facts — but the canonical default policy only
+/// needs `battery_pct`, `thrust`, and `red_alert`. The #779 empty-facts lesson:
+/// a `fact(...)` guard validates but never fires unless the host seeds the fact,
+/// so this is THE piece that makes the reserve guard (and every other) live.
+///
+/// SHIP facts: `battery_pct`, `thrust`, `red_alert`, per-group `power_<group>`
+/// current level, and `total_allocation`. THREAT: `secs_since_combat` (absent
+/// when the ship has no combat history) and `nearest_enemy_dist` (absent when
+/// none is known). OBJECTIVE: `has_destroy_objective` (`1.0`/`0.0`). SYSTEM:
+/// `offline_system_count`.
+#[allow(clippy::too_many_arguments)]
+pub fn seed_power_facts(
+    power: &PowerSystem,
+    battery_pct: f32,
+    thrust: f32,
+    red_alert: bool,
+    secs_since_combat: Option<f32>,
+    nearest_enemy_dist: Option<f32>,
+    has_destroy_objective: bool,
+    offline_system_count: u32,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set(
+        crate::entities::config::POWER_BATTERY_PCT_FACT,
+        battery_pct as f64,
+    );
+    facts.set(crate::entities::config::POWER_THRUST_FACT, thrust as f64);
+    facts.set(
+        crate::entities::config::POWER_RED_ALERT_FACT,
+        if red_alert { 1.0 } else { 0.0 },
+    );
+    // Per-group current level, keyed `power_<group>`, plus the ship-wide total.
+    for (id, level) in power.iter() {
+        facts.set(&format!("power_{}", id.0), level as f64);
     }
-}
-
-// ── AI state (issue #693; intent transport retired in #831) ──────────────────
-//
-// `PowerReactorCommand` / `PowerReactorIntents` (the private intent component
-// written by `ai_power_allocation` and drained by the paired
-// `integrate_power_state`) were deleted by issue #831: the AI now emits an
-// admitted `SetPowerGroupAllocation` that `handle_power_messages` (below)
-// applies, the single applier for human and AI commands alike — mirroring the
-// shields #826 retirement of `ShieldArcIntents` / `integrate_shield_state`.
-
-/// Per-ship persistent state for the data-authored power AI rules (issue
-/// #762). Each authored rule needs its own independent `EngageState`, so this
-/// is a map keyed by the rule's stable slot key (`"<index>:<group>"`, minted
-/// by `ai_power_allocation`). Replaces the fixed `{movement, red_alert}` pair
-/// that assumed exactly the two hardcoded rules.
-///
-/// Present only while the ship carries `AiHighFidelity` — bundled alongside
-/// that marker at every spawn/promote site (see `ai::server::lod_ai_ships`
-/// and the `AiHighFidelity` spawn sites in `server_app.rs` /
-/// `ship_plugin.rs` / `ai/server.rs`). It is the surviving power-AI decision
-/// state after the intent transport retired in issue #831.
-#[derive(Component, Default, Clone, Debug)]
-pub struct ShipPowerAiState {
-    /// Per-rule engage state, keyed by the rule's stable slot key.
-    pub rules: std::collections::HashMap<String, crate::console_ai::EngageState>,
+    facts.set("total_allocation", power.total() as f64);
+    // THREAT: only set when known, so an absent-fact guard reads "no threat".
+    if let Some(s) = secs_since_combat {
+        facts.set("secs_since_combat", s as f64);
+    }
+    if let Some(d) = nearest_enemy_dist {
+        facts.set("nearest_enemy_dist", d as f64);
+    }
+    // OBJECTIVE + SYSTEM.
+    facts.set(
+        "has_destroy_objective",
+        if has_destroy_objective { 1.0 } else { 0.0 },
+    );
+    facts.set("offline_system_count", offline_system_count as f64);
+    facts
 }
 
 /// Debounce state for power brownout coordination advisories (issue #678).
@@ -202,7 +217,6 @@ impl Plugin for ShipPowerPlugin {
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
-            .init_resource::<PowerAiConfigResource>()
             .add_systems(
                 Update,
                 (

@@ -78,7 +78,6 @@ pub fn test_app() -> App {
         ShipBoost::default(),
         crate::ai_plugin::AiHighFidelity,
         crate::console_ai_plugin::ShipFrequencyHintState::default(),
-        crate::ship::power::ShipPowerAiState::default(),
     ));
     app.world_mut().entity_mut(ship).insert((
         crate::ship::helm::ThrustInput::default(),

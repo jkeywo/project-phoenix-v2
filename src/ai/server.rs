@@ -719,9 +719,9 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .insert(crate::console_ai_plugin::ShipFrequencyHintState::default());
-                    commands
-                        .entity(entity)
-                        .insert(crate::ship::power::ShipPowerAiState::default());
+                    // Power AI is stateless since issue #784 (the `PowerAiPolicy`
+                    // is attached at spawn, not LOD-scoped), so no per-fidelity
+                    // power state is bundled here any more.
                     commands.entity(entity).insert((
                         crate::ship::helm::ThrustInput::default(),
                         crate::ship::helm::SteeringInput::default(),
@@ -737,9 +737,6 @@ fn lod_ai_ships(
                     commands
                         .entity(entity)
                         .remove::<crate::console_ai_plugin::ShipFrequencyHintState>();
-                    commands
-                        .entity(entity)
-                        .remove::<crate::ship::power::ShipPowerAiState>();
                     commands.entity(entity).remove::<(
                         crate::ship::helm::ThrustInput,
                         crate::ship::helm::SteeringInput,
@@ -1947,7 +1944,6 @@ mod tests {
                 ShipPhysics::default(),
                 AiHighFidelity,
                 crate::console_ai_plugin::ShipFrequencyHintState::default(),
-                crate::ship::power::ShipPowerAiState::default(),
                 crate::ship::helm::ThrustInput::default(),
                 crate::ship::helm::SteeringInput::default(),
                 crate::ship::helm::LateralThrustInput::default(),

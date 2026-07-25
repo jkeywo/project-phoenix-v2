@@ -37,8 +37,7 @@ pub use crate::weapons_plugin::{
 pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
 
 pub use crate::power_plugin::{
-    power_state_broadcaster, PowerAiConfigResource, PowerConfigResource, PowerMultiplierResource,
-    ShipPowerSystem,
+    power_state_broadcaster, PowerConfigResource, PowerMultiplierResource, ShipPowerSystem,
 };
 
 // â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
@@ -2448,7 +2447,6 @@ fn spawn_game_start_entities(
                 .insert(LocalShip)
                 .insert(crate::ai_plugin::AiHighFidelity)
                 .insert(crate::console_ai_plugin::ShipFrequencyHintState::default())
-                .insert(crate::ship::power::ShipPowerAiState::default())
                 .insert(crate::ship::helm::ThrustInput::default())
                 .insert(crate::ship::helm::SteeringInput::default())
                 .insert(crate::ship::helm::LateralThrustInput::default())
@@ -2983,17 +2981,20 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(power_config.clone());
             commands.insert_resource(power_config);
 
-            // Power AI config — unconditionally insert as per-entity
-            // Component so `ai_power_allocation` iterating `With<Ship>` sees
-            // a value on the player ship. Dual-writes the Resource.
-            let ai_cfg = match config.power.as_ref().and_then(|pc| pc.ai.as_ref()) {
-                Some(ai) => PowerAiConfigResource {
-                    rules: ai.to_ai_rules(),
-                },
-                None => PowerAiConfigResource::default(),
+            // Inline stateless Power allocation AI policy (issue #784) —
+            // unconditionally insert as a per-entity Component so
+            // `ai_power_allocation` iterating `With<Ship>` sees a value on the
+            // player ship. From `[power.ai_policy]` if authored, else the
+            // canonical default. `to_policy` cannot fail: validated at load.
+            let power_ai_policy = match config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
+                Some(ai) => ai.to_policy().unwrap_or_default(),
+                None => crate::entities::config::default_power_ai_config()
+                    .to_policy()
+                    .unwrap_or_default(),
             };
-            commands.entity(spawned).insert(ai_cfg.clone());
-            commands.insert_resource(ai_cfg);
+            commands
+                .entity(spawned)
+                .insert(crate::ship::power::PowerAiPolicy(power_ai_policy));
 
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];

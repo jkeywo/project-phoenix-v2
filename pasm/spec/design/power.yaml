@@ -17,7 +17,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Power AI Operator
-      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve. Since issue #831 it emits its reallocation as an admitted SetPowerGroupAllocation command through the shared admission seam (the same surface a human uses), rather than through a private intent component.
+      summary: AI-only role that applies authored rules for each power group while preserving a robust battery reserve. Since issue #784 the rules are inline stateless policy on the shared FineSystemAiConfigToml spine (per-group channels), and it emits its reallocation as an admitted SetPowerGroupAllocation command through the shared admission seam (the same surface a human uses), rather than through a private intent component.
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
 
@@ -51,7 +51,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: AI Power Allocation Rules
-      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches; each rule declares the minimum battery reserve at which it may apply. Implemented in issue #762 — ai_power_allocation iterates PowerAiConfigResource.rules (authored as [[power.ai.rule]] TOML) and tick_power_rule refuses to engage any rule below its own min_battery_reserve floor.
+      summary: AI Power evaluates rules authored per power group instead of fixed Helm, Weapons, or Sensors branches; each rule declares the minimum battery reserve at which it may apply. Reworked in issue #784 onto the inline stateless FineSystemAiConfigToml spine — ai_power_allocation resolves each ship-authored power-group channel through AiPolicy.resolve_channel over a host-seeded fact snapshot (seed_power_facts) plus the read-only scenario flag chain; the highest-priority matching rule emits the value-carrying SetPowerGroupAllocation verb (an absolute level). The minimum reserve is an authored param referenced by the rule's when guard, so a below-reserve guard never fires and allocation never rises when the battery cannot sustain it — replacing both the retired stateful engine (PowerRuleTrigger + EngageState + ShipPowerAiState) and the old global emergency exception.
     game_design:
       enforcement_links: [authored-power-ai-rule-evaluator]
       owner_role: power-ai-operator-role
@@ -87,7 +87,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Authored Power Group AI Rules
-      summary: Each authored power group supplies data-defined AI rules that select its allocation from current ship conditions. Every rule declares a minimum battery reserve below which it cannot apply, preventing routine brownouts. Rules are authored as [[power.ai.rule]] TOML entries (target group, trigger, min_battery_reserve, engage/recharge timers, nudge); the reactor is seeded from all authored [power_groups.*] at spawn so any authored group is allocatable, and rest allocations are kept sustainable so idle ships never brown out.
+      summary: Each authored power group is a dynamic output channel of an inline stateless allocation policy that selects its level from current ship conditions. Rules are authored as [[power.ai_policy.rule]] TOML entries (priority, power-group channel, when guard, the value-carrying set_power_group_allocation verb, and its absolute level payload). Every rule declares a minimum battery reserve as an authored param referenced by its guard, so a group is elevated only while the battery is at or above that reserve — preventing routine brownouts with no global emergency exception. The valid-channel set is built at load from the ship's [power_groups.*] keys (no fixed catalogue); the reactor is seeded from those authored groups at spawn so any authored group is allocatable, and rest allocations are kept sustainable so idle ships never brown out. Omitting the block synthesises default_power_ai_config, which reproduces the retired helm-thrust / weapons-red-alert baseline.
     game_design:
       architecture_links: [authored-power-ai-rule-evaluator]
       participating_roles: [power-ai-operator-role]
@@ -96,6 +96,6 @@ entities:
       outputs: [rule-derived group allocations]
     implementation:
       status: declared
-      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
-      symbols: [tick_power_rule, PowerAiRule, PowerRuleTrigger, PowerAiConfigToml, ai_power_allocation, authored_power_group_seed]
+      paths: [src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/ai/policy.rs, src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
+      symbols: [ai_power_allocation, AiPolicy, resolve_channel, seed_power_facts, POWER_SET_ALLOCATION_VERB, default_power_ai_config, PowerAiPolicy, authored_power_group_seed]
       tests: [cargo test]

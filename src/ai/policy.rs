@@ -119,6 +119,19 @@ pub enum AiPolicyVerb {
     /// same admitted `SetShieldArcFocus` a human Shields operator does; its
     /// absence ("hold"/idle) leaves the current focus where it is.
     FocusShieldArc,
+    /// Set one power group's allocation to an ABSOLUTE target level (the power
+    /// group's own channel of the Power reactor fine system, issue #784). This
+    /// is the FIRST verb that carries a magnitude in its payload: every prior
+    /// verb was either value-less or the boolean `SetRedAlert`. The channel is
+    /// the power group id, so a per-group rule emits the level *its* group
+    /// should hold. The host emits the same admitted `SetPowerGroupAllocation`
+    /// a human Power operator does; the applier re-clamps to the per-group
+    /// `[1, max]` range and the ship-wide `total <= 8` cap, so an absolute
+    /// level is safe and idempotent (the host skips the emit when
+    /// `level == current`). Its absence ("hold"/idle) leaves the group where it
+    /// is — the brownout-avoidance reserve guard is authored in the rule's
+    /// `when`, not here.
+    SetPowerGroupAllocation(u8),
 }
 
 /// One inline stateless policy rule.
@@ -679,5 +692,75 @@ mod tests {
             idle.resolve_channel("shield_focus", &concentrated, &[]),
             None
         );
+    }
+
+    // ── Power group allocation channels (issue #784) ─────────────────────────
+
+    /// The power channel is the power GROUP id (not a fixed name), and the
+    /// winning rule carries an ABSOLUTE target level in its verb. Two groups on
+    /// one policy resolve independently, and the highest-priority matching rule
+    /// for a group wins (AC4).
+    #[test]
+    fn power_group_channels_resolve_absolute_levels_independently() {
+        let mut params = AiParams::new();
+        params.set("thrust_threshold", 0.7);
+        params.set("min_reserve_helm", 50.0);
+        let p = AiPolicy {
+            params,
+            rules: vec![
+                // helm: elevate to 3 while thrusting hard with a healthy
+                // battery, else fall back to the baseline 2.
+                AiPolicyRule {
+                    priority: 10,
+                    channel: "helm".into(),
+                    when: parse_predicate(
+                        "fact(thrust) >= param(thrust_threshold) \
+                         and fact(battery_pct) >= param(min_reserve_helm)",
+                    )
+                    .unwrap(),
+                    verb: AiPolicyVerb::SetPowerGroupAllocation(3),
+                },
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "helm".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::SetPowerGroupAllocation(2),
+                },
+                // A ship-authored extra group ("ops") on its own channel.
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "ops".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::SetPowerGroupAllocation(1),
+                },
+            ],
+            idle: false,
+        };
+
+        // Thrusting hard, battery healthy → helm elevates to 3.
+        let mut hot = AiFacts::new();
+        hot.set("thrust", 0.9);
+        hot.set("battery_pct", 80.0);
+        assert_eq!(
+            p.resolve_channel("helm", &hot, &[]),
+            Some(&AiPolicyVerb::SetPowerGroupAllocation(3))
+        );
+        // Same thrust but battery below the reserve → the elevate guard fails,
+        // the baseline wins: allocation never rises when the battery can't
+        // sustain it (AC5 brownout avoidance).
+        let mut drained = AiFacts::new();
+        drained.set("thrust", 0.9);
+        drained.set("battery_pct", 40.0);
+        assert_eq!(
+            p.resolve_channel("helm", &drained, &[]),
+            Some(&AiPolicyVerb::SetPowerGroupAllocation(2))
+        );
+        // The ops channel resolves its own level, independent of helm.
+        assert_eq!(
+            p.resolve_channel("ops", &hot, &[]),
+            Some(&AiPolicyVerb::SetPowerGroupAllocation(1))
+        );
+        // A group with no authored rule holds (None).
+        assert_eq!(p.resolve_channel("weapons", &hot, &[]), None);
     }
 }

@@ -703,7 +703,6 @@ mod tests {
             ShipBoost::default(),
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::console_ai_plugin::ShipFrequencyHintState::default(),
-            crate::ship::power::ShipPowerAiState::default(),
             crate::entity_spawner::EntityShipArcHull(arc_hull),
         ));
         app.world_mut().entity_mut(ship).insert((

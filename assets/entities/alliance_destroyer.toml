@@ -331,27 +331,48 @@ capacity = 70
 rates = [ 5, 4, 3, 2, -2, -5 ]
 emergency_threshold = 20
 
-# Data-authored power AI rules (issue #762). Each rule targets one authored
-# power group and carries its own battery floor (`min_battery_reserve`); the AI
-# nudges that group's allocation only while the trigger holds and the battery
-# stays at or above the floor, so allocation never rises past what the reactor
-# can sustain.
-[[power.ai.rule]]
-group = "helm"
-trigger = "thrust"
+# Inline stateless power allocation policy (issue #784). Each rule binds a
+# priority + power-group channel to a `when` guard and the value-carrying
+# `set_power_group_allocation` verb (its `level` the absolute target). Every
+# allocation rule declares a MINIMUM BATTERY RESERVE as a `param` its guard
+# reads, so a group is elevated only while the trigger holds AND the battery is
+# at or above that reserve — allocation never rises past what the reactor can
+# sustain (no avoidable brownout), replacing the old global emergency exception.
+[power.ai_policy.param]
 thrust_threshold = 0.7
-engage_delay_secs = 3.0
-min_battery_reserve = 50.0
-battery_recharge_pct = 100.0
-nudge = 1
+min_reserve_helm = 50.0
+min_reserve_weapons = 10.0
+min_reserve_baseline = 0.0
 
-[[power.ai.rule]]
-group = "weapons"
-trigger = "red_alert"
-engage_delay_secs = 3.0
-min_battery_reserve = 10.0
-battery_recharge_pct = 100.0
-nudge = 1
+# helm: elevate to 3 under sustained thrust with a healthy battery, else hold 2.
+[[power.ai_policy.rule]]
+priority = 10
+channel = "helm"
+when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "helm"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2
+
+# weapons: elevate to 3 on red alert with a healthy battery, else hold 2.
+[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "weapons"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2
 
 [captain_console]
 

@@ -435,71 +435,64 @@ pub(crate) fn ai_shield_focus(
 // `emit_power_ai_command` (issue #831) likewise collapsed into the shared
 // `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
-/// AI power-allocation decision system (issue #693, admitted transport #831).
+/// AI power-allocation decision system (issue #784: inline stateless policy
+/// spine; admitted transport #831).
 ///
-/// Wires the previously-orphaned `console_ai::tick_power_movement_rule` and
-/// `console_ai::tick_power_red_alert_rule` pure functions: sustained thrust
-/// nudges the helm power group +1 (and drops it -1 once battery/thrust
-/// conditions lapse); sustained red alert does the same to the weapons power
-/// group. Emits the decision as an admitted `SetPowerGroupAllocation` payload
-/// targeted at `POWER_REACTOR_SYSTEM_ID` (issue #831 — previously a
-/// `PowerReactorIntents` write drained by a paired `integrate_power_state`
-/// adapter), for `ship::power::handle_power_messages` to apply later this tick,
-/// rather than mutating `ShipPowerSystem` directly.
+/// Reworked from the retired stateful engine (`PowerAiConfigResource` +
+/// `ShipPowerAiState` `EngageState` hysteresis, #762) onto the same inline
+/// stateless `AiPolicy` spine as #779–#783. For each of the ship's AUTHORED
+/// power groups it resolves that group's own output channel — the channel IS the
+/// power group id, dynamic per-ship data, NOT a fixed catalogue (AC1) — over an
+/// immutable per-tick fact snapshot, and emits the winning
+/// `SetPowerGroupAllocation(level)` verb's absolute target as an admitted
+/// `SetPowerGroupAllocation` payload targeting `POWER_REACTOR_SYSTEM_ID`, for
+/// `ship::power::handle_power_messages` to apply later this tick — the same
+/// admitted seam a human Power operator uses (AGENTS.md rule #6). It never writes
+/// `ShipPowerSystem` directly.
 ///
-/// Replaces the old fused `ship::power::operate_power_ai` (absolute-set,
-/// non-timer, non-`AiHighFidelity`-gated) entirely — see that module's
-/// history note above `tick_power_brownout_advisory`.
-///
-/// # Gating
+/// # Gating (AC5 human Control Source)
 /// - `ShipSystemControlSources.policy_for(power_reactor_system_id()).operate_ai`
-///   (unchanged from the old `operate_power_ai` gate).
-/// - `AiHighFidelity` (new constraint vs. the old system — query filter).
+///   — a human holding the Power station flips this to false, so the AI stands
+///   down at the decide gate. No per-tick state to reset (statelessness removed
+///   the last `EngageState` timer, AGENTS.md rule #7), so regaining AI control
+///   the next tick yields a clean decision from the fresh snapshot (lifecycle
+///   reset is trivially correct).
+/// - `AiHighFidelity` (query filter).
 ///
-/// The old `operate_power_ai` additionally checked
-/// `sessions.holder_for_station(&StationId("power"))` to yield to a human
-/// Power console holder on the player ship. `ai_shield_focus` (issue #692)
-/// has no equivalent sessions-based check and relies solely on the
-/// `operate_ai` policy gate — a human claiming a station flips that
-/// station's `operate_ai` policy to false via the station-claim path, so the
-/// policy gate alone already represents "no human is occupying this
-/// station". The redundant sessions check is dropped here for consistency
-/// with the #692 precedent.
+/// # Facts + scenario flags (AC3)
+/// `seed_power_facts` builds the immutable SHIP/THREAT/OBJECTIVE/SYSTEM fact
+/// snapshot host-side (the #779 empty-facts lesson: a guard never fires unless
+/// the host seeds the fact). The read-only scenario `flags` chain
+/// (`WorldContentRuntime.flags`) is passed to `resolve_channel` so authored
+/// guards can gate on world flags/counters — the new read surface #784 adds over
+/// the prior hosts.
 ///
-/// # ±1 level semantics
-/// `PowerEngageOutput::Engage` adds +1 to the target group (helm for the
-/// movement rule, weapons for the red-alert rule); `Disengage` subtracts 1;
-/// `NoChange` emits nothing. The target level is clamped to `[1, 4]` (the same
-/// per-group range `PowerSystem::set_group_allocation` enforces), and a command
-/// is emitted **only when that clamped level differs from the current
-/// allocation** — a saturated Engage at level 4 (or Disengage at level 1) is a
-/// no-op and is skipped so admission is not spammed every tick. The applier
-/// (`handle_power_messages`) additionally re-clamps and enforces the total<=8
-/// cap, so the emitted value is safe regardless.
+/// # Brownout avoidance (AC5), no global emergency exception
+/// Each rule's reserve is an authored `param` referenced by its `when` guard
+/// (`fact(battery_pct) >= param(min_reserve)`). Below the reserve the elevate
+/// guard does not fire, so allocation never rises when the battery can't sustain
+/// it — the per-rule reserve guards REPLACE the retired global emergency
+/// exception. The applier's drain/exhaustion-lock/recovery is unchanged.
 ///
-/// # Data sources
-/// - `red_alert` from `ShipRedAlert`, default `false` if absent.
-/// - `thrust` from `LastHelmInput.thrust`, default `0.0` if absent.
-/// - `battery_pct` from `power.0.battery_charge / cfg.capacity * 100.0` (the
-///   pure functions expect a 0.0-100.0 percentage, not a 0.0-1.0 fraction —
-///   confirmed by `console_ai::core`'s own test defaults, e.g.
-///   `battery_recharge_pct: 100.0`).
-/// - `power_is_low` is hardcoded `true`, mirroring `ai_shield_focus`'s
-///   `shields_is_low` precedent — a retired Low/Full complexity model, not
-///   wired up now.
-/// - `dt` from `Time::delta_secs()`.
+/// # Absolute-level emit
+/// The verb carries an absolute target level. The host emits **only when that
+/// level differs from the group's current allocation** (skip no-op saturation so
+/// admission is not spammed every tick). The applier re-clamps to the per-group
+/// `[1, 4]` range and the ship-wide `total <= 8` cap, so the emitted value is
+/// safe regardless.
 fn ai_power_allocation(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
-    // `Option<Res<_>>`, never bare — this system runs in bare-`App` fixtures
-    // that never insert `LogFilterConfig` (see the logging macro docs). The
-    // global `PowerConfigResource`/`PowerAiConfigResource` reads that used to
-    // sit alongside it are gone: issue #738 made tuning per-entity.
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // Read-only scenario flag/counter store (AC3). `Option<Res<_>>` so bare-`App`
+    // fixtures that never insert `WorldContentRuntime` still pass parameter
+    // validation; absent, the flag chain is empty and flag-guards read false.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // Global objective pool for the OBJECTIVE fact. `Option<Res<_>>` for the same
+    // bare-`App` reason. Scored once per tick, outside the per-ship loop.
+    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
     mut ships: Query<
         (
-            // `Entity` for the log filter's entity scoping, `EntityUuid` for
-            // the `ai:` token `emit_ai_command` builds — both, not either.
             Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
@@ -507,9 +500,9 @@ fn ai_power_allocation(
             Option<&crate::ship_state::ShipRedAlert>,
             Option<&crate::ship_plugin::LastHelmInput>,
             Option<&crate::ship::power::PowerConfigResource>,
-            Option<&crate::ship::power::PowerAiConfigResource>,
+            Option<&crate::ship::power::PowerAiPolicy>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::ship::power::ShipPowerAiState,
+            Option<&crate::ship::combat_activity::RecentCombatActivity>,
             &mut crate::messages::AdmittedCommands,
         ),
         (
@@ -518,7 +511,33 @@ fn ai_power_allocation(
         ),
     >,
 ) {
-    let dt = time.delta_secs();
+    let now = time.elapsed_secs();
+
+    // Canonical fallback policy for any ship missing an attached component (bare
+    // `App` unit fixtures). Real ships always carry one, authored or synthesised,
+    // attached at spawn. Built once per tick, not per ship. `to_policy` cannot
+    // fail: the synthesised default is well-formed.
+    let default_policy = crate::entities::config::default_power_ai_config()
+        .to_policy()
+        .unwrap_or_default();
+
+    // The read-only scenario flag chain (AC3), same for every ship this tick.
+    let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
+        Some(rt) => vec![&rt.flags],
+        None => Vec::new(),
+    };
+
+    // OBJECTIVE fact, scored once per tick: does the active pool carry a Destroy
+    // directive? A broad "the ship has something to kill" signal an authored rule
+    // may use to bias weapons power.
+    let has_destroy_objective = objectives
+        .as_ref()
+        .map(|om| {
+            om.0.scored_pool(&crate::objectives::WorldConditions::default())
+                .iter()
+                .any(|s| matches!(s.directive, crate::messages::AiDirective::Destroy { .. }))
+        })
+        .unwrap_or(false);
 
     for (
         ship_entity,
@@ -528,31 +547,23 @@ fn ai_power_allocation(
         red_alert_comp,
         last_helm_comp,
         cfg_comp,
-        ai_cfg_comp,
+        policy_comp,
         ship_config,
-        mut ai_state,
+        combat_activity,
         mut admitted,
     ) in ships.iter_mut()
     {
-        let policy = control_sources
+        let control_policy = control_sources
             .0
             .policy_for(&crate::system_registry::power_reactor_system_id());
-        if !policy.operate_ai {
-            // Not (or no longer) AI-driven — reset both rules' timers so a
-            // later hand-back to AI control doesn't fire an instantly-stale
-            // engage/disengage decision.
-            *ai_state = crate::ship::power::ShipPowerAiState::default();
+        if !control_policy.operate_ai {
+            // Not (or no longer) AI-driven — human Control Source. Stateless, so
+            // nothing to reset; the next tick under AI control decides cleanly.
             continue;
         }
 
-        // Per-entity config components only (issue #738). These used to fall
-        // back to the global `PowerConfigResource` / `PowerAiConfigResource`
-        // Resources, which `server_app` writes from the PLAYER ship's `[power]`
-        // TOML — so an NPC spawned without those components ran its reactor AI
-        // against the player ship's capacity and thresholds. The fallback is
-        // now the parse-time default each type already supplies for a ship TOML
-        // with no `[power]` block (see `entity_spawner`, which inserts exactly
-        // those defaults on every spawned ship).
+        // Per-entity power config only (issue #738 isolation): the parse-time
+        // default each ship is spawned with, never a player-ship global.
         let cfg_default;
         let cfg: &crate::ship::power::PowerConfigResource = match cfg_comp {
             Some(c) => c,
@@ -561,62 +572,66 @@ fn ai_power_allocation(
                 &cfg_default
             }
         };
-        let ai_cfg_default;
-        let ai_cfg: &crate::ship::power::PowerAiConfigResource = match ai_cfg_comp {
-            Some(c) => c,
-            None => {
-                ai_cfg_default = crate::ship::power::PowerAiConfigResource::default();
-                &ai_cfg_default
-            }
+
+        let policy: &crate::ai::policy::AiPolicy = match policy_comp {
+            Some(p) => &p.0,
+            None => &default_policy,
         };
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
-
         let battery_pct = if cfg.0.capacity > 0.0 {
             (power.0.battery_charge / cfg.0.capacity) * 100.0
         } else {
             0.0
         };
+        let secs_since_combat = combat_activity.and_then(|a| {
+            let last = most_recent_combat(a);
+            last.map(|s| now - s)
+        });
 
-        // Emit an admitted `SetPowerGroupAllocation` toward the reactor for a
-        // ±1 nudge on `group`, but only when the clamped target level actually
-        // differs from the current allocation (skip saturated no-ops so a held
-        // Engage/Disengage doesn't spam admission every tick — issue #831).
-        //
-        // `reason` carries the branch's per-rule reactor logging (PRD #835)
-        // into main's emit shape: the log line lives here rather than in the
-        // match arms so it reports the *clamped* level actually asked for and
-        // stays silent on the skipped no-ops.
-        let emit_delta =
+        // Immutable per-tick fact snapshot. `offline_system_count` is seeded 0
+        // for now (a fuller per-system availability seed from blackboards is
+        // future work); the fact still exists so an authored guard referencing it
+        // validates and reads a real value.
+        let facts = crate::ship::power::seed_power_facts(
+            &power.0,
+            battery_pct,
+            thrust,
+            red_alert,
+            secs_since_combat,
+            None,
+            has_destroy_objective,
+            0,
+        );
+
+        // Emit an admitted absolute `SetPowerGroupAllocation` toward the reactor
+        // for `group`, but only when the target level actually differs from the
+        // current allocation (skip saturated no-ops so admission is not spammed
+        // every tick).
+        let emit_level =
             |group: &crate::messages::PowerGroupId,
-             delta: i16,
-             reason: &str,
+             level: u8,
              admitted: &mut crate::messages::AdmittedCommands| {
                 let current = power.0.level_for(group);
-                let target = (current as i16 + delta).clamp(1, 4) as u8;
-                if target == current {
+                if level == current {
                     return;
                 }
-                // Engage/Disengage are the natural power edges — they only fire
-                // after the pure rule's own delay/battery gates lapse, so they
-                // are event-driven, not per-tick. `info`, entity-scoped.
                 crate::pinfo!(
                     log,
                     crate::logging::LogCat::Power,
                     entity = ship_entity,
-                    "{} power {} -> {} ({})",
+                    "{} power {} -> {} (policy)",
                     group.0,
                     current,
-                    target,
-                    reason
+                    level
                 );
                 emit_ai_command(
                     entity_uuid,
                     crate::system_registry::power_reactor_system_id(),
                     crate::messages::SystemControlPayload::SetPowerGroupAllocation {
                         group: group.clone(),
-                        level: target,
+                        level,
                     },
                     control_sources,
                     &sessions,
@@ -625,48 +640,38 @@ fn ai_power_allocation(
                 );
             };
 
-        // ── Data-authored per-group rules (issue #762) ───────────────────
-        //
-        // Iterate the ship's authored rules instead of the two hardcoded
-        // movement→helm / red-alert→weapons blocks. Each rule carries its own
-        // battery floor (`min_battery_reserve`); the pure `tick_power_rule`
-        // engine (reusing the same `EngageState` hysteresis) will not engage
-        // below that floor (AC2), so allocation only rises when the battery can
-        // sustain it — avoiding preventable brownouts (AC3). Humans keep
-        // control because we already `continue`d above when `operate_ai` is
-        // false; the emitted command funnels through the same
-        // `handle_power_messages` applier as human input (no source branch).
-        let rule_input = crate::console_ai::PowerRuleInput {
-            thrust,
-            red_alert,
-            battery_pct,
-            dt,
-            // Already gated on `operate_ai` above; the reactor is AI-driven.
-            enabled: true,
-        };
-        for (index, rule) in ai_cfg.rules.iter().enumerate() {
-            // Stable per-rule slot key so two rules targeting the same group
-            // (e.g. thrust and red-alert both nudging weapons) keep independent
-            // engage timers.
-            let key = format!("{index}:{}", rule.group);
-            let state = ai_state.rules.entry(key).or_default();
-            let output = crate::console_ai::tick_power_rule(state, rule, &rule_input);
-            let group_id = crate::messages::PowerGroupId(rule.group.clone());
-            let reason = match &rule.trigger {
-                crate::console_ai::PowerRuleTrigger::Thrust { .. } => "thrust rule",
-                crate::console_ai::PowerRuleTrigger::RedAlert => "red-alert rule",
-            };
-            match output {
-                crate::console_ai::PowerEngageOutput::Engage => {
-                    emit_delta(&group_id, rule.nudge, reason, &mut admitted);
-                }
-                crate::console_ai::PowerEngageOutput::Disengage => {
-                    emit_delta(&group_id, -rule.nudge, reason, &mut admitted);
-                }
-                crate::console_ai::PowerEngageOutput::NoChange => {}
+        // Loop the ship's AUTHORED power groups (dynamic channels, AC1). For each
+        // group resolve its channel; the highest-priority matching rule wins
+        // (AC4) and its verb carries the absolute level to hold. A group with no
+        // matching rule resolves `None` — hold (no emit).
+        let group_ids: Vec<crate::messages::PowerGroupId> =
+            power.0.iter().map(|(id, _)| id.clone()).collect();
+        for group_id in &group_ids {
+            // Only the allocation verb ever resolves on a power-group channel
+            // (the policy is validated to carry no other), so an `if let` is
+            // exhaustive in practice; any other verb holds (no emit).
+            if let Some(crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level)) =
+                policy.resolve_channel(&group_id.0, &facts, &flag_chain)
+            {
+                emit_level(group_id, *level, &mut admitted);
             }
         }
     }
+}
+
+/// Most-recent combat timestamp for the THREAT `secs_since_combat` fact,
+/// mirroring `operate_captain_ai`'s reduction over the same activity fields.
+fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) -> Option<f32> {
+    [
+        a.last_damage_taken,
+        a.last_hostile_fire_taken,
+        a.last_weapon_fired,
+    ]
+    .into_iter()
+    .flatten()
+    .fold(None, |acc: Option<f32>, s| {
+        Some(acc.map_or(s, |cur| cur.max(s)))
+    })
 }
 
 // `integrate_power_state` (issue #693's mutate-only adapter) was deleted by
@@ -1442,6 +1447,7 @@ mod tests {
             when: "fact(recent_damage_total) > param(min_recent_damage)".to_string(),
             verb: crate::entities::config::SHIELD_FOCUS_VERB.to_string(),
             value: false,
+            level: 0,
         }];
         ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
     }
@@ -2290,20 +2296,50 @@ station = "sensors"
         );
     }
 
-    // ── ai_power_allocation (emit → admit → apply) ──────────────────────────
+    // ── ai_power_allocation (inline stateless policy spine, issue #784) ──────
+
+    use crate::entities::config::{
+        default_power_ai_config, FineSystemAiConfigToml, FineSystemAiRuleToml,
+        POWER_SET_ALLOCATION_VERB,
+    };
+    use crate::ship::power::PowerAiPolicy;
+
+    /// Build a `PowerAiPolicy` through the real `to_policy` decode path so the
+    /// tests exercise the value-carrying `set_power_group_allocation` verb + the
+    /// `level` payload just as authored TOML would.
+    fn power_policy(params: &[(&str, f32)], rules: Vec<FineSystemAiRuleToml>) -> PowerAiPolicy {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: params.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            rule: rules,
+        };
+        PowerAiPolicy(cfg.to_policy().expect("power policy decodes"))
+    }
+
+    fn alloc_rule(priority: i32, channel: &str, when: &str, level: u8) -> FineSystemAiRuleToml {
+        FineSystemAiRuleToml {
+            priority,
+            channel: channel.to_string(),
+            when: when.to_string(),
+            verb: POWER_SET_ALLOCATION_VERB.to_string(),
+            value: false,
+            level,
+        }
+    }
+
+    fn default_power_policy() -> PowerAiPolicy {
+        PowerAiPolicy(default_power_ai_config().to_policy().unwrap())
+    }
 
     /// Wires the real production pair: the AI decide system
     /// (`ai_power_allocation`, emit) `.before` the single applier
-    /// (`ship::power::handle_power_messages`, issue #831), minus the
-    /// `AdmissionPlugin` per-tick clear these single-shot scenarios don't need
-    /// (mirrors `shield_test_app`).
+    /// (`ship::power::handle_power_messages`, issue #831). Attaches the canonical
+    /// default `PowerAiPolicy` (baseline: helm←thrust / weapons←red alert with
+    /// reserve guards) unless the caller overrides it.
     fn power_test_app() -> App {
         let mut app = App::new();
-        // Manual `Time::advance_by` (mirroring `ai_frequency_hint`'s test
-        // app above) rather than `TimePlugin` + `TimeUpdateStrategy`.
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
-            .init_resource::<crate::ship::power::PowerAiConfigResource>()
             .insert_resource(crate::lobby::Sessions(
                 crate::lobby::session::SessionManager::new(),
             ))
@@ -2329,7 +2365,7 @@ station = "sensors"
             ),
             crate::ship_state::ShipRedAlert::default(),
             crate::ship_plugin::LastHelmInput::default(),
-            crate::ship::power::ShipPowerAiState::default(),
+            default_power_policy(),
             crate::messages::AdmittedCommands::default(),
             AiHighFidelity,
         ));
@@ -2353,6 +2389,15 @@ station = "sensors"
             .level_for(&crate::messages::PowerGroupId(group.into()))
     }
 
+    fn set_battery(app: &mut App, e: Entity, charge: f32) {
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship::power::ShipPowerSystem>()
+            .unwrap()
+            .0
+            .battery_charge = charge;
+    }
+
     fn power_tick_with_dt(app: &mut App, dt_secs: f32) {
         let mut time = app.world_mut().resource_mut::<Time>();
         time.advance_by(std::time::Duration::from_secs_f32(dt_secs));
@@ -2360,144 +2405,111 @@ station = "sensors"
     }
 
     #[test]
-    fn ai_power_allocation_reallocates_toward_weapons_on_red_alert() {
-        // Explicit acceptance criterion: NPC under red alert reallocates
-        // power toward weapons.
+    fn baseline_default_reallocates_toward_weapons_on_red_alert() {
+        // Baseline preservation: the synthesised default policy reproduces the
+        // retired red-alert→weapons behaviour. Under red alert with a full
+        // battery (well above the 10% weapons reserve) weapons rises to its
+        // elevated level 3.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
-
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
-        let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        power_tick_with_dt(&mut app, 0.1);
 
-        // 4s exceeds the 3s default red_alert_engage_delay_secs in a single
-        // tick; default battery is full (100%), well above the 10% floor.
-        power_tick_with_dt(&mut app, 4.0);
-
-        let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
-        assert!(
-            after > before,
-            "weapons power should increase under sustained red alert (before={before}, after={after})"
-        );
-    }
-
-    #[test]
-    fn npc_power_ai_reads_its_own_tuning_not_the_player_ships_global_resource() {
-        // Issue #738 isolation: `ai_power_allocation` used to resolve both its
-        // reactor config and its AI tuning as
-        // `per_entity_component.unwrap_or(&*global_resource)`, and `server_app`
-        // writes those Resources from the PLAYER ship's `[power]` TOML. An NPC
-        // spawned without the components therefore ran the player's thresholds.
-        //
-        // The global `PowerAiConfigResource` here carries an eager 0.5s
-        // red-alert delay, so a single 1.0s tick engages under the global
-        // tuning but not under the parse-time 3.0s default.
-        let mut app = power_test_app();
-        let npc = power_ship_entity(&mut app);
-        // Eager 0.5s red-alert rule as a GLOBAL resource — `ai_power_allocation`
-        // must NOT fall back to it for a ship that carries no per-entity tuning.
-        let eager_rules = vec![crate::console_ai::PowerAiRule {
-            group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-            trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
-            min_battery_reserve: 10.0,
-            battery_recharge_pct: 100.0,
-            engage_delay_secs: 0.5,
-            nudge: 1,
-        }];
-        app.insert_resource(crate::ship::power::PowerAiConfigResource {
-            rules: eager_rules.clone(),
-        });
-
-        let mut tuned_sources = ShipSystemControlSources::default();
-        tuned_sources.0.set(
-            crate::system_registry::power_reactor_system_id(),
-            ControlSource::Ai,
-        );
-        let tuned = app
-            .world_mut()
-            .spawn((
-                crate::server_app::Ship,
-                tuned_sources,
-                crate::ship::power::ShipPowerSystem(
-                    crate::modifiers::power_system::PowerSystem::default(),
-                ),
-                crate::ship_state::ShipRedAlert(true),
-                crate::ship_plugin::LastHelmInput::default(),
-                crate::ship::power::ShipPowerAiState::default(),
-                crate::messages::AdmittedCommands::default(),
-                AiHighFidelity,
-                crate::ship::power::PowerAiConfigResource { rules: eager_rules },
-            ))
-            .id();
-
-        app.world_mut()
-            .entity_mut(npc)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
-            .unwrap()
-            .0 = true;
-
-        let npc_before = power_level(
-            &app,
-            npc,
-            crate::modifiers::power_system::WEAPONS_POWER_GROUP,
-        );
-        let tuned_before = power_level(
-            &app,
-            tuned,
-            crate::modifiers::power_system::WEAPONS_POWER_GROUP,
-        );
-
-        power_tick_with_dt(&mut app, 1.0);
-
-        assert!(
-            power_level(
-                &app,
-                tuned,
-                crate::modifiers::power_system::WEAPONS_POWER_GROUP
-            ) > tuned_before,
-            "a ship carrying the eager 0.5s red-alert delay on its own entity must engage \
-             after 1.0s"
-        );
         assert_eq!(
-            power_level(
-                &app,
-                npc,
-                crate::modifiers::power_system::WEAPONS_POWER_GROUP
-            ),
-            npc_before,
-            "an NPC without its own power-AI tuning must fall back to the parse-time 3.0s \
-             default, never to the global Resource holding the player ship's tuning"
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            3,
+            "sustained red alert must elevate weapons power (default baseline)"
         );
     }
 
     #[test]
-    fn ai_power_allocation_reallocates_toward_helm_on_sustained_thrust() {
-        // Movement-rule equivalent: high sustained thrust + healthy battery
-        // increases helm power (±1 per engage event under the new
-        // timer/hysteresis semantics, not an absolute target of 3).
+    fn baseline_default_reallocates_toward_helm_on_sustained_thrust() {
+        // Baseline preservation: sustained high thrust + healthy battery raises
+        // helm power to its elevated level 3 (reproducing the retired
+        // movement→helm behaviour, now absolute + stateless).
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
-
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_plugin::LastHelmInput>()
             .unwrap()
             .thrust = 0.9;
 
-        let before = power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP);
+        power_tick_with_dt(&mut app, 0.1);
 
-        // 4s exceeds the 3s default movement_engage_delay_secs in a single
-        // tick; default battery is full (100%), well above the 50% floor.
-        power_tick_with_dt(&mut app, 4.0);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            3,
+            "sustained high thrust must elevate helm power (default baseline)"
+        );
+    }
 
-        let after = power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP);
-        assert!(
-            after > before,
-            "helm power should increase under sustained high thrust (before={before}, after={after})"
+    #[test]
+    fn reserve_gate_blocks_elevation_below_the_authored_floor() {
+        // AC2 + AC5: with the battery drained below the helm 50% reserve, the
+        // elevate guard cannot fire even under full thrust, so the baseline
+        // fallback holds helm at level 2 — allocation never rises when the
+        // battery can't sustain it (no avoidable brownout). Above the reserve it
+        // elevates.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .unwrap()
+            .thrust = 0.9;
+
+        // 40% battery is below the 50% helm reserve → held at baseline 2.
+        set_battery(&mut app, e, 40.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            2,
+            "below-reserve thrust must NOT elevate helm (brownout avoidance)"
+        );
+
+        // Recharge above the reserve → the same thrust now elevates.
+        set_battery(&mut app, e, 80.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            3,
+            "above-reserve thrust must elevate helm"
+        );
+    }
+
+    #[test]
+    fn reserve_gate_lowers_allocation_when_battery_dips_under_load() {
+        // AC5: a group already elevated is brought back down by the lowering
+        // baseline rule once the battery falls below the reserve while still
+        // under thrust — the per-rule reserve guard is the brownout-avoidance
+        // mechanism, with no global emergency exception.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_plugin::LastHelmInput>()
+            .unwrap()
+            .thrust = 0.9;
+
+        set_battery(&mut app, e, 80.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            3
+        );
+
+        set_battery(&mut app, e, 40.0);
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            2,
+            "an elevated group must drop back to baseline once battery dips below reserve"
         );
     }
 
@@ -2513,7 +2525,7 @@ station = "sensors"
             .0 = true;
 
         let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
-        power_tick_with_dt(&mut app, 4.0);
+        power_tick_with_dt(&mut app, 0.1);
         let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
         assert_eq!(
             before, after,
@@ -2522,9 +2534,19 @@ station = "sensors"
     }
 
     #[test]
-    fn ai_power_allocation_skips_ships_where_power_is_not_ai_operated() {
+    fn human_control_source_holds_and_regains_cleanly() {
+        // AC5 human Control Source + lifecycle reset: while a human holds the
+        // Power reactor the AI stands down (allocation unchanged). Because the
+        // decision is stateless there is nothing to reset — the very next tick
+        // after AI control is regained yields a clean decision from the fresh
+        // snapshot.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
         app.world_mut()
             .entity_mut(e)
             .get_mut::<ShipSystemControlSources>()
@@ -2534,92 +2556,42 @@ station = "sensors"
                 crate::system_registry::power_reactor_system_id(),
                 ControlSource::Human,
             );
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
-            .unwrap()
-            .0 = true;
 
         let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
-        power_tick_with_dt(&mut app, 4.0);
-        let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
-            before, after,
+            before,
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
             "human-operated power reactor must not be touched by ai_power_allocation"
         );
-    }
 
-    #[test]
-    fn ai_power_reallocation_dual_writes_resource_for_local_ship() {
-        // Issue #693 review finding, rewired for issue #831: when the AI path
-        // reallocates power for the LocalShip (e.g. a disconnected player's
-        // station backfilled to AI per AGENTS.md rule 5), the admitted
-        // `SetPowerGroupAllocation` must flow through
-        // `ship::power::handle_power_messages` — the single applier — which
-        // dual-writes the legacy global `ShipPowerSystem` Resource, not just
-        // the per-entity Component. (Previously asserted against the retired
-        // `integrate_power_state` adapter.)
-        let mut app = power_test_app();
-        let e = power_ship_entity(&mut app);
+        // Hand back to AI: a clean decision this tick, no stale carry-over.
         app.world_mut()
             .entity_mut(e)
-            .insert(crate::server_app::LocalShip);
-        app.world_mut()
-            .insert_resource(crate::ship::power::ShipPowerSystem(
-                crate::modifiers::power_system::PowerSystem::default(),
-            ));
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<ShipSystemControlSources>()
             .unwrap()
-            .0 = true;
-
-        // 4s exceeds the 3s default red_alert_engage_delay_secs in a single
-        // tick, so the weapons group should engage by +1.
-        power_tick_with_dt(&mut app, 4.0);
-
-        let component_level =
-            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
-        let resource_level = app
-            .world()
-            .resource::<crate::ship::power::ShipPowerSystem>()
             .0
-            .level_for(&crate::messages::PowerGroupId(
-                crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
-            ));
+            .set(
+                crate::system_registry::power_reactor_system_id(),
+                ControlSource::Ai,
+            );
+        power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
-            component_level, resource_level,
-            "global ShipPowerSystem Resource must be dual-written to match \
-             the LocalShip's per-entity Component after AI reallocation"
-        );
-        assert!(
-            resource_level > 1,
-            "expected the AI-driven weapons reallocation to be reflected in \
-             the dual-written Resource (resource_level={resource_level})"
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            3,
+            "regaining AI control yields a clean elevate decision (stateless reset)"
         );
     }
 
     #[test]
-    fn ai_power_allocation_emits_admitted_set_power_group_allocation() {
-        // The decide system emits its reallocation as an admitted
-        // `SetPowerGroupAllocation` targeting the reactor (issue #831), rather
-        // than writing a private `PowerReactorIntents` component. A saturated
-        // no-op must NOT be admitted every tick.
-        let mut app = power_test_app();
-        let e = power_ship_entity(&mut app);
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
-            .unwrap()
-            .0 = true;
-
-        // Run just the emit half so AdmittedCommands is observable before the
-        // applier drains it: a fresh app whose only system is the decide one.
+    fn emits_admitted_set_power_group_allocation_and_skips_no_ops() {
+        // AC: the decide system emits its reallocation as an admitted
+        // `SetPowerGroupAllocation` targeting the reactor, and a saturated no-op
+        // (target == current) is NOT re-admitted every tick.
         let mut emit_app = App::new();
         emit_app
             .insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
-            .init_resource::<crate::ship::power::PowerAiConfigResource>()
             .insert_resource(crate::lobby::Sessions(
                 crate::lobby::session::SessionManager::new(),
             ))
@@ -2639,14 +2611,14 @@ station = "sensors"
                 ),
                 crate::ship_state::ShipRedAlert(true),
                 crate::ship_plugin::LastHelmInput::default(),
-                crate::ship::power::ShipPowerAiState::default(),
+                default_power_policy(),
                 crate::messages::AdmittedCommands::default(),
                 AiHighFidelity,
             ))
             .id();
         {
             let mut time = emit_app.world_mut().resource_mut::<Time>();
-            time.advance_by(std::time::Duration::from_secs_f32(4.0));
+            time.advance_by(std::time::Duration::from_secs_f32(0.1));
         }
         emit_app.update();
 
@@ -2655,39 +2627,43 @@ station = "sensors"
             .entity(ee)
             .get::<crate::messages::AdmittedCommands>()
             .unwrap();
-        let has_weapons_alloc = admitted.0.iter().any(|c| {
-            c.target == crate::system_registry::power_reactor_system_id()
-                && matches!(
-                    &c.payload,
-                    crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
-                        if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
-                )
+        let weapons_alloc = admitted.0.iter().find_map(|c| match &c.payload {
+            crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level }
+                if c.target == crate::system_registry::power_reactor_system_id()
+                    && group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP =>
+            {
+                Some(*level)
+            }
+            _ => None,
         });
-        assert!(
-            has_weapons_alloc,
-            "sustained red alert must admit a SetPowerGroupAllocation for weapons"
+        assert_eq!(
+            weapons_alloc,
+            Some(3),
+            "red alert must admit an absolute SetPowerGroupAllocation(3) for weapons"
         );
 
-        // No-op guard: with weapons now saturated at 4, a further sustained
-        // engage produces the same target level and must NOT be re-admitted.
+        // Saturate weapons at the emitted level and clear admissions: a further
+        // tick produces the same target and must NOT re-admit a no-op.
         {
             let mut ent = emit_app.world_mut().entity_mut(ee);
-            let mut ps = ent
-                .get_mut::<crate::ship::power::ShipPowerSystem>()
+            ent.get_mut::<crate::ship::power::ShipPowerSystem>()
+                .unwrap()
+                .0
+                .set_group_allocation(
+                    &crate::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
+                    3,
+                )
                 .unwrap();
-            ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(
-                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
-                ),
-                4,
-            )
-            .unwrap();
-            let mut ac = ent.get_mut::<crate::messages::AdmittedCommands>().unwrap();
-            ac.0.clear();
+            ent.get_mut::<crate::messages::AdmittedCommands>()
+                .unwrap()
+                .0
+                .clear();
         }
         {
             let mut time = emit_app.world_mut().resource_mut::<Time>();
-            time.advance_by(std::time::Duration::from_secs_f32(4.0));
+            time.advance_by(std::time::Duration::from_secs_f32(0.1));
         }
         emit_app.update();
         let admitted = emit_app
@@ -2701,21 +2677,55 @@ station = "sensors"
                 crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
                     if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
             )),
-            "a saturated weapons allocation (already at 4) must not re-admit a no-op"
+            "a group already at the target level must not re-admit a no-op"
         );
     }
 
     #[test]
-    fn two_ships_with_different_authored_rules_allocate_independently() {
-        // AC1 + AC4 per-ship isolation: two AI ships carry DIFFERENT authored
-        // rules — one boosts `helm` on thrust, the other boosts `sensors` on
-        // thrust. Under identical sustained thrust each ship nudges only its
-        // own authored group, and neither touches the other's, proving the
-        // rules are per-ship data (not a shared hardcoded category set).
+    fn ai_power_reallocation_dual_writes_resource_for_local_ship() {
+        // When the AI path reallocates power for the LocalShip, the admitted
+        // command flows through `handle_power_messages` — the single applier —
+        // which dual-writes the legacy global `ShipPowerSystem` Resource.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(crate::server_app::LocalShip);
+        app.world_mut()
+            .insert_resource(crate::ship::power::ShipPowerSystem(
+                crate::modifiers::power_system::PowerSystem::default(),
+            ));
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        let component_level =
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
+        let resource_level = app
+            .world()
+            .resource::<crate::ship::power::ShipPowerSystem>()
+            .0
+            .level_for(&crate::messages::PowerGroupId(
+                crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+            ));
+        assert_eq!(component_level, resource_level);
+        assert_eq!(resource_level, 3);
+    }
+
+    #[test]
+    fn two_ships_with_different_authored_group_layouts_allocate_independently() {
+        // AC1 + AC4 + AC6 per-ship isolation: two AI ships carry DIFFERENT
+        // authored group layouts. Ship A (helm/weapons/sensors/ops) elevates its
+        // `ops` group on thrust; ship B (canonical three) elevates `sensors` on
+        // thrust. Under identical thrust each nudges only its own authored group,
+        // proving the channels are per-ship data, not a shared catalogue.
         let mut app = App::new();
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
-            .init_resource::<crate::ship::power::PowerAiConfigResource>()
             .insert_resource(crate::lobby::Sessions(
                 crate::lobby::session::SessionManager::new(),
             ))
@@ -2727,184 +2737,239 @@ station = "sensors"
                 ),
             );
 
-        let spawn_ruled = |app: &mut App, group: &str| -> Entity {
+        let spawn = |app: &mut App, groups: &[(&str, u8)], policy: PowerAiPolicy| -> Entity {
             let mut cs = ShipSystemControlSources::default();
             cs.0.set(
                 crate::system_registry::power_reactor_system_id(),
                 ControlSource::Ai,
             );
-            let helm = crate::ship_plugin::LastHelmInput {
-                thrust: 0.9,
-                ..Default::default()
-            };
+            let seed: Vec<(crate::messages::PowerGroupId, u8)> = groups
+                .iter()
+                .map(|(g, l)| (crate::messages::PowerGroupId(g.to_string()), *l))
+                .collect();
             app.world_mut()
                 .spawn((
                     crate::server_app::Ship,
                     cs,
                     crate::ship::power::ShipPowerSystem(
-                        crate::modifiers::power_system::PowerSystem::default(),
+                        crate::modifiers::power_system::PowerSystem::from_authored_groups(
+                            100.0, &seed,
+                        ),
                     ),
                     crate::ship_state::ShipRedAlert::default(),
-                    helm,
-                    crate::ship::power::ShipPowerAiState::default(),
+                    crate::ship_plugin::LastHelmInput {
+                        thrust: 0.9,
+                        ..Default::default()
+                    },
+                    policy,
                     crate::messages::AdmittedCommands::default(),
                     AiHighFidelity,
-                    crate::ship::power::PowerAiConfigResource {
-                        rules: vec![crate::console_ai::PowerAiRule {
-                            group: group.to_string(),
-                            trigger: crate::console_ai::PowerRuleTrigger::Thrust { threshold: 0.7 },
-                            min_battery_reserve: 50.0,
-                            battery_recharge_pct: 100.0,
-                            engage_delay_secs: 3.0,
-                            nudge: 1,
-                        }],
-                    },
                 ))
                 .id()
         };
 
-        let helm_ship = spawn_ruled(&mut app, crate::modifiers::power_system::HELM_POWER_GROUP);
-        let sensors_ship = spawn_ruled(
+        let ops_ship = spawn(
             &mut app,
-            crate::modifiers::power_system::SENSORS_POWER_GROUP,
+            &[("helm", 2), ("weapons", 2), ("sensors", 1), ("ops", 1)],
+            power_policy(
+                &[("reserve", 10.0)],
+                vec![alloc_rule(
+                    10,
+                    "ops",
+                    "fact(thrust) >= 0.7 and fact(battery_pct) >= param(reserve)",
+                    3,
+                )],
+            ),
+        );
+        let sensors_ship = spawn(
+            &mut app,
+            &[("helm", 2), ("weapons", 2), ("sensors", 2)],
+            power_policy(
+                &[("reserve", 10.0)],
+                vec![alloc_rule(
+                    10,
+                    "sensors",
+                    "fact(thrust) >= 0.7 and fact(battery_pct) >= param(reserve)",
+                    4,
+                )],
+            ),
         );
 
-        power_tick_with_dt(&mut app, 4.0);
+        power_tick_with_dt(&mut app, 0.1);
 
-        // Ship A boosted helm, left sensors alone.
+        assert_eq!(power_level(&app, ops_ship, "ops"), 3, "ops ship raises ops");
         assert_eq!(
-            power_level(
-                &app,
-                helm_ship,
-                crate::modifiers::power_system::HELM_POWER_GROUP
-            ),
-            3,
-            "helm-ruled ship must raise its own helm group"
+            power_level(&app, ops_ship, "sensors"),
+            1,
+            "ops ship leaves sensors alone"
         );
         assert_eq!(
-            power_level(
-                &app,
-                helm_ship,
-                crate::modifiers::power_system::SENSORS_POWER_GROUP
-            ),
+            power_level(&app, sensors_ship, "sensors"),
+            4,
+            "sensors ship raises sensors to its authored level"
+        );
+        assert_eq!(
+            power_level(&app, sensors_ship, "helm"),
             2,
-            "helm-ruled ship must NOT touch sensors"
-        );
-        // Ship B boosted sensors, left helm alone.
-        assert_eq!(
-            power_level(
-                &app,
-                sensors_ship,
-                crate::modifiers::power_system::SENSORS_POWER_GROUP
-            ),
-            3,
-            "sensors-ruled ship must raise its own sensors group"
-        );
-        assert_eq!(
-            power_level(
-                &app,
-                sensors_ship,
-                crate::modifiers::power_system::HELM_POWER_GROUP
-            ),
-            2,
-            "sensors-ruled ship must NOT touch helm"
+            "sensors ship leaves helm alone"
         );
     }
 
     #[test]
-    fn conflicting_rules_on_same_group_converge_without_error() {
-        // AC4 conflicting rules at the system level: one ship authors TWO rules
-        // that both target `weapons` (thrust and red alert). Both fire this
-        // tick; the emitted admitted commands funnel through the single applier
-        // and the group settles one step up (no double-apply, no error).
+    fn highest_priority_matching_rule_wins_on_one_group() {
+        // AC4 conflicting rules on ONE group: two rules target `weapons`, both
+        // firing this tick. The higher-priority rule's absolute level wins.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        app.world_mut().entity_mut(e).insert(power_policy(
+            &[("reserve", 10.0)],
+            vec![
+                // Low priority: hold weapons at 2.
+                alloc_rule(0, "weapons", "true", 2),
+                // High priority: on red alert, elevate to 4 — this must win.
+                alloc_rule(
+                    10,
+                    "weapons",
+                    "fact(red_alert) > 0 and fact(battery_pct) >= param(reserve)",
+                    4,
+                ),
+            ],
+        ));
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
+
+        power_tick_with_dt(&mut app, 0.1);
+
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            4,
+            "the highest-priority matching weapons rule wins the channel"
+        );
+    }
+
+    #[test]
+    fn authored_guard_fires_from_seeded_facts() {
+        // The #779 empty-facts lesson, applied to power: an authored `fact(...)`
+        // guard actually fires because the host SEEDS the fact. Here a guard on
+        // the seeded `total_allocation` ship fact elevates sensors only once the
+        // total crosses the authored threshold.
+        let mut app = power_test_app();
+        let e = power_ship_entity(&mut app);
+        // Default seed totals 2+2+2 = 6. A guard `total_allocation >= 6` fires;
+        // `>= 7` would not.
+        app.world_mut().entity_mut(e).insert(power_policy(
+            &[],
+            vec![alloc_rule(10, "sensors", "fact(total_allocation) >= 6", 3)],
+        ));
+
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            3,
+            "a guard reading the seeded total_allocation fact fires"
+        );
+    }
+
+    #[test]
+    fn scenario_flag_guard_gates_allocation() {
+        // AC3: a rule may read read-only SCENARIO flags. Weapons stays at
+        // baseline until a world flag is set; once the `WorldContentRuntime`
+        // flag chain carries it, the same tick elevates weapons.
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .init_resource::<crate::world::server::WorldContentRuntime>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    ai_power_allocation.before(crate::ship::power::handle_power_messages),
+                    crate::ship::power::handle_power_messages,
+                ),
+            );
+        let mut cs = ShipSystemControlSources::default();
+        cs.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let e = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                cs,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::default(),
+                ),
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_plugin::LastHelmInput::default(),
+                power_policy(
+                    &[],
+                    vec![alloc_rule(10, "weapons", "flag(battle_stations)", 4)],
+                ),
+                crate::messages::AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+
+        // Flag unset → weapons holds at its seeded baseline 2.
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            2,
+            "with the scenario flag unset the guard does not fire"
+        );
+
+        // Set the scenario flag → the same guard now fires and elevates weapons.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("battle_stations");
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            4,
+            "once the scenario flag is set the guard fires (AC3 read-only flags)"
+        );
+    }
+
+    #[test]
+    fn idle_policy_holds_every_group() {
+        // A ship whose policy is an explicit idle takes no power action.
         let mut app = power_test_app();
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .insert(crate::ship::power::PowerAiConfigResource {
-                rules: vec![
-                    crate::console_ai::PowerAiRule {
-                        group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-                        trigger: crate::console_ai::PowerRuleTrigger::Thrust { threshold: 0.7 },
-                        min_battery_reserve: 50.0,
-                        battery_recharge_pct: 100.0,
-                        engage_delay_secs: 3.0,
-                        nudge: 1,
-                    },
-                    crate::console_ai::PowerAiRule {
-                        group: crate::modifiers::power_system::WEAPONS_POWER_GROUP.to_string(),
-                        trigger: crate::console_ai::PowerRuleTrigger::RedAlert,
-                        min_battery_reserve: 10.0,
-                        battery_recharge_pct: 100.0,
-                        engage_delay_secs: 3.0,
-                        nudge: 1,
-                    },
-                ],
-            });
+            .insert(PowerAiPolicy(crate::ai::policy::AiPolicy {
+                idle: true,
+                ..Default::default()
+            }));
+        app.world_mut()
+            .entity_mut(e)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = true;
         app.world_mut()
             .entity_mut(e)
             .get_mut::<crate::ship_plugin::LastHelmInput>()
             .unwrap()
             .thrust = 0.9;
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
-            .unwrap()
-            .0 = true;
 
-        power_tick_with_dt(&mut app, 4.0);
-
+        power_tick_with_dt(&mut app, 0.1);
         assert_eq!(
             power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
-            3,
-            "two rules on weapons both engage and converge to a single +1 step"
+            2
         );
-    }
-
-    #[test]
-    fn human_held_power_reactor_rejects_ai_emission() {
-        // A human holds the Power reactor. Unlike shields (coarse system vs.
-        // per-arc fine systems), power's decide gate and admission target the
-        // SAME system — the reactor — so `operate_ai` being false stops the
-        // AI at the decide gate, and `validate_and_admit` would independently
-        // refuse the same `ai:` token were it reached. Either way no admitted
-        // command exists and the allocation never changes — the refusal the
-        // retired `integrate_power_state` adapter could not express (it applied
-        // intents unconditionally).
-        let mut app = power_test_app();
-        let e = power_ship_entity(&mut app);
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<ShipSystemControlSources>()
-            .unwrap()
-            .0
-            .set(
-                crate::system_registry::power_reactor_system_id(),
-                ControlSource::Human,
-            );
-        app.world_mut()
-            .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
-            .unwrap()
-            .0 = true;
-
-        let before = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
-        power_tick_with_dt(&mut app, 4.0);
-        let after = power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP);
         assert_eq!(
-            before, after,
-            "an ai: emission targeting a human-held power reactor must be refused at admission"
-        );
-        assert!(
-            app.world()
-                .entity(e)
-                .get::<crate::messages::AdmittedCommands>()
-                .unwrap()
-                .0
-                .is_empty(),
-            "the refused command must never reach AdmittedCommands"
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            2
         );
     }
+
     // ── AI torpedo loading (admitted-command path) ──────────────────
 
     /// One tube, `volley_max = 2`, no per-tube AI override — so its resolved
@@ -3065,6 +3130,7 @@ station = "sensors"
                 when: when.into(),
                 verb: crate::entity_config::TORPEDO_LOAD_VERB.into(),
                 value: false,
+                level: 0,
             }],
         };
         let mut map = std::collections::HashMap::new();

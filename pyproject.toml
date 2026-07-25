@@ -1,38 +1,28 @@
+# Development tooling for project-phoenix-v2. Ships no Python of its own;
+# exists to pull PASM.
+#
+# PASM used to be vendored here. It is the fleet's tool, kept in vellum and
+# consumed as a git subdirectory pinned to a rev, so this repo cannot drift
+# from the version the rest of the fleet validates against. The spec itself
+# (pasm/spec/) stays here — that is this game's model, not the tool.
 [project]
-name = "project-phoenix-pasm"
+name = "project-phoenix-tooling"
 version = "0.1.0"
-description = "Phase 0-6 PASM runtime for Project Phoenix."
-readme = "README.md"
+description = "Development tooling for project-phoenix-v2. Ships no Python; exists to pull PASM."
 requires-python = ">=3.11"
 dependencies = [
-  "PyYAML>=6.0",
+  "pasm @ git+https://github.com/jkeywo/vellum@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9#subdirectory=pasm",
 ]
 
-[project.scripts]
-pasm = "pasm.cli.main:main"
+[tool.uv]
+package = false
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = [
-  "pasm",
-  "pasm.architecture",
-  "pasm.cli",
-  "pasm.core",
-  "pasm.domains",
-  "pasm.domains.game_design",
-  "pasm.implementation",
-  "pasm.integration",
-  "pasm.migration",
-  "pasm.scanners",
-]
+# Local override against a sibling vellum checkout — uncomment for local work,
+# re-comment before committing. The committed state always resolves the pin.
+# [tool.uv.sources]
+# pasm = { path = "../vellum/pasm", editable = true }
 
 [dependency-groups]
 dev = [
   "pytest>=8.0",
 ]
-
-[tool.pytest.ini_options]
-testpaths = ["tests/pasm"]

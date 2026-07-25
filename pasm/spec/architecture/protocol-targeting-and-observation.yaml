@@ -120,36 +120,11 @@ entities:
       paths: [src/entities/target.rs, src/console/weapons/mod.rs, src/core/messages.rs]
       tests: [cargo test]
 
-  - component: authored-toml-observer
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Authored TOML Observer
-      summary: PASM repository observer that inventories TOML files and source-locates authored template and world-layer path references without attempting general TOML runtime semantics.
-    architecture:
-      kind: repository-observer
-      authority: local
-      owns: [authored-content-observation-state]
-      produces: [authored-content-observation-state]
-      runs_in: [host-browser-runtime]
-    implementation:
-      status: declared
-      paths: [pasm/scanners/toml.py, pasm/implementation/observation.py, tests/pasm/test_validation.py]
-      tests: [uv run pytest -q tests/pasm]
-
-  - state: authored-content-observation-state
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Authored Content Observation State
-      summary: Revision-linked TOML file inventory and resolved direct authored path edges for worlds, entity templates, and nested asteroid templates.
-    architecture:
-      classification: local
-      owner: authored-toml-observer
-      writers: [authored-toml-observer]
-    implementation:
-      status: declared
-      paths: [pasm/implementation/observation.py, pasm/scanners/toml.py]
+  # The authored-toml-observer component and its authored-content-observation-state
+  # were removed when phoenix de-vendored PASM. They modelled the TOML scanner
+  # inside the tool, not anything this game implements; the tool now lives in
+  # vellum and is modelled by vellum's own spec. Keeping declarations here would
+  # have meant this repo asserting ownership of code it does not contain.
 
   - component: console-ai-orchestrator-plugin
     core:

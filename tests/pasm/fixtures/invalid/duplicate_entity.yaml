@@ -1,7 +1,0 @@
-entities:
-  - component: engineering-station
-    core:
-      status: accepted
-  - component: engineering-station
-    core:
-      status: provisional

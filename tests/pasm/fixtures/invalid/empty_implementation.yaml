@@ -1,5 +1,0 @@
-entities:
-  - component: empty-mapped-thing
-    core:
-      status: implemented
-    implementation: {}

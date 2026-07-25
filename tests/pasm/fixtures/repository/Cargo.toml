@@ -1,6 +1,0 @@
-[package]
-name = "pasm-observation-fixture"
-version = "0.1.0"
-
-[dependencies]
-serde = "1"

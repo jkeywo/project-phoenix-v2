@@ -1,8 +1,0 @@
-entities:
-  - component: mapped-thing
-    core:
-      status: implemented
-    implementation:
-      status: declared
-      paths:
-        - fixtures/invalid/does-not-exist.py

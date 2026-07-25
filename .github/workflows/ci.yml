@@ -27,9 +27,6 @@ jobs:
           spec-path: pasm/spec
           scan: gate
 
-      - name: Run PASM tests
-        run: uv run pytest -q tests/pasm
-
       # Not covered by the composite action: traceability is phoenix's own
       # report, and the artifact shape below is consumed by this repo's tooling.
       - name: Generate revision-linked PASM reports

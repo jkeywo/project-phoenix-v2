@@ -1,5 +1,0 @@
-entities:
-  - component: engineering-station
-    extra_field: nope
-    core:
-      status: accepted

@@ -1,19 +1,42 @@
 # PASM Foundation
 
-Phase 0-12 of the **Phoenix Architecture & System Model** lives in this top-level `pasm/` Python package.
+The **Phoenix Architecture & System Model** — this game's authored model — lives
+in [`spec/`](./spec/). The tool that reads it is the fleet's, kept in
+[vellum](https://github.com/jkeywo/vellum) and consumed as a git subdirectory
+dependency pinned to a rev in `pyproject.toml`.
 
-## Running PASM tests
+Phoenix used to vendor a copy of that tool here. It was byte-identical to
+vellum's apart from one scanner regex, which has since been upstreamed
+(jkeywo/vellum#10), so the copy was only somewhere for the two to drift apart.
+The tool's own documentation — command reference, finding categories, parser
+internals — lives with the tool.
 
-Use the project-managed Python environment so PASM does not depend on a global Python installation:
+## Running it
 
 ```powershell
-uv sync --group dev
-uv run pytest -q
+uv run pasm validate
+uv run pasm scan --json > target/pasm/scan.json
+uv run pasm traceability --json > target/pasm/traceability.json
 ```
+
+CI runs `validate` and a gating `scan` through vellum's `pasm-validate`
+composite action, then produces the traceability report and uploads both as the
+`pasm-reports` artifact.
+
+To work on the tool itself, edit a sibling vellum checkout and uncomment the
+`[tool.uv.sources]` block in `pyproject.toml`. That override must never be
+committed active: it resolves whatever is on disk instead of the pinned rev,
+which makes the pin worthless. Land the change in vellum, then bump the rev.
 
 `pasm validate` resolves implementation paths relative to `pasm/spec` by default. For nested fixtures or an external spec root, pass `--workspace-root <path>` explicitly.
 
-- The PASM design docs live beside the authored YAML under [`spec/`](./spec/), making `pasm/` the single canonical package and specification root.
+## Design and tooling notes
+
+The rest of this file is phoenix's running record of what the model asserts and
+why. Entries describing PASM phases record the tool capabilities this repo
+relies on; the remainder are this game's own architecture decisions.
+
+- The PASM design docs live beside the authored YAML under [`spec/`](./spec/), making `pasm/spec/` the canonical specification root for this game.
 - Authored PASM YAML lives under [`spec/`](./spec/). The seed files there are intentionally small so `pasm validate` has a real default target.
 - The first parser pass uses **PyYAML**'s composed node tree instead of a custom grammar. That keeps the implementation simple while still preserving source line/column information.
 - The restricted YAML subset currently accepts mappings, sequences, strings, and explicit booleans only. Unknown fields are rejected, anchors and custom tags are rejected.

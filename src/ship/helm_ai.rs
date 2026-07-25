@@ -1112,6 +1112,46 @@ pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState)
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmSteeringAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
 
+/// Per-ship BOUNDED history of the range to the current travel target
+/// (issue #788), and the identity that history was accumulated against.
+///
+/// ## Why a window rather than another memory slot
+///
+/// Private memory is a bag of `f64`s, so it can carry running aggregates
+/// (`min_range_seen`) but not a *window*. "Has this ship HELD its safe distance"
+/// is not a running aggregate: a running minimum never recovers once one bad
+/// sample folds into it, so a destroyer that dipped inside the ring once at the
+/// start of its recovery could never satisfy a re-entry gate built on one. The
+/// answer needs the last N readings and nothing older, which is exactly
+/// [`crate::bounded_history::BoundedHistory`].
+///
+/// ## Why the bound is the point
+///
+/// A `Vec` that only grows is a leak in a scenario that runs for an hour, and a
+/// growing window silently redefines "recently" as the run goes on. The
+/// capacity is authored (`safe_distance_window_ticks`) and re-applied every
+/// tick, so memory is constant and the window always means the same span of
+/// shared AI ticks.
+///
+/// ## Why it is host-side rather than policy memory
+///
+/// It is a derived measurement surface, in the same family as
+/// [`HelmPassSurface`]: the host folds it, the host reduces it to the single
+/// `fact(safe_distance_held)` reading, and the policy makes the decision. Being
+/// per-SHIP rather than per-fine-system is correct here for the same reason the
+/// fact snapshot is shared: it is a reading of the world, not a private belief,
+/// and all three machines must agree about it or they would reach different
+/// legs.
+#[derive(Component, Clone, Debug, Default)]
+pub struct HelmRecoveryHistory {
+    /// Recent range readings, oldest first. Capacity is authored.
+    pub ranges: crate::bounded_history::BoundedHistory,
+    /// Which target the readings belong to. A target switch clears the window:
+    /// distances held against a ship that is no longer the threat say nothing
+    /// about the one that is.
+    pub target: Option<uuid::Uuid>,
+}
+
 /// The host's per-tick, read-only publication of a ship's fly-through pass
 /// (issue #883), written by [`ai_policy_state_tick`] and consumed by
 /// `helm_motion_planner`.
@@ -1175,6 +1215,40 @@ pub struct HelmPassSurface {
     pub tracking_deadband_rad: f32,
     /// Authored steering saturation angle, radians (Steering `param`).
     pub tracking_full_steer_rad: f32,
+    // ── The shield-recovery standoff (issue #788) ────────────────────────────
+    //
+    // Three more legs' worth of derived answer, resolved the same way the
+    // escape leg is: off the AUTHORED yaw verb, never off a state name. A hull
+    // that authors no recovery states leaves every field below at its default
+    // and the planner never selects the arm.
+    /// `true` once the Steering machine's current state answers the `yaw`
+    /// channel with `hold_recovery_orbit` AND the hull authors the full
+    /// recovery parameter set: the ship is spiralling onto / holding the safe
+    /// ring around [`Self::safe_range`].
+    pub recover: bool,
+    /// `true` once that channel answers with `pivot_to_reengage`: recovery is
+    /// over, the ship is turning back onto the target at
+    /// [`Self::reengage_speed`] to begin another pass.
+    pub reengage: bool,
+    /// The radius to hold, world units: the TARGET's own longest usable
+    /// direct-fire range plus this hull's authored `safe_range_margin`.
+    ///
+    /// Derived per tick from a threat fact about the ship being fought, not
+    /// authored as a constant — a destroyer standing off a blaster boat and one
+    /// standing off a beam cruiser are not standing off at the same distance.
+    pub safe_range: f32,
+    /// Which way round the ring: `+1.0` or `-1.0`, read out of the Steering
+    /// system's own host-written `memory(orbit_direction)`, drawn once per
+    /// recovery from a seeded composite key.
+    pub orbit_direction: f32,
+    /// Authored throttle fraction flown on the ring (Steering `param`).
+    pub orbit_speed: f32,
+    /// Authored spiral gain: radians of heading offset per unit of fractional
+    /// radial error (Steering `param`).
+    pub orbit_spiral_gain: f32,
+    /// Authored throttle fraction flown on the re-entry pivot (Steering
+    /// `param`). `0.0` cuts thrust for the turn.
+    pub reengage_speed: f32,
 }
 
 /// The fact name the shared hazard surface is seeded under by
@@ -1212,6 +1286,60 @@ pub(crate) const SPEED_FRACTION_FACT: &str = "speed_fraction";
 /// thrust magnitude is. The policy still owns the decision: it compares this
 /// against its authored `closest_approach_hysteresis`.
 pub(crate) const RANGE_ABOVE_MIN_SEEN_FACT: &str = "range_above_min_seen";
+
+// ── Shield-recovery facts (issue #788) ───────────────────────────────────────
+//
+// SCOPE, and it is narrower than the facts above: these three are seeded by
+// `seed_recovery_facts`, which only `ai_policy_state_tick` calls. They are
+// therefore available to TRANSITION guards and not to a state's continuous
+// RULE guards, which the per-axis actuator hosts resolve from their own
+// snapshot.
+//
+// That is deliberate — `safe_distance_held` is the verdict of a bounded history
+// window that must be folded exactly once per shared tick, and four hosts each
+// folding it would advance it four times as fast — but it is also a sharp edge
+// of precisely the #779 shape: a RULE guard authored on one of these names
+// parses, validates, and then reads absent for ever. Author them in
+// transitions. The shipped destroyer doctrine does; every recovery RULE it
+// authors is unconditional.
+
+/// This ship's OWN total shield health as a fraction of capacity, `[0, 1]`.
+///
+/// Transition-scope only — see the note above.
+///
+/// New plumbing: the shield fraction was computed host-side for BROADCAST only
+/// (`server_app`'s entity-health delta), so no ship could reason about the state
+/// of its own shields. Seeded from the shared, pure
+/// [`crate::shield::ShieldSystem::fraction`] — the same function the player
+/// ship's shields go through, because a shield does not care who owns the hull
+/// (AGENTS.md #6).
+///
+/// Deliberately ABSENT (not zero) for a hull with no shield system at all, so a
+/// `fact(shield_fraction) <= …` guard reads false rather than firing
+/// permanently on a ship that has no shields to recover.
+pub(crate) const SHIELD_FRACTION_FACT: &str = "shield_fraction";
+/// The TARGET's longest usable direct-fire range, world units — the threat
+/// radius a standoff ring is derived from. Sourced from
+/// [`crate::ai::AiWorldEntity::direct_fire_range`], i.e. from that ship's own
+/// online blaster and phaser banks. `0.0` for an unarmed or fully-disarmed
+/// target.
+pub(crate) const TARGET_DIRECT_FIRE_RANGE_FACT: &str = "target_direct_fire_range";
+/// The derived safe-ring radius: [`TARGET_DIRECT_FIRE_RANGE_FACT`] plus this
+/// hull's authored [`SAFE_RANGE_MARGIN_PARAM`].
+///
+/// DERIVED host-side for the same reason [`RANGE_ABOVE_MIN_SEEN_FACT`] is: the
+/// predicate grammar compares one atom to a literal or a `param(...)`, so a sum
+/// of a fact and a param is the host's job. Seeded only when the hull authors
+/// the margin — a hull with no recovery doctrine gets no ring.
+pub(crate) const SAFE_RANGE_FACT: &str = "safe_range";
+/// `1.0` when the ship has HELD at least the safe ring across the whole
+/// authored history window (or has no live target at all), `0.0` otherwise.
+///
+/// The bounded-window half of the re-entry gate. Reduced host-side from
+/// [`HelmRecoveryHistory`] to a single reading, because a policy predicate reads
+/// scalars and because the window's meaning (full-or-not, tolerance band) is
+/// measurement detail the doctrine should not have to restate.
+pub(crate) const SAFE_DISTANCE_HELD_FACT: &str = "safe_distance_held";
 
 /// Private-memory slot: the smallest range seen since this policy state was
 /// entered (issue #883). A running MINIMUM, folded every gated tick by the host —
@@ -1261,6 +1389,59 @@ pub(crate) const TRACKING_DEADBAND_PARAM: &str = "tracking_deadband_rad";
 /// Authored Steering `param` naming the tracking saturation angle, radians.
 pub(crate) const TRACKING_FULL_STEER_PARAM: &str = "tracking_full_steer_rad";
 
+// ── Authored shield-recovery manoeuvre params (issue #788) ───────────────────
+//
+// All six are read off the STEERING policy, the axis that owns the recovery
+// legs (its yaw verb is what tells the host which leg is being flown). There is
+// no default for any of them anywhere in Rust: a hull that omits one publishes
+// `recover = false` and flies ordinary doctrine travel rather than orbiting at
+// an invented radius (AGENTS.md #11).
+
+/// World units added to the target's own direct-fire reach to get the safe ring.
+pub(crate) const SAFE_RANGE_MARGIN_PARAM: &str = "safe_range_margin";
+/// Throttle fraction flown while orbiting the ring.
+pub(crate) const ORBIT_SPEED_PARAM: &str = "orbit_speed";
+/// Radians of heading offset per unit of *fractional* radial error — how hard
+/// the orbit spirals back onto the ring.
+pub(crate) const ORBIT_SPIRAL_GAIN_PARAM: &str = "orbit_spiral_gain";
+/// World units inside the ring that still count as "at safe distance" when
+/// folding the history window. Absorbs the orbit's own overshoot so a spiral
+/// that is converging correctly is not read as a breach.
+pub(crate) const SAFE_RING_TOLERANCE_PARAM: &str = "safe_ring_tolerance";
+/// Length of the bounded distance history, in shared AI ticks. The "maintained"
+/// in "maintained safe distance" — one good sample is not a maintained distance.
+pub(crate) const SAFE_DISTANCE_WINDOW_TICKS_PARAM: &str = "safe_distance_window_ticks";
+/// Throttle fraction flown on the re-entry pivot. `0.0` cuts thrust for the turn.
+pub(crate) const REENGAGE_SPEED_PARAM: &str = "reengage_speed";
+
+/// Private-memory slot: which way round the current recovery orbit runs,
+/// `+1.0` or `-1.0` (issue #788).
+///
+/// Host-written on the tick the recovery state is entered, from
+/// [`crate::composite_rng::signed_choice`] over a (world, ship, system,
+/// transition, occurrence) key — so the choice is reproducible for a given seed
+/// and yet is not the same every time, and two destroyers entering recovery on
+/// the same tick do not both break the same way. Read back by the host when it
+/// builds [`HelmPassSurface`]; no authored guard reads it.
+pub(crate) const ORBIT_DIRECTION_MEMORY: &str = "orbit_direction";
+/// Private-memory slot: how many times this machine has entered a
+/// recovery-orbit state since its last reset (issue #788).
+///
+/// The OCCURRENCE field of the orbit-direction seed key, and another
+/// host-written counter in the `memory(min_range_seen)` /
+/// `memory(peak_hazard_urgency)` family: the host owns the quantity, the policy
+/// would own any decision made from it. It is what stops a destroyer that
+/// recovers twice against the same target from picking the same direction both
+/// times.
+pub(crate) const RECOVERY_OCCURRENCES_MEMORY: &str = "recovery_occurrences";
+
+/// The composite-seed SYSTEM key for the Steering fine system (issue #788).
+///
+/// A stable string rather than the `SystemId`, so the derived value cannot move
+/// when an unrelated registry detail changes. It is part of the reproducibility
+/// contract in exactly the way `SimStream::name` is.
+pub(crate) const STEERING_SEED_SYSTEM_NAME: &str = "helm-steering";
+
 /// Private-memory slot: how many times this machine has entered a state that
 /// engages boost, since its last reset (issue #882).
 ///
@@ -1293,6 +1474,24 @@ pub(crate) const PEAK_HAZARD_MEMORY: &str = "peak_hazard_urgency";
 /// retired the last per-frame AI timer; nothing here reintroduces one.
 #[derive(Resource, Default)]
 pub(crate) struct AiPolicyTickClock(pub(crate) f64);
+
+/// The mutable per-ship policy runtime [`ai_policy_state_tick`] owns, bundled as
+/// one `QueryData` (issue #788).
+///
+/// Bundled because Bevy's query tuples cap out and that system already carries
+/// most of a ship's helm configuration, but also because these five components
+/// are one thing: the runtime state of a ship's helm policy machines plus the
+/// two surfaces derived from them. Nothing else writes any of them, so there is
+/// exactly one writer for the whole bundle.
+#[derive(bevy::ecs::query::QueryData)]
+#[query_data(mutable)]
+pub(crate) struct HelmPolicyRuntime {
+    engines: &'static mut HelmEnginesAiPolicyState,
+    steering: &'static mut HelmSteeringAiPolicyState,
+    boost: &'static mut HelmBoostAiPolicyState,
+    pass: &'static mut HelmPassSurface,
+    recovery: &'static mut HelmRecoveryHistory,
+}
 
 /// Advance every stateful fine-system policy's state machine, ONCE per shared
 /// AI tick, and COMMIT the entered state before any output resolves this tick
@@ -1348,6 +1547,12 @@ pub(crate) fn ai_policy_state_tick(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
+    // The run's master seed — the WORLD field of the orbit-direction composite
+    // key (issue #788). `Option` for the same reason every other simulation
+    // system takes it optionally: a bare `Res` fails Bevy parameter validation
+    // in every bare-`App` fixture in this crate. Absent resolves to seed 0,
+    // which is still deterministic.
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
     mut clock: ResMut<AiPolicyTickClock>,
     mut ships: Query<
         (
@@ -1367,10 +1572,13 @@ pub(crate) fn ai_policy_state_tick(
             Option<&HelmEnginesAiPolicy>,
             Option<&HelmSteeringAiPolicy>,
             Option<&HelmBoostAiPolicy>,
-            &mut HelmEnginesAiPolicyState,
-            &mut HelmSteeringAiPolicyState,
-            &mut HelmBoostAiPolicyState,
-            &mut HelmPassSurface,
+            // This ship's OWN shields (issue #788). Read-only here — `tick_shields`
+            // is the single writer — so this adds no ordering question, only a
+            // reading that may be one tick old.
+            Option<&crate::ship::shields::ShipShields>,
+            // The SHIP field of the orbit-direction composite key.
+            Option<&crate::entity_spawner::EntityUuid>,
+            HelmPolicyRuntime,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
@@ -1397,6 +1605,8 @@ pub(crate) fn ai_policy_state_tick(
         .to_policy()
         .unwrap_or_default();
 
+    let world_seed = sim_rng.as_deref().map(|r| r.seed()).unwrap_or(0);
+
     for (
         entity,
         sources,
@@ -1407,10 +1617,9 @@ pub(crate) fn ai_policy_state_tick(
         engines_policy,
         steering_policy,
         boost_policy,
-        mut engines_state,
-        mut steering_state,
-        mut boost_state,
-        mut pass,
+        shields,
+        entity_uuid,
+        mut runtime,
     ) in ships.iter_mut()
     {
         let engines_policy = engines_policy.map(|p| &p.0).unwrap_or(&default_engines);
@@ -1436,11 +1645,22 @@ pub(crate) fn ai_policy_state_tick(
             physics,
             physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
         );
+        // Shield-recovery readings (issue #788): own shield fraction, the derived
+        // safe ring, and the bounded distance history's verdict. Read off the
+        // STEERING policy's params — the axis that owns the recovery legs — so
+        // all three machines see one consistent ring.
+        seed_recovery_facts(
+            &mut facts,
+            &steering_policy.params,
+            shields.map(|s| s.0.fraction()),
+            &mut runtime.recovery,
+            travel_target,
+        );
 
         // ── Engines ──────────────────────────────────────────────────────────
         tick_policy_machine(
             engines_policy,
-            &mut engines_state.0,
+            &mut runtime.engines.0,
             sources
                 .0
                 .policy_for(&crate::system_registry::helm_thrust_system_id())
@@ -1453,9 +1673,9 @@ pub(crate) fn ai_policy_state_tick(
         );
 
         // ── Steering ─────────────────────────────────────────────────────────
-        tick_policy_machine(
+        let steering_entered = tick_policy_machine(
             steering_policy,
-            &mut steering_state.0,
+            &mut runtime.steering.0,
             sources
                 .0
                 .policy_for(&crate::system_registry::helm_steering_system_id())
@@ -1466,6 +1686,52 @@ pub(crate) fn ai_policy_state_tick(
             physics.yaw,
             |_| {},
         );
+        if let Some(entered) = steering_entered {
+            // Entering a RECOVERY-ORBIT state draws that recovery's circulation
+            // direction (issue #788). The host asks the policy what the state it
+            // just entered does on this system's own channel, exactly as the
+            // boost engagement counter below does, so this needs no knowledge of
+            // authored state names.
+            let orbits = resolve_helm_channel(
+                steering_policy,
+                Some(&runtime.steering.0),
+                crate::entities::config::HELM_YAW_CHANNEL,
+                &facts,
+                now,
+            ) == Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit);
+            if orbits {
+                let occurrence = runtime
+                    .steering
+                    .0
+                    .memory
+                    .get(RECOVERY_OCCURRENCES_MEMORY)
+                    .unwrap_or(0.0)
+                    + 1.0;
+                runtime
+                    .steering
+                    .0
+                    .memory
+                    .set(RECOVERY_OCCURRENCES_MEMORY, occurrence);
+                // Deterministic from (world, ship, system, transition,
+                // occurrence) and from nothing else — no `Time`, no frame count,
+                // no OS entropy. Two runs of the same seeded scenario break the
+                // same way; two ships breaking off on the same tick do not.
+                let key = crate::composite_rng::CompositeKey {
+                    world: world_seed,
+                    ship: entity_uuid
+                        .and_then(|u| uuid::Uuid::parse_str(&u.0).ok())
+                        .map(|u| u.as_u128() as u64)
+                        .unwrap_or_else(|| entity.to_bits()),
+                    system: crate::composite_rng::key_from_name(STEERING_SEED_SYSTEM_NAME),
+                    transition: crate::composite_rng::key_from_name(&entered),
+                    occurrence: occurrence as u64,
+                };
+                runtime.steering.0.memory.set(
+                    ORBIT_DIRECTION_MEMORY,
+                    crate::composite_rng::signed_choice(&key),
+                );
+            }
+        }
 
         // ── Boost ────────────────────────────────────────────────────────────
         // Availability is part of this axis's AC5 reset gate: an absent or
@@ -1477,7 +1743,7 @@ pub(crate) fn ai_policy_state_tick(
             && boost_cfg.map(|c| c.enabled).unwrap_or(false);
         let entered = tick_policy_machine(
             boost_policy,
-            &mut boost_state.0,
+            &mut runtime.boost.0,
             boost_operable,
             &facts,
             travel_target,
@@ -1504,26 +1770,32 @@ pub(crate) fn ai_policy_state_tick(
             // `memory(...)` different from `param(...)`.
             let engages = resolve_helm_channel(
                 boost_policy,
-                Some(&boost_state.0),
+                Some(&runtime.boost.0),
                 crate::entities::config::HELM_BOOST_CHANNEL,
                 &facts,
                 now,
             ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
             if engages {
-                let n = boost_state.0.memory.get(ENGAGEMENTS_MEMORY).unwrap_or(0.0);
-                boost_state.0.memory.set(ENGAGEMENTS_MEMORY, n + 1.0);
+                let n = runtime
+                    .boost
+                    .0
+                    .memory
+                    .get(ENGAGEMENTS_MEMORY)
+                    .unwrap_or(0.0);
+                runtime.boost.0.memory.set(ENGAGEMENTS_MEMORY, n + 1.0);
             }
         }
 
-        // ── Publish the derived fly-through pass surface (issue #883) ────────
-        *pass = build_pass_surface(
+        // ── Publish the derived fly-through pass surface (issues #883, #788) ──
+        let surface = build_pass_surface(
             engines_policy,
             steering_policy,
-            &steering_state.0,
+            &runtime.steering.0,
             sources,
             &facts,
             now,
         );
+        *runtime.pass = surface;
     }
 }
 
@@ -1677,13 +1949,46 @@ fn build_pass_surface(
         return HelmPassSurface::default();
     }
 
-    let escape = resolve_helm_channel(
+    let yaw_verb = resolve_helm_channel(
         steering_policy,
         Some(steering_state),
         crate::entities::config::HELM_YAW_CHANNEL,
         facts,
         now,
-    ) == Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading);
+    );
+    let escape = yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading);
+
+    // ── The shield-recovery legs (issue #788) ────────────────────────────────
+    //
+    // Same rule as the escape leg: the leg is the authored yaw verb, and every
+    // scalar it needs is an authored `param` with no Rust default. A hull that
+    // authors the verb but omits a param publishes `recover = false` and flies
+    // ordinary doctrine travel — the same "decline rather than invent" posture
+    // the four params above take for the pass as a whole.
+    // All SIX are required, not just the four this surface reads itself:
+    // `safe_ring_tolerance` and `safe_distance_window_ticks` are consumed by
+    // `seed_recovery_facts`, and a hull that omits either can never satisfy
+    // `safe_distance_held` — so admitting the arm without them would orbit for
+    // ever rather than decline.
+    let recovery_params = (
+        steering_policy.params.get(SAFE_RANGE_MARGIN_PARAM),
+        steering_policy.params.get(ORBIT_SPEED_PARAM),
+        steering_policy.params.get(ORBIT_SPIRAL_GAIN_PARAM),
+        steering_policy.params.get(REENGAGE_SPEED_PARAM),
+        steering_policy.params.get(SAFE_RING_TOLERANCE_PARAM),
+        steering_policy.params.get(SAFE_DISTANCE_WINDOW_TICKS_PARAM),
+    );
+    let (recover, reengage, orbit_speed, orbit_spiral_gain, reengage_speed) = match recovery_params
+    {
+        (Some(_), Some(orbit_speed), Some(gain), Some(reengage_speed), Some(_), Some(_)) => (
+            yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit),
+            yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::PivotToReengage),
+            orbit_speed as f32,
+            gain as f32,
+            reengage_speed as f32,
+        ),
+        _ => (false, false, 0.0, 0.0, 0.0),
+    };
 
     HelmPassSurface {
         active: true,
@@ -1696,6 +2001,23 @@ fn build_pass_surface(
         escape_speed: escape_speed as f32,
         tracking_deadband_rad: tracking_deadband_rad as f32,
         tracking_full_steer_rad: tracking_full_steer_rad as f32,
+        recover,
+        reengage,
+        // The ring the host derived this tick (target reach + authored margin).
+        // Zero when there is no target to derive one from, which is exactly when
+        // the planner has no orbit centre either.
+        safe_range: facts.get(SAFE_RANGE_FACT).unwrap_or(0.0) as f32,
+        // `1.0` when the slot has not been written yet. A direction has to be
+        // one of two, so this is a structural fallback rather than a gameplay
+        // value — and it is unreachable in practice: the slot is written on the
+        // tick the recovery state is entered, before any leg reads it.
+        orbit_direction: steering_state
+            .memory
+            .get(ORBIT_DIRECTION_MEMORY)
+            .unwrap_or(1.0) as f32,
+        orbit_speed,
+        orbit_spiral_gain,
+        reengage_speed,
     }
 }
 
@@ -1802,7 +2124,87 @@ fn seed_helm_travel_facts(
     facts.set(RANGE_TO_TARGET_FACT, motion.range as f64);
     facts.set(CLOSING_RATE_FACT, motion.closing_rate as f64);
     facts.set(BEARING_TO_TARGET_FACT, motion.bearing_rad as f64);
+    // How far the ship being fought can shoot (issue #788). Published on the
+    // snapshot entity by `build_world_snapshot`, so it is a reading of the
+    // TARGET's own online banks rather than a guess about its hull class.
+    facts.set(
+        TARGET_DIRECT_FIRE_RANGE_FACT,
+        target.direct_fire_range as f64,
+    );
     Some(uuid)
+}
+
+/// Fold the SHIELD-RECOVERY readings into the shared fact snapshot and advance
+/// the bounded distance history (issue #788).
+///
+/// Called only from [`ai_policy_state_tick`], which is where the transitions
+/// that read these facts are resolved. The per-axis actuator hosts deliberately
+/// do NOT seed them: their job is resolving a *rule* inside an already-committed
+/// state, and every recovery rule the doctrine authors is unconditional
+/// (`when = "true"`), so nothing they resolve reads one. Seeding them there too
+/// would mean folding the history four times a tick.
+///
+/// Returns the derived safe-ring radius when the hull authors a margin.
+///
+/// The window's capacity is re-applied every call because the authored value
+/// lives on the policy, which the component (a plain `default()` at spawn)
+/// cannot see; `BoundedHistory::set_capacity` is a no-op when unchanged, so this
+/// cannot reset the window.
+fn seed_recovery_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    params: &crate::world::flags::AiParams,
+    shield_fraction: Option<f32>,
+    history: &mut HelmRecoveryHistory,
+    target: Option<uuid::Uuid>,
+) -> Option<f32> {
+    // Absent (not zero) for a hull with no shield system — see the constant.
+    if let Some(fraction) = shield_fraction {
+        facts.set(SHIELD_FRACTION_FACT, fraction as f64);
+    }
+
+    let safe_range = params
+        .get(SAFE_RANGE_MARGIN_PARAM)
+        .map(|margin| facts.get(TARGET_DIRECT_FIRE_RANGE_FACT).unwrap_or(0.0) + margin);
+    if let Some(range) = safe_range {
+        facts.set(SAFE_RANGE_FACT, range);
+    }
+
+    if let Some(ticks) = params.get(SAFE_DISTANCE_WINDOW_TICKS_PARAM) {
+        history.ranges.set_capacity(ticks.max(0.0).round() as usize);
+    }
+    // A target switch invalidates the history outright: distance held against a
+    // ship that is no longer the threat says nothing about the one that is.
+    if history.target != target {
+        history.ranges.clear();
+        history.target = target;
+    }
+
+    let target_valid = facts.get(TARGET_VALID_FACT).unwrap_or(0.0) > 0.0;
+    let held = if !target_valid {
+        // Nothing visible is shooting: the ship is trivially at a safe
+        // distance from a threat it cannot see. Answering `false` here would
+        // trap a destroyer whose target died mid-recovery in an orbit around
+        // nothing, for ever.
+        history.ranges.clear();
+        true
+    } else {
+        match (
+            facts.get(RANGE_TO_TARGET_FACT),
+            safe_range,
+            params.get(SAFE_RING_TOLERANCE_PARAM),
+        ) {
+            (Some(range), Some(safe), Some(tolerance)) => {
+                history.ranges.push(range);
+                history.ranges.all_at_least(safe - tolerance)
+            }
+            // A hull that authors no recovery params never holds — and never
+            // authors a state that asks.
+            _ => false,
+        }
+    };
+    facts.set(SAFE_DISTANCE_HELD_FACT, if held { 1.0 } else { 0.0 });
+
+    safe_range.map(|r| r as f32)
 }
 
 /// Fold this fine system's OWN private memory into the shared fact snapshot
@@ -2121,6 +2523,15 @@ pub(crate) fn ai_helm_steering(
             ),
             Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing)
                 | Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading)
+                // Issue #788's two recovery mode verbs actuate here identically
+                // too, and for the identical reason: the difference between them
+                // was already resolved upstream, by the planner solving the
+                // facing against a ring tangent or against the target rather
+                // than against a frozen heading. Overriding `SteeringInput` here
+                // would bypass the planner and stop hazard avoidance composing
+                // onto the orbit.
+                | Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit)
+                | Some(&crate::ai::policy::AiPolicyVerb::PivotToReengage)
         );
         if !actuates {
             continue;
@@ -5916,6 +6327,7 @@ mod tests {
                 movable: false,
                 dangerous: true,
                 size_rating: radius,
+                direct_fire_range: 0.0,
             }],
         });
     }
@@ -6066,6 +6478,7 @@ mod tests {
                 movable: true,
                 dangerous: true,
                 size_rating: radius,
+                direct_fire_range: 0.0,
             }],
         });
     }
@@ -7960,12 +8373,30 @@ when = "state_time >= param(surge_dwell_secs)"
     /// its physics envelope, and an enabled boost drive — the same components
     /// `entities::spawner` would attach — hunting a single named bogey.
     fn fly_through_app(bogey_pos: [f32; 3]) -> (App, uuid::Uuid) {
+        fly_through_app_omitting(bogey_pos, &[])
+    }
+
+    /// As [`fly_through_app`], but with the named STEERING `param`s stripped
+    /// from the hull before its policy is built — the partially-authored hull
+    /// AGENTS.md #11 says must decline rather than invent.
+    ///
+    /// Each name must actually be present to begin with, so this cannot quietly
+    /// pass by "removing" a param the hull renamed out from under it.
+    fn fly_through_app_omitting(bogey_pos: [f32; 3], omit: &[&str]) -> (App, uuid::Uuid) {
         let mut app = test_app();
         let cfg = destroyer_hull();
-        let hc = cfg
+        let mut hc = cfg
             .helm_console
             .clone()
             .expect("hull declares [helm_console]");
+        for name in omit {
+            hc.steering_ai
+                .as_mut()
+                .expect("hull declares [helm_console.steering_ai]")
+                .param
+                .remove(*name)
+                .unwrap_or_else(|| panic!("the shipped hull must author `{name}` to omit it"));
+        }
         let boost = hc
             .boost
             .clone()
@@ -8571,6 +9002,520 @@ when = "state_time >= param(surge_dwell_secs)"
         assert!(
             !pass_surface(&mut app).active,
             "and the planner stops being offered a pass at all"
+        );
+    }
+
+    // ── The shield-recovery standoff orbit (issue #788) ──────────────────────
+    //
+    // Same posture as the fly-through tests above: the SHIPPED hull's authored
+    // policies driven through a real ticking app, asserting only on observable
+    // things — admitted actuator inputs, the ship's boost state, the committed
+    // policy state, the published pass surface.
+    //
+    // Two things are held constant across the long dwells below (the escape is
+    // an authored 7 seconds, which is 210 shared AI ticks): the ship's pose and
+    // its shield fraction. Both would otherwise drift — the hull keeps flying,
+    // and `tick_shields` keeps regenerating — and a test that let them drift
+    // would be measuring the drift rather than the doctrine.
+
+    /// How far the bogey below can shoot. Not the authored margin and not a
+    /// round number, so a safe ring computed as "reach + margin" is
+    /// distinguishable from one that quietly used only one of them.
+    const BOGEY_DIRECT_FIRE_REACH: f32 = 90.0;
+
+    /// The destroyer's authored `safe_range_margin`, restated so the expected
+    /// ring below is arithmetic on named values rather than a magic constant.
+    fn authored_steering_param(name: &str) -> f32 {
+        let cfg = destroyer_hull();
+        cfg.helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .and_then(|ai| ai.param.get(name).copied())
+            .unwrap_or_else(|| panic!("the shipped hull must author `{name}`"))
+    }
+
+    /// A bogey that can shoot back — the reach a standoff ring is derived from.
+    fn set_armed_bogey(app: &mut App, uuid: uuid::Uuid, pos: [f32; 3], reach: f32) {
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![crate::ai::AiWorldEntity {
+                uuid,
+                name: Some(BOGEY.into()),
+                position: pos,
+                yaw: Some(0.0),
+                forward_speed: 0.0,
+                radius: 3.0,
+                size_rating: 3.0,
+                movable: true,
+                dangerous: true,
+                direct_fire_range: reach,
+                ..Default::default()
+            }],
+        });
+    }
+
+    /// Force this ship's shields to `fraction` of capacity, online.
+    ///
+    /// Written through the real `ShipShields` component rather than through a
+    /// fact, so the guard under test reads the same surface production reads.
+    fn set_shield_fraction(app: &mut App, fraction: f32) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut shields = entity
+            .get_mut::<crate::ship::shields::ShipShields>()
+            .expect("the test ship carries ShipShields");
+        for facing in &mut shields.0.facings {
+            facing.hp = (facing.max_hp as f32 * fraction).round() as i32;
+            facing.offline_remaining = 0.0;
+        }
+    }
+
+    fn shield_fraction(app: &mut App) -> f32 {
+        app.world_mut()
+            .query::<&crate::ship::shields::ShipShields>()
+            .single(app.world())
+            .expect("ship carries ShipShields")
+            .0
+            .fraction()
+    }
+
+    /// Advance the shared AI-policy clock by roughly `secs`, pinning the ship's
+    /// pose and shield fraction every tick.
+    ///
+    /// `+3` covers the clock's own quantisation and the one-tick offset between
+    /// publishing the pass surface and the planner consuming it.
+    fn hold_and_tick(app: &mut App, secs: f32, pose: (f32, f32, f32, f32), shields: f32) {
+        let ticks = (secs * 30.0).ceil() as usize + 3;
+        for _ in 0..ticks {
+            place_ship(app, pose.0, pose.1, pose.2, pose.3);
+            set_shield_fraction(app, shields);
+            tick(app);
+        }
+    }
+
+    /// Fly a complete pass against an ARMED bogey and sit out the authored
+    /// escape dwell with the shields collapsed, leaving the machine in
+    /// `recover` and the ship well inside the safe ring.
+    fn run_to_recovery() -> (App, uuid::Uuid) {
+        run_to_recovery_omitting(&[])
+    }
+
+    /// As [`run_to_recovery`], but flying a hull whose STEERING policy is
+    /// missing the named recovery `param`s.
+    fn run_to_recovery_omitting(omit: &[&str]) -> (App, uuid::Uuid) {
+        let (mut app, uuid) = fly_through_app_omitting([0.0, 0.0, -200.0], omit);
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "inbound");
+        place_ship(&mut app, 0.0, -195.0, 0.0, 20.0);
+        tick(&mut app);
+        place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(steering_state(&mut app), "escape");
+        // Sit out the dwell with the shields gone, parked 60 units from the
+        // bogey — well INSIDE the ring, so the distance history is full of
+        // breaches when recovery begins.
+        hold_and_tick(&mut app, 7.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+        (app, uuid)
+    }
+
+    /// The "decline rather than invent" gate covers all SIX recovery scalars,
+    /// not only the four the pass surface reads for itself.
+    ///
+    /// `safe_ring_tolerance` and `safe_distance_window_ticks` are consumed by
+    /// `seed_recovery_facts` instead, and a hull that omits either can never
+    /// satisfy `fact(safe_distance_held)`: without the window the history keeps
+    /// its `Default` capacity of zero, so `is_full` — and therefore
+    /// `all_at_least` — is false for ever; without the tolerance the fold falls
+    /// through to its `_ => false` arm. The AC6 re-entry conjunct then cannot be
+    /// met and the hull flies the standoff ring indefinitely, which is a
+    /// strictly WORSE failure than the documented one. So either name missing,
+    /// on its own, must decline the whole arm.
+    ///
+    /// The shipped hull reaches `recover` and publishes `recover = true` at this
+    /// exact point (asserted by the tests below), so nothing here passes for
+    /// want of getting that far.
+    #[test]
+    fn a_hull_omitting_either_history_scalar_declines_the_recovery_arm() {
+        for omitted in [SAFE_RING_TOLERANCE_PARAM, SAFE_DISTANCE_WINDOW_TICKS_PARAM] {
+            let (mut app, _uuid) = run_to_recovery_omitting(&[omitted]);
+
+            // The MACHINE still enters the authored recovery state: the guard
+            // that takes it there reads shields, not these scalars. What must
+            // not happen is the HOST flying an orbit it can never fly out of.
+            assert_eq!(
+                steering_state(&mut app),
+                "recover",
+                "omitting `{omitted}` must not change which state is entered"
+            );
+            let pass = pass_surface(&mut app);
+            assert!(
+                !pass.recover,
+                "omitting `{omitted}` must decline the recovery arm outright; \
+                 publishing `recover` without it orbits for ever, because \
+                 `safe_distance_held` can never be satisfied"
+            );
+            assert!(
+                !pass.reengage,
+                "the whole arm declines together, not half of it"
+            );
+
+            // And it stays declined. The shipped hull is holding its ring
+            // through this dwell, so a run that keeps ticking must not quietly
+            // start orbiting a few ticks later.
+            hold_and_tick(&mut app, 3.0, (0.0, -260.0, 0.0, 20.0), 0.0);
+            let pass = pass_surface(&mut app);
+            assert!(
+                !pass.recover && !pass.reengage,
+                "omitting `{omitted}` must keep declining the arm, not orbit"
+            );
+        }
+    }
+
+    /// AC1's consequence at the doctrine level, and the anti-trap for an
+    /// unseeded fact: `fact(shield_fraction)` is genuinely read, so the escape
+    /// hands off to recovery ONLY when the pass actually cost the destroyer its
+    /// shields.
+    ///
+    /// The negative control is the load-bearing half. A guard on a fact nobody
+    /// seeds parses fine and reads false for ever — which here would look like a
+    /// destroyer that simply never recovers, with nothing failing. The two runs
+    /// below differ in exactly one thing: the shield fraction.
+    #[test]
+    fn the_escape_hands_off_to_recovery_only_when_the_shields_collapsed() {
+        let (mut app, _uuid) = run_to_recovery();
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "shields at zero when the dwell expired: the destroyer must break off"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "recover",
+            "Engines runs its own copy of the machine and must reach the same leg \
+             from the same facts, not by reading Steering's state"
+        );
+
+        // Negative control: identical run, healthy shields.
+        let (mut app, uuid) = fly_through_app([0.0, 0.0, -200.0]);
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
+        place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+        tick_twice(&mut app);
+        place_ship(&mut app, 0.0, -195.0, 0.0, 20.0);
+        tick(&mut app);
+        place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
+        tick(&mut app);
+        assert_eq!(steering_state(&mut app), "escape");
+        hold_and_tick(&mut app, 7.2, (0.0, -260.0, 0.0, 20.0), 1.0);
+        // It re-acquires and — parked 60 units from the bogey, well inside the
+        // authored `commit_range` — commits to the next run immediately. Which
+        // of the two pass states it lands in is a detail; that it is back on the
+        // pass cycle rather than orbiting is the point.
+        assert!(
+            ["acquire", "inbound"].contains(&steering_state(&mut app).as_str()),
+            "with its shields intact the destroyer turns straight back in — if this \
+             reads `recover` the shield guard is not reading the ship's shields; got {}",
+            steering_state(&mut app)
+        );
+    }
+
+    /// AC2: the safe ring is the TARGET's own longest usable direct-fire range
+    /// plus this hull's authored margin — not an authored distance, and not a
+    /// property of the destroyer at all.
+    ///
+    /// Asserted by changing only the bogey's reach and watching the published
+    /// ring move with it, which no constant could do.
+    #[test]
+    fn the_safe_ring_derives_from_the_targets_direct_fire_reach_plus_the_margin() {
+        let margin = authored_steering_param(SAFE_RANGE_MARGIN_PARAM);
+        let (mut app, uuid) = run_to_recovery();
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.recover, "the published leg must be the recovery orbit");
+        assert!(
+            (pass.safe_range - (BOGEY_DIRECT_FIRE_REACH + margin)).abs() < 1e-3,
+            "the ring must be the target's reach ({BOGEY_DIRECT_FIRE_REACH}) plus the \
+             authored margin ({margin}), got {}",
+            pass.safe_range
+        );
+
+        // A longer-ranged opponent pushes the ring out by exactly the change in
+        // ITS reach. Nothing about the destroyer changed.
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], 400.0);
+        hold_and_tick(&mut app, 0.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+        assert!(
+            (pass_surface(&mut app).safe_range - (400.0 + margin)).abs() < 1e-3,
+            "the ring must follow the target's reach, got {}",
+            pass_surface(&mut app).safe_range
+        );
+
+        // ...and an unarmed target collapses it to the margin alone, rather than
+        // to an invented distance.
+        set_armed_bogey(&mut app, uuid, [0.0, 0.0, -200.0], 0.0);
+        hold_and_tick(&mut app, 0.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+        assert!((pass_surface(&mut app).safe_range - margin).abs() < 1e-3);
+    }
+
+    /// AC3 at the host: the recovery leg is flown at the authored ORBIT
+    /// throttle, under power and turning — not stopped, and not simply pointed
+    /// away.
+    ///
+    /// The throttle assertion is what separates the orbit from the two
+    /// alternatives the issue rules out: a station-keeper would be braking
+    /// toward zero at the ring, and a retreat would be flying the escape
+    /// throttle straight down the outward bearing with no turn at all.
+    #[test]
+    fn the_recovery_leg_is_flown_as_a_powered_turning_orbit() {
+        let (mut app, _uuid) = run_to_recovery();
+        let orbit_speed = authored_steering_param(ORBIT_SPEED_PARAM);
+        let pass = pass_surface(&mut app);
+        assert!(pass.recover);
+
+        assert!(
+            (get_thrust_input(&mut app) - orbit_speed).abs() < 1e-3,
+            "the ring is flown at the authored orbit throttle ({orbit_speed}), got {}",
+            get_thrust_input(&mut app)
+        );
+        assert!(
+            get_steering_input(&mut app).abs() > 0.0,
+            "an orbit turns; a retreat does not"
+        );
+        assert!(
+            pass.orbit_direction == 1.0 || pass.orbit_direction == -1.0,
+            "the circulation direction must be a definite choice, got {}",
+            pass.orbit_direction
+        );
+    }
+
+    /// AC4: the circulation direction is drawn from a
+    /// (world, ship, system, transition, occurrence) key, so it reproduces
+    /// exactly for a given seed — and is not simply a constant.
+    #[test]
+    fn the_orbit_direction_is_deterministic_from_the_seed_without_being_constant() {
+        fn direction_for(seed: u64, ship: uuid::Uuid) -> f32 {
+            let (mut app, bogey) = fly_through_app([0.0, 0.0, -200.0]);
+            app.insert_resource(crate::sim_rng::SimRng::new(
+                seed,
+                crate::sim_rng::SeedSource::Cli,
+            ));
+            let entity = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(crate::entity_spawner::EntityUuid(ship.to_string()));
+            set_armed_bogey(&mut app, bogey, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
+            place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
+            tick_twice(&mut app);
+            place_ship(&mut app, 0.0, -195.0, 0.0, 20.0);
+            tick(&mut app);
+            place_ship(&mut app, 0.0, -260.0, 0.0, 20.0);
+            tick(&mut app);
+            hold_and_tick(&mut app, 7.2, (0.0, -260.0, 0.0, 20.0), 0.0);
+            assert_eq!(steering_state(&mut app), "recover");
+            pass_surface(&mut app).orbit_direction
+        }
+
+        let ship = uuid::Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
+        // Reproducible: same world seed, same ship, same answer. This is the
+        // property a replayed `--seed` run depends on.
+        assert_eq!(direction_for(4242, ship), direction_for(4242, ship));
+
+        // Not a constant: over a handful of seeds both directions occur. A
+        // hardcoded `+1` would pass every other assertion in this file.
+        let directions: Vec<f32> = [1, 2, 3, 4, 5, 6, 7, 8]
+            .into_iter()
+            .map(|seed| direction_for(seed, ship))
+            .collect();
+        assert!(
+            directions.contains(&1.0) && directions.contains(&-1.0),
+            "the direction must genuinely vary with the seed, got {directions:?}"
+        );
+    }
+
+    /// AC6: re-entry needs BOTH the authored shield fraction and a MAINTAINED
+    /// safe distance, and takes neither alone.
+    ///
+    /// Three runs from the same starting point, differing only in which half is
+    /// satisfied. The "distance" half is what the bounded history window buys:
+    /// the ship is at range in the third run for long enough to fill it.
+    #[test]
+    fn re_entry_takes_neither_half_of_the_gate_alone() {
+        let reentry_fraction = authored_steering_param("reentry_shield_fraction");
+        let window_secs = authored_steering_param(SAFE_DISTANCE_WINDOW_TICKS_PARAM) / 30.0 + 0.5;
+
+        // (a) Shields fully restored, but parked well INSIDE the ring.
+        let (mut app, _uuid) = run_to_recovery();
+        hold_and_tick(&mut app, window_secs, (0.0, -260.0, 0.0, 20.0), 1.0);
+        assert!(
+            shield_fraction(&mut app) >= reentry_fraction,
+            "precondition: the shields really are back"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "full shields inside the enemy's reach is not a recovery: the destroyer \
+             must keep its ring"
+        );
+
+        // (b) Out beyond the ring for the whole window, but the shields are
+        // still short of the authored fraction.
+        let (mut app, _uuid) = run_to_recovery();
+        hold_and_tick(&mut app, window_secs, (0.0, -700.0, 0.0, 20.0), 0.5);
+        assert!(
+            shield_fraction(&mut app) < reentry_fraction,
+            "precondition: the shields are still short"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "a maintained standoff with half its shields is not a recovery either"
+        );
+
+        // (c) Both: out beyond the ring for the whole window AND shields back.
+        let (mut app, _uuid) = run_to_recovery();
+        hold_and_tick(&mut app, window_secs, (0.0, -700.0, 0.0, 20.0), 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "reenter",
+            "both halves satisfied: the destroyer turns back in"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "reenter",
+            "and every axis agrees, from the same facts"
+        );
+    }
+
+    /// AC5/AC6, the "maintained" in maintained safe distance: ONE tick at range
+    /// does not open the gate. The window is authored and bounded, so the
+    /// destroyer must actually hold the ring for its full span.
+    #[test]
+    fn one_tick_at_range_is_not_a_maintained_safe_distance() {
+        let (mut app, _uuid) = run_to_recovery();
+        // Shields back, and a single tick out beyond the ring.
+        hold_and_tick(&mut app, 0.05, (0.0, -700.0, 0.0, 20.0), 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "a couple of ticks at range is not a held distance — if this re-enters, \
+             the history window is not being consulted"
+        );
+    }
+
+    /// AC5: the history is BOUNDED. Ticking for many multiples of the authored
+    /// window must never let it grow past its capacity — the property that keeps
+    /// a scenario running for an hour from accumulating a per-ship buffer of
+    /// every range it ever saw.
+    #[test]
+    fn the_distance_history_never_grows_past_its_authored_bound() {
+        let (mut app, _uuid) = run_to_recovery();
+        let capacity = authored_steering_param(SAFE_DISTANCE_WINDOW_TICKS_PARAM) as usize;
+        hold_and_tick(&mut app, 12.0, (0.0, -700.0, 0.0, 20.0), 0.0);
+        let history = app
+            .world_mut()
+            .query::<&HelmRecoveryHistory>()
+            .single(app.world())
+            .expect("ship carries HelmRecoveryHistory")
+            .clone();
+        assert_eq!(
+            history.ranges.capacity(),
+            capacity,
+            "the window's capacity is the authored value"
+        );
+        assert!(
+            history.ranges.len() <= capacity,
+            "the window must stay bounded: {} samples in a window of {capacity}",
+            history.ranges.len()
+        );
+        assert!(history.ranges.is_full());
+    }
+
+    /// AC1/AC8, interrupted regeneration seen from the doctrine: shields that
+    /// are knocked back down mid-recovery keep the destroyer on its ring. The
+    /// gate is a level, not an edge, so a ship that briefly touched the
+    /// threshold and was then hit again does not get to re-enter.
+    #[test]
+    fn regeneration_interrupted_mid_recovery_keeps_the_destroyer_on_its_ring() {
+        let window_secs = authored_steering_param(SAFE_DISTANCE_WINDOW_TICKS_PARAM) / 30.0 + 0.5;
+        let (mut app, _uuid) = run_to_recovery();
+
+        // Out at range with the shields climbing, but knocked back to zero
+        // before they ever reach the authored fraction.
+        hold_and_tick(&mut app, window_secs, (0.0, -700.0, 0.0, 20.0), 0.6);
+        assert_eq!(steering_state(&mut app), "recover");
+        hold_and_tick(&mut app, 0.5, (0.0, -700.0, 0.0, 20.0), 0.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "recover",
+            "a shield ramp that was interrupted has not recovered"
+        );
+
+        // Let it actually finish this time.
+        hold_and_tick(&mut app, 0.5, (0.0, -700.0, 0.0, 20.0), 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "reenter",
+            "and once it does finish, with the distance still held, re-entry follows"
+        );
+    }
+
+    /// AC7: normal re-entry cuts thrust, pivots onto the target WITHOUT boost,
+    /// and then begins another normal-speed pass.
+    #[test]
+    fn re_entry_cuts_thrust_pivots_cold_and_starts_another_normal_speed_pass() {
+        let window_secs = authored_steering_param(SAFE_DISTANCE_WINDOW_TICKS_PARAM) / 30.0 + 0.5;
+        let (mut app, uuid) = run_to_recovery();
+        hold_and_tick(&mut app, window_secs, (0.0, -700.0, 0.0, 20.0), 1.0);
+        assert_eq!(steering_state(&mut app), "reenter");
+
+        // Put the bogey hard off the beam so a real pivot is demanded and a
+        // "hold the last steering command" fallback would be visible as zero.
+        set_armed_bogey(
+            &mut app,
+            uuid,
+            [500.0, 0.0, -700.0],
+            BOGEY_DIRECT_FIRE_REACH,
+        );
+        place_ship(&mut app, 0.0, -700.0, 0.0, 20.0);
+        set_shield_fraction(&mut app, 1.0);
+        tick(&mut app);
+        tick(&mut app);
+
+        assert!(
+            pass_surface(&mut app).reengage,
+            "the published leg must be the re-entry pivot"
+        );
+        assert_eq!(
+            get_thrust_input(&mut app),
+            0.0,
+            "the pivot cuts thrust — that is what the authored reengage_speed of 0 means"
+        );
+        assert!(
+            get_steering_input(&mut app) > 0.0,
+            "and it turns onto the target off the starboard beam, got {}",
+            get_steering_input(&mut app)
+        );
+        assert!(
+            !boost_is_active(&mut app),
+            "the pivot is flown COLD: no recovery state authors a boost rule"
+        );
+
+        // ...and the pivot's authored dwell hands off to an ordinary
+        // normal-speed pass, not to another escape.
+        let pivot_secs = authored_steering_param("reenter_pivot_secs");
+        for _ in 0..((pivot_secs * 30.0).ceil() as usize + 3) {
+            place_ship(&mut app, 0.0, -700.0, 0.0, 20.0);
+            set_shield_fraction(&mut app, 1.0);
+            tick(&mut app);
+        }
+        assert_eq!(
+            steering_state(&mut app),
+            "acquire",
+            "the pivot ends in the ordinary approach state, so the next run is a \
+             normal-speed pass"
+        );
+        assert!(
+            !boost_is_active(&mut app),
+            "an approach never boosts: acquire authors no boost rule"
         );
     }
 }

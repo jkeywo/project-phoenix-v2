@@ -399,6 +399,55 @@ fn evaluate_family_arc_request(emitters: &[EmitterArcInput]) -> Option<Vec<Weapo
     (has_out_of_arc_in_range && !has_ready).then_some(arcs)
 }
 
+/// One emitter's contribution to a ship's direct-fire reach (issue #788).
+///
+/// Deliberately narrower than [`EmitterArcInput`]: reach is a question about
+/// *range*, so no arc geometry and no target are involved. Kept as its own type
+/// (rather than reusing the arc-request struct) because building the arc struct
+/// requires a live target to compute geometry against, and the reach of a ship's
+/// guns exists whether or not it currently has anyone in its sights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DirectFireEmitter {
+    /// Emitter is not offline (disabled / destroyed).
+    pub online: bool,
+    /// Emitter can actually fire a round. Always true for phasers and blasters,
+    /// which carry no per-emitter ammunition.
+    pub usable: bool,
+    /// Effective reach of this emitter, world units.
+    pub range: f32,
+}
+
+/// The longest range at which a ship can put **direct fire** on a target
+/// (issue #788): the maximum effective range across its usable, ONLINE phaser
+/// and blaster emitters.
+///
+/// Pure and testable; the Bevy caller ([`crate::ai::server`]'s world-snapshot
+/// build) supplies the emitter list.
+///
+/// ## Why torpedoes are excluded
+///
+/// A torpedo homes. Its reach is a lifespan × speed budget for a round that
+/// chases you, so standing off at "torpedo reach + a margin" buys nothing — the
+/// round simply flies further. Direct fire is the family whose threat genuinely
+/// stops at a radius, which is what makes a *safe ring* a meaningful place to
+/// sit. Excluding them is a deliberate modelling choice, not an oversight.
+///
+/// ## Why `online && usable`
+///
+/// The same gate [`evaluate_family_arc_request`] applies, for the same reason:
+/// a bank that is offline (disabled or shot out) is not a threat, so its range
+/// must not inflate the ring an opponent keeps. A ship whose banks are all
+/// offline has a reach of `0.0`, which correctly collapses the safe ring to the
+/// authored margin alone.
+pub fn longest_usable_direct_fire_range(emitters: &[DirectFireEmitter]) -> f32 {
+    emitters
+        .iter()
+        .filter(|e| e.online && e.usable)
+        .map(|e| e.range)
+        .fold(0.0_f32, f32::max)
+        .max(0.0)
+}
+
 /// Emit a channel-3 `ArcBearingRequest` coordination message to Helm whenever
 /// the selected usable weapon family has the current target in range but
 /// outside every one of that family's available arcs (issues #677, #767).

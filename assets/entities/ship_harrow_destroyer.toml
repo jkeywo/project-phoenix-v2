@@ -13,7 +13,10 @@
 #
 #   acquire  ──(target inside commit_range)──▶  inbound
 #   inbound  ──(closest approach detected)───▶  escape
-#   escape   ──(authored escape dwell)───────▶  acquire
+#   escape   ──(dwell done, shields intact)──▶  acquire
+#   escape   ──(dwell done, shields down)───▶   recover
+#   recover  ──(shields back AND distance held)▶ reenter
+#   reenter  ──(pivot complete)──────────────▶  acquire
 #
 # * INBOUND is flown at a flat, normal approach throttle, with Steering
 #   re-solving the facing against the target's CURRENT position every tick — the
@@ -26,9 +29,40 @@
 #   verb, `hold_committed_heading`, and flies the heading the host froze at the
 #   merge. Engines stay on full escape throttle and Boost lights for the
 #   authored window. The target can turn, run, or die — the escape does not care.
+# * RECOVERY (issue #788) is what the escape hands off to when the pass cost the
+#   destroyer its shields. Since #788 a collapsed shield comes back EMPTY and
+#   climbs at its authored regen rate, so "my shields are down" is now a state
+#   with a duration, and flying a second pass through it is how this hull dies.
+#   At the end of the escape dwell the machine therefore asks one question — are
+#   my shields effectively gone? — and if so breaks off to a standoff ORBIT
+#   instead of turning back in.
+#
+#   The orbit's radius is NOT authored: it is the TARGET's own longest usable
+#   direct-fire range plus `safe_range_margin`. A destroyer standing off a
+#   short-ranged blaster boat has no business sitting where it would have to sit
+#   against a beam cruiser, and neither number is knowable when this file is
+#   written. The circulation direction is drawn once per recovery from a seeded
+#   (world, ship, system, transition, occurrence) key, so a replayed seed breaks
+#   the same way every time while two destroyers breaking off together do not
+#   mirror one another.
+#
+#   The orbit SPIRALS: the host flies a tangent of the ring bent toward or away
+#   from the target in proportion to the radial error, so a destroyer inside the
+#   ring works its way out while still circling, and one that has over-run works
+#   its way back in rather than running to the edge of the map. It never stops
+#   and it never simply retreats.
+# * RE-ENTRY needs BOTH halves and will not take one: shields back to
+#   `reentry_shield_fraction`, AND the safe distance actually HELD across the
+#   whole `safe_distance_window_ticks` history window. One tick at range is not a
+#   maintained standoff, and full shields while still being shot at is not a
+#   recovery. When both are true the destroyer cuts thrust (`reengage_speed = 0`),
+#   pivots onto the target with the drive cold, and starts an ordinary
+#   normal-speed pass — no boost, because boost is the escape's accelerant and
+#   this is an approach.
 #
 # Shared hazard avoidance still bends the escape (it is a steering force folded
-# into the same pure arm), and bending it changes no pass state at all.
+# into the same pure arm), and bending it changes no pass state at all. It bends
+# the recovery orbit the same way, for the same reason.
 #
 # ARMAMENT: forward blasters, and deliberately NO torpedoes. A ship that crosses
 # the merge at full throttle has a fraction of a second of firing solution;
@@ -52,13 +86,20 @@ hull_integrity = 900.0
 
 # Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
 # so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
+#
+# `regen_per_sec` is load-bearing for the recovery doctrine since issue #788: a
+# collapsed facing now comes back at ZERO and climbs at this rate, so this is
+# what sets how long a broken-off destroyer spends on its standoff ring. At 4/s
+# a collapsed 40-point arc reaches the authored 75% re-entry threshold about 7.5
+# seconds after the offline delay expires.
 [[shield_arc]]
 id = "all"
 label = "entity.ship_harrow_destroyer.shield_arc.all.label"
 center_deg = 0
 width_deg = 360
 max_hp = 40
-regen_per_sec = 1.0
+regen_per_sec = 4.0
+offline_duration = 6.0
 
 [collider]
 shape = "Capsule"
@@ -130,6 +171,16 @@ closest_approach_hysteresis = 6.0
 # How long (seconds) the escape leg runs before the destroyer turns back for
 # another pass.
 escape_duration_secs = 7.0
+# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
+# Own-shield fraction at or below which the pass has cost too much to repeat:
+# the escape hands off to the standoff orbit instead of turning back in. Low, so
+# a scratched destroyer presses the attack and only a COLLAPSED one breaks off.
+recover_shield_fraction = 0.15
+# Own-shield fraction the orbit must restore before re-entry is even considered.
+# The other half of the gate is `fact(safe_distance_held)`; both are required.
+reentry_shield_fraction = 0.75
+# How long (seconds) the cut-thrust pivot runs before the next pass begins.
+reenter_pivot_secs = 1.5
 
 # Host-written private memory (issue #882: the host writes, the policy reads —
 # there is no authored write verb). `min_range_seen` starts effectively
@@ -187,11 +238,57 @@ id = "escape"
   verb = "actuate_desired_travel"
 
   # Only the authored dwell ends the escape. Nothing about the target may cut it
-  # short — that is what "commits to the outward heading" means.
+  # short — that is what "commits to the outward heading" means. What the dwell
+  # ends INTO is a decision: with the shields gone, recovery; otherwise another
+  # pass. Checking here rather than mid-escape is deliberate — the escape's
+  # commitment is the doctrine's own invariant, and the shields are no more
+  # recovered a second earlier.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
   [[helm_console.engines_ai.state.transition]]
   priority = 0
   to = "acquire"
   when = "state_time >= param(escape_duration_secs)"
+
+# The standoff orbit. Engines simply actuate the planner's desired travel here
+# as in every other state — the ORBIT throttle (`orbit_speed`) is one of the
+# authored scalars the host publishes on the pass surface, so this axis needs no
+# knowledge that it is circling rather than closing.
+[[helm_console.engines_ai.state]]
+id = "recover"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # BOTH halves, and neither alone (AC6). `safe_distance_held` is the bounded
+  # history window's verdict — every sample across the whole window at or beyond
+  # the safe ring — not a single-tick range reading.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+# The cut-thrust pivot. `reengage_speed = 0` on the Steering axis is what makes
+# "actuate the planner's desired travel" mean zero throttle here.
+[[helm_console.engines_ai.state]]
+id = "reenter"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"
 
 # ── Steering (yaw) doctrine ───────────────────────────────────────────────────
 #
@@ -217,10 +314,48 @@ escape_duration_secs = 7.0
 # the destroyer turns hard onto a tracking solution rather than easing onto it.
 tracking_deadband_rad = 0.02
 tracking_full_steer_rad = 0.5
+# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
+# Restated because this axis's own guards reference them; content validation
+# rejects an undeclared `param(...)`.
+recover_shield_fraction = 0.15
+reentry_shield_fraction = 0.75
+reenter_pivot_secs = 1.5
+# The six scalars the HOST reads off this axis by name to fly the standoff.
+# Steering owns them because Steering's yaw verb is what tells the host which
+# leg is being flown; omit any one of them and the host declines the recovery
+# arm outright rather than orbiting at an invented radius.
+#
+# World units added to the TARGET's own longest usable direct-fire range to get
+# the ring. The ring is therefore a property of the fight, not of this file: all
+# this hull authors is how much daylight it wants beyond the other ship's guns.
+safe_range_margin = 120.0
+# Throttle fraction flown on the ring. Not zero: a destroyer parked inside a
+# hostile's reach is not recovering, it is a target.
+orbit_speed = 0.7
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so
+# the same gain behaves identically on an 80-unit ring and an 800-unit one —
+# otherwise this would need re-tuning every time a weapon's range changed.
+orbit_spiral_gain = 1.2
+# World units inside the ring that still count as "at safe distance" when the
+# distance history is folded. Absorbs the spiral's own overshoot, so a converging
+# orbit is not read as a breach.
+safe_ring_tolerance = 25.0
+# Length of the bounded distance history, in shared AI ticks. At the default
+# 30 Hz helm cadence this is two seconds of held standoff — the "maintained" in
+# "maintained safe distance".
+safe_distance_window_ticks = 60.0
+# Throttle flown on the re-entry pivot. ZERO: the destroyer cuts thrust and
+# turns cold before it commits to the next run.
+reengage_speed = 0.0
 
 [helm_console.steering_ai.memory]
 min_range_seen = 1000000.0
 escape_heading_rad = 0.0
+# Host-written on the tick a recovery orbit is entered, from the seeded
+# composite key. Declared here so its pre-recovery value is authored rather than
+# implicit; no guard reads it — the host does, when it publishes the pass
+# surface.
+orbit_direction = 1.0
 
 [[helm_console.steering_ai.state]]
 id = "acquire"
@@ -270,9 +405,50 @@ id = "escape"
   verb = "hold_committed_heading"
 
   [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
+  [[helm_console.steering_ai.state.transition]]
   priority = 0
   to = "acquire"
   when = "state_time >= param(escape_duration_secs)"
+
+# THE recovery leg (issue #788). The THIRD yaw mode verb: neither "track the
+# target" nor "fly a frozen heading" but "hold a ring around it". The host reads
+# the leg off this verb — never off the state's name — so these states could be
+# called anything.
+[[helm_console.steering_ai.state]]
+id = "recover"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+# The FOURTH yaw mode verb: track the target like `actuate_desired_facing`, but
+# paired host-side with the authored `reengage_speed` throttle instead of the
+# approach throttle. That pairing is the whole difference, and it is why this is
+# its own verb rather than a reuse.
+[[helm_console.steering_ai.state]]
+id = "reenter"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "pivot_to_reengage"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"
 
 # ── Boost doctrine ────────────────────────────────────────────────────────────
 #
@@ -296,6 +472,12 @@ escape_boost_secs = 4.0
 # Do not light the drive from near-standstill (e.g. straight after a collision
 # scrub); boost is an escape accelerant, not a launch assist.
 boost_min_speed_fraction = 0.3
+# ── Shield-recovery thresholds (issue #788) ───────────────────────────────────
+# Restated so this axis reaches the same legs from the same facts — it is a
+# third independent copy of the machine, not a reader of the other two.
+recover_shield_fraction = 0.15
+reentry_shield_fraction = 0.75
+reenter_pivot_secs = 1.5
 
 [helm_console.boost_ai.memory]
 min_range_seen = 1000000.0
@@ -332,9 +514,35 @@ id = "escape"
   verb = "engage_boost"
 
   [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
+  [[helm_console.boost_ai.state.transition]]
   priority = 0
   to = "acquire"
   when = "state_time >= param(escape_duration_secs)"
+
+# Neither recovery state authors a boost rule at all, so the channel holds and
+# the drive stays cold for the whole standoff AND for the pivot — "pivots
+# without boost" (AC7) is this absence, plus `ai_helm_boost`'s on-change release
+# when the escape's rule stops firing. It also means the drive is recharging
+# throughout the orbit, ready for the next escape.
+[[helm_console.boost_ai.state]]
+id = "recover"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+[[helm_console.boost_ai.state]]
+id = "reenter"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"
 
 # ── Weapons ───────────────────────────────────────────────────────────────────
 #

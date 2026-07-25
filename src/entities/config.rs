@@ -1636,11 +1636,24 @@ pub const HELM_ACTUATE_DESIRED_FACING_VERB: &str = "actuate_desired_facing";
 /// Distinct from a "hold" (no rule fires), which holds the last steering
 /// COMMAND and would keep a non-zero yaw turning for ever.
 pub const HELM_HOLD_COMMITTED_HEADING_VERB: &str = "hold_committed_heading";
+/// The `hold_recovery_orbit` verb: the Steering fine system's THIRD mode verb
+/// (issue #788). Its presence tells the host to fly a tangent of the safe ring
+/// around the current target — radius derived from that target's own direct-fire
+/// reach plus this hull's authored `safe_range_margin`, circulation direction
+/// taken from this system's host-written `memory(orbit_direction)`.
+pub const HELM_HOLD_RECOVERY_ORBIT_VERB: &str = "hold_recovery_orbit";
+/// The `pivot_to_reengage` verb: the Steering fine system's FOURTH mode verb
+/// (issue #788). Tracks the target like `actuate_desired_facing`, but the host
+/// pairs it with the authored `reengage_speed` throttle rather than the approach
+/// throttle — the cut-thrust pivot that ends a recovery and starts the next run.
+pub const HELM_PIVOT_TO_REENGAGE_VERB: &str = "pivot_to_reengage";
 
-/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883).
+/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883, #788).
 pub const HELM_STEERING_VERBS: &[&str] = &[
     HELM_ACTUATE_DESIRED_FACING_VERB,
     HELM_HOLD_COMMITTED_HEADING_VERB,
+    HELM_HOLD_RECOVERY_ORBIT_VERB,
+    HELM_PIVOT_TO_REENGAGE_VERB,
 ];
 
 // ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
@@ -2846,6 +2859,12 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // The frozen-heading Steering mode verb (issue #883): also value-less —
         // the heading is host-written private memory, not an authored constant.
         HELM_HOLD_COMMITTED_HEADING_VERB => crate::ai::policy::AiPolicyVerb::HoldCommittedHeading,
+        // The recovery-orbit and re-engage Steering mode verbs (issue #788):
+        // value-less too — the ring's radius is derived from the TARGET's
+        // reach and the circulation direction is host-written private memory,
+        // neither of which an authored constant could express.
+        HELM_HOLD_RECOVERY_ORBIT_VERB => crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit,
+        HELM_PIVOT_TO_REENGAGE_VERB => crate::ai::policy::AiPolicyVerb::PivotToReengage,
         // Helm secondary-actuator mode verbs (issue #780): value-less,
         // like the travel-axis verbs above.
         HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
@@ -8243,10 +8262,11 @@ when = "state_time >= param(surge_dwell_secs)"
                 ai.rule.is_empty(),
                 "{name} must be state-only (rule XOR state)"
             );
+            let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
-                ai.state.len(),
-                3,
-                "{name} authors the three-state pass machine"
+                ids,
+                vec!["acquire", "inbound", "escape", "recover", "reenter"],
+                "{name} authors the five-state pass + recovery machine"
             );
             assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
             let policy = ai.to_policy().expect("must decode");
@@ -8256,8 +8276,9 @@ when = "state_time >= param(surge_dwell_secs)"
             );
         }
 
-        // The yaw channel carries BOTH mode verbs, and which one wins is the
-        // whole doctrine: tracking while inbound, frozen heading on the escape.
+        // The yaw channel carries ALL FOUR mode verbs, and which one wins is the
+        // whole doctrine: tracking while inbound, frozen heading on the escape,
+        // a ring while recovering, a cut-thrust pivot on the way back in.
         let steering = hc.steering_ai.as_ref().unwrap();
         let verbs: Vec<&str> = steering
             .state
@@ -8267,6 +8288,124 @@ when = "state_time >= param(surge_dwell_secs)"
             .collect();
         assert!(verbs.contains(&HELM_ACTUATE_DESIRED_FACING_VERB));
         assert!(verbs.contains(&HELM_HOLD_COMMITTED_HEADING_VERB));
+        assert!(verbs.contains(&HELM_HOLD_RECOVERY_ORBIT_VERB));
+        assert!(verbs.contains(&HELM_PIVOT_TO_REENGAGE_VERB));
+
+        // Issue #788, AC7: neither recovery state authors a boost rule. The
+        // absence is the doctrine — a pivot flown with the drive lit is not the
+        // "normal-speed pass" the hull is supposed to be starting — and an
+        // absence is exactly the kind of content that gets helpfully filled in.
+        let boost = hc.boost_ai.as_ref().unwrap();
+        for id in ["recover", "reenter"] {
+            let state = boost
+                .state
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("boost_ai must declare '{id}'"));
+            assert!(
+                state.rule.is_empty(),
+                "boost_ai '{id}' must author NO rule: boost stays cold through recovery"
+            );
+        }
+    }
+
+    /// Issue #788, AC6: re-entry is gated on BOTH the shield fraction and the
+    /// held distance, on every axis. Dropping either conjunct from any of the
+    /// three machines would let one axis re-enter early and desynchronise the
+    /// hull from itself — and would do it silently, because each machine runs
+    /// its own copy.
+    #[test]
+    fn harrow_destroyer_reentry_requires_both_shields_and_held_distance() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+            ("boost_ai", hc.boost_ai.as_ref().unwrap()),
+        ] {
+            let recover = ai
+                .state
+                .iter()
+                .find(|s| s.id == "recover")
+                .unwrap_or_else(|| panic!("{name} must declare 'recover'"));
+            assert_eq!(
+                recover.transition.len(),
+                1,
+                "{name}: recovery has exactly one way out"
+            );
+            let guard = &recover.transition[0].when;
+            assert_eq!(recover.transition[0].to, "reenter");
+            assert!(
+                guard.contains(crate::ship::helm_ai::SHIELD_FRACTION_FACT)
+                    && guard.contains("reentry_shield_fraction"),
+                "{name}: re-entry must require the authored shield fraction, got `{guard}`"
+            );
+            assert!(
+                guard.contains(crate::ship::helm_ai::SAFE_DISTANCE_HELD_FACT),
+                "{name}: re-entry must require the HELD safe distance, got `{guard}`"
+            );
+            // ...and the escape must be able to reach recovery at all.
+            let escape = ai.state.iter().find(|s| s.id == "escape").unwrap();
+            assert!(
+                escape.transition.iter().any(|t| t.to == "recover"),
+                "{name}: the escape must hand off to recovery when the shields are gone"
+            );
+        }
+    }
+
+    /// Issue #788, AC2/AC3/AC5: every scalar the recovery manoeuvre needs is an
+    /// authored `param` on the Steering axis, found by the host BY NAME. A
+    /// rename in either direction lights this up — and it must, because the
+    /// host's response to a missing one is to decline the recovery arm and
+    /// quietly fly ordinary doctrine travel instead.
+    #[test]
+    fn harrow_destroyer_authors_every_recovery_scalar_as_a_steering_param() {
+        let cfg = EntityConfig::from_toml(HARROW_DESTROYER_TOML).expect("hull must parse");
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .unwrap()
+            .steering_ai
+            .as_ref()
+            .unwrap();
+        for required in [
+            crate::ship::helm_ai::SAFE_RANGE_MARGIN_PARAM,
+            crate::ship::helm_ai::ORBIT_SPEED_PARAM,
+            crate::ship::helm_ai::ORBIT_SPIRAL_GAIN_PARAM,
+            crate::ship::helm_ai::SAFE_RING_TOLERANCE_PARAM,
+            crate::ship::helm_ai::SAFE_DISTANCE_WINDOW_TICKS_PARAM,
+            crate::ship::helm_ai::REENGAGE_SPEED_PARAM,
+        ] {
+            assert!(
+                steering.param.contains_key(required),
+                "steering_ai must author `{required}`"
+            );
+        }
+        // AC7: the pivot is flown on CUT thrust, and that is authored, not
+        // hardcoded anywhere in Rust.
+        assert_eq!(
+            steering
+                .param
+                .get(crate::ship::helm_ai::REENGAGE_SPEED_PARAM),
+            Some(&0.0),
+            "the re-entry pivot must cut thrust"
+        );
+        // AC6: the authored re-entry fraction is the issue's stated 75%.
+        assert_eq!(
+            steering.param.get("reentry_shield_fraction"),
+            Some(&0.75),
+            "the authored re-entry shield fraction is 75%"
+        );
+        // AC5: the distance history is BOUNDED, and its bound is authored.
+        let window = steering
+            .param
+            .get(crate::ship::helm_ai::SAFE_DISTANCE_WINDOW_TICKS_PARAM)
+            .copied()
+            .unwrap();
+        assert!(
+            window > 1.0 && window.is_finite(),
+            "the window must be a real, finite bound, got {window}"
+        );
     }
 
     /// AC6: every manoeuvre threshold the doctrine flies by is an authored

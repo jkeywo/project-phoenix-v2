@@ -293,6 +293,35 @@ then overlays the focus configuration. `Option<ShieldsBaseConfig>` was
 used so the 22 existing `EntityConfig {...}` test literals scattered
 across the codebase did not need to be touched.
 
+## Shield collapse and recovery (#788)
+
+`ShieldFacing` (`src/weapons/shield.rs`) is the one arc model the player ship
+and every arc-shielded NPC share — nothing in it branches on who owns the hull.
+
+When a facing's HP reaches 0 it **collapses**: `offline_remaining` is set to the
+authored `offline_duration` and every subsequent hit passes straight to hull.
+`offline_duration` is a *no-damage delay*, not a recharge time. When it expires
+the facing comes back online **at 0 HP** and climbs at its authored
+`regen_per_sec` from there (`ShieldFacing::tick`). Before #788 it snapped
+straight back to `max_hp`, so there was no instant at which a shield was
+*partially* recovered — which made any fractional threshold ("wait until shields
+are back to 75%") either already met or unreachable.
+
+Two consequences worth knowing:
+
+- A hit during the ramp knocks the facing back to 0 and restarts the full
+  `offline_duration`, so sustained fire keeps a shield down rather than letting
+  it flicker back.
+- A facing may now sit at 0 HP while **online** (the first instant of its ramp).
+  `apply_damage` therefore only re-arms the offline timer when the effective
+  damage was non-zero.
+
+`ShieldSystem::fraction()` is the whole-ship reading over all arcs, `[0, 1]`
+(0.0 for a hull with no shield capacity). It is what
+`src/ship/helm_ai.rs` seeds as `fact(shield_fraction)` for a ship's own
+policies — see the Harrow destroyer's shield-recovery doctrine in
+`assets/entities/ship_harrow_destroyer.toml`.
+
 ## HTML Shields console runtime
 
 The live phone Shields panel is `gui/shield-console.html`, embedded by
@@ -364,6 +393,7 @@ Follow the blaster as the template (`blaster.rs` is the newest, smallest weapon 
 - `src/server_app.rs` (integration tests)
 - Issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)
 - Issue [#685](https://github.com/jkeywo/project-phoenix-v2/issues/685) (weapons decomposition series, #721–#731)
+- Issue [#788](https://github.com/jkeywo/project-phoenix-v2/issues/788) (shield collapse ramp + destroyer recovery orbit)
 - [Console UI Authoring Library](./console-ui-library.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 

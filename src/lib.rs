@@ -74,6 +74,11 @@ pub mod server_app;
 // Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
 pub use server_app as simulation;
 pub mod audio_config;
+/// Fixed-capacity history window (issue #788). Pure, Bevy-free, domain-neutral.
+pub mod bounded_history;
+/// Composite-key deterministic value derivation (issue #788). Pure, Bevy-free,
+/// domain-neutral.
+pub mod composite_rng;
 pub mod console_bridge;
 pub mod radar;
 pub mod radar_config;

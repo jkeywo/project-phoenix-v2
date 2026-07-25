@@ -212,6 +212,7 @@ pub(crate) fn helm_motion_planner(
                     escape_heading_rad: pass.escape_heading_rad,
                     approach_speed: pass.approach_speed,
                     escape_speed: pass.escape_speed,
+                    reengage_speed: pass.reengage_speed,
                     tracking_deadband_rad: pass.tracking_deadband_rad,
                     tracking_full_steer_rad: pass.tracking_full_steer_rad,
                     entities: &sf.merged_view.entities,
@@ -219,6 +220,30 @@ pub(crate) fn helm_motion_planner(
                     avoidance_look_ahead_secs: avoidance_look_ahead,
                 })
             };
+        // The shield-recovery standoff orbit (issue #788). Like the pass legs
+        // this is a substitution *in the planner*, so the orbit arrives
+        // downstream as an ordinary desired facing and the hazard force, the
+        // imminent-collision override, and the per-axis actuators all compose
+        // onto it unchanged.
+        let fly_orbit = |target_pos: [f32; 3], target_uuid: uuid::Uuid| {
+            crate::ai::plan_recovery_orbit(&crate::ai::RecoveryOrbitInput {
+                self_pos: [physics.x, physics.y, physics.z],
+                self_yaw: physics.yaw,
+                self_speed: physics.forward_speed,
+                self_radius: sf.merged_view.self_radius,
+                target_pos,
+                target_uuid,
+                safe_range: pass.safe_range,
+                orbit_direction: pass.orbit_direction,
+                spiral_gain: pass.orbit_spiral_gain,
+                orbit_speed: pass.orbit_speed,
+                tracking_deadband_rad: pass.tracking_deadband_rad,
+                tracking_full_steer_rad: pass.tracking_full_steer_rad,
+                entities: &sf.merged_view.entities,
+                avoidance_buffer,
+                avoidance_look_ahead_secs: avoidance_look_ahead,
+            })
+        };
         // Ordinary doctrine travel, byte-identical to the pre-#883 path.
         let doctrine_travel = || {
             helm_ai_decision(
@@ -246,10 +271,25 @@ pub(crate) fn helm_motion_planner(
                 // is no longer in `entities` either.
                 pass_target.map(|t| t.uuid).unwrap_or_else(uuid::Uuid::nil),
             ),
-            // Inbound: needs a resolvable target, or there is nothing to track.
+            // Recovery orbit: a ring has a CENTRE, so this leg needs a
+            // resolvable target the same way the inbound leg does. Without one
+            // there is nothing to stand off from, and the doctrine's own
+            // `safe_distance_held` reading has already gone true, so the machine
+            // is about to leave the state anyway.
+            (true, true) if pass.recover => pass_target.map_or_else(doctrine_travel, |target| {
+                fly_orbit(target.position, target.uuid)
+            }),
+            // Re-entry pivot and inbound: both track the target, so both need a
+            // resolvable one. They differ only in the authored throttle the leg
+            // carries, which is what makes the pivot a cut-thrust turn rather
+            // than the start of the run.
             (true, true) => pass_target.map_or_else(doctrine_travel, |target| {
                 fly_pass(
-                    crate::ai::FlyThroughLeg::Inbound,
+                    if pass.reengage {
+                        crate::ai::FlyThroughLeg::Reengage
+                    } else {
+                        crate::ai::FlyThroughLeg::Inbound
+                    },
                     target.position,
                     target.uuid,
                 )

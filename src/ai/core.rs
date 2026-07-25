@@ -207,6 +207,17 @@ pub struct AiWorldEntity {
     /// below the assessing ship's own, scaled by an authored ratio). Populated
     /// from the collision radius today (issue #743).
     pub size_rating: f32,
+    /// Threat fact: how far this entity can put **direct fire** — the longest
+    /// effective range across its usable, online phaser and blaster banks
+    /// (issue #788). Homing weapons are deliberately excluded; see
+    /// `console::weapons::longest_usable_direct_fire_range`.
+    ///
+    /// `0.0` means "no reach known": an unarmed entity, an entity whose banks
+    /// are all offline, or a snapshot source that does not carry weapon
+    /// configuration (the helm's fallback ECS query). A doctrine standing off at
+    /// "their reach plus a margin" therefore falls back to the margin alone
+    /// rather than to an invented distance.
+    pub direct_fire_range: f32,
 }
 
 /// Hand-written so a bare `AiWorldEntity { ..Default::default() }` is a
@@ -229,6 +240,7 @@ impl Default for AiWorldEntity {
             movable: false,
             dangerous: true,
             size_rating: 0.0,
+            direct_fire_range: 0.0,
         }
     }
 }
@@ -889,6 +901,12 @@ pub enum FlyThroughLeg {
     /// current outward heading" means, and it is why the escape cannot be
     /// dragged back around by a target that keeps moving.
     Escape,
+    /// Recovery is over: the ship is turning back onto the target to begin
+    /// another pass (issue #788). Steering tracks the target exactly as
+    /// [`FlyThroughLeg::Inbound`] does — this IS the pivot — but the throttle is
+    /// the authored re-engage fraction rather than the approach fraction, so a
+    /// hull can author `0.0` and pivot on cut thrust before the run starts.
+    Reengage,
 }
 
 /// Inputs to [`plan_fly_through_pass`] (issue #883).
@@ -917,6 +935,9 @@ pub struct FlyThroughPassInput<'a> {
     pub approach_speed: f32,
     /// Throttle fraction flown on the escape leg.
     pub escape_speed: f32,
+    /// Throttle fraction flown on the [`FlyThroughLeg::Reengage`] pivot
+    /// (issue #788). Read only on that leg.
+    pub reengage_speed: f32,
     /// Angular deadband below which the tracking solution commands no yaw.
     pub tracking_deadband_rad: f32,
     /// Angular error at which the tracking solution saturates to ±1.
@@ -943,7 +964,7 @@ pub struct FlyThroughPassInput<'a> {
 /// escape without the leg — or the caller's pass state — changing at all.
 pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
     let (dir, thrust) = match input.leg {
-        FlyThroughLeg::Inbound => {
+        FlyThroughLeg::Inbound | FlyThroughLeg::Reengage => {
             let dx = input.target_pos[0] - input.self_pos[0];
             let dz = input.target_pos[2] - input.self_pos[2];
             let dist = (dx * dx + dz * dz).sqrt();
@@ -954,7 +975,12 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
                 // dividing by ~0. The pass is over in any meaningful sense.
                 [input.self_yaw.sin(), -input.self_yaw.cos()]
             };
-            (dir, input.approach_speed)
+            let thrust = if input.leg == FlyThroughLeg::Reengage {
+                input.reengage_speed
+            } else {
+                input.approach_speed
+            };
+            (dir, thrust)
         }
         FlyThroughLeg::Escape => (
             [
@@ -983,6 +1009,124 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
     );
     (
         thrust.clamp(-1.0, 1.0),
+        (base_steer + avoidance).clamp(-1.0, 1.0),
+    )
+}
+
+/// Inputs to [`plan_recovery_orbit`] (issue #788).
+///
+/// Every gameplay scalar arrives from authored ship data or from host-written
+/// private memory; this module holds no default for any of them (AGENTS.md #11).
+pub struct RecoveryOrbitInput<'a> {
+    pub self_pos: [f32; 3],
+    pub self_yaw: f32,
+    pub self_speed: f32,
+    pub self_radius: f32,
+    /// The centre of the ring: the ship being stood off from.
+    pub target_pos: [f32; 3],
+    /// Excluded from the avoidance scan — the ship is deliberately circling it,
+    /// so treating it as an obstacle would fight the orbit.
+    pub target_uuid: Uuid,
+    /// The radius to hold, world units. Host-derived from the target's own
+    /// direct-fire reach plus the hull's authored margin.
+    pub safe_range: f32,
+    /// Which way round: `+1.0` clockwise (starboard-hand), `-1.0` the other
+    /// way. Chosen once per recovery from a seeded composite key, so it is
+    /// deterministic without being predictable.
+    pub orbit_direction: f32,
+    /// How hard a radial error bends the tangential course, in radians of
+    /// heading offset per unit of *fractional* range error. The spiral gain.
+    pub spiral_gain: f32,
+    /// Throttle fraction flown on the ring.
+    pub orbit_speed: f32,
+    pub tracking_deadband_rad: f32,
+    pub tracking_full_steer_rad: f32,
+    pub entities: &'a [AiWorldEntity],
+    pub avoidance_buffer: f32,
+    pub avoidance_look_ahead_secs: f32,
+}
+
+/// The shield-recovery standoff orbit: `(thrust, steering)` for one tick
+/// (issue #788).
+///
+/// **It spirals; it does not stop and it does not simply run.** The commanded
+/// heading is the *tangent* of the safe ring — perpendicular to the bearing
+/// back to the target, on the authored side — rotated toward or away from the
+/// target in proportion to how wrong the current radius is:
+///
+/// * inside the ring (`range < safe_range`) the tangent is rotated *outward*,
+///   so the ship spirals out while still travelling around;
+/// * outside it, the tangent is rotated *inward*, so it spirals back in rather
+///   than fleeing to infinity;
+/// * on it, the ship flies the pure tangent and holds the ring.
+///
+/// The error is *fractional* (`(range - safe_range) / safe_range`) so the same
+/// authored gain behaves identically for a ring of 80 units and one of 800 —
+/// the alternative would make `spiral_gain` a value a designer has to re-tune
+/// every time a weapon's range changes. The rotation is clamped to a quarter
+/// turn, which is the point at which the "tangent bent toward the target"
+/// becomes "straight at the target": beyond it the correction would start
+/// spiralling the wrong way round.
+///
+/// Throttle is the flat authored orbit fraction — the ship keeps its energy up
+/// while it waits, because a stationary ship inside a hostile's reach is not
+/// recovering, it is a target.
+///
+/// **Avoidance bends the orbit** exactly as it bends the pass legs: the shared
+/// repulsion steering is summed on and the result clamped.
+pub fn plan_recovery_orbit(input: &RecoveryOrbitInput) -> (f32, f32) {
+    let dx = input.target_pos[0] - input.self_pos[0];
+    let dz = input.target_pos[2] - input.self_pos[2];
+    let range = (dx * dx + dz * dz).sqrt();
+
+    // Sitting exactly on the target (or an un-authored ring) leaves no tangent
+    // to fly: hold the current heading rather than dividing by ~0.
+    let dir = if range <= f32::EPSILON || input.safe_range <= f32::EPSILON {
+        [input.self_yaw.sin(), -input.self_yaw.cos()]
+    } else {
+        let inward = [dx / range, dz / range];
+        // Tangent of the ring, on the authored side. `sign` is the sense of the
+        // circulation; ±1 is all `orbit_direction` ever carries.
+        let sign = if input.orbit_direction >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let tangent = [-inward[1] * sign, inward[0] * sign];
+
+        // Fractional radial error, positive when too far out.
+        let error = (range - input.safe_range) / input.safe_range;
+        // Rotate the tangent toward the target when outside the ring, away from
+        // it when inside. Clamped to a quarter turn — see the doc comment.
+        let correction = (error * input.spiral_gain)
+            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+        let (s, c) = correction.sin_cos();
+        // Blend tangent toward `inward` by `correction`: at 0 it is the pure
+        // tangent, at ±π/2 it is straight at (or straight away from) the target.
+        [
+            tangent[0] * c + inward[0] * s,
+            tangent[1] * c + inward[1] * s,
+        ]
+    };
+
+    let base_steer = steer_toward(
+        input.self_yaw,
+        dir,
+        input.tracking_deadband_rad,
+        input.tracking_full_steer_rad,
+    );
+    let avoidance = avoidance_steering(
+        input.self_pos,
+        input.self_yaw,
+        input.self_speed,
+        input.self_radius,
+        input.target_uuid,
+        input.entities,
+        input.avoidance_buffer,
+        input.avoidance_look_ahead_secs,
+    );
+    (
+        input.orbit_speed.clamp(-1.0, 1.0),
         (base_steer + avoidance).clamp(-1.0, 1.0),
     )
 }
@@ -3571,6 +3715,7 @@ mod tests {
             escape_heading_rad: 0.0,
             approach_speed: 0.85,
             escape_speed: 1.0,
+            reengage_speed: 0.0,
             tracking_deadband_rad: 0.03,
             tracking_full_steer_rad: 0.6,
             entities,
@@ -3658,5 +3803,224 @@ mod tests {
             bent.0, clear.0,
             "avoidance bends the heading, it does not change the leg's throttle"
         );
+    }
+
+    /// Issue #788, AC7: the re-entry pivot tracks the target exactly as the
+    /// inbound leg does, but flies the authored re-engage throttle. With the
+    /// destroyer's authored `0.0` that is a cut-thrust turn — the observable
+    /// difference between "turning to start a pass" and "running the pass".
+    #[test]
+    fn reengage_leg_tracks_the_target_on_the_authored_reengage_throttle() {
+        let none: [AiWorldEntity; 0] = [];
+        let inbound = plan_fly_through_pass(&pass_input(FlyThroughLeg::Inbound, &none));
+        let pivot = plan_fly_through_pass(&pass_input(FlyThroughLeg::Reengage, &none));
+        assert_eq!(
+            pivot.1, inbound.1,
+            "the pivot IS the tracking solution: same steering as the inbound leg"
+        );
+        assert_eq!(pivot.0, 0.0, "and it cuts thrust to make the turn");
+
+        // The throttle is the authored scalar, not a hardcoded zero.
+        let mut powered = pass_input(FlyThroughLeg::Reengage, &none);
+        powered.reengage_speed = 0.4;
+        assert!((plan_fly_through_pass(&powered).0 - 0.4).abs() < 1e-6);
+    }
+
+    // ── The shield-recovery standoff orbit (issue #788) ──────────────────────
+
+    fn orbit_input(entities: &[AiWorldEntity]) -> RecoveryOrbitInput<'_> {
+        RecoveryOrbitInput {
+            self_pos: [0.0, 0.0, 0.0],
+            self_yaw: 0.0,
+            self_speed: 10.0,
+            self_radius: 1.0,
+            // Target dead ahead at 200; the ring below sits at 200 too, so the
+            // default fixture starts exactly ON the ring.
+            target_pos: [0.0, 0.0, -200.0],
+            target_uuid: Uuid::nil(),
+            safe_range: 200.0,
+            orbit_direction: 1.0,
+            spiral_gain: 1.2,
+            orbit_speed: 0.7,
+            tracking_deadband_rad: 0.02,
+            tracking_full_steer_rad: 0.5,
+            entities,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+        }
+    }
+
+    /// The heading the orbit commands, in world radians, recovered from the
+    /// steering it demands. Only meaningful for the fixture's yaw of 0 and a
+    /// non-saturated turn, which is why the tests below check the SIGN of the
+    /// steering rather than reconstructing angles.
+    fn orbit_steer(input: &RecoveryOrbitInput) -> f32 {
+        plan_recovery_orbit(input).1
+    }
+
+    /// AC3, the core claim: on the ring the ship flies the TANGENT — it neither
+    /// closes nor opens. With the target dead ahead and the ring at the current
+    /// range, a tangential course is a hard turn, not "carry on" and not "stop".
+    #[test]
+    fn on_the_ring_the_orbit_flies_the_tangent() {
+        let none: [AiWorldEntity; 0] = [];
+        let input = orbit_input(&none);
+        let (thrust, steering) = plan_recovery_orbit(&input);
+        assert!(
+            (thrust - 0.7).abs() < 1e-6,
+            "the ring is flown at the authored orbit throttle, not coasted"
+        );
+        assert!(
+            steering.abs() > 0.9,
+            "a target dead ahead means the tangent is 90 degrees off the bow: \
+             the orbit must command a hard turn, got {steering}"
+        );
+    }
+
+    /// AC3's "spirals rather than stopping or retreating indefinitely".
+    ///
+    /// The ship is pointed ALONG the pure tangent, so the steering the orbit
+    /// demands is exactly the spiral correction and nothing else: zero means
+    /// "hold the ring", and the sign says which way the correction bends. With
+    /// the target dead ahead of the ring's centre and a starboard-hand orbit, a
+    /// positive demand turns further off the target (opening the range) and a
+    /// negative one turns back onto it (closing).
+    #[test]
+    fn the_orbit_spirals_outward_when_inside_and_inward_when_outside() {
+        let none: [AiWorldEntity; 0] = [];
+        // Facing +X: for a target dead astern-of-ring at -Z, that is the pure
+        // starboard-hand tangent.
+        let tangent_yaw = std::f32::consts::FRAC_PI_2;
+
+        let mut on_ring = orbit_input(&none);
+        on_ring.self_yaw = tangent_yaw;
+        assert_eq!(
+            plan_recovery_orbit(&on_ring).1,
+            0.0,
+            "already on the ring and already on the tangent: no correction at all"
+        );
+
+        let mut inside = orbit_input(&none);
+        inside.self_yaw = tangent_yaw;
+        inside.target_pos = [0.0, 0.0, -60.0]; // range 60 vs a 200 ring
+        let inside_steer = plan_recovery_orbit(&inside).1;
+
+        let mut outside = orbit_input(&none);
+        outside.self_yaw = tangent_yaw;
+        outside.target_pos = [0.0, 0.0, -600.0]; // range 600 vs a 200 ring
+        let outside_steer = plan_recovery_orbit(&outside).1;
+
+        assert!(
+            inside_steer > 0.0,
+            "inside the ring the orbit must bend AWAY from the target and work \
+             its way out, got {inside_steer}"
+        );
+        assert!(
+            outside_steer < 0.0,
+            "outside the ring it must bend BACK toward the target rather than \
+             running away indefinitely, got {outside_steer}"
+        );
+        // And it never stops: the throttle is the same on the ring and off it.
+        assert_eq!(
+            plan_recovery_orbit(&inside).0,
+            plan_recovery_orbit(&on_ring).0
+        );
+        assert_eq!(
+            plan_recovery_orbit(&outside).0,
+            plan_recovery_orbit(&on_ring).0
+        );
+    }
+
+    /// The gain is fractional, so the same authored value produces the same
+    /// correction for a small ring and a large one. Without this a designer
+    /// would have to re-tune `orbit_spiral_gain` every time a weapon's range
+    /// changed, which is exactly the coupling the safe ring exists to avoid.
+    #[test]
+    fn the_spiral_correction_is_scale_free() {
+        let none: [AiWorldEntity; 0] = [];
+        let mut small = orbit_input(&none);
+        small.safe_range = 80.0;
+        small.target_pos = [0.0, 0.0, -40.0]; // 50% of the ring
+        let mut large = orbit_input(&none);
+        large.safe_range = 800.0;
+        large.target_pos = [0.0, 0.0, -400.0]; // also 50% of the ring
+        assert!(
+            (orbit_steer(&small) - orbit_steer(&large)).abs() < 1e-5,
+            "the same FRACTIONAL error must produce the same correction: {} vs {}",
+            orbit_steer(&small),
+            orbit_steer(&large)
+        );
+    }
+
+    /// The circulation direction is an input, and reversing it reverses the turn
+    /// — which is what makes a seeded ±1 a meaningful choice rather than
+    /// decoration.
+    #[test]
+    fn reversing_the_orbit_direction_reverses_the_turn() {
+        let none: [AiWorldEntity; 0] = [];
+        let mut cw = orbit_input(&none);
+        cw.orbit_direction = 1.0;
+        let mut ccw = orbit_input(&none);
+        ccw.orbit_direction = -1.0;
+        let (a, b) = (orbit_steer(&cw), orbit_steer(&ccw));
+        assert!(
+            a * b < 0.0,
+            "the two directions must turn opposite ways, got {a} and {b}"
+        );
+    }
+
+    /// AC3 again, at the pure layer: a hazard bends the orbit the same way it
+    /// bends the escape, and the throttle is untouched.
+    #[test]
+    fn hazard_bends_the_orbit_without_changing_its_throttle() {
+        let none: [AiWorldEntity; 0] = [];
+        // Put the ship well inside the ring so the commanded course is nearly
+        // straight ahead and a rock ahead of it is genuinely in the way.
+        let mut clear_input = orbit_input(&none);
+        clear_input.target_pos = [200.0, 0.0, 0.0];
+        clear_input.safe_range = 200.0;
+        let clear = plan_recovery_orbit(&clear_input);
+
+        let rock = [AiWorldEntity {
+            uuid: Uuid::new_v4(),
+            position: [3.0, 0.0, -30.0],
+            radius: 2.0,
+            size_rating: 2.0,
+            ..Default::default()
+        }];
+        let mut bent_input = orbit_input(&rock);
+        bent_input.target_pos = [200.0, 0.0, 0.0];
+        bent_input.safe_range = 200.0;
+        let bent = plan_recovery_orbit(&bent_input);
+
+        assert_ne!(
+            bent.1, clear.1,
+            "a hazard on the orbit path must bend the orbit steering"
+        );
+        assert_eq!(
+            bent.0, clear.0,
+            "avoidance bends the heading, never the leg's throttle"
+        );
+    }
+
+    /// Degenerate geometry must not produce NaN steering: sitting on top of the
+    /// target, and an un-derivable ring, both hold the current heading.
+    #[test]
+    fn degenerate_orbit_geometry_holds_the_current_heading() {
+        let none: [AiWorldEntity; 0] = [];
+        let mut on_top = orbit_input(&none);
+        on_top.target_pos = on_top.self_pos;
+        let (thrust, steering) = plan_recovery_orbit(&on_top);
+        assert!(steering.is_finite() && thrust.is_finite());
+        assert_eq!(
+            steering, 0.0,
+            "already on the held heading: no turn demanded"
+        );
+
+        let mut no_ring = orbit_input(&none);
+        no_ring.safe_range = 0.0;
+        let (_, steering) = plan_recovery_orbit(&no_ring);
+        assert!(steering.is_finite());
+        assert_eq!(steering, 0.0);
     }
 }

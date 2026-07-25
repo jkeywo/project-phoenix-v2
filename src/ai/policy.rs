@@ -97,6 +97,36 @@ pub enum AiPolicyVerb {
     /// shared motion planner, so hazard avoidance composes onto the escape
     /// exactly as it composes onto any other travel solution.
     HoldCommittedHeading,
+    /// Fly the shield-recovery standoff orbit (the `yaw` channel's THIRD mode
+    /// verb, issue #788).
+    ///
+    /// Says the facing solution is neither "track the target" nor "fly a frozen
+    /// heading" but "hold a ring around the target": the host solves a tangent
+    /// of the authored safe radius, bent toward or away from it in proportion to
+    /// the current radial error, so the ship spirals onto the ring instead of
+    /// stopping short or running away for ever.
+    ///
+    /// Value-less like every other mode verb. The ring's radius is derived
+    /// host-side from the TARGET's own direct-fire reach plus the hull's
+    /// authored margin — a number that cannot be authored as a constant because
+    /// it depends on which ship is being fought — and the direction of travel is
+    /// host-written private memory, drawn once per recovery from a seeded
+    /// composite key.
+    HoldRecoveryOrbit,
+    /// Turn back onto the target to begin another pass (the `yaw` channel's
+    /// FOURTH mode verb, issue #788).
+    ///
+    /// The re-entry pivot. Steering tracks the target exactly as
+    /// [`AiPolicyVerb::ActuateDesiredFacing`] does; what differs is the
+    /// *throttle* the host pairs with it — the authored re-engage fraction
+    /// rather than the approach fraction — so a hull can author a pivot flown on
+    /// cut thrust before the next run's acceleration begins.
+    ///
+    /// It is a distinct verb rather than a reuse of `actuate_desired_facing`
+    /// precisely so the host can tell the two apart: the leg is read off the
+    /// authored verb and never off a state name, so a designer stays free to
+    /// call the states whatever they like.
+    PivotToReengage,
     /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
     /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
     /// starboard/port magnitude comes from the shared hazard assessment weighted
@@ -635,6 +665,130 @@ mod tests {
             p.resolve_channel("longitudinal", &AiFacts::new(), &[]),
             None
         );
+    }
+
+    /// Issue #788: the `yaw` channel now carries FOUR mode verbs, and a state
+    /// resolves exactly one of them. They are distinct values — not a flag on a
+    /// shared verb — because the host reads the leg off the verb and pairs each
+    /// one with a different upstream facing solution and throttle.
+    #[test]
+    fn the_yaw_channel_resolves_all_four_distinct_mode_verbs() {
+        let state = |id: &str, verb: AiPolicyVerb| AiPolicyState {
+            id: id.into(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "yaw".into(),
+                when: parse_predicate("true").unwrap(),
+                verb,
+            }],
+            transitions: Vec::new(),
+        };
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "track".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    state("track", AiPolicyVerb::ActuateDesiredFacing),
+                    state("escape", AiPolicyVerb::HoldCommittedHeading),
+                    state("recover", AiPolicyVerb::HoldRecoveryOrbit),
+                    state("reenter", AiPolicyVerb::PivotToReengage),
+                ],
+            }),
+        };
+        let memory = AiPolicyMemory::new();
+        for (id, expected) in [
+            ("track", AiPolicyVerb::ActuateDesiredFacing),
+            ("escape", AiPolicyVerb::HoldCommittedHeading),
+            ("recover", AiPolicyVerb::HoldRecoveryOrbit),
+            ("reenter", AiPolicyVerb::PivotToReengage),
+        ] {
+            assert_eq!(
+                p.resolve_channel_in_state(id, "yaw", &AiFacts::new(), &memory, &[]),
+                Some(&expected),
+                "state '{id}' must answer the yaw channel with its own verb"
+            );
+            // ...and drives no other axis.
+            assert_eq!(
+                p.resolve_channel_in_state(id, "longitudinal", &AiFacts::new(), &memory, &[]),
+                None
+            );
+        }
+        // The four are genuinely different values: a host matching on them can
+        // tell the legs apart.
+        assert_ne!(
+            AiPolicyVerb::HoldRecoveryOrbit,
+            AiPolicyVerb::HoldCommittedHeading
+        );
+        assert_ne!(
+            AiPolicyVerb::PivotToReengage,
+            AiPolicyVerb::ActuateDesiredFacing
+        );
+    }
+
+    /// A recovery gate needs BOTH conjuncts (issue #788, AC6): the transition
+    /// fires only when the shield fraction AND the held-distance reading pass.
+    /// Pinned at the evaluator so the doctrine's `and` cannot silently degrade
+    /// to an `or` under a grammar change.
+    #[test]
+    fn a_two_conjunct_recovery_gate_takes_neither_half_alone() {
+        let mut params = AiParams::new();
+        params.set("reentry_shield_fraction", 0.75);
+        let p = AiPolicy {
+            params,
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "recover".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "recover".into(),
+                        rules: Vec::new(),
+                        transitions: vec![AiPolicyTransition {
+                            priority: 0,
+                            to: "reenter".into(),
+                            when: parse_predicate(
+                                "fact(shield_fraction) >= param(reentry_shield_fraction) \
+                                 and fact(safe_distance_held) > 0",
+                            )
+                            .unwrap(),
+                        }],
+                    },
+                    AiPolicyState {
+                        id: "reenter".into(),
+                        rules: Vec::new(),
+                        transitions: Vec::new(),
+                    },
+                ],
+            }),
+        };
+        let memory = AiPolicyMemory::new();
+        let facts = |shields: f64, held: f64| {
+            let mut f = AiFacts::new();
+            f.set("shield_fraction", shields);
+            f.set("safe_distance_held", held);
+            f
+        };
+        assert!(p
+            .resolve_transition("recover", &facts(1.0, 0.0), &memory, &[])
+            .is_none());
+        assert!(p
+            .resolve_transition("recover", &facts(0.5, 1.0), &memory, &[])
+            .is_none());
+        assert_eq!(
+            p.resolve_transition("recover", &facts(0.75, 1.0), &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("reenter"),
+            "the authored fraction is inclusive, and both halves together open the gate"
+        );
+        // Unseeded facts read absent, so an unwired host holds the ship on its
+        // ring rather than letting it re-enter for free.
+        assert!(p
+            .resolve_transition("recover", &AiFacts::new(), &memory, &[])
+            .is_none());
     }
 
     // ── Helm secondary-actuator mode verbs (issue #780) ──────────────────────

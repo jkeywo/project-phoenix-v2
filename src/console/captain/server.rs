@@ -285,6 +285,10 @@ fn operate_captain_ai(
                 // The Steering frozen-heading mode verb (issue #883) is likewise
                 // a helm axis verb, never a red_alert one.
                 | crate::ai::policy::AiPolicyVerb::HoldCommittedHeading
+                // The Steering recovery-orbit / re-engage mode verbs (issue
+                // #788) — helm axis verbs too.
+                | crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit
+                | crate::ai::policy::AiPolicyVerb::PivotToReengage
                 | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
                 | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
                 | crate::ai::policy::AiPolicyVerb::EngageImpulse

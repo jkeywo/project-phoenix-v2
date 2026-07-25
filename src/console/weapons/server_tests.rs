@@ -10437,3 +10437,60 @@ fn beam_kill_of_a_non_local_ship_emits_entity_destroyed_with_killer_credit() {
         "EntityDestroyed must credit the local shooter as killer"
     );
 }
+
+// ── Direct-fire reach (issue #788) ──────────────────────────────────────────
+//
+// The pure half of the standoff ring: how far a ship can put unguided fire.
+// Torpedoes are excluded by construction — they never reach this list — so the
+// tests below are about the online/usable gate and the max.
+
+fn emitter(online: bool, usable: bool, range: f32) -> DirectFireEmitter {
+    DirectFireEmitter {
+        online,
+        usable,
+        range,
+    }
+}
+
+#[test]
+fn direct_fire_reach_is_the_longest_usable_online_bank() {
+    let reach = longest_usable_direct_fire_range(&[
+        emitter(true, true, 40.0),
+        emitter(true, true, 320.0),
+        emitter(true, true, 120.0),
+    ]);
+    assert_eq!(reach, 320.0, "the longest bank sets the reach");
+}
+
+#[test]
+fn an_offline_or_unusable_bank_does_not_count_toward_reach() {
+    // The longest bank is offline: it is not a threat, so it must not inflate
+    // the ring an opponent keeps.
+    assert_eq!(
+        longest_usable_direct_fire_range(&[emitter(false, true, 320.0), emitter(true, true, 40.0)]),
+        40.0
+    );
+    // Online but unusable is the same answer.
+    assert_eq!(
+        longest_usable_direct_fire_range(&[emitter(true, false, 320.0), emitter(true, true, 40.0)]),
+        40.0
+    );
+}
+
+#[test]
+fn a_ship_with_no_usable_direct_fire_has_no_reach() {
+    assert_eq!(longest_usable_direct_fire_range(&[]), 0.0);
+    assert_eq!(
+        longest_usable_direct_fire_range(&[emitter(false, true, 500.0)]),
+        0.0,
+        "a fully disarmed ship reaches nothing — never a fallback distance"
+    );
+}
+
+#[test]
+fn reach_is_never_negative() {
+    assert_eq!(
+        longest_usable_direct_fire_range(&[emitter(true, true, -10.0)]),
+        0.0
+    );
+}

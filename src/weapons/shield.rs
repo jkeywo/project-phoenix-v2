@@ -12,14 +12,26 @@
 /// forward direction (angle 0).
 ///
 /// ## Offline mechanic
-/// When a facing's HP reaches 0 it goes offline for `offline_duration`
-/// seconds. While offline it absorbs no damage; any hit to that facing
-/// passes straight through to the hull. The facing recharges back to
-/// `max_hp` once the timer expires.
+/// When a facing's HP reaches 0 it **collapses**: it goes offline for
+/// `offline_duration` seconds. While offline it absorbs no damage; any hit to
+/// that facing passes straight through to the hull.
+///
+/// `offline_duration` is a *no-damage delay*, not a recharge time. When it
+/// expires the facing comes back online **at zero HP** and climbs from there at
+/// its authored `regen_per_sec` (issue #788). It used to snap straight back to
+/// `max_hp`, which meant a collapse cost a ship nothing but the offline window
+/// and made "wait until shields are back to 75%" an unanswerable question —
+/// there was no interval during which a shield was partially recovered.
+///
+/// This is one shared function: the player ship and every NPC collapse and
+/// recover identically, and nothing here branches on who owns the hull
+/// (AGENTS.md rule #6).
 ///
 /// ## Regen
 /// Each facing regenerates `regen_per_sec` HP per second while online.
-/// Regen is capped at `max_hp`.
+/// Regen is capped at `max_hp`. A facing that is hit while still ramping is
+/// knocked back to 0 and collapses again for a fresh `offline_duration`, so
+/// sustained fire keeps a shield down rather than letting it flicker back.
 use std::f32::consts::TAU;
 
 /// A snapshot of a single shield facing, suitable for serialisation and UI.
@@ -232,7 +244,10 @@ impl ShieldFacing {
         let effective = (amount as f32 * self.damage_multiplier).round().max(0.0) as i32;
         if effective <= self.hp {
             self.hp -= effective;
-            if self.hp == 0 {
+            // `effective > 0` matters since #788: a facing may now legitimately
+            // sit at 0 HP while ONLINE (the first tick of its regen ramp), and a
+            // zero-damage hit on it must not re-arm the offline timer.
+            if self.hp == 0 && effective > 0 {
                 self.offline_remaining = self.offline_duration;
             }
             0
@@ -249,8 +264,10 @@ impl ShieldFacing {
         if !self.is_online() {
             self.offline_remaining = (self.offline_remaining - dt).max(0.0);
             if self.is_online() {
-                // Just came back online — restore to full HP and clear accumulator.
-                self.hp = self.max_hp;
+                // Just came back online. The facing restarts from EMPTY and
+                // climbs at `regen_per_sec` from here (issue #788) — the offline
+                // window is the authored no-damage delay, not a free recharge.
+                self.hp = 0;
                 self.hp_frac = 0.0;
             }
         } else {
@@ -719,6 +736,25 @@ impl ShieldSystem {
     pub fn snapshot(&self) -> Vec<ShieldFacingSnapshot> {
         self.facings.iter().map(|f| f.snapshot()).collect()
     }
+
+    /// Total shield health as a fraction of total capacity, `[0, 1]`
+    /// (issue #788).
+    ///
+    /// The whole-ship reading a doctrine reasons about: "are my shields back?"
+    /// is a question about the ship, not about one arc. A ship with no arcs (or
+    /// no capacity) reads `0.0` — it has no shields to recover, which is the
+    /// safe answer for a re-entry gate that must not open on a missing system.
+    ///
+    /// Now that a collapsed facing comes back at 0 HP and ramps, this value
+    /// genuinely traverses the interval instead of jumping 1.0 → 0.0 → 1.0.
+    pub fn fraction(&self) -> f32 {
+        let total_max: i32 = self.facings.iter().map(|f| f.max_hp).sum();
+        if total_max <= 0 {
+            return 0.0;
+        }
+        let total_hp: i32 = self.facings.iter().map(|f| f.hp.max(0)).sum();
+        (total_hp as f32 / total_max as f32).clamp(0.0, 1.0)
+    }
 }
 
 impl Default for ShieldSystem {
@@ -819,13 +855,123 @@ mod tests {
         assert!((f.offline_remaining - 6.0).abs() < 1e-4);
     }
 
+    /// Issue #788 (AC1). A collapsed facing waits out the authored no-damage
+    /// delay and then comes back **empty**, climbing at its authored
+    /// `regen_per_sec`. It used to snap straight to `max_hp` the instant the
+    /// timer expired.
+    ///
+    /// This is a deliberate behaviour change, and the assertion below is the
+    /// whole reason a "wait until shields are back to 75%" doctrine can exist at
+    /// all: under the old snap there was no instant at which a recovering shield
+    /// was partially recovered, so any fractional threshold was either already
+    /// met or unreachable.
     #[test]
-    fn facing_comes_back_online_at_full_hp_after_offline_duration() {
-        let mut f = ShieldFacing::new("Fore", 100, 0.0, 10.0);
-        f.apply_damage(100); // offline for 10s
+    fn facing_comes_back_online_empty_and_regenerates_at_its_authored_rate() {
+        let mut f = ShieldFacing::new("Fore", 100, 10.0, 10.0);
+        f.apply_damage(100); // collapse → offline for 10s
+
+        // The delay is a delay: nothing regenerates during it.
+        f.tick(9.0);
+        assert!(!f.is_online());
+        assert_eq!(f.hp, 0);
+
+        // The tick the delay expires, the facing is online again — and empty.
+        f.tick(1.0);
+        assert!(f.is_online(), "the authored offline duration has elapsed");
+        assert_eq!(
+            f.hp, 0,
+            "a recovered facing restarts from zero, not from max_hp"
+        );
+
+        // From there it climbs at the authored rate, and only at that rate.
+        f.tick(3.0); // 10 hp/s × 3 s
+        assert_eq!(f.hp, 30);
+        f.tick(4.5); // +45
+        assert_eq!(f.hp, 75);
+        // ...all the way back to full, where it caps.
+        f.tick(10.0);
+        assert_eq!(f.hp, 100);
+    }
+
+    /// Issue #788 (AC1/AC8, interrupted regeneration): a hit while the facing is
+    /// still ramping knocks it back to zero and collapses it again for a FRESH
+    /// no-damage delay, with the surplus passing to the hull.
+    #[test]
+    fn a_hit_during_the_regen_ramp_collapses_the_facing_again() {
+        let mut f = ShieldFacing::new("Fore", 100, 10.0, 10.0);
+        f.apply_damage(100); // collapse
+        f.tick(10.0); // back online, empty
+        f.tick(3.0); // ramped to 30
+        assert_eq!(f.hp, 30);
+
+        let passthrough = f.apply_damage(50);
+        assert_eq!(f.hp, 0, "the ramp is knocked back to zero");
+        assert_eq!(passthrough, 20, "the surplus reaches the hull");
+        assert!(!f.is_online(), "and the facing collapses again");
+        assert!(
+            (f.offline_remaining - 10.0).abs() < 1e-4,
+            "the no-damage delay restarts in full, got {}",
+            f.offline_remaining
+        );
+
+        // The restarted delay is real: it holds the facing down for its full
+        // duration rather than resuming the interrupted ramp.
+        f.tick(9.0);
+        assert!(!f.is_online());
+        assert_eq!(f.hp, 0);
+    }
+
+    /// A facing sitting at 0 HP while ONLINE (the first instant of its ramp) is
+    /// a state that could not occur before #788. A zero-damage hit on it must
+    /// not re-arm the offline timer — that would freeze the ramp for ever on any
+    /// ship being grazed by rounded-to-zero damage.
+    #[test]
+    fn a_zero_damage_hit_on_an_empty_online_facing_does_not_re_collapse_it() {
+        let mut f = ShieldFacing::new("Fore", 100, 10.0, 10.0);
+        f.apply_damage(100);
         f.tick(10.0);
         assert!(f.is_online());
-        assert_eq!(f.hp, 100);
+        assert_eq!(f.hp, 0);
+
+        assert_eq!(f.apply_damage(0), 0);
+        assert!(f.is_online(), "a no-op hit must not collapse the facing");
+        f.tick(1.0);
+        assert_eq!(f.hp, 10, "the ramp continues uninterrupted");
+    }
+
+    /// The whole-ship reading a recovery doctrine gates on: it traverses the
+    /// interval as the arcs ramp, rather than jumping between 0 and 1.
+    #[test]
+    fn system_fraction_tracks_the_recovery_ramp() {
+        let mut s = ShieldSystem::new(&ShieldConfig {
+            num_facings: 1,
+            max_hp: 40,
+            regen_per_sec: 10.0,
+            offline_duration: 4.0,
+        });
+        assert!((s.fraction() - 1.0).abs() < 1e-6);
+
+        s.apply_damage(40, 0.0); // collapse the single arc
+        assert_eq!(s.fraction(), 0.0);
+
+        s.tick(4.0); // no-damage delay expires: online, empty
+        assert_eq!(s.fraction(), 0.0);
+        s.tick(2.0); // +20 of 40
+        assert!((s.fraction() - 0.5).abs() < 1e-6, "got {}", s.fraction());
+        s.tick(1.0); // +10 → 30 of 40
+        assert!((s.fraction() - 0.75).abs() < 1e-6, "got {}", s.fraction());
+        s.tick(10.0);
+        assert!((s.fraction() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn system_fraction_of_a_shieldless_hull_is_zero() {
+        let s = ShieldSystem::new(&ShieldConfig {
+            num_facings: 1,
+            max_hp: 0,
+            ..Default::default()
+        });
+        assert_eq!(s.fraction(), 0.0);
     }
 
     #[test]

@@ -213,6 +213,11 @@ pub type AiHighFidelityComponents = (
     crate::ship::helm_ai::HelmEnginesAiPolicyState,
     crate::ship::helm_ai::HelmSteeringAiPolicyState,
     crate::ship::helm_ai::HelmPassSurface,
+    // Issue #788: the bounded range-history window behind the "has this ship
+    // HELD its safe distance" half of the recovery re-entry gate. Same reason
+    // again — a spawn path that missed it would leave the destroyer unable to
+    // ever re-enter, silently.
+    crate::ship::helm_ai::HelmRecoveryHistory,
 );
 
 /// Build the [`AiHighFidelityComponents`] set at its defaults.
@@ -234,6 +239,7 @@ pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
         crate::ship::helm_ai::HelmEnginesAiPolicyState::default(),
         crate::ship::helm_ai::HelmSteeringAiPolicyState::default(),
         crate::ship::helm_ai::HelmPassSurface::default(),
+        crate::ship::helm_ai::HelmRecoveryHistory::default(),
     )
 }
 
@@ -382,6 +388,15 @@ fn build_world_snapshot(
         Option<&crate::entity_spawner::EntitySystemHull>,
         Option<&crate::entity_spawner::ColliderSection>,
         Option<&crate::ship_state::ShipPhysics>,
+        // Direct-fire reach (issue #788): the longest range this entity can put
+        // unguided fire at, published as a threat fact so another ship's helm
+        // can derive a safe standoff ring from it. Needs the control sources
+        // (to know which banks are offline) and the radar-range modifier (which
+        // scales beam reach, exactly as the arc-bearing evaluation scales it).
+        Option<&crate::ship_plugin::ShipSystemControlSources>,
+        Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+        Option<&crate::weapons_plugin::BlasterSystemResource>,
+        Option<&crate::modifiers::ShipModifiers>,
     )>,
     asteroids: Query<
         (
@@ -395,7 +410,19 @@ fn build_world_snapshot(
     snapshot.entities = query
         .iter()
         .map(
-            |(uuid, transform, name, faction, hull, collider, physics)| {
+            |(
+                uuid,
+                transform,
+                name,
+                faction,
+                hull,
+                collider,
+                physics,
+                control_sources,
+                phasers,
+                blasters,
+                modifiers,
+            )| {
                 let hull_fraction = hull.map(|h| {
                     let max = h.0.total_max();
                     if max > 0.0 {
@@ -408,6 +435,8 @@ fn build_world_snapshot(
                 // Prefer ShipPhysics.forward_speed (authoritative for all ships after #587);
                 // Use ShipPhysics.forward_speed (authoritative after #581).
                 let forward_speed = physics.map(|p| p.forward_speed).unwrap_or(0.0);
+                let direct_fire_range =
+                    entity_direct_fire_range(control_sources, phasers, blasters, modifiers);
                 crate::ai::AiWorldEntity {
                     uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
                     name: name.as_ref().map(|n| n.0.clone()),
@@ -428,6 +457,7 @@ fn build_world_snapshot(
                     movable: true,
                     dangerous: true,
                     size_rating: radius,
+                    direct_fire_range,
                 }
             },
         )
@@ -461,8 +491,69 @@ fn build_world_snapshot(
                     movable: false,
                     dangerous: true,
                     size_rating: collider.0.radius,
+                    // An asteroid shoots at nobody.
+                    direct_fire_range: 0.0,
                 }),
         );
+}
+
+/// This entity's longest usable direct-fire reach (issue #788), or `0.0` when it
+/// carries no direct-fire armament.
+///
+/// The Bevy adapter for the pure
+/// [`longest_usable_direct_fire_range`](crate::weapons_plugin::longest_usable_direct_fire_range):
+/// it reads the per-bank configuration off the entity, applies the same
+/// offline gate and the same radar-range beam modifier the arc-bearing
+/// evaluation applies, and hands a flat list to the pure function. Torpedo
+/// tubes are deliberately absent — a homing round has no standoff radius.
+fn entity_direct_fire_range(
+    control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    modifiers: Option<&crate::modifiers::ShipModifiers>,
+) -> f32 {
+    use crate::weapons_plugin::{longest_usable_direct_fire_range, DirectFireEmitter};
+
+    let default_modifiers = crate::modifiers::ShipModifiers::new();
+    let radar_range_mult = modifiers
+        .unwrap_or(&default_modifiers)
+        .get(&crate::messages::ModifierSlot::RadarRange);
+    // No control sources (a bare test spawn) means nothing is known to be
+    // offline, which is the same reading the arc-bearing path takes.
+    let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
+        match (control_sources, sid) {
+            (Some(cs), Some(id)) => cs.0.is_offline(&id),
+            _ => false,
+        }
+    };
+
+    let mut emitters: Vec<DirectFireEmitter> = Vec::new();
+    if let Some(cfg) = phasers {
+        for b in &cfg.0.banks {
+            let base = if b.beam_range > 0.0 {
+                b.beam_range
+            } else {
+                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+            };
+            emitters.push(DirectFireEmitter {
+                online: !is_offline(crate::system_registry::phaser_bank_system_id(&b.id)),
+                usable: true,
+                range: base * radar_range_mult,
+            });
+        }
+    }
+    if let Some(res) = blasters {
+        for bs in &res.0 {
+            emitters.push(DirectFireEmitter {
+                online: !is_offline(crate::system_registry::blaster_bank_system_id(
+                    &bs.config.id,
+                )),
+                usable: true,
+                range: bs.config.range,
+            });
+        }
+    }
+    longest_usable_direct_fire_range(&emitters)
 }
 
 /// Score each entity's doctrine and write `scored_objectives` into its
@@ -1124,6 +1215,143 @@ mod tests {
         assert_eq!(rock.position, [30.0, 0.0, -12.0]);
         assert_eq!(rock.faction, None, "a rock is hostile to nobody");
         assert_eq!(rock.forward_speed, 0.0);
+    }
+
+    // ── build_world_snapshot: direct-fire reach (issue #788) ───────────────
+    //
+    // This is genuinely new CROSS-ENTITY plumbing: before #788 nothing published
+    // one ship's weapon reach where another ship's AI could read it (the
+    // long-dead `WorldView.entity_weapons_range` was zeroed by every producer).
+    // The tests below drive the real system, so a regression that stops
+    // publishing the field fails here rather than showing up as a destroyer that
+    // quietly orbits at its authored margin.
+
+    /// A hull with one 200-unit phaser bank and one 320-unit blaster bank, plus
+    /// the components the spawner would attach for them.
+    fn armed_hull_components() -> (
+        crate::weapons_plugin::PhaserCombatConfigResource,
+        crate::weapons_plugin::BlasterSystemResource,
+    ) {
+        let cfg = crate::entity_config::EntityConfig::from_toml(
+            r#"
+name = "Armed"
+[weapons_console]
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 90
+auto_arc_deg = 90
+beam_range = 200
+beam_damage_per_sec = 3
+beam_duration_secs = 4
+cooldown_secs = 4
+[[weapons_console.blaster_banks]]
+id = "lance"
+facing_deg = 0
+range = 320
+"#,
+        )
+        .expect("fixture hull must parse");
+        let wc = cfg
+            .weapons_console
+            .expect("hull declares [weapons_console]");
+        (
+            crate::weapons_plugin::PhaserCombatConfigResource(
+                crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc),
+            ),
+            crate::weapons_plugin::BlasterSystemResource(
+                wc.blaster_banks
+                    .iter()
+                    .map(|bc| crate::blaster::BlasterSystem::new(bc.to_runtime()))
+                    .collect(),
+            ),
+        )
+    }
+
+    /// The snapshot publishes the LONGEST reach across the entity's direct-fire
+    /// banks — here the blaster, which outranges the phaser.
+    #[test]
+    fn world_snapshot_publishes_the_longest_direct_fire_reach() {
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            phasers,
+            blasters,
+        ));
+
+        app.update();
+
+        let snapshot = app.world().resource::<WorldSnapshot>();
+        assert_eq!(
+            snapshot.entities[0].direct_fire_range, 320.0,
+            "the reach is the longest bank, not the first or the sum"
+        );
+    }
+
+    /// An offline bank is not a threat, so it must not inflate the ring another
+    /// ship keeps. With the blaster shot out, the reach falls back to the
+    /// phaser's; with both gone it is zero.
+    #[test]
+    fn an_offline_bank_stops_counting_toward_direct_fire_reach() {
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+        sources.0.set_offline(
+            crate::system_registry::blaster_bank_system_id("lance").unwrap(),
+            true,
+        );
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                phasers,
+                blasters,
+                sources,
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<WorldSnapshot>().entities[0].direct_fire_range,
+            200.0,
+            "a disabled blaster bank must drop out of the reach"
+        );
+
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>()
+            .unwrap()
+            .0
+            .set_offline(
+                crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+                true,
+            );
+        app.update();
+        assert_eq!(
+            app.world().resource::<WorldSnapshot>().entities[0].direct_fire_range,
+            0.0,
+            "a fully disarmed ship has no reach at all — the ring collapses to the \
+             standing-off hull's own authored margin"
+        );
+    }
+
+    /// An unarmed entity — and an asteroid — publish no reach, rather than a
+    /// default one.
+    #[test]
+    fn an_unarmed_entity_publishes_no_direct_fire_reach() {
+        let mut app = snapshot_test_app();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<WorldSnapshot>().entities[0].direct_fire_range,
+            0.0
+        );
     }
 
     #[test]

@@ -1448,6 +1448,7 @@ mod tests {
             verb: crate::entities::config::SHIELD_FOCUS_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }];
         ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
     }
@@ -2324,6 +2325,7 @@ station = "sensors"
             verb: POWER_SET_ALLOCATION_VERB.to_string(),
             value: false,
             level,
+            response_index: 0,
         }
     }
 
@@ -3131,6 +3133,7 @@ station = "sensors"
                 verb: crate::entity_config::TORPEDO_LOAD_VERB.into(),
                 value: false,
                 level: 0,
+                response_index: 0,
             }],
         };
         let mut map = std::collections::HashMap::new();

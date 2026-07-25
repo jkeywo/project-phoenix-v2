@@ -546,6 +546,20 @@ pub fn spawn_entity(
             selector: repair_selector,
             power_rating: config.power_rating.map(|r| r as f32),
         });
+        // Comms hail selector + dialogue-response policy (issue #786) — the two
+        // halves of the Comms console's AI, from `[comms_console.selector]` /
+        // `[comms_console.ai]` if authored, else the canonical defaults (which
+        // reproduce the retired filter+argmax and the retired
+        // `record_response(id, 0)` stub's DECISION, now routed through
+        // admission). Resolved by the SHARED
+        // `comms_console_ai_components` helper, because
+        // `server_app::spawn_game_start_entities` must attach the identical pair
+        // to the player ship — the only ship either Comms AI host actually runs
+        // on, since both are filtered `With<LocalShip>`.
+        let (comms_selector, comms_response_policy) =
+            crate::console::comms::server::comms_console_ai_components(config);
+        entity_commands.insert(comms_selector);
+        entity_commands.insert(comms_response_policy);
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying
         // a `[behaviour]` block, alongside the sensors block above and inside
@@ -1168,6 +1182,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1219,6 +1234,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1267,6 +1283,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1320,6 +1337,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1376,6 +1394,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1439,6 +1458,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1513,6 +1533,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1569,6 +1590,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1664,6 +1686,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1728,6 +1751,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1785,6 +1809,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1869,6 +1894,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,
@@ -1990,6 +2016,7 @@ hull_integrity = 60.0
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             sensors_console: None,
             navigation_console: None,

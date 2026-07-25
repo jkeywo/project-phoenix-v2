@@ -132,6 +132,23 @@ pub enum AiPolicyVerb {
     /// is — the brownout-avoidance reserve guard is authored in the rule's
     /// `when`, not here.
     SetPowerGroupAllocation(u8),
+    /// Answer the Comms dialogue currently being resolved with the authored
+    /// response INDEX (the `comms_respond` channel of the Comms fine system,
+    /// issue #786). The SECOND value-carrying verb, after
+    /// [`AiPolicyVerb::SetPowerGroupAllocation`] — and value-carrying for the
+    /// same reason: the choice is a position in a fixed, small, index-addressed
+    /// set (`ActiveDialogue.current_node.responses`), so it is authored data,
+    /// not host geometry.
+    ///
+    /// WHICH message is being answered is NOT carried here: the host resolves
+    /// this channel once per open dialogue awaiting a response and supplies the
+    /// message id from its own context, exactly as the phaser verbs take their
+    /// bank from the host. The host emits the same admitted `RespondToMessage`
+    /// a human Comms officer sends, so the shared `handle_respond_to_message`
+    /// router fires the response's trigger actions and advances its follow-up
+    /// identically for both. Its absence ("hold"/idle) leaves the dialogue open
+    /// this tick — there is no "decline" index.
+    RespondToMessage(u8),
 }
 
 /// One inline stateless policy rule.
@@ -762,5 +779,109 @@ mod tests {
         );
         // A group with no authored rule holds (None).
         assert_eq!(p.resolve_channel("weapons", &hot, &[]), None);
+    }
+
+    // ── Comms dialogue-response channel (issue #786) ────────────────────────
+
+    /// The `comms_respond` channel resolves the SECOND value-carrying verb, and
+    /// the authored index rides the verb (not the host).
+    #[test]
+    fn comms_respond_channel_resolves_the_authored_response_index() {
+        let mut params = AiParams::new();
+        params.set("urgent_threshold", 1.0);
+        let p = AiPolicy {
+            params,
+            rules: vec![
+                // An urgent message gets the second (index 1) response...
+                AiPolicyRule {
+                    priority: 10,
+                    channel: "comms_respond".into(),
+                    when: parse_predicate("fact(is_urgent) >= param(urgent_threshold)").unwrap(),
+                    verb: AiPolicyVerb::RespondToMessage(1),
+                },
+                // ...everything else takes the first, reproducing the retired
+                // channel-2 auto-response stub's decision.
+                AiPolicyRule {
+                    priority: 0,
+                    channel: "comms_respond".into(),
+                    when: parse_predicate("true").unwrap(),
+                    verb: AiPolicyVerb::RespondToMessage(0),
+                },
+            ],
+            idle: false,
+        };
+
+        let mut routine = AiFacts::new();
+        routine.set("is_urgent", 0.0);
+        routine.set("response_count", 3.0);
+        assert_eq!(
+            p.resolve_channel("comms_respond", &routine, &[]),
+            Some(&AiPolicyVerb::RespondToMessage(0)),
+            "the baseline rule answers with index 0"
+        );
+
+        let mut urgent = AiFacts::new();
+        urgent.set("is_urgent", 1.0);
+        urgent.set("response_count", 3.0);
+        assert_eq!(
+            p.resolve_channel("comms_respond", &urgent, &[]),
+            Some(&AiPolicyVerb::RespondToMessage(1)),
+            "the higher-priority urgent rule answers with its own authored index"
+        );
+
+        // No rule on another channel: the Comms policy drives only its own axis.
+        assert_eq!(p.resolve_channel("red_alert", &urgent, &[]), None);
+    }
+
+    /// An idle Comms policy answers nothing — the explicit "the AI does not
+    /// speak for me" declaration.
+    #[test]
+    fn idle_comms_policy_never_responds() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "comms_respond".into(),
+                when: parse_predicate("true").unwrap(),
+                verb: AiPolicyVerb::RespondToMessage(0),
+            }],
+            idle: true,
+        };
+        assert_eq!(
+            p.resolve_channel("comms_respond", &AiFacts::new(), &[]),
+            None
+        );
+    }
+
+    /// A `comms_respond` guard may read scenario flags; the flag chain is a
+    /// shared slice, so the policy can never write one back (AC4).
+    #[test]
+    fn comms_respond_guard_reads_the_scenario_flag_chain() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "comms_respond".into(),
+                when: parse_predicate("flag(cleared_to_answer)").unwrap(),
+                verb: AiPolicyVerb::RespondToMessage(2),
+            }],
+            idle: false,
+        };
+        let empty = FlagStore::new();
+        assert_eq!(
+            p.resolve_channel("comms_respond", &AiFacts::new(), &[&empty]),
+            None,
+            "an unset flag holds the response"
+        );
+        let mut set = FlagStore::new();
+        set.set_flag("cleared_to_answer");
+        assert_eq!(
+            p.resolve_channel("comms_respond", &AiFacts::new(), &[&set]),
+            Some(&AiPolicyVerb::RespondToMessage(2))
+        );
+        // The store is untouched by evaluation.
+        let mut expected = FlagStore::new();
+        expected.set_flag("cleared_to_answer");
+        assert_eq!(set, expected);
     }
 }

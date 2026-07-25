@@ -2555,6 +2555,7 @@ mod tests {
                 verb: crate::entity_config::HELM_ACTUATE_DESIRED_TRAVEL_VERB.into(),
                 value: false,
                 level: 0,
+                response_index: 0,
             }],
         };
         attach_engines_policy(&mut app, hold);

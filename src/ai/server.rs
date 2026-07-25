@@ -1589,6 +1589,7 @@ mod tests {
             helm_capability: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             collider: None,
             appearance: None,
             asteroid_field: None,

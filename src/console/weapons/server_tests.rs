@@ -7062,6 +7062,7 @@ fn attach_launch_policy(app: &mut App, when: &str) {
             verb: crate::entity_config::TORPEDO_LAUNCH_VERB.into(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     };
     let mut map = std::collections::HashMap::new();
@@ -9952,6 +9953,7 @@ fn phaser_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
             verb: crate::entities::config::PHASER_FIRE_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
     .to_policy()

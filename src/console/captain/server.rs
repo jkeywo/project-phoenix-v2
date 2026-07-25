@@ -300,7 +300,11 @@ fn operate_captain_ai(
                 | crate::ai::policy::AiPolicyVerb::FocusShieldArc
                 // Power allocation verb (issue #784) never resolves on the
                 // Captain's red_alert channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(_) => None,
+                | crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(_)
+                // Comms dialogue-response verb (issue #786) never resolves on
+                // the Captain's red_alert channel, but the match must stay
+                // exhaustive.
+                | crate::ai::policy::AiPolicyVerb::RespondToMessage(_) => None,
             });
 
         if let Some(should_be_red_alert) = should_be_red_alert {
@@ -1472,6 +1476,7 @@ mod tests {
                 verb: "set_red_alert".into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         }
         .to_policy()

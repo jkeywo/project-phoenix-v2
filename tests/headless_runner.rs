@@ -84,6 +84,61 @@ fn player_ship_is_fully_backfilled_by_ai() {
     );
 }
 
+/// Issue #786 wiring guard: the PLAYER ship must carry the per-system AI
+/// components its own template authored.
+///
+/// The player ship never goes through `entities::spawner::spawn_entity` — only
+/// `server_app::spawn_game_start_entities` builds it — and both Comms AI hosts
+/// (`operate_comms_ai`, `operate_comms_response_ai`) are filtered
+/// `With<LocalShip>`, i.e. they run ONLY on the player ship. So a missing
+/// `server_app` attach meant the feature was dead in production: the hosts fell
+/// back to a tick-local canonical default every tick, an authored
+/// `[comms_console]` block was parsed, validated and then silently ignored, and
+/// `self_fact/fact(power_rating)` was permanently ABSENT (the #779 empty-facts
+/// failure mode). `RepairTargetSelector` had the same gap on the player ship —
+/// less severe because `operate_repair_ai`'s host is `With<Ship>`, so
+/// spawner-built NPCs already had one, but an authored `[repair.selector]` on a
+/// player-class hull was still ignored.
+///
+/// This boots the real headless world, so it fails if either attach block is
+/// removed. The `power_rating` assertion is the sharp end: it is the value the
+/// selector expressions read as `self_fact(power_rating)`, and it can only be
+/// right if the component was built from the ship's own `EntityConfig`.
+#[test]
+fn player_game_start_spawn_attaches_the_comms_and_repair_ai_components() {
+    use project_phoenix::console::comms::server::{CommsResponseAiPolicy, CommsTargetSelector};
+    use project_phoenix::console::repair::server::RepairTargetSelector;
+
+    let args = test_args();
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    // `assets/entities/alliance_cruiser.toml` declares `power_rating = 90`.
+    let expected_rating = Some(90.0_f32);
+
+    let mut q = app.world_mut().query_filtered::<(
+        &CommsTargetSelector,
+        &CommsResponseAiPolicy,
+        &RepairTargetSelector,
+    ), With<LocalShip>>();
+    let (comms_selector, _comms_policy, repair_selector) = q.single(app.world()).expect(
+        "the player ship must carry the Comms hail selector, the Comms \
+                 response policy, and the Repair selector — is the attach block \
+                 still present in `spawn_game_start_entities`?",
+    );
+
+    assert_eq!(
+        comms_selector.power_rating, expected_rating,
+        "the Comms selector must carry the ship template's authored \
+         power_rating; `self_fact(power_rating)` and `fact(power_rating)` are \
+         both read off this component"
+    );
+    assert_eq!(
+        repair_selector.power_rating, expected_rating,
+        "the Repair selector must carry the same authored power_rating"
+    );
+}
+
 /// Sim time is a function of tick count alone, and `HeadlessArgs::sim_seconds`
 /// is the authority on the conversion.
 #[test]

@@ -2749,6 +2749,48 @@ fn spawn_game_start_entities(
                     power_rating: config.power_rating.map(|r| r as f32),
                 });
 
+            // Comms hail selector + dialogue-response policy (issue #786) — the
+            // player-ship half of the per-entity pattern in `spawner.rs`, and
+            // the ONLY half that can ever run: both `operate_comms_ai` and
+            // `operate_comms_response_ai` are filtered `With<LocalShip>`, and
+            // the spawner never spawns the player ship. Without this,
+            // `[comms_console.selector]` / `[comms_console.ai]` parsed,
+            // validated, and were then silently ignored (the host's tick-local
+            // canonical default always won), and `self_fact(power_rating)` /
+            // `fact(power_rating)` were permanently ABSENT — the #779
+            // empty-facts failure mode. Both are resolved by the same shared
+            // helper the spawner calls, so the two paths cannot drift.
+            let (comms_selector, comms_response_policy) =
+                crate::console::comms::server::comms_console_ai_components(&config);
+            commands
+                .entity(spawned)
+                .insert((comms_selector, comms_response_policy));
+
+            // Repair target selector (issue #785) — same player-ship gap. Less
+            // severe than Comms because `operate_repair_ai`'s host is
+            // `With<Ship>`, so spawner-built NPCs already carried one; but the
+            // PLAYER ship never goes through the spawner, so an authored
+            // `[repair.selector]` on a player-class hull was ignored and
+            // `self_fact(power_rating)` was absent there too. Same shape as the
+            // spawner's insert; the block is already validated in
+            // `EntityConfig::from_toml`.
+            let repair_selector = config
+                .repair
+                .as_ref()
+                .and_then(|rc| rc.selector.as_ref())
+                .map(|s| s.to_selector().unwrap_or_default())
+                .unwrap_or_else(|| {
+                    crate::entities::config::default_repair_target_selector_config()
+                        .to_selector()
+                        .unwrap_or_default()
+                });
+            commands
+                .entity(spawned)
+                .insert(crate::console::repair::server::RepairTargetSelector {
+                    selector: repair_selector,
+                    power_rating: config.power_rating.map(|r| r as f32),
+                });
+
             // Captain AI policy (issue #775) — the player ship half of the
             // per-entity pattern above. Authored `[captain_console.ai]` drives
             // `operate_captain_ai`; absent, the canonical default policy is

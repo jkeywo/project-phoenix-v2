@@ -428,6 +428,7 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            comms_console: None,
             power: None,
             shields_console: None,
             torpedoes: None,

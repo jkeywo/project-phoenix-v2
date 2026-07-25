@@ -1493,6 +1493,38 @@ pub struct CaptainConsoleConfig {
     pub ai: Option<FineSystemAiConfigToml>,
 }
 
+/// Config block for the Comms CONSOLE's AI (issue #786), loaded from
+/// `[comms_console]`.
+///
+/// Deliberately separate from the top-level `[comms]` section: that one is the
+/// per-ENTITY comms RANGE (`CommsConfig`), present on stations and NPCs that are
+/// merely hailable, and has nothing to do with who operates the console. The AI
+/// policy belongs to the console, next to `[captain_console.ai]` and
+/// `[sensors_console.selector]`.
+///
+/// Comms is the FIRST system to author BOTH fine-system AI machines: a #776
+/// `selector` (WHO to hail — a variable candidate set keyed by real contact
+/// UUIDs) and a #775 channel/verb `ai` policy (HOW to answer an open dialogue —
+/// a fixed, index-addressed response list). See [`COMMS_RESPOND_CHANNEL`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CommsConsoleConfig {
+    /// Inline per-system target selector for hail target ranking (issue #786).
+    /// Loaded from `[comms_console.selector]`; absent ⇒ the canonical
+    /// [`default_comms_target_selector_config`] is synthesised at spawn.
+    /// Validated in [`EntityConfig::from_toml`] against
+    /// [`COMMS_SELECTOR_SOURCES`].
+    #[serde(default)]
+    pub selector: Option<FineSystemAiSelectorToml>,
+    /// Inline stateless AI policy for the Comms dialogue-response fine system
+    /// (issue #786). Loaded from `[comms_console.ai]`; absent ⇒ the canonical
+    /// [`default_comms_response_ai_config`] is synthesised at spawn (baseline
+    /// preservation). Validated against [`COMMS_RESPOND_CHANNELS`] /
+    /// [`COMMS_RESPOND_VERBS`].
+    #[serde(default)]
+    pub ai: Option<FineSystemAiConfigToml>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CinematicCameraConfig {
@@ -1795,6 +1827,39 @@ pub const POWER_THRUST_FACT: &str = "thrust";
 /// Host-seeded fact name: red-alert state as `1.0`/`0.0`.
 pub const POWER_RED_ALERT_FACT: &str = "red_alert";
 
+// ── Comms dialogue-response fine-system AI policy channel/verb (issue #786) ───
+//
+// Comms is the FIRST fine system to author BOTH machines at once, because it
+// owns two different decisions:
+//
+//   * WHO to hail — a variable, per-tick candidate set of real contacts keyed by
+//     genuine entity UUID. That is #776 selector vocabulary (see
+//     [`COMMS_SELECTOR_SOURCES`] / [`default_comms_target_selector_config`]).
+//   * HOW to answer an open dialogue — a fixed, small, INDEX-addressed set
+//     (`ActiveDialogue.current_node.responses`, addressed by `usize`). That is
+//     the #775 channel/verb model, for the same reason Shields (#783) stayed on
+//     it: there is no entity set for a candidate-source selector to union.
+//
+// The `respond_to_message` verb is the SECOND value-carrying verb (after #784's
+// `set_power_group_allocation`): only the response INDEX rides the verb — WHICH
+// message is being answered comes from the host context, never the policy.
+
+/// The `comms_respond` output channel: the Comms fine system's
+/// answer-an-open-dialogue axis, resolved once per message awaiting a response.
+pub const COMMS_RESPOND_CHANNEL: &str = "comms_respond";
+/// The `respond_to_message` verb: answer the message being resolved with the
+/// authored `response_index` payload. Its presence tells the host to emit the
+/// same admitted `RespondToMessage` a human Comms officer sends — through the
+/// SAME `handle_respond_to_message` router, so trigger actions and follow-ups
+/// fire identically for AI and human (AGENTS.md rule #6). Its absence
+/// ("hold"/idle) leaves the dialogue open this tick.
+pub const COMMS_RESPOND_VERB: &str = "respond_to_message";
+
+/// The registered output channels a Comms response policy may drive (#786).
+pub const COMMS_RESPOND_CHANNELS: &[&str] = &[COMMS_RESPOND_CHANNEL];
+/// The registered verbs a Comms response policy may emit (issue #786).
+pub const COMMS_RESPOND_VERBS: &[&str] = &[COMMS_RESPOND_VERB];
+
 // ── Per-system target selector sources (issue #776) ───────────────────────────
 
 /// Candidate source: the ship's frozen combat lock (Tactical's designated
@@ -1874,6 +1939,28 @@ pub const SELECTOR_SOURCE_CORE_BUCKET: &str = "core-bucket";
 pub const REPAIR_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_DAMAGED_STATIONS,
     SELECTOR_SOURCE_CORE_BUCKET,
+];
+
+/// Candidate source: positive, Comms-relevant `Hail` directives resolved from
+/// the scored objective pool (issue #786). This is the AC1 surface: the Comms
+/// AI ranks the hail orders it has actually been given, resolving each
+/// directive's authored entity NAME to a real contact UUID before it can become
+/// a candidate.
+pub const SELECTOR_SOURCE_HAIL_OBJECTIVES: &str = "hail-objectives";
+/// Candidate source: the authoritative comms contact list (issue #786) —
+/// `CommsRuntime.contacts`, the same hailable roster a human Comms officer sees.
+/// Under the canonical policy a contact is NOT independently eligible (the
+/// default eligibility keys on `source_hail_objective`): it ENRICHES a
+/// coincident hail directive with its live readings, exactly as
+/// `chart-contacts` enriches a Navigation destination (#778). An author may
+/// widen the eligibility to let the Comms AI hail on its own initiative.
+pub const SELECTOR_SOURCE_COMMS_CONTACTS: &str = "comms-contacts";
+
+/// The registered candidate sources the Comms hail selector may union
+/// (issue #786).
+pub const COMMS_SELECTOR_SOURCES: &[&str] = &[
+    SELECTOR_SOURCE_HAIL_OBJECTIVES,
+    SELECTOR_SOURCE_COMMS_CONTACTS,
 ];
 
 /// Parse-time fallbacks for the default Tactical selector (AGENTS.md rule #11
@@ -1986,6 +2073,56 @@ const DEFAULT_REPAIR_DEFICIT_BAND_LOW: f32 = 0.80;
 const DEFAULT_REPAIR_DEFICIT_BAND_MID: f32 = 0.90;
 const DEFAULT_REPAIR_DEFICIT_BAND_HIGH: f32 = 0.95;
 const DEFAULT_REPAIR_SWITCH_MARGIN: f32 = 0.0;
+
+/// Parse-time fallbacks for the default Comms hail selector (issue #786,
+/// AGENTS.md rule #11 parse-defaults only). The retired hardcoded Comms AI
+/// filtered the scored pool to positive, Comms-relevant `Hail` directives and
+/// took the FIRST one that resolved and was in range (`scored_pool` is sorted
+/// descending, so that was an implicit "highest score wins" argmax). Here that
+/// ordering becomes an authored BANDED score ladder.
+///
+/// WHY A BANDED LADDER AND NOT A SINGLE `objective_score` TERM — the #785
+/// lesson. A `ScoreTerm` contributes a FIXED weight when its boolean guard
+/// fires; the selector has no multiplicative term, so a continuous reading can
+/// only enter the ranking as a ladder of thresholds. One term guarded on
+/// `objective_score > 0` would give every eligible hail an identical score and
+/// collapse the whole ranking onto the selector's smallest-UUID tie-break —
+/// i.e. the POLICY would not rank at all (AC1). The ladder makes the ranking
+/// genuinely authored.
+///
+/// WHERE THE BANDS SIT AND WHY — the other #785 lesson: bands must be placed
+/// where the population actually is, or they discriminate nothing. Objective
+/// utility is `base_priority (+10 if mandatory) + condition modifiers`, and the
+/// shipped content authors `base_priority` at 20 / 30 / 35 / 40 / 45 / 50 / 80 /
+/// 100. Bands at 25 / 45 / 75 therefore split that population four ways:
+///
+/// ```text
+///   20            → 0 bands   (background chatter)
+///   30 / 35 / 40  → 1 band    (routine orders)
+///   45 / 50       → 2 bands   (priority orders)
+///   80 / 100      → 3 bands   (mission-critical)
+/// ```
+///
+/// Bands at, say, 100/200/300 would fire for nothing and every hail would tie;
+/// bands at 1/2/3 would fire for everything and every hail would tie. Within one
+/// band the ranking falls through to the selector's documented smallest-UUID
+/// tie-break, which is deterministic. Authors re-point `score_band_*` without
+/// touching Rust.
+///
+/// `switch_margin` is 0 and the host passes `current: None`: a hail is a
+/// ONE-SHOT event, not a retained target, so there is nothing to apply
+/// hysteresis to (see `operate_comms_ai`'s AC5 note).
+const DEFAULT_COMMS_SCORE_BAND_WEIGHT: f32 = 100.0;
+const DEFAULT_COMMS_SCORE_BAND_LOW: f32 = 25.0;
+const DEFAULT_COMMS_SCORE_BAND_MID: f32 = 45.0;
+const DEFAULT_COMMS_SCORE_BAND_HIGH: f32 = 75.0;
+const DEFAULT_COMMS_SWITCH_MARGIN: f32 = 0.0;
+
+/// Parse-time fallback: the response index the canonical Comms response policy
+/// picks (issue #786). Reproduces the retired `handle_comms_channel2` stub's
+/// hardcoded `record_response(&id, 0)` — the FIRST available response — with the
+/// difference that it now travels through admission and the real router.
+const DEFAULT_COMMS_RESPONSE_INDEX: u8 = 0;
 
 /// One authored additive utility term (`[[sensors_console.selector.score]]`,
 /// issue #776): a guard expression plus the weight it contributes to a
@@ -2353,6 +2490,96 @@ pub fn default_repair_target_selector_config() -> FineSystemAiSelectorToml {
     }
 }
 
+/// The canonical default Comms hail selector synthesised for ships that do not
+/// author `[comms_console.selector]` (issue #786).
+///
+/// Encodes the retired hardcoded Comms filter+argmax as data. `operate_comms_ai`
+/// used to `filter(score > 0 && relevance contains Comms && directive is Hail)`
+/// and then `find_map` the first entry that resolved to a UUID and was in range;
+/// here the filter becomes the `eligibility` guard and the implicit
+/// highest-score-first ordering becomes the authored banded `score` ladder (see
+/// the PRECEDENCE / BAND-PLACEMENT notes on the constant block above).
+///
+/// Eligibility does the AC1 + AC2 work:
+///   - `source_hail_objective > 0` — only targets an active `Hail` directive
+///     actually names are ranked. This is what preserves the baseline: the
+///     `comms-contacts` source is surfaced for authors but carries no directive
+///     of its own, so by default a contact never independently hails (the same
+///     shape as Navigation's `chart-contacts`, #778).
+///   - `in_range > 0` — the AC2 comms-range gate, seeded host-side from
+///     `CommsRuntime.range_flags` honouring `range_active`. Defence in depth:
+///     `handle_hail` keeps its own hard server-side range check.
+///   - `objective_score > 0` — the zero-gate drop, exactly the retired
+///     `s.score > 0.0` filter.
+///   - `has_open_hail_thread < 1` — the anti-respam gate, read from the
+///     AUTHORITATIVE `CommsRuntime.open_hails` record that `handle_hail` writes
+///     for every hail (human officer or AI) rather than from the retired
+///     `CommsAiHailState.last_hailed` AI memory. It is TERMINATING: a hail that
+///     fires no `on_hailed` template still arms it, so a standing directive
+///     cannot re-emit every tick. It re-arms on two externally-driven events —
+///     a human officer's `ClearComms`, and the target ceasing to be a live hail
+///     candidate (its directive gone, or out of range), which `operate_comms_ai`
+///     retires per tick. The second is what an UNMANNED ship relies on: there is
+///     no scripted `ClearComms`, so without it a later `Hail` directive naming
+///     an already-hailed contact would be dropped forever. Termination survives
+///     because a standing directive's target stays a candidate every tick.
+///     Deliberately NOT `has_unread_from_sender` — that fact is true of any
+///     inbound message whatever its provenance, so gating on it would let a
+///     scenario-pushed greeting permanently suppress a legitimate hail.
+///   - `self_fact(comms_available) > 0` — the AC2 system-availability gate, read
+///     off `EntitySystemHull`: a Disabled or Destroyed Comms system stops the
+///     ship hailing at all.
+///
+/// All weights and bands are named parameters or parse-time defaults, so a
+/// designer retunes hail priority without Rust (rule #11). Comms RANGE is
+/// already authored via `[comms].range` and is deliberately NOT duplicated as a
+/// second constant here — the selector reads it as a seeded fact.
+pub fn default_comms_target_selector_config() -> FineSystemAiSelectorToml {
+    let mut param = std::collections::HashMap::new();
+    param.insert("score_band_low".to_string(), DEFAULT_COMMS_SCORE_BAND_LOW);
+    param.insert("score_band_mid".to_string(), DEFAULT_COMMS_SCORE_BAND_MID);
+    param.insert("score_band_high".to_string(), DEFAULT_COMMS_SCORE_BAND_HIGH);
+    param.insert(
+        "score_band_weight".to_string(),
+        DEFAULT_COMMS_SCORE_BAND_WEIGHT,
+    );
+    FineSystemAiSelectorToml {
+        param,
+        sources: COMMS_SELECTOR_SOURCES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        // Comms candidates are hail TARGETS, not spatial destinations: comms
+        // reach is the authored `[comms].range` radius, already resolved into
+        // the `in_range` fact by `update_comms_range_flags`. The host therefore
+        // places every candidate at the ship's own origin so the planar horizon
+        // never double-gates what range already decided; the value is kept at
+        // the shared static outer bound for consistency with the other hosts.
+        horizon: DEFAULT_SELECTOR_HORIZON,
+        switch_margin: DEFAULT_COMMS_SWITCH_MARGIN,
+        eligibility: "candidate_fact(source_hail_objective) > 0 \
+                      and candidate_fact(in_range) > 0 \
+                      and candidate_fact(objective_score) > 0 \
+                      and candidate_fact(has_open_hail_thread) < 1 \
+                      and self_fact(comms_available) > 0"
+            .to_string(),
+        score: vec![
+            ScoreTermToml {
+                when: "candidate_fact(objective_score) >= param(score_band_low)".to_string(),
+                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(objective_score) >= param(score_band_mid)".to_string(),
+                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
+            },
+            ScoreTermToml {
+                when: "candidate_fact(objective_score) >= param(score_band_high)".to_string(),
+                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
+            },
+        ],
+    }
+}
+
 /// Validate an inline per-system target selector before world activation
 /// (issue #776), mirroring [`validate_fine_system_ai_policy`].
 ///
@@ -2419,6 +2646,16 @@ pub struct FineSystemAiRuleToml {
     /// value-less and boolean verbs. Defaults to `0`.
     #[serde(default)]
     pub level: u8,
+    /// Index payload for the `respond_to_message` verb (issue #786): WHICH of
+    /// the open dialogue node's responses this rule answers with. Ignored by
+    /// every other verb. Deliberately a separate field from `level` — the two
+    /// address different things (a power magnitude vs. a position in a fixed
+    /// response list), and fusing them would make an authored rule's meaning
+    /// depend on its verb. Defaults to `0` (the first response), reproducing the
+    /// retired channel-2 auto-response stub. A rule that should NOT answer this
+    /// tick simply does not fire; there is no "don't respond" index.
+    #[serde(default)]
+    pub response_index: u8,
 }
 
 /// Inline stateless AI policy for an AI-capable fine system
@@ -2500,6 +2737,12 @@ impl FineSystemAiConfigToml {
                 POWER_SET_ALLOCATION_VERB => {
                     crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(r.level)
                 }
+                // Comms dialogue-response verb (issue #786): the SECOND
+                // value-carrying verb. Only the response INDEX rides the verb —
+                // WHICH message is being answered comes from the host context.
+                COMMS_RESPOND_VERB => {
+                    crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index)
+                }
                 other => return Err(format!("unknown ai policy verb '{other}'")),
             };
             rules.push(crate::ai::policy::AiPolicyRule {
@@ -2541,6 +2784,7 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
                 value: true,
                 level: 0,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2549,8 +2793,58 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
                 verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
                 value: false,
                 level: 0,
+                response_index: 0,
             },
         ],
+    }
+}
+
+/// The canonical default Comms dialogue-response policy synthesised for ships
+/// that do not author `[comms_console.ai]` (issue #786).
+///
+/// BASELINE PRESERVATION. The retired behaviour was a three-line stub inside
+/// `handle_comms_channel2`: `if policy.operate_ai && !responses.is_empty() {
+/// inbox.record_response(&id, 0) }` — an unconditional "always take the first
+/// response" that wrote the inbox DIRECTLY, bypassing admission and bypassing
+/// `handle_respond_to_message` entirely (so no trigger action ever fired and no
+/// follow-up ever advanced). This single rule reproduces exactly that DECISION
+/// — priority 0, `when "true"`, `response_index = 0` — while the emission now
+/// travels through `emit_ai_command` → `AdmittedCommands` → the real router, so
+/// an AI answer fires the response's actions and advances its follow-up just
+/// like a human answer (AGENTS.md rule #6).
+///
+/// # Why the rule is GUARDED rather than `when = "true"`
+///
+/// The retired stub ran only on channel-2 ARRIVAL, so it could not repeat and
+/// its sender was present by construction. This policy is re-resolved every
+/// tick against every open dialogue, so an unconditional rule would re-emit a
+/// response the router rejects, forever:
+///
+///   - `fact(sender_in_range) > 0` — `handle_respond_to_message` refuses a
+///     response whose sender has left comms range. Without this the AI re-emits
+///     the doomed `RespondToMessage` (re-flashing the officer's rejection) every
+///     tick until the sender returns. Baseline-preserving: the retired stub's
+///     sender was always in range.
+///   - `fact(comms_available) > 0` — the AC2 system-availability gate, read off
+///     `EntitySystemHull`: a Disabled or Destroyed Comms system stops the ship
+///     ANSWERING as well as hailing.
+///
+/// An author gates or re-points it without Rust: raise a higher-priority rule
+/// guarded on `fact(is_urgent)`, `fact(response_count)`, a scenario flag, …, or
+/// declare `idle = true` to make the Comms AI answer nothing at all.
+pub fn default_comms_response_ai_config() -> FineSystemAiConfigToml {
+    FineSystemAiConfigToml {
+        idle: false,
+        param: std::collections::HashMap::new(),
+        rule: vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: COMMS_RESPOND_CHANNEL.to_string(),
+            when: "fact(comms_available) > 0 and fact(sender_in_range) > 0".to_string(),
+            verb: COMMS_RESPOND_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: DEFAULT_COMMS_RESPONSE_INDEX,
+        }],
     }
 }
 
@@ -2574,6 +2868,7 @@ pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ACTUATE_DESIRED_TRAVEL_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2593,6 +2888,7 @@ pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ACTUATE_DESIRED_FACING_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2616,6 +2912,7 @@ pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ACTUATE_LATERAL_THRUST_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2640,6 +2937,7 @@ pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ACTUATE_VERTICAL_THRUST_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2663,6 +2961,7 @@ pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
             verb: HELM_ENGAGE_IMPULSE_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2705,6 +3004,7 @@ pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
             verb: PHASER_FIRE_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2759,6 +3059,7 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
                 verb: SHIELD_FOCUS_VERB.to_string(),
                 value: false,
                 level: 0,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2767,6 +3068,7 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
                 verb: SHIELD_FOCUS_VERB.to_string(),
                 value: false,
                 level: 0,
+                response_index: 0,
             },
         ],
     }
@@ -2832,6 +3134,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
                 verb: POWER_SET_ALLOCATION_VERB.to_string(),
                 value: false,
                 level: DEFAULT_POWER_ELEVATED_LEVEL,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2842,6 +3145,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
                 verb: POWER_SET_ALLOCATION_VERB.to_string(),
                 value: false,
                 level: DEFAULT_POWER_BASELINE_LEVEL,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 10,
@@ -2853,6 +3157,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
                 verb: POWER_SET_ALLOCATION_VERB.to_string(),
                 value: false,
                 level: DEFAULT_POWER_ELEVATED_LEVEL,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2863,6 +3168,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
                 verb: POWER_SET_ALLOCATION_VERB.to_string(),
                 value: false,
                 level: DEFAULT_POWER_BASELINE_LEVEL,
+                response_index: 0,
             },
         ],
     }
@@ -2884,6 +3190,7 @@ pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
             verb: BLASTER_FIRE_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -2910,6 +3217,7 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
                 verb: TORPEDO_LOAD_VERB.to_string(),
                 value: false,
                 level: 0,
+                response_index: 0,
             },
             FineSystemAiRuleToml {
                 priority: 0,
@@ -2918,6 +3226,7 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
                 verb: TORPEDO_LAUNCH_VERB.to_string(),
                 value: false,
                 level: 0,
+                response_index: 0,
             },
         ],
     }
@@ -2940,6 +3249,7 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
             verb: TORPEDO_MAGAZINE_GRANT_VERB.to_string(),
             value: false,
             level: 0,
+            response_index: 0,
         }],
     }
 }
@@ -3640,6 +3950,11 @@ pub struct EntityConfig {
     pub weapons_console: Option<WeaponsConsoleConfig>,
     pub engineering_console: Option<EngineeringConsoleConfig>,
     pub captain_console: Option<CaptainConsoleConfig>,
+    /// Comms CONSOLE config (issue #786): the hail `selector` and the
+    /// dialogue-response `ai` policy. Distinct from the `comms` field below,
+    /// which is the per-entity comms RANGE.
+    #[serde(default)]
+    pub comms_console: Option<CommsConsoleConfig>,
     pub power: Option<PowerConfigSection>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
@@ -4176,6 +4491,26 @@ impl EntityConfig {
         // `*_console` section.
         if let Some(sel) = config.repair.as_ref().and_then(|c| c.selector.as_ref()) {
             validate_fine_system_ai_selector(sel, REPAIR_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
+        }
+
+        // Validate the authored Comms console AI blocks before world activation
+        // (issue #786). Comms is the first system to author BOTH machines, so
+        // both validators run: the hail SELECTOR against its registered
+        // candidate sources, and the dialogue-response POLICY against the single
+        // `comms_respond` channel and its `respond_to_message` verb. Both emit
+        // admitted commands into the shared comms router, so a malformed block
+        // must fail the entity load rather than reach a live tick.
+        if let Some(sel) = config
+            .comms_console
+            .as_ref()
+            .and_then(|c| c.selector.as_ref())
+        {
+            validate_fine_system_ai_selector(sel, COMMS_SELECTOR_SOURCES)
+                .map_err(SerdeError::custom)?;
+        }
+        if let Some(ai) = config.comms_console.as_ref().and_then(|c| c.ai.as_ref()) {
+            validate_fine_system_ai_policy(ai, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
                 .map_err(SerdeError::custom)?;
         }
 
@@ -7691,6 +8026,7 @@ value = false
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7728,6 +8064,7 @@ value = true
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7746,6 +8083,7 @@ value = true
                 verb: "launch_torpedoes".into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7764,6 +8102,7 @@ value = true
                 verb: CAPTAIN_SET_RED_ALERT_VERB.into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).unwrap_err();
@@ -7782,6 +8121,7 @@ value = true
                 verb: "nope".into(),
                 value: true,
                 level: 0,
+                response_index: 0,
             }],
         };
         assert!(cfg.to_policy().is_err());
@@ -7867,6 +8207,7 @@ idle = true
                 when: "true".into(),
                 value: false,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err =
@@ -7887,6 +8228,7 @@ idle = true
                 when: "true".into(),
                 value: false,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err =
@@ -8034,6 +8376,7 @@ verb = "engage_impulse"
                 when: "true".into(),
                 value: false,
                 level: 0,
+                response_index: 0,
             }],
         };
         let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
@@ -8417,6 +8760,290 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let cfg = EntityConfig::from_toml("[repair]\nrepair_team_count = 2\n")
             .expect("parse must succeed");
         assert!(cfg.repair.expect("repair present").selector.is_none());
+    }
+
+    // ── Comms console AI (issue #786) ───────────────────────────────────────
+
+    /// BAND PLACEMENT (the #785 lesson): the objective-score ladder must be a
+    /// strictly increasing set of thresholds that actually straddles the
+    /// population of authored `base_priority` values (20 … 100), or every hail
+    /// scores identically and the "ranking" collapses onto the selector's
+    /// smallest-UUID tie-break.
+    #[test]
+    fn default_comms_selector_bands_are_a_monotone_ladder_over_real_scores() {
+        const {
+            assert!(DEFAULT_COMMS_SCORE_BAND_LOW < DEFAULT_COMMS_SCORE_BAND_MID);
+            assert!(DEFAULT_COMMS_SCORE_BAND_MID < DEFAULT_COMMS_SCORE_BAND_HIGH);
+            // Straddles the shipped authoring range: the lowest band sits above
+            // the cheapest authored priority (20) and the highest below the
+            // dearest (100), so all four buckets are reachable.
+            assert!(DEFAULT_COMMS_SCORE_BAND_LOW > 20.0);
+            assert!(DEFAULT_COMMS_SCORE_BAND_HIGH < 100.0);
+            // A hail is a one-shot event: nothing to retain, so no hysteresis.
+            assert!(DEFAULT_COMMS_SWITCH_MARGIN == 0.0);
+        }
+    }
+
+    #[test]
+    fn default_comms_selector_config_validates() {
+        let cfg = default_comms_target_selector_config();
+        assert!(
+            validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).is_ok(),
+            "the canonical Comms selector must validate against its own sources"
+        );
+        assert!(
+            cfg.to_selector().is_ok(),
+            "the canonical Comms selector must resolve to a typed selector"
+        );
+    }
+
+    /// The two eligibility terms the #786 review added, pinned by name so a
+    /// future edit cannot quietly drop them:
+    ///   - `has_open_hail_thread` (NOT `has_unread_from_sender`) is the
+    ///     anti-respam gate — it must key on hails WE issued, or a
+    ///     scenario-pushed greeting permanently suppresses a legitimate hail;
+    ///   - `self_fact(comms_available)` is the AC2 system-availability gate,
+    ///     which the AC names explicitly and which nothing else in the hail path
+    ///     enforces.
+    #[test]
+    fn default_comms_selector_eligibility_names_the_anti_respam_and_availability_gates() {
+        let cfg = default_comms_target_selector_config();
+        assert!(
+            cfg.eligibility
+                .contains("candidate_fact(has_open_hail_thread) < 1"),
+            "got: {}",
+            cfg.eligibility
+        );
+        assert!(
+            !cfg.eligibility.contains("has_unread_from_sender"),
+            "inbound traffic of unknown provenance must NOT gate hailing; got: {}",
+            cfg.eligibility
+        );
+        assert!(
+            cfg.eligibility.contains("self_fact(comms_available) > 0"),
+            "got: {}",
+            cfg.eligibility
+        );
+    }
+
+    #[test]
+    fn comms_selector_rejects_unregistered_source() {
+        let mut cfg = default_comms_target_selector_config();
+        cfg.sources.push(SELECTOR_SOURCE_RADAR_CONTACTS.into());
+        let err = validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains(SELECTOR_SOURCE_RADAR_CONTACTS), "got: {err}");
+    }
+
+    #[test]
+    fn comms_selector_undeclared_param_is_rejected() {
+        let mut cfg = default_comms_target_selector_config();
+        cfg.eligibility = "candidate_fact(objective_score) >= param(nope)".to_string();
+        let err = validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).unwrap_err();
+        assert!(err.contains("nope"), "got: {err}");
+    }
+
+    #[test]
+    fn comms_selector_bad_guard_is_rejected() {
+        let mut cfg = default_comms_target_selector_config();
+        cfg.eligibility = "candidate_fact(in_range) >>> 0".to_string();
+        assert!(validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).is_err());
+    }
+
+    /// BASELINE PRESERVATION: the canonical response policy reproduces the
+    /// retired `handle_comms_channel2` stub's decision — a single rule answering
+    /// with index 0 — while routing it through admission.
+    ///
+    /// The rule is not `when = "true"`. The stub ran ONLY on channel-2 arrival,
+    /// so it could not repeat and its sender was in range by construction; this
+    /// policy is re-resolved every tick against every open dialogue. The two
+    /// guard terms restore exactly those two implicit preconditions:
+    /// `sender_in_range` (or the router rejects the response, forever) and
+    /// `comms_available` (AC2 — a Destroyed Comms system answers nothing).
+    #[test]
+    fn default_comms_response_ai_config_reproduces_the_retired_stub_decision() {
+        let cfg = default_comms_response_ai_config();
+        assert!(
+            validate_fine_system_ai_policy(&cfg, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
+                .is_ok(),
+            "the canonical Comms response policy must validate"
+        );
+        assert_eq!(cfg.rule.len(), 1);
+        assert_eq!(cfg.rule[0].channel, COMMS_RESPOND_CHANNEL);
+        assert_eq!(
+            cfg.rule[0].when, "fact(comms_available) > 0 and fact(sender_in_range) > 0",
+            "AC2 system availability and the router's range precondition are both \
+             named — an unguarded rule re-emits rejected responses every tick"
+        );
+        assert_eq!(cfg.rule[0].response_index, DEFAULT_COMMS_RESPONSE_INDEX);
+        let policy = cfg.to_policy().expect("must resolve to a typed policy");
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::RespondToMessage(0),
+            "the authored response_index must ride the verb"
+        );
+    }
+
+    /// The `response_index` payload decodes onto the verb (the SECOND
+    /// value-carrying verb, after `set_power_group_allocation`), and is a
+    /// SEPARATE field from `level` so a rule's meaning never depends on its verb.
+    #[test]
+    fn comms_respond_verb_decodes_its_own_response_index_field() {
+        let cfg = FineSystemAiConfigToml {
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: vec![FineSystemAiRuleToml {
+                priority: 5,
+                channel: COMMS_RESPOND_CHANNEL.to_string(),
+                when: "true".to_string(),
+                verb: COMMS_RESPOND_VERB.to_string(),
+                value: true,
+                // A non-zero `level` must be ignored by this verb.
+                level: 3,
+                response_index: 2,
+            }],
+        };
+        let policy = cfg.to_policy().expect("must resolve");
+        assert_eq!(
+            policy.rules[0].verb,
+            crate::ai::policy::AiPolicyVerb::RespondToMessage(2)
+        );
+    }
+
+    #[test]
+    fn comms_response_policy_rejects_wrong_verb_and_unknown_channel() {
+        let mut wrong_verb = default_comms_response_ai_config();
+        wrong_verb.rule[0].verb = POWER_SET_ALLOCATION_VERB.to_string();
+        let err = validate_fine_system_ai_policy(
+            &wrong_verb,
+            COMMS_RESPOND_CHANNELS,
+            COMMS_RESPOND_VERBS,
+        )
+        .unwrap_err();
+        assert!(err.contains(POWER_SET_ALLOCATION_VERB), "got: {err}");
+
+        let mut wrong_channel = default_comms_response_ai_config();
+        wrong_channel.rule[0].channel = "shield_focus".to_string();
+        let err = validate_fine_system_ai_policy(
+            &wrong_channel,
+            COMMS_RESPOND_CHANNELS,
+            COMMS_RESPOND_VERBS,
+        )
+        .unwrap_err();
+        assert!(err.contains("shield_focus"), "got: {err}");
+    }
+
+    #[test]
+    fn comms_response_policy_rejects_undeclared_param() {
+        let mut cfg = default_comms_response_ai_config();
+        cfg.rule[0].when = "fact(response_count) > param(nope)".to_string();
+        let err = validate_fine_system_ai_policy(&cfg, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
+            .unwrap_err();
+        assert!(err.contains("nope"), "got: {err}");
+    }
+
+    /// `[comms_console]` carries BOTH machines, parses, and bad content in
+    /// either fails the entity load before any live tick.
+    #[test]
+    fn comms_console_parses_both_blocks_and_bad_content_fails_entity_load() {
+        let good = r##"
+[comms_console.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["hail-objectives", "comms-contacts"]
+eligibility = "candidate_fact(source_hail_objective) > 0 and candidate_fact(in_range) > 0"
+
+[[comms_console.selector.score]]
+when = "candidate_fact(objective_score) > 0"
+weight = 100.0
+
+[[comms_console.ai.rule]]
+priority = 10
+channel = "comms_respond"
+when = "fact(is_urgent) > 0"
+verb = "respond_to_message"
+response_index = 1
+"##;
+        let cfg = EntityConfig::from_toml(good).expect("valid [comms_console] must parse");
+        let console = cfg.comms_console.expect("comms_console present");
+        let sel = console.selector.expect("selector present");
+        assert_eq!(sel.sources.len(), 2);
+        assert_eq!(sel.score.len(), 1);
+        let ai = console.ai.expect("ai present");
+        assert_eq!(ai.rule.len(), 1);
+        assert_eq!(ai.rule[0].response_index, 1);
+
+        let bad_source = r##"
+[comms_console.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["radar-contacts"]
+eligibility = "candidate_fact(source_hail_objective) > 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad_source).is_err(),
+            "unknown Comms selector source must fail from_toml"
+        );
+
+        let bad_guard = r##"
+[comms_console.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["hail-objectives"]
+eligibility = "candidate_fact(in_range) >>> 0"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad_guard).is_err(),
+            "an unparseable Comms selector guard must fail from_toml"
+        );
+
+        let undeclared_param = r##"
+[comms_console.selector]
+horizon = 1000.0
+switch_margin = 0.0
+sources = ["hail-objectives"]
+eligibility = "candidate_fact(objective_score) > param(nope)"
+"##;
+        assert!(
+            EntityConfig::from_toml(undeclared_param).is_err(),
+            "an undeclared selector param must fail from_toml"
+        );
+
+        let bad_verb = r##"
+[[comms_console.ai.rule]]
+priority = 0
+channel = "comms_respond"
+when = "true"
+verb = "set_red_alert"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad_verb).is_err(),
+            "a non-Comms verb on the comms_respond channel must fail from_toml"
+        );
+
+        let bad_channel = r##"
+[[comms_console.ai.rule]]
+priority = 0
+channel = "not_a_channel"
+when = "true"
+verb = "respond_to_message"
+"##;
+        assert!(
+            EntityConfig::from_toml(bad_channel).is_err(),
+            "an unknown Comms channel must fail from_toml"
+        );
+    }
+
+    /// `[comms]` (per-entity comms RANGE) and `[comms_console]` (the console's
+    /// AI) are deliberately different sections; authoring one must not imply the
+    /// other.
+    #[test]
+    fn comms_range_section_does_not_carry_the_console_ai() {
+        let cfg = EntityConfig::from_toml("[comms]\nrange = 8000.0\n").expect("parse must succeed");
+        assert!(cfg.comms.is_some());
+        assert!(
+            cfg.comms_console.is_none(),
+            "[comms] is the entity's comms RANGE; the console AI lives in [comms_console]"
+        );
     }
 
     #[test]

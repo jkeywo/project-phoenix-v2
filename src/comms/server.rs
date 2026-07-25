@@ -71,6 +71,27 @@ pub struct CommsRuntime {
     /// Response follow-ups carry a `placeholder_id` so the inbox shows a
     /// `...` row while the trigger is pending; chained roots stay silent.
     pub pending_follow_ups: Vec<PendingFollowUp>,
+    /// Entity UUIDs this ship has HAILED and not yet cleared (issue #786).
+    ///
+    /// Authoritative comms state, not AI memory: `handle_hail` records EVERY
+    /// hail that passes the server-side range gate — human officer or Backfill
+    /// AI alike — and `handle_clear_comms` empties it alongside the inbox it
+    /// mirrors. It is the record of a command that actually happened, in the
+    /// same category as `range_flags`, and both actors read the same set.
+    ///
+    /// It exists because "did we hail them?" is NOT derivable from the inbox: a
+    /// hail to a target with no matching (or already-`fired`) `on_hailed`
+    /// template seats no message and no dialogue at all. Without this record a
+    /// standing `Hail` directive re-emits every tick forever. See
+    /// [`crate::console::comms::server::has_open_hail_thread_with`].
+    ///
+    /// Three things retire an entry: a human officer's `ClearComms`
+    /// (`handle_clear_comms`), the target ceasing to be a live hail candidate
+    /// (`operate_comms_ai`'s per-tick retirement — the unmanned ship's only
+    /// re-arm), and the target's entity despawning
+    /// ([`update_comms_range_flags`], which keeps the set from growing
+    /// monotonically across world-layer cycles).
+    pub open_hails: std::collections::BTreeSet<String>,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -145,7 +166,18 @@ impl Plugin for CommsWorldPlugin {
                 (
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
-                    handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                    // CLEAR WINS on a tie (issue #786). `handle_hail` and
+                    // `handle_clear_comms` both take `ResMut<CommsRuntime>` and
+                    // both write `open_hails`; if a Hail and a ClearComms land
+                    // in the same tick, whether the hail survives the clear must
+                    // not depend on executor ordering. The enclosing `.chain()`
+                    // already orders these, but the constraint is spelled out
+                    // explicitly so it survives the chain being unpicked — this
+                    // is the same class of bug #785 fixed for repair. Clear-wins
+                    // matches the inbox semantics the two share.
+                    handle_clear_comms
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(handle_hail),
                     // Deterministic same-tick viewscreen ordering (issue #769):
                     // apply comms `ShowOnScreen` AFTER captain `SetView` so the
                     // latest-valid-command-wins `sequence` is a total order when
@@ -595,6 +627,18 @@ pub(crate) fn update_comms_range_flags(
     if comms.contacts.len() != before {
         any_changed = true;
     }
+
+    // Prune the open-hail record the same way (issue #786). Without this it
+    // grows monotonically and retains the UUIDs of despawned entities: a
+    // LoadWorld → UnloadWorld → LoadWorld cycle that re-registers the same
+    // authored UUID would leave that contact permanently un-hailable, because
+    // `candidate_fact(has_open_hail_thread)` would still read 1 for a hail
+    // issued in a previous life of the world. Layer unload despawns the layer's
+    // entities (`apply_world_layer_changes`), so this covers `remove_layer_comms`
+    // too. Deliberately does NOT touch `any_changed`: `open_hails` is not part
+    // of the broadcast `CommsState`, so dropping a stale entry is not a reason
+    // to re-broadcast.
+    comms.open_hails.retain(|uuid| live_ref.contains(uuid));
 
     // Stamp the surviving contacts in place from the flag map.
     let CommsRuntime {
@@ -1382,6 +1426,123 @@ pub(crate) mod tests {
         );
     }
 
+    /// Issue #786: `open_hails` must be pruned alongside `contacts` when the
+    /// target entity stops existing, or it grows monotonically and retains the
+    /// UUIDs of despawned entities. A LoadWorld → UnloadWorld → LoadWorld cycle
+    /// that re-registers the same authored UUID would otherwise leave that
+    /// contact permanently un-hailable: `candidate_fact(has_open_hail_thread)`
+    /// would still read 1 for a hail issued in a previous life of the world.
+    #[test]
+    fn despawning_a_hailed_entity_prunes_the_open_hail_record() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-uuid-open-hail-prune";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(100.0),
+            ))
+            .id();
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
+            },
+        );
+        let _ = tick(&mut app);
+        assert!(
+            app.world()
+                .resource::<CommsRuntime>()
+                .open_hails
+                .contains(station_uuid),
+            "the hail must be recorded while the target is live"
+        );
+
+        // The layer unloads (or the station is destroyed): its entity despawns.
+        app.world_mut().despawn(station_entity);
+        let _ = tick(&mut app);
+        assert!(
+            !app.world()
+                .resource::<CommsRuntime>()
+                .open_hails
+                .contains(station_uuid),
+            "a despawned entity's open-hail record must be pruned alongside its \
+             contact and range flag"
+        );
+    }
+
+    /// Issue #786 determinism: a `Hail` and a `ClearComms` landing in the SAME
+    /// tick must resolve the same way every run — clear wins, matching the inbox
+    /// semantics the two handlers share. `handle_clear_comms` is explicitly
+    /// `.after(handle_hail)`, so the outcome cannot depend on executor ordering.
+    #[test]
+    fn a_same_tick_clear_wins_over_a_hail() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-uuid-same-tick-clear";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        app.world_mut().spawn((
+            Ship,
+            crate::simulation::LocalShip,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::Hail {
+                    target_uuid: station_uuid.into(),
+                },
+            },
+        );
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::ControlSystem {
+                target: crate::system_registry::comms_system_id(),
+                payload: crate::messages::SystemControlPayload::ClearComms,
+            },
+        );
+        let _ = tick(&mut app);
+
+        assert!(
+            app.world().resource::<CommsRuntime>().open_hails.is_empty(),
+            "clear must win over a same-tick hail: `handle_clear_comms` runs \
+             after `handle_hail`, deterministically"
+        );
+    }
+
     #[test]
     fn comms_state_marks_contact_in_range_when_ship_close() {
         use crate::comms::CommsRange;
@@ -2074,10 +2235,20 @@ pub(crate) mod tests {
         assert_eq!(messages[0].sender_name, "Outpost Alpha");
     }
 
-    /// When the comms system is AI-operated (`operate_ai = true`),
-    /// `handle_comms_channel2` auto-picks the first response (index 0).
+    /// Issue #786: `handle_comms_channel2` is INJECT-ONLY. It used to carry an
+    /// AI branch that called `inbox.record_response(&id, 0)` directly whenever
+    /// the comms system was AI-operated — a direct authoritative write that
+    /// bypassed admission AND `handle_respond_to_message`, so no trigger action
+    /// ever fired and no follow-up ever advanced. That stub is retired: the AI's
+    /// answer is now decided by `operate_comms_response_ai` and emitted as an
+    /// ordinary admitted `RespondToMessage` for the real router (proved by
+    /// `console::comms::server::tests::comms_ai_response_fires_trigger_actions_through_the_router`).
+    ///
+    /// This test pins the retirement: with an AI-operated comms system and a
+    /// message carrying a response, channel-2 delivery injects the message and
+    /// leaves `selected_response` untouched.
     #[test]
-    fn ai_auto_respond_on_scenario_hail_via_channel2() {
+    fn channel2_injection_never_auto_responds_for_ai_comms() {
         let mut app = ai_trigger_test_app();
 
         // Spawn a Ship entity with comms system set to AI control.
@@ -2133,9 +2304,13 @@ pub(crate) mod tests {
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
         assert_eq!(messages.len(), 1, "message must be injected into inbox");
         assert_eq!(
-            messages[0].selected_response,
-            Some(0),
-            "AI-operated comms must auto-pick response index 0"
+            messages[0].selected_response, None,
+            "channel-2 delivery must never record a response: the retired stub \
+             bypassed admission and the consequence router (issue #786)"
+        );
+        assert!(
+            !messages[0].is_read,
+            "channel-2 delivery must not mark an AI-operated ship's message read"
         );
     }
 }

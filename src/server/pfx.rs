@@ -755,9 +755,9 @@ fn sync_phaser_beams(
     for (src_t, src_markers, beam, src_uuid_opt, render_cfg_opt, combat_cfg_opt, is_local) in
         beam_ships_q.iter()
     {
-        let Some(target_uuid) = beam.target_uuid.clone() else {
+        if !beam.is_firing() {
             continue;
-        };
+        }
 
         // Shooter identity: prefer the entity's own UUID; for the LocalShip in
         // legacy test harnesses without one, fall back to a stable string.
@@ -769,71 +769,74 @@ fn sync_phaser_beams(
             None => continue,
         };
 
-        let bank_id = beam.bank.as_deref().unwrap_or("default");
-        let key = format!("beam:{}:{}:{}", src_key, bank_id, target_uuid);
-
         // Per-entity component paths (preferred). Fall back to the global
         // Resource so pre-PR-5 test paths still render.
         let render_cfg: &PhaserRenderConfig = render_cfg_opt.unwrap_or(&render_cfg_res);
         let combat_cfg: &PhaserCombatConfigResource = combat_cfg_opt.unwrap_or(&combat_cfg_res);
-        let bank_cfg = beam
-            .bank
-            .as_deref()
-            .and_then(|id| combat_cfg.0.bank_by_id(id));
 
-        let target_point_index = choose_target_point_index(
-            &key,
-            target_point_count(
-                &target_uuid,
+        // One render entity per LIVE BANK (issue #790). The key format already
+        // carried the bank, and its doc already promised "simultaneous beams
+        // from different banks render as distinct entities" — before #790 the
+        // single-slot `ActiveBeam` made that unreachable. It is reachable now.
+        for (bank_id, slot) in beam.live_banks() {
+            let target_uuid = slot.target_uuid.as_str();
+            let key = format!("beam:{}:{}:{}", src_key, bank_id, target_uuid);
+            let bank_cfg = combat_cfg.0.bank_by_id(bank_id);
+
+            let target_point_index = choose_target_point_index(
+                &key,
+                target_point_count(
+                    target_uuid,
+                    local_ship_uuid.as_deref(),
+                    &entity_q,
+                    &local_ship_q,
+                ),
+                &mut state,
+            );
+            let Some(target_pos) = target_position(
+                target_uuid,
+                src_t,
                 local_ship_uuid.as_deref(),
+                target_point_index,
+                &asteroid_q,
                 &entity_q,
                 &local_ship_q,
-            ),
-            &mut state,
-        );
-        let Some(target_pos) = target_position(
-            &target_uuid,
-            src_t,
-            local_ship_uuid.as_deref(),
-            target_point_index,
-            &asteroid_q,
-            &entity_q,
-            &local_ship_q,
-        ) else {
-            continue;
-        };
+            ) else {
+                continue;
+            };
 
-        let color = bank_cfg
-            .map(|b| beam_render::resolve_beam_color(&b.beam_color))
-            .unwrap_or(render_cfg.beam_color);
-        let range = bank_cfg
-            .map(|b| b.beam_range)
-            .filter(|r| *r > 0.0)
-            .unwrap_or(render_cfg.beam_range);
+            let color = bank_cfg
+                .map(|b| beam_render::resolve_beam_color(&b.beam_color))
+                .unwrap_or(render_cfg.beam_color);
+            let range = bank_cfg
+                .map(|b| b.beam_range)
+                .filter(|r| *r > 0.0)
+                .unwrap_or(render_cfg.beam_range);
 
-        // Origin: named marker takes priority; otherwise a bank-facing offset
-        // around ship center (falls through to bare ship center when no bank
-        // is defined). Uses the shooter's live Transform — position and yaw
-        // both come from there, so this works for player and NPC alike.
-        let origin = bank_cfg
-            .and_then(|b| marker_origin(src_t, src_markers, b.marker.as_deref()))
-            .unwrap_or_else(|| bank_fallback_origin(src_t, bank_cfg));
-        let end = clamp_endpoint(origin, target_pos, src_t.translation, range);
+            // Origin: named marker takes priority; otherwise a bank-facing offset
+            // around ship center (falls through to bare ship center when no bank
+            // is defined). Uses the shooter's live Transform — position and yaw
+            // both come from there, so this works for player and NPC alike.
+            let origin = bank_cfg
+                .and_then(|b| marker_origin(src_t, src_markers, b.marker.as_deref()))
+                .unwrap_or_else(|| bank_fallback_origin(src_t, bank_cfg));
+            let end = clamp_endpoint(origin, target_pos, src_t.translation, range);
 
-        live_keys.insert(key.clone());
-        upsert_beam(
-            key,
-            origin,
-            end,
-            color,
-            &pfx_assets,
-            &mut state,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut body_q,
-            &mut glow_q,
-        );
+            live_keys.insert(key.clone());
+            upsert_beam(
+                key,
+                origin,
+                end,
+                color,
+                &pfx_assets,
+                &mut state,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut body_q,
+                &mut glow_q,
+            );
+        }
     }
 
     let dead: Vec<String> = state
@@ -4697,11 +4700,10 @@ position = [0.5, -0.1, 0.25]
             EntityUuid("shooter-uuid-1".to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
             ShipPhysics::default(),
-            ActiveBeam {
-                target_uuid: Some(target_uuid.clone()),
-                remaining_secs: 10.0,
-                damage_accumulator: 0.0,
-                bank: None,
+            {
+                let mut beam = ActiveBeam::default();
+                beam.start("", target_uuid.clone(), 10.0);
+                beam
             },
         ));
 
@@ -4769,11 +4771,10 @@ position = [0.5, -0.1, 0.25]
                 EntityUuid("shooter-uuid-2".to_string()),
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 ShipPhysics::default(),
-                ActiveBeam {
-                    target_uuid: Some(target_uuid.clone()),
-                    remaining_secs: 10.0,
-                    damage_accumulator: 0.0,
-                    bank: None,
+                {
+                    let mut beam = ActiveBeam::default();
+                    beam.start("", target_uuid.clone(), 10.0);
+                    beam
                 },
                 thrust_command(),
                 crate::ship_plugin::ShipSystemControlSources::default(),

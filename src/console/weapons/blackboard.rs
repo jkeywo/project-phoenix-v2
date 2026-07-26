@@ -84,12 +84,11 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         q.single(world).ok().and_then(viewscreen_combat_lock)
     };
-    let (beam_active, active_beam_bank) = {
+    // The whole per-bank beam map (issue #790), not a single (active?, bank)
+    // pair: a hull with overlapping arcs can be burning several banks at once.
+    let active_beam: ActiveBeam = {
         let mut q = world.query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
-        q.single(world)
-            .ok()
-            .map(|b| (b.target_uuid.is_some(), b.bank.clone()))
-            .unwrap_or((false, None))
+        q.single(world).ok().cloned().unwrap_or_default()
     };
     let bank_cooldowns: std::collections::HashMap<String, f32> = {
         let mut q = world.query_filtered::<&PhaserCooldown, With<crate::server_app::LocalShip>>();
@@ -302,7 +301,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             )
         });
         let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
-        let on_cooldown = beam_active || cd > 0.0;
+        let on_cooldown = active_beam.is_bank_firing("") || cd > 0.0;
         let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(""));
         let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
         let readiness = crate::messages::WeaponReadiness::evaluate(
@@ -342,9 +341,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
                     )
                 });
                 let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
-                let beam_on_this_bank =
-                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
-                let on_cooldown = beam_on_this_bank || cd > 0.0;
+                let on_cooldown = active_beam.is_bank_firing(&b.id) || cd > 0.0;
                 let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(&b.id));
                 let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
                 let readiness = crate::messages::WeaponReadiness::evaluate(
@@ -458,8 +455,10 @@ fn viewscreen_combat_lock(bbs: &crate::server_app::ShipSystemBlackboards) -> Opt
 fn build_bank_states(
     combat_config: &PhaserCombatConfigResource,
     cooldown: &PhaserCooldown,
-    beam_active: bool,
-    active_beam_bank: Option<&str>,
+    // The whole per-bank beam map (issue #790): each bank's `on_cooldown` asks
+    // whether THAT bank is burning, so a single (active?, bank) pair could not
+    // describe a ship with two broadsides lit.
+    beam: &ActiveBeam,
     radar_range_mult: f32,
     physics: ShipPhysics,
     target_live_pos: Option<(f32, f32)>,
@@ -495,7 +494,7 @@ fn build_bank_states(
             )
         });
         let cd = cooldown.bank_remaining_secs("");
-        let on_cooldown = beam_active || cd > 0.0;
+        let on_cooldown = beam.is_bank_firing("") || cd > 0.0;
         let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
         let readiness = crate::messages::WeaponReadiness::evaluate(
             bank_online(""),
@@ -536,8 +535,7 @@ fn build_bank_states(
                     )
                 });
                 let cd = cooldown.bank_remaining_secs(b.id.as_str());
-                let beam_on_this_bank = beam_active && active_beam_bank == Some(b.id.as_str());
-                let on_cooldown = beam_on_this_bank || cd > 0.0;
+                let on_cooldown = beam.is_bank_firing(&b.id) || cd > 0.0;
                 let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
                 let readiness = crate::messages::WeaponReadiness::evaluate(
                     bank_online(&b.id),
@@ -802,8 +800,6 @@ pub(crate) fn publish_weapons_core_blackboard(
         // latency and nothing else.
         let target_uuid = viewscreen_combat_lock(&entity_bbs);
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let beam_active = beam.target_uuid.is_some();
-        let active_beam_bank = beam.bank.clone();
 
         let target_live_pos: Option<(f32, f32)> = target_uuid
             .as_deref()
@@ -827,8 +823,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         let banks: Vec<PhaserBankState> = build_bank_states(
             combat_config,
             cooldown,
-            beam_active,
-            active_beam_bank.as_deref(),
+            beam,
             radar_range_mult,
             physics,
             target_live_pos,
@@ -1124,8 +1119,7 @@ pub(crate) fn publish_phaser_bank_blackboards(
         let banks = build_bank_states(
             combat_config,
             cooldown,
-            beam.target_uuid.is_some(),
-            beam.bank.as_deref(),
+            beam,
             radar_range_mult,
             physics,
             target_live_pos,

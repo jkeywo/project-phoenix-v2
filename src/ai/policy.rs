@@ -127,6 +127,30 @@ pub enum AiPolicyVerb {
     /// authored verb and never off a state name, so a designer stays free to
     /// call the states whatever they like.
     PivotToReengage,
+    /// Fly the continuous COMBAT broadside orbit (the `yaw` channel's FIFTH mode
+    /// verb, issue #790).
+    ///
+    /// The same ring geometry [`AiPolicyVerb::HoldRecoveryOrbit`] flies — a
+    /// tangent of a ring around the target, bent toward or away from it in
+    /// proportion to the fractional radial error, so the hull spirals onto the
+    /// ring from either side — asked for a different reason, and that difference
+    /// is why it is its own verb rather than a reuse.
+    ///
+    /// `hold_recovery_orbit` is a BREAK-OFF: the host only publishes it when the
+    /// hull authors a complete shield-recovery parameter set, and the ring's
+    /// radius is derived from the TARGET's own direct-fire reach plus a margin —
+    /// a standoff distance, chosen to sit outside the other ship's guns while
+    /// shields come back. This verb is the opposite intent: it is how the hull
+    /// fights, at a range the DESIGNER authored precisely because the whole point
+    /// is to keep the enemy inside this hull's own weapon envelope. Deriving that
+    /// range from the enemy's reach, or gating it on a shield doctrine the hull
+    /// need not have, would both be wrong.
+    ///
+    /// Value-less like every other mode verb: the ring radius, the throttle and
+    /// the spiral gain are authored `param`s the host reads off the Steering
+    /// policy, and the circulation direction is host-written private memory drawn
+    /// once per engagement from a seeded composite key.
+    HoldCombatOrbit,
     /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
     /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
     /// starboard/port magnitude comes from the shared hazard assessment weighted

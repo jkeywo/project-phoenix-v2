@@ -220,12 +220,23 @@ pub(crate) fn helm_motion_planner(
                     avoidance_look_ahead_secs: avoidance_look_ahead,
                 })
             };
-        // The shield-recovery standoff orbit (issue #788). Like the pass legs
-        // this is a substitution *in the planner*, so the orbit arrives
-        // downstream as an ordinary desired facing and the hazard force, the
-        // imminent-collision override, and the per-axis actuators all compose
-        // onto it unchanged.
-        let fly_orbit = |target_pos: [f32; 3], target_uuid: uuid::Uuid| {
+        // The ring legs — the shield-recovery standoff (issue #788) and the
+        // combat broadside orbit (issue #790). Like the pass legs this is a
+        // substitution *in the planner*, so the orbit arrives downstream as an
+        // ordinary desired facing and the hazard force, the imminent-collision
+        // override, and the per-axis actuators all compose onto it unchanged.
+        //
+        // ONE closure, three authored scalars passed in: the geometry is the
+        // same tangent-of-a-ring solution in both cases and duplicating it would
+        // let the two drift apart. What differs is only WHICH radius, throttle
+        // and gain the surface published, and that difference is the doctrine's,
+        // not the geometry's. The circulation direction is shared outright —
+        // a ship circles one way at a time.
+        let fly_orbit = |target_pos: [f32; 3],
+                         target_uuid: uuid::Uuid,
+                         ring_radius: f32,
+                         ring_speed: f32,
+                         spiral_gain: f32| {
             crate::ai::plan_recovery_orbit(&crate::ai::RecoveryOrbitInput {
                 self_pos: [physics.x, physics.y, physics.z],
                 self_yaw: physics.yaw,
@@ -233,10 +244,10 @@ pub(crate) fn helm_motion_planner(
                 self_radius: sf.merged_view.self_radius,
                 target_pos,
                 target_uuid,
-                safe_range: pass.safe_range,
+                safe_range: ring_radius,
                 orbit_direction: pass.orbit_direction,
-                spiral_gain: pass.orbit_spiral_gain,
-                orbit_speed: pass.orbit_speed,
+                spiral_gain,
+                orbit_speed: ring_speed,
                 tracking_deadband_rad: pass.tracking_deadband_rad,
                 tracking_full_steer_rad: pass.tracking_full_steer_rad,
                 entities: &sf.merged_view.entities,
@@ -277,13 +288,43 @@ pub(crate) fn helm_motion_planner(
             // `safe_distance_held` reading has already gone true, so the machine
             // is about to leave the state anyway.
             (true, true) if pass.recover => pass_target.map_or_else(doctrine_travel, |target| {
-                fly_orbit(target.position, target.uuid)
+                fly_orbit(
+                    target.position,
+                    target.uuid,
+                    pass.safe_range,
+                    pass.orbit_speed,
+                    pass.orbit_spiral_gain,
+                )
             }),
+            // Combat broadside orbit (issue #790): the same ring geometry at the
+            // hull's OWN authored fighting radius. Needs a resolvable target for
+            // the same reason the recovery ring does — a ring has a centre — and
+            // falls back to ordinary doctrine travel without one, which is where
+            // the hull's own machine is heading anyway (its orbit state's only
+            // exit is `target_valid < 1`).
+            (true, true) if pass.combat_orbit => {
+                pass_target.map_or_else(doctrine_travel, |target| {
+                    fly_orbit(
+                        target.position,
+                        target.uuid,
+                        pass.combat_orbit_range,
+                        pass.combat_orbit_speed,
+                        pass.combat_orbit_spiral_gain,
+                    )
+                })
+            }
             // Re-entry pivot and inbound: both track the target, so both need a
             // resolvable one. They differ only in the authored throttle the leg
             // carries, which is what makes the pivot a cut-thrust turn rather
             // than the start of the run.
-            (true, true) => pass_target.map_or_else(doctrine_travel, |target| {
+            //
+            // This is the FALLBACK arm — every state that resolves no other leg
+            // verb lands here — so it is gated on the hull actually authoring
+            // the pass throttles (issue #790). A hull that flies only a combat
+            // orbit has no `approach_speed`, and running its approach at an
+            // unauthored zero would be a ship coasting into a fight; it takes
+            // ordinary doctrine travel instead.
+            (true, true) if pass.pass_legs => pass_target.map_or_else(doctrine_travel, |target| {
                 fly_pass(
                     if pass.reengage {
                         crate::ai::FlyThroughLeg::Reengage
@@ -294,8 +335,8 @@ pub(crate) fn helm_motion_planner(
                     target.uuid,
                 )
             }),
-            // No pass authored / not active.
-            (true, false) => doctrine_travel(),
+            // No leg authored / not active / no leg selected this tick.
+            (true, _) => doctrine_travel(),
             (false, _) => (0.0, 0.0),
         };
 

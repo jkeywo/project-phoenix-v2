@@ -345,13 +345,21 @@ fn set_weapons_target(app: &mut App, uuid: Option<String>) {
     }
 }
 
+// ── Single-beam fixture helpers (post-#790) ──────────────────────────────────
+//
+// `ActiveBeam` is per-bank since issue #790. Every fixture below drives a ship
+// that fires ONE bank at a time, so "the beam" still means "the one live slot";
+// these helpers preserve their old signatures and simply address that slot.
+// Tests that genuinely care about two banks at once assert on `live_banks()`
+// directly.
+
 fn get_active_beam_target(app: &mut App) -> Option<String> {
     let mut q = app
         .world_mut()
         .query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
     q.single(app.world())
         .ok()
-        .and_then(|b| b.target_uuid.clone())
+        .and_then(|b| b.any_target().map(str::to_string))
 }
 
 fn active_beam_target_is_none(app: &mut App) -> bool {
@@ -362,33 +370,71 @@ fn get_active_beam_bank(app: &mut App) -> Option<String> {
     let mut q = app
         .world_mut()
         .query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
-    q.single(app.world()).ok().and_then(|b| b.bank.clone())
+    q.single(app.world())
+        .ok()
+        .and_then(|b| b.any_bank().map(str::to_string))
+}
+
+fn live_beam_banks(app: &mut App) -> Vec<String> {
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&ActiveBeam, With<crate::server_app::LocalShip>>();
+    q.single(app.world())
+        .ok()
+        .map(|b| b.live_banks().map(|(k, _)| k.clone()).collect())
+        .unwrap_or_default()
 }
 
 fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
+    let banks = live_beam_banks(app);
     let mut q = app
         .world_mut()
         .query_filtered::<&mut ActiveBeam, With<crate::server_app::LocalShip>>();
     if let Ok(mut b) = q.single_mut(app.world_mut()) {
-        b.target_uuid = uuid;
+        match uuid {
+            // Extinguish every live bank — the "beam cancelled" fixture.
+            None => {
+                for bank in banks {
+                    b.end_bank(&bank);
+                }
+            }
+            Some(u) => {
+                let bank = banks.first().cloned().unwrap_or_default();
+                let remaining = b
+                    .bank_slot_mut(&bank)
+                    .map(|s| s.remaining_secs)
+                    .unwrap_or(0.0);
+                b.start(bank, u, remaining);
+            }
+        }
     }
 }
 
 fn set_active_beam_remaining_secs(app: &mut App, secs: f32) {
+    let banks = live_beam_banks(app);
     let mut q = app
         .world_mut()
         .query_filtered::<&mut ActiveBeam, With<crate::server_app::LocalShip>>();
     if let Ok(mut b) = q.single_mut(app.world_mut()) {
-        b.remaining_secs = secs;
+        for bank in banks {
+            if let Some(slot) = b.bank_slot_mut(&bank) {
+                slot.remaining_secs = secs;
+            }
+        }
     }
 }
 
 fn set_active_beam_damage_accumulator(app: &mut App, val: f32) {
+    let banks = live_beam_banks(app);
     let mut q = app
         .world_mut()
         .query_filtered::<&mut ActiveBeam, With<crate::server_app::LocalShip>>();
     if let Ok(mut b) = q.single_mut(app.world_mut()) {
-        b.damage_accumulator = val;
+        for bank in banks {
+            if let Some(slot) = b.bank_slot_mut(&bank) {
+                slot.damage_accumulator = val;
+            }
+        }
     }
 }
 
@@ -1452,13 +1498,17 @@ fn beam_severs_when_target_vanishes() {
     );
 }
 
-/// Issue #763 (AC4) — independent banks. The single-`ActiveBeam`-per-ship model
-/// means only one bank fires a beam at a time, so bank independence is tested at
-/// the capture/cooldown level: driving the *other* bank (starboard) into
-/// cooldown must not disturb the port bank's live captured beam, and the two
-/// banks' cooldown state stays independent (`PhaserCooldown` is per-bank). This
-/// is the LIVE counterpart to the pure `banks_are_independent` test in
-/// `src/weapons/phaser.rs`.
+/// Issue #763 (AC4) — independent banks, tested at the capture/cooldown level:
+/// driving the *other* bank (starboard) into cooldown must not disturb the port
+/// bank's live captured beam, and the two banks' cooldown state stays
+/// independent. This is the LIVE counterpart to the pure `banks_are_independent`
+/// test in `src/weapons/phaser.rs`.
+///
+/// The premise changed under issue #790 — `ActiveBeam` is per-bank now, so
+/// "only one bank fires a beam at a time" is no longer true and this fixture
+/// simply has only one bank bearing (the target sits in the port arc alone).
+/// Both `ActiveBeam` and `PhaserCooldown` are per-bank maps, and this pins that
+/// touching one bank's entry leaves the other's alone in both of them.
 #[test]
 fn independent_bank_cooldown_does_not_disturb_live_captured_beam() {
     let mut app = test_app();
@@ -3681,7 +3731,7 @@ fn npc_fire_phaser_activates_entity_phaser_state() {
         .get::<ActiveBeam>(npc_entity)
         .expect("NPC entity must have ActiveBeam component");
     assert!(
-        beam.target_uuid.is_some(),
+        beam.is_firing(),
         "ActiveBeam::target_uuid should be Some after NPC fires phaser via ai: token"
     );
 }
@@ -3705,8 +3755,7 @@ fn npc_beam_tick_applies_damage_to_target_hull() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.target_uuid = Some(target_uuid_str.to_string());
-        beam.remaining_secs = 10.0;
+        beam.start("", target_uuid_str.to_string(), 10.0);
     }
 
     let hp_before = app
@@ -3760,8 +3809,7 @@ fn npc_beam_tick_records_shooter_as_last_attacker() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.target_uuid = Some(target_uuid_str.to_string());
-        beam.remaining_secs = 10.0;
+        beam.start("", target_uuid_str.to_string(), 10.0);
     }
 
     // Tick enough for the beam to reach and hit the target.
@@ -3832,8 +3880,7 @@ fn sustained_beam_marks_last_attacker_changed_exactly_once() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.target_uuid = Some(target_uuid_str.to_string());
-        beam.remaining_secs = 100.0;
+        beam.start("", target_uuid_str.to_string(), 100.0);
     }
 
     // Many ticks of one continuous beam from one shooter.
@@ -3893,8 +3940,7 @@ fn npc_beam_tick_damages_npc_target_not_player() {
             .world_mut()
             .get_mut::<ActiveBeam>(shooter_entity)
             .unwrap();
-        beam.target_uuid = Some(npc_target_uuid.to_string());
-        beam.remaining_secs = 10.0;
+        beam.start("", npc_target_uuid.to_string(), 10.0);
     }
 
     let hp_before = app
@@ -4083,8 +4129,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     // Activate the beam directly targeting the player ship.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.target_uuid = Some(player_uuid.to_string());
-        beam.remaining_secs = 10.0;
+        beam.start("", player_uuid.to_string(), 10.0);
     }
 
     for _ in 0..10 {
@@ -4147,8 +4192,7 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.target_uuid = Some(target_uuid_str.to_string());
-        beam.remaining_secs = 0.001; // expires on first tick
+        beam.start("", target_uuid_str.to_string(), 0.001); // expires on first tick
     }
 
     app.update(); // beam expires
@@ -4156,7 +4200,7 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
 
     let beam = app.world().get::<ActiveBeam>(npc_entity).unwrap();
     assert!(
-        beam.target_uuid.is_none(),
+        !beam.is_firing(),
         "ActiveBeam.target_uuid must be None after beam expires"
     );
     let cooldown = app.world().get::<PhaserCooldown>(npc_entity).unwrap();
@@ -4354,7 +4398,7 @@ rank = "Ltn."
         .get::<ActiveBeam>(npc_entity)
         .expect("NPC must have ActiveBeam component");
     assert!(
-        beam.target_uuid.is_some(),
+        beam.is_firing(),
         "ActiveBeam.target_uuid must be Some after tick_ai_controllers → InboundMessage → handle_fire_phaser routing"
     );
 }
@@ -4393,10 +4437,10 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         .spawn((
             crate::server_app::Ship,
             EntityUuid(npc_uuid.to_string()),
-            ActiveBeam {
-                target_uuid: Some(target_uuid.to_string()),
-                remaining_secs: 10.0,
-                ..Default::default()
+            {
+                let mut beam = ActiveBeam::default();
+                beam.start("", target_uuid, 10.0);
+                beam
             },
             PhaserCooldown::default(),
             ShipPhysics::default(),
@@ -4500,12 +4544,12 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
         .get::<ActiveBeam>(npc_entity)
         .expect("NPC entity must have ActiveBeam component");
     assert!(
-        beam.target_uuid.is_some(),
+        beam.is_firing(),
         "ai_phaser_auto_fire -> handle_fire_phaser must activate the \
          NPC's ActiveBeam when Tactical is AI-controlled"
     );
     assert_eq!(
-        beam.bank.as_deref(),
+        beam.any_bank(),
         Some("fore"),
         "NPC should fire the in-arc bank selected from its own PhaserCombatConfigResource"
     );
@@ -4615,11 +4659,7 @@ fn ai_phaser_auto_fire_writes_admitted_command_without_touching_the_beam() {
         "the payload must be FirePhaser"
     );
     assert!(
-        app.world()
-            .get::<ActiveBeam>(npc)
-            .unwrap()
-            .target_uuid
-            .is_none(),
+        !app.world().get::<ActiveBeam>(npc).unwrap().is_firing(),
         "ai_phaser_auto_fire must not mutate ActiveBeam — that is \
          handle_fire_phaser's job"
     );
@@ -4657,11 +4697,7 @@ fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
     app.update();
 
     assert!(
-        app.world()
-            .get::<ActiveBeam>(npc)
-            .unwrap()
-            .target_uuid
-            .is_some(),
+        app.world().get::<ActiveBeam>(npc).unwrap().is_firing(),
         "low-LOD NPCs must keep firing phasers — ai_phaser_auto_fire is \
          deliberately NOT gated on AiHighFidelity"
     );
@@ -5241,7 +5277,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
 
     let beam = app.world().get::<ActiveBeam>(npc_entity).unwrap();
     assert!(
-        beam.target_uuid.is_none(),
+        !beam.is_firing(),
         "FirePhaser for a port bank must be rejected when the target is not in that bank's fire arc — unified handler now honours per-bank config for NPCs"
     );
 }
@@ -8529,12 +8565,12 @@ ai_only = true
         .get::<ActiveBeam>(npc_entity)
         .expect("NPC entity must have ActiveBeam component");
     assert!(
-        beam.target_uuid.is_some(),
+        beam.is_firing(),
         "ai_phaser_auto_fire must activate the beam when ANY phaser bank fine \
          system has operate_ai=true, even without the coarse tactical SystemId"
     );
     assert_eq!(
-        beam.bank.as_deref(),
+        beam.any_bank(),
         Some("port"),
         "NPC should fire the port bank whose fine system is AI-operated"
     );
@@ -9327,10 +9363,7 @@ fn spawn_los_asteroid(
 /// Activate a beam on the given ship entity, targeting `target_uuid`.
 fn activate_los_beam(app: &mut App, shooter: bevy::ecs::entity::Entity, target_uuid: &str) {
     let mut beam = app.world_mut().get_mut::<ActiveBeam>(shooter).unwrap();
-    beam.target_uuid = Some(target_uuid.to_string());
-    beam.remaining_secs = 10.0;
-    beam.damage_accumulator = 0.0;
-    beam.bank = Some("port".to_string());
+    beam.start("port", target_uuid, 10.0);
 }
 
 /// Read the total current hull HP from a ship/asteroid entity.
@@ -9984,6 +10017,23 @@ fn spawn_policy_phaser_npc(
         crate::ai::policy::AiPolicy,
     )>,
 ) -> Entity {
+    spawn_policy_phaser_npc_at(app, npc_uuid, target_uuid, banks, [0.0, 0.0, -20.0])
+}
+
+/// As [`spawn_policy_phaser_npc`], with the target placed anywhere.
+///
+/// The position is what selects which banks bear, so a test about OVERLAPPING
+/// arcs needs the target abeam rather than dead ahead (issue #790).
+fn spawn_policy_phaser_npc_at(
+    app: &mut App,
+    npc_uuid: &str,
+    target_uuid: &str,
+    banks: Vec<(
+        crate::entity_config::PhaserBankConfig,
+        crate::ai::policy::AiPolicy,
+    )>,
+    target_pos: [f32; 3],
+) -> Entity {
     use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
@@ -10024,7 +10074,7 @@ fn spawn_policy_phaser_npc(
             SystemId("captain".into()),
             50.0,
         )])),
-        Transform::from_xyz(0.0, 0.0, -20.0),
+        Transform::from_xyz(target_pos[0], target_pos[1], target_pos[2]),
     ));
     npc
 }
@@ -10061,7 +10111,7 @@ fn phaser_bank_idle_policy_holds_fire() {
     app.update();
     let beam = app.world().get::<ActiveBeam>(npc).unwrap();
     assert!(
-        beam.target_uuid.is_none(),
+        !beam.is_firing(),
         "an idle phaser bank policy must hold fire — no beam should start"
     );
 }
@@ -10092,11 +10142,11 @@ fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
     app.update();
     let beam = app.world().get::<ActiveBeam>(npc).unwrap();
     assert!(
-        beam.target_uuid.is_some(),
+        beam.is_firing(),
         "the aft bank's fact guard must fire (facts are seeded) even though fore is idle"
     );
     assert_eq!(
-        beam.bank.as_deref(),
+        beam.any_bank(),
         Some("aft"),
         "the idle fore bank must not fire and must not disarm the firing aft bank"
     );
@@ -10163,7 +10213,7 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
     app.update();
     let beam = app.world().get::<ActiveBeam>(npc).unwrap();
     assert!(
-        beam.target_uuid.is_some() && beam.bank.as_deref() == Some("fore"),
+        beam.is_firing() && beam.any_bank() == Some("fore"),
         "a human admitted FirePhaser must produce the same active beam an AI-policy fire does"
     );
 }
@@ -10492,5 +10542,472 @@ fn reach_is_never_negative() {
     assert_eq!(
         longest_usable_direct_fire_range(&[emitter(true, true, -10.0)]),
         0.0
+    );
+}
+
+// ── Simultaneous broadside beams (issue #790) ────────────────────────────────
+//
+// `ActiveBeam` was one slot per ship until issue #790: `handle_fire_phaser`
+// refused any fire while it was occupied and `ai_phaser_auto_fire` `find_map`ped
+// to exactly one bank, so two banks could never be lit at once no matter how far
+// their arcs overlapped. It is a per-bank map now, and these pin both halves of
+// that: two banks DO burn together when both bear, and every ordinary gate still
+// applies to each bank on its own.
+//
+// The bank geometry is taken from SHIPPED hulls rather than restated inline, so
+// a hull that stopped overlapping would fail here rather than passing against a
+// fixture that no ship flies.
+
+/// The authored phaser banks of a shipped hull, exactly as the TOML declares
+/// them — arcs included, so a hull retuned in `assets/` is felt here.
+fn shipped_bank_configs(toml_str: &str) -> Vec<crate::entity_config::PhaserBankConfig> {
+    let cfg = crate::entity_config::EntityConfig::from_toml(toml_str).expect("hull must parse");
+    let banks = cfg
+        .weapons_console
+        .as_ref()
+        .expect("hull declares [weapons_console]")
+        .phaser_banks
+        .clone();
+    assert_eq!(banks.len(), 2, "these fixtures are about a bank PAIR");
+    banks
+}
+
+/// The authored phaser banks of a shipped hull, paired with an unconditional
+/// fire policy — the shape `spawn_policy_phaser_npc_at` takes.
+fn shipped_banks(
+    toml_str: &str,
+) -> Vec<(
+    crate::entity_config::PhaserBankConfig,
+    crate::ai::policy::AiPolicy,
+)> {
+    shipped_bank_configs(toml_str)
+        .into_iter()
+        .map(|b| (b, phaser_bank_fire_policy("true")))
+        .collect()
+}
+
+const HARROW_CRUISER_TOML: &str = include_str!("../../../assets/entities/ship_harrow_cruiser.toml");
+const ALLIANCE_CRUISER_TOML: &str = include_str!("../../../assets/entities/alliance_cruiser.toml");
+
+/// Broadly abeam to starboard but deliberately **off** the beam line. The ship
+/// sits at the origin at yaw 0, so forward is `-Z` and starboard is `+X`; this
+/// is a bearing of ≈101.3°, some 11° abaft the beam.
+///
+/// The 11° matters, and every broadside fixture in this section uses this
+/// constant rather than a true `[20, 0, 0]` beam bearing because of it. Exactly
+/// 90° is the exact edge of a 180-degree arc centred on 0° AND the exact edge of
+/// one centred on 180°. `in_arc` compares `<=` against the half-arc, and
+/// `180f32.to_radians() * 0.5` is bit-identically `FRAC_PI_2`, so a pair of
+/// 180-degree fore/aft arcs BOTH admit there — by exact float equality, not by
+/// overlapping. A test sitting on that tie cannot tell a 270-degree arc from a
+/// 180-degree one: it only asserts that a tie compares equal. Narrow the hull's
+/// arcs and it would keep passing, which is precisely the regression these
+/// fixtures exist to catch.
+///
+/// Well inside a 270-degree arc centred either fore or aft (those reach ±135°),
+/// so it is an honest interior bearing for the wide arcs, and outside the fore
+/// half of a 180-degree pair, so it is a discriminating one for the narrow.
+const OFF_BOUNDARY_STARBOARD: [f32; 3] = [20.0, 0.0, 4.0];
+/// Dead ahead — inside the fore bank's arc and inside the aft bank's blind
+/// wedge.
+const DEAD_AHEAD: [f32; 3] = [0.0, 0.0, -20.0];
+
+fn live_banks_of(app: &App, ship: Entity) -> Vec<String> {
+    app.world()
+        .get::<ActiveBeam>(ship)
+        .expect("ship carries ActiveBeam")
+        .live_banks()
+        .map(|(bank, _)| bank.clone())
+        .collect()
+}
+
+/// AC5: when a broadside bears, BOTH authored banks light — literally at the
+/// same time, on the same target.
+///
+/// This is the assertion the whole per-bank rework exists for. Before it, the
+/// identical fixture produced exactly one live beam and nothing failed.
+///
+/// The bearing is [`OFF_BOUNDARY_STARBOARD`], not the beam line itself, so this
+/// pins the authored 270-degree arcs rather than a float tie — see that
+/// constant.
+#[test]
+fn both_270_degree_banks_burn_at_once_on_a_target_abeam() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let target_uuid = "cc000000-0000-0000-0000-0000000007a2";
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007a1",
+        target_uuid,
+        shipped_banks(HARROW_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    app.update();
+
+    assert_eq!(
+        live_banks_of(&app, npc),
+        vec!["aft".to_string(), "fore".to_string()],
+        "a target broad on the starboard quarter is inside BOTH 270-degree arcs — and \
+         inside only one of a 180-degree pair — so both banks must be burning"
+    );
+    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+    for bank in ["fore", "aft"] {
+        assert_eq!(
+            beam.bank_target(bank),
+            Some(target_uuid),
+            "bank '{bank}' must be burning at the locked target"
+        );
+    }
+}
+
+/// Spawn the PLAYER's ship — `LocalShip`, banks on the `Human` control source —
+/// with a pending admitted `FirePhaser` for every bank: exactly what admission
+/// leaves behind when a human gunner presses both fire buttons on one tick.
+///
+/// `Human` (not `Ai`) is load-bearing. `ai_phaser_auto_fire` needs `operate_ai`
+/// on a bank, or a `LocalShip` with `CurrentPhaserMode::Auto` — and the test app
+/// defaults to `Manual`. So the auto-fire path is inert here and any beam that
+/// lights can only have come from `handle_fire_phaser`, which is what these
+/// fixtures are about.
+fn spawn_player_hull_firing_all_banks_at(
+    app: &mut App,
+    ship_uuid: &str,
+    target_uuid: &str,
+    banks: Vec<crate::entity_config::PhaserBankConfig>,
+    target_pos: [f32; 3],
+) -> Entity {
+    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    let mut admitted = AdmittedCommands::default();
+    for cfg in &banks {
+        let bank_system = crate::system_registry::phaser_bank_system_id(&cfg.id).unwrap();
+        sources.set(
+            bank_system.clone(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+        admitted.0.push(crate::messages::AdmittedCommand {
+            target: bank_system,
+            payload: SystemControlPayload::FirePhaser,
+            response_token: None,
+        });
+    }
+
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
+            EntityUuid(ship_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            ActiveBeam::default(),
+            PhaserCooldown::default(),
+            ShipPhysics::default(),
+            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig { banks }),
+            admitted,
+            Transform::default(),
+        ))
+        .id();
+
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(target_pos[0], target_pos[1], target_pos[2]),
+    ));
+    ship
+}
+
+/// The same mechanic on the PLAYER's hull, on the path a human gunner actually
+/// uses (AGENTS.md #6).
+///
+/// `alliance_cruiser` authors `fire_arc_deg = 270` on both banks, and
+/// `handle_fire_phaser` gates on `fire_arc_deg` — so the two arcs genuinely
+/// overlap through 180°, and a target abeam is a real double broadside for a
+/// human. Note the hull's `auto_arc_deg` is only 180: the AI path tells a
+/// different and much narrower story, pinned by
+/// `the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line`
+/// below. This test is deliberately scoped to the manual path and says nothing
+/// about the auto one.
+///
+/// This is still the symmetry proof, because the mechanism is shared:
+/// `handle_fire_phaser` reads `AdmittedCommands` and carries no origin branch at
+/// all (admission already stripped the source identity), so the NPC path above
+/// and this one are the same per-bank `ActiveBeam` rework seen from two sides.
+/// The ship carries `LocalShip` and human-operated banks, so it is the player's
+/// ship in every respect the firing path could observe even if someone added
+/// such a branch.
+#[test]
+fn the_player_hulls_270_degree_banks_both_light_on_the_manual_fire_path() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let target_uuid = "cc000000-0000-0000-0000-0000000007b2";
+    let ship = spawn_player_hull_firing_all_banks_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007b1",
+        target_uuid,
+        shipped_bank_configs(ALLIANCE_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    app.update();
+
+    assert_eq!(
+        live_banks_of(&app, ship),
+        vec!["aft".to_string(), "fore".to_string()],
+        "a bearing 11 degrees abaft the beam is comfortably inside BOTH 270-degree \
+         fire arcs, so a human firing both banks must get both beams"
+    );
+    let beam = app.world().get::<ActiveBeam>(ship).unwrap();
+    for bank in ["fore", "aft"] {
+        assert_eq!(
+            beam.bank_target(bank),
+            Some(target_uuid),
+            "bank '{bank}' must be burning at the locked target"
+        );
+    }
+}
+
+/// The other half of the player hull's story, and the reason the test above is
+/// scoped to the manual path.
+///
+/// `alliance_cruiser` authors `auto_arc_deg = 180` on both banks, and
+/// `ai_phaser_auto_fire` gates on `auto_arc_deg`. Two 180-degree arcs centred
+/// fore and aft do not overlap — they abut, sharing only the beam line itself —
+/// so an AI-operated alliance cruiser gets ONE bank at any bearing off that
+/// line, not the double broadside the wide manual arcs give.
+///
+/// The bearing is the whole point. Exactly abeam, `in_arc`'s `<=` admits both
+/// arcs by bit-exact equality on the shared boundary, which reads as an overlap
+/// that is not there; `OFF_BOUNDARY_STARBOARD` stands 11 degrees abaft the beam
+/// so the answer is the real one. Widening the hull's `auto_arc_deg` to 270
+/// would fail this — which is the intent: it is a player-facing balance change,
+/// not a refactor, and issue #790 is scoped to the Harrow cruiser.
+#[test]
+fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let ship = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007b3",
+        "cc000000-0000-0000-0000-0000000007b4",
+        shipped_banks(ALLIANCE_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    app.update();
+    assert_eq!(
+        live_banks_of(&app, ship),
+        vec!["aft".to_string()],
+        "abaft the beam is outside the fore bank's 180-degree AUTO arc: only the aft \
+         bank may burn, however wide the manual fire arc is"
+    );
+}
+
+/// AC5's other half, and the reason the arcs are 270 rather than 360: a target
+/// in only ONE bank's arc lights only that bank.
+///
+/// Without this, "both banks fire" would be indistinguishable from "the arc
+/// check stopped being applied".
+#[test]
+fn a_target_in_one_arc_only_lights_the_bank_that_bears() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007c1",
+        "cc000000-0000-0000-0000-0000000007c2",
+        shipped_banks(HARROW_CRUISER_TOML),
+        DEAD_AHEAD,
+    );
+    app.update();
+    assert_eq!(
+        live_banks_of(&app, npc),
+        vec!["fore".to_string()],
+        "dead ahead is the AFT bank's blind wedge: only the fore bank may burn"
+    );
+}
+
+/// Per-bank AVAILABILITY still gates each bank on its own: a bank whose fine
+/// system is not AI-operable stays cold while its sibling fires.
+#[test]
+fn an_unavailable_bank_does_not_stop_its_sibling_broadside() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007d1",
+        "cc000000-0000-0000-0000-0000000007d2",
+        shipped_banks(HARROW_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    // Take the aft bank off AI. `spawn_policy_phaser_npc_at` put every bank on
+    // Ai, so this is the only difference from the double-broadside fixture.
+    {
+        let mut sources = app
+            .world_mut()
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(npc)
+            .unwrap();
+        sources.0.set(
+            crate::system_registry::phaser_bank_system_id("aft").unwrap(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+    }
+    app.update();
+    assert_eq!(
+        live_banks_of(&app, npc),
+        vec!["fore".to_string()],
+        "the aft bank is not AI-operable, and its absence must not disarm the fore bank"
+    );
+}
+
+/// Per-bank COOLDOWN still gates each bank on its own — the property
+/// `PhaserCooldown` already had, now matched by the beam map.
+#[test]
+fn a_bank_on_cooldown_does_not_stop_its_sibling_broadside() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007e1",
+        "cc000000-0000-0000-0000-0000000007e2",
+        shipped_banks(HARROW_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    {
+        let mut cooldown = app.world_mut().get_mut::<PhaserCooldown>(npc).unwrap();
+        cooldown.start_bank("aft", 5.0);
+    }
+    app.update();
+    assert_eq!(
+        live_banks_of(&app, npc),
+        vec!["fore".to_string()],
+        "the aft bank is cooling down; the fore bank must fire anyway"
+    );
+}
+
+/// A bank already mid-beam is not re-lit, and — the part that used to be
+/// impossible — that does not stop the other bank from opening fire on a later
+/// tick when IT comes to bear.
+#[test]
+fn a_burning_bank_is_not_relit_while_its_sibling_may_still_open_fire() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007f1",
+        "cc000000-0000-0000-0000-0000000007f2",
+        shipped_banks(HARROW_CRUISER_TOML),
+        DEAD_AHEAD,
+    );
+    app.update();
+    assert_eq!(live_banks_of(&app, npc), vec!["fore".to_string()]);
+    let opened_at = app
+        .world()
+        .get::<ActiveBeam>(npc)
+        .unwrap()
+        .bank_remaining_secs("fore");
+
+    // Turn the ship so the same target now bears broad on the starboard quarter
+    // and the aft bank bears too. For a target dead ahead at yaw 0 the relative
+    // bearing is simply `-yaw`, so this yaw puts it at ≈101.5° — the same 11°
+    // abaft the beam as [`OFF_BOUNDARY_STARBOARD`], and for the same reason:
+    // a yaw of exactly `-FRAC_PI_2` would park the target on the bit-exact edge
+    // of a 180-degree fore/aft pair, where both arcs admit by float tie and the
+    // assertion below could no longer tell 270 from 180. Turning the shooter
+    // rather than moving the target is what makes this a test about arcs rather
+    // than about range.
+    {
+        let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
+        physics.yaw = -(std::f32::consts::FRAC_PI_2 + 0.2);
+    }
+    app.update();
+
+    assert_eq!(
+        live_banks_of(&app, npc),
+        vec!["aft".to_string(), "fore".to_string()],
+        "the aft bank must be free to open fire while the fore bank is still burning"
+    );
+    let beam = app.world().get::<ActiveBeam>(npc).unwrap();
+    assert!(
+        beam.bank_remaining_secs("fore") < opened_at,
+        "and the fore bank must not have been re-lit — its own timer keeps running down"
+    );
+}
+
+/// Both live beams reach the wire as distinct `BeamStarted` broadcasts, one per
+/// bank.
+///
+/// The renderer keys its beam entities on `(shooter, bank, target)` and the
+/// client folds these messages, so a rework that lit two banks server-side but
+/// only announced one would draw a single beam and look like nothing had
+/// changed.
+#[test]
+fn each_live_broadside_bank_announces_its_own_beam_on_the_wire() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let target_uuid = "cc000000-0000-0000-0000-000000000802";
+    spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000801",
+        target_uuid,
+        shipped_banks(HARROW_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    let out = tick(&mut app);
+    let mut banks: Vec<String> = out
+        .iter()
+        .filter_map(|m| match &m.msg {
+            ServerMessage::BeamStarted {
+                bank,
+                target_uuid: t,
+                ..
+            } if t == target_uuid => Some(bank.clone()),
+            _ => None,
+        })
+        .collect();
+    banks.sort();
+    assert_eq!(
+        banks,
+        vec!["aft".to_string(), "fore".to_string()],
+        "both live beams must be broadcast, one BeamStarted per bank"
+    );
+}
+
+/// Both live beams draw power, one drain per burning bank.
+///
+/// A ship running two emitters pays for two. Keeping the drain ship-level would
+/// have made the second broadside free — exactly the sort of silent discount a
+/// per-bank rework leaves behind if nobody looks.
+#[test]
+fn every_live_broadside_bank_draws_its_own_power() {
+    use crate::messages::InterSystemPayload;
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000811",
+        "cc000000-0000-0000-0000-000000000812",
+        shipped_banks(HARROW_CRUISER_TOML),
+        OFF_BOUNDARY_STARBOARD,
+    );
+    app.update();
+    assert_eq!(live_banks_of(&app, npc).len(), 2, "precondition: two beams");
+    app.update();
+    let drains = app
+        .world()
+        .resource::<crate::messages::InterSystemQueue>()
+        .0
+        .iter()
+        .filter(|m| {
+            matches!(m.payload, InterSystemPayload::DrainWeaponsBattery { .. })
+                && m.source_entity == Some(npc)
+        })
+        .count();
+    assert_eq!(
+        drains, 2,
+        "two burning banks must draw two battery drains, not one"
     );
 }

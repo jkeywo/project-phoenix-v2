@@ -1351,7 +1351,15 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            b.target_uuid = uuid;
+            // Per-bank since issue #790; this fixture drives the legacy single
+            // implicit bank (`""`), which is what a ship with no authored banks
+            // fires from.
+            match uuid {
+                Some(u) => b.start("", u, 1.0),
+                None => {
+                    b.end_bank("");
+                }
+            }
         }
     }
 
@@ -1452,7 +1460,15 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ActiveBeam, With<crate::simulation::LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            b.target_uuid = uuid;
+            // Per-bank since issue #790; this fixture drives the legacy single
+            // implicit bank (`""`), which is what a ship with no authored banks
+            // fires from.
+            match uuid {
+                Some(u) => b.start("", u, 1.0),
+                None => {
+                    b.end_bank("");
+                }
+            }
         }
     }
 

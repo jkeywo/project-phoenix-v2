@@ -4173,6 +4173,10 @@ message = "."
         // fly-through interceptor wave, and it is the one hull whose
         // helm behaviour is authored content rather than shared code,
         // so a missed preload would be especially visible.
+        //
+        // (#790) `ship_harrow_cruiser` joins the list: the overlapping
+        // 270-degree fore/aft phaser pair only reads as a double
+        // broadside if the hull is on station when its wave fires.
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
         let paths = entity_template_paths(&cfg);
@@ -4181,6 +4185,7 @@ message = "."
             "assets/entities/ship_harrow_patrol.toml",
             "assets/entities/ship_harrow_warhawk.toml",
             "assets/entities/ship_harrow_destroyer.toml",
+            "assets/entities/ship_harrow_cruiser.toml",
         ] {
             assert!(
                 paths.contains(&required.to_string()),

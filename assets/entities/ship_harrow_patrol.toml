@@ -1,7 +1,9 @@
-# Harrow Cruiser (Ironveil class)
+# Harrow Patrol Cruiser (Ironveil class)
 #
 # Medium-weight cruiser. Two phaser banks (port + starboard), shielded,
-# fights to the death. (#474) Rebalanced for the combat-test scenario
+# fights to the death. (#790) Renamed from the bare "Harrow Cruiser":
+# `ship_harrow_cruiser` now flies alongside it in the combat-test waves,
+# and two hulls sharing a name on radar and target readouts is unreadable. (#474) Rebalanced for the combat-test scenario
 # (#475) — gained weapons (previously had a `[behaviour]` block declaring
 # `attacking` state but no `[weapons_console]`, so could not fire),
 # gained `on_attacked → pursue` transition (mirrors the destroyer),

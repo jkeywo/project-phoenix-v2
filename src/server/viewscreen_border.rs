@@ -516,11 +516,10 @@ fn recompute_hud_state(
         .next()
         .map(|li| li.thrust.abs())
         .unwrap_or(0.0);
-    // `ActiveBeam.target_uuid` is `Some` exactly while a beam is burning.
-    let phaser_firing = beam_q
-        .single()
-        .map(|b| b.target_uuid.is_some())
-        .unwrap_or(false);
+    // `ActiveBeam::is_firing` is true while ANY bank is burning (issue #790) —
+    // the HUD's "phasers are firing" hum is a ship-level state, not a per-bank
+    // one, so two live broadsides read the same as one.
+    let phaser_firing = beam_q.single().map(|b| b.is_firing()).unwrap_or(false);
     let next = compute_hud_state(
         red_alert,
         &physics,

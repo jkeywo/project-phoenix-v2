@@ -1647,13 +1647,21 @@ pub const HELM_HOLD_RECOVERY_ORBIT_VERB: &str = "hold_recovery_orbit";
 /// pairs it with the authored `reengage_speed` throttle rather than the approach
 /// throttle — the cut-thrust pivot that ends a recovery and starts the next run.
 pub const HELM_PIVOT_TO_REENGAGE_VERB: &str = "pivot_to_reengage";
+/// The `hold_combat_orbit` verb: the Steering fine system's FIFTH mode verb
+/// (issue #790). Its presence tells the host to fly a tangent of a ring around
+/// the current target whose radius is the hull's own authored
+/// `combat_orbit_range` — a fighting range, not a standoff derived from the
+/// target's reach — with the circulation direction taken from this system's
+/// host-written `memory(orbit_direction)`.
+pub const HELM_HOLD_COMBAT_ORBIT_VERB: &str = "hold_combat_orbit";
 
-/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883, #788).
+/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883, #788, #790).
 pub const HELM_STEERING_VERBS: &[&str] = &[
     HELM_ACTUATE_DESIRED_FACING_VERB,
     HELM_HOLD_COMMITTED_HEADING_VERB,
     HELM_HOLD_RECOVERY_ORBIT_VERB,
     HELM_PIVOT_TO_REENGAGE_VERB,
+    HELM_HOLD_COMBAT_ORBIT_VERB,
 ];
 
 // ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
@@ -2865,6 +2873,10 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // neither of which an authored constant could express.
         HELM_HOLD_RECOVERY_ORBIT_VERB => crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit,
         HELM_PIVOT_TO_REENGAGE_VERB => crate::ai::policy::AiPolicyVerb::PivotToReengage,
+        // The combat broadside orbit (issue #790): value-less too — the ring's
+        // radius, throttle and spiral gain are authored Steering `param`s and
+        // the circulation direction is host-written private memory.
+        HELM_HOLD_COMBAT_ORBIT_VERB => crate::ai::policy::AiPolicyVerb::HoldCombatOrbit,
         // Helm secondary-actuator mode verbs (issue #780): value-less,
         // like the travel-axis verbs above.
         HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
@@ -8653,6 +8665,341 @@ when = "state_time >= param(surge_dwell_secs)"
             );
         }
         assert!(boost.param.contains_key("escape_boost_secs"));
+    }
+
+    // ── The Harrow Cruiser hull (issue #790) ─────────────────────────────────
+
+    const HARROW_CRUISER_TOML: &str =
+        include_str!("../../assets/entities/ship_harrow_cruiser.toml");
+
+    /// AC4, as content: the two banks are on the CENTRELINE, one forward and one
+    /// aft, and each sweeps 270 degrees.
+    ///
+    /// Every number here is load-bearing and each has its own silent failure
+    /// mode. Facings of ±90 (port/starboard, the shape every other beam cruiser
+    /// in the set uses) would give a hull whose banks cover one side each and
+    /// never overlap. An arc of 180 would give centreline banks with no overlap
+    /// either — they would meet exactly on the beam line and cover nothing
+    /// twice. 270 is the smallest arc for which two opposed banks overlap on
+    /// BOTH beams, which is the entire premise of the doctrine.
+    ///
+    /// The overlap is asserted through the shared `in_arc` predicate rather than
+    /// by arithmetic on the authored numbers, so this pins the behaviour the
+    /// firing paths actually see.
+    #[test]
+    fn harrow_cruiser_carries_overlapping_fore_and_aft_270_degree_phaser_banks() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML)
+            .expect("the cruiser hull must pass content validation");
+        let wc = cfg
+            .weapons_console
+            .as_ref()
+            .expect("the hull declares [weapons_console]");
+
+        let ids: Vec<&str> = wc.phaser_banks.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["fore", "aft"],
+            "the cruiser mounts exactly one forward and one aft beam bank"
+        );
+        for (id, facing) in [("fore", 0.0), ("aft", 180.0)] {
+            let bank = wc.phaser_banks.iter().find(|b| b.id == id).unwrap();
+            assert_eq!(
+                bank.facing_deg, facing,
+                "bank '{id}' must sit on the centreline facing {facing}"
+            );
+            assert_eq!(
+                bank.fire_arc_deg, 270.0,
+                "bank '{id}' must sweep 270 degrees — anything narrower removes the \
+                 broadside overlap the whole doctrine is built on"
+            );
+            assert_eq!(
+                bank.auto_arc_deg, 270.0,
+                "bank '{id}': the AI fires on the same arc it may fire on. A narrower \
+                 auto arc would switch off exactly the abeam overlap this hull exists for"
+            );
+        }
+
+        // The overlap itself, through the shared predicate: a target directly
+        // off either beam is inside BOTH banks' arcs, and a target dead astern
+        // is outside the fore bank's (so the arcs are genuinely 270 and not 360).
+        for (label, rx, ry) in [
+            ("starboard beam", 10.0_f32, 0.0_f32),
+            ("port beam", -10.0, 0.0),
+        ] {
+            for bank in &wc.phaser_banks {
+                assert!(
+                    crate::weapons::phaser::in_arc(rx, ry, bank.facing_deg, bank.fire_arc_deg),
+                    "a target on the {label} must bear for bank '{}'",
+                    bank.id
+                );
+            }
+        }
+        // ...and each bank still has a blind wedge opposite its own facing, so
+        // the arcs are genuinely 270 and not 360. A bank that covers everything
+        // leaves the orbit nothing to solve.
+        // Ship-local bearing is `radar_x.atan2(radar_y)`, so `(0, +r)` is dead
+        // ahead and `(0, -r)` dead astern.
+        let fore = wc.phaser_banks.iter().find(|b| b.id == "fore").unwrap();
+        let aft = wc.phaser_banks.iter().find(|b| b.id == "aft").unwrap();
+        assert!(
+            !crate::weapons::phaser::in_arc(0.0, -10.0, fore.facing_deg, fore.fire_arc_deg),
+            "the fore bank must be blind dead astern"
+        );
+        assert!(
+            !crate::weapons::phaser::in_arc(0.0, 10.0, aft.facing_deg, aft.fire_arc_deg),
+            "the aft bank must be blind dead ahead"
+        );
+
+        // The deliberate absences (see the hull header).
+        assert!(
+            wc.blaster_banks.is_empty(),
+            "the cruiser is beam-armed only"
+        );
+        assert!(
+            cfg.torpedoes.is_none(),
+            "the cruiser must carry NO torpedo magazine"
+        );
+        let ship_config = cfg
+            .ship_config
+            .as_ref()
+            .expect("the hull declares [[system]] blocks");
+        for system in &ship_config.systems {
+            assert!(
+                !system.kind.contains("torpedo"),
+                "the cruiser must declare no torpedo system, found '{:?}' ({})",
+                system.id,
+                system.kind
+            );
+        }
+        // Every bank needs its own fine system or it is never AI-operable, and
+        // the id follows the `phaser-<bank_id>` convention the resolver uses.
+        for bank in &wc.phaser_banks {
+            let expected = crate::system_registry::phaser_bank_system_id(&bank.id)
+                .expect("a non-empty bank id always resolves");
+            assert!(
+                ship_config.systems.iter().any(|s| s.id == expected),
+                "bank '{}' must declare a [[system]] entry `{}` — without it the bank \
+                 is never registered as AI-operable and the hull never fires",
+                bank.id,
+                expected.0
+            );
+        }
+    }
+
+    /// AC1/AC2, as content: both travel axes author the two-state orbit machine,
+    /// the yaw channel resolves the combat-orbit verb, and every scalar the host
+    /// reads by name is present on the Steering axis.
+    #[test]
+    fn harrow_cruiser_authors_the_broadside_orbit_machine_on_both_travel_axes() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let hc = cfg
+            .helm_console
+            .as_ref()
+            .expect("the hull declares [helm_console]");
+
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref()),
+            ("steering_ai", hc.steering_ai.as_ref()),
+        ] {
+            let ai = ai.unwrap_or_else(|| panic!("{name} must be authored"));
+            assert!(
+                ai.rule.is_empty(),
+                "{name} must be state-only (rule XOR state)"
+            );
+            let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["acquire", "orbit"],
+                "{name} authors the two-state orbit machine"
+            );
+            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            assert!(
+                ai.to_policy().expect("must decode").machine().is_some(),
+                "{name} must decode to a machine"
+            );
+        }
+
+        // The yaw channel resolves the FIFTH mode verb in the orbit state, and
+        // tracks in the approach.
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let verb_of = |state_id: &str| -> String {
+            let state = steering
+                .state
+                .iter()
+                .find(|s| s.id == state_id)
+                .unwrap_or_else(|| panic!("steering_ai must declare '{state_id}'"));
+            assert_eq!(
+                state.rule.len(),
+                1,
+                "'{state_id}' answers yaw with one rule"
+            );
+            state.rule[0].verb.clone()
+        };
+        assert_eq!(verb_of("acquire"), HELM_ACTUATE_DESIRED_FACING_VERB);
+        assert_eq!(
+            verb_of("orbit"),
+            HELM_HOLD_COMBAT_ORBIT_VERB,
+            "the orbit leg is the combat-orbit verb — NOT `hold_recovery_orbit`, \
+             whose ring is derived from the target's reach and gated on a shield \
+             doctrine this hull does not have"
+        );
+
+        // Every scalar the host reads off this axis BY NAME. A rename in either
+        // direction lights this up, and it must: the host's response to a
+        // missing one is to decline the whole arm and fly ordinary doctrine
+        // travel instead.
+        for required in crate::ship::helm_ai::COMBAT_ORBIT_PARAMS {
+            assert!(
+                steering.param.contains_key(*required),
+                "steering_ai must author `{required}`: the host gates the whole \
+                 combat-orbit arm on all three together"
+            );
+        }
+        for required in [
+            crate::ship::helm_ai::TRACKING_DEADBAND_PARAM,
+            crate::ship::helm_ai::TRACKING_FULL_STEER_PARAM,
+        ] {
+            assert!(
+                steering.param.contains_key(required),
+                "steering_ai must author `{required}`"
+            );
+        }
+        assert!(
+            steering
+                .memory
+                .contains_key(crate::ship::helm_ai::ORBIT_DIRECTION_MEMORY),
+            "the circulation direction slot must be declared so its pre-engagement \
+             value is authored rather than implicit"
+        );
+    }
+
+    /// AC2, as content: the authored fighting ring sits INSIDE the banks' own
+    /// beam range, and the orbit is flown under power.
+    ///
+    /// This is the assertion that makes the ring a fighting range rather than a
+    /// standoff. A ring authored at or beyond `beam_range` would produce a
+    /// cruiser that circles a target it cannot hit — every structural test above
+    /// would still pass, and the hull would look correct and do nothing.
+    #[test]
+    fn harrow_cruiser_orbits_inside_its_own_beam_envelope_and_under_power() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .unwrap()
+            .steering_ai
+            .as_ref()
+            .unwrap();
+        let ring = steering
+            .param
+            .get(crate::ship::helm_ai::COMBAT_ORBIT_RANGE_PARAM)
+            .copied()
+            .unwrap();
+        let shortest_beam = cfg
+            .weapons_console
+            .as_ref()
+            .unwrap()
+            .phaser_banks
+            .iter()
+            .map(|b| b.beam_range)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            ring > 0.0 && ring < shortest_beam,
+            "the fighting ring ({ring}) must sit inside every bank's beam range \
+             ({shortest_beam}) — a ring outside it circles a target it cannot hit"
+        );
+
+        let speed = steering
+            .param
+            .get(crate::ship::helm_ai::COMBAT_ORBIT_SPEED_PARAM)
+            .copied()
+            .unwrap();
+        assert!(
+            speed > 0.0 && speed <= 1.0,
+            "the ring is flown UNDER POWER: an orbit at zero throttle is a parked \
+             ship inside a hostile's guns, got {speed}"
+        );
+        let gain = steering
+            .param
+            .get(crate::ship::helm_ai::COMBAT_ORBIT_SPIRAL_GAIN_PARAM)
+            .copied()
+            .unwrap();
+        assert!(
+            gain > 0.0 && gain.is_finite(),
+            "a zero spiral gain flies the bare tangent and never corrects the \
+             radius, got {gain}"
+        );
+    }
+
+    /// AC3, as content, and the reason it is asserted at all: NO transition
+    /// anywhere in this hull's doctrine is guarded on a hazard reading.
+    ///
+    /// Avoidance composes onto the orbit additively inside the pure planner and
+    /// through the stateless imminent-collision facing override — both temporary
+    /// and both outside the state machine. A `fact(hazard_urgency)` transition
+    /// here would replace that with a manoeuvre the hull has to be talked out
+    /// of, and re-entering the orbit afterwards would RE-DRAW the circulation
+    /// direction, so flying past an asteroid would randomise which way the
+    /// cruiser circles. An absence is exactly the kind of content that gets
+    /// helpfully filled in.
+    #[test]
+    fn harrow_cruiser_never_leaves_the_orbit_for_a_hazard() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+        ] {
+            let orbit = ai.state.iter().find(|s| s.id == "orbit").unwrap();
+            assert_eq!(
+                orbit.transition.len(),
+                1,
+                "{name}: the orbit has exactly one way out"
+            );
+            assert_eq!(orbit.transition[0].to, "acquire");
+            assert!(
+                orbit.transition[0]
+                    .when
+                    .contains(crate::ship::helm_ai::TARGET_VALID_FACT),
+                "{name}: losing the target is the one thing that ends the orbit, got `{}`",
+                orbit.transition[0].when
+            );
+            for state in &ai.state {
+                for transition in &state.transition {
+                    for forbidden in [
+                        crate::ship::helm_ai::HAZARD_URGENCY_FACT,
+                        "hazard_present",
+                        "moving_hazard_threat",
+                    ] {
+                        assert!(
+                            !transition.when.contains(forbidden),
+                            "{name} '{}': no transition may be guarded on `{forbidden}` — \
+                             a detour must bend the orbit, never exit it, got `{}`",
+                            state.id,
+                            transition.when
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The deliberate absence of a boost drive (see the hull header). A cruiser
+    /// that lights the drive on the ring widens it; nothing in the doctrine asks
+    /// for that, and there is no `[helm_console.boost]` block for it to use.
+    #[test]
+    fn harrow_cruiser_authors_no_boost_drive_and_no_boost_doctrine() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        assert!(
+            hc.boost.is_none(),
+            "the cruiser mounts no boost drive: a broadside orbit is flown at a \
+             steady authored throttle"
+        );
+        assert!(
+            hc.boost_ai.is_none(),
+            "and authors no boost doctrine to go with the drive it does not have"
+        );
     }
 
     /// The authored stateful block validates end to end through the real

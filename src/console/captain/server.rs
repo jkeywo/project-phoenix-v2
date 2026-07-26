@@ -289,6 +289,9 @@ fn operate_captain_ai(
                 // #788) — helm axis verbs too.
                 | crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit
                 | crate::ai::policy::AiPolicyVerb::PivotToReengage
+                // The Steering combat broadside-orbit mode verb (issue #790) —
+                // a helm axis verb too.
+                | crate::ai::policy::AiPolicyVerb::HoldCombatOrbit
                 | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
                 | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
                 | crate::ai::policy::AiPolicyVerb::EngageImpulse

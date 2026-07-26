@@ -1013,10 +1013,18 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
     )
 }
 
-/// Inputs to [`plan_recovery_orbit`] (issue #788).
+/// Inputs to [`plan_recovery_orbit`] (issue #788; second caller added by #790).
 ///
 /// Every gameplay scalar arrives from authored ship data or from host-written
 /// private memory; this module holds no default for any of them (AGENTS.md #11).
+///
+/// The name is historical — this is the input to *ring* geometry, not to the
+/// shield-recovery doctrine specifically. Two doctrines fill it in, with
+/// opposite intents and different radii: the shield-recovery standoff (the
+/// radius derived from the TARGET's reach, held to stay out of trouble) and the
+/// cruiser's combat broadside orbit (an authored radius from the shooter's OWN
+/// weapon envelope, held to stay in it). See `ship::helm_planner`'s `fly_orbit`,
+/// which is the single call site both route through.
 pub struct RecoveryOrbitInput<'a> {
     pub self_pos: [f32; 3],
     pub self_yaw: f32,
@@ -1027,8 +1035,12 @@ pub struct RecoveryOrbitInput<'a> {
     /// Excluded from the avoidance scan — the ship is deliberately circling it,
     /// so treating it as an obstacle would fight the orbit.
     pub target_uuid: Uuid,
-    /// The radius to hold, world units. Host-derived from the target's own
-    /// direct-fire reach plus the hull's authored margin.
+    /// The radius of the ring to hold, world units. Whose radius it is depends
+    /// on the calling doctrine and the geometry does not care: the standoff leg
+    /// passes a host-derived "target's direct-fire reach + this hull's authored
+    /// margin"; the combat orbit passes the hull's own authored
+    /// `combat_orbit_range`. The name is historical (issue #788 had only the
+    /// first caller).
     pub safe_range: f32,
     /// Which way round: `+1.0` clockwise (starboard-hand), `-1.0` the other
     /// way. Chosen once per recovery from a seeded composite key, so it is
@@ -1046,13 +1058,22 @@ pub struct RecoveryOrbitInput<'a> {
     pub avoidance_look_ahead_secs: f32,
 }
 
-/// The shield-recovery standoff orbit: `(thrust, steering)` for one tick
-/// (issue #788).
+/// Hold a ring around a target: `(thrust, steering)` for one tick (issue #788,
+/// generalised by #790).
+///
+/// **Shared geometry, parameterised by a radius.** Two doctrines fly it and the
+/// solution below knows about neither: the shield-recovery standoff circles at a
+/// radius derived from the target's own reach to stay OUT of its envelope, and
+/// the cruiser's combat broadside orbit circles at its own authored
+/// `combat_orbit_range` to keep its beams ON. Only the radius
+/// ([`RecoveryOrbitInput::safe_range`]), `orbit_speed` and `spiral_gain` differ;
+/// the intent is the caller's and never appears here. The name is historical —
+/// #788 had one caller and named the function after it.
 ///
 /// **It spirals; it does not stop and it does not simply run.** The commanded
-/// heading is the *tangent* of the safe ring — perpendicular to the bearing
-/// back to the target, on the authored side — rotated toward or away from the
-/// target in proportion to how wrong the current radius is:
+/// heading is the *tangent* of the ring — perpendicular to the bearing back to
+/// the target, on the authored side — rotated toward or away from the target in
+/// proportion to how wrong the current radius is:
 ///
 /// * inside the ring (`range < safe_range`) the tangent is rotated *outward*,
 ///   so the ship spirals out while still travelling around;
@@ -1063,14 +1084,15 @@ pub struct RecoveryOrbitInput<'a> {
 /// The error is *fractional* (`(range - safe_range) / safe_range`) so the same
 /// authored gain behaves identically for a ring of 80 units and one of 800 —
 /// the alternative would make `spiral_gain` a value a designer has to re-tune
-/// every time a weapon's range changes. The rotation is clamped to a quarter
-/// turn, which is the point at which the "tangent bent toward the target"
-/// becomes "straight at the target": beyond it the correction would start
-/// spiralling the wrong way round.
+/// every time a weapon's range changes, and it is what lets the two doctrines
+/// share a gain scale at all. The rotation is clamped to a quarter turn, which
+/// is the point at which the "tangent bent toward the target" becomes "straight
+/// at the target": beyond it the correction would start spiralling the wrong way
+/// round.
 ///
 /// Throttle is the flat authored orbit fraction — the ship keeps its energy up
-/// while it waits, because a stationary ship inside a hostile's reach is not
-/// recovering, it is a target.
+/// while it circles, because a stationary ship inside a hostile's reach is
+/// neither recovering nor fighting, it is a target.
 ///
 /// **Avoidance bends the orbit** exactly as it bends the pass legs: the shared
 /// repulsion steering is summed on and the result clamped.

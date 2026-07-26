@@ -1,0 +1,415 @@
+# Harrow Cruiser (Ironveil class) — the broadside orbit (issue #790)
+#
+# The second hull whose HELM BEHAVIOUR is authored rather than inherited, and
+# the opposite manoeuvre to the destroyer's.
+#
+#   acquire ──(target visible, inside engage_range)──▶ orbit
+#   orbit   ──(target lost)───────────────────────────▶ acquire
+#
+# Two states, and that brevity is the doctrine rather than a shortcut. This hull
+# has no break-off, no re-entry pivot and no escape leg: it circles, and it keeps
+# circling for as long as there is something to circle. What makes that a fight
+# rather than a stalemate is the ARMAMENT below.
+#
+# ## Why an orbit at all
+#
+# The shared `plan_helm_travel` Destroy arm (`helm_destroy`) brakes through a
+# decel zone, parks at a fraction of weapons range and re-faces the target. That
+# is a bow-on gunship posture: it presents the smallest silhouette and brings the
+# forward arc to bear. A ship whose guns are on its BEAM wants the exact
+# opposite — it wants to be side-on, and it wants to stay side-on while the
+# target manoeuvres, which a station-keeper cannot do because "face the target"
+# and "show the target your flank" are contradictory instructions.
+#
+# So Steering answers its channel with `hold_combat_orbit`: the host solves the
+# TANGENT of a ring of `combat_orbit_range` around the target, bent toward or
+# away from it in proportion to how wrong the current radius is. The result is
+# continuous tangential travel (the broadsides stay on) that SPIRALS onto the
+# ring from either side — inside it the tangent is rotated outward and the
+# cruiser works its way out while still circling; outside it the tangent is
+# rotated inward and the cruiser closes while still circling. It never stops and
+# it never simply runs.
+#
+# The circulation direction — clockwise or anticlockwise — is drawn ONCE, on the
+# tick the orbit state is entered, from a seeded (world, ship, system,
+# transition, occurrence) key. So a replayed seed produces the same fight every
+# time, two cruisers entering the same engagement do not mirror one another, and
+# a player cannot learn "they always break left".
+#
+# ## Why the ring radius is AUTHORED and the destroyer's is not
+#
+# The destroyer's recovery ring is derived from the TARGET's own direct-fire
+# reach plus a margin, because a standoff is a statement about the other ship's
+# guns. This ring is a statement about THIS ship's guns: the cruiser wants its
+# target inside its own beam envelope, which is a property of this file and is
+# knowable when the file is written. `combat_orbit_range` is therefore a plain
+# authored `param`, deliberately set inside `beam_range` so the target is under
+# the broadsides for the whole orbit rather than only at the tangent point.
+#
+# ## Hazards do not break the orbit
+#
+# There is no transition anywhere below guarded on hazard urgency, collision
+# proximity, or any other avoidance reading — and that absence is load-bearing.
+# Avoidance already composes onto this leg two ways, both of them temporary and
+# both of them outside the state machine: the shared repulsion steering is summed
+# onto the orbit's own tangent inside the pure planner, and an IMMINENT collision
+# temporarily overrides desired facing from the shared hazard force. Neither
+# touches `memory(orbit_direction)` and neither is a state, so the detour
+# evaporates the moment the hazard clears and the cruiser resumes the same
+# circulation it was already flying. Adding a "dodging" state would have replaced
+# that with a manoeuvre that has to be exited — and an exit is a place to get
+# stuck.
+#
+# ## ARMAMENT: fore and aft, each 270 degrees
+#
+# Not port and starboard. A pair of 180-degree beam banks covers each side once
+# and can only ever fire one of them at a target. This hull mounts its banks on
+# the CENTRELINE — one forward, one aft — and gives each a 270-degree arc, so
+# each bank's only blind spot is the 90-degree wedge directly behind it. The
+# consequence is that everything abeam, to port or to starboard, is inside BOTH
+# arcs at once, and a bearing broadside lights two beams rather than one.
+#
+# That is what makes a circling ship dangerous rather than merely evasive: the
+# orbit holds the target abeam by construction, which is precisely where the
+# overlap is. It is also why the arcs are 270 and not 360 — a ship that can shoot
+# anywhere has no geometry to fly, and the whole doctrine would collapse back
+# into station-keeping.
+
+name = "entity.ship_harrow_cruiser.name"
+tags = ["ship", "npc", "enemy"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "entity.ship_harrow_cruiser.target.description"
+
+# Heavier than the patrol cruiser it replaces in the combat-test waves: a ship
+# that commits to circling inside its own weapon envelope is a ship that expects
+# to be shot at for the whole engagement.
+[hull]
+hull_integrity = 420.0
+
+# Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
+# so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
+[[shield_arc]]
+id = "all"
+label = "entity.ship_harrow_cruiser.shield_arc.all.label"
+center_deg = 0
+width_deg = 360
+max_hp = 90
+regen_per_sec = 2.0
+offline_duration = 8.0
+
+[collider]
+shape = "Capsule"
+radius = 3.0
+length = 8.0
+
+[radar_appearance]
+colour = [0.85, 0.35, 0.12]
+size = 8.0
+icon = "cruiser"
+
+[mesh]
+model = "assets/models/dynasty_cruiser.glb"
+shape = "cuboid"
+size = [6.0, 2.0, 10.0]
+colour = [0.85, 0.35, 0.12]
+
+# Slower and less agile than the destroyer. `max_yaw_rate` matters more here than
+# on any straight-line hull: an orbit is a permanent turn, and a cruiser that
+# cannot sustain the ring's angular rate spirals outward no matter what the
+# spiral gain says.
+[helm_console]
+max_speed = 15.0
+max_reverse_speed = 6.0
+acceleration = 5.0
+deceleration = 10.0
+max_yaw_rate = 0.30
+max_bank_deg = 14.0
+
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.55
+
+# NOTE the deliberate absence: there is no `[helm_console.boost]` block and no
+# `[helm_console.boost_ai]` machine. No state in this doctrine engages the drive
+# — a broadside orbit is flown at a steady authored throttle, and lighting a
+# boost would widen the ring rather than help. The absence is pinned by a parse
+# test, because it is exactly the kind of content that gets helpfully filled in.
+
+# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
+#
+# Both states author the same unconditional "actuate the planner's desired
+# travel". The orbit's throttle is `combat_orbit_speed`, one of the authored
+# scalars the HOST reads off the Steering axis and publishes on the pass surface,
+# so this axis needs no knowledge that it is circling rather than closing.
+[helm_console.engines_ai]
+initial_state = "acquire"
+
+[helm_console.engines_ai.param]
+# The cruiser commits to the orbit once the target is this close. Comfortably
+# outside `combat_orbit_range` so the approach and the ring are distinct phases
+# and the spiral-in is visible rather than instantaneous.
+engage_range = 220.0
+
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+[[helm_console.engines_ai.state]]
+id = "orbit"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # THE ONLY EXIT, and the only one there may be. A transition guarded on hazard
+  # urgency here would drop the cruiser out of the orbit for the duration of a
+  # detour it is already handling additively, and re-entering would re-draw the
+  # circulation direction — so a debris field would randomise which way the ship
+  # circles. Losing the target is the one thing that genuinely ends an
+  # engagement.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
+#
+# The axis that carries the manoeuvre. `acquire` tracks the target so the cruiser
+# closes on it; `orbit` answers with the FIFTH yaw mode verb, `hold_combat_orbit`
+# — neither "track the target" nor "fly a frozen heading" but "hold a ring around
+# it at my own fighting range".
+[helm_console.steering_ai]
+initial_state = "acquire"
+
+[helm_console.steering_ai.param]
+# Restated because this axis's own guard references it; content validation
+# rejects an undeclared `param(...)`.
+engage_range = 220.0
+# Steering response. A wider deadband than the destroyer's: an orbit is a
+# sustained turn against a continuously moving solution, and a tight deadband
+# would have the hull hunting either side of the tangent every tick. The
+# saturation angle is TIGHTER than the destroyer's (0.5) for the opposite reason
+# — it is half of what sets the orbit's steady-state radius; see
+# `combat_orbit_spiral_gain` below.
+tracking_deadband_rad = 0.05
+tracking_full_steer_rad = 0.3
+# ── The three scalars the HOST reads off this axis to fly the orbit ───────────
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown. Omit ANY ONE of them and the host declines the combat-orbit arm
+# outright — the cruiser falls back to ordinary doctrine travel rather than
+# circling at an invented radius or at zero throttle.
+#
+# The fighting radius, world units. Inside the banks' 55-unit `beam_range` by a
+# real margin, so the target stays under the broadsides for the whole orbit
+# instead of only where the ring happens to graze weapons range. This is an
+# authored property of THIS hull's guns — it is not derived from the target.
+combat_orbit_range = 42.0
+# Throttle fraction flown on the ring. Not zero and not flat out: the orbit has
+# to hold its angular rate against `max_yaw_rate`, and a cruiser at full throttle
+# on a 42-unit ring would need more turn authority than this hull has.
+combat_orbit_speed = 0.6
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so
+# the same gain behaves identically on a 42-unit ring and a 400-unit one.
+#
+# Much higher than the destroyer's recovery gain (1.2), and the reason is the
+# control law rather than taste. The correction is PROPORTIONAL — heading offset
+# against radial error, with no integral term — so the orbit settles at the
+# radius where the offset it commands is exactly the offset needed to sustain the
+# turn, which is always a little OUTSIDE the authored ring. That equilibrium
+# solves to `r(r - R) = v * R * tracking_full_steer_rad / (max_yaw_rate * gain)`,
+# and with this hull's numbers (v = 15 * 0.6 = 9, R = 42) it lands at ~44 — five
+# per cent wide, and comfortably inside the 55-unit beam range. The destroyer's
+# gentler gain is fine for a standoff ring 200 units out, where five per cent is
+# noise; on a 42-unit fighting ring it would settle at 51, most of the way to the
+# edge of the envelope. Raising the gain and tightening
+# `tracking_full_steer_rad` together is what pulls it back in.
+combat_orbit_spiral_gain = 4.0
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+# Host-written on the tick the orbit state is entered, from the seeded composite
+# key. Declared here so its pre-engagement value is authored rather than
+# implicit; no guard reads it — the host does, when it publishes the pass
+# surface.
+orbit_direction = 1.0
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+[[helm_console.steering_ai.state]]
+id = "orbit"
+
+  # THE manoeuvre. The host reads the leg off this verb — never off the state's
+  # name — so these states could be called anything.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_combat_orbit"
+
+  # See the Engines copy for why this is the only transition out.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# ── Weapons ───────────────────────────────────────────────────────────────────
+#
+# The pair the whole doctrine exists to point: centreline fore and aft, 270
+# degrees each, so their arcs overlap across both beams. See the header.
+#
+# `auto_arc_deg` matches `fire_arc_deg` deliberately. On hulls where the two
+# differ, the narrower auto arc is a "do not open fire at the very edge of the
+# envelope" rule; here the edge of the envelope IS the doctrine — the overlap
+# region a broadside orbit lives in reaches to 135 degrees off each bank's
+# facing, so narrowing the auto arc would switch off exactly the double
+# broadside this hull is built around.
+[weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 270
+beam_range = 55
+beam_damage_per_sec = 6
+beam_duration_secs = 5
+cooldown_secs = 4
+shield_pierce = 0.1
+beam_color = [1.0, 0.35, 0.08, 1.0]
+
+[[weapons_console.phaser_banks]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 270
+auto_arc_deg = 270
+beam_range = 55
+beam_damage_per_sec = 6
+beam_duration_secs = 5
+cooldown_secs = 4
+shield_pierce = 0.1
+beam_color = [1.0, 0.35, 0.08, 1.0]
+
+# NOTE the deliberate absence: no `[torpedoes]` table, no `[[torpedoes.tubes]]`,
+# and no torpedo `[[system]]` entry below. A ship that never presents its bow to
+# the enemy has nothing to launch a fixed forward tube at, and the beams are the
+# point. Pinned by a parse test.
+
+[comms]
+range = 700.0
+
+[ai_profile]
+aggression = 0.9
+# Wide enough that the cruiser sees its target well outside `engage_range` and
+# spends real time closing before the ring begins.
+sensor_range = 350.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Destroy only. The doctrine entry supplies the objective the helm surfaces
+# score; the *manoeuvre* is the policy machine's, not this section's —
+# `target_speed`/`maintain_range` here only apply on the fallback path (no orbit
+# target visible), where ordinary doctrine travel resumes.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.ship_harrow_cruiser.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 40.0
+target_speed   = 0.8
+maintain_range = 42.0
+
+# Ship systems. No stations on this hull, so every system is ownerless and
+# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+# Declared for hull-uniformity with every other ship: no state in this doctrine
+# engages boost (and there is no `[helm_console.boost]` block), so the
+# declaration only gives the axis the standard damage/repair surface.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+ai_only = true
+
+# Fine Tactical systems (issue #512): one per phaser bank, following the
+# `phaser-<bank_id>` naming convention. Without these entries neither bank is
+# registered as AI-operable and the hull would never fire at all.
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+ai_only = true
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+ai_only = true
+
+# Ship-wide phaser settings: firing mode + emitter frequency. One declared system
+# (NOT per-bank) so SetPhaserMode/SetPhaserFrequency admission gates on a real
+# system.
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

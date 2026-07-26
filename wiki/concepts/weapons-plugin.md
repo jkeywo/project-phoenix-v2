@@ -89,7 +89,7 @@ Summing every arc meant three healthy rear arcs vetoed a shot into a collapsed f
 | Resource | Purpose |
 |---|---|
 | `TacticalRadarSelection` | Currently locked target UUID (`None` if no lock); the ship's Combat Lock, lifted into `ViewscreenBlackboard::combat_lock` (#829) |
-| `ActiveBeam` | Active phaser beam: target UUID, remaining seconds, damage accumulator, bank |
+| `ActiveBeam` | Active phaser beams, tracked **per bank** (issue #790): an ordered `bank -> {target UUID, remaining seconds, damage accumulator}` map. A hull whose arcs overlap burns both banks at once on a target abeam, and the two shipped fore/aft pairs overlap by different amounts: `ship_harrow_cruiser` authors 270° on **both** `fire_arc_deg` and `auto_arc_deg`, so it double-broadsides on the manual (`handle_fire_phaser`) and AI (`ai_phaser_auto_fire`) paths alike; `alliance_cruiser` authors `fire_arc_deg = 270` but `auto_arc_deg = 180`, so it double-broadsides on the manual path only — its two auto arcs abut on the beam line rather than overlapping. Same shape as `PhaserCooldown`, ordered rather than hashed so the per-tick shooter snapshots (and the seeded damage draws they feed) stay deterministic |
 | `PhaserCooldown` | Post-beam cooldown (duration sourced from `PhaserCombatConfigResource`) |
 | `CurrentPhaserMode` | Auto or Manual phaser mode |
 | `PhaserRenderConfig` | Beam colour and max render range, populated from ship TOML during world setup |

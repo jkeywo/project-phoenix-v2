@@ -105,9 +105,21 @@ impl Default for TacticalTargetSelector {
 #[derive(Component, Default, Clone, Debug, PartialEq)]
 pub struct LastShipAttacker(pub Option<String>);
 
-/// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
+/// One live beam: what a single phaser bank is currently burning at.
+///
 /// `remaining_secs` counts down to 0. `damage_accumulator` tracks fractional
 /// damage between ticks so 5 HP/s is applied accurately at any frame rate.
+/// The slot's mere existence in [`ActiveBeam`] means "this bank is firing" —
+/// there is no `Option<String>` target, because a beam with no target is not a
+/// beam.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ActiveBeamSlot {
+    pub target_uuid: String,
+    pub remaining_secs: f32,
+    pub damage_accumulator: f32,
+}
+
+/// Active phaser beam state, tracked independently **per bank** (issue #790).
 ///
 /// Per-entity `Component` on every ship (player + NPC). PR-7 (issue #597)
 /// removed the dual `Resource` derive — every ship has its own beam state.
@@ -115,13 +127,122 @@ pub struct LastShipAttacker(pub Option<String>);
 /// After issue #846, phaser fire commands arrive as admitted `ControlSystem`
 /// payloads rather than through `PhaserIntents` — the `#[require]` was deleted
 /// alongside the intents component.
+///
+/// ## Why per-bank, and why it is not a cruiser feature
+///
+/// Until issue #790 this was ONE slot per ship: a single `(target, bank)` pair,
+/// with `handle_fire_phaser` refusing any fire while it was occupied and
+/// `ai_phaser_auto_fire` picking exactly one bank per tick. That made
+/// overlapping fire arcs unrepresentable — a hull whose fore and aft banks each
+/// sweep 270° has both bearing on anything abeam, and could still only light
+/// one of them.
+///
+/// The shape is [`PhaserCooldown`]'s, deliberately: per-bank state that already
+/// worked keyed by the same `PhaserBankConfig.id` used everywhere else. Nothing
+/// here branches on who owns the hull (AGENTS.md #6) — how many banks bear is
+/// decided entirely by the arcs a hull authors. The player's `alliance_cruiser`
+/// authors `fire_arc_deg = 270` but `auto_arc_deg = 180`, and `handle_fire_phaser`
+/// gates on the former while `ai_phaser_auto_fire` gates on the latter, so it
+/// gets the same double broadside on the MANUAL path; its two auto arcs abut on
+/// the beam line rather than overlapping. `ship_harrow_cruiser` authors 270° on
+/// both, and double-broadsides on both paths.
+///
+/// ## Why `BTreeMap` and not `HashMap`
+///
+/// [`PhaserCooldown`] can use a `HashMap` because nothing ever *iterates* it in
+/// an order-sensitive way — it is a lookup plus an order-free decay. This map is
+/// iterated to build the per-tick shooter snapshots that drive damage
+/// application, and damage draws from the shared seeded RNG stream. `HashMap`'s
+/// iteration order is randomised per process, so it would make two runs of the
+/// same seeded scenario diverge. A `BTreeMap` orders by bank id, which is
+/// authored content and therefore stable.
 #[derive(Component, Default, Clone, Debug)]
 pub struct ActiveBeam {
-    pub target_uuid: Option<String>,
-    pub remaining_secs: f32,
-    pub damage_accumulator: f32,
-    /// Which bank is firing this beam. `None` when no beam is active.
-    pub bank: Option<PhaserBank>,
+    per_bank: std::collections::BTreeMap<PhaserBank, ActiveBeamSlot>,
+}
+
+impl ActiveBeam {
+    /// Is ANY bank burning? The ship-level "phasers are firing" question — HUD
+    /// state, power drain gating, observability.
+    pub fn is_firing(&self) -> bool {
+        !self.per_bank.is_empty()
+    }
+
+    /// Is this specific bank burning? The gate every firing path uses now: one
+    /// bank's live beam must never block another's.
+    pub fn is_bank_firing(&self, bank: &str) -> bool {
+        self.per_bank.contains_key(bank)
+    }
+
+    /// What this bank is burning at, if anything.
+    pub fn bank_target(&self, bank: &str) -> Option<&str> {
+        self.per_bank.get(bank).map(|s| s.target_uuid.as_str())
+    }
+
+    /// The lowest-keyed live bank's target — for the handful of single-value
+    /// observability surfaces (test helpers, the legacy no-banks path) that ask
+    /// "what is this ship shooting at" rather than "what is each bank doing".
+    /// Deterministic because the map is ordered.
+    pub fn any_target(&self) -> Option<&str> {
+        self.per_bank
+            .values()
+            .next()
+            .map(|s| s.target_uuid.as_str())
+    }
+
+    /// The lowest-keyed live bank's id. Same caveat as [`Self::any_target`].
+    pub fn any_bank(&self) -> Option<&str> {
+        self.per_bank.keys().next().map(|b| b.as_str())
+    }
+
+    /// Every live `(bank, slot)` in authored-id order.
+    pub fn live_banks(&self) -> impl Iterator<Item = (&PhaserBank, &ActiveBeamSlot)> {
+        self.per_bank.iter()
+    }
+
+    /// The number of banks currently burning.
+    pub fn live_bank_count(&self) -> usize {
+        self.per_bank.len()
+    }
+
+    /// How much longer this bank's beam burns, seconds. `0.0` when it is not
+    /// firing — the same shape [`PhaserCooldown::bank_remaining_secs`] uses for
+    /// its own per-bank map.
+    pub fn bank_remaining_secs(&self, bank: &str) -> f32 {
+        self.per_bank
+            .get(bank)
+            .map(|s| s.remaining_secs)
+            .unwrap_or(0.0)
+    }
+
+    /// Light `bank` at `target_uuid` for `duration_secs`. Replaces any beam
+    /// already on that bank (and only that bank).
+    pub fn start(
+        &mut self,
+        bank: impl Into<PhaserBank>,
+        target_uuid: impl Into<String>,
+        duration_secs: f32,
+    ) {
+        self.per_bank.insert(
+            bank.into(),
+            ActiveBeamSlot {
+                target_uuid: target_uuid.into(),
+                remaining_secs: duration_secs,
+                damage_accumulator: 0.0,
+            },
+        );
+    }
+
+    /// Extinguish `bank`, returning the slot it was burning (if any).
+    pub fn end_bank(&mut self, bank: &str) -> Option<ActiveBeamSlot> {
+        self.per_bank.remove(bank)
+    }
+
+    /// Mutable access to one bank's live slot, for the per-tick damage and
+    /// lifetime folds.
+    pub fn bank_slot_mut(&mut self, bank: &str) -> Option<&mut ActiveBeamSlot> {
+        self.per_bank.get_mut(bank)
+    }
 }
 
 /// Post-beam cooldown, tracked independently per phaser bank.
@@ -501,7 +622,11 @@ pub(crate) fn handle_fire_phaser(
                 continue;
             }
 
-            if cooldown.is_bank_active(&bank_id) || beam.target_uuid.is_some() {
+            // PER-BANK (issue #790): a live beam on one bank must not refuse a
+            // fire order on another. Before #790 this read `beam.target_uuid
+            // .is_some()` — a ship-level lock that made overlapping arcs
+            // unrepresentable.
+            if cooldown.is_bank_active(&bank_id) || beam.is_bank_firing(&bank_id) {
                 continue;
             }
 
@@ -568,14 +693,15 @@ pub(crate) fn handle_fire_phaser(
                 continue;
             }
 
-            // Cancel any active beam before starting the new one.
-            if let Some(old_uuid) = beam.target_uuid.take() {
-                let old_bank = beam.bank.clone().unwrap_or_default();
-                beam.remaining_secs = 0.0;
-                beam.damage_accumulator = 0.0;
+            // Cancel any beam already on THIS bank before relighting it. The
+            // gate above makes this unreachable today; it is kept per-bank
+            // rather than deleted so that if the gate is ever relaxed (a
+            // re-target mid-burn, say) the ended beam still closes its own
+            // `BeamEndedEvent` instead of leaking a live beam on the wire.
+            if let Some(old) = beam.end_bank(&bank_id) {
                 commands.trigger(BeamEndedEvent {
-                    bank: old_bank,
-                    target_uuid: old_uuid,
+                    bank: bank_id.clone(),
+                    target_uuid: old.target_uuid,
                     source_entity: ship_entity,
                 });
             }
@@ -589,10 +715,7 @@ pub(crate) fn handle_fire_phaser(
                     }
                 })
                 .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
-            beam.target_uuid = Some(target_uuid.clone());
-            beam.remaining_secs = beam_duration_secs;
-            beam.damage_accumulator = 0.0;
-            beam.bank = Some(bank_id.clone());
+            beam.start(bank_id.clone(), target_uuid.clone(), beam_duration_secs);
 
             commands.trigger(BeamStartedEvent {
                 bank: bank_id,
@@ -689,7 +812,7 @@ pub(crate) fn ai_phaser_auto_fire(
         // leg because their fine phaser bank systems are Ai by default).
         //
         // Per-bank gate: each bank's own policy is checked inside the
-        // find_map below when choosing which bank to fire, so that AI can
+        // filter_map below when collecting which banks to fire, so that AI can
         // auto-fire from one bank even when another is offline. This
         // ship-level `any_bank_operates_ai` predicate is only an early skip.
         let bank_ai_available = match ship_config_opt {
@@ -709,9 +832,11 @@ pub(crate) fn ai_phaser_auto_fire(
             continue;
         }
 
-        if beam.target_uuid.is_some() {
-            continue;
-        }
+        // NOTE the absence (issue #790): there is no ship-level "already
+        // firing → skip" bail here any more. It was what made two banks
+        // mutually exclusive no matter how far their arcs overlapped. The
+        // equivalent per-bank check lives in the bank scan below, alongside the
+        // cooldown one it belongs with.
 
         // Target selection: the **Combat Lock** from this ship's frozen
         // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted
@@ -737,11 +862,14 @@ pub(crate) fn ai_phaser_auto_fire(
         let modifiers: &crate::modifiers::ShipModifiers =
             modifiers_opt.unwrap_or(&modifiers_default);
 
-        // Find the first bank that is off-cooldown and has the target in its auto arc.
+        // Find EVERY bank that is off-cooldown, not already burning, and has the
+        // target in its auto arc (issue #790 — this was `find_map`, i.e. at most
+        // one bank per ship per tick).
+        //
         // Per-bank policy gate (issue #512): skip banks whose fine system is
         // offline (damaged/destroyed) — auto-fire uses the same operate_ai
         // predicate as manual fire.
-        let bank_id: Option<String> = if combat_config.0.banks.is_empty() {
+        let bank_ids: Vec<String> = if combat_config.0.banks.is_empty() {
             let effective_range =
                 PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
             let ready = crate::radar::is_fire_ready_with_range(
@@ -767,73 +895,96 @@ pub(crate) fn ai_phaser_auto_fire(
                 ready,
                 phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
             );
-            (ready && !cooldown.is_bank_active("") && phaser_bank_policy_fires(policy, &facts))
-                .then(String::new)
+            (ready
+                && !cooldown.is_bank_active("")
+                && !beam.is_bank_firing("")
+                && phaser_bank_policy_fires(policy, &facts))
+            .then(String::new)
+            .into_iter()
+            .collect()
         } else {
-            combat_config.0.banks.iter().find_map(|b| {
-                // Per-bank fine-system gate — skip offline banks.
-                if let Some(bank_id) = crate::system_registry::phaser_bank_system_id(&b.id) {
-                    if system_is_registered(control_sources, &bank_id)
-                        && !control_sources.0.policy_for(&bank_id).operate_ai
-                    {
+            combat_config
+                .0
+                .banks
+                .iter()
+                .filter_map(|b| {
+                    // Per-bank fine-system gate — skip offline banks.
+                    if let Some(bank_id) = crate::system_registry::phaser_bank_system_id(&b.id) {
+                        if system_is_registered(control_sources, &bank_id)
+                            && !control_sources.0.policy_for(&bank_id).operate_ai
+                        {
+                            return None;
+                        }
+                    }
+                    // Cooldown and "already burning" are the same per-bank question
+                    // asked of two surfaces: a bank mid-beam must not be re-lit, but
+                    // its sibling is free to fire (issue #790).
+                    if cooldown.is_bank_active(&b.id) || beam.is_bank_firing(&b.id) {
                         return None;
                     }
-                }
-                if cooldown.is_bank_active(&b.id) {
-                    return None;
-                }
-                let bank_base_range = if b.beam_range > 0.0 {
-                    b.beam_range
-                } else {
-                    PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                };
-                let effective_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-                let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                    <= effective_range * effective_range;
-                let (rx, ry) =
-                    crate::weapons::phaser::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
-                let arc_ok = crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
-                if !(range_ok && arc_ok) {
-                    return None;
-                }
-                // Per-bank policy gate (issue #781): the bank is host-ready
-                // (off-cooldown, target in range/arc) — now resolve its own
-                // authored open-fire policy over a seeded readiness snapshot.
-                // Only a bank whose policy fires is selected; an idle bank (or one
-                // whose guard holds) is skipped, leaving other banks free to fire
-                // (per-bank independence, AC7).
-                let policy = bank_policies_opt
-                    .and_then(|p| p.0.get(&b.id))
-                    .unwrap_or(&default_bank_policy);
-                let facts = seed_phaser_bank_facts(
-                    true,
-                    false,
-                    0.0,
-                    range_ok,
-                    arc_ok,
-                    phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-                );
-                phaser_bank_policy_fires(policy, &facts).then(|| b.id.clone())
-            })
+                    let bank_base_range = if b.beam_range > 0.0 {
+                        b.beam_range
+                    } else {
+                        PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    };
+                    let effective_range =
+                        bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+                    let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
+                        <= effective_range * effective_range;
+                    let (rx, ry) = crate::weapons::phaser::ship_local(
+                        tx,
+                        tz,
+                        physics.x,
+                        physics.z,
+                        physics.yaw,
+                    );
+                    let arc_ok =
+                        crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
+                    if !(range_ok && arc_ok) {
+                        return None;
+                    }
+                    // Per-bank policy gate (issue #781): the bank is host-ready
+                    // (off-cooldown, target in range/arc) — now resolve its own
+                    // authored open-fire policy over a seeded readiness snapshot.
+                    // Only a bank whose policy fires is selected; an idle bank (or one
+                    // whose guard holds) is skipped, leaving other banks free to fire
+                    // (per-bank independence, AC7).
+                    let policy = bank_policies_opt
+                        .and_then(|p| p.0.get(&b.id))
+                        .unwrap_or(&default_bank_policy);
+                    let facts = seed_phaser_bank_facts(
+                        true,
+                        false,
+                        0.0,
+                        range_ok,
+                        arc_ok,
+                        phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+                    );
+                    phaser_bank_policy_fires(policy, &facts).then(|| b.id.clone())
+                })
+                .collect()
         };
 
-        let Some(bank_id) = bank_id else {
-            continue;
-        };
-
-        // Emit as an admitted command through the shared AI seam.
-        let Some(target) = crate::system_registry::phaser_bank_system_id(&bank_id) else {
-            continue;
-        };
-        crate::command_admission::ai_emit::emit_ai_command(
-            entity_uuid,
-            target,
-            crate::messages::SystemControlPayload::FirePhaser,
-            control_sources,
-            &sessions,
-            ship_config_opt,
-            &mut admitted,
-        );
+        // One admitted command per eligible bank. `handle_fire_phaser` reads the
+        // whole admitted set in `SimSet::Physics`, so a hull whose fore and aft
+        // 270° arcs both bear on an abeam target lights both this tick — with
+        // every ordinary gate (fine-system online, cooldown, range, arc, then the
+        // bank's own policy) still applied independently to each.
+        for bank_id in bank_ids {
+            // Emit as an admitted command through the shared AI seam.
+            let Some(target) = crate::system_registry::phaser_bank_system_id(&bank_id) else {
+                continue;
+            };
+            crate::command_admission::ai_emit::emit_ai_command(
+                entity_uuid,
+                target,
+                crate::messages::SystemControlPayload::FirePhaser,
+                control_sources,
+                &sessions,
+                ship_config_opt,
+                &mut admitted,
+            );
+        }
     }
 }
 
@@ -934,10 +1085,18 @@ pub(crate) fn tick_beams_prepare(
     {
         cooldown.tick(dt);
 
-        let Some(target_uuid) = beam.target_uuid.clone() else {
+        // Every bank burning this tick, in authored-id order (issue #790). Taken
+        // as an owned snapshot so the loop below can mutate the beam map — end a
+        // bank, fold its accumulator — while iterating. Ordered, so the shooter
+        // snapshots it produces (and therefore the seeded damage draws they
+        // drive) are identical across runs of the same seed.
+        let live: Vec<(PhaserBank, String)> = beam
+            .live_banks()
+            .map(|(bank, slot)| (bank.clone(), slot.target_uuid.clone()))
+            .collect();
+        if live.is_empty() {
             continue;
-        };
-        let active_bank = beam.bank.clone().unwrap_or_default();
+        }
 
         // Per-entity component paths (preferred). Fall back to defaults —
         // and for `ShipModifiers`, also fall back to the global Resource
@@ -950,27 +1109,82 @@ pub(crate) fn tick_beams_prepare(
         let modifiers: &crate::modifiers::ShipModifiers =
             modifiers_opt.unwrap_or(&modifiers_default);
 
-        let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
-        let cooldown_secs = active_bank_cfg
-            .map(|b| {
-                if b.cooldown_secs > 0.0 {
-                    b.cooldown_secs
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
-                }
-            })
-            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
+        for (active_bank, target_uuid) in live {
+            let active_bank_cfg = combat_config.0.bank_by_id(&active_bank);
+            let cooldown_secs = active_bank_cfg
+                .map(|b| {
+                    if b.cooldown_secs > 0.0 {
+                        b.cooldown_secs
+                    } else {
+                        PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+                    }
+                })
+                .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
 
-        // Use live ECS position for arc/range check — WorldResource snapshot
-        // is stale for moving targets.
-        let live_pos = live_entity_xz(&target_uuid, &asteroid_q, &entity_q);
-        let (tx, tz) = match live_pos {
-            Some(p) => p,
-            None => {
-                // Target vanished — end beam.
-                beam.target_uuid = None;
-                beam.remaining_secs = 0.0;
-                beam.damage_accumulator = 0.0;
+            // Use live ECS position for arc/range check — WorldResource snapshot
+            // is stale for moving targets.
+            let live_pos = live_entity_xz(&target_uuid, &asteroid_q, &entity_q);
+            let (tx, tz) = match live_pos {
+                Some(p) => p,
+                None => {
+                    // Target vanished — end this bank's beam.
+                    beam.end_bank(&active_bank);
+                    cooldown.start_bank(&active_bank, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                    continue;
+                }
+            };
+
+            // Bank in-arc/range check (uses per-bank config; falls back to a
+            // legacy global range when the config has no banks defined).
+            let bank_in_arc = if combat_config.0.banks.is_empty() {
+                let effective_phaser_range = PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    * modifiers.get(&ModifierSlot::RadarRange);
+                crate::radar::is_fire_ready_with_range(
+                    tx,
+                    tz,
+                    shooter_physics.x,
+                    shooter_physics.z,
+                    shooter_physics.yaw,
+                    effective_phaser_range,
+                )
+            } else {
+                active_bank_cfg
+                    .map(|bank_cfg| {
+                        let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                            bank_cfg.beam_range
+                        } else {
+                            PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                        };
+                        let effective_bank_range =
+                            bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+                        let (rx, ry) = crate::weapons::phaser::ship_local(
+                            tx,
+                            tz,
+                            shooter_physics.x,
+                            shooter_physics.z,
+                            shooter_physics.yaw,
+                        );
+                        let range_ok = (tx - shooter_physics.x).powi(2)
+                            + (tz - shooter_physics.z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok
+                            && crate::weapons::phaser::in_arc(
+                                rx,
+                                ry,
+                                bank_cfg.facing_deg,
+                                bank_cfg.fire_arc_deg,
+                            )
+                    })
+                    .unwrap_or(false)
+            };
+
+            if !bank_in_arc {
+                beam.end_bank(&active_bank);
                 cooldown.start_bank(&active_bank, cooldown_secs);
                 commands.trigger(BeamEndedEvent {
                     bank: active_bank.clone(),
@@ -979,189 +1193,147 @@ pub(crate) fn tick_beams_prepare(
                 });
                 continue;
             }
-        };
 
-        // Bank in-arc/range check (uses per-bank config; falls back to a
-        // legacy global range when the config has no banks defined).
-        let bank_in_arc = if combat_config.0.banks.is_empty() {
-            let effective_phaser_range =
-                PhaserCombatConfig::DEFAULT_PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-            crate::radar::is_fire_ready_with_range(
-                tx,
-                tz,
-                shooter_physics.x,
-                shooter_physics.z,
-                shooter_physics.yaw,
-                effective_phaser_range,
-            )
-        } else {
-            active_bank_cfg
-                .map(|bank_cfg| {
-                    let bank_base_range = if bank_cfg.beam_range > 0.0 {
-                        bank_cfg.beam_range
+            let damage_per_sec = active_bank_cfg
+                .map(|b| {
+                    if b.beam_damage_per_sec > 0.0 {
+                        b.beam_damage_per_sec
                     } else {
-                        PhaserCombatConfig::DEFAULT_PHASER_RANGE
-                    };
-                    let effective_bank_range =
-                        bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-                    let (rx, ry) = crate::weapons::phaser::ship_local(
-                        tx,
-                        tz,
-                        shooter_physics.x,
-                        shooter_physics.z,
-                        shooter_physics.yaw,
-                    );
-                    let range_ok = (tx - shooter_physics.x).powi(2)
-                        + (tz - shooter_physics.z).powi(2)
-                        <= effective_bank_range * effective_bank_range;
-                    range_ok
-                        && crate::weapons::phaser::in_arc(
-                            rx,
-                            ry,
-                            bank_cfg.facing_deg,
-                            bank_cfg.fire_arc_deg,
-                        )
+                        PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
+                    }
                 })
-                .unwrap_or(false)
-        };
+                .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
+            let shield_pierce = active_bank_cfg.and_then(|b| b.shield_pierce).unwrap_or(0.0);
 
-        if !bank_in_arc {
-            beam.target_uuid = None;
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
-            cooldown.start_bank(&active_bank, cooldown_secs);
-            commands.trigger(BeamEndedEvent {
-                bank: active_bank.clone(),
-                target_uuid,
-                source_entity: shooter_entity,
-            });
-            continue;
-        }
-
-        let damage_per_sec = active_bank_cfg
-            .map(|b| {
-                if b.beam_damage_per_sec > 0.0 {
-                    b.beam_damage_per_sec
-                } else {
-                    PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC
+            // Each bank accumulates its OWN fractional damage: two banks with
+            // different `beam_damage_per_sec` must not share one accumulator, or the
+            // weaker one would round up on the stronger one's remainder.
+            let damage_to_apply = match beam.bank_slot_mut(&active_bank) {
+                Some(slot) => {
+                    slot.damage_accumulator +=
+                        damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
+                    let whole = slot.damage_accumulator.floor() as i32;
+                    // Deduct the integer part now; the snapshot below drives damage
+                    // application in phase 2.
+                    slot.damage_accumulator -= whole as f32;
+                    whole
                 }
-            })
-            .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC);
-        let shield_pierce = active_bank_cfg.and_then(|b| b.shield_pierce).unwrap_or(0.0);
+                None => continue,
+            };
 
-        beam.damage_accumulator += damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
-        let damage_to_apply = beam.damage_accumulator.floor() as i32;
-        // Deduct the integer part now; the snapshot below drives damage
-        // application in phase 2.
-        beam.damage_accumulator -= damage_to_apply as f32;
-
-        // ── LOS raycast: check if another entity blocks the beam this tick ──
-        //
-        // When Rapier physics is not loaded (tests without RapierPhysicsPlugin),
-        // `rapier_context` is None — skip LOS and apply damage to the original
-        // target as before.
-        let (effective_target_uuid, effective_target_x, effective_target_z, zero_damage) =
-            if let Some(ref ctx_param) = rapier_context {
-                if let Ok(ctx) = ctx_param.single() {
-                    let ray_origin = Vec3::new(shooter_physics.x, 0.0, shooter_physics.z);
-                    let to_target = Vec3::new(tx - shooter_physics.x, 0.0, tz - shooter_physics.z);
-                    let dist_to_target = to_target.length();
-                    if dist_to_target > f32::EPSILON {
-                        let ray_dir = to_target / dist_to_target;
-                        let filter = bevy_rapier3d::prelude::QueryFilter::new()
-                            .exclude_rigid_body(shooter_entity);
-                        if let Some((hit_entity, toi)) =
-                            ctx.cast_ray(ray_origin, ray_dir, dist_to_target, true, filter)
-                        {
-                            // Classify the blocking entity.
-                            if let Ok((_, blocker_ent_uuid, blocker_ast_uuid, blocker_faction)) =
-                                blocker_info_q.get(hit_entity)
+            // ── LOS raycast: check if another entity blocks the beam this tick ──
+            //
+            // When Rapier physics is not loaded (tests without RapierPhysicsPlugin),
+            // `rapier_context` is None — skip LOS and apply damage to the original
+            // target as before.
+            let (effective_target_uuid, effective_target_x, effective_target_z, zero_damage) =
+                if let Some(ref ctx_param) = rapier_context {
+                    if let Ok(ctx) = ctx_param.single() {
+                        let ray_origin = Vec3::new(shooter_physics.x, 0.0, shooter_physics.z);
+                        let to_target =
+                            Vec3::new(tx - shooter_physics.x, 0.0, tz - shooter_physics.z);
+                        let dist_to_target = to_target.length();
+                        if dist_to_target > f32::EPSILON {
+                            let ray_dir = to_target / dist_to_target;
+                            let filter = bevy_rapier3d::prelude::QueryFilter::new()
+                                .exclude_rigid_body(shooter_entity);
+                            if let Some((hit_entity, toi)) =
+                                ctx.cast_ray(ray_origin, ray_dir, dist_to_target, true, filter)
                             {
-                                let blocker_uuid_str: Option<&str> = blocker_ent_uuid
-                                    .map(|u| u.0.as_str())
-                                    .or_else(|| blocker_ast_uuid.map(|u| u.0.as_str()));
+                                // Classify the blocking entity.
+                                if let Ok((
+                                    _,
+                                    blocker_ent_uuid,
+                                    blocker_ast_uuid,
+                                    blocker_faction,
+                                )) = blocker_info_q.get(hit_entity)
+                                {
+                                    let blocker_uuid_str: Option<&str> = blocker_ent_uuid
+                                        .map(|u| u.0.as_str())
+                                        .or_else(|| blocker_ast_uuid.map(|u| u.0.as_str()));
 
-                                // Only reroute when blocker is a *different* entity from
-                                // the original target (the ray hits the target itself at
-                                // toi == dist_to_target).
-                                let blocker_is_target = blocker_uuid_str
-                                    .map(|u| u == target_uuid.as_str())
-                                    .unwrap_or(false);
+                                    // Only reroute when blocker is a *different* entity from
+                                    // the original target (the ray hits the target itself at
+                                    // toi == dist_to_target).
+                                    let blocker_is_target = blocker_uuid_str
+                                        .map(|u| u == target_uuid.as_str())
+                                        .unwrap_or(false);
 
-                                if !blocker_is_target && toi < dist_to_target {
-                                    // Determine friendliness.
-                                    let is_friendly = match (
-                                        shooter_faction_opt.map(|f| f.0),
-                                        blocker_faction.map(|f| f.0),
-                                        &faction_registry,
-                                    ) {
-                                        (Some(sf), Some(bf), Some(reg)) => {
-                                            !crate::faction::is_enemy(Some(sf), Some(bf), reg)
-                                        }
-                                        // No faction data → treat as non-friendly (takes damage).
-                                        _ => false,
-                                    };
+                                    if !blocker_is_target && toi < dist_to_target {
+                                        // Determine friendliness.
+                                        let is_friendly = match (
+                                            shooter_faction_opt.map(|f| f.0),
+                                            blocker_faction.map(|f| f.0),
+                                            &faction_registry,
+                                        ) {
+                                            (Some(sf), Some(bf), Some(reg)) => {
+                                                !crate::faction::is_enemy(Some(sf), Some(bf), reg)
+                                            }
+                                            // No faction data → treat as non-friendly (takes damage).
+                                            _ => false,
+                                        };
 
-                                    if is_friendly {
-                                        // Friendly ship blocks; nobody takes damage this tick.
-                                        (target_uuid.clone(), tx, tz, true)
-                                    } else {
-                                        // Enemy/neutral/asteroid blocks; blocker takes damage.
-                                        let blocker_uuid =
-                                            blocker_uuid_str.unwrap_or("").to_string();
-                                        if blocker_uuid.is_empty() {
-                                            // Blocker has no UUID — fall through to original target.
-                                            (target_uuid.clone(), tx, tz, false)
+                                        if is_friendly {
+                                            // Friendly ship blocks; nobody takes damage this tick.
+                                            (target_uuid.clone(), tx, tz, true)
                                         } else {
-                                            // Use the ray hit position as the blocker position
-                                            // for VFX (e.g. asteroid destruction effects).
-                                            let hit_pos = ray_origin + ray_dir * toi;
-                                            (blocker_uuid, hit_pos.x, hit_pos.z, false)
+                                            // Enemy/neutral/asteroid blocks; blocker takes damage.
+                                            let blocker_uuid =
+                                                blocker_uuid_str.unwrap_or("").to_string();
+                                            if blocker_uuid.is_empty() {
+                                                // Blocker has no UUID — fall through to original target.
+                                                (target_uuid.clone(), tx, tz, false)
+                                            } else {
+                                                // Use the ray hit position as the blocker position
+                                                // for VFX (e.g. asteroid destruction effects).
+                                                let hit_pos = ray_origin + ray_dir * toi;
+                                                (blocker_uuid, hit_pos.x, hit_pos.z, false)
+                                            }
                                         }
+                                    } else {
+                                        // Hit was the target itself — no blocker.
+                                        (target_uuid.clone(), tx, tz, false)
                                     }
                                 } else {
-                                    // Hit was the target itself — no blocker.
+                                    // Hit entity not in blocker_info_q — fall through to original target.
                                     (target_uuid.clone(), tx, tz, false)
                                 }
                             } else {
-                                // Hit entity not in blocker_info_q — fall through to original target.
+                                // No LOS blocker found.
                                 (target_uuid.clone(), tx, tz, false)
                             }
                         } else {
-                            // No LOS blocker found.
+                            // Shooter and target at same position — no LOS check.
                             (target_uuid.clone(), tx, tz, false)
                         }
                     } else {
-                        // Shooter and target at same position — no LOS check.
+                        // Rapier context unavailable at this tick.
                         (target_uuid.clone(), tx, tz, false)
                     }
                 } else {
-                    // Rapier context unavailable at this tick.
+                    // No Rapier plugin — skip LOS.
                     (target_uuid.clone(), tx, tz, false)
-                }
-            } else {
-                // No Rapier plugin — skip LOS.
-                (target_uuid.clone(), tx, tz, false)
-            };
+                };
 
-        beam_context.0.push(ShooterState {
-            shooter_entity,
-            shooter_uuid: shooter_uuid_opt.map(|u| u.0.clone()).unwrap_or_default(),
-            shooter_x: shooter_physics.x,
-            shooter_z: shooter_physics.z,
-            target_uuid,
-            active_bank,
-            cooldown_secs,
-            damage_to_apply,
-            shield_pierce,
-            end_beam_early: false,
-            is_local_shooter,
-            effective_target_uuid,
-            effective_target_x,
-            effective_target_z,
-            zero_damage,
-            shooter_phaser_freq: shooter_phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
-        });
+            beam_context.0.push(ShooterState {
+                shooter_entity,
+                shooter_uuid: shooter_uuid_opt.map(|u| u.0.clone()).unwrap_or_default(),
+                shooter_x: shooter_physics.x,
+                shooter_z: shooter_physics.z,
+                target_uuid,
+                active_bank,
+                cooldown_secs,
+                damage_to_apply,
+                shield_pierce,
+                end_beam_early: false,
+                is_local_shooter,
+                effective_target_uuid,
+                effective_target_x,
+                effective_target_z,
+                zero_damage,
+                shooter_phaser_freq: shooter_phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+            });
+        }
     }
 }
 
@@ -1237,6 +1409,19 @@ pub(crate) fn tick_beams_apply_damage(
     // `LogFilterConfig` (see logging macro docs).
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
+    // Uuids whose destruction has already been reported this tick (issue #790).
+    //
+    // `apply_hull_damage` reports `destroyed` from `hull.is_destroyed()`, so a
+    // SECOND hit landing on an already-dead hull in the same tick reports the
+    // kill again — and every `EntityDespawned`, `AiEntityDestroyed`,
+    // `ShipDestroyedVfx` and `EntityDestroyed` telemetry row behind it would fire
+    // twice. Two shooters converging on one target could always hit that; a
+    // broadside cruiser whose fore and aft banks share a target hits it as the
+    // NORMAL case, which is what makes the guard necessary now. Reporting is
+    // deduplicated; damage and `end_beam_early` are not — both beams really did
+    // fire and both must still end.
+    let mut destruction_reported: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for state in beam_context.0.iter_mut() {
         // When a friendly ship blocks the beam this tick, skip all damage and
         // attacker tracking — nobody takes damage.
@@ -1597,6 +1782,13 @@ pub(crate) fn tick_beams_apply_damage(
             continue;
         }
         if target_asteroid_destroyed || target_ship_destroyed_non_local {
+            // First reporter wins; a second beam that landed on the same corpse
+            // this tick still ends (below) but says nothing (see
+            // `destruction_reported`).
+            if !destruction_reported.insert(state.effective_target_uuid.clone()) {
+                state.end_beam_early = true;
+                continue;
+            }
             world
                 .0
                 .entities
@@ -1688,9 +1880,7 @@ pub(crate) fn tick_beams_tick_lifetimes(
         };
 
         if state.end_beam_early {
-            beam.target_uuid = None;
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
+            beam.end_bank(&state.active_bank);
             cooldown.start_bank(&state.active_bank, state.cooldown_secs);
             if state.is_local_shooter {
                 if let Some(ref mut wt) = weapons_target_opt {
@@ -1705,12 +1895,15 @@ pub(crate) fn tick_beams_tick_lifetimes(
             continue;
         }
 
-        // Time-based beam end.
-        beam.remaining_secs -= dt;
-        if beam.remaining_secs <= 0.0 {
-            beam.target_uuid = None;
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
+        // Time-based beam end, per bank: each bank runs down its own authored
+        // `beam_duration_secs`, so a short bank expiring never cuts a long one
+        // short (issue #790).
+        let Some(slot) = beam.bank_slot_mut(&state.active_bank) else {
+            continue;
+        };
+        slot.remaining_secs -= dt;
+        if slot.remaining_secs <= 0.0 {
+            beam.end_bank(&state.active_bank);
             cooldown.start_bank(&state.active_bank, state.cooldown_secs);
             commands.trigger(BeamEndedEvent {
                 bank: state.active_bank.clone(),
@@ -1791,7 +1984,11 @@ pub fn drain_power_for_active_beam(
 ) {
     let amount = PHASER_BATTERY_DRAIN_PER_SEC * time.delta_secs();
     for (source_entity, beam) in beam_q.iter() {
-        if beam.target_uuid.is_some() {
+        // One drain per LIVE BANK (issue #790). A ship burning both broadsides
+        // is running two emitters and pays for two: keeping this ship-level
+        // would have made the second beam free, which is the kind of silent
+        // discount a "just make it per-bank" rework leaves behind.
+        for _ in 0..beam.live_bank_count() {
             inter_system.0.push(InterSystemMsg {
                 target: crate::system_registry::power_battery_system_id(),
                 payload: InterSystemPayload::DrainWeaponsBattery { amount },

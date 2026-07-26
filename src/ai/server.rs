@@ -1809,7 +1809,7 @@ range = 320
 
         let beam = app.world().get::<ActiveBeam>(entity).unwrap();
         let cd = app.world().get::<PhaserCooldown>(entity).unwrap();
-        assert!(beam.target_uuid.is_none(), "beam must not be active");
+        assert!(!beam.is_firing(), "beam must not be active");
         assert!(!cd.is_bank_active("fore"), "cooldown must be 0");
     }
 

@@ -4081,43 +4081,81 @@ station = "pilot"
         q.single(app.world()).ok().and_then(|wt| wt.0.clone())
     }
 
+    // `ActiveBeam` is per-bank since issue #790; these fixtures all drive a ship
+    // firing ONE bank at a time, so "the beam" still means "the one live slot".
+
     fn get_active_beam_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
             .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
         q.single(app.world())
             .ok()
-            .and_then(|b| b.target_uuid.clone())
+            .and_then(|b| b.any_target().map(str::to_string))
     }
 
     fn active_beam_target_is_none(app: &mut App) -> bool {
         get_active_beam_target(app).is_none()
     }
 
+    fn live_beam_banks(app: &mut App) -> Vec<String> {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+        q.single(app.world())
+            .ok()
+            .map(|b| b.live_banks().map(|(k, _)| k.clone()).collect())
+            .unwrap_or_default()
+    }
+
     fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
+        let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            b.target_uuid = uuid;
+            match uuid {
+                None => {
+                    for bank in banks {
+                        b.end_bank(&bank);
+                    }
+                }
+                Some(u) => {
+                    let bank = banks.first().cloned().unwrap_or_default();
+                    let remaining = b
+                        .bank_slot_mut(&bank)
+                        .map(|s| s.remaining_secs)
+                        .unwrap_or(0.0);
+                    b.start(bank, u, remaining);
+                }
+            }
         }
     }
 
     fn set_active_beam_remaining_secs(app: &mut App, secs: f32) {
+        let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            b.remaining_secs = secs;
+            for bank in banks {
+                if let Some(slot) = b.bank_slot_mut(&bank) {
+                    slot.remaining_secs = secs;
+                }
+            }
         }
     }
 
     fn set_active_beam_damage_accumulator(app: &mut App, val: f32) {
+        let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
             .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
-            b.damage_accumulator = val;
+            for bank in banks {
+                if let Some(slot) = b.bank_slot_mut(&bank) {
+                    slot.damage_accumulator = val;
+                }
+            }
         }
     }
 

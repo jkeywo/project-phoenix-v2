@@ -1222,13 +1222,33 @@ pub struct HelmRecoveryHistory {
 /// one-tick yaw rate, and it converges rather than drifting.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct HelmPassSurface {
-    /// The hull authors a complete fly-through doctrine AND both travel axes are
-    /// AI-operated. `false` — every hull that ships today — means the planner
-    /// uses the ordinary `plan_helm_travel` arm and nothing changes.
+    /// The hull authors at least ONE complete host-flown leg set — the
+    /// fly-through pass ([`Self::pass_legs`]), the shield-recovery standoff, or
+    /// the combat broadside orbit — AND both travel axes are AI-operated.
+    /// `false` means the planner uses the ordinary `plan_helm_travel` arm and
+    /// nothing changes.
+    ///
+    /// Widened by issue #790. Before it, `active` was exactly "the fly-through
+    /// pass is authored", because that was the only host-flown leg set there
+    /// was; the recovery legs rode along on top of it because the destroyer
+    /// happens to author both. A hull that flies a combat orbit and nothing else
+    /// has no `approach_speed` and no `escape_speed` to author, and gating its
+    /// orbit on them would have made it fly ordinary doctrine travel for ever —
+    /// silently, since every other assertion about it would still hold.
     pub active: bool,
+    /// The hull authors the fly-through pass's own two throttles
+    /// ([`Self::approach_speed`] / [`Self::escape_speed`]), so the planner may
+    /// select the INBOUND and RE-ENGAGE legs (issue #790).
+    ///
+    /// Separate from [`Self::active`] because those two legs are the planner's
+    /// *fallback* when no other leg is selected, and a fallback flown on an
+    /// unauthored throttle is a ship coasting at zero into a fight. A hull
+    /// without them falls back to ordinary doctrine travel instead.
+    pub pass_legs: bool,
     /// `true` once the Steering machine's current state answers the `yaw`
-    /// channel with `hold_committed_heading`: the facing solution is closed and
-    /// the ship is flying [`Self::escape_heading_rad`].
+    /// channel with `hold_committed_heading` AND [`Self::pass_legs`] holds: the
+    /// facing solution is closed and the ship is flying
+    /// [`Self::escape_heading_rad`].
     pub escape: bool,
     /// The heading (radians) the host froze at the last committed transition,
     /// read out of the Steering system's own `memory(escape_heading_rad)`.
@@ -1275,6 +1295,32 @@ pub struct HelmPassSurface {
     /// Authored throttle fraction flown on the re-entry pivot (Steering
     /// `param`). `0.0` cuts thrust for the turn.
     pub reengage_speed: f32,
+    // ── The combat broadside orbit (issue #790) ──────────────────────────────
+    //
+    // A FIFTH leg, resolved exactly like the four above: off the authored yaw
+    // verb, never off a state name. It shares [`Self::orbit_direction`] — a ship
+    // circles one way at a time, and the slot is written by the same host draw —
+    // but nothing else, because a fighting ring and a standoff ring are
+    // different numbers chosen for opposite reasons.
+    /// `true` once the Steering machine's current state answers the `yaw`
+    /// channel with `hold_combat_orbit` AND the hull authors the full
+    /// combat-orbit parameter set: the ship is circling its target at
+    /// [`Self::combat_orbit_range`] with its broadsides bearing.
+    pub combat_orbit: bool,
+    /// The fighting radius to hold, world units — an AUTHORED Steering `param`,
+    /// not a derivation from the target's reach.
+    ///
+    /// It is the hull's own weapon envelope expressed as a distance, so it
+    /// cannot come from the enemy: a cruiser whose broadsides reach 50 units
+    /// wants to be at 50 units whether it is fighting a knife-fighter or a
+    /// long-range missile boat. [`Self::safe_range`] is the opposite question and
+    /// keeps its own field.
+    pub combat_orbit_range: f32,
+    /// Authored throttle fraction flown on the combat ring (Steering `param`).
+    pub combat_orbit_speed: f32,
+    /// Authored spiral gain for the combat ring: radians of heading offset per
+    /// unit of *fractional* radial error (Steering `param`).
+    pub combat_orbit_spiral_gain: f32,
 }
 
 /// The fact name the shared hazard surface is seeded under by
@@ -1561,26 +1607,81 @@ pub(crate) const PRESSED_PARAMS: &[&str] = &[
     PRESSED_HYSTERESIS_PARAM,
 ];
 
-/// Private-memory slot: which way round the current recovery orbit runs,
-/// `+1.0` or `-1.0` (issue #788).
+// ── Authored combat-orbit params (issue #790) ────────────────────────────────
+//
+// The broadside orbit's own three scalars, read off the STEERING policy for the
+// same reason the recovery six are: Steering's yaw verb is what tells the host
+// which leg is being flown. There is no default for any of them anywhere in
+// Rust, and the host gates on ALL THREE together — see [`COMBAT_ORBIT_PARAMS`].
+
+/// The fighting radius the orbit holds, world units.
 ///
-/// Host-written on the tick the recovery state is entered, from
+/// AUTHORED, and deliberately not routed through [`SAFE_RANGE_FACT`] /
+/// [`seed_recovery_facts`]. Those derive a ring from the TARGET's direct-fire
+/// reach plus a margin, which is the right question for a shield-recovery
+/// standoff and the wrong one for a fighting range: this hull wants the enemy
+/// inside its OWN weapon envelope, a number that belongs to the hull and is
+/// knowable when the file is written.
+pub(crate) const COMBAT_ORBIT_RANGE_PARAM: &str = "combat_orbit_range";
+/// Throttle fraction flown on the combat ring. Non-zero by construction — a
+/// broadside orbit that stops is a station-keeper, not an orbit.
+pub(crate) const COMBAT_ORBIT_SPEED_PARAM: &str = "combat_orbit_speed";
+/// Radians of heading offset per unit of *fractional* radial error — how hard
+/// the orbit spirals back onto the ring from inside or outside it.
+pub(crate) const COMBAT_ORBIT_SPIRAL_GAIN_PARAM: &str = "combat_orbit_spiral_gain";
+
+/// Every scalar the combat-orbit arm needs, gated as ONE unit by
+/// [`combat_orbit_params_authored`].
+///
+/// All three, for the reason #788's and #789's reviews both landed on: a gate
+/// that requires only some of the params an arm needs admits a
+/// partially-authored hull into an arm it half-flies. A hull authoring the range
+/// but not the throttle would orbit at zero speed (a parked ship inside a
+/// hostile's guns); one authoring the throttle but not the range would fly a
+/// tangent of a ring of radius zero, which is a spiral straight into the target.
+/// Declining the whole arm leaves it flying ordinary doctrine travel, which is a
+/// behaviour a designer can actually see.
+pub(crate) const COMBAT_ORBIT_PARAMS: &[&str] = &[
+    COMBAT_ORBIT_RANGE_PARAM,
+    COMBAT_ORBIT_SPEED_PARAM,
+    COMBAT_ORBIT_SPIRAL_GAIN_PARAM,
+];
+
+/// Does this Steering policy author the complete combat-orbit scalar set?
+///
+/// The sibling of [`recovery_params_authored`], and separate from it on purpose:
+/// a hull may fly a combat orbit with no shield-recovery doctrine at all, and
+/// vice versa.
+fn combat_orbit_params_authored(params: &crate::world::flags::AiParams) -> bool {
+    COMBAT_ORBIT_PARAMS
+        .iter()
+        .all(|name| params.get(name).is_some())
+}
+
+/// Private-memory slot: which way round the current orbit runs, `+1.0` or
+/// `-1.0` (issues #788, #790).
+///
+/// Host-written on the tick an ORBITING state is entered — the shield-recovery
+/// standoff (#788) or the combat broadside ring (#790) — from
 /// [`crate::composite_rng::signed_choice`] over a (world, ship, system,
-/// transition, occurrence) key — so the choice is reproducible for a given seed
-/// and yet is not the same every time, and two destroyers entering recovery on
-/// the same tick do not both break the same way. Read back by the host when it
+/// transition, occurrence) key, so the choice is reproducible for a given seed
+/// and yet is not the same every time, and two ships entering an orbit on the
+/// same tick do not both break the same way. Read back by the host when it
 /// builds [`HelmPassSurface`]; no authored guard reads it.
+///
+/// ONE slot for both orbit legs, deliberately: a ship circles one way at a time,
+/// and the two legs are mutually exclusive (a state resolves exactly one yaw
+/// verb). What differs between them is the RADIUS, and that has its own field.
 pub(crate) const ORBIT_DIRECTION_MEMORY: &str = "orbit_direction";
-/// Private-memory slot: how many times this machine has entered a
-/// recovery-orbit state since its last reset (issue #788).
+/// Private-memory slot: how many times this machine has entered an orbiting
+/// state since its last reset (issues #788, #790).
 ///
 /// The OCCURRENCE field of the orbit-direction seed key, and another
 /// host-written counter in the `memory(min_range_seen)` /
 /// `memory(peak_hazard_urgency)` family: the host owns the quantity, the policy
-/// would own any decision made from it. It is what stops a destroyer that
-/// recovers twice against the same target from picking the same direction both
-/// times.
-pub(crate) const RECOVERY_OCCURRENCES_MEMORY: &str = "recovery_occurrences";
+/// would own any decision made from it. It is what stops a ship that orbits
+/// twice against the same target from picking the same direction both times.
+pub(crate) const ORBIT_OCCURRENCES_MEMORY: &str = "orbit_occurrences";
 
 /// The composite-seed SYSTEM key for the Steering fine system (issue #788).
 ///
@@ -1838,31 +1939,43 @@ pub(crate) fn ai_policy_state_tick(
             |_| {},
         );
         if let Some(entered) = steering_entered {
-            // Entering a RECOVERY-ORBIT state draws that recovery's circulation
-            // direction (issue #788). The host asks the policy what the state it
+            // Entering an ORBITING state draws that orbit's circulation direction
+            // (issues #788, #790). The host asks the policy what the state it
             // just entered does on this system's own channel, exactly as the
             // boost engagement counter below does, so this needs no knowledge of
             // authored state names.
-            let orbits = resolve_helm_channel(
-                steering_policy,
-                Some(&runtime.steering.0),
-                crate::entities::config::HELM_YAW_CHANNEL,
-                &facts,
-                now,
-            ) == Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit);
+            //
+            // BOTH orbit verbs draw, and they must: the shield-recovery standoff
+            // and the combat broadside ring each need a definite side to circle
+            // on, and gating the draw on one of them would leave the other
+            // reading whatever the hull happened to declare — a constant, which
+            // is precisely what a seeded choice exists to avoid.
+            let orbits = matches!(
+                resolve_helm_channel(
+                    steering_policy,
+                    Some(&runtime.steering.0),
+                    crate::entities::config::HELM_YAW_CHANNEL,
+                    &facts,
+                    now,
+                ),
+                Some(
+                    &crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit
+                        | &crate::ai::policy::AiPolicyVerb::HoldCombatOrbit
+                )
+            );
             if orbits {
                 let occurrence = runtime
                     .steering
                     .0
                     .memory
-                    .get(RECOVERY_OCCURRENCES_MEMORY)
+                    .get(ORBIT_OCCURRENCES_MEMORY)
                     .unwrap_or(0.0)
                     + 1.0;
                 runtime
                     .steering
                     .0
                     .memory
-                    .set(RECOVERY_OCCURRENCES_MEMORY, occurrence);
+                    .set(ORBIT_OCCURRENCES_MEMORY, occurrence);
                 // Deterministic from (world, ship, system, transition,
                 // occurrence) and from nothing else — no `Time`, no frame count,
                 // no OS entropy. Two runs of the same seeded scenario break the
@@ -2060,11 +2173,24 @@ where
 ///
 /// The leg is read off the AUTHORED yaw verb — `hold_committed_heading` means
 /// escape — so this host never learns an authored state name and a designer can
-/// call the states anything. The surface only goes `active` when the hull
-/// authors a complete manoeuvre parameter set on both travel axes AND both axes
-/// are AI-operated: a partial authoring falls back to ordinary doctrine travel
-/// rather than flying a pass with invented numbers (AGENTS.md #11 — there is no
-/// default for any of these values anywhere in Rust).
+/// call the states anything. Each leg SET goes live only when the hull authors
+/// every scalar that set needs, and the surface only goes `active` when at least
+/// one of them does AND both travel axes are AI-operated: a partial authoring
+/// falls back to ordinary doctrine travel rather than flying a leg with invented
+/// numbers (AGENTS.md #11 — there is no default for any of these values anywhere
+/// in Rust).
+///
+/// ## Three independent leg sets (issue #790)
+///
+/// * the FLY-THROUGH pass (`approach_speed` + `escape_speed`) → `pass_legs`,
+/// * the SHIELD-RECOVERY standoff ([`RECOVERY_PARAMS`]) → `recover`/`reengage`,
+/// * the COMBAT broadside orbit ([`COMBAT_ORBIT_PARAMS`]) → `combat_orbit`.
+///
+/// They are gated separately because a hull may author any one of them without
+/// the others: the destroyer authors the first two and no combat orbit, the
+/// cruiser the third and neither of the others. Only the two steering-response
+/// scalars are common to all three — every pure planner arm takes them — so
+/// those alone are required unconditionally.
 fn build_pass_surface(
     engines_policy: &crate::ai::policy::AiPolicy,
     steering_policy: &crate::ai::policy::AiPolicy,
@@ -2082,18 +2208,12 @@ fn build_pass_surface(
             .policy_for(&crate::system_registry::helm_steering_system_id())
             .operate_ai;
     let authored = steering_policy.machine().is_some() && engines_policy.machine().is_some();
-    let (
-        Some(approach_speed),
-        Some(escape_speed),
-        Some(tracking_deadband_rad),
-        Some(tracking_full_steer_rad),
-    ) = (
-        engines_policy.params.get(APPROACH_SPEED_PARAM),
-        engines_policy.params.get(ESCAPE_SPEED_PARAM),
+    // The two steering-response scalars every pure planner arm takes. Required
+    // unconditionally, because no leg can be flown without them.
+    let (Some(tracking_deadband_rad), Some(tracking_full_steer_rad)) = (
         steering_policy.params.get(TRACKING_DEADBAND_PARAM),
         steering_policy.params.get(TRACKING_FULL_STEER_PARAM),
-    )
-    else {
+    ) else {
         return HelmPassSurface::default();
     };
     if !authored || !travel_axes_ai {
@@ -2107,7 +2227,21 @@ fn build_pass_surface(
         facts,
         now,
     );
-    let escape = yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading);
+
+    // ── The fly-through pass legs (issue #883) ───────────────────────────────
+    //
+    // Both throttles or neither: the inbound/re-engage legs are the planner's
+    // FALLBACK arm, so admitting them on a missing throttle would fly a run-in
+    // at zero thrust rather than declining.
+    let (pass_legs, approach_speed, escape_speed) = match (
+        engines_policy.params.get(APPROACH_SPEED_PARAM),
+        engines_policy.params.get(ESCAPE_SPEED_PARAM),
+    ) {
+        (Some(approach), Some(escape)) => (true, approach as f32, escape as f32),
+        _ => (false, 0.0, 0.0),
+    };
+    let escape =
+        pass_legs && yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading);
 
     // ── The shield-recovery legs (issue #788) ────────────────────────────────
     //
@@ -2134,15 +2268,48 @@ fn build_pass_surface(
         _ => (false, false, 0.0, 0.0, 0.0),
     };
 
+    // ── The combat broadside orbit (issue #790) ──────────────────────────────
+    //
+    // Gated independently of the recovery six: a hull may fight a ring without
+    // authoring any shield-recovery doctrine at all, and the destroyer authors
+    // the recovery set without ever flying a combat ring. All THREE of its own
+    // params are required together — see [`COMBAT_ORBIT_PARAMS`].
+    let (combat_orbit, combat_orbit_range, combat_orbit_speed, combat_orbit_spiral_gain) = match (
+        combat_orbit_params_authored(&steering_policy.params),
+        steering_policy.params.get(COMBAT_ORBIT_RANGE_PARAM),
+        steering_policy.params.get(COMBAT_ORBIT_SPEED_PARAM),
+        steering_policy.params.get(COMBAT_ORBIT_SPIRAL_GAIN_PARAM),
+    ) {
+        (true, Some(range), Some(speed), Some(gain)) => (
+            yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldCombatOrbit),
+            range as f32,
+            speed as f32,
+            gain as f32,
+        ),
+        _ => (false, 0.0, 0.0, 0.0),
+    };
+
+    // At least ONE leg set has to be fully authored, or there is nothing for the
+    // planner to fly and the hull is better served by ordinary doctrine travel.
+    // `recover`/`reengage`/`combat_orbit` are per-tick verb readings, so the
+    // gate is over the PARAM sets rather than over this tick's booleans — a
+    // recovery-capable hull must publish `active` while it is still inbound.
+    let recovery_legs = recovery_params_authored(&steering_policy.params);
+    let combat_orbit_legs = combat_orbit_params_authored(&steering_policy.params);
+    if !pass_legs && !recovery_legs && !combat_orbit_legs {
+        return HelmPassSurface::default();
+    }
+
     HelmPassSurface {
         active: true,
+        pass_legs,
         escape,
         escape_heading_rad: steering_state
             .memory
             .get(ESCAPE_HEADING_MEMORY)
             .unwrap_or(0.0) as f32,
-        approach_speed: approach_speed as f32,
-        escape_speed: escape_speed as f32,
+        approach_speed,
+        escape_speed,
         tracking_deadband_rad: tracking_deadband_rad as f32,
         tracking_full_steer_rad: tracking_full_steer_rad as f32,
         recover,
@@ -2162,6 +2329,10 @@ fn build_pass_surface(
         orbit_speed,
         orbit_spiral_gain,
         reengage_speed,
+        combat_orbit,
+        combat_orbit_range,
+        combat_orbit_speed,
+        combat_orbit_spiral_gain,
     }
 }
 
@@ -2764,6 +2935,11 @@ pub(crate) fn ai_helm_steering(
                 // onto the orbit.
                 | Some(&crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit)
                 | Some(&crate::ai::policy::AiPolicyVerb::PivotToReengage)
+                // ...and issue #790's combat broadside orbit, for the third
+                // time and the same reason: the planner already solved the
+                // facing against the fighting ring's tangent, so this axis's
+                // only job is to emit it.
+                | Some(&crate::ai::policy::AiPolicyVerb::HoldCombatOrbit)
         );
         if !actuates {
             continue;
@@ -10384,6 +10560,556 @@ when = "state_time >= param(surge_dwell_secs)"
             hold_and_tick(&mut app, 3.0, (0.0, PRESSED_DWELL_Z, 0.0, 20.0), 0.0);
             assert!(
                 !steering_state(&mut app).starts_with("pressed"),
+                "omitting `{omitted}` must keep declining the arm"
+            );
+        }
+    }
+
+    // ── The Harrow Cruiser broadside orbit (issue #790) ──────────────────────
+    //
+    // Same posture as the destroyer block above: these drive the SHIPPED hull's
+    // authored policies through a real ticking app, so they fail on the content
+    // as well as on the code, and every assertion is about something observable
+    // — an admitted actuator input, the published pass surface, the committed
+    // policy state, or the ship's own flown range.
+    //
+    // Unlike the destroyer's tests, the orbit ones deliberately let the ship
+    // FLY rather than pinning its pose each tick. A spiral is a claim about how
+    // the range changes over time, and pinning the pose would make that claim
+    // untestable.
+
+    fn cruiser_hull() -> crate::entity_config::EntityConfig {
+        crate::entity_config::EntityConfig::from_toml(include_str!(
+            "../../assets/entities/ship_harrow_cruiser.toml"
+        ))
+        .expect("the shipped cruiser hull must parse")
+    }
+
+    /// The cruiser's authored Steering `param`s, so expectations below are
+    /// arithmetic on named values rather than magic numbers.
+    fn cruiser_steering_param(name: &str) -> f32 {
+        cruiser_hull()
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .and_then(|ai| ai.param.get(name).copied())
+            .unwrap_or_else(|| panic!("the shipped cruiser must author `{name}`"))
+    }
+
+    /// A ship carrying the shipped cruiser's two authored policy machines and
+    /// its physics envelope — the same components `entities::spawner` would
+    /// attach — hunting a single named bogey.
+    ///
+    /// The cruiser authors no boost drive and no boost doctrine, so nothing
+    /// boost-shaped is inserted here either: the fixture mirrors the hull.
+    fn broadside_app(bogey_pos: [f32; 3]) -> (App, uuid::Uuid) {
+        broadside_app_omitting(bogey_pos, &[])
+    }
+
+    /// As [`broadside_app`], but with the named STEERING `param`s stripped from
+    /// the hull before its policy is built — the partially-authored hull
+    /// AGENTS.md #11 says must decline rather than invent.
+    ///
+    /// Each name must actually be present to begin with, so this cannot quietly
+    /// pass by "removing" a param the hull renamed out from under it.
+    fn broadside_app_omitting(bogey_pos: [f32; 3], omit: &[&str]) -> (App, uuid::Uuid) {
+        let mut app = test_app();
+        let cfg = cruiser_hull();
+        let mut hc = cfg
+            .helm_console
+            .clone()
+            .expect("hull declares [helm_console]");
+        for name in omit {
+            hc.steering_ai
+                .as_mut()
+                .expect("hull declares [helm_console.steering_ai]")
+                .param
+                .remove(*name)
+                .unwrap_or_else(|| panic!("the shipped hull must author `{name}` to omit it"));
+        }
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert((
+            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
+            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
+            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
+                max_speed: hc.max_speed,
+                max_reverse_speed: hc.max_reverse_speed,
+                acceleration: hc.acceleration,
+                deceleration: hc.deceleration,
+                max_yaw_rate: hc.max_yaw_rate,
+                ..crate::ship_physics::ShipPhysicsConfig::new()
+            }),
+        ));
+        set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective(BOGEY, 80.0)]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let uuid = uuid::Uuid::new_v4();
+        set_bogey(&mut app, uuid, bogey_pos, 0.0, 0.0);
+        (app, uuid)
+    }
+
+    /// The bogey sits at the origin for every orbit fixture, so a "range to the
+    /// target" reading is just the ship's own distance from the origin.
+    const ORBIT_BOGEY: [f32; 3] = [0.0, 0.0, 0.0];
+
+    fn ship_pose(app: &mut App) -> ShipPhysics {
+        *app.world_mut()
+            .query_filtered::<&ShipPhysics, With<Ship>>()
+            .single(app.world())
+            .expect("ship carries ShipPhysics")
+    }
+
+    /// Planar distance from the ship to the bogey at [`ORBIT_BOGEY`].
+    fn range_to_bogey(app: &mut App) -> f32 {
+        let p = ship_pose(app);
+        (p.x * p.x + p.z * p.z).sqrt()
+    }
+
+    /// Shortest signed angular step from `previous` to `now`, radians. Summing
+    /// these is what turns a wrapping bearing into a swept angle.
+    fn wrapped_delta(now: f32, previous: f32) -> f32 {
+        let mut d = now - previous;
+        while d > std::f32::consts::PI {
+            d -= std::f32::consts::TAU;
+        }
+        while d < -std::f32::consts::PI {
+            d += std::f32::consts::TAU;
+        }
+        d
+    }
+
+    /// The ship's bearing around the bogey, radians. Its RATE of change is the
+    /// circulation: a positive drift is one way round the ring, a negative one
+    /// the other, and that is what "clockwise or anticlockwise" means
+    /// observably.
+    fn bearing_around_bogey(app: &mut App) -> f32 {
+        let p = ship_pose(app);
+        p.x.atan2(p.z)
+    }
+
+    /// Put the cruiser into its orbit state, flying, at `start_range` from the
+    /// bogey.
+    ///
+    /// The ship starts abeam of its own heading (placed down `-Z`, facing `+X`)
+    /// so it begins with a tangential component rather than head-on, which is
+    /// the pose the approach leg would have delivered it in anyway.
+    fn run_to_orbit_omitting(start_range: f32, omit: &[&str]) -> (App, uuid::Uuid) {
+        let (mut app, uuid) = broadside_app_omitting(ORBIT_BOGEY, omit);
+        let speed = cruiser_hull().helm_console.as_ref().unwrap().max_speed
+            * cruiser_steering_param(COMBAT_ORBIT_SPEED_PARAM);
+        place_ship(
+            &mut app,
+            0.0,
+            -start_range,
+            std::f32::consts::FRAC_PI_2,
+            speed,
+        );
+        // Two ticks: the first publishes the pass surface, the second is the
+        // first planner pass that consumes it (see `HelmPassSurface`).
+        tick_twice(&mut app);
+        (app, uuid)
+    }
+
+    fn run_to_orbit(start_range: f32) -> (App, uuid::Uuid) {
+        run_to_orbit_omitting(start_range, &[])
+    }
+
+    /// Let the ship actually fly for roughly `secs` of SIMULATED flight,
+    /// touching nothing.
+    ///
+    /// The physics step is capped at [`HELM_AI_MAX_DT_SECS`] (1/30 s) regardless
+    /// of how long the fixture's `Time` says a frame took, so flown seconds are
+    /// counted in physics steps rather than in the fixture's 200 ms frames.
+    /// Getting this wrong makes a convergence test read as a failure to converge.
+    fn fly_for(app: &mut App, secs: f32) {
+        for _ in 0..((secs / HELM_AI_MAX_DT_SECS).ceil() as usize) {
+            tick(app);
+        }
+    }
+
+    /// Flown seconds needed for the orbit to reach its steady radius from any of
+    /// the fixtures below — measured, not guessed: the worst case starts inside
+    /// the ring facing the wrong way round and takes about 28 s to settle.
+    const ORBIT_SETTLE_SECS: f32 = 40.0;
+
+    /// Sum the ship's swept bearing around the bogey over `secs` of flight. The
+    /// SIGN is the circulation and the magnitude is how far round it got.
+    fn swept_bearing(app: &mut App, secs: f32) -> f32 {
+        let mut previous = bearing_around_bogey(app);
+        let mut swept = 0.0_f32;
+        for _ in 0..((secs / HELM_AI_MAX_DT_SECS).ceil() as usize) {
+            tick(app);
+            let now = bearing_around_bogey(app);
+            swept += wrapped_delta(now, previous);
+            previous = now;
+        }
+        swept
+    }
+
+    /// AC1's precondition and AC2's first half: the cruiser commits to the
+    /// orbit and the host publishes the combat-orbit leg with the hull's OWN
+    /// authored ring, throttle and gain.
+    ///
+    /// The `engage_range` half is the anti-trap for an unseeded fact: before the
+    /// travel axes were seeded, a `fact(range_to_target)` guard validated at
+    /// load and read false for ever. That this test can distinguish "far" from
+    /// "near" is the proof the guard actually gates.
+    #[test]
+    fn the_cruiser_commits_to_the_orbit_inside_its_authored_engage_range() {
+        let engage = cruiser_steering_param("engage_range");
+
+        // Well outside the authored engage range: still closing, not circling.
+        let (mut app, _uuid) = broadside_app([0.0, 0.0, -(engage * 3.0)]);
+        place_ship(&mut app, 0.0, engage * 3.0, 0.0, 0.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "acquire",
+            "a target beyond engage_range must not start an orbit"
+        );
+        assert!(
+            !pass_surface(&mut app).combat_orbit,
+            "and the host must not publish the orbit leg for a ship still closing"
+        );
+
+        // Inside it.
+        let (mut app, _uuid) = run_to_orbit(engage * 0.5);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "inside engage_range the machine must commit to the ring — if this reads \
+             `acquire` the travel axis is seeing empty facts"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "orbit",
+            "Engines runs its OWN copy of the machine and must reach the same leg from \
+             the same facts, not by reading Steering's state"
+        );
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.active, "the cruiser must be flying an authored leg");
+        assert!(pass.combat_orbit, "and that leg is the combat orbit");
+        assert!(
+            !pass.recover && !pass.reengage && !pass.escape,
+            "the combat orbit is its own leg — it must not masquerade as the \
+             shield-recovery standoff, whose ring is derived from the TARGET's reach"
+        );
+        assert_eq!(
+            pass.combat_orbit_range,
+            cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM),
+            "the ring is the hull's OWN authored fighting radius"
+        );
+        assert_eq!(
+            pass.combat_orbit_speed,
+            cruiser_steering_param(COMBAT_ORBIT_SPEED_PARAM)
+        );
+        assert_eq!(
+            pass.combat_orbit_spiral_gain,
+            cruiser_steering_param(COMBAT_ORBIT_SPIRAL_GAIN_PARAM)
+        );
+        assert_eq!(
+            pass.safe_range, 0.0,
+            "the shield-recovery ring is untouched: this hull authors no recovery \
+             doctrine, so `safe_range` must stay at its default rather than being \
+             quietly repurposed"
+        );
+    }
+
+    /// AC2, the continuous half: the ring is flown UNDER POWER and TURNING, at
+    /// the authored orbit throttle.
+    ///
+    /// The throttle assertion is what separates an orbit from the two things it
+    /// is not: a station-keeper would be braking toward zero at the ring, and a
+    /// retreat would be running the outward bearing with no turn at all.
+    #[test]
+    fn the_orbit_is_flown_as_a_powered_continuous_turn() {
+        let orbit_speed = cruiser_steering_param(COMBAT_ORBIT_SPEED_PARAM);
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+        let (mut app, _uuid) = run_to_orbit(ring);
+        tick(&mut app);
+
+        assert!(
+            (get_thrust_input(&mut app) - orbit_speed).abs() < 1e-3,
+            "the ring is flown at the authored orbit throttle ({orbit_speed}), got {}",
+            get_thrust_input(&mut app)
+        );
+        let pass = pass_surface(&mut app);
+        assert!(
+            pass.orbit_direction == 1.0 || pass.orbit_direction == -1.0,
+            "the circulation direction must be a definite choice, got {}",
+            pass.orbit_direction
+        );
+
+        // Continuous TANGENTIAL movement: the bearing around the target keeps
+        // advancing, always the same way. This is the observable form of
+        // "continuous tangential movement" — a ship that stopped, or that flew
+        // straight at or away from the target, would sweep no bearing at all.
+        //
+        // Measured after the orbit has settled, because the fixture drops the
+        // cruiser onto the ring already flying, and the direction it is dealt
+        // may be the opposite of the one it happens to be pointing: the first
+        // half-turn is the ship getting onto its chosen circulation, not the
+        // circulation itself.
+        fly_for(&mut app, ORBIT_SETTLE_SECS);
+        assert_eq!(steering_state(&mut app), "orbit");
+        let direction = pass_surface(&mut app).orbit_direction;
+
+        let range_before = range_to_bogey(&mut app);
+        let swept = swept_bearing(&mut app, 8.0);
+        assert!(
+            swept * direction > 0.0,
+            "the cruiser must circle the way it was dealt (direction {direction}),              but it swept {swept} rad"
+        );
+        assert!(
+            swept.abs() > 0.5,
+            "eight seconds on the ring must sweep real bearing, got {swept} rad"
+        );
+        // ...and it swept that bearing while HOLDING the ring rather than by
+        // running past the target: tangential, not radial.
+        let range_after = range_to_bogey(&mut app);
+        for (label, range) in [("before", range_before), ("after", range_after)] {
+            assert!(
+                (range - ring).abs() < ring * 0.25,
+                "the settled orbit must stay near the authored ring ({ring}); {label}                  the sweep it was at {range}"
+            );
+        }
+    }
+
+    /// AC2, the spiral half: the cruiser MAINTAINS the authored range from
+    /// either side of it.
+    ///
+    /// Two runs, identical but for which side of the ring the cruiser starts on.
+    /// Both must converge toward the ring, which is what distinguishes a spiral
+    /// correction from a bare tangent (which would hold whatever radius it
+    /// started at for ever) and from a retreat or a charge.
+    #[test]
+    fn the_orbit_spirals_onto_the_authored_ring_from_inside_and_outside() {
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+
+        for (label, start) in [("inside", ring * 0.4), ("outside", ring * 2.5)] {
+            let (mut app, _uuid) = run_to_orbit(start);
+            assert_eq!(steering_state(&mut app), "orbit");
+            let before = range_to_bogey(&mut app);
+            let error_before = (before - ring).abs();
+
+            fly_for(&mut app, ORBIT_SETTLE_SECS);
+
+            let after = range_to_bogey(&mut app);
+            let error_after = (after - ring).abs();
+            assert!(
+                error_after < error_before,
+                "starting {label} the ring ({before} vs {ring}), the spiral must close \
+                 the radial error, but it went from {error_before} to {error_after}"
+            );
+            assert_eq!(
+                steering_state(&mut app),
+                "orbit",
+                "and it corrects INSIDE the orbit state — the spiral is the leg, not a \
+                 separate manoeuvre the hull has to enter"
+            );
+        }
+    }
+
+    /// AC1: the circulation direction is drawn from a
+    /// (world, ship, system, transition, occurrence) key, so it reproduces
+    /// exactly for a given seed — and is not simply a constant.
+    ///
+    /// The negative half is the load-bearing one: the hull DECLARES
+    /// `orbit_direction = 1.0` in its authored memory, so a host that never drew
+    /// would publish `+1.0` every time and pass every other assertion in this
+    /// file.
+    #[test]
+    fn the_combat_orbit_direction_is_deterministic_from_the_seed_without_being_constant() {
+        fn direction_for(seed: u64, ship: uuid::Uuid) -> f32 {
+            let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+            let (mut app, _bogey) = broadside_app(ORBIT_BOGEY);
+            app.insert_resource(crate::sim_rng::SimRng::new(
+                seed,
+                crate::sim_rng::SeedSource::Cli,
+            ));
+            let entity = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(crate::entity_spawner::EntityUuid(ship.to_string()));
+            place_ship(&mut app, 0.0, -ring, std::f32::consts::FRAC_PI_2, 9.0);
+            tick_twice(&mut app);
+            assert_eq!(steering_state(&mut app), "orbit");
+            pass_surface(&mut app).orbit_direction
+        }
+
+        let ship = uuid::Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
+        // Reproducible: same world seed, same ship, same answer. This is the
+        // property a replayed `--seed` run depends on.
+        assert_eq!(direction_for(4242, ship), direction_for(4242, ship));
+
+        // Not a constant: over a handful of seeds both directions occur.
+        let directions: Vec<f32> = [1, 2, 3, 4, 5, 6, 7, 8]
+            .into_iter()
+            .map(|seed| direction_for(seed, ship))
+            .collect();
+        assert!(
+            directions.contains(&1.0) && directions.contains(&-1.0),
+            "the direction must genuinely vary with the seed, got {directions:?}"
+        );
+    }
+
+    /// AC3: a hazard detour BENDS the orbit and never exits it, and the same
+    /// circulation resumes once the hazard is clear.
+    ///
+    /// Three things are asserted and each has its own failure mode:
+    ///
+    /// * the steering command genuinely changes while the obstacle is there —
+    ///   without this the rest of the test would pass on a hazard the ship never
+    ///   noticed;
+    /// * the committed policy state and the drawn direction are untouched — a
+    ///   transition guarded on urgency would exit the orbit, and RE-entering it
+    ///   would re-draw the direction, so flying past debris would randomise
+    ///   which way the cruiser circles;
+    /// * the bearing keeps advancing the same way afterwards — the resume.
+    #[test]
+    fn a_hazard_detour_bends_the_orbit_without_changing_its_direction() {
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+        let (mut app, bogey) = run_to_orbit(ring);
+        // Settle onto the ring first: a cruiser still hauling itself round onto
+        // its chosen circulation is commanding saturated steering, and a
+        // saturated command cannot be observed to bend.
+        fly_for(&mut app, ORBIT_SETTLE_SECS);
+        assert_eq!(steering_state(&mut app), "orbit");
+        let direction = pass_surface(&mut app).orbit_direction;
+        let clean_steering = get_steering_input(&mut app);
+        assert!(
+            clean_steering.abs() < 1.0,
+            "precondition: the settled orbit must have steering authority to spare,              or a detour could not show up in the command at all (got {clean_steering})"
+        );
+
+        // Drop an obstacle right on the ship's projected path. Deliberately NOT
+        // the target — the orbit's own centre is excluded from the avoidance
+        // scan, because circling a thing you are also fleeing is incoherent.
+        let pose = ship_pose(&mut app);
+        let hazard = uuid::Uuid::from_u128(0x0b57ac1e);
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid: bogey,
+                    name: Some(BOGEY.into()),
+                    position: ORBIT_BOGEY,
+                    yaw: Some(0.0),
+                    forward_speed: 0.0,
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: hazard,
+                    name: Some("rock".into()),
+                    position: [
+                        pose.x + pose.yaw.sin() * 12.0,
+                        0.0,
+                        pose.z - pose.yaw.cos() * 12.0,
+                    ],
+                    yaw: None,
+                    forward_speed: 0.0,
+                    radius: 25.0,
+                    size_rating: 25.0,
+                    movable: false,
+                    dangerous: false,
+                    ..Default::default()
+                },
+            ],
+        });
+        tick(&mut app);
+        tick(&mut app);
+
+        assert!(
+            (get_steering_input(&mut app) - clean_steering).abs() > 1e-3,
+            "precondition: the obstacle must actually bend the steering solution \
+             (clean {clean_steering}, detour {})",
+            get_steering_input(&mut app)
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "a detour must not exit the orbit — nothing in this doctrine is guarded on \
+             a hazard reading"
+        );
+        assert_eq!(engines_state(&mut app), "orbit");
+        let during = pass_surface(&mut app);
+        assert!(during.combat_orbit, "the published leg is still the orbit");
+        assert_eq!(
+            during.orbit_direction, direction,
+            "and the circulation direction survives the detour untouched"
+        );
+
+        // Clear the hazard: the cruiser resumes the SAME circulation.
+        set_bogey(&mut app, bogey, ORBIT_BOGEY, 0.0, 0.0);
+        tick(&mut app);
+        tick(&mut app);
+        let resumed = pass_surface(&mut app);
+        assert!(resumed.combat_orbit);
+        assert_eq!(
+            resumed.orbit_direction, direction,
+            "clearing the hazard must not re-draw the direction either"
+        );
+        assert_eq!(steering_state(&mut app), "orbit");
+
+        let mut previous = bearing_around_bogey(&mut app);
+        let mut swept = 0.0_f32;
+        for _ in 0..30 {
+            tick(&mut app);
+            let now = bearing_around_bogey(&mut app);
+            swept += wrapped_delta(now, previous);
+            previous = now;
+        }
+        assert!(
+            swept * direction > 0.0,
+            "after the detour the cruiser must go on circling the way it chose \
+             (direction {direction}), but it swept {swept} rad"
+        );
+    }
+
+    /// "Decline rather than invent", on all three combat-orbit scalars.
+    ///
+    /// Each fails differently if admitted alone, and each failure is worse than
+    /// not flying the arm: without `combat_orbit_range` the host would solve a
+    /// tangent of a ring of radius zero, which is a spiral straight into the
+    /// target; without `combat_orbit_speed` the cruiser would sit at zero
+    /// throttle inside a hostile's guns; without `combat_orbit_spiral_gain` it
+    /// would fly the bare tangent and hold whatever radius it happened to arrive
+    /// at, for ever. So the host gates on all three together and the hull falls
+    /// back to ordinary doctrine travel — a behaviour a designer can see.
+    ///
+    /// The shipped hull orbits at this exact point (asserted above), so nothing
+    /// here passes for want of getting that far.
+    #[test]
+    fn a_hull_omitting_any_combat_orbit_scalar_declines_the_whole_arm() {
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+        for omitted in COMBAT_ORBIT_PARAMS {
+            let (mut app, _uuid) = run_to_orbit_omitting(ring, &[omitted]);
+            // The machine still enters the state — the verb parses and resolves
+            // with or without the params. What must not happen is the HOST
+            // flying a ring it has no numbers for.
+            assert_eq!(
+                steering_state(&mut app),
+                "orbit",
+                "omitting `{omitted}` must not change which state is entered"
+            );
+            let pass = pass_surface(&mut app);
+            assert!(
+                !pass.combat_orbit,
+                "omitting `{omitted}` must decline the combat-orbit arm outright"
+            );
+            assert_eq!(
+                pass.combat_orbit_range, 0.0,
+                "the whole arm declines together, not part of it"
+            );
+
+            // And it stays declined: a run that keeps flying must not quietly
+            // start orbiting a few ticks later.
+            fly_for(&mut app, 3.0);
+            assert!(
+                !pass_surface(&mut app).combat_orbit,
                 "omitting `{omitted}` must keep declining the arm"
             );
         }

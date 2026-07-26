@@ -907,6 +907,18 @@ pub enum FlyThroughLeg {
     /// the authored re-engage fraction rather than the approach fraction, so a
     /// hull can author `0.0` and pivot on cut thrust before the run starts.
     Reengage,
+    /// A torpedo opportunity is open: hold the BOW on the target while a fixed
+    /// forward tube lines up (issue #791). Steering tracks the target's live
+    /// position exactly as [`FlyThroughLeg::Inbound`] and
+    /// [`FlyThroughLeg::Reengage`] do — a target that keeps manoeuvring keeps
+    /// being followed, which is the whole point of a bow-on hold — and the
+    /// throttle is the authored `torpedo_bearing_speed`.
+    ///
+    /// A third tracking leg rather than a flag on `Reengage` because the two
+    /// take their throttle from different authored scalars, and the host gates
+    /// them on different authored sets: `Reengage` needs the six shield-recovery
+    /// params, this needs one of its own.
+    TorpedoBearing,
 }
 
 /// Inputs to [`plan_fly_through_pass`] (issue #883).
@@ -938,6 +950,11 @@ pub struct FlyThroughPassInput<'a> {
     /// Throttle fraction flown on the [`FlyThroughLeg::Reengage`] pivot
     /// (issue #788). Read only on that leg.
     pub reengage_speed: f32,
+    /// Throttle fraction flown on the [`FlyThroughLeg::TorpedoBearing`] hold
+    /// (issue #791). Read only on that leg. `0.0` cuts thrust for the bow-on
+    /// tracking phase — the authored value a hull that wants to stop swinging
+    /// its beam and line a fixed tube up gives it.
+    pub torpedo_bearing_speed: f32,
     /// Angular deadband below which the tracking solution commands no yaw.
     pub tracking_deadband_rad: f32,
     /// Angular error at which the tracking solution saturates to ±1.
@@ -964,7 +981,7 @@ pub struct FlyThroughPassInput<'a> {
 /// escape without the leg — or the caller's pass state — changing at all.
 pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
     let (dir, thrust) = match input.leg {
-        FlyThroughLeg::Inbound | FlyThroughLeg::Reengage => {
+        FlyThroughLeg::Inbound | FlyThroughLeg::Reengage | FlyThroughLeg::TorpedoBearing => {
             let dx = input.target_pos[0] - input.self_pos[0];
             let dz = input.target_pos[2] - input.self_pos[2];
             let dist = (dx * dx + dz * dz).sqrt();
@@ -975,10 +992,14 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
                 // dividing by ~0. The pass is over in any meaningful sense.
                 [input.self_yaw.sin(), -input.self_yaw.cos()]
             };
-            let thrust = if input.leg == FlyThroughLeg::Reengage {
-                input.reengage_speed
-            } else {
-                input.approach_speed
+            // Three tracking legs, three authored throttles. The geometry above
+            // is shared precisely because "point at where the target IS now" is
+            // one question; what a hull does with its engines while it does that
+            // is the doctrine's, and each leg names its own scalar.
+            let thrust = match input.leg {
+                FlyThroughLeg::Reengage => input.reengage_speed,
+                FlyThroughLeg::TorpedoBearing => input.torpedo_bearing_speed,
+                _ => input.approach_speed,
             };
             (dir, thrust)
         }
@@ -3738,6 +3759,9 @@ mod tests {
             approach_speed: 0.85,
             escape_speed: 1.0,
             reengage_speed: 0.0,
+            // Deliberately different from `reengage_speed` so a leg that took
+            // the wrong scalar would be visible rather than accidentally right.
+            torpedo_bearing_speed: 0.25,
             tracking_deadband_rad: 0.03,
             tracking_full_steer_rad: 0.6,
             entities,
@@ -3846,6 +3870,47 @@ mod tests {
         let mut powered = pass_input(FlyThroughLeg::Reengage, &none);
         powered.reengage_speed = 0.4;
         assert!((plan_fly_through_pass(&powered).0 - 0.4).abs() < 1e-6);
+    }
+
+    /// Issue #791: the torpedo-opportunity hold tracks the target's LIVE
+    /// position (so a manoeuvring target keeps being followed onto the bow) and
+    /// flies its OWN authored throttle — not the re-engage one, and not the
+    /// approach one.
+    ///
+    /// The throttle half is the load-bearing assertion. The fixture authors
+    /// `reengage_speed = 0.0` and `torpedo_bearing_speed = 0.25` precisely so a
+    /// leg that quietly took the wrong scalar would look like a cut-thrust turn
+    /// and pass every other check here.
+    #[test]
+    fn torpedo_bearing_leg_tracks_the_live_target_on_its_own_authored_throttle() {
+        let none: [AiWorldEntity; 0] = [];
+        let inbound = plan_fly_through_pass(&pass_input(FlyThroughLeg::Inbound, &none));
+        let hold = plan_fly_through_pass(&pass_input(FlyThroughLeg::TorpedoBearing, &none));
+        assert_eq!(
+            hold.1, inbound.1,
+            "the hold IS a tracking solution: same steering as the inbound leg"
+        );
+        assert!(
+            (hold.0 - 0.25).abs() < 1e-6,
+            "the throttle is `torpedo_bearing_speed`, not `reengage_speed` (0.0) \
+             and not `approach_speed` (0.85), got {}",
+            hold.0
+        );
+
+        // A target that MOVES to the other side flips the commanded turn: the
+        // solution is re-derived from the live position every call, which is
+        // what separates this leg from the frozen-heading escape.
+        let mut port = pass_input(FlyThroughLeg::TorpedoBearing, &none);
+        port.target_pos = [-60.0, 0.0, -60.0];
+        assert!(
+            plan_fly_through_pass(&port).1 < 0.0 && hold.1 > 0.0,
+            "moving the target across the bow must reverse the commanded turn"
+        );
+
+        // An authored cut-thrust hold is a real authored value, not a default.
+        let mut cut = pass_input(FlyThroughLeg::TorpedoBearing, &none);
+        cut.torpedo_bearing_speed = 0.0;
+        assert_eq!(plan_fly_through_pass(&cut).0, 0.0);
     }
 
     // ── The shield-recovery standoff orbit (issue #788) ──────────────────────

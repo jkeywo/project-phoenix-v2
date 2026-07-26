@@ -128,7 +128,16 @@ pub struct TorpedoAiInput {
     pub target_facing_shields: i32,
     /// Tubes considered by the AI, in priority order.
     pub tubes: Vec<TubeSummary>,
-    /// Torpedoes remaining in the magazine.
+    /// Torpedoes remaining in the magazine — the rounds still available to
+    /// RELOAD with, reported for the benefit of callers and policies that care
+    /// about resupply.
+    ///
+    /// It deliberately does NOT gate firing. A round sitting in a tube was drawn
+    /// from the magazine when its load *started* (`TorpedoSystem::start_load`
+    /// decrements there), so the magazine counts what is left to load NEXT, not
+    /// what can be fired NOW — and a hull whose last rounds are in its tubes has
+    /// a magazine of zero and a battery ready to launch. See
+    /// [`auto_fire_torpedo`].
     pub magazine: u32,
 }
 
@@ -141,7 +150,31 @@ pub struct TorpedoAiInput {
 /// - The shield arc the torpedo would *strike* is down (`target_facing_shields ≤ 0`)
 /// - The tube is loaded
 /// - The tube is in arc
-/// - The magazine has torpedoes remaining
+///
+/// # Why the magazine is not one of them
+///
+/// A round in a tube has *already been paid for*: `TorpedoSystem::start_load`
+/// (and the auto-load block in `TorpedoSystem::tick`) decrements
+/// `torpedoes_remaining` when a load STARTS, so the magazine counts the rounds
+/// left to reload with and says nothing about the rounds a tube is holding. An
+/// `input.magazine == 0` conjunct here therefore refused to fire a fully loaded
+/// battery whenever the hold happened to be empty — and on any hull whose
+/// magazine divides evenly into its salvo, that is the state it ends in.
+///
+/// The Harrow cruiser is the deterministic case: 8 rounds, a 4-round battery.
+/// Load 4 (magazine 4), fire, reload the last 4 (magazine 0) — and from that
+/// moment a full battery could never launch again, while `tubes_full` read
+/// permanently true. The helm doctrine's salvo-spent resume conjoins
+/// `fact(tubes_full) < 1`, so it could never fire either: the hull sat bow-on
+/// with a loaded battery it would not shoot, bounded only by the target
+/// recovering a shield — precisely the dependency that bound exists to remove.
+///
+/// Nothing downstream re-imposes the gate, and deliberately so:
+/// `handle_fire_torpedo` gates on the tube's and magazine's *online* state, and
+/// `TorpedoSystem::launch` on `loaded_count`. Emptiness stops the next LOAD
+/// (`start_load` and `claim_magazine_round` both refuse at zero), which is where
+/// running dry belongs. This is shared mechanics: it applies to a player's ship
+/// exactly as it does to an NPC's (AGENTS.md #6).
 ///
 /// # Why the shield gate is per-arc, not ship-wide
 ///
@@ -159,7 +192,7 @@ pub struct TorpedoAiInput {
 /// order `[ForePort, ForeStarboard, Aft]`.  Each tube that passes all
 /// conditions appears at most once in the result.
 pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
-    if !input.target_locked || input.target_facing_shields > 0 || input.magazine == 0 {
+    if !input.target_locked || input.target_facing_shields > 0 {
         return vec![];
     }
     input
@@ -883,14 +916,55 @@ mod tests {
         );
     }
 
-    // ── Condition: magazine ────────────────────────────────────────────────
+    // ── Non-condition: the magazine ────────────────────────────────────────
 
+    /// An empty magazine does NOT stop a loaded tube firing, and it must not:
+    /// the rounds in the tubes were drawn from the magazine when their load
+    /// started, so "nothing left to reload with" and "nothing left to shoot" are
+    /// different states and only the second should hold fire.
+    ///
+    /// This test used to assert the opposite. The gate it asserted made a hull
+    /// whose magazine divides evenly into its battery permanently unable to fire
+    /// its last, fully-loaded salvo — the Harrow cruiser (8 rounds, 4-round
+    /// battery) reaches that state on its second reload every single run, and
+    /// then held a bow-on torpedo phase open around a battery it refused to
+    /// shoot.
+    ///
+    /// The comparison against a stocked magazine is the anti-vacuity half: the
+    /// two calls differ in the magazine and nothing else, so an implementation
+    /// that had quietly stopped firing for some other reason cannot pass.
     #[test]
-    fn empty_magazine_no_fire() {
+    fn an_empty_magazine_does_not_stop_a_loaded_tube_firing() {
+        let stocked = auto_fire_torpedo(&all_ready_input());
+        assert!(
+            !stocked.is_empty(),
+            "precondition: the fixture must fire at all"
+        );
+
         let mut input = all_ready_input();
         input.magazine = 0;
-        let result = auto_fire_torpedo(&input);
-        assert!(result.is_empty(), "should not fire when magazine is empty");
+        assert_eq!(
+            auto_fire_torpedo(&input),
+            stocked,
+            "rounds already in the tubes are already paid for — an empty magazine \
+             stops the next LOAD, not the shot that is standing ready"
+        );
+    }
+
+    /// ...and the magazine is not a back door either: emptying it while the
+    /// tubes are empty still fires nothing, because the tubes are what is asked
+    /// about.
+    #[test]
+    fn an_empty_magazine_with_empty_tubes_still_fires_nothing() {
+        let mut input = all_ready_input();
+        input.magazine = 0;
+        for t in &mut input.tubes {
+            t.loaded = false;
+        }
+        assert!(
+            auto_fire_torpedo(&input).is_empty(),
+            "no rounds anywhere is still no shot"
+        );
     }
 
     // ── Condition: loaded ──────────────────────────────────────────────────

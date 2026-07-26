@@ -588,6 +588,33 @@ impl TorpedoSystem {
         self.tubes.iter_mut().find(|t| t.id == id)
     }
 
+    /// How many MORE rounds must come out of the magazine before every tube is
+    /// at `volley_max` — i.e. before a ship-wide `tubes_full` could read true
+    /// (issue #791 follow-up).
+    ///
+    /// Rounds already claimed for an in-progress load are NOT counted again:
+    /// the magazine is decremented when a load *starts* (see `start_load` and
+    /// the auto-load block in [`Self::tick`]), so a `Loading` tube is already
+    /// paid for and its round is simply not in `loaded_count` yet. Counting it
+    /// twice would make a ship with exactly enough rounds look one short for
+    /// the whole of every load cycle.
+    ///
+    /// A hull with no tubes returns 0. That is arithmetically right and
+    /// deliberately not the answer to "can this ship fill its tubes" — the
+    /// caller that asks THAT question has to rule out a tubeless hull itself,
+    /// because `all`-over-nothing is vacuously true here as it is everywhere.
+    pub fn salvo_shortfall(&self) -> u32 {
+        self.tubes
+            .iter()
+            .map(|t| {
+                let in_progress = u32::from(matches!(t.load_state, TubeLoadState::Loading { .. }));
+                t.volley_max
+                    .saturating_sub(t.loaded_count)
+                    .saturating_sub(in_progress)
+            })
+            .sum()
+    }
+
     /// Start loading a torpedo into the given tube.
     ///
     /// Consumes one torpedo from the shared pool. Returns `false` if the pool
@@ -1217,6 +1244,43 @@ mod tests {
         sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.in_flight.len(), 1);
         assert_eq!(sys.in_flight[0].uuid, "t1");
+    }
+
+    #[test]
+    fn salvo_shortfall_counts_only_rounds_not_yet_committed() {
+        // Three tubes at volley_max 1, all empty: three rounds short.
+        let mut sys = default_system();
+        assert_eq!(sys.salvo_shortfall(), 3);
+
+        // A round already claimed for an in-progress load is NOT counted again —
+        // `start_load` has already taken it out of the magazine, so counting the
+        // gap it has not yet filled would charge for it twice and make a ship
+        // with exactly enough rounds look one short for every load cycle.
+        sys.tubes[0].target_count = 1;
+        assert!(sys.start_load("fore_port"));
+        assert_eq!(sys.salvo_shortfall(), 2);
+
+        // And once it lands, the shortfall stays where it was: the round moved
+        // from `Loading` into `loaded_count`, it did not appear from nowhere.
+        let load_time = sys.tube("fore_port").unwrap().load_time;
+        sys.tick(load_time, &HashMap::new(), &mut no_uuid);
+        assert_eq!(sys.tube("fore_port").unwrap().loaded_count, 1);
+        assert_eq!(sys.salvo_shortfall(), 2);
+    }
+
+    #[test]
+    fn salvo_shortfall_is_zero_for_a_full_battery_and_for_no_tubes() {
+        assert_eq!(loaded_system().salvo_shortfall(), 0);
+
+        let mut config = TorpedoConfig::default();
+        config.count = 0;
+        let tubeless = TorpedoSystem::from_configs(&[], config);
+        assert_eq!(
+            tubeless.salvo_shortfall(),
+            0,
+            "a hull with no tubes is short of nothing — callers asking `can I fill \
+             my tubes` must rule the tubeless case out themselves"
+        );
     }
 
     #[test]

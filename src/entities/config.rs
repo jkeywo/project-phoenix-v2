@@ -1654,14 +1654,26 @@ pub const HELM_PIVOT_TO_REENGAGE_VERB: &str = "pivot_to_reengage";
 /// target's reach — with the circulation direction taken from this system's
 /// host-written `memory(orbit_direction)`.
 pub const HELM_HOLD_COMBAT_ORBIT_VERB: &str = "hold_combat_orbit";
+/// The `hold_torpedo_bearing` verb: the Steering fine system's SIXTH mode verb
+/// (issue #791). Tracks the target's live position like `actuate_desired_facing`,
+/// but the host pairs it with the authored `torpedo_bearing_speed` throttle
+/// rather than with doctrine travel — the bow-on, thrust-cut hold a hull flies
+/// while a fixed forward tube lines up on a shield facing that has gone down.
+///
+/// Deliberately NOT a reuse of `pivot_to_reengage`, whose geometry is the same
+/// but whose host gate is the six-scalar shield-RECOVERY parameter set: a hull
+/// with no standoff doctrine would have to invent all six to borrow it.
+pub const HELM_HOLD_TORPEDO_BEARING_VERB: &str = "hold_torpedo_bearing";
 
-/// The verbs a Steering (`yaw`) policy may emit (issues #779, #883, #788, #790).
+/// The verbs a Steering (`yaw`) policy may emit
+/// (issues #779, #883, #788, #790, #791).
 pub const HELM_STEERING_VERBS: &[&str] = &[
     HELM_ACTUATE_DESIRED_FACING_VERB,
     HELM_HOLD_COMMITTED_HEADING_VERB,
     HELM_HOLD_RECOVERY_ORBIT_VERB,
     HELM_PIVOT_TO_REENGAGE_VERB,
     HELM_HOLD_COMBAT_ORBIT_VERB,
+    HELM_HOLD_TORPEDO_BEARING_VERB,
 ];
 
 // ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
@@ -2877,6 +2889,11 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // radius, throttle and spiral gain are authored Steering `param`s and
         // the circulation direction is host-written private memory.
         HELM_HOLD_COMBAT_ORBIT_VERB => crate::ai::policy::AiPolicyVerb::HoldCombatOrbit,
+        // The torpedo-opportunity bow hold (issue #791): value-less too — the
+        // throttle is an authored Steering `param`, and which shield is down,
+        // which arc the tubes cover and whether a salvo is still in flight are
+        // all host readings.
+        HELM_HOLD_TORPEDO_BEARING_VERB => crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing,
         // Helm secondary-actuator mode verbs (issue #780): value-less,
         // like the travel-axis verbs above.
         HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
@@ -8750,27 +8767,16 @@ when = "state_time >= param(surge_dwell_secs)"
             "the aft bank must be blind dead ahead"
         );
 
-        // The deliberate absences (see the hull header).
+        // The deliberate absence that survives: no blasters. The beams are still
+        // the only continuous weapon on the hull.
         assert!(
             wc.blaster_banks.is_empty(),
-            "the cruiser is beam-armed only"
-        );
-        assert!(
-            cfg.torpedoes.is_none(),
-            "the cruiser must carry NO torpedo magazine"
+            "the cruiser is beam-armed only between torpedo opportunities"
         );
         let ship_config = cfg
             .ship_config
             .as_ref()
             .expect("the hull declares [[system]] blocks");
-        for system in &ship_config.systems {
-            assert!(
-                !system.kind.contains("torpedo"),
-                "the cruiser must declare no torpedo system, found '{:?}' ({})",
-                system.id,
-                system.kind
-            );
-        }
         // Every bank needs its own fine system or it is never AI-operable, and
         // the id follows the `phaser-<bank_id>` convention the resolver uses.
         for bank in &wc.phaser_banks {
@@ -8786,9 +8792,190 @@ when = "state_time >= param(surge_dwell_secs)"
         }
     }
 
-    /// AC1/AC2, as content: both travel axes author the two-state orbit machine,
-    /// the yaw channel resolves the combat-orbit verb, and every scalar the host
-    /// reads by name is present on the Steering axis.
+    /// AC2, as content — and the INVERSION of a #790 pin.
+    ///
+    /// #790 asserted this hull carried no `[torpedoes]` table and no torpedo
+    /// `[[system]]` at all, because a ship that never presents its bow has
+    /// nothing to launch a fixed forward tube at. #791 changes that premise: the
+    /// cruiser now breaks its orbit to point at a shield gap, so the pin is
+    /// replaced rather than deleted, and the replacement is at least as specific.
+    /// Every number below has its own silent failure mode:
+    ///
+    /// * fewer than two tubes and `fact(tubes_full)` degenerates to "this tube is
+    ///   full" — the salvo doctrine would still parse and would pin nothing;
+    /// * a tube facing anywhere but dead ahead, or a wide arc, and the ORBIT
+    ///   already satisfies `in_arc` — the whole bow-on phase becomes decoration
+    ///   the hull never needs;
+    /// * a missing `[[system]]` entry and the tube is never AI-operable, so the
+    ///   salvo can never be full and the phase never launches.
+    #[test]
+    fn harrow_cruiser_carries_two_narrow_bow_tubes_for_the_shield_opportunity() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let torpedoes = cfg
+            .torpedoes
+            .as_ref()
+            .expect("the cruiser carries a torpedo magazine for the shield opportunity");
+
+        let ids: Vec<&str> = torpedoes.tubes.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["bow_port", "bow_starboard"],
+            "two forward tubes: with one, `tubes_full` says nothing a per-tube \
+             `loaded` reading does not already say"
+        );
+        for tube in &torpedoes.tubes {
+            assert_eq!(
+                tube.facing_deg, 0.0,
+                "tube '{}' must be a FIXED forward tube — the phase exists because \
+                 the guns cannot be pointed without pointing the ship",
+                tube.id
+            );
+            assert!(
+                tube.fire_arc_deg > 0.0 && tube.fire_arc_deg <= 30.0,
+                "tube '{}' must have a NARROW bow arc ({} deg): the orbit holds the \
+                 target abeam, so an arc wide enough to cover the beam would let the \
+                 cruiser launch without ever breaking off",
+                tube.id,
+                tube.fire_arc_deg
+            );
+            assert!(
+                tube.volley_max > 1,
+                "tube '{}' fires a salvo, not a round",
+                tube.id
+            );
+            assert_eq!(
+                tube.ai_target_count,
+                Some(tube.volley_max),
+                "an AI crew keeps tube '{}' at its full volley between \
+                 opportunities — the load time is longer than the window",
+                tube.id
+            );
+        }
+
+        // The tubes are barely-homing hull-killers aimed by the bow, not a way
+        // through a shield: a round that arrives after the arc recovers must do
+        // nothing, which is what makes the abort transition matter.
+        assert_eq!(
+            torpedoes.damage_shields, 0,
+            "these rounds go through the hole the beams made; they do not make one"
+        );
+        assert!(
+            torpedoes.damage_hull > 0,
+            "and they hurt the hull once they are through"
+        );
+        assert!(
+            torpedoes.load_time > torpedoes.lifespan,
+            "reloading ({}) must outlast a round's whole flight ({}), or the cruiser \
+             could refill inside one opportunity and the doctrine would collapse into \
+             holding the bow on and emptying the magazine",
+            torpedoes.load_time,
+            torpedoes.lifespan
+        );
+
+        // The authored per-tube policy — the first in the set. All three of AC2's
+        // conditions, on the launch channel, on EVERY tube.
+        for tube in &torpedoes.tubes {
+            let ai = tube
+                .ai
+                .as_ref()
+                .unwrap_or_else(|| panic!("tube '{}' must author its own policy", tube.id));
+            assert!(
+                validate_fine_system_ai_policy(ai, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS)
+                    .is_ok(),
+                "tube '{}' policy must pass content validation",
+                tube.id
+            );
+            let load = ai
+                .rule
+                .iter()
+                .find(|r| r.channel == TORPEDO_LOAD_CHANNEL)
+                .unwrap_or_else(|| panic!("tube '{}' must author a load rule", tube.id));
+            assert_eq!(load.verb, TORPEDO_LOAD_VERB);
+            let launch = ai
+                .rule
+                .iter()
+                .find(|r| r.channel == TORPEDO_LAUNCH_CHANNEL)
+                .unwrap_or_else(|| panic!("tube '{}' must author a launch rule", tube.id));
+            assert_eq!(launch.verb, TORPEDO_LAUNCH_VERB);
+            for required in ["tubes_full", "target_facing_shields", "in_arc"] {
+                assert!(
+                    launch.when.contains(required),
+                    "tube '{}': the launch guard must require `{required}` continuously, \
+                     got `{}`",
+                    tube.id,
+                    launch.when
+                );
+            }
+        }
+
+        // Fine systems: one per tube plus the shared magazine. Both loaders gate
+        // on the magazine before they look at a tube, so its absence would
+        // silently switch the whole armament off.
+        let ship_config = cfg.ship_config.as_ref().expect("hull declares systems");
+        let declared =
+            |id: &crate::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
+        assert!(
+            declared(&crate::system_registry::torpedo_magazine_system_id()),
+            "the shared magazine needs a [[system]] entry or neither loading nor \
+             launching runs at all"
+        );
+        for tube in &torpedoes.tubes {
+            let expected = crate::system_registry::torpedo_tube_system_id(&tube.id)
+                .expect("a non-empty tube id always resolves");
+            assert!(
+                declared(&expected),
+                "tube '{}' must declare a [[system]] entry `{}`",
+                tube.id,
+                expected.0
+            );
+        }
+    }
+
+    /// AC5, as content: the fore phaser bank still bears on a target held dead
+    /// ahead, so ordinary beam pressure continues through the whole torpedo
+    /// phase rather than pausing for it.
+    ///
+    /// This is a geometry claim, not a plumbing one — `ai_phaser_auto_fire` never
+    /// reads the Steering verb or the pass surface (pinned in the weapons tests)
+    /// — but the geometry is the half that could silently stop being true: narrow
+    /// the fore bank's arc and the cruiser would go quiet exactly while it was
+    /// most exposed.
+    #[test]
+    fn harrow_cruiser_fore_bank_still_bears_while_the_bow_is_held_on_the_target() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let wc = cfg.weapons_console.as_ref().unwrap();
+        let fore = wc.phaser_banks.iter().find(|b| b.id == "fore").unwrap();
+        // Ship-local bearing is `radar_x.atan2(radar_y)`, so `(0, +r)` is dead
+        // ahead — where the bow hold puts the target.
+        assert!(
+            crate::weapons::phaser::in_arc(0.0, 10.0, fore.facing_deg, fore.auto_arc_deg),
+            "a target dead ahead must be inside the fore bank's AUTO arc: the beams \
+             keep working while the tubes line up"
+        );
+        // ...and the tubes' own cone sits inside that arc, so there is no bearing
+        // at which the torpedoes may launch but the beams may not fire.
+        let torpedoes = cfg.torpedoes.as_ref().unwrap();
+        for tube in &torpedoes.tubes {
+            let half = tube.fire_arc_deg * 0.5;
+            for edge in [-half, half] {
+                let (x, y) = (
+                    edge.to_radians().sin() * 10.0,
+                    edge.to_radians().cos() * 10.0,
+                );
+                assert!(
+                    crate::weapons::phaser::in_arc(x, y, fore.facing_deg, fore.auto_arc_deg),
+                    "the edge of tube '{}' arc ({edge} deg) must still be inside the \
+                     fore bank's auto arc",
+                    tube.id
+                );
+            }
+        }
+    }
+
+    /// AC1/AC2, as content: both travel axes author the three-state machine
+    /// (issue #791 adds `torpedo_run` to #790's pair), the yaw channel resolves
+    /// the combat-orbit verb in the ring and the bow-hold verb in the phase, and
+    /// every scalar the host reads by name is present on the Steering axis.
     #[test]
     fn harrow_cruiser_authors_the_broadside_orbit_machine_on_both_travel_axes() {
         let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
@@ -8809,8 +8996,8 @@ when = "state_time >= param(surge_dwell_secs)"
             let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
             assert_eq!(
                 ids,
-                vec!["acquire", "orbit"],
-                "{name} authors the two-state orbit machine"
+                vec!["acquire", "orbit", "torpedo_run"],
+                "{name} authors the three-state orbit + shield-opportunity machine"
             );
             assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
             assert!(
@@ -8843,6 +9030,13 @@ when = "state_time >= param(surge_dwell_secs)"
              whose ring is derived from the target's reach and gated on a shield \
              doctrine this hull does not have"
         );
+        assert_eq!(
+            verb_of("torpedo_run"),
+            HELM_HOLD_TORPEDO_BEARING_VERB,
+            "the shield-opportunity leg is the SIXTH yaw verb — NOT \
+             `pivot_to_reengage`, whose geometry is the same but whose host gate \
+             is the six shield-recovery scalars this hull would have to invent"
+        );
 
         // Every scalar the host reads off this axis BY NAME. A rename in either
         // direction lights this up, and it must: the host's response to a
@@ -8853,6 +9047,14 @@ when = "state_time >= param(surge_dwell_secs)"
                 steering.param.contains_key(*required),
                 "steering_ai must author `{required}`: the host gates the whole \
                  combat-orbit arm on all three together"
+            );
+        }
+        for required in crate::ship::helm_ai::TORPEDO_BEARING_PARAMS {
+            assert!(
+                steering.param.contains_key(*required),
+                "steering_ai must author `{required}`: the host gates the whole \
+                 bow-hold arm on it, and the value this hull wants (0.0) is \
+                 indistinguishable from an omission unless the NAME is present"
             );
         }
         for required in [
@@ -8951,18 +9153,147 @@ when = "state_time >= param(surge_dwell_secs)"
             ("steering_ai", hc.steering_ai.as_ref().unwrap()),
         ] {
             let orbit = ai.state.iter().find(|s| s.id == "orbit").unwrap();
+            // Exactly TWO ways out, both of them named here. #790 pinned one;
+            // #791 adds the shield opportunity and re-pins the whole set rather
+            // than loosening the count, because "some number of exits" would let
+            // a third grow in unnoticed.
+            let exits: Vec<&str> = orbit.transition.iter().map(|t| t.to.as_str()).collect();
             assert_eq!(
-                orbit.transition.len(),
-                1,
-                "{name}: the orbit has exactly one way out"
+                exits,
+                vec!["torpedo_run", "acquire"],
+                "{name}: the orbit has exactly two ways out, in this priority order"
             );
-            assert_eq!(orbit.transition[0].to, "acquire");
             assert!(
                 orbit.transition[0]
                     .when
-                    .contains(crate::ship::helm_ai::TARGET_VALID_FACT),
-                "{name}: losing the target is the one thing that ends the orbit, got `{}`",
+                    .contains(crate::ship::helm_ai::TARGET_FACING_SHIELD_DOWN_FACT),
+                "{name}: the shield opportunity is what interrupts the orbit, got `{}`",
                 orbit.transition[0].when
+            );
+            // ...and the interruption stays an interruption, which takes BOTH
+            // armament readings and not either alone.
+            //
+            // `tubes_full` is the load-bearing one and it is the LAUNCHER's
+            // question: entry is what spends the broadside geometry, so it must
+            // ask exactly what the `torpedo_launch` policy asks. Guarding on
+            // `tubes_fillable` alone was measured at 506 bow-on ticks against
+            // 431 orbiting over a 400 s run, only 29 of them with the tubes
+            // actually full — reachability stays true through the whole 18 s
+            // reload, so the ring broke on collapses with nothing loadable
+            // inside the window.
+            //
+            // `tubes_fillable` stays beside it because it catches what
+            // `tubes_full` cannot: a tube that is loaded but has been shot out,
+            // and a magazine that can no longer top the battery up.
+            //
+            // Both pinned as content because the failure is invisible in any
+            // test that fights a single engagement.
+            for required in [
+                crate::ship::helm_ai::TUBES_FULL_FACT,
+                crate::ship::helm_ai::TUBES_FILLABLE_FACT,
+            ] {
+                assert!(
+                    orbit.transition[0].when.contains(required),
+                    "{name}: the orbit may only be given up with `{required}` \
+                     satisfied — a salvo loaded, in a battery that can still fire \
+                     it, got `{}`",
+                    orbit.transition[0].when
+                );
+            }
+            assert!(
+                orbit.transition[1]
+                    .when
+                    .contains(crate::ship::helm_ai::TARGET_VALID_FACT),
+                "{name}: losing the target is the other thing that ends the orbit, got `{}`",
+                orbit.transition[1].when
+            );
+            // And the phase resumes the ring THREE ways, which is the whole of
+            // the trap fix. Pinned as a set rather than as "at least one exit
+            // mentioning the right facts", because it is precisely the ones
+            // after the first that are easy to lose and impossible to miss the
+            // absence of in a fixture whose target has shields and whose tubes
+            // survive the engagement.
+            let phase = ai.state.iter().find(|s| s.id == "torpedo_run").unwrap();
+            let resumes: Vec<&str> = phase
+                .transition
+                .iter()
+                .filter(|t| t.to == "orbit")
+                .map(|t| t.when.as_str())
+                .collect();
+            assert_eq!(
+                resumes.len(),
+                3,
+                "{name}: the phase must have exactly three ways back to the ring — \
+                 the window closing, the salvo being spent and the battery becoming \
+                 unusable, got {resumes:?}"
+            );
+
+            // THE WINDOW CLOSED. Both conjuncts: the shield being back is not
+            // enough while a salvo is still in the air, or the cruiser turns
+            // away mid-flight the instant the arc regenerates — which, since it
+            // regenerates the whole time the rounds are flying, is nearly always.
+            for required in [
+                crate::ship::helm_ai::TARGET_FACING_SHIELD_DOWN_FACT,
+                crate::ship::helm_ai::TORPEDOES_IN_FLIGHT_FACT,
+            ] {
+                assert!(
+                    resumes[0].contains(required),
+                    "{name}: the window-closed resume must require `{required}`, \
+                     got `{}`",
+                    resumes[0]
+                );
+            }
+
+            // THE SALVO IS SPENT, and this one may not mention the target's
+            // shields AT ALL. `target_facing_shield_down` reads a permanent 1.0
+            // against any resolvable target with no `[shields]` block — a
+            // station, a probe — so an exit that consulted it would be no exit
+            // at all for those targets, and the cruiser would hold its nose on
+            // one until something died. The bound has to be the hull's own
+            // armament.
+            for required in [
+                crate::ship::helm_ai::TUBES_FULL_FACT,
+                crate::ship::helm_ai::TORPEDOES_IN_FLIGHT_FACT,
+            ] {
+                assert!(
+                    resumes[1].contains(required),
+                    "{name}: the salvo-spent resume must require `{required}`, \
+                     got `{}`",
+                    resumes[1]
+                );
+            }
+            assert!(
+                !resumes[1].contains(crate::ship::helm_ai::TARGET_FACING_SHIELD_DOWN_FACT),
+                "{name}: the salvo-spent resume must not depend on the target ever \
+                 raising a shield — that is the one thing a shieldless target never \
+                 does, got `{}`",
+                resumes[1]
+            );
+
+            // THE BATTERY IS GONE, and this one exists because the guard above
+            // cannot see it. `tubes_full` reads the ROUNDS, and a tube that is
+            // shot out mid-phase keeps the rounds already in it — so the
+            // salvo-spent resume stays shut, `torpedoes_in_flight` is zero, and
+            // against a target with no arc to raise the hull is trapped bow-on
+            // for a salvo `handle_fire_torpedo` will decline. Reachability is
+            // the reading that notices, and it must be on the EXIT and not only
+            // on the entry guard.
+            for required in [
+                crate::ship::helm_ai::TUBES_FILLABLE_FACT,
+                crate::ship::helm_ai::TORPEDOES_IN_FLIGHT_FACT,
+            ] {
+                assert!(
+                    resumes[2].contains(required),
+                    "{name}: the battery-lost resume must require `{required}`, \
+                     got `{}`",
+                    resumes[2]
+                );
+            }
+            assert!(
+                !resumes[2].contains(crate::ship::helm_ai::TARGET_FACING_SHIELD_DOWN_FACT),
+                "{name}: the battery-lost resume must not depend on the target \
+                 either, got `{}`",
+                resumes[2]
             );
             for state in &ai.state {
                 for transition in &state.transition {

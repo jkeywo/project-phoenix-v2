@@ -93,6 +93,28 @@ impl Plugin for ShipPlugin {
                     .after(crate::lobby::LobbySystemSet)
                     .after(crate::sim_sets::AiTickLabel)
                     .after(helm_motion_planner)
+                    // Issue #791: this system seeds `torpedoes_in_flight` from
+                    // the ship's LIVE `TorpedoSystemResource`, and both of the
+                    // systems that write `in_flight` also run in
+                    // `SimSet::Physics`. Without these two edges the reading
+                    // would be run-order-dependent — the exact ambiguity that
+                    // has bitten this codebase before — so the order is pinned
+                    // rather than left to the scheduler:
+                    //
+                    // * `.after(handle_fire_torpedo)` so a salvo launched THIS
+                    //   tick is already visible. Without it the doctrine could
+                    //   read "no salvo in flight" on the very tick it launched
+                    //   one and let go of the target a tick early.
+                    // * `.after(tick_torpedo_lifecycle)` so a round that hit,
+                    //   missed or expired this tick is already gone. The count
+                    //   the transition guard sees is therefore the settled one
+                    //   for this tick, in both directions.
+                    //
+                    // Both are absent from the ShipPlugin-only test fixtures,
+                    // where an ordering edge against an unregistered system type
+                    // is simply an empty constraint.
+                    .after(crate::console::weapons::handle_fire_torpedo)
+                    .after(crate::console::weapons::tick_torpedo_lifecycle)
                     .before(ai_helm_thrust)
                     .before(ai_helm_steering)
                     .before(ai_helm_lateral_thrust)

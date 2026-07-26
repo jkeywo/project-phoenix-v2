@@ -151,6 +151,28 @@ pub enum AiPolicyVerb {
     /// policy, and the circulation direction is host-written private memory drawn
     /// once per engagement from a seeded composite key.
     HoldCombatOrbit,
+    /// Hold the bow on the target for a torpedo opportunity (the `yaw` channel's
+    /// SIXTH mode verb, issue #791).
+    ///
+    /// Tracks the target's LIVE position every tick, exactly as
+    /// [`AiPolicyVerb::ActuateDesiredFacing`] and
+    /// [`AiPolicyVerb::PivotToReengage`] do; what differs is the *throttle* the
+    /// host pairs with it — the authored `torpedo_bearing_speed` — so a hull can
+    /// author `0.0` and cut thrust while it lines a fixed forward tube up on a
+    /// shield that has just gone down.
+    ///
+    /// It is its own verb rather than a reuse of `pivot_to_reengage` because the
+    /// two are gated on different authoring. The re-engage pivot is one leg of
+    /// the shield-RECOVERY doctrine and the host only publishes it when the hull
+    /// authors the complete recovery parameter set — six scalars all describing a
+    /// standoff ring derived from the *target's* reach, none of which a
+    /// torpedo-opportunity hull has any business inventing (AGENTS.md #11). This
+    /// verb carries one authored scalar of its own and nothing else.
+    ///
+    /// Value-less like every other mode verb: which shield is down, which arc the
+    /// tubes cover and whether a salvo is still in flight are all host readings,
+    /// never authored constants.
+    HoldTorpedoBearing,
     /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
     /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
     /// starboard/port magnitude comes from the shared hazard assessment weighted
@@ -748,6 +770,67 @@ mod tests {
         );
         assert_ne!(
             AiPolicyVerb::PivotToReengage,
+            AiPolicyVerb::ActuateDesiredFacing
+        );
+    }
+
+    /// Issue #791: the `yaw` channel's SIXTH mode verb is a distinct value, and
+    /// distinct from `pivot_to_reengage` in particular — the one it would
+    /// otherwise be tempting to reuse, since the two fly identical geometry.
+    ///
+    /// The host tells the legs apart by matching on the verb, so if these ever
+    /// became the same value a cruiser with no shield-recovery doctrine would
+    /// silently take a leg gated on six scalars it does not author, and simply
+    /// never fly the phase.
+    #[test]
+    fn the_torpedo_bearing_verb_is_its_own_yaw_mode_verb() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "orbit".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "orbit".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "yaw".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::HoldCombatOrbit,
+                        }],
+                        transitions: Vec::new(),
+                    },
+                    AiPolicyState {
+                        id: "torpedo_run".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "yaw".into(),
+                            when: parse_predicate("true").unwrap(),
+                            verb: AiPolicyVerb::HoldTorpedoBearing,
+                        }],
+                        transitions: Vec::new(),
+                    },
+                ],
+            }),
+        };
+        let memory = AiPolicyMemory::new();
+        assert_eq!(
+            p.resolve_channel_in_state("torpedo_run", "yaw", &AiFacts::new(), &memory, &[]),
+            Some(&AiPolicyVerb::HoldTorpedoBearing)
+        );
+        assert_eq!(
+            p.resolve_channel_in_state("orbit", "yaw", &AiFacts::new(), &memory, &[]),
+            Some(&AiPolicyVerb::HoldCombatOrbit),
+            "the two legs must stay tellable apart"
+        );
+        assert_ne!(
+            AiPolicyVerb::HoldTorpedoBearing,
+            AiPolicyVerb::PivotToReengage
+        );
+        assert_ne!(
+            AiPolicyVerb::HoldTorpedoBearing,
             AiPolicyVerb::ActuateDesiredFacing
         );
     }

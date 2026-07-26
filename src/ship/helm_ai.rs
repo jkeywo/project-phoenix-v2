@@ -1321,6 +1321,26 @@ pub struct HelmPassSurface {
     /// Authored spiral gain for the combat ring: radians of heading offset per
     /// unit of *fractional* radial error (Steering `param`).
     pub combat_orbit_spiral_gain: f32,
+    // ── The torpedo-opportunity bow hold (issue #791) ────────────────────────
+    //
+    // A SIXTH leg and a FOURTH independent leg set, resolved exactly like the
+    // five above: off the authored yaw verb, never off a state name. It shares
+    // nothing with the orbit legs — a bow-on hold has no ring, no radius and no
+    // circulation — which is why it carries only its own throttle.
+    /// `true` once the Steering machine's current state answers the `yaw`
+    /// channel with `hold_torpedo_bearing` AND the hull authors the
+    /// torpedo-bearing parameter set: the ship is tracking the target's live
+    /// position bow-on while a fixed forward tube lines up.
+    pub torpedo_bearing: bool,
+    /// Authored throttle fraction flown on the bow-on hold (Steering `param`).
+    /// `0.0` cuts thrust for the phase.
+    ///
+    /// Its own field rather than a reuse of [`Self::reengage_speed`], for the
+    /// reason the verbs are distinct: `reengage_speed` is one of the six
+    /// shield-recovery scalars and the host declines all six together, so a hull
+    /// with no standoff doctrine would have to invent five unrelated numbers to
+    /// borrow this one (AGENTS.md #11).
+    pub torpedo_bearing_speed: f32,
 }
 
 /// The fact name the shared hazard surface is seeded under by
@@ -1658,6 +1678,237 @@ fn combat_orbit_params_authored(params: &crate::world::flags::AiParams) -> bool 
         .all(|name| params.get(name).is_some())
 }
 
+// ── Authored torpedo-opportunity params (issue #791) ─────────────────────────
+//
+// The bow-on hold's single scalar, read off the STEERING policy for the same
+// reason every other leg's are: Steering's yaw verb is what tells the host which
+// leg is being flown. There is no default for it anywhere in Rust, and the host
+// gates the arm on it — see [`TORPEDO_BEARING_PARAMS`].
+
+/// Throttle fraction flown while holding the bow on a torpedo opportunity.
+///
+/// AUTHORED, and deliberately its own name rather than a reuse of
+/// [`REENGAGE_SPEED_PARAM`]. The value a hull wants here is very often `0.0`
+/// (cut thrust, stop swinging the beam, let the tube line up), and `0.0` is
+/// exactly the value that cannot be distinguished from "unauthored" unless the
+/// gate asks for the name. A hull omitting it declines the whole arm and flies
+/// its ordinary leg instead of coasting to a halt in front of an enemy.
+pub(crate) const TORPEDO_BEARING_SPEED_PARAM: &str = "torpedo_bearing_speed";
+
+/// Every scalar the torpedo-opportunity arm needs, gated as ONE unit by
+/// [`torpedo_bearing_params_authored`].
+///
+/// A one-element set today, and expressed as a set anyway: the shape is what
+/// #788's and #789's reviews both landed on — the gate is over the *arm's whole
+/// requirement*, so adding a second scalar later cannot leave a half-gated arm
+/// behind. Everything else the phase needs (which shield is down, which arc the
+/// tubes cover, whether a salvo is still in flight) is a host reading, not an
+/// authored constant.
+pub(crate) const TORPEDO_BEARING_PARAMS: &[&str] = &[TORPEDO_BEARING_SPEED_PARAM];
+
+/// Does this Steering policy author the complete torpedo-bearing scalar set?
+///
+/// The sibling of [`recovery_params_authored`] and
+/// [`combat_orbit_params_authored`], and separate from both on purpose: a hull
+/// may fly a torpedo opportunity out of a combat orbit, out of a fly-through
+/// pass, or out of nothing at all.
+fn torpedo_bearing_params_authored(params: &crate::world::flags::AiParams) -> bool {
+    TORPEDO_BEARING_PARAMS
+        .iter()
+        .all(|name| params.get(name).is_some())
+}
+
+// ── Torpedo-opportunity facts (issue #791) ───────────────────────────────────
+//
+// SCOPE, and it is the same narrow one the recovery and pressed facts have:
+// these two are seeded by `seed_torpedo_opportunity_facts`, which only
+// `ai_policy_state_tick` calls. They are therefore available to TRANSITION
+// guards and NOT to a state's continuous RULE guards, which the per-axis
+// actuator hosts resolve from their own snapshot. Author them in transitions;
+// the shipped cruiser doctrine does, and every rule it authors is unconditional.
+
+/// `1.0` when the ONE shield arc of the current target that faces this ship is
+/// down — offline, or absent because the target carries no shield system at all
+/// — and `0.0` when it is online and blocking.
+///
+/// Transition-scope only — see the note above.
+///
+/// Resolved through the SAME path damage takes and the same one
+/// `ai_torpedo_auto_fire` gates on: the target's live `Transform` + its own
+/// `ShipShields`, through [`crate::shield::attacker_bearing_relative`] and then
+/// the target's own `facing_index_for_bearing`. That resolver is
+/// priority-tiered, so a hull that authors overlapping arcs routes the AI's
+/// belief and the eventual hit to the same arc. Deriving the arc any other way
+/// would let the manoeuvre commit to an opportunity the shot cannot take.
+///
+/// Deliberately ABSENT (not zero) when the helm has no target at all, so a
+/// `fact(target_facing_shield_down) > 0` guard reads false rather than firing on
+/// nothing. It reads `0.0` — "no opportunity" — when the target is live but
+/// cannot be resolved to an entity carrying a transform (an asteroid, say):
+/// unknowable is treated as closed, so the guard that OPENS the phase reads
+/// false and the phase is never entered on a target nothing is known about.
+///
+/// ## This fact is not, and cannot be, a phase bound
+///
+/// Note carefully what the paragraph above does NOT say. Unknowable-is-closed
+/// keeps the phase from opening; it does nothing to end one already open,
+/// because the case that traps a hull is the opposite one. A target that
+/// RESOLVES but carries no `[shields]` at all — a station, a probe, a hull
+/// authored without the block — reads `1.0` here, correctly and permanently:
+/// there is genuinely no arc in the way and there never will be. A doctrine
+/// whose only way back out of the bow hold were "this fact went to zero" would
+/// hold its bow on such a target until one of them died. That is why the shipped
+/// cruiser's resume guards do not rest on this fact alone — see
+/// [`TUBES_FULL_FACT`], which bounds the phase on the hull's OWN armament and so
+/// cannot depend on the target ever raising a shield.
+pub(crate) const TARGET_FACING_SHIELD_DOWN_FACT: &str = "target_facing_shield_down";
+/// How many of this ship's OWN torpedo rounds are still UNRESOLVED — airborne,
+/// or already committed to a burst and waiting on its timer.
+///
+/// Transition-scope only — see the note above.
+///
+/// Read off the live [`crate::weapons_plugin::TorpedoSystemResource`] component,
+/// NOT off `SystemBlackboard::TorpedoMagazine`: the blackboard is published in
+/// `SimSet::Publish`, one whole tick after this system runs in `SimSet::Physics`,
+/// so a doctrine gating on it would see a salvo it launched a tick after it
+/// launched it — and, worse, would read "no salvo" on the launch tick itself.
+/// This is the identical trap `ai_shield_focus` calls out for `ShipShields` vs
+/// `ShieldsBlackboard`.
+///
+/// "Every projectile has hit, missed, or expired" covers the airborne half
+/// exactly: `tick_torpedo_lifecycle` removes a round from `in_flight` on
+/// detonation and on expiry alike, so there is one reading rather than three.
+/// `ai_policy_state_tick` is ordered after both the launcher and the lifecycle
+/// (see `ship_plugin`), so the count is this tick's settled one.
+///
+/// Always seeded, including as `0.0` for a hull with no torpedo system at all —
+/// a ship cannot be held bow-on by a salvo it can never have fired.
+///
+/// ## Why `in_flight` alone is not the count
+///
+/// A burst launch puts its FIRST round in `in_flight` immediately and schedules
+/// the rest as a [`crate::torpedo::TubeBurstState`], whose `pending` rounds are
+/// not in `in_flight` until their timer elapses. `in_flight.len()` on its own
+/// therefore under-reports a salvo mid-burst, and a doctrine reading `< 1`
+/// releases the hull in the gap between the last airborne round resolving and
+/// the next pending one launching. So this fact is `in_flight.len()` PLUS the
+/// pending rounds of every live burst state.
+///
+/// That gap is not theoretical, and the arithmetic that once said it was is
+/// worth recording as the mistake it was. The reasoning ran: `volley_max = 2`
+/// and `burst_interval_secs = 0.35`, so the two rounds of a tube's burst are
+/// 0.35 s apart, while a round at `speed = 45` needs ~0.9 s to cross the
+/// 42-unit combat ring — the first round cannot resolve before the second is
+/// airborne. It assumes the round has to fly the AUTHORED ring radius. It does
+/// not: the cruiser enters the phase with thrust cut and the target closing, and
+/// an instrumented `combat_test` run measured the first two rounds of a salvo
+/// launching at t=172.10 and both resolving by t=172.33 — 0.23 s, well inside
+/// the burst interval. `in_flight` hit zero with `pending` still at 2, the
+/// salvo-spent guard fired, and the back half of the salvo launched in `orbit`
+/// with the bow already swinging away: `|bearing| = 0.230` rad and `in_arc = 0`,
+/// i.e. rounds thrown outside the tubes' 24-degree cone. Counting the pending
+/// rounds here holds the hull bow-on instead — the same run measured the second
+/// pair away at `|bearing| = 0.163` rad, `in_arc = 1`.
+///
+/// The lesson generalises past this hull: flight TIME is a function of the
+/// closing geometry, not of the ring the doctrine authors, so no arrangement of
+/// `speed`, `lifespan` and `burst_interval_secs` licenses reading only the
+/// airborne half. A round that has been committed to is a round the hull owes
+/// the manoeuvre, whether or not it has left the tube yet.
+pub(crate) const TORPEDOES_IN_FLIGHT_FACT: &str = "torpedoes_in_flight";
+
+/// `1.0` when this ship could still get every tube to `volley_max` — i.e. when
+/// a WHOLE SALVO is still a reachable state — and `0.0` when it is not.
+///
+/// Transition-scope only — see the note above.
+///
+/// The slower half of the pair it forms with [`TUBES_FULL_FACT`], and it is a
+/// STAY reading rather than an entry one. `tubes_full` is "the salvo is ready
+/// this instant"; this is "the salvo is still a reachable state at all" — no
+/// tube and not the magazine has been shot out, and there are enough rounds left
+/// to top every tube up. A hull that has just fired fails `tubes_full` for the
+/// whole of its 18 s reload and yet passes this the entire time, which is
+/// exactly the distinction: the first says whether to break a firing geometry
+/// NOW, the second says whether this hull is still in the torpedo business.
+///
+/// It is a phase BOUND as well as an entry conjunct, and for a case
+/// [`TUBES_FULL_FACT`] cannot reach: a tube shot out mid-phase keeps the rounds
+/// already loaded into it, so the loaded-count reading stays true for ever while
+/// the launcher declines every shot. Against a target with no arc to raise that
+/// traps the hull bow-on until something dies. Reachability is the reading that
+/// notices, so the shipped cruiser conjoins it on an EXIT as well as on entry.
+///
+/// Which is why the shipped cruiser conjoins BOTH on entry and neither alone.
+/// `tubes_full` on its own would let a hull with a destroyed tube open the phase
+/// on a magazine-full coincidence; this on its own is what issue #791's first
+/// round shipped, and it opens the phase throughout every reload window — 94% of
+/// the resulting bow-on time was spent at a moment the launcher could not have
+/// fired whatever the target's shield did. Together they read "a whole salvo is
+/// loaded, and the battery that fired it is still intact".
+///
+/// Three things have to hold, and each is a reason the salvo is unreachable
+/// rather than merely not-yet-reached:
+///
+/// * the hull HAS tubes. A tubeless hull reads `0.0`, not the vacuous truth an
+///   `all`-over-nothing would give it;
+/// * every tube and the magazine are ONLINE — not Disabled, not Destroyed.
+///   Loading and firing both gate on the fine system, so one dead tube makes a
+///   ship-wide `tubes_full` permanently false. Read as "the system is not
+///   offline" (`accept_human_input || operate_ai`), the same reading
+///   `handle_fire_torpedo` gates a launch on, so this stays a statement about
+///   the hull and not about who is crewing it (AGENTS.md #6);
+/// * the magazine holds at least
+///   [`crate::torpedo::TorpedoSystem::salvo_shortfall`] rounds — the ones still
+///   needed to top every tube up, over and above those already claimed for an
+///   in-progress load.
+///
+/// Always seeded, including `0.0` for a hull with no torpedo system at all, for
+/// the same reason [`TORPEDOES_IN_FLIGHT_FACT`] is: a doctrine that asks must
+/// get an answer, and "no tubes" is a definite one.
+pub(crate) const TUBES_FILLABLE_FACT: &str = "tubes_fillable";
+
+/// `1.0` when EVERY tube on this ship is at its `volley_max` right now — a whole
+/// salvo loaded and ready to leave — and `0.0` otherwise.
+///
+/// Transition-scope only — see the note above.
+///
+/// The launcher's question, seeded helm-side so a MANOEUVRE can ask it too. It
+/// is deliberately the identical reading `ai_torpedo_auto_fire` computes for the
+/// `torpedo_launch` channel's fact of the same name
+/// (`tubes.iter().all(|t| t.loaded_count >= t.volley_max)`), because the two
+/// halves of a salvo doctrine have to agree: the helm gives up a firing geometry
+/// to create the shot, and the launcher takes it. If the helm asked a weaker
+/// question than the launcher, it would spend the geometry on windows the
+/// launcher was always going to decline.
+///
+/// That is precisely what happened when the entry guard asked
+/// [`TUBES_FILLABLE_FACT`] alone. Reachability stays true through the initial
+/// load-up and through the whole 18 s reload after every salvo
+/// (`load_time = 9.0` × `volley_max = 2`), so the cruiser broke its ring on
+/// every arc collapse in those windows with nothing loadable inside them.
+/// Measured over a 400 sim-second `combat_test` run: 506 ticks bow-on against
+/// 431 orbiting, and only 29 of the 506 — 5.7% — with the tubes actually full.
+///
+/// It is ALSO what bounds the phase, and that second job is why it is a fact
+/// rather than a detail of the entry guard. A hull that has fired fails this for
+/// its whole reload, so a resume guard conjoining it is guaranteed to fire once
+/// the salvo resolves — no matter what the target's shields do, and in
+/// particular for a resolvable target with no `[shields]` block at all, whose
+/// [`TARGET_FACING_SHIELD_DOWN_FACT`] is permanently `1.0`.
+///
+/// What it does NOT bound is a battery that stops working with the rounds still
+/// in it. This reads the ROUNDS: destroying a tube leaves its `loaded_count`
+/// untouched, so a hull that loses a tube mid-phase still reads `1.0` here for
+/// ever while `handle_fire_torpedo` declines every launch. That case is
+/// [`TUBES_FILLABLE_FACT`]'s, and it is why the shipped cruiser carries a
+/// reachability resume beside this one rather than only a reachability entry
+/// guard.
+///
+/// A hull with no tubes reads `0.0`, not the vacuous truth `all` over an empty
+/// battery would give it — the same treatment [`TUBES_FILLABLE_FACT`] gets, and
+/// for the same reason.
+pub(crate) const TUBES_FULL_FACT: &str = "tubes_full";
+
 /// Private-memory slot: which way round the current orbit runs, `+1.0` or
 /// `-1.0` (issues #788, #790).
 ///
@@ -1824,12 +2075,28 @@ pub(crate) fn ai_policy_state_tick(
             // is the single writer — so this adds no ordering question, only a
             // reading that may be one tick old.
             Option<&crate::ship::shields::ShipShields>,
+            // This ship's OWN tubes and rounds in flight (issue #791). Read-only,
+            // and unlike the shields above this one DOES carry an ordering
+            // question — `handle_fire_torpedo` appends to `in_flight` and
+            // `tick_torpedo_lifecycle` removes from it, both in `SimSet::Physics`
+            // — so `ship_plugin` pins this system after both of them.
+            Option<&crate::weapons_plugin::TorpedoSystemResource>,
             // The SHIP field of the orbit-direction composite key.
             Option<&crate::entity_spawner::EntityUuid>,
             HelmPolicyRuntime,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
+    // Every entity a target uuid could name, for the facing-shield reading
+    // (issue #791). The same shape `ai_torpedo_auto_fire` resolves its own
+    // striking arc through, and read-only, so it conflicts with nothing the
+    // ship query above mutates.
+    targets: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&crate::ship::shields::ShipShields>,
+        Option<&ShipPhysics>,
+    )>,
 ) {
     // One authored tick period per run — the shared cadence, never Time::delta.
     let hz = world_config
@@ -1866,6 +2133,7 @@ pub(crate) fn ai_policy_state_tick(
         steering_policy,
         boost_policy,
         shields,
+        torpedoes,
         entity_uuid,
         mut runtime,
     ) in ships.iter_mut()
@@ -1908,6 +2176,20 @@ pub(crate) fn ai_policy_state_tick(
         // trend and the "inside the target's own reach" comparison. Folded here,
         // once per shared tick, after the target scope above has been settled.
         seed_pressed_facts(&mut facts, &steering_policy.params, &mut runtime.recovery);
+        // Torpedo-opportunity readings (issue #791): whether the ONE shield arc
+        // of the target that faces us is down, how many of our own rounds are
+        // still in the air, and whether a whole salvo is still reachable at all.
+        // All three are pure world readings with no authored threshold, so they
+        // are seeded for every hull; a hull whose doctrine never asks simply
+        // never reads them.
+        seed_torpedo_opportunity_facts(
+            &mut facts,
+            travel_target,
+            physics,
+            &targets,
+            torpedoes.map(|t| &t.0),
+            sources,
+        );
 
         // ── Engines ──────────────────────────────────────────────────────────
         tick_policy_machine(
@@ -2180,16 +2462,18 @@ where
 /// numbers (AGENTS.md #11 — there is no default for any of these values anywhere
 /// in Rust).
 ///
-/// ## Three independent leg sets (issue #790)
+/// ## Four independent leg sets (issues #790, #791)
 ///
 /// * the FLY-THROUGH pass (`approach_speed` + `escape_speed`) → `pass_legs`,
 /// * the SHIELD-RECOVERY standoff ([`RECOVERY_PARAMS`]) → `recover`/`reengage`,
-/// * the COMBAT broadside orbit ([`COMBAT_ORBIT_PARAMS`]) → `combat_orbit`.
+/// * the COMBAT broadside orbit ([`COMBAT_ORBIT_PARAMS`]) → `combat_orbit`,
+/// * the TORPEDO-OPPORTUNITY bow hold ([`TORPEDO_BEARING_PARAMS`]) →
+///   `torpedo_bearing`.
 ///
 /// They are gated separately because a hull may author any one of them without
-/// the others: the destroyer authors the first two and no combat orbit, the
-/// cruiser the third and neither of the others. Only the two steering-response
-/// scalars are common to all three — every pure planner arm takes them — so
+/// the others: the destroyer authors the first two and neither of the rest, the
+/// cruiser the last two and neither of the first. Only the two steering-response
+/// scalars are common to all four — every pure planner arm takes them — so
 /// those alone are required unconditionally.
 fn build_pass_surface(
     engines_policy: &crate::ai::policy::AiPolicy,
@@ -2289,14 +2573,35 @@ fn build_pass_surface(
         _ => (false, 0.0, 0.0, 0.0),
     };
 
+    // ── The torpedo-opportunity bow hold (issue #791) ────────────────────────
+    //
+    // Gated independently of both ring sets, and of the pass throttles: the
+    // opportunity is a thing a hull does *while* flying some other doctrine, and
+    // which doctrine that is is none of this arm's business. Its own param is
+    // required — see [`TORPEDO_BEARING_PARAMS`] — because the value a hull most
+    // often wants is `0.0`, which is indistinguishable from "unauthored" unless
+    // the gate asks for the name.
+    let (torpedo_bearing, torpedo_bearing_speed) = match (
+        torpedo_bearing_params_authored(&steering_policy.params),
+        steering_policy.params.get(TORPEDO_BEARING_SPEED_PARAM),
+    ) {
+        (true, Some(speed)) => (
+            yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing),
+            speed as f32,
+        ),
+        _ => (false, 0.0),
+    };
+
     // At least ONE leg set has to be fully authored, or there is nothing for the
     // planner to fly and the hull is better served by ordinary doctrine travel.
-    // `recover`/`reengage`/`combat_orbit` are per-tick verb readings, so the
-    // gate is over the PARAM sets rather than over this tick's booleans — a
-    // recovery-capable hull must publish `active` while it is still inbound.
+    // `recover`/`reengage`/`combat_orbit`/`torpedo_bearing` are per-tick verb
+    // readings, so the gate is over the PARAM sets rather than over this tick's
+    // booleans — a recovery-capable hull must publish `active` while it is still
+    // inbound.
     let recovery_legs = recovery_params_authored(&steering_policy.params);
     let combat_orbit_legs = combat_orbit_params_authored(&steering_policy.params);
-    if !pass_legs && !recovery_legs && !combat_orbit_legs {
+    let torpedo_bearing_legs = torpedo_bearing_params_authored(&steering_policy.params);
+    if !pass_legs && !recovery_legs && !combat_orbit_legs && !torpedo_bearing_legs {
         return HelmPassSurface::default();
     }
 
@@ -2333,6 +2638,8 @@ fn build_pass_surface(
         combat_orbit_range,
         combat_orbit_speed,
         combat_orbit_spiral_gain,
+        torpedo_bearing,
+        torpedo_bearing_speed,
     }
 }
 
@@ -2608,6 +2915,205 @@ fn seed_pressed_facts(
         // target is not pressed by it.
         _ => history.separation.clear(),
     }
+}
+
+/// Fold the TORPEDO-OPPORTUNITY readings into the shared fact snapshot
+/// (issue #791).
+///
+/// Called from [`ai_policy_state_tick`] alone, like the recovery and pressed
+/// seeders, so all four facts are TRANSITION-scope (see their constants).
+///
+/// Four readings, and none carries an authored threshold — the doctrine owns
+/// every decision made from them, in the hull's own TOML:
+///
+/// * [`TARGET_FACING_SHIELD_DOWN_FACT`] resolves the ONE arc of the target that
+///   faces this ship through the target's OWN
+///   [`crate::shield::ShieldSystem::facing_index_for_bearing`] — the same
+///   priority-tiered resolver `apply_damage` routes a hit through, and the same
+///   one `ai_torpedo_auto_fire` gates its launch on. Going through a parallel
+///   view of the target's arcs would let the manoeuvre commit to an opportunity
+///   the shot cannot take, which is a bug that shows up as a cruiser holding its
+///   bow on a healthy shield for ever.
+/// * [`TORPEDOES_IN_FLIGHT_FACT`] is the LIVE component reading, not the
+///   blackboard's, and it counts the rounds a burst still owes alongside the
+///   airborne ones — see the constant.
+/// * [`TUBES_FULL_FACT`] is the READY-NOW reading — a whole salvo loaded —
+///   computed exactly as `ai_torpedo_auto_fire` computes the launch channel's
+///   fact of the same name, so the manoeuvre that spends a firing geometry and
+///   the launcher that uses it ask one question and not two.
+/// * [`TUBES_FILLABLE_FACT`] is the slower REACHABILITY reading beside it — see
+///   the constant, and [`torpedo_tubes_fillable`] for how it is resolved.
+fn seed_torpedo_opportunity_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    target: Option<uuid::Uuid>,
+    physics: &ShipPhysics,
+    targets: &Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&crate::ship::shields::ShipShields>,
+        Option<&ShipPhysics>,
+    )>,
+    torpedoes: Option<&crate::torpedo::TorpedoSystem>,
+    sources: &ShipSystemControlSources,
+) {
+    // A hull with no torpedo system reads zero rather than absent: it can never
+    // be held bow-on by a salvo it could not have fired.
+    //
+    // Airborne rounds PLUS the rounds a live burst still owes. A burst launch
+    // puts only its first round in `in_flight` and leaves the rest pending on a
+    // timer, so the airborne count alone dips to zero mid-salvo and releases the
+    // hull between rounds — see the constant for the measured trace.
+    facts.set(
+        TORPEDOES_IN_FLIGHT_FACT,
+        torpedoes
+            .map(|t| {
+                t.in_flight.len() as u32 + t.burst_states.iter().map(|b| b.pending).sum::<u32>()
+            })
+            .unwrap_or(0) as f64,
+    );
+    // Likewise zero rather than absent for a hull that has no tubes to fill.
+    facts.set(
+        TUBES_FILLABLE_FACT,
+        if torpedo_tubes_fillable(torpedoes, sources) {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    // ...and the launcher's own question, asked helm-side. Same treatment again:
+    // a hull with no tubes reads a definite zero rather than `all`'s vacuous
+    // truth over an empty battery.
+    facts.set(
+        TUBES_FULL_FACT,
+        if torpedo_tubes_full(torpedoes) {
+            1.0
+        } else {
+            0.0
+        },
+    );
+
+    // Absent (not zero) with no target at all — see the constant. The guard that
+    // opens the phase conjoins `target_valid` anyway, but an absent reading is
+    // what makes a doctrine that forgets to say so still safe.
+    let Some(target) = target else {
+        return;
+    };
+    let wanted = target.to_string();
+    let resolved = targets.iter().find(|(uuid, _, _, _)| uuid.0 == wanted).map(
+        |(_, transform, shields, target_physics)| {
+            let Some(shields) = shields else {
+                // No shield system at all: nothing is in the way, which is
+                // exactly the reading `ai_torpedo_auto_fire` takes from the same
+                // case (it reports 0 HP on the striking arc).
+                //
+                // Note what this reading is permanently: a station, a probe or
+                // any hull authored without `[shields]` reads `1.0` here for as
+                // long as it lives, because there is genuinely no arc to come
+                // back. A doctrine may therefore OPEN a phase on this fact but
+                // must never rely on it alone to CLOSE one — see the constant,
+                // and `TUBES_FULL_FACT` for the bound that does not depend on
+                // the target.
+                return true;
+            };
+            // Arcs are authored relative to the TARGET's own facing, so the
+            // bearing is taken in the target's frame.
+            let incoming = crate::shield::attacker_bearing_relative(
+                physics.x,
+                physics.z,
+                transform.translation.x,
+                transform.translation.z,
+                target_physics.map(|p| p.yaw).unwrap_or(0.0),
+            );
+            let facing = &shields.0.facings[shields.0.facing_index_for_bearing(incoming)];
+            !facing.is_online()
+        },
+    );
+    // A live target this ship cannot resolve to a transform (an asteroid, say)
+    // reads "no opportunity" rather than absent: unknowable is treated as
+    // closed, so the phase is never opened on a target nothing is known about.
+    facts.set(
+        TARGET_FACING_SHIELD_DOWN_FACT,
+        if resolved.unwrap_or(false) { 1.0 } else { 0.0 },
+    );
+}
+
+/// Resolve [`TUBES_FULL_FACT`]: is EVERY tube at `volley_max` right now?
+///
+/// One expression, and it is deliberately the SAME one `ai_torpedo_auto_fire`
+/// evaluates to seed the launch channel's `tubes_full`. Two spellings of "the
+/// salvo is ready" that could drift apart is the whole failure this fact exists
+/// to close: the helm must not break a broadside orbit for a window the launcher
+/// is going to decline.
+///
+/// Unlike [`torpedo_tubes_fillable`] this asks NOTHING about the fine systems'
+/// control policy. Being loaded is a fact about the rounds in the tubes, not
+/// about who is crewing them or whether the console is Disabled — a shot-out
+/// tube that still has rounds in it reads full here, and the doctrine conjoins
+/// `tubes_fillable` beside this precisely to catch that case.
+fn torpedo_tubes_full(torpedoes: Option<&crate::torpedo::TorpedoSystem>) -> bool {
+    // A hull with no tubes reads false, not `all`'s vacuous true.
+    torpedoes
+        .filter(|sys| !sys.tubes.is_empty())
+        .is_some_and(|sys| {
+            sys.tubes
+                .iter()
+                .all(|tube| tube.loaded_count >= tube.volley_max)
+        })
+}
+
+/// Resolve [`TUBES_FILLABLE_FACT`]: can this ship still bring EVERY tube to
+/// `volley_max`?
+///
+/// See the constant for why a manoeuvre asks this rather than `tubes_full`. The
+/// three clauses below are the three ways the answer is permanently no.
+///
+/// The online test is `accept_human_input || operate_ai` — "this fine system is
+/// not Disabled/Destroyed" — rather than `operate_ai` alone. `handle_fire_torpedo`
+/// gates a launch on exactly that pair, so the manoeuvre and the shot agree; and
+/// a hull-capability reading must not turn on who happens to be crewing the
+/// tube, which is what an `operate_ai`-only test would make it (AGENTS.md #6).
+fn torpedo_tubes_fillable(
+    torpedoes: Option<&crate::torpedo::TorpedoSystem>,
+    sources: &ShipSystemControlSources,
+) -> bool {
+    // No torpedo system, or a system with no tubes: nothing to fill. Ruled out
+    // here rather than left to `all`, which is vacuously true over no tubes.
+    let Some(sys) = torpedoes.filter(|s| !s.tubes.is_empty()) else {
+        return false;
+    };
+
+    let online = |id: &crate::messages::SystemId| {
+        let policy = if crate::console::weapons::shared::system_is_registered(sources, id) {
+            sources.0.policy_for(id)
+        } else {
+            // An unregistered fine system falls back to the default-source
+            // policy, matching `handle_fire_torpedo` and `ai_torpedo_load`
+            // (issue #801 — no coarse fallback).
+            crate::ship::control_source::control_tick_policy(
+                crate::ship::control_source::ControlSource::default(),
+            )
+        };
+        policy.accept_human_input || policy.operate_ai
+    };
+
+    // The magazine is the shared bottleneck every tube draws from: offline, and
+    // no tube tops up again.
+    if !online(&crate::system_registry::torpedo_magazine_system_id()) {
+        return false;
+    }
+    // One dead tube is enough. `tubes_full` is an ALL-tubes reading, so a tube
+    // that can never load makes it permanently false however healthy the rest
+    // of the battery is.
+    let every_tube_online = sys.tubes.iter().all(|tube| {
+        crate::system_registry::torpedo_tube_system_id(&tube.id).is_some_and(|id| online(&id))
+    });
+    if !every_tube_online {
+        return false;
+    }
+
+    // And finally the rounds: enough left in the magazine to cover what the
+    // tubes are still short of.
+    sys.torpedoes_remaining >= sys.salvo_shortfall()
 }
 
 /// Fold this fine system's OWN private memory into the shared fact snapshot
@@ -2940,6 +3446,12 @@ pub(crate) fn ai_helm_steering(
                 // facing against the fighting ring's tangent, so this axis's
                 // only job is to emit it.
                 | Some(&crate::ai::policy::AiPolicyVerb::HoldCombatOrbit)
+                // ...and issue #791's torpedo-opportunity bow hold, for the
+                // fourth time and the same reason: the planner already solved
+                // the facing against the target's live position, so this axis's
+                // only job is to emit it — and emitting it through the planner
+                // is what keeps hazard avoidance composing onto the hold.
+                | Some(&crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing)
         );
         if !actuates {
             continue;
@@ -11110,6 +11622,1160 @@ when = "state_time >= param(surge_dwell_secs)"
             fly_for(&mut app, 3.0);
             assert!(
                 !pass_surface(&mut app).combat_orbit,
+                "omitting `{omitted}` must keep declining the arm"
+            );
+        }
+    }
+
+    // ── The cruiser's shield-opportunity torpedo phase (issue #791) ──────────
+    //
+    // The orbit fixtures above only ever needed the bogey as a row in the
+    // `WorldSnapshot`, because ring geometry is solved from the merged view. The
+    // torpedo phase is different in two ways, and both drive the fixtures below:
+    //
+    // * the arc of the TARGET that faces this ship is resolved through that
+    //   target's own `Transform` + `ShipShields`, through the same
+    //   `attacker_bearing_relative` → `facing_index_for_bearing` pair damage
+    //   takes — so the bogey has to be a real entity, not a snapshot row;
+    // * "the salvo has resolved" is `TorpedoSystem::in_flight` being empty on
+    //   this ship's OWN component, so the cruiser has to carry one.
+    //
+    // The result is a fixture that composes the helm and weapons conventions,
+    // which is what AC7 spans.
+
+    /// Give the cruiser the shipped hull's real torpedo system — the same
+    /// `from_configs` call `entities::spawner` makes — so tube capacity, the
+    /// magazine and `in_flight` are the hull's own and not a fixture's idea of
+    /// them.
+    fn attach_cruiser_torpedoes(app: &mut App) {
+        let cfg = cruiser_hull();
+        let torpedoes = cfg
+            .torpedoes
+            .as_ref()
+            .expect("the shipped cruiser must carry a torpedo magazine");
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::weapons_plugin::TorpedoSystemResource(
+                crate::torpedo::TorpedoSystem::from_configs(
+                    &torpedoes.tubes,
+                    torpedoes.to_runtime(),
+                ),
+            ));
+    }
+
+    /// Spawn the bogey as a real ECS entity carrying shields, alongside the
+    /// snapshot row `set_bogey` already wrote.
+    ///
+    /// Deliberately carries NO `Ship`/`LocalShip` marker and no `ShipPhysics`:
+    /// every helper above resolves the cruiser through a `With<Ship>` filter, and
+    /// a second marked ship would make them ambiguous. A target with no physics
+    /// reads yaw 0, which is exactly what `ai_torpedo_auto_fire` does for the
+    /// same case.
+    fn spawn_bogey_entity(app: &mut App, uuid: uuid::Uuid, pos: [f32; 3]) -> Entity {
+        app.world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid(uuid.to_string()),
+                Transform::from_xyz(pos[0], pos[1], pos[2]),
+                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
+            ))
+            .id()
+    }
+
+    /// Which of the bogey's arcs currently faces the cruiser, resolved the way
+    /// the host resolves it: the bearing of the attacker in the TARGET's frame,
+    /// through the target's own priority-tiered router.
+    ///
+    /// The tests below flip arcs BY THIS INDEX rather than by a hardcoded one, so
+    /// they keep meaning "the arc that faces us" if the shield layout is ever
+    /// re-authored — and so the negative case ("some other arc is down") can be
+    /// expressed at all.
+    fn bogey_facing_index(app: &mut App, bogey: Entity) -> usize {
+        let pose = ship_pose(app);
+        let transform = *app
+            .world()
+            .get::<Transform>(bogey)
+            .expect("bogey carries a Transform");
+        let shields = app
+            .world()
+            .get::<crate::simulation::ShipShields>(bogey)
+            .expect("bogey carries ShipShields");
+        let incoming = crate::shield::attacker_bearing_relative(
+            pose.x,
+            pose.z,
+            transform.translation.x,
+            transform.translation.z,
+            0.0,
+        );
+        shields.0.facing_index_for_bearing(incoming)
+    }
+
+    /// Knock one of the bogey's arcs offline (or bring it back).
+    fn set_bogey_arc_online(app: &mut App, bogey: Entity, index: usize, online: bool) {
+        let mut shields = app
+            .world_mut()
+            .get_mut::<crate::simulation::ShipShields>(bogey)
+            .expect("bogey carries ShipShields");
+        shields.0.facings[index].offline_remaining = if online { 0.0 } else { 30.0 };
+    }
+
+    /// How many rounds the cruiser has in the air, written directly. Standing in
+    /// for `handle_fire_torpedo` (which is not in this fixture's schedule): what
+    /// the doctrine reads is the count, and writing it is the smallest thing that
+    /// makes the salvo half of AC4 observable.
+    fn set_torpedoes_in_flight(app: &mut App, n: usize) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        torpedoes.0.in_flight.clear();
+        for i in 0..n {
+            torpedoes.0.in_flight.push(crate::torpedo::Torpedo {
+                uuid: format!("salvo-{i}"),
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                heading: 0.0,
+                pitch: 0.0,
+                lifespan_remaining: 5.0,
+                target_uuid: None,
+                source_uuid: None,
+                tube_id: "bow_port".into(),
+                shield_pierce: 0.0,
+            });
+        }
+    }
+
+    /// Bring every tube to its authored `volley_max` and take the rounds out of
+    /// the magazine, exactly as a completed load cycle would.
+    ///
+    /// Standing in for the loader, which is not in this fixture's schedule, and
+    /// it has to stand in because the entry guard asks `tubes_full`: a cruiser
+    /// fresh off `from_configs` has empty tubes and a 9-second-per-round load
+    /// time, so without this no fixture below would ever reach the phase at all.
+    /// That is the doctrine working — a reloading cruiser keeps circling — but it
+    /// makes "loaded" a precondition every opportunity fixture has to establish
+    /// rather than assume.
+    fn fill_the_tubes(app: &mut App) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        let mut drawn = 0;
+        for tube in &mut torpedoes.0.tubes {
+            drawn += tube.volley_max.saturating_sub(tube.loaded_count);
+            tube.loaded_count = tube.volley_max;
+            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+        }
+        torpedoes.0.torpedoes_remaining = torpedoes.0.torpedoes_remaining.saturating_sub(drawn);
+    }
+
+    /// Empty every tube without touching the magazine — the tube half of the
+    /// state a cruiser is in the instant after it launches.
+    fn empty_the_tubes(app: &mut App) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        for tube in &mut torpedoes.0.tubes {
+            tube.loaded_count = 0;
+            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+        }
+    }
+
+    /// The cruiser settled on its fighting ring, with a live shielded bogey
+    /// entity, its own tubes, and a salvo loaded in them. Returns the app, the
+    /// bogey's uuid and the bogey's entity.
+    fn opportunity_app_omitting(omit: &[&str]) -> (App, uuid::Uuid, Entity) {
+        let ring = cruiser_steering_param(COMBAT_ORBIT_RANGE_PARAM);
+        let (mut app, uuid) = run_to_orbit_omitting(ring, omit);
+        attach_cruiser_torpedoes(&mut app);
+        fill_the_tubes(&mut app);
+        let bogey = spawn_bogey_entity(&mut app, uuid, ORBIT_BOGEY);
+        tick_twice(&mut app);
+        (app, uuid, bogey)
+    }
+
+    fn opportunity_app() -> (App, uuid::Uuid, Entity) {
+        opportunity_app_omitting(&[])
+    }
+
+    /// Signed bearing from the cruiser's own bow to the bogey, radians. Zero is
+    /// bow-on; the sign is which side the target sits.
+    fn bearing_to_bogey(app: &mut App) -> f32 {
+        let p = ship_pose(app);
+        crate::ai::target_relative_motion(
+            [p.x, p.y, p.z],
+            p.yaw,
+            p.forward_speed,
+            ORBIT_BOGEY,
+            Some(0.0),
+            0.0,
+        )
+        .bearing_rad
+    }
+
+    /// AC1: a down target-facing shield arc breaks the orbit into a bow-on hold,
+    /// and the hold cuts thrust.
+    ///
+    /// The negative half comes first and is the anti-trap for an unseeded fact:
+    /// a `fact(target_facing_shield_down)` name that were never seeded would
+    /// parse, validate, and read false for ever, so the cruiser would circle
+    /// exactly as it does today and every #790 assertion would still pass. That
+    /// this fixture can distinguish "arc up" from "arc down" is the proof.
+    #[test]
+    fn a_downed_target_arc_breaks_the_orbit_into_a_bow_on_hold_with_thrust_cut() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+
+        // Healthy shields: the cruiser keeps circling.
+        assert_eq!(steering_state(&mut app), "orbit");
+        assert!(pass_surface(&mut app).combat_orbit);
+        assert!(
+            !pass_surface(&mut app).torpedo_bearing,
+            "a target behind a healthy arc offers no opportunity"
+        );
+
+        // Knock the arc that actually faces us offline.
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        tick_twice(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "a down facing arc must break the orbit — if this reads `orbit` the \
+             shield fact is not reaching the transition guard"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "torpedo_run",
+            "Engines runs its OWN copy of the machine and must reach the phase from \
+             the same shared facts, not by reading Steering's state"
+        );
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.active);
+        assert!(pass.torpedo_bearing, "the published leg is the bow hold");
+        assert!(
+            !pass.combat_orbit && !pass.recover && !pass.reengage && !pass.escape,
+            "the bow hold is its own leg — it must not masquerade as the ring it \
+             just left, nor as the recovery pivot whose geometry it shares"
+        );
+        assert_eq!(
+            pass.torpedo_bearing_speed,
+            cruiser_steering_param(TORPEDO_BEARING_SPEED_PARAM),
+            "the hold flies the hull's OWN authored throttle"
+        );
+
+        // The thrust axis actually cuts, and the ship actually slows.
+        let entry_speed = ship_pose(&mut app).forward_speed;
+        assert!(
+            entry_speed > 0.0,
+            "precondition: the cruiser must have been moving, or 'cuts thrust' is \
+             unobservable"
+        );
+        fly_for(&mut app, 2.0);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+        assert_eq!(
+            get_thrust_input(&mut app),
+            cruiser_steering_param(TORPEDO_BEARING_SPEED_PARAM),
+            "the commanded throttle is the authored bow-hold fraction"
+        );
+        assert!(
+            ship_pose(&mut app).forward_speed < entry_speed,
+            "and the hull is genuinely slowing: {} vs {entry_speed}",
+            ship_pose(&mut app).forward_speed
+        );
+
+        // ...and it swings its bow onto the target rather than holding the beam
+        // aspect the ring left it in. The hull's authored `max_yaw_rate` is 0.30
+        // rad/s and the orbit hands the phase a target roughly abeam, so this is
+        // a manoeuvre that takes several seconds by construction.
+        let entry_bearing = bearing_to_bogey(&mut app).abs();
+        fly_for(&mut app, 8.0);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+        let held_bearing = bearing_to_bogey(&mut app).abs();
+        assert!(
+            held_bearing < entry_bearing && held_bearing < 0.2,
+            "the bow must come onto the target ({entry_bearing} → {held_bearing} rad)"
+        );
+    }
+
+    /// AC1's other half: the arc that matters is the one that FACES this ship,
+    /// resolved through the target's own router.
+    ///
+    /// A cruiser that opened the phase on "any arc is down" would break its orbit
+    /// for a hole in the far side of the enemy and then hold its bow on a healthy
+    /// shield until something else moved. This is the assertion that the belief
+    /// and the shot agree about which arc is in the way.
+    #[test]
+    fn only_the_arc_that_faces_the_cruiser_opens_the_opportunity() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        let facing = bogey_facing_index(&mut app, bogey);
+
+        // Knock out every OTHER arc.
+        let arcs = app
+            .world()
+            .get::<crate::simulation::ShipShields>(bogey)
+            .expect("bogey carries ShipShields")
+            .0
+            .facings
+            .len();
+        assert!(arcs > 1, "precondition: the bogey must have several arcs");
+        for index in 0..arcs {
+            if index != facing {
+                set_bogey_arc_online(&mut app, bogey, index, false);
+            }
+        }
+        fly_for(&mut app, 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "arcs on the far side of the target are no opportunity at all"
+        );
+        assert!(!pass_surface(&mut app).torpedo_bearing);
+
+        // Now the one that does face us.
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+    }
+
+    /// Leave the cruiser in the state it is in after its last salvo: nothing in
+    /// the tubes and nothing left in the magazine to reload them with.
+    fn spend_the_magazine(app: &mut App) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        torpedoes.0.torpedoes_remaining = 0;
+        for tube in &mut torpedoes.0.tubes {
+            tube.loaded_count = 0;
+            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+        }
+    }
+
+    /// Put `rounds` back in the magazine — the positive control for the two
+    /// tests below, so neither can pass by simply never reaching the phase.
+    fn restock_the_magazine(app: &mut App, rounds: u32) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        torpedoes.0.torpedoes_remaining = rounds;
+    }
+
+    /// Mark one of the cruiser's fine systems damage-offline, the way
+    /// `sync_console_damage_tiers` does when a console crosses into
+    /// Disabled/Destroyed.
+    fn knock_system_offline(app: &mut App, system_id: &str) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut sources = entity
+            .get_mut::<ShipSystemControlSources>()
+            .expect("the cruiser carries control sources");
+        sources
+            .0
+            .set_offline(crate::messages::SystemId(system_id.into()), true);
+    }
+
+    /// The doctrine-quality guard #790's premise depends on: a cruiser that
+    /// CANNOT launch does not give up its broadside orbit to try.
+    ///
+    /// The end of the line for this hull's armament: the state it is left in
+    /// after its last salvo, tubes empty and no rounds left to refill them with.
+    /// The magazine is 8 rounds against a 4-round salvo, so the cruiser gets two
+    /// torpedo runs and then never another, and from that point on every arc it
+    /// collapses is somebody else's opportunity.
+    ///
+    /// With no armament conjunct on the entry guard at all the cruiser could not
+    /// see that: from the third arc collapse onward it broke the ring, cut thrust
+    /// and held its nose on the enemy for the rest of the fight. Measured over a
+    /// 180 s headless `combat_test` run, 287 ticks in `torpedo_run` against 87 in
+    /// `orbit` — the interruption had become the hull's normal combat mode, which
+    /// is precisely what #790 says it must not be.
+    ///
+    /// The restock at the end is the anti-vacuity half: the same arc, the same
+    /// target, the same tick cadence, and the only things that changed are the
+    /// rounds.
+    #[test]
+    fn a_spent_magazine_keeps_the_cruiser_in_its_orbit() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        spend_the_magazine(&mut app);
+
+        // The opportunity opens, and it is a real one — the arc that faces us is
+        // down. The only thing missing is anything to shoot through it with.
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        fly_for(&mut app, 2.0);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "a cruiser with an empty magazine must keep circling: breaking the ring \
+             costs it the broadside and buys a salvo it cannot load"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "orbit",
+            "the travel axis reads the same fact and must reach the same conclusion"
+        );
+        let pass = pass_surface(&mut app);
+        assert!(pass.combat_orbit, "the ring is still the manoeuvre");
+        assert!(
+            !pass.torpedo_bearing,
+            "and the bow hold was never published"
+        );
+
+        // Anti-vacuity: rounds back and a salvo loaded from them, same
+        // everything else, phase opens. Both halves are needed because both
+        // halves of "can shoot into it" are guarded — restocking alone leaves
+        // the hull in its reload window, which is the case the test below owns.
+        restock_the_magazine(&mut app, 8);
+        fill_the_tubes(&mut app);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "with the magazine restocked the SAME opportunity must open — otherwise \
+             this test is only asserting that the phase never runs"
+        );
+    }
+
+    /// The case that is `tubes_fillable`'s alone, and the reason it stays
+    /// conjoined beside `tubes_full` rather than being replaced by it: a tube
+    /// that has been shot out.
+    ///
+    /// The fixture arrives here with a full salvo loaded, so `tubes_full` reads
+    /// TRUE throughout — being loaded is a fact about the rounds in the tubes and
+    /// says nothing about whether the tube can still fire them. Only
+    /// `tubes_fillable` looks at the fine system, and `handle_fire_torpedo` gates
+    /// a launch on exactly that, so a cruiser without this conjunct would break
+    /// its orbit and hold its nose out for a salvo the launcher will decline.
+    ///
+    /// One dead tube is enough: the salvo doctrine this hull authors is
+    /// all-or-nothing, so the launch gate is an ALL-tubes reading however healthy
+    /// the other tube is.
+    #[test]
+    fn a_shot_out_tube_keeps_the_cruiser_in_its_orbit() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        knock_system_offline(&mut app, "torpedo-tube-bow-port");
+
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        fly_for(&mut app, 2.0);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "one dead tube makes a full salvo unreachable, so the opportunity is \
+             not one"
+        );
+        assert!(!pass_surface(&mut app).torpedo_bearing);
+    }
+
+    /// The RELEASE half of the case above, which the entry guard cannot cover
+    /// and the salvo-spent resume structurally cannot see.
+    ///
+    /// `tubes_full` reads the rounds, not the tubes. Destroying a tube leaves
+    /// `loaded_count` exactly where it was, so a hull that loses a tube AFTER
+    /// the phase opens still reads `tubes_full` true, has nothing in the air,
+    /// and — against a target that carries no arc to raise — has every exit
+    /// shut. It sits bow-on, thrust cut, for a salvo `handle_fire_torpedo` will
+    /// decline, which is the same trap the salvo-spent bound was added to close,
+    /// reopened by a lucky hit.
+    ///
+    /// The bound that catches it is reachability, which the entry guard already
+    /// asks and which now sits on an exit as well. The target is deliberately
+    /// shieldless so the window-closed resume is unable to fire at all: whatever
+    /// releases the hull here can only be the hull's own armament.
+    #[test]
+    fn a_tube_shot_out_mid_phase_releases_the_cruiser_back_to_its_orbit() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        app.world_mut()
+            .entity_mut(bogey)
+            .remove::<crate::simulation::ShipShields>();
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "precondition: an unshielded target opens the phase"
+        );
+
+        // Battery intact and loaded: the phase holds, and it holds indefinitely
+        // — this target will never close the window for it.
+        fly_for(&mut app, 3.0);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+        assert!(
+            tubes_are_full(&mut app),
+            "precondition: a full battery is what makes the salvo-spent resume \
+             unable to end this phase"
+        );
+
+        // A hit takes a tube out while rounds are still in the air.
+        knock_system_offline(&mut app, "torpedo-tube-bow-port");
+        set_torpedoes_in_flight(&mut app, 2);
+        fly_for(&mut app, 2.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "the battery-lost resume takes the same in-flight conjunct as the \
+             other two: a hull does not turn away from rounds it has committed, \
+             whatever has happened to the tube that fired them"
+        );
+
+        // The rounds resolve. Nothing is committed, the battery can never be
+        // filled again, and there is no arc to come back.
+        set_torpedoes_in_flight(&mut app, 0);
+        fly_for(&mut app, 2.0);
+        assert!(
+            tubes_are_full(&mut app),
+            "the rounds are still sitting in the dead tube — which is precisely \
+             why `tubes_full` cannot be the reading that ends this phase"
+        );
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "a cruiser whose battery has been shot out must go back to raking \
+             with the beams it still has — with a full battery, nothing in the \
+             air and a target with no arc to raise, reachability is the ONLY \
+             thing left that can release the hull"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "orbit",
+            "the travel axis is bounded by the same reading, not by Steering's state"
+        );
+        let pass = pass_surface(&mut app);
+        assert!(
+            pass.combat_orbit && !pass.torpedo_bearing,
+            "and the published leg is the ring again, with thrust restored"
+        );
+
+        // ...and it stays out: the entry guard asks reachability too, so a dead
+        // tube keeps the phase shut rather than chattering the hull in and out.
+        fly_for(&mut app, 4.0);
+        assert_eq!(steering_state(&mut app), "orbit");
+    }
+
+    /// The dominant-state bug, and the reason the entry guard asks the
+    /// LAUNCHER's question rather than the reachability one.
+    ///
+    /// This is the reload window: tubes empty, magazine full, every fine system
+    /// healthy. `tubes_fillable` is TRUE throughout it — a whole salvo is
+    /// perfectly reachable, in 18 seconds — and it is true throughout the
+    /// initial load-up too, so a cruiser guarded on reachability alone breaks
+    /// its ring for arc collapses it cannot possibly shoot into. Measured over a
+    /// 400 sim-second `combat_test` run before `tubes_full` was conjoined: 506
+    /// bow-on ticks against 431 orbiting, and only 29 of the 506 — 5.7% — with
+    /// the tubes actually full. The "brief interruption" was the majority of
+    /// resolved manoeuvre time and almost none of it could have ended in a shot.
+    ///
+    /// The restock/spend pair at the end is the anti-vacuity half, and it is
+    /// deliberately the OTHER axis of the same question: same arc, same target,
+    /// same cadence, magazine untouched, and the only thing that changes is
+    /// whether the rounds are in the tubes.
+    #[test]
+    fn a_cruiser_mid_reload_keeps_its_orbit_however_full_the_magazine_is() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        // The state the hull is in for 18 seconds after every salvo: nothing in
+        // the tubes, plenty in the magazine.
+        empty_the_tubes(&mut app);
+        restock_the_magazine(&mut app, 8);
+
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        fly_for(&mut app, 3.0);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "a reloading cruiser must keep circling: the tubes cannot fill inside \
+             the window, so breaking the ring buys a shot that will not be taken"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "orbit",
+            "the travel axis reads the same facts and must reach the same conclusion"
+        );
+        let pass = pass_surface(&mut app);
+        assert!(pass.combat_orbit, "the ring is still the manoeuvre");
+        assert!(
+            !pass.torpedo_bearing,
+            "and the bow hold was never published"
+        );
+
+        // Anti-vacuity: load the salvo and nothing else. The magazine was
+        // already full, so `tubes_fillable` did not change — only `tubes_full`
+        // did, which is the whole claim.
+        fill_the_tubes(&mut app);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "with the salvo loaded the SAME opportunity must open — otherwise this \
+             test is only asserting that the phase never runs"
+        );
+    }
+
+    /// AC3: a shield that recovers before anything has launched aborts the
+    /// opportunity, and the cruiser resumes its orbit.
+    #[test]
+    fn a_recovered_shield_aborts_the_opportunity_before_launch() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+        assert_eq!(
+            torpedoes_in_flight(&mut app),
+            0,
+            "precondition: this is the BEFORE-launch abort"
+        );
+
+        set_bogey_arc_online(&mut app, bogey, facing, true);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "with nothing in the air, a recovered arc ends the opportunity"
+        );
+        assert_eq!(engines_state(&mut app), "orbit");
+        let pass = pass_surface(&mut app);
+        assert!(
+            pass.combat_orbit && !pass.torpedo_bearing,
+            "and the published leg goes back to the ring"
+        );
+    }
+
+    /// The cruiser's own count of rounds in the air, read off the live component
+    /// the doctrine reads.
+    fn torpedoes_in_flight(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&crate::weapons_plugin::TorpedoSystemResource>()
+            .single(app.world())
+            .expect("the cruiser carries a torpedo system")
+            .0
+            .in_flight
+            .len()
+    }
+
+    /// AC4: once a salvo is away the cruiser stays bow-on until every round has
+    /// hit, missed or expired — even after the shield it was shooting at comes
+    /// back.
+    ///
+    /// The recovered-shield half is the load-bearing one. A shield regenerates
+    /// while the rounds are flying essentially every time, so an exit guarded on
+    /// the shield alone would turn the cruiser away mid-salvo in almost every
+    /// real engagement — and the abort test above would still pass.
+    #[test]
+    fn a_salvo_in_flight_holds_the_cruiser_bow_on_after_the_shield_recovers() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+
+        // A salvo is away, and the arc recovers behind it.
+        set_torpedoes_in_flight(&mut app, 2);
+        set_bogey_arc_online(&mut app, bogey, facing, true);
+        fly_for(&mut app, 2.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "a recovered shield must NOT release the hull while its own rounds are \
+             still in the air"
+        );
+        assert!(pass_surface(&mut app).torpedo_bearing);
+
+        // One round resolves; one is still flying. Still committed.
+        set_torpedoes_in_flight(&mut app, 1);
+        fly_for(&mut app, 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "the commitment is to the whole salvo, not to its first round"
+        );
+
+        // The last one hits, misses or expires — `in_flight` is empty either way.
+        set_torpedoes_in_flight(&mut app, 0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "with the salvo resolved and the arc back, the phase is over"
+        );
+        assert!(pass_surface(&mut app).combat_orbit);
+    }
+
+    /// Fire a REAL salvo out of the cruiser's own tubes, through the same
+    /// `TorpedoSystem::launch` call `handle_fire_torpedo` makes.
+    ///
+    /// Deliberately not [`set_torpedoes_in_flight`], which writes `in_flight`
+    /// directly and so stages a salvo that is fully airborne from its first tick.
+    /// A real burst launch is not: round 0 of each tube goes immediately and the
+    /// rest are left as a [`crate::torpedo::TubeBurstState`] waiting on
+    /// `burst_interval_secs`. Returns `(airborne, owed)`.
+    fn launch_a_real_salvo(app: &mut App) -> (usize, u32) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        let ids: Vec<String> = torpedoes.0.tubes.iter().map(|t| t.id.clone()).collect();
+        for id in &ids {
+            let result =
+                torpedoes
+                    .0
+                    .launch(id, format!("salvo-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
+            assert!(
+                matches!(result, crate::torpedo::LaunchResult::Launched { .. }),
+                "precondition: tube '{id}' must have a volley loaded to fire, got {result:?}"
+            );
+        }
+        (
+            torpedoes.0.in_flight.len(),
+            torpedoes.0.burst_states.iter().map(|b| b.pending).sum(),
+        )
+    }
+
+    /// Rounds this ship has COMMITTED to a burst but not yet put in the air.
+    fn torpedoes_pending(app: &mut App) -> u32 {
+        let ship = find_ship_entity(app);
+        app.world()
+            .get::<crate::weapons_plugin::TorpedoSystemResource>(ship)
+            .expect("the cruiser carries a torpedo system")
+            .0
+            .burst_states
+            .iter()
+            .map(|b| b.pending)
+            .sum()
+    }
+
+    /// Whether every tube is at its `volley_max` — the reading the doctrine's
+    /// `tubes_full` fact takes, read here so a fixture can assert on the state
+    /// that arms the salvo-spent resume.
+    fn tubes_are_full(app: &mut App) -> bool {
+        let ship = find_ship_entity(app);
+        let torpedoes = app
+            .world()
+            .get::<crate::weapons_plugin::TorpedoSystemResource>(ship)
+            .expect("the cruiser carries a torpedo system");
+        !torpedoes.0.tubes.is_empty()
+            && torpedoes
+                .0
+                .tubes
+                .iter()
+                .all(|t| t.loaded_count >= t.volley_max)
+    }
+
+    /// Advance the cruiser's own torpedo system by `dt` through the real
+    /// `TorpedoSystem::tick`, so a burst pays its owed rounds out by production
+    /// code rather than by fixture fiat. This fixture's schedule carries no
+    /// weapons plugin, so nothing else moves the burst timer.
+    fn tick_the_torpedoes(app: &mut App, dt: f32) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut torpedoes = entity
+            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .expect("the cruiser carries a torpedo system");
+        let mut n = 0_u32;
+        torpedoes
+            .0
+            .tick(dt, &std::collections::HashMap::new(), &mut || {
+                n += 1;
+                format!("burst-{n}")
+            });
+    }
+
+    /// AC4's other half, and the one the test above structurally cannot see.
+    ///
+    /// That fixture writes `in_flight` directly, so its salvo is airborne all at
+    /// once and the count it asserts on can only fall. A real salvo can fall to
+    /// zero and come back: a burst launch puts one round per tube in the air and
+    /// leaves the rest pending on `burst_interval_secs` (0.35 s), and the
+    /// airborne rounds can resolve inside that gap. They do — the cruiser enters
+    /// the phase with thrust cut and the target closing, and an instrumented
+    /// `combat_test` run measured a salvo's first pair away at t=172.10 and both
+    /// resolved by t=172.33.
+    ///
+    /// What made that a bug rather than a curiosity is what else is true on the
+    /// launch tick: firing empties the tubes, so `tubes_full` is already false
+    /// and the salvo-spent resume is armed with `torpedoes_in_flight` the only
+    /// conjunct still holding it shut. Counting the airborne half alone released
+    /// the hull mid-salvo, and the owed rounds then left the tubes in `orbit`
+    /// with the bow swinging away — measured at `|bearing| = 0.230` rad and
+    /// `in_arc = 0`, i.e. thrown outside the tubes' own 24-degree cone. Counting
+    /// the owed rounds holds the bow on and puts them away in arc.
+    #[test]
+    fn a_pending_burst_holds_the_cruiser_bow_on_between_its_own_rounds() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        tick_twice(&mut app);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+
+        // A real salvo, through the launcher's own call.
+        let (airborne, owed) = launch_a_real_salvo(&mut app);
+        assert_eq!(airborne, 2, "one round per tube leaves immediately");
+        assert!(
+            owed > 0,
+            "precondition: the hull must OWE rounds, or there is no burst to be \
+             released in the middle of"
+        );
+        assert!(
+            !tubes_are_full(&mut app),
+            "precondition: firing empties the tubes, so the salvo-spent resume is \
+             already armed and `torpedoes_in_flight` is the only conjunct holding \
+             the phase"
+        );
+
+        // The airborne pair resolves before the burst timer elapses — the
+        // measured case, and the one that used to release the hull.
+        set_torpedoes_in_flight(&mut app, 0);
+        assert_eq!(
+            torpedoes_pending(&mut app),
+            owed,
+            "precondition: nothing is in the air and the burst still owes every \
+             round it was scheduled with"
+        );
+        fly_for(&mut app, 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "a hull that has committed rounds to a burst must hold its bow on \
+             until they have actually left the tubes — releasing here fires the \
+             back half of its own salvo out of arc"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "torpedo_run",
+            "the travel axis reads the same fact and must reach the same conclusion"
+        );
+        assert!(pass_surface(&mut app).torpedo_bearing);
+
+        // The timer elapses and the owed rounds actually leave the tubes.
+        tick_the_torpedoes(&mut app, 0.4);
+        assert_eq!(torpedoes_pending(&mut app), 0, "the burst has paid out");
+        assert_eq!(
+            torpedoes_in_flight(&mut app),
+            owed as usize,
+            "...and every owed round is now airborne"
+        );
+        fly_for(&mut app, 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "still committed — the same rounds, now counted on the other side of \
+             the ledger"
+        );
+
+        // ...and those resolve too. Anti-vacuity: nothing owed and nothing
+        // airborne must end the phase, or this test only asserts it never ends.
+        set_torpedoes_in_flight(&mut app, 0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "with the WHOLE salvo resolved the phase is over"
+        );
+        assert!(pass_surface(&mut app).combat_orbit);
+    }
+
+    /// The phase is BOUNDED against a target that can never close the window.
+    ///
+    /// `target_facing_shield_down` reads `1.0` for a target that resolves but
+    /// carries no `[shields]` at all — a station, a probe, any hull authored
+    /// without the block — and it reads it for as long as that target lives,
+    /// correctly: there is genuinely no arc in the way and there never will be.
+    /// (Asteroids are a different case and a safe one: they resolve to no
+    /// transform-carrying row here, so the fact reads `0.0` and the phase is
+    /// never entered.)
+    ///
+    /// So the window-closed exit can never fire against such a target, and with
+    /// `target_valid` the only other way out the cruiser would hold its bow on a
+    /// station, thrust cut, until one of them died. The bound is the salvo-spent
+    /// exit, drawn on the hull's own armament: it fires whatever the target does.
+    #[test]
+    fn a_shieldless_target_does_not_trap_the_cruiser_bow_on() {
+        let (mut app, _uuid, bogey) = opportunity_app();
+
+        // Turn the bogey into a resolvable target with NO shield system, leaving
+        // everything else — position, uuid, the snapshot row — exactly as the
+        // orbit fixture set it. Only the bogey's component goes: this is a
+        // statement about what the TARGET carries, not about the cruiser.
+        app.world_mut()
+            .entity_mut(bogey)
+            .remove::<crate::simulation::ShipShields>();
+        tick_twice(&mut app);
+
+        // The opportunity opens, and it opens permanently: nothing about this
+        // target will ever make `target_facing_shield_down` read zero.
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "an unshielded target is a real opportunity — every arc is 'down'"
+        );
+        fly_for(&mut app, 5.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "and with a salvo loaded and nothing in the air the hull stays committed"
+        );
+
+        // The salvo goes. Emptying the tubes is what `handle_fire_torpedo` does
+        // to them, and this fixture's schedule does not run it.
+        empty_the_tubes(&mut app);
+        set_torpedoes_in_flight(&mut app, 2);
+        fly_for(&mut app, 1.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "torpedo_run",
+            "rounds in the air still hold the hull, exactly as against a shielded \
+             target"
+        );
+
+        // ...and the rounds resolve. There is still no shield to come back, so
+        // this release can only be the armament bound.
+        set_torpedoes_in_flight(&mut app, 0);
+        fly_for(&mut app, 2.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "the cruiser must go back to raking a shieldless target once its salvo \
+             is spent — with the window-closed exit unable to fire against a target \
+             that has no arc to raise, this is the ONLY bound on the phase, and \
+             without it the hull holds its nose on a station for the rest of the run"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "orbit",
+            "the travel axis is bounded by the same reading, not by Steering's state"
+        );
+        let pass = pass_surface(&mut app);
+        assert!(
+            pass.combat_orbit && !pass.torpedo_bearing,
+            "and the published leg is the ring again, with thrust restored"
+        );
+
+        // It stays out: the reload is 9 seconds a round, so the phase cannot
+        // immediately re-open and chatter the ship between the two states.
+        fly_for(&mut app, 4.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "orbit",
+            "and it stays on the ring while it reloads rather than chattering"
+        );
+    }
+
+    /// AC1/AC4, the tracking half: the bow hold follows a target that KEEPS
+    /// MOVING, because the facing solution is re-derived from its live position
+    /// every tick.
+    ///
+    /// This is the property that separates `hold_torpedo_bearing` from the
+    /// frozen-heading escape leg, and it is the whole reason a fixed forward
+    /// tube can be aimed at all.
+    #[test]
+    fn the_bow_hold_tracks_a_moving_target() {
+        let (mut app, uuid, bogey) = opportunity_app();
+        let facing = bogey_facing_index(&mut app, bogey);
+        set_bogey_arc_online(&mut app, bogey, facing, false);
+        // Settle onto the bow-on solution first, so what follows is the hold
+        // reacting to the target rather than the hull still swinging round.
+        fly_for(&mut app, 6.0);
+        assert_eq!(steering_state(&mut app), "torpedo_run");
+        let settled = bearing_to_bogey(&mut app).abs();
+        assert!(
+            settled < 0.2,
+            "precondition: the hull must have come bow-on first, got {settled} rad"
+        );
+
+        // Jink the target well off the current bow line, on BOTH sides in turn:
+        // each move must command a turn back toward it, and the sign must follow
+        // the target rather than being a fixed bias.
+        let pose = ship_pose(&mut app);
+        for side in [1.0_f32, -1.0] {
+            let offset = [
+                pose.x + side * 60.0 + pose.yaw.sin() * 60.0,
+                0.0,
+                pose.z - pose.yaw.cos() * 60.0,
+            ];
+            set_bogey(&mut app, uuid, offset, 0.0, 0.0);
+            app.world_mut()
+                .entity_mut(bogey)
+                .insert(Transform::from_xyz(offset[0], offset[1], offset[2]));
+            // Moving the bogey moves which of ITS arcs faces the cruiser, so the
+            // arc knocked offline before the loop is no longer the one the guard
+            // reads. Re-derive and re-knock, or the opportunity closes the moment
+            // the target jinks: `target_facing_shield_down` goes to 0, the phase
+            // aborts back to `orbit`, and both assertions below are then
+            // satisfied by `hold_combat_orbit` — a bow-hold test that never
+            // exercises the bow hold. (Measured: without this the `side = -1`
+            // iteration ran entirely in `orbit`.)
+            let moved_facing = bogey_facing_index(&mut app, bogey);
+            set_bogey_arc_online(&mut app, bogey, moved_facing, false);
+            tick_twice(&mut app);
+
+            // The tripwire for exactly that: everything below is about the HOLD,
+            // so the hold has to still be the resolved state.
+            assert_eq!(
+                steering_state(&mut app),
+                "torpedo_run",
+                "the bow hold must survive the target jinking — a fallback to \
+                 `orbit` would satisfy the tracking assertions below off the \
+                 wrong verb"
+            );
+
+            let bearing = crate::ai::target_relative_motion(
+                {
+                    let p = ship_pose(&mut app);
+                    [p.x, p.y, p.z]
+                },
+                ship_pose(&mut app).yaw,
+                0.0,
+                offset,
+                Some(0.0),
+                0.0,
+            )
+            .bearing_rad;
+            let steering = get_steering_input(&mut app);
+            assert!(
+                steering * bearing > 0.0,
+                "the hold must turn TOWARD the target's live position (bearing \
+                 {bearing} rad, commanded steering {steering})"
+            );
+            // ...and following it actually closes the angle.
+            let before = bearing.abs();
+            fly_for(&mut app, 4.0);
+            let after = crate::ai::target_relative_motion(
+                {
+                    let p = ship_pose(&mut app);
+                    [p.x, p.y, p.z]
+                },
+                ship_pose(&mut app).yaw,
+                0.0,
+                offset,
+                Some(0.0),
+                0.0,
+            )
+            .bearing_rad
+            .abs();
+            assert!(
+                after < before,
+                "tracking must close the angle on a moved target ({before} → {after})"
+            );
+        }
+    }
+
+    /// AC6, and the reason the phase is a genuinely distinct STATE rather than a
+    /// flag on the orbit: coming back re-enters `orbit`, and entering an orbiting
+    /// state is what makes the host re-draw the circulation direction from the
+    /// seeded key.
+    ///
+    /// A flag layered on the existing state would leave `hold_combat_orbit`
+    /// resolved throughout, so nothing would ever be re-entered and the cruiser
+    /// would circle the same way for the whole engagement — which is precisely
+    /// what a seeded per-entry choice exists to avoid.
+    ///
+    /// Asserted over a spread of seeds rather than one: a re-draw legitimately
+    /// lands on the same side about half the time, so "it changed for THIS seed"
+    /// is not the property. "It can change at all" is.
+    #[test]
+    fn resuming_the_orbit_after_a_torpedo_run_redraws_the_circulation() {
+        fn round_trip(seed: u64) -> (f32, f32) {
+            let (mut app, _uuid, bogey) = opportunity_app();
+            app.insert_resource(crate::sim_rng::SimRng::new(
+                seed,
+                crate::sim_rng::SeedSource::Cli,
+            ));
+            let entity = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(crate::entity_spawner::EntityUuid(
+                    uuid::Uuid::from_u128(0x9111_2222_3333_4444_5555_6666_7777_8888).to_string(),
+                ));
+            // Re-enter the ring once under this seed so the "before" reading is
+            // a real draw rather than the hull's authored declaration.
+            let facing = bogey_facing_index(&mut app, bogey);
+            set_bogey_arc_online(&mut app, bogey, facing, false);
+            tick_twice(&mut app);
+            set_bogey_arc_online(&mut app, bogey, facing, true);
+            tick_twice(&mut app);
+            assert_eq!(steering_state(&mut app), "orbit");
+            let first = pass_surface(&mut app).orbit_direction;
+
+            // ...and again.
+            let facing = bogey_facing_index(&mut app, bogey);
+            set_bogey_arc_online(&mut app, bogey, facing, false);
+            tick_twice(&mut app);
+            assert_eq!(steering_state(&mut app), "torpedo_run");
+            set_bogey_arc_online(&mut app, bogey, facing, true);
+            tick_twice(&mut app);
+            assert_eq!(steering_state(&mut app), "orbit");
+            (first, pass_surface(&mut app).orbit_direction)
+        }
+
+        // Reproducible for a given seed — the property a replayed run depends on.
+        assert_eq!(round_trip(31), round_trip(31));
+
+        // ...and genuinely re-drawn: over a spread of seeds, at least one round
+        // trip comes back circling the other way. A flag on the orbit state, or
+        // a host that only drew on the FIRST entry, could never produce this.
+        let flipped = (1_u64..=12).any(|seed| {
+            let (before, after) = round_trip(seed);
+            before != after
+        });
+        assert!(
+            flipped,
+            "resuming the orbit after a torpedo run must re-draw the circulation \
+             direction, but it came back the same way for every seed tried"
+        );
+    }
+
+    /// "Decline rather than invent", on the bow hold's own scalar.
+    ///
+    /// `torpedo_bearing_speed` is authored `0.0` on this hull, which is exactly
+    /// the value an unauthored param would be mistaken for — so the gate is over
+    /// the NAME. A hull that omits it must fly its ordinary leg rather than
+    /// coasting to a halt in front of an enemy on a number nobody chose.
+    ///
+    /// The shipped hull holds its bow at this exact point (asserted above), so
+    /// nothing here passes for want of getting that far.
+    #[test]
+    fn a_hull_omitting_the_bow_hold_throttle_declines_the_whole_arm() {
+        for omitted in TORPEDO_BEARING_PARAMS {
+            let (mut app, _uuid, bogey) = opportunity_app_omitting(&[omitted]);
+            let facing = bogey_facing_index(&mut app, bogey);
+            set_bogey_arc_online(&mut app, bogey, facing, false);
+            tick_twice(&mut app);
+
+            // The machine still enters the state — the verb parses and resolves
+            // with or without the param. What must not happen is the HOST flying
+            // a leg it has no throttle for.
+            assert_eq!(
+                steering_state(&mut app),
+                "torpedo_run",
+                "omitting `{omitted}` must not change which state is entered"
+            );
+            let pass = pass_surface(&mut app);
+            assert!(
+                !pass.torpedo_bearing,
+                "omitting `{omitted}` must decline the bow-hold arm outright"
+            );
+            assert_eq!(
+                pass.torpedo_bearing_speed, 0.0,
+                "the whole arm declines together, not part of it"
+            );
+
+            // And it stays declined.
+            fly_for(&mut app, 3.0);
+            assert!(
+                !pass_surface(&mut app).torpedo_bearing,
                 "omitting `{omitted}` must keep declining the arm"
             );
         }

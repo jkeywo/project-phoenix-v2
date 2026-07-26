@@ -885,6 +885,62 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     );
 }
 
+/// Production-schedule guard: an AI-crewed ship actually LAUNCHES a torpedo in
+/// a real run.
+///
+/// `ai_torpedo_auto_fire` (the decider) and `console::weapons::handle_fire_torpedo`
+/// (the applier) both live in `SimSet::Physics`. Until this guard landed, the
+/// production registration in `ConsoleAiPlugin` declared no edge between them
+/// and the resolved order put the CONSUMER first — so the admitted
+/// `FireTorpedo` sat in `AdmittedCommands` untouched until admission's
+/// `clear_before_input` wiped it at the top of the next tick, and an AI-crewed
+/// ship never launched a torpedo in its life. Every weapons unit test passed
+/// regardless, because `torpedo_ai_test_app` adds the missing
+/// `.before(handle_fire_torpedo)` edge in its own harness; only a test that
+/// boots the REAL plugin set can see it. This is the same shape as #881, where
+/// an AI-emitted boost silently no-opped in production.
+///
+/// `probe_duel.toml` is the vehicle rather than a new world: two torpedo-armed
+/// AI hulls at 45 units, mutually hostile from world-load, both on the
+/// unconditional default tube launch policy, resolving in ~14 sim-seconds. The
+/// budget is 90 s so the assertion is about the salvo, not about the clock.
+///
+/// `TorpedoLaunched` is proof rather than a proxy: nobody is connected, so no
+/// human `FireTorpedo` exists, and `handle_fire_torpedo` is the only system
+/// that turns an admitted `FireTorpedo` into a launch (the burst rounds
+/// `tick_torpedo_lifecycle` reports all descend from one). A non-zero count can
+/// therefore only mean the decider's command survived to its applier in the
+/// same tick.
+#[test]
+fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(90.0, dt),
+        seed: Some(838),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    let launched = report
+        .message_counts
+        .get("TorpedoLaunched")
+        .copied()
+        .unwrap_or(0);
+    assert!(
+        launched > 0,
+        "no torpedo ever left a tube in a duel between two torpedo-armed AI hulls — \
+         `ai_torpedo_auto_fire`'s admitted FireTorpedo is being cleared before \
+         `handle_fire_torpedo` sees it (missing production ordering edge). \
+         message_counts: {:?}",
+        report.message_counts
+    );
+}
+
 /// Issue #844 AC: an asymmetric duel driven from `--side-a`/`--side-b` runs
 /// `duel.toml` to a classified annihilation, with side-tagged ledgers and side
 /// aggregates.

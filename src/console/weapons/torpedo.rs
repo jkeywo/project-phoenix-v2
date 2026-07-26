@@ -77,12 +77,21 @@ pub fn seed_torpedo_tube_load_facts(
 /// (issue #782). Mirrors [`seed_torpedo_tube_load_facts`]; the host has already
 /// resolved the tube's live readiness (loaded, target valid, in range, in arc)
 /// and the shield arc the shot would strike before calling this.
+///
+/// `tubes_full` is the SHIP-WIDE reading added by issue #791: every tube on this
+/// ship at `loaded_count == volley_max`. It is deliberately not derivable from
+/// the per-tube `loaded` fact, which is `loaded_count > 0` — the two answer
+/// different questions, and a doctrine that fires a whole salvo into a shield
+/// gap in one go needs the stronger one. Note `target_facing_shields` beside it
+/// is an HP reading, not a boolean: `<= 0` means the striking arc is not
+/// blocking (down, or absent entirely).
 pub fn seed_torpedo_tube_launch_facts(
     loaded: bool,
     target_valid: bool,
     in_range: bool,
     in_arc: bool,
     target_facing_shields: i32,
+    tubes_full: bool,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("loaded", if loaded { 1.0 } else { 0.0 });
@@ -90,6 +99,7 @@ pub fn seed_torpedo_tube_launch_facts(
     facts.set("in_range", if in_range { 1.0 } else { 0.0 });
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
     facts.set("target_facing_shields", target_facing_shields as f64);
+    facts.set("tubes_full", if tubes_full { 1.0 } else { 0.0 });
     facts
 }
 

@@ -213,6 +213,7 @@ pub(crate) fn helm_motion_planner(
                     approach_speed: pass.approach_speed,
                     escape_speed: pass.escape_speed,
                     reengage_speed: pass.reengage_speed,
+                    torpedo_bearing_speed: pass.torpedo_bearing_speed,
                     tracking_deadband_rad: pass.tracking_deadband_rad,
                     tracking_full_steer_rad: pass.tracking_full_steer_rad,
                     entities: &sf.merged_view.entities,
@@ -310,6 +311,26 @@ pub(crate) fn helm_motion_planner(
                         pass.combat_orbit_range,
                         pass.combat_orbit_speed,
                         pass.combat_orbit_spiral_gain,
+                    )
+                })
+            }
+            // Torpedo-opportunity bow hold (issue #791): track the target's LIVE
+            // position with the authored `torpedo_bearing_speed` on the engines.
+            // It needs a resolvable target for the plainest reason of all — the
+            // leg IS "point at where the target is now" — and falls back to
+            // ordinary doctrine travel without one, which is where the hull's own
+            // machine is heading anyway (the phase's highest-priority exit is
+            // `target_valid < 1`).
+            //
+            // Ordered before the pass-legs fallback and gated on its own
+            // authoring, so a hull that flies this hold out of a combat orbit
+            // needs no `approach_speed` to reach it.
+            (true, true) if pass.torpedo_bearing => {
+                pass_target.map_or_else(doctrine_travel, |target| {
+                    fly_pass(
+                        crate::ai::FlyThroughLeg::TorpedoBearing,
+                        target.position,
+                        target.uuid,
                     )
                 })
             }

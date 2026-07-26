@@ -92,14 +92,27 @@ impl Plugin for ConsoleAiPlugin {
                     .after(crate::sim_sets::AiTickLabel)
                     .before(crate::ship::power::handle_power_messages),
                 // Decide only. The apply half is
-                // `console::weapons::integrate_weapons_state`
-                // (issue #698), which drains `TorpedoIntents` and
-                // `PhaserIntents` together and is registered by
-                // `WeaponsPlugin` — see its docs for why the weapons
-                // integrator does not live here.
+                // `console::weapons::handle_fire_torpedo` (issue #846 —
+                // previously `integrate_weapons_state`, which drained the
+                // retired `TorpedoIntents`), registered by `WeaponsPlugin` in
+                // this same `Physics` set.
+                //
+                // The `.before` edge is NOT decoration, and its absence was a
+                // live production bug: both systems sat in `SimSet::Physics`
+                // with no edge between them, and the resolved order put the
+                // CONSUMER first. The admitted `FireTorpedo` therefore sat in
+                // `AdmittedCommands` untouched until `clear_before_input`
+                // wiped it at the top of the next tick, so an AI-crewed ship
+                // never launched a torpedo in a real run — every unit test
+                // passed only because the weapons harness adds this edge
+                // itself. Same class as #881 (an AI-emitted command whose
+                // applier was never ordered against the emitter); the
+                // shields/power siblings above carry the identical edge for
+                // the identical reason.
                 ai_torpedo_auto_fire
                     .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(crate::sim_sets::AiTickLabel),
+                    .after(crate::sim_sets::AiTickLabel)
+                    .before(crate::console::weapons::handle_fire_torpedo),
                 // The loading half of the torpedo AI. `Input`, not `Physics`,
                 // and explicitly before the volley-target handler: the command
                 // it emits has to be consumed in the SAME tick, exactly as
@@ -908,7 +921,22 @@ pub(crate) fn ai_torpedo_auto_fire(
                 in_arc: tube.is_in_arc(bearing),
             })
             .collect();
+        // Reported, not a gate: `torpedoes_remaining` is the rounds left to
+        // RELOAD with — the ones in the tubes were drawn from it when their load
+        // started — so it must never veto a launch. See `auto_fire_torpedo`.
         let magazine = torpedo_sys.torpedoes_remaining;
+        // Ship-wide "every tube is at its volley capacity" (issue #791). A
+        // doctrine that spends a shield gap on one full salvo needs this rather
+        // than the per-tube `loaded` (which is `loaded_count > 0`), and it is a
+        // reading of the ship's own tubes rather than an authored number — the
+        // capacity itself is `[[torpedoes.tubes]] volley_max`. A hull with no
+        // tubes at all cannot reach here (`tubes` would be empty and
+        // `auto_fire_torpedo` would return nothing), so the vacuous-true case of
+        // `all` is unreachable rather than merely unlikely.
+        let tubes_full = torpedo_sys
+            .tubes
+            .iter()
+            .all(|tube| tube.loaded_count >= tube.volley_max);
 
         let input = crate::console_ai::TorpedoAiInput {
             // Reaching here means `TacticalRadarSelection` named an entity that
@@ -923,7 +951,9 @@ pub(crate) fn ai_torpedo_auto_fire(
         for tube_id in tubes_to_fire {
             // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
             // already resolved this tube's host readiness (loaded, in arc, target
-            // locked, striking-arc shields down, magazine non-empty); now resolve
+            // locked, striking-arc shields down — NOT the magazine, whose rounds
+            // are the ones left to reload with and were already spent for
+            // whatever is in the tubes); now resolve
             // the tube's own authored launch policy over a seeded snapshot. Only a
             // tube whose policy fires `LaunchTorpedo` launches — an idle tube (or
             // one whose guard holds) is skipped, leaving other tubes free to fire
@@ -940,6 +970,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 true,
                 target_facing_shields,
+                tubes_full,
             );
             if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(launch_policy, &facts) {
                 continue;

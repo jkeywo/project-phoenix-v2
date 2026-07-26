@@ -7180,6 +7180,277 @@ fn ai_torpedo_auto_fire_launch_fact_guard_fires_over_seeded_facts() {
     );
 }
 
+/// Issue #791, AC2: the new ship-wide `tubes_full` launch fact.
+///
+/// "All tubes full" did not exist before #791 — `TorpedoTube::is_loaded()` is
+/// `loaded_count > 0`, so the closest thing available was "this tube has at
+/// least one round", which a salvo doctrine cannot use. The fact is seeded from
+/// every tube's `loaded_count` against its own `volley_max`.
+///
+/// Both halves matter, and the negative one especially: an unseeded `fact(...)`
+/// name parses, validates, and then reads absent for ever, so a guard on it
+/// would hold fire permanently and look exactly like a correctly cautious
+/// doctrine. One tube loaded out of the fixture's three is the "not full" case;
+/// all three is the "full" case, through the same guard.
+#[test]
+fn ai_torpedo_auto_fire_tubes_full_fact_gates_the_salvo() {
+    // One tube of three loaded → the ship is NOT at full salvo → hold.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "fact(tubes_full) > 0");
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "one loaded tube out of three is not a full salvo: the guard must hold"
+    );
+
+    // Every tube at its volley capacity → launch. That this differs from the
+    // run above is the proof the fact is genuinely seeded rather than absent.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    for tube in ["fore_port", "fore_starboard", "aft"] {
+        load_tube_now(&mut app, tube);
+    }
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "fact(tubes_full) > 0");
+    let out = tick(&mut app);
+    assert!(
+        out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "with every tube at its volley capacity the salvo guard must fire"
+    );
+}
+
+/// Issue #791, AC2 as SHIPPED CONTENT: the Harrow cruiser's own authored tube
+/// policy launches only while all three of its conditions hold, continuously.
+///
+/// The tests above prove the `tubes_full` fact is seeded and gates; this proves
+/// the hull actually authors a guard that uses it, on real tubes with a real
+/// 24-degree arc, through the real decider. A hull whose guard were quietly
+/// wrong — a fact name typo, say — would parse, validate, and simply never fire,
+/// which is invisible everywhere else.
+#[test]
+fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
+    use crate::entity_spawner::EntityUuid;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/ship_harrow_cruiser.toml"
+    ))
+    .expect("the shipped cruiser hull must parse");
+    let torpedoes = hull.torpedoes.as_ref().expect("the cruiser carries tubes");
+
+    // The ship, its tubes and its AUTHORED per-tube policies — the same three
+    // things `entities::spawner` attaches together.
+    let build = |app: &mut App, target_uuid: &str, loaded: &[(&str, u32)]| -> Entity {
+        let mut system =
+            crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+        for (id, count) in loaded {
+            system.tube_mut(id).expect("shipped tube").loaded_count = *count;
+        }
+        let policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> = torpedoes
+            .tubes
+            .iter()
+            .map(|t| {
+                (
+                    t.id.clone(),
+                    t.ai.as_ref()
+                        .expect("every shipped tube authors a policy")
+                        .to_policy()
+                        .expect("and it decodes"),
+                )
+            })
+            .collect();
+        let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+        sources.set(
+            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+        for tube in &torpedoes.tubes {
+            sources.set(
+                crate::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
+                crate::ship::control_source::ControlSource::Ai,
+            );
+        }
+        app.world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid("harrow-cruiser".into()),
+                crate::ship_plugin::ShipConfigComponent::default(),
+                crate::ship_plugin::ShipSystemControlSources(sources),
+                crate::ship_plugin::ActiveStationRatings::default(),
+                ShipPhysics::default(),
+                crate::server_app::ShipSystemBlackboards::default(),
+                TacticalRadarSelection(Some(target_uuid.to_string())),
+                TorpedoSystemResource(system),
+                crate::weapons_plugin::TorpedoTubeAiPolicies(policies),
+                AdmittedCommands::default(),
+                crate::ai_plugin::AiHighFidelity,
+                Transform::default(),
+            ))
+            .id()
+    };
+
+    // A shielded target, placed so the choice of arc state is the only variable.
+    // `(0, -30)` is dead ahead of a ship at the origin with yaw 0 — deliberately
+    // NOT on an arc boundary, so the 24-degree tube arc admits it on its merits.
+    let spawn_target = |app: &mut App, uuid: &str, x: f32, z: f32, arcs_online: bool| {
+        let mut shields = crate::shield::ShieldSystem::default();
+        if !arcs_online {
+            for facing in shields.facings.iter_mut() {
+                facing.offline_remaining = 30.0;
+            }
+        }
+        app.world_mut().spawn((
+            EntityUuid(uuid.to_string()),
+            Transform::from_xyz(x, 0.0, z),
+            crate::simulation::ShipShields(shields, 0.5),
+        ));
+    };
+
+    let launches = |app: &mut App, ship: Entity| -> usize {
+        app.world_mut()
+            .run_system_once(seed_viewscreen_from_selection)
+            .expect("seed viewscreen");
+        app.world_mut()
+            .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+            .expect("ai_torpedo_auto_fire runs");
+        app.world()
+            .get::<AdmittedCommands>(ship)
+            .expect("admitted commands")
+            .0
+            .iter()
+            .filter(|c| matches!(c.payload, SystemControlPayload::FireTorpedo { .. }))
+            .count()
+    };
+
+    let full: Vec<(&str, u32)> = torpedoes
+        .tubes
+        .iter()
+        .map(|t| (t.id.as_str(), t.volley_max))
+        .collect();
+
+    // Full salvo, arc down, dead ahead → every tube launches.
+    let mut app = test_app();
+    let ship = build(&mut app, "cruiser-target", &full);
+    spawn_target(&mut app, "cruiser-target", 0.0, -30.0, false);
+    assert_eq!(
+        launches(&mut app, ship),
+        torpedoes.tubes.len(),
+        "a full salvo through a downed arc must fire every tube"
+    );
+
+    // One tube one round short → the WHOLE salvo holds. This is the condition
+    // that did not exist before #791: every tube is `is_loaded()`, and the old
+    // gate would have fired.
+    let mut short = full.clone();
+    short[0].1 -= 1;
+    assert!(
+        short[0].1 > 0,
+        "precondition: the short tube is still loaded"
+    );
+    let mut app = test_app();
+    let ship = build(&mut app, "cruiser-target", &short);
+    spawn_target(&mut app, "cruiser-target", 0.0, -30.0, false);
+    assert_eq!(
+        launches(&mut app, ship),
+        0,
+        "one tube short of a full salvo must hold EVERY tube: the doctrine spends \
+         a shield gap on one volley or not at all"
+    );
+
+    // Full salvo but the arc is back up → hold.
+    let mut app = test_app();
+    let ship = build(&mut app, "cruiser-target", &full);
+    spawn_target(&mut app, "cruiser-target", 0.0, -30.0, true);
+    assert_eq!(
+        launches(&mut app, ship),
+        0,
+        "a healthy striking arc must hold the salvo"
+    );
+
+    // Full salvo, arc down, but the target is off the bow — outside the tubes'
+    // 24-degree cone. This is what the Steering phase exists to fix, and until it
+    // has, nothing launches.
+    let mut app = test_app();
+    let ship = build(&mut app, "cruiser-target", &full);
+    spawn_target(&mut app, "cruiser-target", 30.0, 0.0, false);
+    assert_eq!(
+        launches(&mut app, ship),
+        0,
+        "a target abeam is outside a fixed forward tube's arc, however open the \
+         opportunity is"
+    );
+}
+
+/// Issue #791, AC5: the phaser banks keep working while the helm is holding the
+/// bow on a torpedo opportunity.
+///
+/// `ai_phaser_auto_fire` reads physics, the bank's own arcs/cooldown and its
+/// #781 policy — and nothing else. This pins that: a ship carrying a
+/// `HelmPassSurface` that says the torpedo phase is live still opens fire on a
+/// bearing target. The failure this guards against is a future "pause the beams
+/// while lining up the tubes" coupling, which would be invisible in every helm
+/// test and would leave the cruiser silent at the moment it is most exposed.
+#[test]
+fn ai_phaser_auto_fire_ignores_the_helm_torpedo_bearing_phase() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    let npc = spawn_ai_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000001",
+        "cc000000-0000-0000-0000-000000000002",
+    );
+    app.world_mut()
+        .run_system_once(seed_viewscreen_from_selection)
+        .expect("seed viewscreen");
+
+    let fire_count = |app: &mut App| {
+        app.world_mut()
+            .run_system_once(ai_phaser_auto_fire)
+            .expect("ai_phaser_auto_fire runs");
+        let mut entity = app.world_mut().entity_mut(npc);
+        let mut admitted = entity
+            .get_mut::<AdmittedCommands>()
+            .expect("every ship has AdmittedCommands");
+        let n = admitted
+            .0
+            .iter()
+            .filter(|c| matches!(c.payload, SystemControlPayload::FirePhaser))
+            .count();
+        admitted.0.clear();
+        n
+    };
+
+    let baseline = fire_count(&mut app);
+    assert!(
+        baseline > 0,
+        "precondition: the bank must be firing at all, or this test proves nothing"
+    );
+
+    // Now say the helm is mid-torpedo-phase. Nothing about the bank changed.
+    app.world_mut()
+        .entity_mut(npc)
+        .insert(crate::ship::helm_ai::HelmPassSurface {
+            active: true,
+            torpedo_bearing: true,
+            torpedo_bearing_speed: 0.0,
+            ..Default::default()
+        });
+    assert_eq!(
+        fire_count(&mut app),
+        baseline,
+        "the phaser path must not consult the helm's leg: ordinary beam pressure \
+         continues through the whole bow-on phase"
+    );
+}
+
 /// Target invalidation: a locked target UUID that resolves to no live entity
 /// (destroyed / never spawned) yields no launch — even under an unconditional
 /// launch policy — because the host readiness gate finds nothing to shoot at.

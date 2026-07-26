@@ -7388,6 +7388,458 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
     );
 }
 
+// ── The battleship's opportunistic close defence (issue #793) ──────────────
+
+/// Build the shipped Harrow battleship's real torpedo battery: its tubes, its
+/// AUTHORED per-tube policies, and the control sources the spawner registers —
+/// the same three things `entities::spawner` attaches together.
+///
+/// `loaded` names the tubes that start with a round in them; any tube left out is
+/// empty, which is what "still reloading" looks like to the decider.
+#[cfg(test)]
+fn spawn_shipped_warhawk_battery(
+    app: &mut App,
+    torpedoes: &crate::entity_config::TorpedoesConfig,
+    target_uuid: &str,
+    loaded: &[&str],
+) -> Entity {
+    use crate::entity_spawner::EntityUuid;
+
+    let mut system =
+        crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+    for id in loaded {
+        let tube = system.tube_mut(id).expect("shipped tube");
+        tube.loaded_count = tube.volley_max;
+    }
+    let policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> = torpedoes
+        .tubes
+        .iter()
+        .map(|t| {
+            (
+                t.id.clone(),
+                t.ai.as_ref()
+                    .expect("every shipped tube authors a policy")
+                    .to_policy()
+                    .expect("and it decodes"),
+            )
+        })
+        .collect();
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    for tube in &torpedoes.tubes {
+        sources.set(
+            crate::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+    }
+    app.world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid("harrow-warhawk".into()),
+            crate::ship_plugin::ShipConfigComponent::default(),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::ship_plugin::ActiveStationRatings::default(),
+            ShipPhysics::default(),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            TorpedoSystemResource(system),
+            crate::weapons_plugin::TorpedoTubeAiPolicies(policies),
+            AdmittedCommands::default(),
+            crate::ai_plugin::AiHighFidelity,
+            Transform::default(),
+        ))
+        .id()
+}
+
+/// Spawn a shielded target for the battleship's launchers to decide about.
+/// `arcs_online = false` forces every arc offline, which the host reports as 0 HP
+/// — "the arc a round would strike is not blocking".
+#[cfg(test)]
+fn spawn_warhawk_shield_target(app: &mut App, uuid: &str, x: f32, z: f32, arcs_online: bool) {
+    use crate::entity_spawner::EntityUuid;
+
+    let mut shields = crate::shield::ShieldSystem::default();
+    if !arcs_online {
+        for facing in shields.facings.iter_mut() {
+            facing.offline_remaining = 30.0;
+        }
+    }
+    app.world_mut().spawn((
+        EntityUuid(uuid.to_string()),
+        Transform::from_xyz(x, 0.0, z),
+        crate::simulation::ShipShields(shields, 0.5),
+    ));
+}
+
+/// Every `FireTorpedo` the decider admitted on this ship, by the tube it targets.
+#[cfg(test)]
+fn torpedo_launch_targets(app: &mut App, ship: Entity) -> Vec<SystemId> {
+    use bevy::ecs::system::RunSystemOnce;
+
+    app.world_mut()
+        .run_system_once(seed_viewscreen_from_selection)
+        .expect("seed viewscreen");
+    app.world_mut()
+        .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+        .expect("ai_torpedo_auto_fire runs");
+    app.world()
+        .get::<AdmittedCommands>(ship)
+        .expect("admitted commands")
+        .0
+        .iter()
+        .filter(|c| matches!(c.payload, SystemControlPayload::FireTorpedo { .. }))
+        .map(|c| c.target.clone())
+        .collect()
+}
+
+/// Issue #793, AC2/AC3 as SHIPPED CONTENT: the battleship's fore and aft
+/// launchers evaluate readiness, bearing and the striking shield arc entirely
+/// independently of one another.
+///
+/// The FIRST case is the one the whole issue turns on, and it is the case the
+/// cruiser's guard gets wrong. The cruiser gates on `fact(tubes_full)`, which is
+/// SHIP-WIDE — every tube on the hull at its `volley_max`. Pasted onto this hull
+/// it would mean a loaded fore tube, bearing on a collapsed arc, holding its round
+/// because the aft tube is eight seconds into a reload. The battleship gates on
+/// the per-tube `fact(loaded)` instead, and this test is what tells the two apart:
+/// under `tubes_full` the expected count here is zero.
+///
+/// A hull whose guard were quietly wrong — a fact-name typo, say — would parse,
+/// validate, and simply never fire, which is invisible everywhere else.
+#[test]
+fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
+    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/ship_harrow_warhawk.toml"
+    ))
+    .expect("the shipped battleship hull must parse");
+    let torpedoes = hull
+        .torpedoes
+        .as_ref()
+        .expect("the battleship carries close-defence launchers");
+    let fore = crate::system_registry::torpedo_tube_system_id("fore").unwrap();
+    let aft = crate::system_registry::torpedo_tube_system_id("aft").unwrap();
+
+    // AC2: the FORE tube is loaded and bearing; the AFT tube is still reloading.
+    // `(0, -30)` is dead ahead of a ship at the origin with yaw 0 — 45 degrees
+    // clear of the 90-degree cone's edge, so it is admitted on its merits rather
+    // than by the `<=` boundary tie.
+    let mut app = test_app();
+    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore"]);
+    spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, false);
+    assert_eq!(
+        torpedo_launch_targets(&mut app, ship),
+        vec![fore.clone()],
+        "the loaded fore launcher must take its own opportunity while the aft \
+         launcher is still reloading — a ship-wide `tubes_full` guard would hold \
+         BOTH tubes here, which is the coupling this hull must not have"
+    );
+
+    // AC2, the other launcher: a player who has got behind a hull that turns at
+    // 0.20 rad/s. `(0, +30)` is dead astern — inside the aft cone, 180 degrees off
+    // the fore one.
+    let mut app = test_app();
+    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    spawn_warhawk_shield_target(&mut app, "closer", 0.0, 30.0, false);
+    assert_eq!(
+        torpedo_launch_targets(&mut app, ship),
+        vec![aft.clone()],
+        "a target astern is the AFT launcher's opportunity and nobody else's: the \
+         fore tube is loaded and bearing on nothing"
+    );
+
+    // AC3: the striking arc is back. Both tubes are loaded and one of them is
+    // bearing, and neither fires.
+    let mut app = test_app();
+    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, true);
+    assert_eq!(
+        torpedo_launch_targets(&mut app, ship),
+        Vec::<SystemId>::new(),
+        "a recovered shield arc must hold every launcher: the gate is doctrine, \
+         not damage arithmetic — `damage_hull` would land either way — and a \
+         twelve-round magazine is spent on openings, not on a covered target"
+    );
+
+    // Out of arc: the target is abeam, 45 degrees clear of BOTH cones' edges.
+    // Nothing puts it back in — the launchers never command a bearing (AC4), so
+    // an abeam target is simply an opportunity that does not exist.
+    let mut app = test_app();
+    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    spawn_warhawk_shield_target(&mut app, "closer", 30.0, 0.0, false);
+    assert_eq!(
+        torpedo_launch_targets(&mut app, ship),
+        Vec::<SystemId>::new(),
+        "a target on the beam sits in the gap between the fore and aft cones, \
+         however open the shield opportunity is"
+    );
+}
+
+/// Issue #793, AC2/AC3 at the guard itself: the shipped launch policy resolved
+/// directly over a seeded fact snapshot.
+///
+/// The behaviour test above goes through `auto_fire_torpedo`, which applies the
+/// same conditions as HOST gates before the policy is ever consulted — so it
+/// cannot, on its own, tell an authored guard that reads its facts from one that
+/// silently reads nothing. (An unseeded or misspelled `fact(...)` name parses,
+/// validates, and then reads absent for ever; the #779 failure mode.)
+///
+/// This drives the real `seed_torpedo_tube_launch_facts` → shipped policy pair
+/// directly, so each conjunct is switched on and off in isolation. The
+/// `tubes_full = false` in every case is deliberate and is AC2's independence
+/// stated at the level it is authored: the ship-wide reading is FALSE throughout,
+/// and the guard fires anyway.
+#[test]
+fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
+    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/ship_harrow_warhawk.toml"
+    ))
+    .expect("the shipped battleship hull must parse");
+    let torpedoes = hull
+        .torpedoes
+        .as_ref()
+        .expect("the battleship carries tubes");
+
+    for tube in &torpedoes.tubes {
+        let policy = tube
+            .ai
+            .as_ref()
+            .expect("every shipped tube authors a policy")
+            .to_policy()
+            .expect("and it decodes");
+        let fires = |loaded: bool, in_arc: bool, facing_shields: i32| {
+            crate::weapons_plugin::torpedo_tube_launch_policy_fires(
+                &policy,
+                &crate::weapons_plugin::seed_torpedo_tube_launch_facts(
+                    loaded,
+                    true,
+                    true,
+                    in_arc,
+                    facing_shields,
+                    // SHIP-WIDE "every tube full" is false in every case below.
+                    false,
+                ),
+            )
+        };
+
+        assert!(
+            fires(true, true, 0),
+            "tube '{}': loaded, bearing, striking arc down — the shot is on, and \
+             the ship-wide `tubes_full` reading being FALSE must not touch it",
+            tube.id
+        );
+        assert!(
+            !fires(false, true, 0),
+            "tube '{}': an empty launcher must hold even with the opportunity \
+             wide open — and that this differs from the case above is the proof \
+             `loaded` is a seeded fact rather than an absent name reading 0",
+            tube.id
+        );
+        assert!(
+            !fires(true, false, 0),
+            "tube '{}': a loaded launcher that is not bearing must hold — the \
+             tubes take the bearing the gun line gives them and never ask for one",
+            tube.id
+        );
+        assert!(
+            !fires(true, true, 40),
+            "tube '{}': a striking arc with HP left must hold the round; \
+             `target_facing_shields` is an HP reading, not a boolean",
+            tube.id
+        );
+        assert!(
+            fires(true, true, -5),
+            "tube '{}': the gate is `<= 0`, so an over-collapsed arc is still an \
+             opportunity",
+            tube.id
+        );
+    }
+}
+
+/// Issue #793, AC4/AC5: taking a torpedo opportunity never commands Steering and
+/// never moves the hull.
+///
+/// The mirror of `ai_phaser_auto_fire_ignores_the_helm_torpedo_bearing_phase`,
+/// pointed the other way: that one pins that the helm's leg does not reach the
+/// guns, this one that the guns do not reach the helm. AC4 is satisfied by
+/// OMISSION — `ai_torpedo_auto_fire` only ever emits `FireTorpedo` at a tube's own
+/// system id — and an omission is exactly what a later "swing the bow onto the
+/// tube" change would fill in. The failure it guards against is invisible in every
+/// content test: the battleship would still parse, still hold its band, and simply
+/// start aiming its artillery at where the target IS instead of where the bolt and
+/// the target meet.
+///
+/// The whole launch runs here — the decider AND `handle_fire_torpedo` — because
+/// AC5 is a statement about what firing COSTS, and a decision that never became a
+/// round cannot cost anything. The launch is asserted to have actually happened
+/// (a `TorpedoLaunched` broadcast, and the tube emptied) before the physics
+/// comparison is allowed to mean anything.
+///
+/// The hull is put in the state it is really in while this happens: holding its
+/// artillery firing position, with the `HelmPassSurface` that leg publishes
+/// live — every high-fidelity AI ship carries one (`ai_high_fidelity_components`),
+/// so a fixture without the component could assert nothing about it.
+#[test]
+fn warhawk_torpedo_opportunity_never_commands_the_helm() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/ship_harrow_warhawk.toml"
+    ))
+    .expect("the shipped battleship hull must parse");
+    let torpedoes = hull
+        .torpedoes
+        .as_ref()
+        .expect("the battleship carries tubes");
+    let steering = hull
+        .helm_console
+        .as_ref()
+        .expect("the hull declares [helm_console]")
+        .steering_ai
+        .as_ref()
+        .expect("and authors a Steering policy");
+    let steering_param = |name: &str| {
+        *steering
+            .param
+            .get(name)
+            .unwrap_or_else(|| panic!("the hull authors a `{name}` steering param"))
+    };
+    // The lead speed the artillery hold predicts with is derived host-side from
+    // the hull's longest-reaching blaster bank, so it is read the same way here.
+    let bow = hull
+        .weapons_console
+        .as_ref()
+        .expect("the hull declares [weapons_console]")
+        .blaster_banks
+        .iter()
+        .max_by(|a, b| a.range.total_cmp(&b.range))
+        .expect("the battleship carries its bow artillery");
+
+    let mut app = test_app();
+    let ship = spawn_shipped_warhawk_battery(&mut app, torpedoes, "closer", &["fore", "aft"]);
+    spawn_warhawk_shield_target(&mut app, "closer", 0.0, -30.0, false);
+    // The leg the battleship is flying while its tubes take the opportunity,
+    // built out of this hull's own authored numbers rather than invented ones.
+    let surface = crate::ship::helm_ai::HelmPassSurface {
+        active: true,
+        artillery_hold: true,
+        artillery_hold_speed: steering_param("artillery_hold_speed"),
+        artillery_lead_speed: bow.projectile_speed,
+        tracking_deadband_rad: steering_param("tracking_deadband_rad"),
+        tracking_full_steer_rad: steering_param("tracking_full_steer_rad"),
+        ..Default::default()
+    };
+    app.world_mut().entity_mut(ship).insert(surface);
+
+    let before = *app
+        .world()
+        .get::<ShipPhysics>(ship)
+        .expect("the fixture ship carries physics");
+
+    let launches = torpedo_launch_targets(&mut app, ship);
+    assert!(
+        !launches.is_empty(),
+        "precondition: a launcher must actually take the opportunity, or this \
+         test proves nothing about what taking one costs"
+    );
+
+    // Every admitted command is a launch at a tube. Nothing addresses the helm.
+    let admitted = app
+        .world()
+        .get::<AdmittedCommands>(ship)
+        .expect("admitted commands");
+    for command in &admitted.0 {
+        assert!(
+            matches!(command.payload, SystemControlPayload::FireTorpedo { .. }),
+            "the torpedo path admitted a non-launch command ({:?} at {}): a \
+             launcher may publish nothing but its own shot",
+            command.payload,
+            command.target.0
+        );
+        assert!(
+            torpedoes
+                .tubes
+                .iter()
+                .any(
+                    |t| crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                        == Some(&command.target)
+                ),
+            "a launch was admitted at `{}`, which is not one of this hull's tubes",
+            command.target.0
+        );
+    }
+
+    // Now actually fire: the consumer takes the admitted launch and advances the
+    // tube's own state machine, which is the step that puts a round in the air.
+    let loaded_before: u32 = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .expect("the fixture ship carries its own tubes")
+        .0
+        .tubes
+        .iter()
+        .map(|t| t.loaded_count)
+        .sum();
+    app.world_mut()
+        .run_system_once(handle_fire_torpedo)
+        .expect("handle_fire_torpedo runs");
+
+    let launched: Vec<&ServerMessage> = app
+        .world()
+        .resource::<SimOutbox>()
+        .0
+        .iter()
+        .map(|(_, m)| m)
+        .filter(|m| matches!(m, ServerMessage::TorpedoLaunched { .. }))
+        .collect();
+    assert!(
+        !launched.is_empty(),
+        "precondition: a round must genuinely have left a tube — without a launch \
+         the physics comparison below cannot fail for any reason"
+    );
+    let loaded_after: u32 = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .expect("the fixture ship carries its own tubes")
+        .0
+        .tubes
+        .iter()
+        .map(|t| t.loaded_count)
+        .sum();
+    assert!(
+        loaded_after < loaded_before,
+        "precondition: the launch must have spent a loaded round \
+         ({loaded_before} → {loaded_after})"
+    );
+
+    // AC5: and the hull has not moved ACROSS THE LAUNCH. `recoil_impulse` is the
+    // only mechanism in the close-defence path that could touch physics, it is
+    // blaster-only, and this hull authors none — pinned as content in
+    // `entities::config`. `handle_fire_torpedo` takes `&ShipPhysics`, so the
+    // guarantee is structural; this is what would notice it stopping being so.
+    let after = *app
+        .world()
+        .get::<ShipPhysics>(ship)
+        .expect("the fixture ship carries physics");
+    assert_eq!(
+        (after.yaw, after.x, after.z, after.forward_speed),
+        (before.yaw, before.x, before.z, before.forward_speed),
+        "launching from the firing position must not move or re-point the hull: \
+         the predictive bow-artillery facing is the battleship"
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::helm_ai::HelmPassSurface>(ship)
+            .copied(),
+        Some(surface),
+        "the torpedo path must not touch the helm's pass surface: the leg the \
+         host publishes is derived from the Steering machine's own yaw verb and \
+         from nothing the launchers did"
+    );
+}
+
 /// Issue #791, AC5: the phaser banks keep working while the helm is holding the
 /// bow on a torpedo opportunity.
 ///

@@ -1118,6 +1118,113 @@ fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
     );
 }
 
+/// Issue #793, the close defence end-to-end: the battleship's opportunistic
+/// launchers actually put a round in the air in a real run.
+///
+/// The unit tests above the line each assert one link — the shipped guard reads
+/// its own tube's facts, the decider admits a launch at that tube, the hull
+/// declares the tube as a system. None of them can see the chain snap in
+/// production, and the whole armament is authored content: a `[[system]]` block
+/// missing its magazine entry switches BOTH the loader and the launcher off
+/// silently, an unloadable tube never reaches `loaded`, and a doctrine that never
+/// puts an enemy inside a 90-degree cone with its arc down would leave every unit
+/// test passing over a weapon that has never fired.
+///
+/// The assertion is per-SHIP and per-WEAPON rather than on the run's
+/// `TorpedoLaunched` count, because both duelists carry tubes and an aggregate
+/// message count cannot say whose round it was. `WeaponFired` carries the
+/// shooter's uuid and the tube's own id, so the battleship's ledger names the
+/// launcher — which is also why the tube ids are checked against this hull's beam
+/// and blaster ids first: `fore` on the battleship's ledger is only proof while
+/// `fore` is not also the name of one of its guns.
+#[test]
+fn the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run() {
+    use project_phoenix::entity_config::EntityConfig;
+
+    let hull = EntityConfig::from_toml(include_str!("../assets/entities/ship_harrow_warhawk.toml"))
+        .expect("the shipped battleship hull must parse");
+    let tube_ids: Vec<String> = hull
+        .torpedoes
+        .as_ref()
+        .expect("the battleship carries close-defence launchers")
+        .tubes
+        .iter()
+        .map(|t| t.id.clone())
+        .collect();
+    let wc = hull
+        .weapons_console
+        .as_ref()
+        .expect("hull declares [weapons_console]");
+    for gun in wc
+        .phaser_banks
+        .iter()
+        .map(|b| b.id.clone())
+        .chain(wc.blaster_banks.iter().map(|b| b.id.clone()))
+    {
+        assert!(
+            !tube_ids.contains(&gun),
+            "precondition: `{gun}` names both a gun and a tube on this hull, so a \
+             ledger row under that name could not attribute a launch"
+        );
+    }
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/duel.toml".into(),
+        side_a: vec!["cruiser".into()],
+        side_b: vec!["ship_harrow_warhawk".into()],
+        dt,
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        seed: Some(792),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    // Side B is the battleship — the duel harness names its ships `side_b_<n>`.
+    let battleship = report
+        .damage_by_ship
+        .values()
+        .find(|l| {
+            l.name_id
+                .as_deref()
+                .is_some_and(|n| n.starts_with("side_b"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the battleship must appear in the ledger: {:?}",
+                report.damage_by_ship
+            )
+        });
+    // The assertion names the FORE tube specifically, because that is the only
+    // launcher this duel reaches. The battleship holds its artillery lead, so the
+    // cruiser spends the engagement inside the bow cone and never crosses the
+    // stern one: the run's ledger is
+    // `{"bow_artillery": 2, "fore": 1, "port": 2, "starboard": 2}`. Summing both
+    // tubes instead would state coverage this test does not have — a permanently
+    // dead AFT chain would still pass on the fore tube's round. The aft launcher
+    // is pinned at unit level instead, by
+    // `shipped_warhawk_launchers_decide_independently_through_a_downed_arc`,
+    // which puts a target dead astern; no reachable duel scenario does.
+    assert!(
+        tube_ids.iter().any(|id| id == "fore"),
+        "precondition: this hull must still carry a `fore` launcher for the \
+         assertion below to name — its tubes are {tube_ids:?}"
+    );
+    let launches = battleship.shots_fired.get("fore").copied().unwrap_or(0);
+    assert!(
+        launches > 0,
+        "the battleship never took a close-defence opportunity with its FORE \
+         launcher in a real duel — the chain from the authored \
+         `[[torpedoes.tubes]] ai` guard through the `torpedo-magazine` / \
+         `torpedo-tube-*` declarations to `handle_fire_torpedo` is broken \
+         somewhere no unit test can see. Its ledger: {:?}",
+        battleship.shots_fired
+    );
+}
+
 /// Issue #844 AC: an asymmetric duel driven from `--side-a`/`--side-b` runs
 /// `duel.toml` to a classified annihilation, with side-tagged ledgers and side
 /// aggregates.

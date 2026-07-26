@@ -7292,6 +7292,410 @@ hull_max_hp = 6
         }
     }
 
+    // ── The battleship's opportunistic close defence (issue #793) ────────────
+
+    /// AC1, as content: the beam battery answers a player who has closed inside
+    /// the artillery envelope with its WHOLE output, not half of it.
+    ///
+    /// #792 authored two 180-degree banks on ±90 facings. That covers the circle
+    /// with no dead zone — but two half-planes only touch, they never overlap, so
+    /// exactly one bank could bear at any real bearing and the hull's close-in
+    /// output was 12 damage/s however it was engaged. The seam between them lies
+    /// dead ahead, which is the one bearing an artillery platform holding a
+    /// predictive lead solution keeps its target on.
+    ///
+    /// The ±30 assertions are the ones that discriminate, and they are why the
+    /// test does not simply read the bow. A bearing of exactly 0 is admitted by
+    /// BOTH banks under the old 180-degree authoring too — `in_arc` compares with
+    /// `<=`, so the seam is a boundary tie and a fixture sitting on it proves
+    /// nothing. Thirty degrees off the bow is inside the new overlap and outside
+    /// the old one.
+    #[test]
+    fn harrow_warhawk_beams_double_up_across_the_bow_for_a_closing_player() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let wc = cfg
+            .weapons_console
+            .as_ref()
+            .expect("hull declares [weapons_console]");
+        let banks = &wc.phaser_banks;
+        assert!(banks.len() > 1, "precondition: more than one beam bank");
+
+        for bank in banks {
+            assert!(
+                (bank.auto_arc_deg - bank.fire_arc_deg).abs() < 1e-3,
+                "bank '{}': the AUTO arc must reach as far as the fire arc ({} vs \
+                 {}) — the overlap this hull's close defence lives in reaches to \
+                 the edge of each bank's cone, and a narrower auto arc switches off \
+                 exactly the cover the widening exists to create",
+                bank.id,
+                bank.auto_arc_deg,
+                bank.fire_arc_deg
+            );
+        }
+
+        // Beam damage available at one bearing, through the same `in_arc` the
+        // auto-fire gate uses, summed over every bank that bears.
+        let total_dps: f32 = banks.iter().map(|b| b.beam_damage_per_sec).sum();
+        let dps_at = |deg: f32| -> f32 {
+            let bearing = deg.to_radians();
+            banks
+                .iter()
+                .filter(|b| {
+                    crate::weapons::phaser::in_arc(
+                        bearing.sin(),
+                        bearing.cos(),
+                        b.facing_deg,
+                        b.auto_arc_deg,
+                    )
+                })
+                .map(|b| b.beam_damage_per_sec)
+                .sum()
+        };
+
+        // No dead zone anywhere — the property #792 already had, kept.
+        for deg in -179..=180 {
+            assert!(
+                dps_at(deg as f32) > 0.0,
+                "no bearing may be uncovered: {deg} degrees has no bank on it"
+            );
+        }
+
+        // ...and the bow cone, which is where the hold puts a closing player,
+        // gets the WHOLE battery rather than half of it.
+        for deg in [-30.0_f32, 0.0, 30.0] {
+            assert!(
+                (dps_at(deg) - total_dps).abs() < 1e-3,
+                "a target {deg} degrees off the bow must be engaged by every bank \
+                 ({} of {total_dps} damage/s bears): the artillery hold holds a \
+                 closing player on the centreline, so a battery split across it \
+                 fights every engagement at half output",
+                dps_at(deg)
+            );
+        }
+        // The stern gets it too, which is the half the aft launcher works with.
+        assert!(
+            (dps_at(180.0) - total_dps).abs() < 1e-3,
+            "the stern cone must be covered by every bank as well: a hull turning \
+             at 0.20 rad/s cannot keep its nose on a close crosser"
+        );
+
+        // Close defence, and only close defence: the beams are for the player who
+        // has come inside the gun line, and the gun line is authored much further
+        // out. If a retune ever made them reach the holding radius, this hull is
+        // no longer holding a standoff it cannot shoot into.
+        let hold = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .expect("hull authors [helm_console.steering_ai]")
+            .param[crate::ship::helm_ai::ARTILLERY_HOLD_RANGE_PARAM];
+        for bank in banks {
+            assert!(
+                bank.beam_range < hold,
+                "bank '{}' reaches {} units, at or beyond the {hold}-unit holding \
+                 radius — 'close defence' means the player has to close for it",
+                bank.id,
+                bank.beam_range
+            );
+        }
+    }
+
+    /// AC2/AC3, as content: two opposed launchers, each gating on ITS OWN
+    /// readiness, ITS OWN cone, and the arc ITS round would strike.
+    ///
+    /// The guard's choice of fact is the whole of AC2 and the one thing that
+    /// cannot be read off behaviour alone, because the wrong fact fails silently:
+    /// `fact(tubes_full)` is ship-wide (every tube at `volley_max`), which is
+    /// right for the cruiser's committed salvo and wrong here — a loaded fore tube
+    /// bearing on a collapsed arc would refuse the shot because the aft tube is
+    /// eight seconds into a reload, and the two launchers would collapse into one.
+    /// So the presence of `loaded` and the ABSENCE of `tubes_full` are both
+    /// asserted.
+    #[test]
+    fn harrow_warhawk_carries_two_opposed_launchers_that_decide_independently() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let torpedoes = cfg
+            .torpedoes
+            .as_ref()
+            .expect("the battleship carries close-defence launchers");
+
+        let ids: Vec<&str> = torpedoes.tubes.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["fore", "aft"],
+            "two launchers on OPPOSED facings: the fore tube answers the player \
+             who closes down the gun line, the aft one the player who gets behind \
+             a hull that cannot turn fast enough to stop them"
+        );
+        let fore = &torpedoes.tubes[0];
+        let aft = &torpedoes.tubes[1];
+        assert_eq!(fore.facing_deg, 0.0, "'fore' is a bow launcher");
+        assert_eq!(aft.facing_deg, 180.0, "'aft' is a stern launcher");
+
+        for tube in &torpedoes.tubes {
+            assert_eq!(
+                tube.volley_max, 1,
+                "tube '{}' spends ONE round per opportunity — the opposite of the \
+                 cruiser's committed salvo, and what makes the two launchers' \
+                 reloads independent",
+                tube.id
+            );
+            assert_eq!(
+                tube.ai_target_count,
+                Some(tube.volley_max),
+                "an AI crew keeps tube '{}' loaded between opportunities: the \
+                 reload ({} s) outlasts any window it could start inside",
+                tube.id,
+                torpedoes.load_time
+            );
+        }
+
+        // The two cones must leave a REAL gap on each beam rather than meeting
+        // there. A fore/aft pair whose cones touch has an arc boundary running
+        // down each beam line, and `is_in_arc` admits a bearing sitting exactly on
+        // it — so every "out of arc" fixture would pass vacuously, and the
+        // armament would in truth cover every bearing, which is a turret and not
+        // the opportunistic pair this doctrine authors.
+        let covered = fore.fire_arc_deg * 0.5 + aft.fire_arc_deg * 0.5;
+        assert!(
+            covered < 180.0,
+            "the fore ({}) and aft ({}) cones must leave the beams uncovered; \
+             together they reach {covered} degrees off the centreline",
+            fore.fire_arc_deg,
+            aft.fire_arc_deg
+        );
+
+        // A round that arrives at a recovered arc must do NOTHING — which is why
+        // the launch guard below gates on the arc being down instead of treating
+        // the shield as something to shoot through.
+        assert_eq!(
+            torpedoes.damage_shields, 0,
+            "these rounds go through a hole the beams made; they cannot make one"
+        );
+        assert!(
+            torpedoes.damage_hull > 0,
+            "and they hurt the hull once they are through"
+        );
+
+        // Reach. There is no range fact a launch guard can read — the host seeds
+        // `in_range` as a constant `true` for every candidate — so a round's own
+        // reach is the only thing deciding whether a shot taken at the far edge of
+        // the gun line can arrive at all.
+        let envelope = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .expect("hull authors [helm_console.steering_ai]")
+            .param[crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM];
+        let reach = torpedoes.speed * torpedoes.lifespan;
+        assert!(
+            reach >= envelope,
+            "a round reaches {reach} units ({} x {} s) but the doctrine holds a \
+             {envelope}-unit gun line: shots taken at the far edge would expire \
+             short and drain the magazine for nothing",
+            torpedoes.speed,
+            torpedoes.lifespan
+        );
+
+        // The authored per-tube policy — all three of AC2/AC3's conditions, on the
+        // launch channel, on EVERY tube, and none of them ship-wide.
+        for tube in &torpedoes.tubes {
+            let ai = tube
+                .ai
+                .as_ref()
+                .unwrap_or_else(|| panic!("tube '{}' must author its own policy", tube.id));
+            assert!(
+                validate_fine_system_ai_policy(ai, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS)
+                    .is_ok(),
+                "tube '{}' policy must pass content validation",
+                tube.id
+            );
+            let load = ai
+                .rule
+                .iter()
+                .find(|r| r.channel == TORPEDO_LOAD_CHANNEL)
+                .unwrap_or_else(|| panic!("tube '{}' must author a load rule", tube.id));
+            assert_eq!(load.verb, TORPEDO_LOAD_VERB);
+            let launch = ai
+                .rule
+                .iter()
+                .find(|r| r.channel == TORPEDO_LAUNCH_CHANNEL)
+                .unwrap_or_else(|| panic!("tube '{}' must author a launch rule", tube.id));
+            assert_eq!(launch.verb, TORPEDO_LAUNCH_VERB);
+            for required in ["loaded", "target_facing_shields", "in_arc"] {
+                assert!(
+                    launch.when.contains(required),
+                    "tube '{}': the launch guard must require `{required}` \
+                     continuously, got `{}`",
+                    tube.id,
+                    launch.when
+                );
+            }
+            assert!(
+                !launch.when.contains("tubes_full"),
+                "tube '{}': the launch guard must NOT gate on the SHIP-WIDE \
+                 `tubes_full` — with it, a loaded launcher bearing on a downed arc \
+                 holds fire because the OTHER launcher is reloading, which is the \
+                 exact opposite of AC2's independence. Got `{}`",
+                tube.id,
+                launch.when
+            );
+        }
+
+        // Fine systems: one per tube plus the shared magazine. Both the loader and
+        // the launcher gate on the magazine before they look at a tube, so its
+        // absence switches the whole armament off silently; a missing tube entry
+        // leaves that one launcher unloadable, which is the half-battery
+        // degradation the per-tube guard above exists to prevent.
+        let ship_config = cfg.ship_config.as_ref().expect("hull declares systems");
+        let declared =
+            |id: &crate::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
+        assert!(
+            declared(&crate::system_registry::torpedo_magazine_system_id()),
+            "the shared magazine needs a [[system]] entry or neither loading nor \
+             launching runs at all"
+        );
+        for tube in &torpedoes.tubes {
+            let expected = crate::system_registry::torpedo_tube_system_id(&tube.id)
+                .expect("a non-empty tube id always resolves");
+            assert!(
+                declared(&expected),
+                "tube '{}' must declare a [[system]] entry `{}`",
+                tube.id,
+                expected.0
+            );
+        }
+    }
+
+    /// AC4, as content: arming the hull changed nothing about how it points.
+    ///
+    /// The torpedo path is launcher-side from end to end — `ai_torpedo_auto_fire`
+    /// only ever emits `FireTorpedo` at a tube's own system id, and nothing in it
+    /// writes `ShipPhysics.yaw` or reaches the helm — so AC4 is satisfied by
+    /// OMISSION, and an omission is exactly the kind of thing a later edit fills
+    /// in helpfully. This is the lock: the travel axes may not acquire a torpedo
+    /// leg, a torpedo param, or a torpedo-guarded transition, and the hold must
+    /// still answer with the artillery verb.
+    ///
+    /// The cruiser is the counter-example that makes the assertion worth writing:
+    /// it authors a whole `torpedo_run` state and a `torpedo_bearing_speed`, and
+    /// copying that shape here would silently trade the predictive bow-artillery
+    /// facing for one aimed at where the target IS.
+    #[test]
+    fn harrow_warhawk_close_defence_adds_no_steering_content() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        assert!(
+            cfg.torpedoes.as_ref().is_some_and(|t| !t.tubes.is_empty()),
+            "precondition: the hull carries launchers, or this proves nothing"
+        );
+        let hc = cfg.helm_console.as_ref().unwrap();
+
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+        ] {
+            let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["acquire", "reposition", "hold"],
+                "{name} must still be the three-state artillery machine: the \
+                 launchers take the bearing the gun line gives them and never ask \
+                 for one"
+            );
+            for param in ai.param.keys() {
+                assert!(
+                    !param.contains("torpedo"),
+                    "{name} authors a torpedo scalar `{param}`: the tubes are \
+                     opportunistic and have no throttle or bearing of their own"
+                );
+            }
+            for state in &ai.state {
+                for rule in &state.rule {
+                    assert!(
+                        !rule.verb.contains("torpedo") && !rule.when.contains("torpedo"),
+                        "{name} state '{}' answers a channel with torpedo content \
+                         (`{}` / `{}`)",
+                        state.id,
+                        rule.when,
+                        rule.verb
+                    );
+                }
+                for transition in &state.transition {
+                    assert!(
+                        !transition.when.contains("torpedo"),
+                        "{name} state '{}' guards a transition on a torpedo reading \
+                         (`{}`): a launcher may never become a leg",
+                        state.id,
+                        transition.when
+                    );
+                }
+            }
+        }
+
+        // The verb the whole doctrine turns on, unchanged — and the cruiser's
+        // bow-hold scalars still absent, so the host cannot publish that leg for
+        // this hull even if a state were added.
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let hold = steering
+            .state
+            .iter()
+            .find(|s| s.id == "hold")
+            .expect("steering_ai declares 'hold'");
+        assert_eq!(
+            hold.rule[0].verb, HELM_HOLD_ARTILLERY_POSITION_VERB,
+            "the firing position must still be aimed by the PREDICTIVE artillery \
+             verb, not by anything the launchers wanted"
+        );
+        for absent in crate::ship::helm_ai::TORPEDO_BEARING_PARAMS {
+            assert!(
+                !steering.param.contains_key(*absent),
+                "steering_ai must not author `{absent}`: it is the cruiser's \
+                 bow-hold scalar, and the host gates that whole leg on the name \
+                 being present"
+            );
+        }
+    }
+
+    /// AC5, as content: nothing in the close-defence armament can shove the hull
+    /// off the position it is holding.
+    ///
+    /// Only one mechanism in the whole path could: `recoil_impulse`, which
+    /// `handle_fire_blaster` adds straight onto `ShipPhysics.forward_speed` when
+    /// it is positive. Phaser beams have no recoil mechanic and a torpedo launch
+    /// never writes physics at all, so the blaster banks are the entire surface —
+    /// and #792 authored the artillery piece without one only by leaving the field
+    /// off, which is a default rather than a decision until something says so.
+    #[test]
+    fn harrow_warhawk_close_defence_cannot_shove_it_off_the_firing_position() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let banks = &cfg.weapons_console.as_ref().unwrap().blaster_banks;
+        assert!(!banks.is_empty(), "precondition: the hull mounts a blaster");
+        for bank in banks {
+            assert_eq!(
+                bank.recoil_impulse, 0.0,
+                "bank '{}' authors a recoil impulse ({}): it is added straight onto \
+                 `forward_speed` at fire time, so an artillery platform firing one \
+                 would walk itself off the gun line it just spent a run-in taking up",
+                bank.id, bank.recoil_impulse
+            );
+        }
+
+        // The other half of "holds station": the hold's own throttle. Restated
+        // here because AC5 is about the whole close-defence path, and a non-zero
+        // throttle would give ground to a closing player for a different reason.
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .unwrap();
+        assert_eq!(
+            steering.param[crate::ship::helm_ai::ARTILLERY_HOLD_SPEED_PARAM],
+            0.0,
+            "the held throttle must stay zero: a player who closes cannot make \
+             this ship give ground"
+        );
+    }
+
     #[test]
     fn station_axiom_template_has_explicit_ball_collider() {
         // (#474) Explicit collider for robust hit detection.

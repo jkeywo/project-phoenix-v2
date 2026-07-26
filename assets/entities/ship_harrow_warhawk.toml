@@ -93,6 +93,61 @@
 # resumes the gun line it was already holding. Adding a "dodging" state would have
 # turned an artillery platform into an orbiting one — a manoeuvre with an exit is
 # a place to get stuck.
+#
+# ## Close defence (issue #793), and why it is entirely a WEAPONS story
+#
+# #792 left the hull with one answer to a player who closes: keep holding, and let
+# the beams do the work at 75 units. #793 completes it. Nothing below adds a state,
+# a transition, a steering verb or a helm param — the doctrine above is untouched,
+# and that is the design rather than an economy. The close-defence armament is
+# opportunistic: it takes the shots the gun line happens to offer and never asks
+# for one.
+#
+# ### The beams: 270 degrees, not 180
+#
+# The two banks were authored at `fire_arc_deg = 180` on ±90 facings. That covers
+# the full circle with no dead zone, which is where #792 left it — but the two
+# half-planes only touch, they do not overlap, so at any real bearing exactly ONE
+# bank could ever fire and the hull's close-in output was 12 damage/s however it
+# was engaged. Worse, the seam between them lies dead ahead, which is precisely
+# where the hold puts the target: an artillery platform pivoting onto its lead
+# solution spends the whole engagement with the enemy sitting on the one bearing
+# its battery is split across.
+#
+# At 270 each the arcs overlap through the bow and through the stern (±45 of
+# either), so both banks bear on anything within 45 degrees of the centreline —
+# 24 damage/s, double, in exactly the cone the doctrine holds a closing player in
+# — while the beams keep the single-bank cover they already had and no bearing
+# loses coverage. `auto_arc_deg` matches `fire_arc_deg` for the same reason the
+# cruiser's does: the overlap region reaches to 135 degrees off each bank's
+# facing, and a narrower auto arc would switch off the very cover this widening
+# exists to create.
+#
+# ### The launchers: fore and aft, independent, and silent about steering
+#
+# Two tubes on opposite facings, each deciding entirely for itself. A tube fires
+# when it is loaded, the target is already inside ITS cone, and the shield arc the
+# round would strike is down — and at no point does any of that reach the helm.
+# There is no torpedo state on either travel axis, no `torpedo_bearing_speed`, and
+# no yaw verb but the artillery hold's: the tubes take the bearing the gun line
+# gives them, and when it gives them nothing they hold their rounds. A battleship
+# that swung its bow to line up a torpedo would be abandoning the predictive
+# intercept its main gun is aimed by, which is the whole hull.
+#
+# That is also why the AFT tube exists and is the interesting one. The hull turns
+# at 0.20 rad/s. A player circling at knife range crosses in bearing several times
+# faster than that, so the battleship cannot keep its nose on them — they sweep
+# through the stern cone on every lap, and the aft launcher is what makes getting
+# behind this ship stop being free. The fore tube covers the opposite case, the
+# player who closes straight down the gun line.
+#
+# Per-tube independence is a real requirement and not a phrasing, and it is the
+# HOST that delivers it: `auto_fire_torpedo` admits candidates tube by tube on
+# their own `loaded` and their own `in_arc`. What the authored launch guards below
+# contribute is a refusal — they never conjoin the ship-wide `tubes_full` the
+# cruiser's committed salvo gates on. On this hull `tubes_full` would mean a loaded
+# fore tube bearing on a collapsed arc refuses the shot because the aft tube is
+# still on its reload — which is the opposite of opportunistic.
 
 name = "entity.ship_harrow_warhawk.name"
 tags = ["ship", "npc", "enemy"]
@@ -416,12 +471,28 @@ id = "hold"
 
 [weapons_console]
 
+# ── The close-defence battery (retuned by issue #793) ─────────────────────────
+#
+# Both banks widened from 180 degrees to 270. See the header for the argument;
+# the short of it is that two 180-degree half-planes on ±90 facings cover the
+# circle without ever OVERLAPPING, so the hull could only bring one bank to bear
+# at a time and the seam between them sat dead ahead — the one bearing an
+# artillery platform holding a lead solution keeps its target on. At 270 the arcs
+# overlap through the bow and the stern, so a player inside 45 degrees of the
+# centreline is engaged by both.
+#
+# `auto_arc_deg` tracks `fire_arc_deg` deliberately, exactly as on the cruiser. On
+# hulls where the two differ, the narrower auto arc is a "do not open fire at the
+# very edge of the envelope" rule; here the edge IS the point, because the overlap
+# reaches 135 degrees off each bank's facing and a narrower auto arc would switch
+# off the double cover this widening exists to create.
+#
 # Port heavy bank.
 [[weapons_console.phaser_banks]]
 id = "port"
 facing_deg = -90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 270.0
 beam_range = 75.0
 beam_damage_per_sec = 12.0
 beam_duration_secs = 8.0
@@ -433,8 +504,8 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 [[weapons_console.phaser_banks]]
 id = "starboard"
 facing_deg = 90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 270.0
 beam_range = 75.0
 beam_damage_per_sec = 12.0
 beam_duration_secs = 8.0
@@ -504,6 +575,168 @@ visual_scale = 2.5
 damage = 60
 shield_pierce = 0.15
 range = 200.0
+
+# ── The close-defence launchers (issue #793) ──────────────────────────────────
+#
+# Two tubes, opposed, each answering for itself. The hull carried no `[torpedoes]`
+# table before this issue. See the header for why they are opportunistic and why
+# neither of them may ever ask the helm for a bearing.
+#
+# The loadout is authored around "the round that goes through a hole somebody else
+# made", which is the same premise as the cruiser's and a different weapon:
+#
+# * `damage_shields = 0`, so every one of the 30 points is hull damage. NOTE what
+#   that does and does not mean: `damage_hull` always hits hull by design (see
+#   `TorpedoConfig::shield_pierce`), and the detonation path only enters the
+#   shield branch when `damage_shields > 0` — so a round arriving at a RECOVERED
+#   arc still lands its full payload. The shield gate on the launcher below is
+#   therefore doctrine, not damage arithmetic: twelve rounds is a small magazine,
+#   and a battleship holding station spends them on the opening somebody else
+#   made rather than on a target that is still covered.
+# * `speed * lifespan = 200`, the artillery envelope to the unit. Reach is the
+#   only lever there is: no launch guard can read a range, because the host seeds
+#   `in_range` as a constant `true` for every candidate and applies no range gate
+#   of its own. So `lifespan` alone decides how far out a shot may be taken from,
+#   and a shorter one would silently decline opportunities the gun line can still
+#   see — hence the match.
+#
+#   What that argument does NOT establish is that a shot at the far edge is a
+#   GOOD one, and it should not be read as if it did. 200 units at 50 units/s is
+#   four seconds of flight, and the striking-arc reading the guard launched on is
+#   four seconds old by the time the round arrives: the target has manoeuvred, the
+#   seeker has turned to follow, and the arc the round is nose-on to when it goes
+#   off is resolved at impact, not at launch — and it need not be the arc the
+#   doctrine looked at. Flight time, not reach, is what makes a long shot a
+#   bet — matching the envelope bounds where a round can be spent from, and
+#   promises nothing about where it lands.
+# * `turn_rate_deg_per_sec = 60` — genuinely homing, unlike the cruiser's barely
+#   -steering salvo. A fixed tube on a hull that turns at 0.20 rad/s cannot lead a
+#   crossing player, so the seeker has to be what closes the last of the distance.
+# * `volley_max = 1` and a `load_time` of 8 seconds. ONE round per launcher per
+#   opportunity, and then that launcher is out of the fight for eight seconds
+#   while the other one is not. This is the cruiser's exact opposite: there the
+#   whole battery commits to one window, here each tube spends its own round on
+#   its own window and the two are never coupled.
+[torpedoes]
+count = 12
+damage_hull = 30
+damage_shields = 0
+speed = 50.0
+turn_rate_deg_per_sec = 60.0
+lifespan = 4.0
+load_time = 8.0
+detonation_radius = 4.0
+
+# No `burst_interval_secs`: with `volley_max = 1` there is no burst to space out.
+# The parse default stands and nothing reads it.
+
+# The FORE launcher — the player who closes straight down the gun line.
+#
+# A 90-degree cone, so ±45 off the bow. Wide enough that the hold's own lead angle
+# (up to 37 degrees against the fastest cruising hull the game ships — see the
+# artillery bank above) never carries the target out of it, and narrow enough that
+# it and the aft cone leave a real 90-degree gap on each beam. The gap is not an
+# oversight: an armament that covered every bearing would not be opportunistic, it
+# would be a turret, and the whole point is that these tubes take what the gun line
+# gives them.
+[[torpedoes.tubes]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+volley_max = 1
+ai_target_count = 1
+
+  # LOAD is unconditional: a tube that starts loading when the opportunity opens
+  # has already missed it (`load_time` is 8 s and a shield arc is back in a few),
+  # so the launcher is kept ready between windows and the reload is the cost of
+  # having taken a shot rather than a cost of taking one.
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  # LAUNCH. Read what the HOST has already decided before this guard is
+  # consulted, because it is most of the decision:
+  #
+  # `auto_fire_torpedo` refuses the whole ship's launch unless the target is
+  # locked and `target_facing_shields <= 0`, then hands on only the tubes passing
+  # `loaded && in_arc` — PER TUBE. That filter, not this line, is what delivers
+  # the per-tube independence the doctrine is built on. `ai_torpedo_auto_fire`
+  # then seeds this snapshot for each surviving candidate with `loaded`,
+  # `target_valid`, `in_range` and `in_arc` as literal `true` — they all passed
+  # already — so the only facts here carrying a live reading are
+  # `target_facing_shields` (which the host has also already gated) and
+  # `tubes_full`.
+  #
+  # So be honest about what this line adds: behaviourally it is the same as the
+  # unconditional launch policy synthesised for a tube that authors none. Its
+  # content is NEGATIVE and it is deliberate — the one live fact this guard could
+  # have gated on, and does not, is `tubes_full`:
+  #
+  # * `tubes_full` is SHIP-WIDE: every tube on the hull at its volley capacity.
+  #   It is right for the cruiser's committed salvo and catastrophic here — a
+  #   loaded fore tube bearing on a collapsed arc would refuse the shot because
+  #   the aft tube is eight seconds into a reload, and the two launchers would
+  #   degrade into one. Its absence is the whole authored decision.
+  #
+  # The conjuncts that ARE written out are written for two reasons, neither of
+  # them "the host might not check":
+  #
+  # * `loaded` and `in_arc` each NAME a real host filter, so this line states at
+  #   the tube what its doctrine depends on: per-tube readiness (`loaded_count >
+  #   0`, never the ship-wide reading) and a bearing nobody supplies — the bow is
+  #   aimed by the artillery's intercept solution and the stern by wherever that
+  #   leaves it. This guard is the whole of the "opportunistic": a question about
+  #   the world, never a request to change it.
+  # * Writing them out pins the fact NAMES. An unseeded or misspelled `fact(...)`
+  #   parses, validates, and then reads absent for ever (the #779 failure mode) —
+  #   invisible through the host path, which would fire anyway. The unit test
+  #   drives `seed_torpedo_tube_launch_facts` against this policy directly and
+  #   switches each conjunct off in isolation, so a typo here fails a test.
+  #
+  # `in_range` is omitted for a reason that does NOT apply to those two: there is
+  # no range gate anywhere on this path. The fact is seeded `true` with nothing
+  # behind it, so naming it would pin a condition no host enforces.
+  #
+  # `target_facing_shields <= 0` restates the host's own ship-wide gate at the
+  # tube, and is worth restating because of WHAT it reads: an HP number, not a
+  # boolean, resolved per-arc through the target's own arc router, so this gate
+  # and the eventual hit agree about which arc is in the way.
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
+
+# The AFT launcher — the player who gets behind a ship that cannot turn.
+#
+# Identical policy to `fore`, and authored out in full rather than shared, because
+# a tube's policy is a property of the tube: these two answer the same words about
+# DIFFERENT arcs and different reloads, and that is exactly the independence the
+# doctrine is built on. A later refit that changed one cone must change one policy.
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 90.0
+volley_max = 1
+ai_target_count = 1
+
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
 
 [comms]
 range = 800.0
@@ -589,7 +822,9 @@ id = "helm-lateral-thrust"
 kind = "lateral_thrust"
 ai_only = true
 
-# Fine Tactical systems (issue #512): port + starboard phaser banks. No torpedoes.
+# Fine Tactical systems (issue #512): port + starboard phaser banks. (The
+# torpedo tubes and their magazine arrived with #793 and are declared below,
+# alongside the artillery bank.)
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
@@ -614,6 +849,29 @@ ai_only = true
 [[system]]
 id = "blaster-bow-artillery"
 kind = "blaster_bank"
+ai_only = true
+
+# The close-defence launchers (issue #793): one per tube, following the
+# `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
+# shared magazine. Both entries are load-bearing and fail differently. Without the
+# MAGAZINE entry neither the loader nor the launcher runs at all — both gate on it
+# before they look at a tube, so the whole armament would be silent. Without a
+# TUBE's own entry that one tube is never AI-operable, so it would never be loaded
+# and the hull would quietly fight with half a battery, which is precisely the
+# degradation the per-tube `loaded` guard exists to prevent.
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-fore"
+kind = "torpedo_tube"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
 ai_only = true
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.

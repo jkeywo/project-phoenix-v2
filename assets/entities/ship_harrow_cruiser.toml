@@ -312,7 +312,7 @@ id = "torpedo_run"
   # The SECOND way back to the ring, and the one that does not depend on the
   # target. See the Steering copy.
   [[helm_console.engines_ai.state.transition]]
-  priority = 0
+  priority = 1
   to = "orbit"
   when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
 
@@ -522,8 +522,15 @@ id = "torpedo_run"
   # hull does not turn away from rounds it has committed, airborne or still owed
   # to a burst. Firing makes `tubes_full` false immediately, so without that
   # conjunct this guard would release the ship on the very tick it launched.
+  #
+  # Priority 1 against the battery-gone guard's 0 is an ORDERING, not a
+  # preference: both exits land in `orbit`, and the two guards do not overlap in
+  # practice, so which one is asked first cannot change where the hull ends up.
+  # It is authored explicitly because content validation refuses equal-priority
+  # transitions out of one state — an authored tie resolves by file order, which
+  # is a decision the file should be making out loud.
   [[helm_console.steering_ai.state.transition]]
-  priority = 0
+  priority = 1
   to = "orbit"
   when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
 

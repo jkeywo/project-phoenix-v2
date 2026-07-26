@@ -3504,6 +3504,24 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
 ///   - an unreachable state (no inbound transition and not the initial state),
 ///   - a `memory(...)` or `state_time` reference in a STATELESS policy, and a
 ///     `memory(...)` reference to a slot the author never declared.
+///
+/// Additionally rejects (issue #794, PRD #774's deterministic-policy
+/// categories):
+///   - two or more transitions out of ONE state authored at the same
+///     `priority`,
+///   - two or more rules on ONE output channel authored at the same `priority`
+///     — within a state for a machine, within the top-level list for a
+///     stateless policy.
+///
+/// Both are the same defect wearing two hats. Resolution is "highest priority
+/// wins, ties to the earliest-authored", so a tie IS resolved — silently, by
+/// where the author happened to put the table. The file then reads as though
+/// the two entries were interchangeable when the runtime has already picked
+/// one, and re-ordering the file changes behaviour without changing a value.
+/// Distinct priorities cost the author one character and make the decision
+/// legible. Note the scope on both: repeated priorities across DIFFERENT
+/// channels (a load rule and a launch rule both at 0) never compete, and are
+/// left alone.
 pub fn validate_fine_system_ai_policy(
     cfg: &FineSystemAiConfigToml,
     valid_channels: &[&str],
@@ -3566,6 +3584,7 @@ pub fn validate_fine_system_ai_policy(
     for (idx, r) in cfg.rule.iter().enumerate() {
         check_rule(&format!("rule {idx}"), r)?;
     }
+    check_rule_priorities("", &cfg.rule)?;
 
     if !stateful {
         return Ok(());
@@ -3600,9 +3619,11 @@ pub fn validate_fine_system_ai_policy(
                 .map_err(|e| format!("ai policy {what} has invalid `when` expression: {e}"))?;
             check_policy_predicate(cfg, stateful, &pred, &what)?;
         }
+        check_transition_priorities(&s.id, &s.transition)?;
         for (idx, r) in s.rule.iter().enumerate() {
             check_rule(&format!("state '{}' rule {idx}", s.id), r)?;
         }
+        check_rule_priorities(&format!("state '{}' ", s.id), &s.rule)?;
     }
     // Reachability is a FIXPOINT walk from `initial`, following transitions only
     // out of states already known reachable. A single pass over every state's
@@ -3631,6 +3652,70 @@ pub fn validate_fine_system_ai_policy(
                  initial state nor the target of any transition",
                 s.id
             ));
+        }
+    }
+    Ok(())
+}
+
+/// Reject two or more transitions out of one state sharing a `priority`
+/// (issue #794, PRD #774's "competing equal-priority transitions").
+///
+/// The transition set of a state is a single winner-take-all race: the runtime
+/// takes the highest-priority ELIGIBLE transition and breaks ties by authoring
+/// order. So an authored tie is not an ambiguity the runtime chokes on — it is
+/// a decision the runtime makes and the file does not record. Moving one of the
+/// two tables past the other then changes which state the hull enters, with no
+/// value anywhere in the file having changed.
+///
+/// The pair is reported rather than the count, and both `to` targets are named:
+/// the author's next question is always "which two?", and two ties in a
+/// six-transition state are otherwise indistinguishable from one.
+fn check_transition_priorities(
+    state_id: &str,
+    transitions: &[FineSystemAiTransitionToml],
+) -> Result<(), String> {
+    for (i, a) in transitions.iter().enumerate() {
+        for (j, b) in transitions.iter().enumerate().skip(i + 1) {
+            if a.priority == b.priority {
+                return Err(format!(
+                    "ai policy state '{state_id}' declares transitions {i} (to '{}') and {j} \
+                     (to '{}') at the same priority {}: equal-priority transitions out of one \
+                     state are resolved by authoring order, so the file never says which wins. \
+                     Give them distinct priorities",
+                    a.to, b.to, a.priority
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reject two or more rules on one output channel sharing a `priority`
+/// (issue #794, PRD #774's "competing equal-priority rules on one output
+/// channel").
+///
+/// The sibling of [`check_transition_priorities`], and the same defect: channel
+/// resolution is winner-take-all per channel with ties broken by authoring
+/// order. The scope is deliberately (channel, priority) and NOT priority alone
+/// — rules on different channels never compete, so a tube authoring a
+/// `torpedo_load` rule and a `torpedo_launch` rule both at priority 0 is
+/// ordinary content, not a tie.
+///
+/// `scope` is `""` for a stateless policy's top-level list, or
+/// `"state '<id>' "` for a machine's per-state list, so the message reads as a
+/// sentence either way.
+fn check_rule_priorities(scope: &str, rules: &[FineSystemAiRuleToml]) -> Result<(), String> {
+    for (i, a) in rules.iter().enumerate() {
+        for (j, b) in rules.iter().enumerate().skip(i + 1) {
+            if a.priority == b.priority && a.channel == b.channel {
+                return Err(format!(
+                    "ai policy {scope}declares rules {i} (verb '{}') and {j} (verb '{}') on \
+                     channel '{}' at the same priority {}: equal-priority rules on one output \
+                     channel are resolved by authoring order, so the file never says which \
+                     wins. Give them distinct priorities",
+                    a.verb, b.verb, a.channel, a.priority
+                ));
+            }
         }
     }
     Ok(())
@@ -9033,6 +9118,241 @@ when = "state_time >= param(surge_dwell_secs)"
         assert!(validate_fine_system_ai_policy(&ok, BOOST_CHANNELS, BOOST_VERBS).is_ok());
     }
 
+    /// Build one transition, spelled out, for the tie cases below —
+    /// `boost_state` hardcodes priority 0, which is the very thing under test.
+    fn transition(priority: i32, to: &str) -> FineSystemAiTransitionToml {
+        FineSystemAiTransitionToml {
+            priority,
+            to: to.to_string(),
+            when: "true".to_string(),
+        }
+    }
+
+    /// One unconditional tube rule at an explicit `(priority, channel)`.
+    fn tube_rule(priority: i32, channel: &str, verb: &str) -> FineSystemAiRuleToml {
+        FineSystemAiRuleToml {
+            priority,
+            channel: channel.to_string(),
+            when: "true".to_string(),
+            verb: verb.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }
+    }
+
+    /// Issue #794 / PRD #774: two transitions out of ONE state at the same
+    /// priority.
+    ///
+    /// The runtime does not stall on this — it silently takes the
+    /// earliest-authored of the two, so the file reads as if the pair were
+    /// interchangeable while the outcome depends entirely on which table was
+    /// typed first.
+    #[test]
+    fn equal_priority_transitions_out_of_one_state_are_rejected() {
+        let tie = stateful_cfg(
+            Some("cruise"),
+            vec![
+                FineSystemAiStateToml {
+                    id: "cruise".to_string(),
+                    rule: Vec::new(),
+                    transition: vec![transition(3, "surge"), transition(3, "coast")],
+                },
+                boost_state("surge", &[]),
+                boost_state("coast", &[]),
+            ],
+        );
+        let err = validate_fine_system_ai_policy(&tie, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        // The message has to be actionable without opening this file: WHICH
+        // state, WHICH priority, and WHICH TWO targets are competing.
+        assert!(err.contains("state 'cruise'"), "must name the state: {err}");
+        assert!(
+            err.contains("same priority 3"),
+            "must name the duplicated priority: {err}"
+        );
+        assert!(
+            err.contains("'surge'") && err.contains("'coast'"),
+            "must name both competing targets: {err}"
+        );
+
+        // Separating them by one is the whole fix.
+        let ok = stateful_cfg(
+            Some("cruise"),
+            vec![
+                FineSystemAiStateToml {
+                    id: "cruise".to_string(),
+                    rule: Vec::new(),
+                    transition: vec![transition(3, "surge"), transition(2, "coast")],
+                },
+                boost_state("surge", &[]),
+                boost_state("coast", &[]),
+            ],
+        );
+        assert!(validate_fine_system_ai_policy(&ok, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    /// The scope of the transition tie is ONE state's transition set. Two
+    /// different states each authoring a priority-0 exit are not competing —
+    /// only one of them is ever the current state — and rejecting that would
+    /// make the common two-state machine unauthorable.
+    #[test]
+    fn equal_priorities_in_different_states_are_not_a_transition_tie() {
+        let cfg = stateful_cfg(
+            Some("cruise"),
+            vec![
+                FineSystemAiStateToml {
+                    id: "cruise".to_string(),
+                    rule: Vec::new(),
+                    transition: vec![transition(0, "surge")],
+                },
+                FineSystemAiStateToml {
+                    id: "surge".to_string(),
+                    rule: Vec::new(),
+                    transition: vec![transition(0, "cruise")],
+                },
+            ],
+        );
+        assert!(validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    /// Issue #794 / PRD #774: two rules on ONE output channel at the same
+    /// priority, in a STATELESS policy's top-level list.
+    #[test]
+    fn equal_priority_rules_on_one_channel_are_rejected() {
+        let stateless = |rules: Vec<FineSystemAiRuleToml>| FineSystemAiConfigToml {
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: rules,
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
+        };
+        let tie = stateless(vec![
+            tube_rule(0, TORPEDO_LAUNCH_CHANNEL, TORPEDO_LAUNCH_VERB),
+            tube_rule(0, TORPEDO_LAUNCH_CHANNEL, TORPEDO_LAUNCH_VERB),
+        ]);
+        let err = validate_fine_system_ai_policy(&tie, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS)
+            .unwrap_err();
+        assert!(
+            err.contains(&format!("channel '{TORPEDO_LAUNCH_CHANNEL}'")),
+            "must name the contested channel: {err}"
+        );
+        assert!(
+            err.contains("same priority 0"),
+            "must name the duplicated priority: {err}"
+        );
+        assert!(
+            err.contains(&format!("verb '{TORPEDO_LAUNCH_VERB}'")),
+            "must name the competing verbs: {err}"
+        );
+
+        // Distinct priorities on the same channel are the fix...
+        let ok = stateless(vec![
+            tube_rule(1, TORPEDO_LAUNCH_CHANNEL, TORPEDO_LAUNCH_VERB),
+            tube_rule(0, TORPEDO_LAUNCH_CHANNEL, TORPEDO_LAUNCH_VERB),
+        ]);
+        assert!(
+            validate_fine_system_ai_policy(&ok, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS).is_ok()
+        );
+
+        // ...and the SAME priority on DIFFERENT channels was never a tie: those
+        // rules do not compete. This is the shipped default tube policy
+        // verbatim — a load rule and a launch rule, both at priority 0 — so a
+        // check scoped to priority alone would have broken every tube on every
+        // hull that authors no inline block.
+        let default = default_torpedo_tube_ai_config();
+        assert_eq!(default.rule.len(), 2);
+        assert_eq!(default.rule[0].priority, default.rule[1].priority);
+        assert_ne!(default.rule[0].channel, default.rule[1].channel);
+        assert!(validate_fine_system_ai_policy(
+            &default,
+            TORPEDO_TUBE_CHANNELS,
+            TORPEDO_TUBE_VERBS
+        )
+        .is_ok());
+    }
+
+    /// The same rule tie, inside a STATE. A machine resolves its channels
+    /// per-state, so the competing set is the current state's rule list — and
+    /// two states each answering the same channel at priority 0 is ordinary
+    /// content, not a tie.
+    #[test]
+    fn equal_priority_rules_inside_one_state_are_rejected() {
+        let boost_rule = |priority: i32| FineSystemAiRuleToml {
+            priority,
+            channel: HELM_BOOST_CHANNEL.to_string(),
+            when: "true".to_string(),
+            verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        };
+        let tie = stateful_cfg(
+            Some("surge"),
+            vec![FineSystemAiStateToml {
+                id: "surge".to_string(),
+                rule: vec![boost_rule(4), boost_rule(4)],
+                transition: Vec::new(),
+            }],
+        );
+        let err = validate_fine_system_ai_policy(&tie, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(err.contains("state 'surge'"), "must name the state: {err}");
+        assert!(
+            err.contains(&format!("channel '{HELM_BOOST_CHANNEL}'"))
+                && err.contains("same priority 4"),
+            "must name the channel and the priority: {err}"
+        );
+
+        // One rule per state at the same priority is not a tie.
+        let ok = stateful_cfg(
+            Some("cruise"),
+            vec![
+                FineSystemAiStateToml {
+                    id: "cruise".to_string(),
+                    rule: vec![boost_rule(0)],
+                    transition: vec![transition(0, "surge")],
+                },
+                FineSystemAiStateToml {
+                    id: "surge".to_string(),
+                    rule: vec![boost_rule(0)],
+                    transition: Vec::new(),
+                },
+            ],
+        );
+        assert!(validate_fine_system_ai_policy(&ok, BOOST_CHANNELS, BOOST_VERBS).is_ok());
+    }
+
+    /// Issue #794 AC8: every shipped entity template still loads.
+    ///
+    /// The tie rejections above are new refusals over content that has been
+    /// shipping for a while, so the guard that matters is not "the fixture is
+    /// rejected" but "nothing in `assets/entities/` is". Deliberately a
+    /// DIRECTORY WALK rather than a hand-listed set of `include_str!`s: the
+    /// failure mode being guarded against is a hull authored later that trips a
+    /// rule nobody remembered, and a hand-listed set is exactly the thing that
+    /// does not grow when a hull is added.
+    #[test]
+    fn every_shipped_entity_template_still_loads() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&dir).expect("assets/entities must exist") {
+            let path = entry.expect("readable dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let toml = std::fs::read_to_string(&path).expect("readable template");
+            if let Err(e) = EntityConfig::from_toml(&toml) {
+                panic!("shipped template {} no longer loads: {e}", path.display());
+            }
+            checked += 1;
+        }
+        assert!(
+            checked > 20,
+            "the walk found only {checked} templates — it is not reaching the \
+             shipped content it is supposed to be guarding"
+        );
+    }
+
     /// AC6: a `memory(...)` reference in a STATELESS policy. Private memory has
     /// no owner without a state machine, and reading a silent `false` would be
     /// a trap rather than a diagnostic.
@@ -10047,6 +10367,51 @@ when = "state_time >= param(surge_dwell_secs)"
             "the circulation direction slot must be declared so its pre-engagement \
              value is authored rather than implicit"
         );
+    }
+
+    /// Issue #794, as content: the cruiser's `torpedo_run` exits carry
+    /// DISTINCT priorities on both travel axes.
+    ///
+    /// The state has four ways out and three of them land in `orbit`, so the
+    /// two that used to share priority 0 — "the salvo is spent" and "the
+    /// battery is gone" — were behaviourally interchangeable and read as if the
+    /// order were arbitrary. It was not arbitrary; it was the file order. The
+    /// pin is here rather than left to the generic validator test because a
+    /// re-author that collapsed them back would fail the load with a message
+    /// about a hull, not about a fixture, and the cruiser is the hull that
+    /// motivated the rule.
+    #[test]
+    fn harrow_cruiser_torpedo_run_exits_carry_distinct_priorities() {
+        let cfg = EntityConfig::from_toml(HARROW_CRUISER_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+        ] {
+            let run = ai
+                .state
+                .iter()
+                .find(|s| s.id == "torpedo_run")
+                .unwrap_or_else(|| panic!("{name} must declare 'torpedo_run'"));
+            let mut priorities: Vec<i32> = run.transition.iter().map(|t| t.priority).collect();
+            let authored = priorities.len();
+            assert_eq!(authored, 4, "{name} authors the four documented exits");
+            priorities.sort_unstable();
+            priorities.dedup();
+            assert_eq!(
+                priorities.len(),
+                authored,
+                "{name} `torpedo_run` must give every exit its own priority — a tie \
+                 resolves by file order, which the file does not say out loud"
+            );
+            // The re-author is an ORDERING and not a re-aim: all three
+            // window-closed exits still land back on the ring.
+            let to_orbit = run.transition.iter().filter(|t| t.to == "orbit").count();
+            assert_eq!(
+                to_orbit, 3,
+                "{name} keeps all three window-closed exits pointed at 'orbit'"
+            );
+        }
     }
 
     /// AC2, as content: the authored fighting ring sits INSIDE the banks' own

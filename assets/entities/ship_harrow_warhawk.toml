@@ -546,16 +546,20 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 #   this cone; a battleship that did not put its nose on the solution would simply
 #   never be allowed to shoot. Ninety rather than something tighter because the
 #   gate reads the target's CURRENT bearing while the hull is pointed at the LEAD,
-#   and the angle between those two is real: the fastest hull the game ships
-#   CRUISES at 26 units/s, which against a 35-unit/s bolt is a lead angle of 37
-#   degrees — so a 60-degree cone would decline the very shots the prediction
-#   exists to take. The pinning test derives that figure rather than trusting this
-#   comment. Cruise is the case the cone is sized for, and deliberately not the
-#   only case there is: the destroyer authors a 2.4x boost, and a hull crossing on
-#   it wants a 61-degree lead that this cone does not admit. That shot is simply
-#   DECLINED — the battleship holds fire rather than loosing a mis-aimed bolt —
-#   and admitting it would take a 122-degree cone, which is a turret rather than
-#   the bow mount this weapon is.
+#   and the angle between those two is real. The exact square-on lead is
+#   asin(v/c), not atan(v/c) — the bolt has to cover the hypotenuse, not the
+#   opposite side — so the fastest hull the game ships, CRUISING at 26 units/s
+#   against a 35-unit/s bolt, wants 48 degrees. That is OUTSIDE this 45-degree
+#   half-arc: the square-on shot at full destroyer cruise is DECLINED, and the
+#   battleship holds its round rather than loosing a mis-aimed bolt. Admitting it
+#   would take a 96-degree cone, which is a turret rather than the bow mount this
+#   weapon is. Every other shipped hull (15, 15, 20, 20) is inside. The pinning
+#   test derives all of this rather than trusting this comment.
+#
+#   Any radial component shortens the lead back inside the cone, so this only
+#   bites dead-square crossings. The boosted case is not a cone question at all:
+#   the destroyer authors a 2.4x boost, and 62.4 units/s exceeds the bolt's own
+#   35 — there is no intercept to aim at, at any cone width.
 #
 # No `[weapons_console.blaster_banks.ai]` policy is authored, so the canonical
 # unconditional-fire policy is synthesised at spawn: the bank fires whenever the
@@ -633,8 +637,8 @@ detonation_radius = 4.0
 # The FORE launcher — the player who closes straight down the gun line.
 #
 # A 90-degree cone, so ±45 off the bow. Wide enough that the hold's own lead angle
-# (up to 37 degrees against the fastest cruising hull the game ships — see the
-# artillery bank above) never carries the target out of it, and narrow enough that
+# (see the artillery bank above, which is sized on the same 45 degrees) does not
+# routinely carry the target out of it, and narrow enough that
 # it and the aft cone leave a real 90-degree gap on each beam. The gap is not an
 # oversight: an armament that covered every bearing would not be opportunistic, it
 # would be a turret, and the whole point is that these tubes take what the gun line

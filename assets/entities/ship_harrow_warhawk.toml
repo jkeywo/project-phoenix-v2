@@ -1,11 +1,153 @@
-# Harrow Battleship (Warhawk class)
+# Harrow Battleship (Warhawk class) — the artillery platform (issue #792)
 #
-# Heavy capital ship. Two long-range phaser banks (port + starboard),
-# heavy shielding, slow but devastating. (#474) Rebalanced for the
-# combat-test scenario (#475) — gained a full behaviour tree (previously
-# only had `initial_state = "idle"` and a stub `attacking` state with
-# no transitions, so the ship spawned and sat there), gained weapons
-# (no `[weapons_console]` block before), gained shields, slowed down.
+# Heavy capital ship. Two long-range phaser banks (port + starboard), heavy
+# shielding, slow but devastating. (#474) Rebalanced for the combat-test scenario
+# (#475) — gained a full behaviour tree (previously only had
+# `initial_state = "idle"` and a stub `attacking` state with no transitions, so
+# the ship spawned and sat there), gained weapons (no `[weapons_console]` block
+# before), gained shields, slowed down.
+#
+# #792 is the first issue to give this hull a HELM DOCTRINE of its own. Until now
+# it fell back to the shared `plan_helm_travel` Destroy arm — a station-keeper
+# that closes to a fraction of weapons range and re-faces the target — which is
+# the same manoeuvre every undoctrined hull flies. The third of the three Harrow
+# hulls to be authored, and the opposite of both its siblings:
+#
+#   acquire     ──(target visible, inside artillery_hold_range)─▶ hold
+#   acquire     ──(target visible, beyond it)────────────────────▶ reposition
+#   reposition  ──(range <= artillery_hold_range)────────────────▶ hold
+#   reposition  ──(target lost)──────────────────────────────────▶ acquire
+#   hold        ──(range >  max_artillery_range)─────────────────▶ reposition
+#   hold        ──(target lost)──────────────────────────────────▶ acquire
+#
+# The destroyer flies THROUGH its target and runs; the cruiser circles it. This
+# hull does neither. It closes once, stops, and then does not move again for the
+# rest of the engagement — the whole doctrine is two states and a range band.
+#
+# ## The range band, and why it is TWO numbers
+#
+# `max_artillery_range` (200) is the outer edge of the envelope: past it the gun
+# line is not worth holding and the hull starts closing again. `artillery_hold_range`
+# (180 — ninety per cent of it, authored as a real value rather than computed in
+# Rust) is where the closing STOPS.
+#
+# The twenty units between them are not slack, they are the hysteresis. A single
+# threshold would put the entry and the exit on the same number, so a target
+# drifting either side of 200 would flip the battleship between "close" and
+# "hold" every few ticks — accelerating and braking a 280-hull capital ship
+# against a boundary it is always sitting on. With the band, entering costs a
+# 20-unit run-in and leaving costs the target 20 units of real separation, and
+# neither can chatter.
+#
+# ## What "holds position" means, and what it deliberately does not
+#
+# `artillery_hold_speed` is authored ZERO. Inside the band the hull commands no
+# translational thrust at all and coasts to a stop; the only thing it keeps doing
+# is TURNING. That is the whole of AC5: there is no transition anywhere below
+# guarded on the target getting CLOSER, so a player who charges the battleship
+# does not push it backwards. It stops shooting artillery at knife range and
+# starts shooting phasers, which is what the 75-unit beam banks are for.
+#
+# Zero is also exactly why the throttle needs a name of its own rather than
+# borrowing the cruiser's `torpedo_bearing_speed` or the destroyer's
+# `reengage_speed`. An unauthored param and an authored 0.0 are the same number
+# and opposite intents, so the host gates on the NAME being present: omit it and
+# the whole arm is declined and the battleship flies ordinary doctrine travel,
+# rather than parking at an invented standstill in front of an enemy.
+#
+# ## Why the yaw verb is its own, and what it solves for
+#
+# Steering answers the hold with `hold_artillery_position`, the SEVENTH yaw mode
+# verb. It is not `pivot_to_reengage`: that verb is one leg of the shield-RECOVERY
+# doctrine and the host only publishes it for a hull that authors all six standoff
+# scalars, every one of them a statement about a ring derived from the TARGET's
+# reach — which an artillery platform has no business inventing in order to borrow
+# a turn. It is not `hold_torpedo_bearing` either, and that one is the more
+# interesting refusal: the cruiser's bow hold points at where the target IS, with
+# no lead at all, which is right for a fixed tube settling on a shield gap forty
+# units away and wrong here. This hull's bolt takes five and a half seconds to
+# cross its own envelope. At that flight time "where it is" and "where it will be"
+# are different bearings, and a battleship that aimed at the first would miss
+# every moving target it ever fired at.
+#
+# So the host solves a PREDICTIVE intercept: the target's velocity is
+# reconstructed from its heading and speed, and the bow goes onto the point the
+# bolt and the target both arrive at — through the same
+# `predict_intercept_heading` the blaster itself launches on, at the same lead
+# speed, so the AI's aim cannot drift from its own ballistics. The lead speed is
+# READ off the bank below rather than authored twice; a second copy of a weapon's
+# flight speed is a number that can silently disagree with the weapon.
+#
+# ## Hazards may move the gun line; they may not make it an orbit
+#
+# There is no transition below guarded on hazard urgency, collision proximity, or
+# any other avoidance reading, and that absence is load-bearing — the same posture
+# the cruiser's header sets out. Avoidance composes onto this leg three ways, all
+# of them temporary and all of them outside the state machine: the shared
+# repulsion steering is summed onto the solved intercept facing inside the pure
+# planner; `ai_helm_lateral_thrust` nudges the hull sideways off its held point
+# without touching Engines or Steering at all (which IS "limited hazard avoidance
+# may relocate the firing position"); and an IMMINENT collision temporarily
+# overrides desired facing from the shared hazard force. None of the three is a
+# state, so a detour evaporates the moment the hazard clears and the battleship
+# resumes the gun line it was already holding. Adding a "dodging" state would have
+# turned an artillery platform into an orbiting one — a manoeuvre with an exit is
+# a place to get stuck.
+#
+# ## Close defence (issue #793), and why it is entirely a WEAPONS story
+#
+# #792 left the hull with one answer to a player who closes: keep holding, and let
+# the beams do the work at 75 units. #793 completes it. Nothing below adds a state,
+# a transition, a steering verb or a helm param — the doctrine above is untouched,
+# and that is the design rather than an economy. The close-defence armament is
+# opportunistic: it takes the shots the gun line happens to offer and never asks
+# for one.
+#
+# ### The beams: 270 degrees, not 180
+#
+# The two banks were authored at `fire_arc_deg = 180` on ±90 facings. That covers
+# the full circle with no dead zone, which is where #792 left it — but the two
+# half-planes only touch, they do not overlap, so at any real bearing exactly ONE
+# bank could ever fire and the hull's close-in output was 12 damage/s however it
+# was engaged. Worse, the seam between them lies dead ahead, which is precisely
+# where the hold puts the target: an artillery platform pivoting onto its lead
+# solution spends the whole engagement with the enemy sitting on the one bearing
+# its battery is split across.
+#
+# At 270 each the arcs overlap through the bow and through the stern (±45 of
+# either), so both banks bear on anything within 45 degrees of the centreline —
+# 24 damage/s, double, in exactly the cone the doctrine holds a closing player in
+# — while the beams keep the single-bank cover they already had and no bearing
+# loses coverage. `auto_arc_deg` matches `fire_arc_deg` for the same reason the
+# cruiser's does: the overlap region reaches to 135 degrees off each bank's
+# facing, and a narrower auto arc would switch off the very cover this widening
+# exists to create.
+#
+# ### The launchers: fore and aft, independent, and silent about steering
+#
+# Two tubes on opposite facings, each deciding entirely for itself. A tube fires
+# when it is loaded, the target is already inside ITS cone, and the shield arc the
+# round would strike is down — and at no point does any of that reach the helm.
+# There is no torpedo state on either travel axis, no `torpedo_bearing_speed`, and
+# no yaw verb but the artillery hold's: the tubes take the bearing the gun line
+# gives them, and when it gives them nothing they hold their rounds. A battleship
+# that swung its bow to line up a torpedo would be abandoning the predictive
+# intercept its main gun is aimed by, which is the whole hull.
+#
+# That is also why the AFT tube exists and is the interesting one. The hull turns
+# at 0.20 rad/s. A player circling at knife range crosses in bearing several times
+# faster than that, so the battleship cannot keep its nose on them — they sweep
+# through the stern cone on every lap, and the aft launcher is what makes getting
+# behind this ship stop being free. The fore tube covers the opposite case, the
+# player who closes straight down the gun line.
+#
+# Per-tube independence is a real requirement and not a phrasing, and it is the
+# HOST that delivers it: `auto_fire_torpedo` admits candidates tube by tube on
+# their own `loaded` and their own `in_arc`. What the authored launch guards below
+# contribute is a refusal — they never conjoin the ship-wide `tubes_full` the
+# cruiser's committed salvo gates on. On this hull `tubes_full` would mean a loaded
+# fore tube bearing on a collapsed arc refuses the shot because the aft tube is
+# still on its reload — which is the opposite of opportunistic.
 
 name = "entity.ship_harrow_warhawk.name"
 tags = ["ship", "npc", "enemy"]
@@ -47,12 +189,23 @@ colour = [0.9, 0.2, 0.05]
 
 # Slower than the cruiser; the battleship is a deliberate threat the
 # player must engage, not a kiteable nuisance.
+#
+# `max_yaw_rate` is the one figure #792 moved (0.12 → 0.20), and it is the
+# doctrine's own requirement rather than a rebalance. The hold turns and does
+# nothing else, and the angular rate it has to sustain is the target's crossing
+# speed over the holding radius: the fastest hull the game ships crosses at 26
+# units/s, which at 180 units is 0.145 rad/s, and a boosted one is faster still.
+# At 0.12 the battleship could not follow its own
+# intercept solution round, so the bow would lag every crosser and the artillery
+# would be aimed at where the solution used to be. Still the slowest hull in the
+# set by a wide margin — the cruiser turns at 0.30 — and still far too slow to
+# fly anything but a gun line.
 [helm_console]
 max_speed = 9.0
 max_reverse_speed = 4.5
 acceleration = 3.0
 deceleration = 9.0
-max_yaw_rate = 0.12
+max_yaw_rate = 0.20
 max_bank_deg = 5.0
 
 [helm_console.engine_pfx]
@@ -60,14 +213,286 @@ color = [ 1.0, 0.22, 0.08, 0.68 ]
 markers = [ "engine_port", "engine_starboard" ]
 trail_lifetime_secs = 0.65
 
+# NOTE the deliberate absences, both pinned by a parse test because both are
+# exactly the kind of content that gets helpfully filled in: there is no
+# `[helm_console.boost]` block and no `[helm_console.boost_ai]` machine (no state
+# in this doctrine engages the drive — an artillery platform that lit a boost
+# would be leaving its own firing position), and no `[helm_console.radar]` block
+# (an unauthored radar range means UNLIMITED helm visibility, which is what lets
+# a 200-unit envelope resolve a target at all).
+
+# ── The impulse drive is switched OFF, and it has to be switched off HERE ──────
+#
+# This is the one hull whose held radius lies INSIDE the impulse cruise window,
+# and until #792 that made the whole doctrine above decorative in production.
+#
+# `entities::spawner` attaches an `ImpulseConfigResource` to every hull that
+# declares a `[helm_console]`, taking the parse defaults — engage at 200 units,
+# cancel at 40. The authored hold band (180) sits entirely inside that window. So
+# the battleship would fly its run-in, engage impulse somewhere around 210 while
+# its bow was lined up on the target, reach `hold` at 180 and command
+# `SetThrust{0.0}` every tick — and be ignored, because the impulse autopilot in
+# `integrate_ship_physics` hard-OVERRIDES commanded throttle with `thrust = 1.0`
+# for as long as the drive is engaged. The hull sailed through its own gun line
+# at max speed and only stopped at the drive's 40-unit release range, ~22 units
+# from the target: AC2's stopping point missed by a factor of eight, AC3's "holds
+# station" not happening at all, and the `max_yaw_rate` retune above undone into
+# the bargain, since the same autopilot scales steering by the 0.1 impulse
+# multiplier (0.20 rad/s of authored authority becoming 0.02).
+#
+# The sibling hulls escape this by accident rather than by design: the cruiser's
+# combat ring settles at ~35 units, inside the 40-unit cancel distance, and the
+# destroyer's legs are high-speed passes anyway.
+#
+# ## Why an `impulse_ai` idle and not `use_impulse = false`
+#
+# `[[behaviour.doctrine]] use_impulse = false` reads like the obvious lever and is
+# the wrong one, because doctrine is the part of a hull a SCENARIO replaces.
+# `assets/worlds/combat_test.toml`'s wave 8 and `assets/worlds/duel.toml` both
+# hand this hull a doctrine list of their own, and neither authors `use_impulse`
+# — and `effective_use_impulse()` defaults to TRUE for every non-Patrol directive,
+# so each of them would silently switch the drive back on and restore the bug in
+# exactly the scenarios the hull is fought in. A tightened
+# `impulse_engage_distance` has the same shape of problem from the other end: it
+# is a geometry that has to stay correct against a band a designer retunes.
+#
+# The `impulse` fine system's own policy is not doctrine and no shipped scenario
+# overrides it. An explicit `idle` is a legal, distinct-from-silence declaration
+# (the same one `default_boost_ai_config` makes for AI boost): `ai_helm_impulse`
+# resolves the channel to nothing and emits neither `StartImpulseCharge` nor
+# `CancelImpulse`, whatever geometry or doctrine it is handed. The drive is
+# simply not part of this hull's manoeuvre — which is the same statement the
+# missing `[helm_console.boost_ai]` above makes about the other overdrive, and
+# for the same reason: a battleship that lights an engine is leaving its firing
+# position.
+[helm_console.impulse_ai]
+idle = true
+
+# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
+#
+# All three states author the same unconditional "actuate the planner's desired
+# travel". The hold's throttle is `artillery_hold_speed` (0.0 — hold station),
+# one of the authored scalars the HOST reads off the Steering axis and folds into
+# the planner solution, so this axis never learns which leg it is flying. In
+# `acquire` and `reposition` the planner has no host-flown leg selected and falls
+# through to ordinary doctrine travel, which closes at the `[[behaviour.doctrine]]`
+# `target_speed` below.
+[helm_console.engines_ai]
+initial_state = "acquire"
+
+[helm_console.engines_ai.param]
+# Restated on this axis because its OWN guards reference them; content validation
+# rejects an undeclared `param(...)`. Engines runs an independent copy of the
+# machine from the SAME shared fact snapshot, so it reaches each leg on its own
+# reading rather than by consulting Steering's state — the two axes are separate
+# fine systems and neither may read the other's memory.
+max_artillery_range = 200.0
+artillery_hold_range = 180.0
+
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # A target that appears ALREADY inside the band is not something to close on.
+  # Higher priority than the reposition arm below so the two cannot both fire on
+  # the tick a target resolves at 150 units.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "hold"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
+
+[[helm_console.engines_ai.state]]
+id = "reposition"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # Losing the target outranks everything: there is no position to take up
+  # against nothing.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # AC2. The run-in ends at the INNER edge of the band, never at the outer one —
+  # see the header for why the two are different numbers.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "hold"
+  when = "fact(range_to_target) <= param(artillery_hold_range)"
+
+[[helm_console.engines_ai.state]]
+id = "hold"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # AC1, and the ONLY way out of the hold that does not involve losing the
+  # target. Note what is absent: nothing here fires when the range SHRINKS. A
+  # player closing on this ship cannot make it give ground (AC5).
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(range_to_target) > param(max_artillery_range)"
+
+# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
+#
+# The axis that carries the manoeuvre. `acquire` and `reposition` track the
+# target so the battleship closes on it; `hold` answers with the SEVENTH yaw mode
+# verb, `hold_artillery_position` — neither "track the target" nor "hold a ring"
+# nor "point at where it is" but "point at where it WILL BE when my bolt gets
+# there". The host reads the leg off this verb and never off a state's name, so
+# these states could be called anything.
+[helm_console.steering_ai]
+initial_state = "acquire"
+
+[helm_console.steering_ai.param]
+# ── The three scalars the HOST reads off this axis to fly the gun line ────────
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown. Omit ANY ONE and the host declines the artillery arm outright —
+# the battleship falls back to ordinary doctrine travel rather than holding a
+# position at an invented range or an invented throttle.
+#
+# The outer edge of the envelope, world units. Matches the bow bank's authored
+# `range` today, and is authored separately on purpose: `range` is where a bolt
+# stops existing, this is where a designer decided the gun line stops being worth
+# holding.
+max_artillery_range = 200.0
+# The inner edge — ninety per cent of the outer one, authored as a real value
+# because a designer tunes the band and not a ratio buried in Rust. Repositioning
+# stops here; see the header for why the gap between the two is the hysteresis.
+artillery_hold_range = 180.0
+# Throttle fraction flown while the position is held. Authored ZERO: an artillery
+# platform that keeps closing is not an artillery platform. See the header for
+# why this needs a name of its own rather than borrowing a sibling hull's.
+artillery_hold_speed = 0.0
+# Steering response. A tighter deadband than either sibling's (the cruiser's is
+# 0.05) because the whole of the hold's output is yaw: a lead solution that the
+# hull declines to chase inside 0.03 rad is a lead solution 5 units wide at 180
+# units, which is most of a ship. The saturation angle is wide, because a
+# battleship correcting a small lead error at full steering authority would
+# oscillate around the solution rather than settle on it.
+tracking_deadband_rad = 0.03
+tracking_full_steer_rad = 0.6
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+# NOTE another deliberate absence: no `orbit_direction` slot. This hull never
+# circles anything, so it needs no circulation to draw — and the host only draws
+# one for a state whose own yaw verb is an orbit.
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "hold"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
+
+[[helm_console.steering_ai.state]]
+id = "reposition"
+
+  # Ordinary target tracking on the way in. The bow is on the target rather than
+  # on a lead solution, which is correct: nothing is being fired at this range,
+  # and a run-in aimed at an intercept would arrive off to one side of it.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "hold"
+  when = "fact(range_to_target) <= param(artillery_hold_range)"
+
+# THE manoeuvre.
+[[helm_console.steering_ai.state]]
+id = "hold"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_artillery_position"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(range_to_target) > param(max_artillery_range)"
+
 [weapons_console]
 
+# ── The close-defence battery (retuned by issue #793) ─────────────────────────
+#
+# Both banks widened from 180 degrees to 270. See the header for the argument;
+# the short of it is that two 180-degree half-planes on ±90 facings cover the
+# circle without ever OVERLAPPING, so the hull could only bring one bank to bear
+# at a time and the seam between them sat dead ahead — the one bearing an
+# artillery platform holding a lead solution keeps its target on. At 270 the arcs
+# overlap through the bow and the stern, so a player inside 45 degrees of the
+# centreline is engaged by both.
+#
+# `auto_arc_deg` tracks `fire_arc_deg` deliberately, exactly as on the cruiser. On
+# hulls where the two differ, the narrower auto arc is a "do not open fire at the
+# very edge of the envelope" rule; here the edge IS the point, because the overlap
+# reaches 135 degrees off each bank's facing and a narrower auto arc would switch
+# off the double cover this widening exists to create.
+#
 # Port heavy bank.
 [[weapons_console.phaser_banks]]
 id = "port"
 facing_deg = -90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 270.0
 beam_range = 75.0
 beam_damage_per_sec = 12.0
 beam_duration_secs = 8.0
@@ -79,8 +504,8 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
 [[weapons_console.phaser_banks]]
 id = "starboard"
 facing_deg = 90.0
-fire_arc_deg = 180.0
-auto_arc_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 270.0
 beam_range = 75.0
 beam_damage_per_sec = 12.0
 beam_duration_secs = 8.0
@@ -88,12 +513,240 @@ cooldown_secs = 4.0
 shield_pierce = 0.1
 beam_color = [1.0, 0.15, 0.05, 1.0]
 
+# ── The bow artillery piece (issue #792) ──────────────────────────────────────
+#
+# ONE bank, and everything about it is authored around the gun line the doctrine
+# above holds. A blaster rather than a beam or a torpedo because a blaster bolt is
+# already exactly the projectile this issue needs and needs no new mechanics: the
+# launch heading is solved ONCE, at fire time, through `predict_intercept_heading`
+# against the target's velocity, and the bolt then flies that fixed heading in a
+# straight line with no reference to the target ever again. Ballistic,
+# launch-time predictive, and non-homing, all of it already built.
+#
+# * `damage = 60` — POWERFUL. Five times a shipped blaster's default, and more
+#   than either phaser bank lands in a whole 8-second beam. One bolt is the point:
+#   at this range the battleship gets one shot every twelve seconds and it has to
+#   be worth waiting for.
+# * `projectile_speed = 35` — SLOW, and the slowest bolt in the set (the lancer's
+#   is 60, the default 40). This is the number the whole issue turns on. It is
+#   what makes the flight time across the envelope five and a half seconds, which
+#   is what makes the intercept prediction necessary; and because the heading is
+#   frozen at launch, it is also what makes a course change AFTER the bolt is away
+#   pay off. A player who holds a constant heading is hit by a shot aimed where
+#   they were going. A player who turns is not.
+# * `range = 200` — the envelope the doctrine's `max_artillery_range` names, and
+#   nearly three times the 75-unit beam banks. Inside 75 this hull is an ordinary
+#   gunship; the artillery is what it does at a distance nothing else of its
+#   generation can reach.
+# * `cooldown_secs = 12` — a bombardment cadence, not a rate of fire. Sustained
+#   it is 5 damage per second, well under the beams' combined output. The bolt is
+#   a punishment for flying predictably, not a DPS race.
+# * `fire_arc_deg = 90` — a bow mount, and the reason the pivot is load-bearing
+#   rather than decorative. The host's fire gate asks whether the target is inside
+#   this cone; a battleship that did not put its nose on the solution would simply
+#   never be allowed to shoot. Ninety rather than something tighter because the
+#   gate reads the target's CURRENT bearing while the hull is pointed at the LEAD,
+#   and the angle between those two is real: the fastest hull the game ships
+#   CRUISES at 26 units/s, which against a 35-unit/s bolt is a lead angle of 37
+#   degrees — so a 60-degree cone would decline the very shots the prediction
+#   exists to take. The pinning test derives that figure rather than trusting this
+#   comment. Cruise is the case the cone is sized for, and deliberately not the
+#   only case there is: the destroyer authors a 2.4x boost, and a hull crossing on
+#   it wants a 61-degree lead that this cone does not admit. That shot is simply
+#   DECLINED — the battleship holds fire rather than loosing a mis-aimed bolt —
+#   and admitting it would take a 122-degree cone, which is a turret rather than
+#   the bow mount this weapon is.
+#
+# No `[weapons_console.blaster_banks.ai]` policy is authored, so the canonical
+# unconditional-fire policy is synthesised at spawn: the bank fires whenever the
+# host's own readiness gates (lock, cooldown, range, arc) are all satisfied. That
+# is the whole doctrine this weapon needs — WHERE to be and WHICH WAY to point is
+# the helm's job, and it is the interesting half.
+[[weapons_console.blaster_banks]]
+id = "bow_artillery"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+volley_count = 1
+volley_interval_secs = 0.0
+cooldown_secs = 12.0
+projectile_speed = 35.0
+collision_radius = 3.0
+visual_scale = 2.5
+damage = 60
+shield_pierce = 0.15
+range = 200.0
+
+# ── The close-defence launchers (issue #793) ──────────────────────────────────
+#
+# Two tubes, opposed, each answering for itself. The hull carried no `[torpedoes]`
+# table before this issue. See the header for why they are opportunistic and why
+# neither of them may ever ask the helm for a bearing.
+#
+# The loadout is authored around "the round that goes through a hole somebody else
+# made", which is the same premise as the cruiser's and a different weapon:
+#
+# * `damage_shields = 0`, so every one of the 30 points is hull damage. NOTE what
+#   that does and does not mean: `damage_hull` always hits hull by design (see
+#   `TorpedoConfig::shield_pierce`), and the detonation path only enters the
+#   shield branch when `damage_shields > 0` — so a round arriving at a RECOVERED
+#   arc still lands its full payload. The shield gate on the launcher below is
+#   therefore doctrine, not damage arithmetic: twelve rounds is a small magazine,
+#   and a battleship holding station spends them on the opening somebody else
+#   made rather than on a target that is still covered.
+# * `speed * lifespan = 200`, the artillery envelope to the unit. Reach is the
+#   only lever there is: no launch guard can read a range, because the host seeds
+#   `in_range` as a constant `true` for every candidate and applies no range gate
+#   of its own. So `lifespan` alone decides how far out a shot may be taken from,
+#   and a shorter one would silently decline opportunities the gun line can still
+#   see — hence the match.
+#
+#   What that argument does NOT establish is that a shot at the far edge is a
+#   GOOD one, and it should not be read as if it did. 200 units at 50 units/s is
+#   four seconds of flight, and the striking-arc reading the guard launched on is
+#   four seconds old by the time the round arrives: the target has manoeuvred, the
+#   seeker has turned to follow, and the arc the round is nose-on to when it goes
+#   off is resolved at impact, not at launch — and it need not be the arc the
+#   doctrine looked at. Flight time, not reach, is what makes a long shot a
+#   bet — matching the envelope bounds where a round can be spent from, and
+#   promises nothing about where it lands.
+# * `turn_rate_deg_per_sec = 60` — genuinely homing, unlike the cruiser's barely
+#   -steering salvo. A fixed tube on a hull that turns at 0.20 rad/s cannot lead a
+#   crossing player, so the seeker has to be what closes the last of the distance.
+# * `volley_max = 1` and a `load_time` of 8 seconds. ONE round per launcher per
+#   opportunity, and then that launcher is out of the fight for eight seconds
+#   while the other one is not. This is the cruiser's exact opposite: there the
+#   whole battery commits to one window, here each tube spends its own round on
+#   its own window and the two are never coupled.
+[torpedoes]
+count = 12
+damage_hull = 30
+damage_shields = 0
+speed = 50.0
+turn_rate_deg_per_sec = 60.0
+lifespan = 4.0
+load_time = 8.0
+detonation_radius = 4.0
+
+# No `burst_interval_secs`: with `volley_max = 1` there is no burst to space out.
+# The parse default stands and nothing reads it.
+
+# The FORE launcher — the player who closes straight down the gun line.
+#
+# A 90-degree cone, so ±45 off the bow. Wide enough that the hold's own lead angle
+# (up to 37 degrees against the fastest cruising hull the game ships — see the
+# artillery bank above) never carries the target out of it, and narrow enough that
+# it and the aft cone leave a real 90-degree gap on each beam. The gap is not an
+# oversight: an armament that covered every bearing would not be opportunistic, it
+# would be a turret, and the whole point is that these tubes take what the gun line
+# gives them.
+[[torpedoes.tubes]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+volley_max = 1
+ai_target_count = 1
+
+  # LOAD is unconditional: a tube that starts loading when the opportunity opens
+  # has already missed it (`load_time` is 8 s and a shield arc is back in a few),
+  # so the launcher is kept ready between windows and the reload is the cost of
+  # having taken a shot rather than a cost of taking one.
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  # LAUNCH. Read what the HOST has already decided before this guard is
+  # consulted, because it is most of the decision:
+  #
+  # `auto_fire_torpedo` refuses the whole ship's launch unless the target is
+  # locked and `target_facing_shields <= 0`, then hands on only the tubes passing
+  # `loaded && in_arc` — PER TUBE. That filter, not this line, is what delivers
+  # the per-tube independence the doctrine is built on. `ai_torpedo_auto_fire`
+  # then seeds this snapshot for each surviving candidate with `loaded`,
+  # `target_valid`, `in_range` and `in_arc` as literal `true` — they all passed
+  # already — so the only facts here carrying a live reading are
+  # `target_facing_shields` (which the host has also already gated) and
+  # `tubes_full`.
+  #
+  # So be honest about what this line adds: behaviourally it is the same as the
+  # unconditional launch policy synthesised for a tube that authors none. Its
+  # content is NEGATIVE and it is deliberate — the one live fact this guard could
+  # have gated on, and does not, is `tubes_full`:
+  #
+  # * `tubes_full` is SHIP-WIDE: every tube on the hull at its volley capacity.
+  #   It is right for the cruiser's committed salvo and catastrophic here — a
+  #   loaded fore tube bearing on a collapsed arc would refuse the shot because
+  #   the aft tube is eight seconds into a reload, and the two launchers would
+  #   degrade into one. Its absence is the whole authored decision.
+  #
+  # The conjuncts that ARE written out are written for two reasons, neither of
+  # them "the host might not check":
+  #
+  # * `loaded` and `in_arc` each NAME a real host filter, so this line states at
+  #   the tube what its doctrine depends on: per-tube readiness (`loaded_count >
+  #   0`, never the ship-wide reading) and a bearing nobody supplies — the bow is
+  #   aimed by the artillery's intercept solution and the stern by wherever that
+  #   leaves it. This guard is the whole of the "opportunistic": a question about
+  #   the world, never a request to change it.
+  # * Writing them out pins the fact NAMES. An unseeded or misspelled `fact(...)`
+  #   parses, validates, and then reads absent for ever (the #779 failure mode) —
+  #   invisible through the host path, which would fire anyway. The unit test
+  #   drives `seed_torpedo_tube_launch_facts` against this policy directly and
+  #   switches each conjunct off in isolation, so a typo here fails a test.
+  #
+  # `in_range` is omitted for a reason that does NOT apply to those two: there is
+  # no range gate anywhere on this path. The fact is seeded `true` with nothing
+  # behind it, so naming it would pin a condition no host enforces.
+  #
+  # `target_facing_shields <= 0` restates the host's own ship-wide gate at the
+  # tube, and is worth restating because of WHAT it reads: an HP number, not a
+  # boolean, resolved per-arc through the target's own arc router, so this gate
+  # and the eventual hit agree about which arc is in the way.
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
+
+# The AFT launcher — the player who gets behind a ship that cannot turn.
+#
+# Identical policy to `fore`, and authored out in full rather than shared, because
+# a tube's policy is a property of the tube: these two answer the same words about
+# DIFFERENT arcs and different reloads, and that is exactly the independence the
+# doctrine is built on. A later refit that changed one cone must change one policy.
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 90.0
+volley_max = 1
+ai_target_count = 1
+
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
+
 [comms]
 range = 800.0
 
 [ai_profile]
 aggression = 0.9
-sensor_range = 150.0
+# Widened for #792: the doctrine's own envelope is 200 units, and a profile that
+# stopped seeing at 150 would describe a ship that cannot perceive its own gun
+# line.
+sensor_range = 320.0
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 #
@@ -111,13 +764,21 @@ directive_loop    = true
 base_priority     = 20.0
 target_speed      = 0.5
 
+# The doctrine entry supplies the OBJECTIVE the helm surfaces score; since #792
+# the *manoeuvre* is the policy machine's above, not this section's.
+# `target_speed`/`maintain_range` here now apply only on the fallback path — the
+# `acquire` and `reposition` legs, where no host-flown leg is selected and
+# ordinary doctrine travel resumes. `maintain_range` is restated as the hold band's
+# inner edge so the fallback brake and the doctrine's own stopping point agree
+# rather than pulling against each other; the transition is what actually stops
+# the run-in, and it fires first.
 [[behaviour.doctrine]]
 id            = "destroy-hostiles"
 text          = "entity.ship_harrow_warhawk.behaviour.doctrine.destroy_hostiles.text"
 directive_kind = "Destroy"
 base_priority  = 35.0
 target_speed   = 0.9
-maintain_range = 60.0
+maintain_range = 180.0
 
 # Ship systems (all AI-controlled - no human consoles)
 # Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
@@ -161,7 +822,9 @@ id = "helm-lateral-thrust"
 kind = "lateral_thrust"
 ai_only = true
 
-# Fine Tactical systems (issue #512): port + starboard phaser banks. No torpedoes.
+# Fine Tactical systems (issue #512): port + starboard phaser banks. (The
+# torpedo tubes and their magazine arrived with #793 and are declared below,
+# alongside the artillery bank.)
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
@@ -178,6 +841,37 @@ ai_only = true
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
+ai_only = true
+
+# The bow artillery piece (issue #792), following the `blaster-<bank_id>`
+# convention (underscores folded to hyphens). Without this entry the bank is
+# never AI-operable and the battleship would hold its gun line in silence.
+[[system]]
+id = "blaster-bow-artillery"
+kind = "blaster_bank"
+ai_only = true
+
+# The close-defence launchers (issue #793): one per tube, following the
+# `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
+# shared magazine. Both entries are load-bearing and fail differently. Without the
+# MAGAZINE entry neither the loader nor the launcher runs at all — both gate on it
+# before they look at a tube, so the whole armament would be silent. Without a
+# TUBE's own entry that one tube is never AI-operable, so it would never be loaded
+# and the hull would quietly fight with half a battery, which is precisely the
+# degradation the per-tube `loaded` guard exists to prevent.
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-fore"
+kind = "torpedo_tube"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-aft"
+kind = "torpedo_tube"
 ai_only = true
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.

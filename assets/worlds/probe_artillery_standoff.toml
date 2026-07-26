@@ -1,0 +1,76 @@
+# Probe world for issue #792 — regression harness for "the battleship never
+# actually holds its firing position".
+#
+# The Harrow battleship's artillery doctrine parks it at `artillery_hold_range`
+# (180 units) and stops. Every unit test of that doctrine runs on a bare `App`
+# carrying the helm axes alone, and for a while none of them carried the impulse
+# drive — so the doctrine was measured in a world without the one component that
+# overrides it. In production `entities::spawner` attaches an
+# `ImpulseConfigResource` to every hull with a `[helm_console]`, the impulse
+# autopilot hard-overrides commanded throttle with `thrust = 1.0`, and the
+# battleship flew straight through its own gun line at full speed.
+#
+# The geometry here is the whole point and is what no other world provides:
+#
+#   * The battleship starts 300 units out — OUTSIDE its own 200-unit artillery
+#     envelope — so it has to fly a real run-in and the stopping point is
+#     something it reaches rather than something it spawned on. `duel.toml`
+#     anchors side B 55 units from the player — well below the default
+#     `impulse_engage_distance` of 200, so the drive never engages there and the
+#     standoff is never exercised at all.
+#   * 300 is inside the hull's own 320-unit `sensor_range`, so it promotes to
+#     high fidelity on the first tick and its helm doctrine actually runs.
+#   * The doctrine is REPLACED wholesale by the `overrides` below, exactly as
+#     `duel.toml` and `combat_test.toml`'s wave 8 replace it, and — like both of
+#     them — it does not author `use_impulse`. So a fix that leaned on the hull's
+#     own `[[behaviour.doctrine]] use_impulse = false` would be erased here. The
+#     fix has to live somewhere a scenario doctrine cannot reach.
+#
+# ── Why the hostility is one-directional ──────────────────────────────────────
+#
+# Only Harrow is told that Federation is an enemy. The battleship therefore
+# acquires and closes on the player, while the player's own untargeted Destroy
+# doctrine resolves no hostile and falls through to `alliance_cruiser`'s
+# `hold-station` (target_speed 0.0). A stationary target is what makes "comes to
+# rest at the hold range" a reading of the BATTLESHIP's travel rather than of two
+# ships converging — the measurement would otherwise mix the player's approach
+# into the number under test.
+
+[global]
+seed = 7920
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — spawned by spawn_game_start_entities when the game starts, and
+# AI-backfilled because nobody connects in a headless run.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# One direction only — see the header.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+# The battleship, 300 units out along +X.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/ship_harrow_warhawk.toml"
+  name          = "artillery_platform"
+  position      = [300.0, 0.0, 0.0]
+  overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
+    { id = "kill", directive_kind = "Destroy",
+      base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+  ] } }

@@ -426,21 +426,26 @@ when       = "counter(ship_power) >= 90"
       zero_gates = [{ condition = "not_attacked" }] },
   ] } }
 
-# Wave 4: cruiser at t=120
+# Wave 4: Harrow Cruiser at t=120 (issue #790).
+#
+# The scenario's broadside orbiter. Where the destroyer (wave 1c) crosses and
+# runs, this hull arrives, closes to its own authored fighting radius and simply
+# keeps circling — so the two authored manoeuvres are visible against each other
+# and against the brake-and-orbit waves either side of them.
+#
+# Its doctrine is left as the hull authors it — no `overrides.behaviour` — for
+# the same reason the destroyer's wave carries none: the manoeuvre lives in the
+# hull's `[helm_console.*_ai]` policy machines, and overriding the doctrine entry
+# here would not change how it flies.
 [[trigger]]
 condition = "on_timer"
 after_secs = 120.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
+  template_path = "assets/entities/ship_harrow_cruiser.toml"
   name          = "wave_4"
   anchor        = "enemy_ne"
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
-      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
-      zero_gates = [{ condition = "not_attacked" }] },
-  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -460,14 +465,9 @@ when       = "counter(ship_power) >= 100"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
+  template_path = "assets/entities/ship_harrow_cruiser.toml"
   name          = "wave_4b"
   position      = [1000.0, 0.0, -360.0]
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
-      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
-      zero_gates = [{ condition = "not_attacked" }] },
-  ] } }
 
 # Wave 5: destroyer at t=210
 [[trigger]]
@@ -512,21 +512,19 @@ when       = "counter(ship_power) >= 90"
       zero_gates = [{ condition = "not_attacked" }] },
   ] } }
 
-# Wave 6: cruiser at t=240
+# Wave 6: Harrow Cruiser at t=240 (issue #790).
+#
+# The second broadside orbiter, arriving late enough that the player meets it
+# with a damaged ship. Doctrine left as the hull authors it — see wave 4.
 [[trigger]]
 condition = "on_timer"
 after_secs = 240.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
+  template_path = "assets/entities/ship_harrow_cruiser.toml"
   name          = "wave_6"
   anchor        = "enemy_ene"
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
-      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
-      zero_gates = [{ condition = "not_attacked" }] },
-  ] } }
 
   [[trigger.action]]
   type           = "add_objective"
@@ -546,14 +544,9 @@ when       = "counter(ship_power) >= 100"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/ship_harrow_patrol.toml"
+  template_path = "assets/entities/ship_harrow_cruiser.toml"
   name          = "wave_6b"
   position      = [1100.0, 0.0, -110.0]
-  overrides = { behaviour = { doctrine = [
-    { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
-      base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
-      zero_gates = [{ condition = "not_attacked" }] },
-  ] } }
 
 # Wave 7: destroyer at t=270
 [[trigger]]

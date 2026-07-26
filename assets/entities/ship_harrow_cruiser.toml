@@ -1,0 +1,805 @@
+# Harrow Cruiser (Ironveil class) — the broadside orbit and its one
+# interruption (issues #790, #791)
+#
+# The second hull whose HELM BEHAVIOUR is authored rather than inherited, and
+# the opposite manoeuvre to the destroyer's.
+#
+#   acquire     ──(target visible, inside engage_range)──▶ orbit
+#   orbit       ──(target lost)───────────────────────────▶ acquire
+#   orbit       ──(arc facing us down AND a salvo LOADED
+#                  AND the battery intact)────────────────▶ torpedo_run
+#   torpedo_run ──(target lost)───────────────────────────▶ acquire
+#   torpedo_run ──(arc back up AND no salvo committed)────▶ orbit
+#   torpedo_run ──(tubes not loaded AND no salvo
+#                  committed)────────────────────────────▶ orbit
+#   torpedo_run ──(battery unusable AND no salvo
+#                  committed)────────────────────────────▶ orbit
+#
+# Three states, and the third is the only thing that stops the circling. This
+# hull has no break-off, no re-entry pivot and no escape leg: it circles, and it
+# keeps circling for as long as there is something to circle. What makes that a
+# fight rather than a stalemate is the ARMAMENT below.
+#
+# ## The one interruption: a shield opportunity (issue #791)
+#
+# The broadsides do not kill. They strip. A ship being circled by this hull is
+# taking beam fire on whichever arc happens to face the ring, and sooner or later
+# that arc collapses — and a collapsed arc passes damage straight through to the
+# hull for the few seconds it takes to come back.
+#
+# That window is what the torpedoes are for, and the geometry of taking it is the
+# exact opposite of the orbit's. The tubes are fixed and forward, on a 24-degree
+# arc; the orbit deliberately holds the target ABEAM. So the cruiser cannot shoot
+# through the gap and keep circling. It has to stop circling, cut thrust, and
+# swing its bow onto the target — accepting, for the length of the phase, that it
+# is presenting its nose to an enemy instead of raking it.
+#
+# Five properties of the phase are load-bearing and each is authored below:
+#
+# * it OPENS on the arc that faces THIS ship being down, resolved through the
+#   target's own arc router — the same one the eventual torpedo hit goes through,
+#   so the manoeuvre can never commit to an opportunity the shot cannot take;
+# * it OPENS ONLY WITH A SALVO ACTUALLY LOADED, and only while the battery that
+#   would fire it is intact. Those are two different readings and the doctrine
+#   takes both. `tubes_full` is the launcher's own question — every tube at its
+#   volley capacity right this second — and it has to be the entry question too,
+#   because entering is what spends the broadside geometry the launch depends on;
+#   `tubes_fillable` catches the slower failures beside it, a magazine emptied or
+#   a tube shot out. The magazine is 8 rounds against a 4-round salvo, so this
+#   hull gets two runs and no more, and the 18-second reload between them is time
+#   it spends circling rather than pointing. Note where the second of those runs
+#   fires from: a round is drawn from the magazine when it STARTS loading, so
+#   after the second reload the hold reads zero with a full battery standing
+#   ready, and the launcher must fire it anyway — emptiness stops the next load,
+#   never the shot already in the tube;
+# * it ABORTS the moment that arc comes back, if nothing has launched yet. A
+#   cruiser that kept its bow on a recovered shield would be giving away the
+#   broadside for nothing;
+# * it COMMITS once a salvo is away. `torpedoes_in_flight` holds the phase open
+#   even after the shield recovers, because a homing round still in the air is
+#   worth tracking to the end, and because turning away mid-salvo is how a hull
+#   ends up with its tubes empty and its beams off target at once. "Away" means
+#   COMMITTED, not merely airborne: `volley_max = 2` fires as a burst, so half a
+#   salvo is still sitting in the tube on `burst_interval_secs` while the first
+#   half flies, and a reading that counted only the airborne rounds released the
+#   hull between them — the back half then left the tubes in `orbit`, outside
+#   their own 24-degree arc;
+# * it ENDS ANYWAY, three ways, none of which the enemy has to co-operate with.
+#   The tubes going empty and the rounds resolving is the ordinary one; the
+#   battery becoming unusable — a tube shot out, which leaves the rounds sitting
+#   in it and so is invisible to a loaded-count reading — is the second; losing
+#   the target is the third. All three are drawn on the cruiser's own armament or
+#   its own sensors rather than on the target's shields, because a target with no
+#   shields at all (a station, a probe) never raises the arc that would otherwise
+#   release the hull, and a manoeuvre whose only exit is something the ENEMY has
+#   to do is not bounded at all.
+#
+# When the run is over the cruiser re-enters `orbit` — a genuinely re-entered
+# state, which is what makes the host RE-DRAW the circulation direction from the
+# seeded key. The second orbit is not necessarily the same way round as the
+# first, and that is deliberate: a player who learns which way this ship circles
+# should have to learn it again after every torpedo run.
+#
+# ## Why an orbit at all
+#
+# The shared `plan_helm_travel` Destroy arm (`helm_destroy`) brakes through a
+# decel zone, parks at a fraction of weapons range and re-faces the target. That
+# is a bow-on gunship posture: it presents the smallest silhouette and brings the
+# forward arc to bear. A ship whose guns are on its BEAM wants the exact
+# opposite — it wants to be side-on, and it wants to stay side-on while the
+# target manoeuvres, which a station-keeper cannot do because "face the target"
+# and "show the target your flank" are contradictory instructions.
+#
+# So Steering answers its channel with `hold_combat_orbit`: the host solves the
+# TANGENT of a ring of `combat_orbit_range` around the target, bent toward or
+# away from it in proportion to how wrong the current radius is. The result is
+# continuous tangential travel (the broadsides stay on) that SPIRALS onto the
+# ring from either side — inside it the tangent is rotated outward and the
+# cruiser works its way out while still circling; outside it the tangent is
+# rotated inward and the cruiser closes while still circling. It never stops and
+# it never simply runs.
+#
+# The circulation direction — clockwise or anticlockwise — is drawn ONCE, on the
+# tick the orbit state is entered, from a seeded (world, ship, system,
+# transition, occurrence) key. So a replayed seed produces the same fight every
+# time, two cruisers entering the same engagement do not mirror one another, and
+# a player cannot learn "they always break left".
+#
+# ## Why the ring radius is AUTHORED and the destroyer's is not
+#
+# The destroyer's recovery ring is derived from the TARGET's own direct-fire
+# reach plus a margin, because a standoff is a statement about the other ship's
+# guns. This ring is a statement about THIS ship's guns: the cruiser wants its
+# target inside its own beam envelope, which is a property of this file and is
+# knowable when the file is written. `combat_orbit_range` is therefore a plain
+# authored `param`, deliberately set inside `beam_range` so the target is under
+# the broadsides for the whole orbit rather than only at the tangent point.
+#
+# ## Hazards do not break the orbit
+#
+# There is no transition anywhere below guarded on hazard urgency, collision
+# proximity, or any other avoidance reading — and that absence is load-bearing.
+# Avoidance already composes onto this leg two ways, both of them temporary and
+# both of them outside the state machine: the shared repulsion steering is summed
+# onto the orbit's own tangent inside the pure planner, and an IMMINENT collision
+# temporarily overrides desired facing from the shared hazard force. Neither
+# touches `memory(orbit_direction)` and neither is a state, so the detour
+# evaporates the moment the hazard clears and the cruiser resumes the same
+# circulation it was already flying. Adding a "dodging" state would have replaced
+# that with a manoeuvre that has to be exited — and an exit is a place to get
+# stuck.
+#
+# ## ARMAMENT: fore and aft, each 270 degrees
+#
+# Not port and starboard. A pair of 180-degree beam banks covers each side once
+# and can only ever fire one of them at a target. This hull mounts its banks on
+# the CENTRELINE — one forward, one aft — and gives each a 270-degree arc, so
+# each bank's only blind spot is the 90-degree wedge directly behind it. The
+# consequence is that everything abeam, to port or to starboard, is inside BOTH
+# arcs at once, and a bearing broadside lights two beams rather than one.
+#
+# That is what makes a circling ship dangerous rather than merely evasive: the
+# orbit holds the target abeam by construction, which is precisely where the
+# overlap is. It is also why the arcs are 270 and not 360 — a ship that can shoot
+# anywhere has no geometry to fly, and the whole doctrine would collapse back
+# into station-keeping.
+#
+# A useful consequence for the torpedo phase (issue #791): 270 degrees means both
+# banks still cover DEAD AHEAD, so swinging the bow onto a shield gap costs the
+# cruiser none of its beam pressure. The phase gives up the double-broadside
+# overlap for a few seconds; it does not give up the guns.
+
+name = "entity.ship_harrow_cruiser.name"
+tags = ["ship", "npc", "enemy"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "entity.ship_harrow_cruiser.target.description"
+
+# Heavier than the patrol cruiser it replaces in the combat-test waves: a ship
+# that commits to circling inside its own weapon envelope is a ship that expects
+# to be shot at for the whole engagement.
+[hull]
+hull_integrity = 420.0
+
+# Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
+# so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
+[[shield_arc]]
+id = "all"
+label = "entity.ship_harrow_cruiser.shield_arc.all.label"
+center_deg = 0
+width_deg = 360
+max_hp = 90
+regen_per_sec = 2.0
+offline_duration = 8.0
+
+[collider]
+shape = "Capsule"
+radius = 3.0
+length = 8.0
+
+[radar_appearance]
+colour = [0.85, 0.35, 0.12]
+size = 8.0
+icon = "cruiser"
+
+[mesh]
+model = "assets/models/dynasty_cruiser.glb"
+shape = "cuboid"
+size = [6.0, 2.0, 10.0]
+colour = [0.85, 0.35, 0.12]
+
+# Slower and less agile than the destroyer. `max_yaw_rate` matters more here than
+# on any straight-line hull: an orbit is a permanent turn, and a cruiser that
+# cannot sustain the ring's angular rate spirals outward no matter what the
+# spiral gain says.
+[helm_console]
+max_speed = 15.0
+max_reverse_speed = 6.0
+acceleration = 5.0
+deceleration = 10.0
+max_yaw_rate = 0.30
+max_bank_deg = 14.0
+
+[helm_console.engine_pfx]
+color = [ 1.0, 0.22, 0.08, 0.68 ]
+markers = [ "engine_port", "engine_starboard" ]
+trail_lifetime_secs = 0.55
+
+# NOTE the deliberate absence: there is no `[helm_console.boost]` block and no
+# `[helm_console.boost_ai]` machine. No state in this doctrine engages the drive
+# — a broadside orbit is flown at a steady authored throttle, and lighting a
+# boost would widen the ring rather than help. The absence is pinned by a parse
+# test, because it is exactly the kind of content that gets helpfully filled in.
+
+# ── Engines (longitudinal) doctrine ───────────────────────────────────────────
+#
+# Both states author the same unconditional "actuate the planner's desired
+# travel". The orbit's throttle is `combat_orbit_speed`, one of the authored
+# scalars the HOST reads off the Steering axis and publishes on the pass surface,
+# so this axis needs no knowledge that it is circling rather than closing.
+[helm_console.engines_ai]
+initial_state = "acquire"
+
+[helm_console.engines_ai.param]
+# The cruiser commits to the orbit once the target is this close. Comfortably
+# outside `combat_orbit_range` so the approach and the ring are distinct phases
+# and the spiral-in is visible rather than instantaneous.
+engage_range = 220.0
+
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+[[helm_console.engines_ai.state]]
+id = "orbit"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # The higher-priority exit: a shield opportunity (issue #791). Engines runs its
+  # OWN copy of the machine from the SAME shared fact snapshot, so it reaches the
+  # phase on its own reading rather than by consulting Steering's state — the two
+  # axes are independent systems and neither may read the other's memory.
+  #
+  # FOUR conjuncts, and the last two are what keep this an interruption rather
+  # than the hull's new normal. See the Steering copy for why.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "torpedo_run"
+  when = "fact(target_valid) > 0 and fact(target_facing_shield_down) > 0 and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+
+  # A transition guarded on hazard urgency here would drop the cruiser out of the
+  # orbit for the duration of a detour it is already handling additively, and
+  # re-entering would re-draw the circulation direction — so a debris field would
+  # randomise which way the ship circles. Losing the target is the one thing that
+  # genuinely ends an engagement.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# The torpedo opportunity, on the travel axis. The rule is the same
+# unconditional "actuate the planner's desired travel" both other states author,
+# and it has to be: the phase's throttle is `torpedo_bearing_speed` (0.0 — cut
+# thrust), which the HOST reads off the Steering axis and folds into the planner
+# solution. This axis never learns which leg it is flying, exactly as it never
+# learns it is orbiting.
+[[helm_console.engines_ai.state]]
+id = "torpedo_run"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # Losing the target outranks everything: there is no bow to hold on nothing.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # BOTH conjuncts, and the second is the whole of AC4. The arc coming back is
+  # what ends the opportunity; a salvo still in the air is what keeps the hull
+  # committed anyway. Dropping `torpedoes_in_flight` would turn away mid-salvo
+  # the instant the shield regenerated — which, since the shield is regenerating
+  # the whole time the rounds are flying, is very nearly always.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 5
+  to = "orbit"
+  when = "fact(target_facing_shield_down) < 1 and fact(torpedoes_in_flight) < 1"
+
+  # The SECOND way back to the ring, and the one that does not depend on the
+  # target. See the Steering copy.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 1
+  to = "orbit"
+  when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
+
+  # The THIRD: the battery itself is gone, which the guard above cannot see
+  # because a shot-out tube keeps the rounds that are already in it. See the
+  # Steering copy.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(tubes_fillable) < 1 and fact(torpedoes_in_flight) < 1"
+
+# ── Steering (yaw) doctrine ───────────────────────────────────────────────────
+#
+# The axis that carries the manoeuvre. `acquire` tracks the target so the cruiser
+# closes on it; `orbit` answers with the FIFTH yaw mode verb, `hold_combat_orbit`
+# — neither "track the target" nor "fly a frozen heading" but "hold a ring around
+# it at my own fighting range".
+[helm_console.steering_ai]
+initial_state = "acquire"
+
+[helm_console.steering_ai.param]
+# Restated because this axis's own guard references it; content validation
+# rejects an undeclared `param(...)`.
+engage_range = 220.0
+# Steering response. A wider deadband than the destroyer's: an orbit is a
+# sustained turn against a continuously moving solution, and a tight deadband
+# would have the hull hunting either side of the tangent every tick. The
+# saturation angle is TIGHTER than the destroyer's (0.5) for the opposite reason
+# — it is half of what sets the orbit's steady-state radius; see
+# `combat_orbit_spiral_gain` below.
+tracking_deadband_rad = 0.05
+tracking_full_steer_rad = 0.3
+# ── The three scalars the HOST reads off this axis to fly the orbit ───────────
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown. Omit ANY ONE of them and the host declines the combat-orbit arm
+# outright — the cruiser falls back to ordinary doctrine travel rather than
+# circling at an invented radius or at zero throttle.
+#
+# The fighting radius, world units. Inside the banks' 55-unit `beam_range` by a
+# real margin, so the target stays under the broadsides for the whole orbit
+# instead of only where the ring happens to graze weapons range. This is an
+# authored property of THIS hull's guns — it is not derived from the target.
+combat_orbit_range = 42.0
+# Throttle fraction flown on the ring. Not zero and not flat out: the orbit has
+# to hold its angular rate against `max_yaw_rate`, and a cruiser at full throttle
+# on a 42-unit ring would need more turn authority than this hull has.
+combat_orbit_speed = 0.6
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so
+# the same gain behaves identically on a 42-unit ring and a 400-unit one.
+#
+# Much higher than the destroyer's recovery gain (1.2), and the reason is the
+# control law rather than taste. The correction is PROPORTIONAL — heading offset
+# against radial error, with no integral term — so the orbit settles at the
+# radius where the offset it commands is exactly the offset needed to sustain the
+# turn, which is always a little OUTSIDE the authored ring. That equilibrium
+# solves to `r(r - R) = v * R * tracking_full_steer_rad / (max_yaw_rate * gain)`,
+# and with this hull's numbers (v = 15 * 0.6 = 9, R = 42) it lands at ~44 — five
+# per cent wide, and comfortably inside the 55-unit beam range. The destroyer's
+# gentler gain is fine for a standoff ring 200 units out, where five per cent is
+# noise; on a 42-unit fighting ring it would settle at 51, most of the way to the
+# edge of the envelope. Raising the gain and tightening
+# `tracking_full_steer_rad` together is what pulls it back in.
+combat_orbit_spiral_gain = 4.0
+# ── The scalar the HOST reads off this axis to fly the torpedo phase (#791) ───
+# Throttle fraction flown while the bow is held on the target. Authored ZERO:
+# the phase exists to stop the hull swinging and let a fixed forward tube settle
+# on a shield gap, and thrust on a 42-unit ring is what makes the bearing move.
+#
+# Zero is exactly why this needs a name of its own rather than borrowing the
+# destroyer's `reengage_speed`. An unauthored param and an authored 0.0 are the
+# same number and opposite intents, so the host gates on the NAME being present:
+# omit it and the whole bow-hold arm is declined and the cruiser keeps orbiting,
+# rather than coasting to a halt in front of an enemy on a value nobody chose.
+torpedo_bearing_speed = 0.0
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+# Host-written on the tick the orbit state is entered, from the seeded composite
+# key. Declared here so its pre-engagement value is authored rather than
+# implicit; no guard reads it — the host does, when it publishes the pass
+# surface.
+orbit_direction = 1.0
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(engage_range)"
+
+[[helm_console.steering_ai.state]]
+id = "orbit"
+
+  # THE manoeuvre. The host reads the leg off this verb — never off the state's
+  # name — so these states could be called anything.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_combat_orbit"
+
+  # The shield opportunity (issue #791), and the last TWO conjuncts are what keep
+  # #790's premise intact.
+  #
+  # A shield gap is only an opportunity for a ship that can shoot into it, and
+  # "can shoot into it" is two separate questions:
+  #
+  # * `tubes_full` — is a WHOLE salvo loaded RIGHT NOW? This is the launcher's
+  #   own question, asked here in the same words: the `torpedo_launch` policy
+  #   below gates on a fact of the same name computed the same way. It has to be
+  #   the same question, because this transition is what SPENDS the broadside
+  #   geometry to create the shot the launcher then takes. Ask anything weaker
+  #   here and the cruiser pays the phase's price for windows the launcher was
+  #   always going to decline.
+  # * `tubes_fillable` — is a whole salvo still REACHABLE at all? Slower and
+  #   quieter: no tube and not the magazine has been shot out, and enough rounds
+  #   remain to top every tube up. It catches what `tubes_full` cannot, a tube
+  #   that is loaded but destroyed, so the pair reads "a salvo is loaded, and the
+  #   battery that will fire it is intact".
+  #
+  # Neither alone is enough, and the measurements say so. With no armament
+  # conjunct at all: 287 ticks in `torpedo_run` against 87 in `orbit` — the
+  # cruiser waiting bow-on, magazine empty, for a salvo that could never come.
+  # With `tubes_fillable` alone: 506 against 431 over a 400 s run, and only 29 of
+  # those 506 ticks — 5.7% — with the tubes actually full. Reachability stays
+  # true throughout the 18 s reload after every salvo (`load_time` 9 s × two
+  # rounds per tube), so the ring broke on arc collapses with nothing loadable
+  # inside the window. `tubes_full` is what closes that: a reloading cruiser
+  # keeps circling, which is what it has beams for.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "torpedo_run"
+  when = "fact(target_valid) > 0 and fact(target_facing_shield_down) > 0 and fact(tubes_full) > 0 and fact(tubes_fillable) > 0"
+
+  # See the Engines copy for why losing the target is the only OTHER way out.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+# THE torpedo opportunity, on the axis that carries it. `hold_torpedo_bearing`
+# is the SIXTH yaw mode verb: neither "hold a ring" nor "fly a frozen heading"
+# but "point my bow at where the target is RIGHT NOW" — a live tracking solution,
+# re-solved every tick, because a target that jinks while a fixed tube is lining
+# up is the case the phase exists to handle.
+#
+# It is not `pivot_to_reengage`, whose geometry is identical: that verb is one
+# leg of the shield-RECOVERY doctrine and the host only publishes it for a hull
+# that authors all six standoff scalars — every one of them a statement about a
+# ring derived from the TARGET's reach, which this hull has no business inventing
+# in order to borrow a turn.
+[[helm_console.steering_ai.state]]
+id = "torpedo_run"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_torpedo_bearing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # THE WINDOW CLOSED. Re-entering `orbit` here is what re-draws the circulation
+  # direction, so the orbit resumed after a torpedo run is not necessarily the
+  # one that preceded it.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 5
+  to = "orbit"
+  when = "fact(target_facing_shield_down) < 1 and fact(torpedoes_in_flight) < 1"
+
+  # THE SALVO IS SPENT — the second way back to the ring, and the one that does
+  # not depend on the target doing anything.
+  #
+  # The guard above ends the phase when the arc comes back. That is the common
+  # case and not a bound, because `target_facing_shield_down` is not a promise
+  # anything will ever change: a target that RESOLVES but carries no `[shields]`
+  # block at all — a station, a probe, a hull authored without one — reads it
+  # `1.0` for as long as it lives, since there is genuinely no arc to recover.
+  # Against such a target the guard above can never fire, and with `target_valid`
+  # the only other exit the cruiser would hold its nose on it until one of them
+  # died.
+  #
+  # This is the bound, and it is drawn on the hull's OWN armament. Entry requires
+  # `tubes_full`; firing empties the tubes, and `load_time` is 9 s per round, so
+  # once the salvo has left and resolved this reads false for the whole reload
+  # and the cruiser is guaranteed back on its ring.
+  #
+  # What it does NOT bound is a battery that stops working with the rounds still
+  # in it. `tubes_full` is a statement about the rounds, not about the tubes:
+  # shooting a tube out mid-phase leaves `loaded_count` exactly where it was, so
+  # this guard stays shut and — against a target with no arc to raise — the hull
+  # is trapped bow-on for a salvo the launcher will decline. That case belongs to
+  # the guard below.
+  #
+  # `torpedoes_in_flight` is on BOTH exits and means the same thing on both: a
+  # hull does not turn away from rounds it has committed, airborne or still owed
+  # to a burst. Firing makes `tubes_full` false immediately, so without that
+  # conjunct this guard would release the ship on the very tick it launched.
+  #
+  # Priority 1 against the battery-gone guard's 0 is an ORDERING, not a
+  # preference: both exits land in `orbit`, and the two guards do not overlap in
+  # practice, so which one is asked first cannot change where the hull ends up.
+  # It is authored explicitly because content validation refuses equal-priority
+  # transitions out of one state — an authored tie resolves by file order, which
+  # is a decision the file should be making out loud.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 1
+  to = "orbit"
+  when = "fact(tubes_full) < 1 and fact(torpedoes_in_flight) < 1"
+
+  # THE BATTERY IS GONE — the third way back to the ring, and the one that
+  # catches what a rounds-in-the-tube reading structurally cannot.
+  #
+  # `tubes_fillable` is the reachability question: are the tubes and the magazine
+  # still online, and are there enough rounds left to top every tube up? It is on
+  # the ENTRY guard already, which is what stops the cruiser breaking its ring for
+  # a battery that has been shot out. Without it here as well, entry was the only
+  # place that ever asked: a tube destroyed AFTER the phase opened left
+  # `tubes_full` true (the rounds are still sitting in the dead tube),
+  # `torpedoes_in_flight` at zero, and every exit shut — the same trap the guard
+  # above closes for the ordinary case, reopened by a lucky hit.
+  #
+  # Same `torpedoes_in_flight` conjunct, same reason: rounds already in the air
+  # from the surviving tube are still worth tracking home.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "orbit"
+  when = "fact(tubes_fillable) < 1 and fact(torpedoes_in_flight) < 1"
+
+# ── Weapons ───────────────────────────────────────────────────────────────────
+#
+# The pair the whole doctrine exists to point: centreline fore and aft, 270
+# degrees each, so their arcs overlap across both beams. See the header.
+#
+# `auto_arc_deg` matches `fire_arc_deg` deliberately. On hulls where the two
+# differ, the narrower auto arc is a "do not open fire at the very edge of the
+# envelope" rule; here the edge of the envelope IS the doctrine — the overlap
+# region a broadside orbit lives in reaches to 135 degrees off each bank's
+# facing, so narrowing the auto arc would switch off exactly the double
+# broadside this hull is built around.
+[weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0
+fire_arc_deg = 270
+auto_arc_deg = 270
+beam_range = 55
+beam_damage_per_sec = 6
+beam_duration_secs = 5
+cooldown_secs = 4
+shield_pierce = 0.1
+beam_color = [1.0, 0.35, 0.08, 1.0]
+
+[[weapons_console.phaser_banks]]
+id = "aft"
+facing_deg = 180
+fire_arc_deg = 270
+auto_arc_deg = 270
+beam_range = 55
+beam_damage_per_sec = 6
+beam_duration_secs = 5
+cooldown_secs = 4
+shield_pierce = 0.1
+beam_color = [1.0, 0.35, 0.08, 1.0]
+
+# ── Torpedoes: the shield opportunity (issue #791) ────────────────────────────
+#
+# #790 shipped this hull with no `[torpedoes]` table at all, on the reasoning
+# that "a ship that never presents its bow to the enemy has nothing to launch a
+# fixed forward tube at". #791 changes the premise rather than the reasoning: the
+# cruiser now DOES present its bow, once, deliberately, for the few seconds an
+# arc it has just stripped is down. See the header.
+#
+# The loadout is authored around that single use and would be poor for anything
+# else, which is the point:
+#
+# * `damage_shields = 0`. These rounds are not a way through a shield, they are
+#   what goes through the hole the beams made. A shot that arrives after the arc
+#   is back does nothing at all — which is the cost of a phase entered too early,
+#   and the reason the abort transition exists.
+# * a short `lifespan` and a low `turn_rate_deg_per_sec`. Barely homing: the
+#   bow-on line-up is what aims them, not the seeker. It is also what makes
+#   "every projectile has hit, missed or EXPIRED" a state the phase actually
+#   reaches within a few seconds rather than a theoretical one.
+# * `load_time` far longer than the phase. The tubes cannot be refilled inside
+#   one opportunity, so the cruiser gets one salvo per shield gap and then goes
+#   back to stripping the next arc. That, not a cooldown, is what stops the
+#   doctrine collapsing into "hold the bow on and empty the magazine".
+[torpedoes]
+count = 8
+burst_interval_secs = 0.35
+damage_hull = 34
+damage_shields = 0
+speed = 45.0
+turn_rate_deg_per_sec = 25.0
+lifespan = 6.0
+load_time = 9.0
+detonation_radius = 4.0
+
+# TWO forward tubes, not one, and that is what makes `fact(tubes_full)` mean
+# something: with a single tube "every tube is full" would be indistinguishable
+# from "this tube is full" and the salvo doctrine would be untestable content.
+#
+# The 24-degree arc is the other half of the phase's premise. It is narrow enough
+# that the orbit — which holds the target abeam by construction — can never
+# satisfy it, so the cruiser genuinely has to break off and point. Widen it and
+# the manoeuvre becomes decoration.
+[[torpedoes.tubes]]
+id = "bow_port"
+facing_deg = 0.0
+fire_arc_deg = 24.0
+volley_max = 2
+ai_target_count = 2
+
+  # The per-tube doctrine (issue #791) — the first hull in the set to author one.
+  #
+  # LOAD is unconditional: the tubes are kept full between opportunities, because
+  # a tube that starts loading when the shield goes down has already missed the
+  # window (`load_time` is 9 s; the window is a few).
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  # LAUNCH takes all three of AC2's conditions, continuously, every tick:
+  #
+  # * `tubes_full` — every tube at its `volley_max`. The whole salvo goes at
+  #   once or none of it does; a dribble of single rounds into a gap that is
+  #   closing is how the magazine empties for nothing.
+  # * `target_facing_shields <= 0` — the striking ARC is not blocking. An HP
+  #   reading, not a boolean, and per-arc rather than ship-wide: the host
+  #   resolves it through the target's own arc router, so this gate and the
+  #   eventual hit agree about which arc is in the way.
+  # * `in_arc` — the target is inside THIS tube's 24-degree cone. It is the
+  #   Steering phase above that puts it there, and this guard is what makes the
+  #   two halves of the manoeuvre one thing rather than two hopeful ones.
+  #
+  # Any of the three going false holds fire on the next tick without the tube
+  # needing to be told the opportunity is over.
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
+
+[[torpedoes.tubes]]
+id = "bow_starboard"
+facing_deg = 0.0
+fire_arc_deg = 24.0
+volley_max = 2
+ai_target_count = 2
+
+  # Identical doctrine to `bow_port`: the tubes fire as one salvo, so they must
+  # answer their channels the same way. Authored per tube rather than shared
+  # because a tube's policy is a property of the tube — a later refit that gives
+  # one of them a different arc would change its answer and not the other's.
+  [torpedoes.tubes.ai]
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_load"
+  when = "true"
+  verb = "load_torpedo"
+
+  [[torpedoes.tubes.ai.rule]]
+  priority = 0
+  channel = "torpedo_launch"
+  when = "fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  verb = "launch_torpedo"
+
+[comms]
+range = 700.0
+
+[ai_profile]
+aggression = 0.9
+# Wide enough that the cruiser sees its target well outside `engage_range` and
+# spends real time closing before the ring begins.
+sensor_range = 350.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Destroy only. The doctrine entry supplies the objective the helm surfaces
+# score; the *manoeuvre* is the policy machine's, not this section's —
+# `target_speed`/`maintain_range` here only apply on the fallback path (no orbit
+# target visible), where ordinary doctrine travel resumes.
+[behaviour]
+
+[[behaviour.doctrine]]
+id             = "destroy-hostiles"
+text           = "entity.ship_harrow_cruiser.behaviour.doctrine.destroy_hostiles.text"
+directive_kind = "Destroy"
+base_priority  = 40.0
+target_speed   = 0.8
+maintain_range = 42.0
+
+# Ship systems. No stations on this hull, so every system is ownerless and
+# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+# Declared for hull-uniformity with every other ship: no state in this doctrine
+# engages boost (and there is no `[helm_console.boost]` block), so the
+# declaration only gives the axis the standard damage/repair surface.
+[[system]]
+id = "helm-boost"
+kind = "helm_boost"
+ai_only = true
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+ai_only = true
+
+# Fine Tactical systems (issue #512): one per phaser bank, following the
+# `phaser-<bank_id>` naming convention. Without these entries neither bank is
+# registered as AI-operable and the hull would never fire at all.
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+ai_only = true
+
+[[system]]
+id = "phaser-aft"
+kind = "phaser_bank"
+ai_only = true
+
+# Ship-wide phaser settings: firing mode + emitter frequency. One declared system
+# (NOT per-bank) so SetPhaserMode/SetPhaserFrequency admission gates on a real
+# system.
+[[system]]
+id = "phaser-control"
+kind = "phaser_control"
+ai_only = true
+
+# Fine torpedo systems (issue #791): one per tube, following the
+# `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
+# shared magazine. Without the magazine entry NEITHER the loader nor the launcher
+# runs at all — both gate on it before they look at a tube — and without a tube's
+# own entry that tube is never AI-operable, so the salvo could never be full.
+[[system]]
+id = "torpedo-magazine"
+kind = "torpedo_magazine"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-bow-port"
+kind = "torpedo_tube"
+ai_only = true
+
+[[system]]
+id = "torpedo-tube-bow-starboard"
+kind = "torpedo_tube"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

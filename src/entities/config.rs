@@ -7087,15 +7087,26 @@ hull_max_hp = 6
              or 'rewards course changes after launch' is unobservable"
         );
 
-        // The bow cone is wide enough to admit the LEAD ANGLE the prediction
-        // produces, which is the failure mode a tighter arc would hide: the fire
-        // gate reads the target's CURRENT bearing while the hull is pointed at
-        // the intercept, so a cone sized for a stationary target declines exactly
-        // the shots the prediction exists to take.
+        // How much crossing speed the bow cone admits, which is the failure mode
+        // a tighter arc would hide: the fire gate reads the target's CURRENT
+        // bearing while the hull is pointed at the intercept, so a cone sized for
+        // a stationary target declines exactly the shots the prediction exists to
+        // take.
         //
-        // The reference is the fastest CRUISE speed the game ships, crossing
-        // square on, derived rather than guessed so a future speedster fails this
-        // instead of quietly going un-shootable.
+        // ## The lead angle is `asin(v/c)`, and it used to be `atan(v/c)`
+        //
+        // This derivation was re-authored when the intercept solver stopped being
+        // a first-order estimate. For a target crossing square across the line of
+        // sight at `v` against a bolt of speed `c`:
+        //
+        //   * the exact intercept solves `d² + (v·t)² = (c·t)²`, giving
+        //     `t = d / sqrt(c² − v²)` and a lead angle of `asin(v/c)`;
+        //   * the old estimate solved `t = d / c`, giving `atan(v/c)`.
+        //
+        // `asin` exceeds `atan` everywhere, and the gap widens fast as `v`
+        // approaches `c`. So an EXACT solver asks the cone for MORE headroom than
+        // the approximation ever did — the arc has not moved, the honest number
+        // for what it must admit has.
         let hulls = [
             include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
             include_str!("../../assets/entities/ship_harrow_cruiser.toml"),
@@ -7107,39 +7118,88 @@ hull_max_hp = 6
         .filter_map(|t| EntityConfig::from_toml(t).ok())
         .filter_map(|c| c.helm_console)
         .collect::<Vec<_>>();
-        let fastest_cruise = hulls.iter().map(|hc| hc.max_speed).fold(0.0_f32, f32::max);
+        let mut cruises = hulls.iter().map(|hc| hc.max_speed).collect::<Vec<_>>();
+        cruises.sort_by(f32::total_cmp);
+        let fastest_cruise = *cruises.last().expect("hulls resolve");
         assert!(
             fastest_cruise > 0.0,
             "precondition: a reference speed must resolve"
         );
-        let lead_angle = (fastest_cruise / bolt.projectile_speed).atan().to_degrees();
+        let half_arc = bolt.fire_arc_deg * 0.5;
+        let lead_angle = |v: f32| (v / bolt.projectile_speed).asin().to_degrees();
 
-        // CRUISE, and only cruise. Boost is excluded from the derivation on
-        // purpose, and the number is computed rather than argued so the exclusion
-        // stays honest: the destroyer authors a `[helm_console.boost] multiplier`,
-        // and a hull crossing on it produces a lead angle that does NOT fit this
-        // cone. The consequence is bounded and benign — the fire gate finds the
-        // target outside the arc and DECLINES the shot, so the battleship holds
-        // fire against a boosting crosser rather than loosing a mis-aimed bolt.
-        // Widening the arc to admit it would take a two-thirds cone, which is a
-        // turret rather than a bow mount and a different weapon from the one #792
-        // authored. So this asserts the case the arc is sized for, and a future
-        // hull with a faster CRUISE speed is what fails here.
+        // Inverted, the cone's own admission limit: the fastest square-on crosser
+        // whose lead still fits inside the half-arc.
+        //
+        // The inversion is `asin`'s, and `asin` only inverts `sin` on [0, 90].
+        // Past a 90 deg half-arc `sin` turns back down, so `admits_crossing`
+        // would start SHRINKING as the cone got wider and the pinned finding
+        // below would pass trivially while the cone admitted every lead there
+        // is — the exact silent pass this whole block exists to prevent. Assert
+        // it rather than trusting the reader, because a designer widening
+        // `fire_arc_deg` has no reason to come and read this.
+        assert!(
+            half_arc <= 90.0,
+            "this derivation inverts `asin` and is only valid up to a 90 deg \
+             half-arc; `fire_arc_deg` is now {} deg. A cone this wide admits \
+             every lead, so re-derive the admission limit (or drop it) rather \
+             than letting `sin` fold back and pass the finding below for free.",
+            bolt.fire_arc_deg
+        );
+        let admits_crossing = bolt.projectile_speed * half_arc.to_radians().sin();
+
+        // Every shipped hull EXCEPT the fastest is admitted at square-on cruise.
+        // This is the property that actually has to hold, and a content change
+        // that broke it — a slower bolt, a tighter cone, a general speed-up of the
+        // fleet — fails here.
+        for &v in &cruises[..cruises.len() - 1] {
+            assert!(
+                half_arc > lead_angle(v),
+                "the bow cone ({} deg) must admit the {} deg lead a {v} u/s \
+                 square-on crosser produces",
+                bolt.fire_arc_deg,
+                lead_angle(v)
+            );
+        }
+
+        // ## FINDING, pinned rather than papered over
+        //
+        // The fastest shipped CRUISE no longer fits. The Harrow destroyer crosses
+        // at 26 u/s against a 35 u/s bolt, which is `asin(26/35)` ≈ 48 deg of lead
+        // — past the 45 deg half-arc. Under the old first-order estimate it read
+        // `atan(26/35)` ≈ 37 deg and fitted, but that shot was never going to
+        // connect: the estimate was under-leading by a ship's length and more.
+        //
+        // The consequence is the same bounded, benign one boost has always had:
+        // the fire gate finds the target outside the arc and DECLINES, so the
+        // battleship holds its round against a full-cruise square-on crosser
+        // rather than loosing a mis-aimed bolt. It is only the SQUARE-ON case —
+        // any closing or opening component shortens the lead and brings the shot
+        // back inside the cone — and the destroyer is the only hull affected.
+        //
+        // The cone is deliberately NOT widened here. Admitting 26 u/s square-on
+        // wants a 96 deg cone, and past that the boost case (2.4× = 62 u/s, which
+        // is faster than the bolt and has no intercept at all) is unreachable at
+        // any width. That is a tuning decision for a designer — either widen the
+        // arc, or speed the bolt up — and it should be made on purpose, not
+        // acquired by an assertion quietly relaxing.
+        assert!(
+            fastest_cruise > admits_crossing,
+            "the bow cone ({} deg) admits square-on crossers up to \
+             {admits_crossing} u/s. If the fastest shipped cruise \
+             ({fastest_cruise} u/s) now fits, the finding recorded here is stale: \
+             re-read this comment and delete it rather than editing the number.",
+            bolt.fire_arc_deg
+        );
         let fastest_boosted = hulls
             .iter()
             .map(|hc| hc.max_speed * hc.boost.as_ref().map(|b| b.multiplier).unwrap_or(1.0))
             .fold(0.0_f32, f32::max);
-        let boosted_lead = (fastest_boosted / bolt.projectile_speed)
-            .atan()
-            .to_degrees();
         assert!(
-            bolt.fire_arc_deg * 0.5 > lead_angle,
-            "the bow cone ({} deg) must admit the {lead_angle} deg lead angle a \
-             target crossing at cruise ({fastest_cruise} units/s) produces — the \
-             fire gate reads the target's CURRENT bearing while the hull points at \
-             the intercept. (Boost is out of scope by design: {fastest_boosted} \
-             units/s would want {boosted_lead} deg, and that shot is declined.)",
-            bolt.fire_arc_deg
+            fastest_boosted > bolt.projectile_speed,
+            "and a BOOSTED crosser ({fastest_boosted} u/s) outruns the bolt \
+             ({} u/s) outright — no cone admits a shot that has no intercept",
+            bolt.projectile_speed
         );
     }
 

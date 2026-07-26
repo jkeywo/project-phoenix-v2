@@ -378,19 +378,47 @@ pub(crate) fn tick_blaster_auto_fire(
 /// whatever the helm integrator produced, not a helm decision. It deliberately
 /// does not opt into the debug `HelmPhysicsWriteGuard`. See the writer-policy
 /// table on `ShipPhysics` (`src/ship/state.rs`).
+///
+/// # Why the queries are a [`ParamSet`] (the blaster-less-target fix)
+///
+/// The intercept solve needs the *target's* velocity, and a target is any ship
+/// — not only one that happens to carry blaster banks. The firing query below
+/// takes `&mut ShipPhysics` (recoil) and `&mut BlasterSystemResource`, so it
+/// only ever yields ships with a blaster bank; building the velocity map from
+/// it silently resolved every blaster-less hull to `(0.0, 0.0)` and aimed the
+/// gun exactly where the target was standing. That is most of the shipped
+/// content — `pirate_raider` and `alliance_cruiser` author no blaster bank —
+/// so the lead vanished against precisely the hulls the artillery shoots at.
+///
+/// A plain second `Query<(&EntityUuid, &ShipPhysics), With<Ship>>` cannot
+/// coexist with the firing query's `&mut ShipPhysics`: the two overlap and
+/// Bevy panics on conflicting access. `ParamSet` is the mechanism for exactly
+/// this — it makes the overlap explicit and lets only one half be borrowed at
+/// a time, which suits a pass that reads every ship's velocity ONCE up front
+/// and then never touches the read half again. The alternatives were worse: a
+/// `Without<BlasterSystemResource>` split relies on the archetypes staying
+/// exactly complementary and needs the map merged from two sources, and
+/// dropping `&mut ShipPhysics` would take recoil with it.
 pub(crate) fn tick_blaster_system(
     time: Res<Time>,
-    mut ship_q: Query<
-        (
-            Option<&crate::entity_spawner::EntityUuid>,
-            &Transform,
-            Option<&ModelMarkers>,
-            &mut ShipPhysics,
-            Option<&crate::server_app::ShipSystemBlackboards>,
-            &mut BlasterSystemResource,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut ship_qs: ParamSet<(
+        // p0 — the firing pass: every ship that carries blaster banks.
+        Query<
+            (
+                Option<&crate::entity_spawner::EntityUuid>,
+                &Transform,
+                Option<&ModelMarkers>,
+                &mut ShipPhysics,
+                Option<&crate::server_app::ShipSystemBlackboards>,
+                &mut BlasterSystemResource,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+        // p1 — the velocity pass: EVERY ship, blaster-carrying or not. A ship
+        // with no `EntityUuid` can never be a combat lock, so it is filtered
+        // by the query rather than skipped in the body.
+        Query<(&crate::entity_spawner::EntityUuid, &ShipPhysics), With<crate::server_app::Ship>>,
+    )>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut outbox: ResMut<SimOutbox>,
@@ -404,22 +432,21 @@ pub(crate) fn tick_blaster_system(
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
 
-    // Pre-compute world-space velocity for every ship so the per-ship loop
-    // below can look up the target's velocity for intercept prediction.
-    // We read via `ship_q.iter()` (shared access to ShipPhysics) before the
-    // main loop uses `ship_q.iter_mut()`, avoiding a Bevy SystemParam conflict.
-    let ship_velocities: std::collections::HashMap<String, (f32, f32)> = {
-        let mut map = std::collections::HashMap::new();
-        for (uuid_opt, _, _, physics, _, _) in ship_q.iter() {
-            if let Some(uuid) = uuid_opt {
-                let vx = physics.forward_speed * physics.yaw.sin();
-                let vz = -physics.forward_speed * physics.yaw.cos();
-                map.insert(uuid.0.clone(), (vx, vz));
-            }
-        }
-        map
-    };
+    // Pre-compute world-space velocity for EVERY ship (see the ParamSet note
+    // on this fn) so the per-ship loop below can look up the target's velocity
+    // for intercept prediction. Read through `p1` and finished with before the
+    // firing pass borrows `p0`.
+    let ship_velocities: std::collections::HashMap<String, (f32, f32)> = ship_qs
+        .p1()
+        .iter()
+        .map(|(uuid, physics)| {
+            let vx = physics.forward_speed * physics.yaw.sin();
+            let vz = -physics.forward_speed * physics.yaw.cos();
+            (uuid.0.clone(), (vx, vz))
+        })
+        .collect();
 
+    let mut ship_q = ship_qs.p0();
     for (source_uuid_opt, transform, markers_opt, mut physics, blackboards_opt, mut blaster_res) in
         ship_q.iter_mut()
     {

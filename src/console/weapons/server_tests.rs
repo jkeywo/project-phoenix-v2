@@ -10411,6 +10411,243 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
     );
 }
 
+/// A moving target that carries **no blaster banks of its own** must still be
+/// led. This is the regression test for the velocity-map defect.
+///
+/// `tick_blaster_system` built its per-target velocity map by iterating its own
+/// firing query, and that query requires `&mut BlasterSystemResource` — so only
+/// blaster-CARRYING ships ever landed in the map. Every other hull missed the
+/// lookup, resolved to `(0.0, 0.0)`, and the intercept solver aimed exactly at
+/// the target's live bearing with no lead whatsoever. That is most of the
+/// shipped content: `pirate_raider` and `alliance_cruiser` author no blaster
+/// bank at all, which is to say precisely the hulls the artillery shoots at.
+///
+/// The geometry is chosen so the correct answer is a round number and the
+/// broken answer is zero — nothing here turns on a tolerance. The target sits
+/// 100 units dead ahead crossing square at 20 u/s against a 40 u/s bolt, so the
+/// exact lead is `asin(20/40)` = 30°. Unled, the heading is the live bearing:
+/// 0°. Both are asserted, so a future change that merely perturbs the lead
+/// fails as loudly as one that removes it.
+#[test]
+fn a_target_with_no_blaster_banks_is_still_led() {
+    use crate::entity_spawner::EntityUuid;
+    use std::f32::consts::FRAC_PI_2;
+
+    let mut app = test_app();
+
+    let shooter_uuid = "bb000000-0000-0000-0000-000000000090";
+    let target_uuid = "bb000000-0000-0000-0000-000000000091";
+
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+
+    // Shooter at (10, 10), yaw 0 → bow along −Z. Away from the `LocalShip` at
+    // the origin so the bolt cannot be consumed by an unrelated hull.
+    let shooter = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(shooter_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            // Seeds the viewscreen combat_lock via `seed_viewscreen_from_selection`.
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            crate::messages::AdmittedCommands::default(),
+            ShipPhysics {
+                x: 10.0,
+                z: 10.0,
+                ..Default::default()
+            },
+            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                crate::blaster::BlasterBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 360.0,
+                    volley_count: 1,
+                    volley_interval_secs: 0.1,
+                    cooldown_secs: 3.0,
+                    charge_time_secs: 0.0,
+                    projectile_speed: 40.0,
+                    collision_radius: 1.5,
+                    visual_scale: 1.0,
+                    damage: 10,
+                    shield_pierce: 0.0,
+                    recoil_impulse: 0.0,
+                    screenshake_magnitude: 0.0,
+                    marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
+                    range: 200.0,
+                },
+            )]),
+            Transform::from_xyz(10.0, 0.0, 10.0),
+        ))
+        .id();
+
+    // The target: a full `Ship` with live `ShipPhysics`, 100 units dead ahead,
+    // yaw +90° → heading along +X at 20 u/s. It deliberately carries NO
+    // `BlasterSystemResource` — that omission IS the test.
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        EntityUuid(target_uuid.to_string()),
+        ShipPhysics {
+            x: 10.0,
+            z: -90.0,
+            yaw: FRAC_PI_2,
+            forward_speed: 20.0,
+            ..Default::default()
+        },
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(10.0, 0.0, -90.0),
+    ));
+
+    app.update();
+
+    let bank = &app
+        .world()
+        .get::<BlasterSystemResource>(shooter)
+        .expect("the shooter keeps its blaster bank")
+        .0[0];
+    assert_eq!(
+        bank.in_flight.len(),
+        1,
+        "the bank must have launched exactly one bolt for this test to say \
+         anything about its heading"
+    );
+
+    let heading = bank.in_flight[0].heading;
+    let led = (20.0_f32 / 40.0).asin(); // 30°, the exact square-on lead.
+    let live_bearing = 0.0_f32; // the target's CURRENT bearing: dead ahead.
+
+    assert!(
+        (heading - led).abs() < 1e-3,
+        "a blaster-less crosser must be led by the full solved angle: heading \
+         {} deg, expected {} deg",
+        heading.to_degrees(),
+        led.to_degrees()
+    );
+    assert!(
+        (heading - live_bearing).abs() > 0.1,
+        "the counterfactual: with the target's velocity unseen the solver aims \
+         at the live bearing ({} deg) and the bolt trails the target — heading \
+         was {} deg",
+        live_bearing.to_degrees(),
+        heading.to_degrees()
+    );
+}
+
+/// The control for `a_target_with_no_blaster_banks_is_still_led`: the SAME
+/// geometry against a target that does carry a blaster bank was always led
+/// correctly, which is why the defect stayed invisible. Pinning both halves
+/// keeps the map's coverage — not the solver — as the thing under test.
+#[test]
+fn a_blaster_carrying_target_is_led_identically() {
+    use crate::entity_spawner::EntityUuid;
+    use std::f32::consts::FRAC_PI_2;
+
+    fn dummy_bank() -> BlasterSystemResource {
+        BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+            crate::blaster::BlasterBankConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 360.0,
+                volley_count: 1,
+                volley_interval_secs: 0.1,
+                cooldown_secs: 3.0,
+                charge_time_secs: 0.0,
+                projectile_speed: 40.0,
+                collision_radius: 1.5,
+                visual_scale: 1.0,
+                damage: 10,
+                shield_pierce: 0.0,
+                recoil_impulse: 0.0,
+                screenshake_magnitude: 0.0,
+                marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                range: 200.0,
+            },
+        )])
+    }
+
+    let mut app = test_app();
+
+    let shooter_uuid = "bb000000-0000-0000-0000-000000000092";
+    let target_uuid = "bb000000-0000-0000-0000-000000000093";
+
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+
+    let shooter = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(shooter_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            crate::messages::AdmittedCommands::default(),
+            ShipPhysics {
+                x: 10.0,
+                z: 10.0,
+                ..Default::default()
+            },
+            dummy_bank(),
+            Transform::from_xyz(10.0, 0.0, 10.0),
+        ))
+        .id();
+
+    // Identical to the target above in every respect BUT the blaster bank.
+    app.world_mut().spawn((
+        crate::server_app::Ship,
+        EntityUuid(target_uuid.to_string()),
+        ShipPhysics {
+            x: 10.0,
+            z: -90.0,
+            yaw: FRAC_PI_2,
+            forward_speed: 20.0,
+            ..Default::default()
+        },
+        dummy_bank(),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(10.0, 0.0, -90.0),
+    ));
+
+    app.update();
+
+    let bank = &app
+        .world()
+        .get::<BlasterSystemResource>(shooter)
+        .expect("the shooter keeps its blaster bank")
+        .0[0];
+    assert_eq!(
+        bank.in_flight.len(),
+        1,
+        "the bank must have launched a bolt"
+    );
+
+    let heading = bank.in_flight[0].heading;
+    let led = (20.0_f32 / 40.0).asin();
+    assert!(
+        (heading - led).abs() < 1e-3,
+        "heading {} deg, expected the same {} deg lead the blaster-less target gets",
+        heading.to_degrees(),
+        led.to_degrees()
+    );
+}
+
 /// NPC with AI-controlled blaster has target out of range — must NOT fire.
 #[test]
 fn tick_blaster_auto_fire_skips_when_target_out_of_range() {

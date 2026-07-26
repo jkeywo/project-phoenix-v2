@@ -1230,10 +1230,17 @@ pub struct ArtilleryPositionInput<'a> {
 /// SAME [`crate::weapons::blaster::predict_intercept_heading`] the bolt itself is
 /// launched on, at the same lead speed — so the bow ends up on the heading the
 /// gun will actually fire, and the AI's aim cannot drift from its own ballistics.
-/// The fallback that function takes when it cannot lead (no flight speed, or a
-/// predicted point sitting on the shooter) is passed as "the heading straight at
-/// the target right now", which is the honest degradation rather than a frozen
-/// heading.
+/// That function solves the closed-form intercept
+/// ([`crate::weapons::blaster::solve_intercept_time`]) rather than estimating a
+/// flight time, so the bow leads a crossing target by the full solved angle
+/// instead of the systematically short first-order one — the gun and the bow
+/// improve together, because they are the same call.
+/// The fallback that function takes when it cannot lead at all (no flight speed,
+/// or a predicted point sitting on the shooter) is passed as "the heading
+/// straight at the target right now", which is the honest degradation rather
+/// than a frozen heading. When an intercept simply does not exist — a target
+/// outrunning the bolt — the solver's own first-order degradation applies, and
+/// the bow still points ahead of the runner rather than at it.
 ///
 /// **Avoidance bends the hold** exactly as it bends every other leg: the shared
 /// repulsion steering is summed onto the solved facing and the result clamped.

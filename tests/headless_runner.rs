@@ -941,6 +941,183 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
     );
 }
 
+/// Issue #792, the whole doctrine end-to-end: the Harrow battleship actually
+/// FIRES its artillery in a real run.
+///
+/// Every unit test above the line asserts one link — the machine reaches `hold`,
+/// the host publishes the leg, the planner solves an intercept, the bolt is
+/// ballistic. None of them can see the chain snap in production, and there are
+/// several places it could: the helm doctrine could park the hull outside its own
+/// bank's arc or range, the artillery bank's `[[system]]` declaration could go
+/// missing so the bank is never AI-operable, or `tick_blaster_auto_fire`'s
+/// admitted `ChargeBlasterStart` could be wiped before `handle_fire_blaster` saw
+/// it — the exact failure #791 found on the torpedo path, where every unit test
+/// passed because the harness supplied the edge the production schedule did not.
+///
+/// `BlasterFired` is proof rather than a proxy: nobody is connected, so no human
+/// `ChargeBlasterStart` exists, and this hull's only blaster is the bow artillery
+/// piece #792 authored.
+#[test]
+fn the_harrow_battleship_fires_its_artillery_in_a_real_run() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/duel.toml".into(),
+        side_a: vec!["cruiser".into()],
+        side_b: vec!["ship_harrow_warhawk".into()],
+        dt,
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        seed: Some(792),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    let fired = report
+        .message_counts
+        .get("BlasterFired")
+        .copied()
+        .unwrap_or(0);
+    assert!(
+        fired > 0,
+        "the battleship never fired its bow artillery in a real duel — the chain \
+         from `hold_artillery_position` through the bank's `[[system]]` \
+         declaration to `handle_fire_blaster` is broken somewhere no unit test \
+         can see. message_counts: {:?}",
+        report.message_counts
+    );
+}
+
+/// Issue #792's blocking defect, end-to-end: the battleship must actually come
+/// to rest on its authored holding radius in a real run, with the impulse drive
+/// production attaches to it present and attached.
+///
+/// [`the_harrow_battleship_fires_its_artillery_in_a_real_run`] above proves the
+/// FIRE chain and nothing about the standoff — `duel.toml` anchors side B 55
+/// units from the player, so the bank fires by luck of geometry and the run-in is
+/// never flown at all. The unit tests, for their part, all measured a hull posed
+/// at or near its holding radius.
+///
+/// Between those two there was no coverage of the one geometry that matters, and
+/// a defect lived in it. `entities::spawner` attaches an `ImpulseConfigResource`
+/// to every hull declaring a `[helm_console]`, taking parse defaults of engage
+/// 200 / cancel 40 — a window the authored 180-unit hold band sits entirely
+/// inside — and the impulse autopilot in `integrate_ship_physics` replaces
+/// commanded throttle with `thrust = 1.0` for as long as the drive runs. So the
+/// hull entered `hold` at 180, commanded `SetThrust{0.0}` every tick, and flew
+/// straight through its own gun line to the drive's 40-unit release range.
+///
+/// `probe_artillery_standoff.toml` is built for exactly this: the battleship
+/// starts 300 units out, so it flies a real run-in from beyond its own envelope,
+/// and its doctrine is replaced wholesale by the scenario without a `use_impulse`
+/// — the shape `duel.toml` and `combat_test.toml`'s wave 8 both use, and the one
+/// that makes a doctrine-level fix worthless. The stopping distance is the
+/// assertion because it is where the defect is a NUMBER: ~180 when the doctrine
+/// is flown, ~40 when the drive is flying the hull.
+#[test]
+fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
+    use project_phoenix::entity_config::EntityConfig;
+    use project_phoenix::server_app::{Ship, ShipImpulse};
+    use project_phoenix::ship_plugin::ImpulseConfigResource;
+
+    /// The battleship's range to the player, and its own speed.
+    fn standoff(app: &mut App) -> (f32, f32) {
+        let player = *app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>()
+            .single(app.world())
+            .expect("exactly one player ship");
+        let npc = *app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, (With<Ship>, Without<LocalShip>)>()
+            .single(app.world())
+            .expect("exactly one NPC — the battleship");
+        let (dx, dz) = (npc.x - player.x, npc.z - player.z);
+        ((dx * dx + dz * dz).sqrt(), npc.forward_speed)
+    }
+
+    // The hull's own authored band, so this asserts against content rather than
+    // against numbers restated here.
+    let hull = EntityConfig::from_toml(include_str!("../assets/entities/ship_harrow_warhawk.toml"))
+        .expect("the shipped battleship hull must parse");
+    let param = |name: &str| -> f32 {
+        hull.helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .and_then(|ai| ai.param.get(name).copied())
+            .unwrap_or_else(|| panic!("the shipped battleship must author `{name}`"))
+    };
+    let max_artillery_range = param("max_artillery_range");
+    let artillery_hold_range = param("artillery_hold_range");
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_artillery_standoff.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        seed: Some(792),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+
+    // One second in: spawned, promoted, and still well outside its own envelope.
+    // Without this the whole run could pass by starting where it means to finish.
+    run(&mut app, ticks_for_sim_seconds(1.0, dt));
+    let (start_range, _) = standoff(&mut app);
+    assert!(
+        start_range > max_artillery_range,
+        "precondition: the battleship must begin OUTSIDE its artillery envelope \
+         ({max_artillery_range}), or no run-in is flown; got {start_range}"
+    );
+
+    // The drive that discards the doctrine really is on this hull in production.
+    // If a future change stops attaching it, this test would go on passing while
+    // no longer proving anything, so the presence is asserted rather than assumed.
+    let mut drive = app
+        .world_mut()
+        .query_filtered::<(&ImpulseConfigResource, &ShipImpulse), (With<Ship>, Without<LocalShip>)>(
+        );
+    let (impulse_cfg, _) = drive
+        .single(app.world())
+        .expect("the spawner attaches an impulse drive to every [helm_console] hull");
+    assert!(
+        impulse_cfg.engage_distance < start_range
+            && impulse_cfg.cancel_distance < artillery_hold_range,
+        "precondition: this run only exercises the defect while the hold band \
+         ({artillery_hold_range}) sits inside the drive's cruise window \
+         (engage {}, cancel {})",
+        impulse_cfg.engage_distance,
+        impulse_cfg.cancel_distance
+    );
+
+    // Fly the run-in out. 120 units at 9 units/s is ~14 s; the rest is settling
+    // time, so what is read below is where the hull STOPS, not where it is.
+    run(&mut app, ticks_for_sim_seconds(35.0, dt));
+    let (settled_range, settled_speed) = standoff(&mut app);
+    assert!(
+        settled_speed.abs() < 0.1,
+        "the battleship must come to rest, got {settled_speed} units/s"
+    );
+    assert!(
+        (settled_range - artillery_hold_range).abs() < artillery_hold_range * 0.1,
+        "the battleship must stop on its authored holding radius \
+         ({artillery_hold_range}); got {settled_range}. A reading near the impulse \
+         drive's cancel distance is the autopilot having overridden the hold's \
+         own `SetThrust{{0.0}}` all the way in"
+    );
+
+    // ...and it STAYS there. "Holds station" is a claim about a range that stops
+    // changing, so it needs two readings separated by real flown time.
+    run(&mut app, ticks_for_sim_seconds(20.0, dt));
+    let (held_range, _) = standoff(&mut app);
+    assert!(
+        (held_range - settled_range).abs() < 1.0,
+        "the firing position must be HELD: {held_range} vs {settled_range}"
+    );
+}
+
 /// Issue #844 AC: an asymmetric duel driven from `--side-a`/`--side-b` runs
 /// `duel.toml` to a classified annihilation, with side-tagged ledgers and side
 /// aggregates.

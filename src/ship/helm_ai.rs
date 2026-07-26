@@ -1341,6 +1341,31 @@ pub struct HelmPassSurface {
     /// with no standoff doctrine would have to invent five unrelated numbers to
     /// borrow this one (AGENTS.md #11).
     pub torpedo_bearing_speed: f32,
+    // ── The artillery firing position (issue #792) ───────────────────────────
+    //
+    // A SEVENTH leg and a FIFTH independent leg set, resolved exactly like the
+    // six above: off the authored yaw verb, never off a state name. It shares
+    // nothing with the ring legs (a held position has no radius and no
+    // circulation) and nothing with the bow hold (which tracks the target's live
+    // position with no lead), so it carries its own throttle and its own lead
+    // speed.
+    /// `true` once the Steering machine's current state answers the `yaw`
+    /// channel with `hold_artillery_position` AND the hull authors the full
+    /// artillery parameter set: the ship is holding translational station and
+    /// pivoting its bow onto a predicted intercept.
+    pub artillery_hold: bool,
+    /// Authored throttle fraction flown while the firing position is held
+    /// (Steering `param`). `0.0` holds translational station.
+    pub artillery_hold_speed: f32,
+    /// The lead speed the intercept is solved at, world units/s: the flight
+    /// speed of the hull's longest-reaching blaster bank.
+    ///
+    /// DERIVED host-side from this ship's OWN armament, not authored — the same
+    /// posture [`Self::safe_range`] takes toward the target's reach, and for the
+    /// same reason: a second authored copy of a weapon's flight speed is a number
+    /// that can silently disagree with the weapon. `0.0` when the hull carries no
+    /// blaster bank, which the planner degrades to aiming at the live position.
+    pub artillery_lead_speed: f32,
 }
 
 /// The fact name the shared hazard surface is seeded under by
@@ -1718,6 +1743,92 @@ fn torpedo_bearing_params_authored(params: &crate::world::flags::AiParams) -> bo
         .all(|name| params.get(name).is_some())
 }
 
+// ── Authored artillery-position params (issue #792) ──────────────────────────
+//
+// The artillery platform's own three scalars, read off the STEERING policy for
+// the same reason every other leg's are: Steering's yaw verb is what tells the
+// host which leg is being flown. There is no default for any of them anywhere in
+// Rust, and the host gates the arm on ALL THREE together — see
+// [`ARTILLERY_PARAMS`].
+
+/// The outer edge of the artillery envelope, world units. Beyond it the doctrine
+/// stops holding and starts repositioning.
+///
+/// AUTHORED, and deliberately not derived from the bank's own `range`. The two
+/// are related but they are not the same statement: `range` is where a bolt
+/// stops existing, and this is where a designer decided the gun line is no longer
+/// worth holding. Deriving one from the other would silently re-tune the
+/// manoeuvre every time a weapon was rebalanced.
+pub(crate) const MAX_ARTILLERY_RANGE_PARAM: &str = "max_artillery_range";
+/// The inner edge: repositioning stops here and the firing position is taken.
+/// Authored BELOW [`MAX_ARTILLERY_RANGE_PARAM`], and the gap between the two IS
+/// the hysteresis — one threshold would have the hull chattering between closing
+/// and holding every time the target drifted across it.
+pub(crate) const ARTILLERY_HOLD_RANGE_PARAM: &str = "artillery_hold_range";
+/// Throttle fraction flown while the firing position is held.
+///
+/// Its own name rather than a reuse of [`TORPEDO_BEARING_SPEED_PARAM`] or
+/// [`REENGAGE_SPEED_PARAM`] for the reason those two are distinct from each
+/// other: the value a hull wants here is very often `0.0`, and `0.0` is exactly
+/// the value that cannot be distinguished from "unauthored" unless the gate asks
+/// for the NAME.
+pub(crate) const ARTILLERY_HOLD_SPEED_PARAM: &str = "artillery_hold_speed";
+
+/// Every scalar the artillery-position arm needs, gated as ONE unit by
+/// [`artillery_params_authored`].
+///
+/// All three, for the reason #788's, #789's and #790's reviews all landed on: a
+/// gate that requires only some of the params an arm needs admits a
+/// partially-authored hull into an arm it half-flies. A hull authoring the hold
+/// throttle but neither range would hold station wherever it happened to be; one
+/// authoring the ranges but not the throttle would take the firing position at an
+/// invented zero and never be told it had. Declining the whole arm leaves the
+/// hull flying ordinary doctrine travel, which is a behaviour a designer can
+/// actually see.
+///
+/// Note the two range params are ALSO structurally required, because the
+/// doctrine's own transition guards reference them by name and content
+/// validation rejects an undeclared `param(...)` at load. That is a second lock
+/// on the same door rather than a reason to leave this one open: the gate is over
+/// the arm's whole requirement, so a future hull that reads a range host-side
+/// without guarding on it cannot leave a half-gated arm behind.
+pub(crate) const ARTILLERY_PARAMS: &[&str] = &[
+    MAX_ARTILLERY_RANGE_PARAM,
+    ARTILLERY_HOLD_RANGE_PARAM,
+    ARTILLERY_HOLD_SPEED_PARAM,
+];
+
+/// Does this Steering policy author the complete artillery scalar set?
+///
+/// The sibling of [`recovery_params_authored`], [`combat_orbit_params_authored`]
+/// and [`torpedo_bearing_params_authored`], and separate from all three on
+/// purpose: an artillery platform has no shield-recovery doctrine, no ring and no
+/// torpedo tubes.
+fn artillery_params_authored(params: &crate::world::flags::AiParams) -> bool {
+    ARTILLERY_PARAMS
+        .iter()
+        .all(|name| params.get(name).is_some())
+}
+
+/// The lead speed the artillery hold predicts with: the flight speed of the
+/// hull's longest-reaching blaster bank (issue #792).
+///
+/// A HOST reading of the ship's own armament rather than an authored duplicate of
+/// it, for the same reason [`SAFE_RANGE_FACT`] is derived rather than authored: a
+/// second copy of a weapon's flight speed is a number that can silently disagree
+/// with the weapon. The artillery piece is by construction the hull's
+/// longest-reaching direct-fire bolt — that is what makes the standoff a standoff
+/// — so "longest range" is the selector, and a hull with no blaster bank at all
+/// reads `0.0`, which [`crate::ai::plan_artillery_position`] degrades to aiming at
+/// the target's live position rather than at an invented intercept.
+fn artillery_lead_speed(banks: &[crate::blaster::BlasterSystem]) -> f32 {
+    banks
+        .iter()
+        .max_by(|a, b| a.config.range.total_cmp(&b.config.range))
+        .map(|bank| bank.config.projectile_speed)
+        .unwrap_or(0.0)
+}
+
 // ── Torpedo-opportunity facts (issue #791) ───────────────────────────────────
 //
 // SCOPE, and it is the same narrow one the recovery and pressed facts have:
@@ -2081,6 +2192,11 @@ pub(crate) fn ai_policy_state_tick(
             // `tick_torpedo_lifecycle` removes from it, both in `SimSet::Physics`
             // — so `ship_plugin` pins this system after both of them.
             Option<&crate::weapons_plugin::TorpedoSystemResource>,
+            // This ship's OWN blaster banks (issue #792), read for their authored
+            // `range`/`projectile_speed` alone. Bank CONFIG never changes at
+            // runtime, so unlike the tubes above this carries no ordering
+            // question — no system in the schedule writes the field this reads.
+            Option<&crate::weapons_plugin::BlasterSystemResource>,
             // The SHIP field of the orbit-direction composite key.
             Option<&crate::entity_spawner::EntityUuid>,
             HelmPolicyRuntime,
@@ -2134,6 +2250,7 @@ pub(crate) fn ai_policy_state_tick(
         boost_policy,
         shields,
         torpedoes,
+        blasters,
         entity_uuid,
         mut runtime,
     ) in ships.iter_mut()
@@ -2340,6 +2457,10 @@ pub(crate) fn ai_policy_state_tick(
             sources,
             &facts,
             now,
+            // The artillery lead speed (issue #792): a reading of this hull's own
+            // longest-reaching bolt, resolved here so the pure planner never has
+            // to know what a blaster bank is.
+            blasters.map(|b| artillery_lead_speed(&b.0)).unwrap_or(0.0),
         );
         *runtime.pass = surface;
     }
@@ -2468,13 +2589,15 @@ where
 /// * the SHIELD-RECOVERY standoff ([`RECOVERY_PARAMS`]) → `recover`/`reengage`,
 /// * the COMBAT broadside orbit ([`COMBAT_ORBIT_PARAMS`]) → `combat_orbit`,
 /// * the TORPEDO-OPPORTUNITY bow hold ([`TORPEDO_BEARING_PARAMS`]) →
-///   `torpedo_bearing`.
+///   `torpedo_bearing`,
+/// * the ARTILLERY firing position ([`ARTILLERY_PARAMS`]) → `artillery_hold`
+///   (issue #792).
 ///
 /// They are gated separately because a hull may author any one of them without
-/// the others: the destroyer authors the first two and neither of the rest, the
-/// cruiser the last two and neither of the first. Only the two steering-response
-/// scalars are common to all four — every pure planner arm takes them — so
-/// those alone are required unconditionally.
+/// the others: the destroyer authors the first two and none of the rest, the
+/// cruiser the third and fourth, the battleship the fifth alone. Only the two
+/// steering-response scalars are common to all five — every pure planner arm
+/// takes them — so those alone are required unconditionally.
 fn build_pass_surface(
     engines_policy: &crate::ai::policy::AiPolicy,
     steering_policy: &crate::ai::policy::AiPolicy,
@@ -2482,6 +2605,10 @@ fn build_pass_surface(
     sources: &ShipSystemControlSources,
     facts: &crate::world::flags::AiFacts,
     now: f64,
+    // The lead speed the artillery hold predicts with, read host-side off this
+    // hull's own armament (issue #792). Not an authored param, so it is handed
+    // in rather than looked up here — see [`HelmPassSurface::artillery_lead_speed`].
+    artillery_lead_speed: f32,
 ) -> HelmPassSurface {
     let travel_axes_ai = sources
         .0
@@ -2592,16 +2719,41 @@ fn build_pass_surface(
         _ => (false, 0.0),
     };
 
+    // ── The artillery firing position (issue #792) ───────────────────────────
+    //
+    // Gated independently of every set above: an artillery platform authors no
+    // shield-recovery doctrine, no ring and no torpedo tubes, and none of those
+    // has any business being a precondition for holding a gun line. All THREE of
+    // its own params are required together — see [`ARTILLERY_PARAMS`] — because
+    // the throttle a hull most often wants here is `0.0`, which is
+    // indistinguishable from "unauthored" unless the gate asks for the name.
+    let (artillery_hold, artillery_hold_speed) = match (
+        artillery_params_authored(&steering_policy.params),
+        steering_policy.params.get(ARTILLERY_HOLD_SPEED_PARAM),
+    ) {
+        (true, Some(speed)) => (
+            yaw_verb == Some(&crate::ai::policy::AiPolicyVerb::HoldArtilleryPosition),
+            speed as f32,
+        ),
+        _ => (false, 0.0),
+    };
+
     // At least ONE leg set has to be fully authored, or there is nothing for the
     // planner to fly and the hull is better served by ordinary doctrine travel.
-    // `recover`/`reengage`/`combat_orbit`/`torpedo_bearing` are per-tick verb
-    // readings, so the gate is over the PARAM sets rather than over this tick's
-    // booleans — a recovery-capable hull must publish `active` while it is still
-    // inbound.
+    // `recover`/`reengage`/`combat_orbit`/`torpedo_bearing`/`artillery_hold` are
+    // per-tick verb readings, so the gate is over the PARAM sets rather than over
+    // this tick's booleans — a recovery-capable hull must publish `active` while
+    // it is still inbound.
     let recovery_legs = recovery_params_authored(&steering_policy.params);
     let combat_orbit_legs = combat_orbit_params_authored(&steering_policy.params);
     let torpedo_bearing_legs = torpedo_bearing_params_authored(&steering_policy.params);
-    if !pass_legs && !recovery_legs && !combat_orbit_legs && !torpedo_bearing_legs {
+    let artillery_legs = artillery_params_authored(&steering_policy.params);
+    if !pass_legs
+        && !recovery_legs
+        && !combat_orbit_legs
+        && !torpedo_bearing_legs
+        && !artillery_legs
+    {
         return HelmPassSurface::default();
     }
 
@@ -2640,6 +2792,13 @@ fn build_pass_surface(
         combat_orbit_spiral_gain,
         torpedo_bearing,
         torpedo_bearing_speed,
+        artillery_hold,
+        artillery_hold_speed,
+        // Published unconditionally, like `safe_range`: it is a reading of the
+        // hull's own armament rather than part of the artillery gate, and a hull
+        // with no blaster bank publishes `0.0` — which is exactly when the
+        // planner has no flight time to lead by either.
+        artillery_lead_speed,
     }
 }
 
@@ -3452,6 +3611,12 @@ pub(crate) fn ai_helm_steering(
                 // only job is to emit it — and emitting it through the planner
                 // is what keeps hazard avoidance composing onto the hold.
                 | Some(&crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing)
+                // ...and issue #792's artillery firing position, for the fifth
+                // time and the same reason: the planner already solved the
+                // facing against the PREDICTED intercept, so this axis's only
+                // job is to emit it — and emitting it through the planner is
+                // what keeps hazard avoidance composing onto the hold.
+                | Some(&crate::ai::policy::AiPolicyVerb::HoldArtilleryPosition)
         );
         if !actuates {
             continue;
@@ -5831,6 +5996,34 @@ mod tests {
             .single_mut(app.world_mut())
             .expect("expected Ship with ShipSystemBlackboards");
         bbs.0.insert(entry.0, entry.1);
+    }
+
+    /// Put `uuid` in the frozen viewscreen's Combat Lock (issue #829), leaving
+    /// the blackboard's scored objectives alone.
+    ///
+    /// In production `ai_target_selection` publishes this lock for any ship
+    /// pursuing a Destroy directive, and `ai_helm_impulse` is the one helm axis
+    /// that resolves its target through it rather than through the directive's
+    /// own name — so a fixture that poses a Destroy objective without a lock has
+    /// an impulse system that can never resolve a target and therefore never
+    /// acts. Must be called AFTER `set_ship_blackboard_objectives`, which
+    /// replaces the whole viewscreen blackboard.
+    fn set_ship_combat_lock(app: &mut App, uuid: uuid::Uuid) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::server_app::ShipSystemBlackboards, With<Ship>>();
+        let mut bbs = q
+            .single_mut(app.world_mut())
+            .expect("expected Ship with ShipSystemBlackboards");
+        match bbs
+            .0
+            .get_mut(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.combat_lock = Some(uuid.to_string());
+            }
+            _ => panic!("set the viewscreen blackboard's objectives before its combat lock"),
+        }
     }
 
     fn world_config_with_anchor(anchor: &str, pos: [f32; 3]) -> crate::world::config::WorldConfig {
@@ -12779,5 +12972,743 @@ when = "state_time >= param(surge_dwell_secs)"
                 "omitting `{omitted}` must keep declining the arm"
             );
         }
+    }
+
+    // ── The Harrow Battleship artillery position (issue #792) ────────────────
+    //
+    // Same posture as the cruiser block above: these drive the SHIPPED hull's
+    // authored policies through a real ticking app, so they fail on the content
+    // as well as on the code, and every assertion is about something observable
+    // — an admitted actuator input, the published pass surface, the committed
+    // policy state, or the ship's own flown range.
+    //
+    // The ships here are allowed to FLY rather than being posed each tick,
+    // because every claim below is a claim about what a position does over time:
+    // "holds station" is only observable as a range that stops changing, and
+    // "pivots onto a lead" is only observable as a bearing that converges on one.
+
+    fn warhawk_hull() -> crate::entity_config::EntityConfig {
+        crate::entity_config::EntityConfig::from_toml(include_str!(
+            "../../assets/entities/ship_harrow_warhawk.toml"
+        ))
+        .expect("the shipped battleship hull must parse")
+    }
+
+    /// The battleship's authored Steering `param`s, so expectations below are
+    /// arithmetic on named values rather than magic numbers.
+    fn warhawk_steering_param(name: &str) -> f32 {
+        warhawk_hull()
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .and_then(|ai| ai.param.get(name).copied())
+            .unwrap_or_else(|| panic!("the shipped battleship must author `{name}`"))
+    }
+
+    /// The bolt whose flight speed the artillery hold leads by — the hull's
+    /// longest-reaching blaster bank, resolved exactly as the host resolves it.
+    fn warhawk_artillery_bank() -> crate::entity_config::BlasterBankConfig {
+        let cfg = warhawk_hull();
+        let wc = cfg
+            .weapons_console
+            .as_ref()
+            .expect("the battleship declares [weapons_console]");
+        wc.blaster_banks
+            .iter()
+            .max_by(|a, b| a.range.total_cmp(&b.range))
+            .expect("the battleship carries an artillery bank")
+            .clone()
+    }
+
+    /// A ship carrying the shipped battleship's two authored policy machines, its
+    /// physics envelope, and its artillery bank — the same components
+    /// `entities::spawner` would attach — hunting a single named bogey, with the
+    /// named STEERING `param`s optionally stripped from the hull before its
+    /// policy is built (the partially-authored hull AGENTS.md #11 says must
+    /// decline rather than invent).
+    ///
+    /// The bank is attached because the LEAD SPEED is a host reading of it. A
+    /// fixture without one would publish a zero lead speed, the predictive
+    /// solution would silently degrade to "aim at where it is", and the aim test
+    /// below would pass by measuring the wrong thing.
+    ///
+    /// The battleship authors no boost drive and no boost doctrine, so nothing
+    /// boost-shaped is inserted here either: the fixture mirrors the hull.
+    ///
+    /// The IMPULSE drive, by contrast, is attached — and it is attached because
+    /// leaving it out was how #792's blocking defect hid. `entities::spawner`
+    /// gives an `ImpulseConfigResource` to every hull that declares a
+    /// `[helm_console]`, and the impulse autopilot in `integrate_ship_physics`
+    /// hard-overrides commanded throttle with `thrust = 1.0`. A fixture that
+    /// omitted the drive measured this doctrine in a world without the one
+    /// component capable of discarding it, so "holds station" could pass here
+    /// while the shipped hull sailed straight through its own gun line. The three
+    /// pieces below are the spawner's, verbatim in shape: the per-hull drive
+    /// config off `[helm_console]`, the authored `[helm_console.impulse_ai]`
+    /// policy (falling back to the canonical unconditional permit exactly as the
+    /// spawner does, so a hull that stopped authoring one is measured on the
+    /// default it would really get), and a `BehaviourSection` — `ai_helm_impulse`
+    /// reads `use_impulse` off the doctrine entry matching the top objective, so
+    /// without one the drive is unreachable and the fixture is back to lying.
+    ///
+    /// That doctrine entry is deliberately in the SCENARIO shape rather than the
+    /// hull's own: a bare Destroy with no `use_impulse`, which is what
+    /// `assets/worlds/duel.toml` and `combat_test.toml`'s wave 8 hand this hull
+    /// when they replace its doctrine list wholesale, and which
+    /// `effective_use_impulse()` resolves to TRUE. It is the permissive case, so
+    /// anything that holds here holds for the hull's own doctrine too.
+    ///
+    /// Each omitted name must actually be present to begin with, so this cannot
+    /// quietly pass by "removing" a param the hull renamed out from under it.
+    fn artillery_app_omitting(bogey_pos: [f32; 3], omit: &[&str]) -> (App, uuid::Uuid) {
+        let mut app = test_app();
+        let cfg = warhawk_hull();
+        let mut hc = cfg
+            .helm_console
+            .clone()
+            .expect("hull declares [helm_console]");
+        for name in omit {
+            hc.steering_ai
+                .as_mut()
+                .expect("hull declares [helm_console.steering_ai]")
+                .param
+                .remove(*name)
+                .unwrap_or_else(|| panic!("the shipped hull must author `{name}` to omit it"));
+        }
+        let banks: Vec<crate::blaster::BlasterSystem> = cfg
+            .weapons_console
+            .as_ref()
+            .expect("hull declares [weapons_console]")
+            .blaster_banks
+            .iter()
+            .map(|b| crate::blaster::BlasterSystem::new(b.to_runtime()))
+            .collect();
+        let ship = find_ship_entity(&mut app);
+        app.world_mut().entity_mut(ship).insert((
+            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
+            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
+            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
+                max_speed: hc.max_speed,
+                max_reverse_speed: hc.max_reverse_speed,
+                acceleration: hc.acceleration,
+                deceleration: hc.deceleration,
+                max_yaw_rate: hc.max_yaw_rate,
+                ..crate::ship_physics::ShipPhysicsConfig::new()
+            }),
+            crate::weapons_plugin::BlasterSystemResource(banks),
+            // The impulse drive, exactly as `entities::spawner` builds it — see
+            // the doc comment for why its absence was load-bearing.
+            HelmImpulseAiPolicy(match hc.impulse_ai.as_ref() {
+                Some(ai) => ai.to_policy().expect("authored impulse policy decodes"),
+                None => crate::entities::config::default_impulse_ai_config()
+                    .to_policy()
+                    .expect("the canonical impulse policy decodes"),
+            }),
+            ImpulseConfigResource {
+                charge_duration: hc.impulse_charge_duration,
+                speed_multiplier: hc.impulse_speed_multiplier,
+                acceleration_multiplier: hc.impulse_acceleration_multiplier,
+                engage_distance: hc.impulse_engage_distance,
+                cancel_distance: hc.impulse_cancel_distance,
+                steering_multiplier: cfg
+                    .helm_capability
+                    .as_ref()
+                    .map(|cap| cap.impulse.steering_multiplier)
+                    .unwrap_or(crate::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT),
+            },
+        ));
+        let objective = destroy_scored_objective(BOGEY, 80.0);
+        // The scenario-shaped doctrine entry the drive's `use_impulse` gate reads
+        // — id-matched to the objective above, because that is how the two meet in
+        // production. `use_impulse` is left unauthored on purpose (see the doc
+        // comment): that is the permissive default every shipped scenario hands
+        // this hull.
+        set_behaviour_section(
+            &mut app,
+            crate::entity_config::BehaviourConfig {
+                doctrine: vec![crate::entity_config::DoctrineObjective {
+                    id: objective.id.clone(),
+                    directive_kind: Some("Destroy".into()),
+                    base_priority: 80.0,
+                    target_speed: 0.9,
+                    maintain_range: 25.0,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        set_ship_blackboard_objectives(&mut app, vec![objective]);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let uuid = uuid::Uuid::new_v4();
+        set_bogey(&mut app, uuid, bogey_pos, 0.0, 0.0);
+        // The Tactical lock `ai_target_selection` would have published. The helm's
+        // travel axes resolve their target from the Destroy directive's own name
+        // and so never needed it, but `ai_helm_impulse` resolves through the lock
+        // alone — the last of the three things whose absence made this fixture a
+        // world the impulse drive could not act in.
+        set_ship_combat_lock(&mut app, uuid);
+        (app, uuid)
+    }
+
+    /// Put the battleship at `start_range` from the bogey at the origin, pointed
+    /// straight at it and coasting inbound at its doctrine throttle — the pose
+    /// the approach would have delivered it in.
+    fn run_to_artillery_omitting(start_range: f32, omit: &[&str]) -> (App, uuid::Uuid) {
+        let (mut app, uuid) = artillery_app_omitting(ORBIT_BOGEY, omit);
+        let speed = warhawk_hull().helm_console.as_ref().unwrap().max_speed;
+        // Down `+Z` from the bogey at the origin, facing `-Z` — which is straight
+        // at it, since ship forward is `(sin yaw, -cos yaw)`.
+        place_ship(&mut app, 0.0, start_range, 0.0, speed);
+        // Two ticks: the first publishes the pass surface, the second is the
+        // first planner pass that consumes it (see `HelmPassSurface`).
+        tick_twice(&mut app);
+        (app, uuid)
+    }
+
+    fn run_to_artillery(start_range: f32) -> (App, uuid::Uuid) {
+        run_to_artillery_omitting(start_range, &[])
+    }
+
+    /// AC1/AC2: the range band is TWO thresholds, and the gap between them is
+    /// hysteresis rather than slack.
+    ///
+    /// Four readings, and each one is a different claim:
+    ///
+    /// * beyond the outer edge the hull is repositioning, not holding;
+    /// * crossing the outer edge INWARD does not stop it — the run-in continues
+    ///   through the band, which is the half a single threshold cannot express;
+    /// * reaching the inner edge stops it;
+    /// * and once holding, drifting back out past the inner edge does NOT restart
+    ///   it. Only clearing the OUTER edge does.
+    ///
+    /// The first reading is also the anti-trap for an unseeded fact: before the
+    /// travel axes were seeded a `fact(range_to_target)` guard validated at load
+    /// and read false for ever. That this test can distinguish "far" from "near"
+    /// at all is the proof the guard actually gates.
+    #[test]
+    fn the_artillery_band_is_two_thresholds_with_hysteresis_between_them() {
+        let max = warhawk_steering_param(MAX_ARTILLERY_RANGE_PARAM);
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        assert!(
+            hold < max,
+            "precondition: the band must have a gap, or every reading below is \
+             the same reading"
+        );
+
+        // Beyond the outer edge: closing.
+        let (mut app, uuid) = run_to_artillery(max * 1.5);
+        assert_eq!(
+            steering_state(&mut app),
+            "reposition",
+            "a target beyond the artillery envelope must be closed on — if this \
+             reads `acquire` the travel axis is seeing empty facts"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "reposition",
+            "Engines runs its OWN copy of the machine and must reach the same leg \
+             from the same facts, not by reading Steering's state"
+        );
+        assert!(
+            !pass_surface(&mut app).artillery_hold,
+            "and the host must not publish the hold leg for a ship still closing"
+        );
+
+        // INSIDE the outer edge but outside the inner one: still closing. This is
+        // the reading that fails if the two thresholds are collapsed into one.
+        let between = (max + hold) * 0.5;
+        set_ship_physics(
+            &mut app,
+            ShipPhysics {
+                z: between,
+                ..Default::default()
+            },
+        );
+        set_bogey(&mut app, uuid, ORBIT_BOGEY, 0.0, 0.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "reposition",
+            "inside `max_artillery_range` but outside `artillery_hold_range` the \
+             run-in must continue: the ENTRY threshold is the inner one"
+        );
+
+        // The inner edge stops it.
+        let (mut app, uuid) = run_to_artillery(hold * 0.99);
+        assert_eq!(
+            steering_state(&mut app),
+            "hold",
+            "reaching the inner edge must take up the firing position"
+        );
+        assert_eq!(engines_state(&mut app), "hold");
+
+        // ...and drifting back out past the INNER edge does not restart it.
+        let between = (max + hold) * 0.5;
+        set_ship_physics(
+            &mut app,
+            ShipPhysics {
+                z: between,
+                ..Default::default()
+            },
+        );
+        set_bogey(&mut app, uuid, ORBIT_BOGEY, 0.0, 0.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "hold",
+            "the EXIT threshold is the outer one — a hull that left the moment it \
+             drifted past the entry threshold would chatter across the band"
+        );
+
+        // Only clearing the outer edge does.
+        set_ship_physics(
+            &mut app,
+            ShipPhysics {
+                z: max * 1.2,
+                ..Default::default()
+            },
+        );
+        set_bogey(&mut app, uuid, ORBIT_BOGEY, 0.0, 0.0);
+        tick_twice(&mut app);
+        assert_eq!(
+            steering_state(&mut app),
+            "reposition",
+            "beyond `max_artillery_range` the hull must start repositioning again"
+        );
+        assert_eq!(engines_state(&mut app), "reposition");
+    }
+
+    /// AC3, the translational half: inside the band the hull commands the authored
+    /// hold throttle, actually comes to a stop, and STAYS at the range it stopped
+    /// at.
+    #[test]
+    fn the_firing_position_holds_station_rather_than_travelling() {
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        let (mut app, _uuid) = run_to_artillery(hold * 0.99);
+        assert_eq!(steering_state(&mut app), "hold");
+
+        let pass = pass_surface(&mut app);
+        assert!(pass.active, "the battleship must be flying an authored leg");
+        assert!(pass.artillery_hold, "and that leg is the artillery hold");
+        assert!(
+            !pass.combat_orbit
+                && !pass.recover
+                && !pass.reengage
+                && !pass.escape
+                && !pass.torpedo_bearing,
+            "the artillery hold is its own leg — it must not masquerade as a ring \
+             it never flies nor as the bow hold, which leads by nothing"
+        );
+        assert_eq!(
+            pass.artillery_hold_speed,
+            warhawk_steering_param(ARTILLERY_HOLD_SPEED_PARAM),
+            "the hold flies the hull's OWN authored throttle"
+        );
+
+        let entry_speed = ship_pose(&mut app).forward_speed;
+        assert!(
+            entry_speed > 0.0,
+            "precondition: the battleship must have been moving, or 'holds \
+             station' is unobservable"
+        );
+        // One more tick before reading the throttle: the surface asserted above
+        // was published at the END of this tick, and the planner consumes the
+        // PREVIOUS tick's surface (see `HelmPassSurface`'s one-tick offset).
+        tick(&mut app);
+        assert_eq!(
+            get_thrust_input(&mut app),
+            warhawk_steering_param(ARTILLERY_HOLD_SPEED_PARAM),
+            "the commanded throttle is the authored hold fraction"
+        );
+
+        // It genuinely stops, and then genuinely stays.
+        fly_for(&mut app, 12.0);
+        assert_eq!(steering_state(&mut app), "hold");
+        let settled = ship_pose(&mut app).forward_speed;
+        assert!(
+            settled.abs() < 0.1,
+            "the hull must come to rest in its firing position, got {settled}"
+        );
+        let settled_range = range_to_bogey(&mut app);
+        fly_for(&mut app, 12.0);
+        assert_eq!(steering_state(&mut app), "hold");
+        assert!(
+            (range_to_bogey(&mut app) - settled_range).abs() < 0.5,
+            "and the range must stop changing: {} vs {settled_range}",
+            range_to_bogey(&mut app)
+        );
+    }
+
+    /// AC2/AC3 against the drive that used to discard them: a run-in that starts
+    /// OUTSIDE the artillery envelope must end inside the band.
+    ///
+    /// Every other test in this block poses the hull at or near its holding
+    /// radius and measures what it does from there. That skips the one geometry
+    /// where the impulse drive engages — the autopilot only lights up beyond
+    /// `impulse_engage_distance` (200 by parse default) with the bow on the
+    /// target, which is precisely the pose an artillery run-in arrives in. From
+    /// there it holds `thrust = 1.0` until the target is inside
+    /// `impulse_cancel_distance` (40), overriding the `SetThrust{0.0}` the hold
+    /// commands the whole way down. The hull entered `hold` at 180, said stop,
+    /// and did not stop.
+    ///
+    /// So this flies the approach rather than posing it, and asserts the
+    /// stopping point — which is where the defect is legible as a number: 180 if
+    /// the doctrine is flown, ~40 if the drive is flying the hull instead. The
+    /// idle phase is asserted alongside it because it names the CAUSE rather than
+    /// the symptom, and would still fail if a future change re-permitted the
+    /// channel while some other brake happened to stop the ship in the band.
+    #[test]
+    fn the_run_in_from_outside_the_envelope_stops_inside_the_band() {
+        let max = warhawk_steering_param(MAX_ARTILLERY_RANGE_PARAM);
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+
+        // Well beyond the envelope, bow on the target, at cruise — the pose the
+        // impulse autopilot engages from.
+        let (mut app, _uuid) = run_to_artillery(max * 1.5);
+        assert_eq!(
+            steering_state(&mut app),
+            "reposition",
+            "precondition: a target beyond the envelope must start a run-in"
+        );
+
+        // Long enough to cover the run-in (120 units at 9 units/s) several times
+        // over, so this measures where the hull SETTLES rather than where it
+        // happened to be. The drive is sampled every tick rather than read at the
+        // end, because it CANCELS itself on arrival — a final reading of `Idle`
+        // is what both the healthy hull and the broken one show.
+        let mut drive_ever_engaged = None;
+        for _ in 0..((60.0 / HELM_AI_MAX_DT_SECS).ceil() as usize) {
+            tick(&mut app);
+            let phase = get_ship_impulse(&mut app).phase;
+            if phase != crate::impulse::ImpulsePhase::Idle && drive_ever_engaged.is_none() {
+                drive_ever_engaged = Some((phase, range_to_bogey(&mut app)));
+            }
+        }
+
+        assert_eq!(
+            steering_state(&mut app),
+            "hold",
+            "the run-in must end in the firing position"
+        );
+        assert_eq!(
+            drive_ever_engaged, None,
+            "the battleship must never engage its impulse drive: the autopilot \
+             replaces commanded throttle with full thrust, so an engaged drive \
+             discards the hold's `SetThrust{{0.0}}` for as long as it runs"
+        );
+        let settled = ship_pose(&mut app).forward_speed;
+        assert!(
+            settled.abs() < 0.1,
+            "and it must actually be stopped, got {settled}"
+        );
+        let range = range_to_bogey(&mut app);
+        assert!(
+            (range - hold).abs() < hold * 0.1,
+            "the hull must come to rest at its authored holding radius ({hold}); \
+             got {range}. A reading near the drive's `impulse_cancel_distance` is \
+             the autopilot having flown the hull through its own gun line"
+        );
+    }
+
+    /// AC5: the battleship holds rather than retreating when the player closes.
+    ///
+    /// Stated as the property that would break if a `maintain_range`-style
+    /// standoff crept into the doctrine: the target is walked from the inner edge
+    /// of the band all the way to point-blank, and at every step the hull must
+    /// still be in `hold`, must still command the authored throttle, and must
+    /// never command REVERSE.
+    #[test]
+    fn the_battleship_holds_rather_than_retreating_when_the_target_closes() {
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        let (mut app, uuid) = run_to_artillery(hold * 0.99);
+        assert_eq!(steering_state(&mut app), "hold");
+        fly_for(&mut app, 12.0);
+        let station = range_to_bogey(&mut app);
+
+        // Walk the bogey in. Each step is a real approach, not a teleport to the
+        // end: a doctrine that only backed off below some inner limit would slip
+        // through a single point-blank reading.
+        for fraction in [0.75_f32, 0.5, 0.25, 0.05] {
+            let pose = ship_pose(&mut app);
+            let closer = [pose.x * (1.0 - fraction), 0.0, pose.z * (1.0 - fraction)];
+            set_bogey(&mut app, uuid, closer, 0.0, 0.0);
+            fly_for(&mut app, 2.0);
+
+            assert_eq!(
+                steering_state(&mut app),
+                "hold",
+                "a closing target must not push the battleship out of its firing \
+                 position (target at {fraction} of the station range)"
+            );
+            assert_eq!(
+                get_thrust_input(&mut app),
+                warhawk_steering_param(ARTILLERY_HOLD_SPEED_PARAM),
+                "and the commanded throttle must stay the authored hold fraction"
+            );
+            assert!(
+                get_thrust_input(&mut app) >= 0.0,
+                "a battleship that answered a charge with reverse thrust would be \
+                 kiting, which is the manoeuvre this hull deliberately does not fly"
+            );
+        }
+
+        // The hull has not moved off its station through any of that.
+        assert!(
+            (range_to_bogey(&mut app) - station).abs() < station,
+            "sanity: the hull's own position must not have run away"
+        );
+        let pose = ship_pose(&mut app);
+        assert!(
+            pose.forward_speed.abs() < 0.1,
+            "and it is still stationary, got {}",
+            pose.forward_speed
+        );
+    }
+
+    /// AC3's facing half, and the whole reason this leg is not
+    /// `hold_torpedo_bearing`: the bow goes onto the PREDICTED INTERCEPT, not
+    /// onto the target.
+    ///
+    /// The two are only distinguishable against a target with real crossing
+    /// velocity, so the bogey is given one — and the expected lead is derived
+    /// from the SAME `predict_intercept_heading` the bolt is launched on, at the
+    /// authored bank speed, so this asserts agreement between the aim and the
+    /// ballistics rather than agreement with a number written here.
+    ///
+    /// The control is the assertion that carries it: the settled bow bearing to
+    /// where the target IS must be non-zero and must sit on the side the target
+    /// is travelling towards. A leg that merely tracked would settle at zero.
+    #[test]
+    fn the_firing_position_pivots_onto_a_predicted_intercept_not_onto_the_target() {
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        let bank = warhawk_artillery_bank();
+        // Crossing square across the line of sight, fast enough that the lead is
+        // a real angle rather than float noise.
+        let crossing_speed = 24.0_f32;
+        let crossing_yaw = std::f32::consts::FRAC_PI_2; // heading +X
+
+        let (mut app, uuid) = run_to_artillery(hold * 0.99);
+        assert_eq!(steering_state(&mut app), "hold");
+        set_bogey(&mut app, uuid, ORBIT_BOGEY, crossing_yaw, crossing_speed);
+        // Let the hull settle onto the solution. The bogey's snapshot position is
+        // held still deliberately: a target that both moved and was led would mix
+        // "did the bow follow it" into a test about "did the bow lead it".
+        fly_for(&mut app, 25.0);
+        assert_eq!(
+            steering_state(&mut app),
+            "hold",
+            "everything below is about the HOLD, so the hold must still be the \
+             resolved state"
+        );
+
+        let pose = ship_pose(&mut app);
+        // The heading the gun itself would fire on, from this pose.
+        let expected = crate::weapons::blaster::predict_intercept_heading(
+            pose.x,
+            pose.z,
+            ORBIT_BOGEY[0],
+            ORBIT_BOGEY[2],
+            crossing_yaw.sin() * crossing_speed,
+            -crossing_yaw.cos() * crossing_speed,
+            bank.projectile_speed,
+            pose.yaw,
+            0.0,
+        );
+        let lead_error = crate::ai::target_relative_motion(
+            [pose.x, pose.y, pose.z],
+            pose.yaw,
+            0.0,
+            [
+                pose.x + expected.sin() * 100.0,
+                0.0,
+                pose.z - expected.cos() * 100.0,
+            ],
+            Some(0.0),
+            0.0,
+        )
+        .bearing_rad;
+        assert!(
+            lead_error.abs() < warhawk_steering_param(TRACKING_DEADBAND_PARAM) * 2.0,
+            "the bow must settle on the heading the gun fires ({expected} rad); \
+             residual bearing error {lead_error} rad"
+        );
+
+        // ...and that heading is NOT the bearing to the target. This is the
+        // control: a leg that tracked the live position would leave this at zero.
+        let live_error = bearing_to_bogey(&mut app);
+        assert!(
+            live_error.abs() > warhawk_steering_param(TRACKING_DEADBAND_PARAM) * 3.0,
+            "a predictive solution must be OFF the target's live bearing against a \
+             crossing target — got {live_error} rad, which is what a plain \
+             tracking leg would produce"
+        );
+        assert!(
+            live_error < 0.0,
+            "and the lead must fall on the side the target is travelling TOWARDS: \
+             the bogey runs +X, so the aim point is to STARBOARD of it and the \
+             target's own live bearing therefore sits to port of the bow. A \
+             positive reading would be a lead aimed behind a crossing target; got \
+             {live_error}"
+        );
+    }
+
+    /// "Decline rather than invent", over the artillery arm's whole requirement.
+    ///
+    /// All THREE params, one at a time. The throttle is the one an authored value
+    /// cannot distinguish from an omission — this hull authors `0.0` — and the two
+    /// ranges are here because a gate over only part of an arm's requirement is
+    /// the exact mistake #788's and #790's reviews each caught once.
+    ///
+    /// The shipped hull holds its position at this exact point (asserted above),
+    /// so nothing here passes for want of getting that far.
+    #[test]
+    fn a_hull_omitting_an_artillery_param_declines_the_whole_arm() {
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        for omitted in ARTILLERY_PARAMS {
+            let (mut app, _uuid) = run_to_artillery_omitting(hold * 0.99, &[omitted]);
+
+            // Omitting the THROTTLE changes nothing about the machine — the verb
+            // parses and resolves either way, and the state is reached exactly as
+            // the shipped hull reaches it. That is what makes this the sharp case:
+            // the leg is selected, the host simply refuses to fly it. (The two
+            // range params are different: their names appear in the machine's own
+            // guards, so removing one strands the machine in `acquire`. It is
+            // rejected outright at content load — see
+            // `harrow_warhawk_cannot_drop_a_guard_referenced_artillery_range` —
+            // and this loop covers what the host does if one ever reached it.)
+            if *omitted == ARTILLERY_HOLD_SPEED_PARAM {
+                assert_eq!(
+                    steering_state(&mut app),
+                    "hold",
+                    "omitting `{omitted}` must not change which state is entered"
+                );
+            }
+            let pass = pass_surface(&mut app);
+            assert!(
+                !pass.artillery_hold,
+                "omitting `{omitted}` must decline the artillery arm outright"
+            );
+            assert_eq!(
+                pass.artillery_hold_speed, 0.0,
+                "the whole arm declines together, not part of it"
+            );
+
+            // And it stays declined.
+            fly_for(&mut app, 3.0);
+            assert!(
+                !pass_surface(&mut app).artillery_hold,
+                "omitting `{omitted}` must keep declining the arm"
+            );
+        }
+    }
+
+    /// AC6: hazard avoidance may RELOCATE the firing position, and may not turn
+    /// the battleship into something that orbits or kites.
+    ///
+    /// The relocation is measured on the LATERAL axis, and it has to be: a hull
+    /// that has come to rest projects no forward path, so `avoidance_steering` —
+    /// which is the layer that bends a *travelling* leg — is zero by construction
+    /// for a ship holding station (`avoidance_steering_is_zero_when_stationary`
+    /// pins that directly). `ai_helm_lateral_thrust` is the layer that actually
+    /// nudges a stopped hull sideways off its held point, it runs as its own fine
+    /// system, and it never touches Engines or Steering — which is exactly what
+    /// makes the detour "limited". The pure planner's own additive fold is pinned
+    /// where it is testable, on the pure function
+    /// (`artillery_position_folds_avoidance_onto_the_intercept_facing`).
+    ///
+    /// The other half is the absence: the machine must never leave `hold` for any
+    /// of it. A detour that became a state would be a manoeuvre with an exit to
+    /// get stuck in, and re-entering the hold afterwards would be a second
+    /// commitment nobody authored.
+    #[test]
+    fn a_hazard_relocates_the_firing_position_without_ending_the_hold() {
+        let hold = warhawk_steering_param(ARTILLERY_HOLD_RANGE_PARAM);
+        let (mut app, uuid) = run_to_artillery(hold * 0.99);
+        fly_for(&mut app, 12.0);
+        assert_eq!(steering_state(&mut app), "hold");
+        assert_eq!(
+            lateral_intent(&mut app),
+            0.0,
+            "precondition: an unobstructed gun line commands no dodge, or the \
+             reading below is not the hazard's doing"
+        );
+        let station = range_to_bogey(&mut app);
+
+        // Drop a large, dangerous obstacle right alongside the hull, off to one
+        // side so the repulsion is a genuine lateral push rather than a head-on
+        // one. The bogey is republished with it: the snapshot is the whole world.
+        let pose = ship_pose(&mut app);
+        let hazard = uuid::Uuid::new_v4();
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid,
+                    name: Some(BOGEY.into()),
+                    position: ORBIT_BOGEY,
+                    yaw: Some(0.0),
+                    forward_speed: 0.0,
+                    radius: 3.0,
+                    size_rating: 3.0,
+                    movable: true,
+                    dangerous: true,
+                    ..Default::default()
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: hazard,
+                    name: Some("rock".into()),
+                    position: [pose.x + 5.0, 0.0, pose.z - 5.0],
+                    yaw: None,
+                    forward_speed: 0.0,
+                    radius: 9.0,
+                    size_rating: 9.0,
+                    movable: false,
+                    dangerous: true,
+                    ..Default::default()
+                },
+            ],
+        });
+        tick_twice(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "hold",
+            "a hazard must NOT be a leg: the doctrine authors no hazard-guarded \
+             transition, so the detour stays a stateless bend"
+        );
+        assert!(
+            pass_surface(&mut app).artillery_hold,
+            "and the published leg is still the artillery hold"
+        );
+        assert!(
+            lateral_intent(&mut app) < 0.0,
+            "the hull must be pushed sideways AWAY from the obstacle (it sits to \
+             starboard, so the dodge is to port); got {}",
+            lateral_intent(&mut app)
+        );
+        assert_eq!(
+            get_thrust_input(&mut app),
+            warhawk_steering_param(ARTILLERY_HOLD_SPEED_PARAM),
+            "and the dodge must not become a translation the ENGINES fly: the \
+             hold's throttle is untouched by hazards"
+        );
+
+        // Clearing the hazard evaporates the detour: no state was entered, so
+        // there is none to leave, and the gun line is where it was.
+        set_bogey(&mut app, uuid, ORBIT_BOGEY, 0.0, 0.0);
+        fly_for(&mut app, 3.0);
+        assert_eq!(steering_state(&mut app), "hold");
+        assert!(pass_surface(&mut app).artillery_hold);
+        assert_eq!(
+            lateral_intent(&mut app),
+            0.0,
+            "the dodge must evaporate with the hazard rather than persisting as \
+             state"
+        );
+        assert!(
+            (range_to_bogey(&mut app) - station).abs() < 5.0,
+            "and the firing position is RELOCATED, not abandoned: {} vs {station}",
+            range_to_bogey(&mut app)
+        );
     }
 }

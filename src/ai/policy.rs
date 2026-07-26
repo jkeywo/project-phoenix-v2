@@ -173,6 +173,32 @@ pub enum AiPolicyVerb {
     /// tubes cover and whether a salvo is still in flight are all host readings,
     /// never authored constants.
     HoldTorpedoBearing,
+    /// Hold the artillery firing position (the `yaw` channel's SEVENTH mode verb,
+    /// issue #792).
+    ///
+    /// The battleship leg. Says the facing solution is neither "track the target"
+    /// nor "hold a ring" nor "point at where the target IS" but "point at where
+    /// the target WILL BE when my bolt arrives" — a predictive intercept
+    /// solution, re-solved every tick from the target's reconstructed velocity
+    /// and the artillery bolt's own authored flight speed — while the
+    /// TRANSLATIONAL axes hold station on the authored hold throttle.
+    ///
+    /// It is its own verb rather than a reuse of [`AiPolicyVerb::PivotToReengage`]
+    /// or [`AiPolicyVerb::HoldTorpedoBearing`], and the reason is different for
+    /// each. The re-engage pivot's host gate is the six shield-RECOVERY scalars —
+    /// a standoff ring derived from the *target's* reach, which an artillery
+    /// platform has no business inventing to borrow a turn (AGENTS.md #11). The
+    /// bow hold tracks the target's LIVE position with no lead at all, which is
+    /// the right answer for a fixed tube settling on a shield gap a few units
+    /// away and the wrong one for a slow bolt with several seconds of flight
+    /// time: at artillery range "where it is" and "where it will be" are
+    /// different bearings, and firing at the first is firing at nothing.
+    ///
+    /// Value-less like every other mode verb: the hold throttle and the range
+    /// band are authored Steering `param`s, and the lead speed is a host reading
+    /// of the hull's own longest-reaching bolt — never an authored duplicate of
+    /// it.
+    HoldArtilleryPosition,
     /// Actuate the lateral-thrust axis this tick (the `lateral` channel of the
     /// Lateral Thrust fine system, issue #780). A mode verb: the continuous
     /// starboard/port magnitude comes from the shared hazard assessment weighted

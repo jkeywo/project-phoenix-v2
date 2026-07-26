@@ -1664,9 +1664,21 @@ pub const HELM_HOLD_COMBAT_ORBIT_VERB: &str = "hold_combat_orbit";
 /// but whose host gate is the six-scalar shield-RECOVERY parameter set: a hull
 /// with no standoff doctrine would have to invent all six to borrow it.
 pub const HELM_HOLD_TORPEDO_BEARING_VERB: &str = "hold_torpedo_bearing";
+/// The `hold_artillery_position` verb: the Steering fine system's SEVENTH mode
+/// verb (issue #792). Tells the host to hold translational station on the
+/// authored `artillery_hold_speed` while pivoting the bow onto a PREDICTIVE
+/// intercept solution — where the target will be when this hull's own artillery
+/// bolt arrives, not where it is now.
+///
+/// Deliberately NOT a reuse of `pivot_to_reengage` (whose host gate is the six
+/// shield-RECOVERY scalars, all describing a standoff ring derived from the
+/// TARGET's reach) nor of `hold_torpedo_bearing` (which tracks the target's live
+/// position with no lead at all — the right answer for a fixed tube at knife
+/// range and the wrong one for a slow bolt with seconds of flight time).
+pub const HELM_HOLD_ARTILLERY_POSITION_VERB: &str = "hold_artillery_position";
 
 /// The verbs a Steering (`yaw`) policy may emit
-/// (issues #779, #883, #788, #790, #791).
+/// (issues #779, #883, #788, #790, #791, #792).
 pub const HELM_STEERING_VERBS: &[&str] = &[
     HELM_ACTUATE_DESIRED_FACING_VERB,
     HELM_HOLD_COMMITTED_HEADING_VERB,
@@ -1674,6 +1686,7 @@ pub const HELM_STEERING_VERBS: &[&str] = &[
     HELM_PIVOT_TO_REENGAGE_VERB,
     HELM_HOLD_COMBAT_ORBIT_VERB,
     HELM_HOLD_TORPEDO_BEARING_VERB,
+    HELM_HOLD_ARTILLERY_POSITION_VERB,
 ];
 
 // ── Helm secondary fine-actuator AI policy channels/verbs (issue #780) ────────
@@ -2894,6 +2907,10 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // which arc the tubes cover and whether a salvo is still in flight are
         // all host readings.
         HELM_HOLD_TORPEDO_BEARING_VERB => crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing,
+        // The artillery firing position (issue #792): value-less too — the hold
+        // throttle and the range band are authored Steering `param`s, and the
+        // lead speed is a host reading of the hull's own artillery bolt.
+        HELM_HOLD_ARTILLERY_POSITION_VERB => crate::ai::policy::AiPolicyVerb::HoldArtilleryPosition,
         // Helm secondary-actuator mode verbs (issue #780): value-less,
         // like the travel-axis verbs above.
         HELM_ACTUATE_LATERAL_THRUST_VERB => crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
@@ -6686,6 +6703,9 @@ hull_max_hp = 6
     fn ship_harrow_warhawk_template_has_full_behaviour_and_weapons() {
         // (#474) Battleship gained a full behaviour tree + weapons +
         // shields. Previously was a stub.
+        // (#792) Gained a bow artillery blaster bank alongside the two beam
+        // banks — asserted here as well, because "two banks" alone would go on
+        // passing if the artillery piece were dropped.
         let toml_str = include_str!("../../assets/entities/ship_harrow_warhawk.toml");
         let config =
             EntityConfig::from_toml(toml_str).expect("ship_harrow_warhawk.toml must parse");
@@ -6693,10 +6713,21 @@ hull_max_hp = 6
             .weapons_console
             .as_ref()
             .expect("battleship must have [weapons_console] (#474)");
-        assert_eq!(wc.phaser_banks.len(), 2, "battleship must have 2 banks");
+        assert_eq!(
+            wc.phaser_banks.len(),
+            2,
+            "battleship must have 2 beam banks"
+        );
         let bank = &wc.phaser_banks[0];
         assert!((bank.beam_damage_per_sec - 12.0).abs() < 1e-6);
         assert!((bank.beam_range - 75.0).abs() < 1e-6);
+        assert_eq!(
+            wc.blaster_banks.len(),
+            1,
+            "battleship must carry exactly one artillery bank (#792) — the helm \
+             doctrine reads its flight speed as the lead speed, and a second, \
+             longer-reaching bank would silently become the one it leads by"
+        );
         // (#514) Battleship migrated to `[[shield_arc]]` block.
         assert_eq!(
             config.shield_arcs.len(),
@@ -6720,6 +6751,545 @@ hull_max_hp = 6
             directive_kinds.contains(&Some("Destroy")),
             "battleship must have a Destroy doctrine (#572 doctrine-based AI)"
         );
+    }
+
+    // ── The Harrow Battleship artillery platform (issue #792) ────────────────
+
+    const HARROW_WARHAWK_TOML: &str =
+        include_str!("../../assets/entities/ship_harrow_warhawk.toml");
+
+    /// AC1/AC2/AC3, as content: both travel axes author the three-state machine,
+    /// the yaw channel resolves the SEVENTH mode verb in the hold and tracks on
+    /// the way in, and every scalar the host reads by name is present on the
+    /// Steering axis.
+    ///
+    /// The verb assertion carries the whole of the "why a new verb" argument, so
+    /// it is spelled out rather than left to the constant: `pivot_to_reengage`
+    /// has identical geometry to nothing here — its host gate is the six
+    /// shield-RECOVERY scalars, all of them statements about a ring derived from
+    /// the TARGET's reach, and an artillery platform authoring five unrelated
+    /// standoff numbers in order to borrow one turn is exactly the invention
+    /// AGENTS.md #11 forbids. `hold_torpedo_bearing` is closer and still wrong:
+    /// it tracks the target's LIVE position with no lead at all, which at this
+    /// hull's flight time is a different bearing from the one the gun fires on.
+    #[test]
+    fn harrow_warhawk_authors_the_artillery_machine_on_both_travel_axes() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let hc = cfg
+            .helm_console
+            .as_ref()
+            .expect("the hull declares [helm_console]");
+
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref()),
+            ("steering_ai", hc.steering_ai.as_ref()),
+        ] {
+            let ai = ai.unwrap_or_else(|| panic!("{name} must be authored"));
+            assert!(
+                ai.rule.is_empty(),
+                "{name} must be state-only (rule XOR state)"
+            );
+            let ids: Vec<&str> = ai.state.iter().map(|s| s.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["acquire", "reposition", "hold"],
+                "{name} authors the three-state artillery machine"
+            );
+            assert_eq!(ai.initial_state.as_deref(), Some("acquire"));
+            assert!(
+                ai.to_policy().expect("must decode").machine().is_some(),
+                "{name} must decode to a machine"
+            );
+        }
+
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let verb_of = |state_id: &str| -> String {
+            let state = steering
+                .state
+                .iter()
+                .find(|s| s.id == state_id)
+                .unwrap_or_else(|| panic!("steering_ai must declare '{state_id}'"));
+            assert_eq!(
+                state.rule.len(),
+                1,
+                "'{state_id}' answers yaw with one rule"
+            );
+            state.rule[0].verb.clone()
+        };
+        assert_eq!(verb_of("acquire"), HELM_ACTUATE_DESIRED_FACING_VERB);
+        assert_eq!(
+            verb_of("reposition"),
+            HELM_ACTUATE_DESIRED_FACING_VERB,
+            "the run-in tracks the target itself: nothing is being fired at this \
+             range, and a run-in aimed at an intercept would arrive beside it"
+        );
+        assert_eq!(
+            verb_of("hold"),
+            HELM_HOLD_ARTILLERY_POSITION_VERB,
+            "the firing position is the SEVENTH yaw verb — NOT `pivot_to_reengage`, \
+             whose host gate is the six shield-recovery scalars this hull would \
+             have to invent, and NOT `hold_torpedo_bearing`, which points at where \
+             the target IS rather than where the bolt and the target meet"
+        );
+
+        // Every scalar the host reads off this axis BY NAME. A rename in either
+        // direction lights this up, and it must: the host's response to a missing
+        // one is to decline the whole arm and fly ordinary doctrine travel.
+        for required in crate::ship::helm_ai::ARTILLERY_PARAMS {
+            assert!(
+                steering.param.contains_key(*required),
+                "steering_ai must author `{required}`: the host gates the whole \
+                 artillery arm on all three together, and the throttle this hull \
+                 wants (0.0) is indistinguishable from an omission unless the NAME \
+                 is present"
+            );
+        }
+        for required in [
+            crate::ship::helm_ai::TRACKING_DEADBAND_PARAM,
+            crate::ship::helm_ai::TRACKING_FULL_STEER_PARAM,
+        ] {
+            assert!(
+                steering.param.contains_key(required),
+                "steering_ai must author `{required}`"
+            );
+        }
+        // ...and the absences. This hull circles nothing, so it declares no
+        // circulation slot; and it authors no shield-recovery, combat-orbit or
+        // bow-hold scalars, which is what makes the artillery arm the ONLY leg
+        // set the host can publish for it.
+        assert!(
+            !steering
+                .memory
+                .contains_key(crate::ship::helm_ai::ORBIT_DIRECTION_MEMORY),
+            "an artillery platform never circles: a declared circulation slot \
+             would be content nobody reads"
+        );
+        for absent in crate::ship::helm_ai::RECOVERY_PARAMS
+            .iter()
+            .chain(crate::ship::helm_ai::COMBAT_ORBIT_PARAMS)
+            .chain(crate::ship::helm_ai::TORPEDO_BEARING_PARAMS)
+        {
+            assert!(
+                !steering.param.contains_key(*absent),
+                "steering_ai must NOT author `{absent}`: this hull flies one leg \
+                 set and borrowing another's scalars is how a doctrine acquires \
+                 behaviour nobody authored"
+            );
+        }
+    }
+
+    /// AC2, as content: the hold band is a PAIR of authored values, the inner one
+    /// is ninety per cent of the outer, and the outer matches the bolt's own reach.
+    ///
+    /// The ratio is asserted here rather than computed in Rust deliberately — the
+    /// point of AGENTS.md #11 is that a designer retunes the band by editing two
+    /// numbers, and this test is what tells them if they broke the relationship
+    /// the acceptance criterion names.
+    #[test]
+    fn harrow_warhawk_hold_range_is_ninety_percent_of_its_artillery_envelope() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let steering = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.steering_ai.as_ref())
+            .expect("hull authors [helm_console.steering_ai]");
+        let max = steering.param[crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM];
+        let hold = steering.param[crate::ship::helm_ai::ARTILLERY_HOLD_RANGE_PARAM];
+
+        assert!(
+            (hold - max * 0.9).abs() < 1e-3,
+            "repositioning must stop at ninety per cent of the envelope: \
+             {hold} vs {max} * 0.9"
+        );
+        assert!(
+            hold < max,
+            "the band must have a gap — one threshold is not hysteresis, it is a \
+             boundary the hull sits on and chatters across"
+        );
+
+        // The outer edge names the bolt's own reach, so the hull never holds a
+        // gun line it cannot shoot down.
+        let bank = &cfg
+            .weapons_console
+            .as_ref()
+            .expect("hull declares [weapons_console]")
+            .blaster_banks[0];
+        assert!(
+            (max - bank.range).abs() < 1e-3,
+            "the artillery envelope ({max}) must be the bank's own range ({})",
+            bank.range
+        );
+
+        // Engines runs its own copy of the machine and must reason about the SAME
+        // band; a drift between the two axes is a ship whose thrust and yaw
+        // disagree about which leg it is flying.
+        let engines = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|hc| hc.engines_ai.as_ref())
+            .expect("hull authors [helm_console.engines_ai]");
+        for name in [
+            crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM,
+            crate::ship::helm_ai::ARTILLERY_HOLD_RANGE_PARAM,
+        ] {
+            assert_eq!(
+                engines.param.get(name),
+                steering.param.get(name),
+                "both travel axes must author the same `{name}`"
+            );
+        }
+    }
+
+    /// AC4, as content: the bow bolt is POWERFUL and SLOW, and its slowness is
+    /// what buys a manoeuvring target time to leave the predicted intercept.
+    #[test]
+    fn harrow_warhawk_bow_bolt_is_powerful_and_slow() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let wc = cfg.weapons_console.as_ref().unwrap();
+        let bolt = &wc.blaster_banks[0];
+        assert_eq!(bolt.facing_deg, 0.0, "the artillery piece is a BOW mount");
+
+        // POWERFUL: one bolt lands more than either beam bank does in a second of
+        // continuous fire, by a wide margin. Compared against the hull's own guns
+        // rather than an absolute, so a future rebalance of the beams is what
+        // this reads against.
+        let beam_dps = wc
+            .phaser_banks
+            .iter()
+            .map(|b| b.beam_damage_per_sec)
+            .fold(0.0_f32, f32::max);
+        assert!(
+            bolt.damage as f32 > beam_dps * 4.0,
+            "one artillery bolt ({}) must dwarf a second of beam fire ({beam_dps}): \
+             the hull gets one shot every {} s and it has to be worth the wait",
+            bolt.damage,
+            bolt.cooldown_secs
+        );
+
+        // SLOW: slower than every other blaster the game ships, and slow enough
+        // that crossing the hull's own envelope takes real seconds — which is the
+        // window a course change after launch has to work in.
+        for (name, other) in [
+            (
+                "ship_harrow_lancer",
+                include_str!("../../assets/entities/ship_harrow_lancer.toml"),
+            ),
+            (
+                "ship_harrow_destroyer",
+                include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
+            ),
+            (
+                "alliance_destroyer",
+                include_str!("../../assets/entities/alliance_destroyer.toml"),
+            ),
+        ] {
+            let other = EntityConfig::from_toml(other).expect("hull must parse");
+            for bank in &other.weapons_console.as_ref().unwrap().blaster_banks {
+                assert!(
+                    bolt.projectile_speed < bank.projectile_speed,
+                    "the artillery bolt ({}) must be slower than {name}'s '{}' \
+                     ({}) — the flight time IS the mechanic",
+                    bolt.projectile_speed,
+                    bank.id,
+                    bank.projectile_speed
+                );
+            }
+        }
+        let flight_secs = bolt.range / bolt.projectile_speed;
+        assert!(
+            flight_secs > 4.0,
+            "a bolt must take real seconds ({flight_secs}) to cross the envelope, \
+             or 'rewards course changes after launch' is unobservable"
+        );
+
+        // The bow cone is wide enough to admit the LEAD ANGLE the prediction
+        // produces, which is the failure mode a tighter arc would hide: the fire
+        // gate reads the target's CURRENT bearing while the hull is pointed at
+        // the intercept, so a cone sized for a stationary target declines exactly
+        // the shots the prediction exists to take.
+        //
+        // The reference is the fastest CRUISE speed the game ships, crossing
+        // square on, derived rather than guessed so a future speedster fails this
+        // instead of quietly going un-shootable.
+        let hulls = [
+            include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
+            include_str!("../../assets/entities/ship_harrow_cruiser.toml"),
+            include_str!("../../assets/entities/pirate_raider.toml"),
+            include_str!("../../assets/entities/alliance_courier.toml"),
+            include_str!("../../assets/entities/alliance_destroyer.toml"),
+        ]
+        .iter()
+        .filter_map(|t| EntityConfig::from_toml(t).ok())
+        .filter_map(|c| c.helm_console)
+        .collect::<Vec<_>>();
+        let fastest_cruise = hulls.iter().map(|hc| hc.max_speed).fold(0.0_f32, f32::max);
+        assert!(
+            fastest_cruise > 0.0,
+            "precondition: a reference speed must resolve"
+        );
+        let lead_angle = (fastest_cruise / bolt.projectile_speed).atan().to_degrees();
+
+        // CRUISE, and only cruise. Boost is excluded from the derivation on
+        // purpose, and the number is computed rather than argued so the exclusion
+        // stays honest: the destroyer authors a `[helm_console.boost] multiplier`,
+        // and a hull crossing on it produces a lead angle that does NOT fit this
+        // cone. The consequence is bounded and benign — the fire gate finds the
+        // target outside the arc and DECLINES the shot, so the battleship holds
+        // fire against a boosting crosser rather than loosing a mis-aimed bolt.
+        // Widening the arc to admit it would take a two-thirds cone, which is a
+        // turret rather than a bow mount and a different weapon from the one #792
+        // authored. So this asserts the case the arc is sized for, and a future
+        // hull with a faster CRUISE speed is what fails here.
+        let fastest_boosted = hulls
+            .iter()
+            .map(|hc| hc.max_speed * hc.boost.as_ref().map(|b| b.multiplier).unwrap_or(1.0))
+            .fold(0.0_f32, f32::max);
+        let boosted_lead = (fastest_boosted / bolt.projectile_speed)
+            .atan()
+            .to_degrees();
+        assert!(
+            bolt.fire_arc_deg * 0.5 > lead_angle,
+            "the bow cone ({} deg) must admit the {lead_angle} deg lead angle a \
+             target crossing at cruise ({fastest_cruise} units/s) produces — the \
+             fire gate reads the target's CURRENT bearing while the hull points at \
+             the intercept. (Boost is out of scope by design: {fastest_boosted} \
+             units/s would want {boosted_lead} deg, and that shot is declined.)",
+            bolt.fire_arc_deg
+        );
+    }
+
+    /// AC4's plumbing: the artillery bank is declared as an AI-operable system
+    /// under the id the registry derives, or the battleship holds its gun line in
+    /// silence and every helm assertion above still passes.
+    #[test]
+    fn harrow_warhawk_declares_its_artillery_bank_as_a_system() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let bank_id = cfg.weapons_console.as_ref().unwrap().blaster_banks[0]
+            .id
+            .clone();
+        let expected = crate::system_registry::blaster_bank_system_id(&bank_id)
+            .expect("a non-empty bank id resolves to a system id");
+        let systems = &cfg
+            .ship_config
+            .as_ref()
+            .expect("hull declares [[system]] blocks")
+            .systems;
+        let declared = systems
+            .iter()
+            .find(|s| s.id == expected)
+            .unwrap_or_else(|| panic!("hull must declare `{}`", expected.0));
+        assert!(
+            declared.ai_only,
+            "this hull has no stations, so the artillery bank is ownerless and AI"
+        );
+    }
+
+    /// AC6, as content: nothing in this doctrine is guarded on a hazard.
+    ///
+    /// The three avoidance layers that DO apply — repulsion summed onto the
+    /// solved facing inside the pure planner, the lateral-thrust axis nudging the
+    /// hull off its held point, and the imminent-collision facing override — are
+    /// all stateless and all outside the machine. A transition guarded on hazard
+    /// urgency would turn a temporary bend into a state with an exit, which is
+    /// how an artillery platform becomes an orbiting one.
+    #[test]
+    fn harrow_warhawk_authors_no_hazard_guarded_transition() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        for (name, ai) in [
+            ("engines_ai", hc.engines_ai.as_ref().unwrap()),
+            ("steering_ai", hc.steering_ai.as_ref().unwrap()),
+        ] {
+            for state in &ai.state {
+                for transition in &state.transition {
+                    assert!(
+                        !transition
+                            .when
+                            .contains(crate::ship::helm_ai::HAZARD_URGENCY_FACT)
+                            && !transition.when.contains("collision"),
+                        "{name} state '{}' guards a transition on a hazard reading \
+                         (`{}`): avoidance must stay a stateless bend, never a leg",
+                        state.id,
+                        transition.when
+                    );
+                }
+            }
+        }
+    }
+
+    /// The battleship switches its impulse drive off, and does it on the axis a
+    /// scenario cannot reach.
+    ///
+    /// This is the content half of #792's blocking defect. `entities::spawner`
+    /// gives an `ImpulseConfigResource` to every hull that declares a
+    /// `[helm_console]` — parse defaults of engage 200 / cancel 40 — and the
+    /// impulse autopilot replaces commanded throttle with full thrust while the
+    /// drive runs. The authored hold band sits ENTIRELY inside that window, so an
+    /// engaged drive discards the whole doctrine and flies the hull to the drive's
+    /// release range instead. This hull is the first whose held radius lies there;
+    /// the cruiser's ring is inside the cancel distance and the destroyer's legs
+    /// are high-speed passes, so neither sibling ever noticed.
+    ///
+    /// The two halves asserted here are both load-bearing:
+    ///
+    /// * an explicit `idle` (not merely an absent block — absent means the
+    ///   canonical UNCONDITIONAL PERMIT is synthesised at spawn, which is the
+    ///   defect), and
+    /// * the band still sitting inside the drive's default window, which is the
+    ///   reason the idle is needed. If a future retune moved the band clear, this
+    ///   assertion is what says so rather than leaving the `idle` looking like
+    ///   superstition.
+    ///
+    /// Deliberately NOT expressed as `[[behaviour.doctrine]] use_impulse = false`:
+    /// doctrine is the part of a hull a scenario replaces wholesale, and both
+    /// `duel.toml` and `combat_test.toml`'s wave 8 do exactly that without
+    /// authoring `use_impulse` — which `effective_use_impulse()` then resolves to
+    /// TRUE. `harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive` pins
+    /// that this is not hypothetical.
+    #[test]
+    fn harrow_warhawk_holds_its_impulse_drive_idle() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        let impulse_ai = hc.impulse_ai.as_ref().expect(
+            "the battleship must author `[helm_console.impulse_ai]`: an ABSENT block \
+             synthesises the canonical unconditional permit at spawn, which is the \
+             defect, not the fix",
+        );
+        assert!(
+            impulse_ai.idle,
+            "the declaration must be an explicit idle — the impulse channel \
+             resolving to nothing, whatever geometry or doctrine the host is handed"
+        );
+        assert!(
+            impulse_ai.rule.is_empty() && impulse_ai.state.is_empty(),
+            "an idle declaration carries no rules and no states (content validation \
+             rejects the contradiction), so anything here is dead content"
+        );
+
+        // The reason it is needed: the authored band lies inside the drive's
+        // default cruise window, so an engaged drive would cross the whole of it
+        // at `thrust = 1.0`.
+        let steering = hc.steering_ai.as_ref().unwrap();
+        let hold = steering.param[crate::ship::helm_ai::ARTILLERY_HOLD_RANGE_PARAM];
+        assert!(
+            hc.impulse_cancel_distance < hold && hold < hc.impulse_engage_distance,
+            "the hold range ({hold}) sits inside the impulse cruise window \
+             (engage {}, cancel {}) — if a retune ever moves it clear, revisit \
+             whether the idle above is still earning its place",
+            hc.impulse_engage_distance,
+            hc.impulse_cancel_distance
+        );
+    }
+
+    /// The deliberate absences named in the hull header. All three are exactly the
+    /// kind of content that gets helpfully filled in later, and each would quietly
+    /// take the battleship off the firing position this issue exists to hold.
+    #[test]
+    fn harrow_warhawk_authors_no_boost_drive_and_no_helm_radar() {
+        let cfg = EntityConfig::from_toml(HARROW_WARHAWK_TOML).expect("hull must parse");
+        let hc = cfg.helm_console.as_ref().unwrap();
+        assert!(
+            hc.boost.is_none(),
+            "the battleship mounts no boost drive: an artillery platform that lit \
+             one would be leaving the firing position it just took up"
+        );
+        assert!(
+            hc.boost_ai.is_none(),
+            "and authors no boost doctrine to go with the drive it does not have"
+        );
+        assert!(
+            hc.radar.is_none(),
+            "and authors no `[helm_console.radar]`: an unauthored radar range means \
+             UNLIMITED helm visibility, which is what lets a {}-unit envelope \
+             resolve a target at all",
+            hc.steering_ai.as_ref().unwrap().param[crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM]
+        );
+    }
+
+    /// The scenarios that replace this hull's doctrine must not be able to switch
+    /// the drive back on.
+    ///
+    /// A `use_impulse = false` on the hull's own `[[behaviour.doctrine]]` reads
+    /// like the natural lever and would have been erased by every scenario that
+    /// actually fields this hull. That is asserted against the shipped world files
+    /// rather than described, because the claim is about THEM: each replaces the
+    /// doctrine list wholesale and none authors `use_impulse`, so
+    /// `effective_use_impulse()` resolves TRUE for their non-Patrol directives.
+    /// The fix therefore has to live on the fine system's own policy, which is
+    /// what the test above pins.
+    #[test]
+    fn harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive() {
+        let doctrine = DoctrineObjective {
+            directive_kind: Some("Destroy".into()),
+            use_impulse: None,
+            ..Default::default()
+        };
+        assert!(
+            doctrine.effective_use_impulse(),
+            "precondition: an unauthored `use_impulse` on a Destroy directive \
+             defaults to permitting the drive — that default is what makes a \
+             doctrine-level fix worthless here"
+        );
+
+        for (name, world) in [
+            (
+                "combat_test.toml",
+                include_str!("../../assets/worlds/combat_test.toml"),
+            ),
+            ("duel.toml", include_str!("../../assets/worlds/duel.toml")),
+        ] {
+            assert!(
+                world.contains("behaviour = { doctrine = ["),
+                "precondition: {name} must replace a spawned hull's doctrine list \
+                 for this to be the scenario shape under test"
+            );
+            assert!(
+                !world.contains("use_impulse"),
+                "{name} authors `use_impulse` somewhere — if a scenario has started \
+                 speaking about the drive, re-read whether the battleship's \
+                 `[helm_console.impulse_ai]` idle is still the whole story"
+            );
+        }
+    }
+
+    /// The structural half of "decline rather than invent": the two range params
+    /// cannot silently vanish from the FILE, because the doctrine's own
+    /// transition guards name them and content validation rejects an undeclared
+    /// `param(...)` at load.
+    ///
+    /// A second lock on the same door as [`crate::ship::helm_ai::ARTILLERY_PARAMS`]
+    /// — the host-side gate — and worth having because the two fail at different
+    /// moments: this one stops the hull existing at all, that one stops a hull
+    /// that DOES load from flying a leg on a number nobody chose.
+    ///
+    /// The param lines are struck out of the TOML text rather than out of the
+    /// parsed struct, because that is where the deletion would actually happen
+    /// and because `to_policy()` alone does not re-validate references.
+    #[test]
+    fn harrow_warhawk_cannot_drop_a_guard_referenced_artillery_range() {
+        for (omitted, line) in [
+            (
+                crate::ship::helm_ai::MAX_ARTILLERY_RANGE_PARAM,
+                "max_artillery_range = 200.0",
+            ),
+            (
+                crate::ship::helm_ai::ARTILLERY_HOLD_RANGE_PARAM,
+                "artillery_hold_range = 180.0",
+            ),
+        ] {
+            assert!(
+                HARROW_WARHAWK_TOML.contains(line),
+                "precondition: the hull must author `{line}` for this to remove it"
+            );
+            let stripped = HARROW_WARHAWK_TOML.replace(line, "");
+            let err = EntityConfig::from_toml(&stripped)
+                .expect_err("a guard on an undeclared param must fail the entity load")
+                .to_string();
+            assert!(
+                err.contains("undeclared parameter") && err.contains(omitted),
+                "the hull without `{omitted}` must fail to load; got: {err}"
+            );
+        }
     }
 
     #[test]

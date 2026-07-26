@@ -334,6 +334,39 @@ pub(crate) fn helm_motion_planner(
                     )
                 })
             }
+            // Artillery firing position (issue #792): hold translational station
+            // on the authored throttle and put the bow on a PREDICTED intercept.
+            // It needs a resolvable target for two reasons at once — there is no
+            // intercept to solve without one, and the lead is measured from the
+            // target's own reconstructed velocity — and falls back to ordinary
+            // doctrine travel without one, which is where the hull's own machine
+            // is heading anyway (the hold's highest-priority exit is
+            // `target_valid < 1`).
+            //
+            // Ordered before the pass-legs fallback and gated on its own
+            // authoring, so an artillery hull needs no `approach_speed` to hold
+            // its gun line.
+            (true, true) if pass.artillery_hold => {
+                pass_target.map_or_else(doctrine_travel, |target| {
+                    crate::ai::plan_artillery_position(&crate::ai::ArtilleryPositionInput {
+                        self_pos: [physics.x, physics.y, physics.z],
+                        self_yaw: physics.yaw,
+                        self_speed: physics.forward_speed,
+                        self_radius: sf.merged_view.self_radius,
+                        target_pos: target.position,
+                        target_yaw: target.yaw,
+                        target_speed: target.forward_speed,
+                        target_uuid: target.uuid,
+                        hold_speed: pass.artillery_hold_speed,
+                        projectile_speed: pass.artillery_lead_speed,
+                        tracking_deadband_rad: pass.tracking_deadband_rad,
+                        tracking_full_steer_rad: pass.tracking_full_steer_rad,
+                        entities: &sf.merged_view.entities,
+                        avoidance_buffer,
+                        avoidance_look_ahead_secs: avoidance_look_ahead,
+                    })
+                })
+            }
             // Re-entry pivot and inbound: both track the target, so both need a
             // resolvable one. They differ only in the authored throttle the leg
             // carries, which is what makes the pivot a cut-thrust turn rather

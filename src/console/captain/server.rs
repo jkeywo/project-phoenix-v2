@@ -295,6 +295,9 @@ fn operate_captain_ai(
                 // The Steering torpedo-opportunity bow hold (issue #791) — a
                 // helm axis verb too.
                 | crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing
+                // The Steering artillery firing position (issue #792) — a helm
+                // axis verb too.
+                | crate::ai::policy::AiPolicyVerb::HoldArtilleryPosition
                 | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
                 | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
                 | crate::ai::policy::AiPolicyVerb::EngageImpulse

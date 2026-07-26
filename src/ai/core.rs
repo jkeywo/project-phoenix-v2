@@ -1174,6 +1174,130 @@ pub fn plan_recovery_orbit(input: &RecoveryOrbitInput) -> (f32, f32) {
     )
 }
 
+/// Inputs to [`plan_artillery_position`] (issue #792).
+///
+/// Every gameplay scalar arrives from authored ship data — the hold throttle
+/// from the Steering policy's own `param` map, the lead speed from the hull's
+/// artillery bank — and this module holds no default for either (AGENTS.md #11).
+pub struct ArtilleryPositionInput<'a> {
+    pub self_pos: [f32; 3],
+    pub self_yaw: f32,
+    pub self_speed: f32,
+    pub self_radius: f32,
+    /// The target's current world position — the point the lead is measured
+    /// FROM, never the point the bow is put on.
+    pub target_pos: [f32; 3],
+    /// The target's heading, or `None` for an entity whose heading is unknown
+    /// (an asteroid, or a snapshot entry with no yaw). [`AiWorldEntity`] carries
+    /// no velocity field, so the target's velocity is reconstructed from
+    /// `(yaw, forward_speed)` exactly as [`target_relative_motion`] reconstructs
+    /// it. An unknown heading contributes no velocity, so the solution degrades
+    /// to "aim at where it is" rather than inventing a course.
+    pub target_yaw: Option<f32>,
+    /// The target's forward speed, world units/s.
+    pub target_speed: f32,
+    /// Excluded from the avoidance scan — the ship is deliberately holding
+    /// station on it, so treating it as an obstacle would fight the hold.
+    pub target_uuid: Uuid,
+    /// Authored throttle fraction flown while the firing position is held.
+    /// `0.0` is the value an artillery platform wants: a gun line that keeps
+    /// closing is not a gun line.
+    pub hold_speed: f32,
+    /// The lead speed: the flight speed of the bolt whose intercept is being
+    /// solved, read host-side off the hull's OWN artillery bank. `0.0` (no
+    /// artillery aboard, or an unresolvable bank) degrades the solution to the
+    /// target's live position rather than inventing a flight time.
+    pub projectile_speed: f32,
+    pub tracking_deadband_rad: f32,
+    pub tracking_full_steer_rad: f32,
+    pub entities: &'a [AiWorldEntity],
+    pub avoidance_buffer: f32,
+    pub avoidance_look_ahead_secs: f32,
+}
+
+/// Hold the artillery firing position: `(thrust, steering)` for one tick
+/// (issue #792).
+///
+/// **It holds; it does not orbit and it does not kite.** Thrust is the flat
+/// authored [`ArtilleryPositionInput::hold_speed`] — nothing here reads the
+/// range, so a target that closes cannot push the hull backwards and a target
+/// that opens cannot pull it forwards. Whether the hull should be here at all is
+/// the doctrine's question, answered by the authored range band in its own
+/// transition guards; this function only flies the position once it is held.
+///
+/// **The facing is a PREDICTIVE intercept, not a bearing.** The target's
+/// velocity is reconstructed from `(yaw, forward_speed)` and fed through the
+/// SAME [`crate::weapons::blaster::predict_intercept_heading`] the bolt itself is
+/// launched on, at the same lead speed — so the bow ends up on the heading the
+/// gun will actually fire, and the AI's aim cannot drift from its own ballistics.
+/// The fallback that function takes when it cannot lead (no flight speed, or a
+/// predicted point sitting on the shooter) is passed as "the heading straight at
+/// the target right now", which is the honest degradation rather than a frozen
+/// heading.
+///
+/// **Avoidance bends the hold** exactly as it bends every other leg: the shared
+/// repulsion steering is summed onto the solved facing and the result clamped.
+/// That is the whole of this leg's hazard handling by design — it composes,
+/// temporarily, and evaporates when the hazard clears, so a detour can never
+/// become a state the hull has to get back out of.
+pub fn plan_artillery_position(input: &ArtilleryPositionInput) -> (f32, f32) {
+    let dx = input.target_pos[0] - input.self_pos[0];
+    let dz = input.target_pos[2] - input.self_pos[2];
+    let dist = (dx * dx + dz * dz).sqrt();
+
+    let dir = if dist <= f32::EPSILON {
+        // Sitting on the target: hold the current heading rather than solving a
+        // bearing from a zero-length vector.
+        [input.self_yaw.sin(), -input.self_yaw.cos()]
+    } else {
+        // Velocities reconstructed from (yaw, forward_speed) — the snapshot
+        // carries no velocity field. Same recipe as `target_relative_motion`.
+        let (tvx, tvz) = match input.target_yaw {
+            Some(y) => (y.sin() * input.target_speed, -y.cos() * input.target_speed),
+            None => (0.0, 0.0),
+        };
+        // The heading straight at where the target is NOW, in the project's
+        // `atan2(dx, -dz)` convention. Handed in as the shooter yaw with a zero
+        // bank facing so that `predict_intercept_heading`'s own fallback — which
+        // is `shooter_yaw + facing_deg` — resolves to exactly this, rather than
+        // to whichever way the hull happened to be pointing.
+        let live = dx.atan2(-dz);
+        let heading = crate::weapons::blaster::predict_intercept_heading(
+            input.self_pos[0],
+            input.self_pos[2],
+            input.target_pos[0],
+            input.target_pos[2],
+            tvx,
+            tvz,
+            input.projectile_speed,
+            live,
+            0.0,
+        );
+        [heading.sin(), -heading.cos()]
+    };
+
+    let base_steer = steer_toward(
+        input.self_yaw,
+        dir,
+        input.tracking_deadband_rad,
+        input.tracking_full_steer_rad,
+    );
+    let avoidance = avoidance_steering(
+        input.self_pos,
+        input.self_yaw,
+        input.self_speed,
+        input.self_radius,
+        input.target_uuid,
+        input.entities,
+        input.avoidance_buffer,
+        input.avoidance_look_ahead_secs,
+    );
+    (
+        input.hold_speed.clamp(-1.0, 1.0),
+        (base_steer + avoidance).clamp(-1.0, 1.0),
+    )
+}
+
 /// Resolve an authored objective target against the AI world view.
 ///
 /// The target may be the entity UUID string itself or the scenario/display name
@@ -3911,6 +4035,149 @@ mod tests {
         let mut cut = pass_input(FlyThroughLeg::TorpedoBearing, &none);
         cut.torpedo_bearing_speed = 0.0;
         assert_eq!(plan_fly_through_pass(&cut).0, 0.0);
+    }
+
+    // ── The artillery firing position (issue #792) ───────────────────────────
+
+    /// A battleship at the origin facing `-Z`, holding station on a target 180
+    /// units dead ahead. `hold_speed` is deliberately NON-zero here so the tests
+    /// below pin "the authored throttle" rather than accidentally agreeing with a
+    /// hardcoded stop.
+    fn artillery_input(entities: &[AiWorldEntity]) -> ArtilleryPositionInput<'_> {
+        ArtilleryPositionInput {
+            self_pos: [0.0, 0.0, 0.0],
+            self_yaw: 0.0,
+            self_speed: 12.0,
+            self_radius: 3.0,
+            target_pos: [0.0, 0.0, -180.0],
+            target_yaw: None,
+            target_speed: 0.0,
+            target_uuid: Uuid::from_u128(9),
+            hold_speed: 0.15,
+            projectile_speed: 35.0,
+            tracking_deadband_rad: 0.03,
+            tracking_full_steer_rad: 0.6,
+            entities,
+            avoidance_buffer: AVOIDANCE_BUFFER,
+            avoidance_look_ahead_secs: AVOIDANCE_LOOK_AHEAD_SECS,
+        }
+    }
+
+    /// AC3/AC4: the hold flies its OWN authored throttle, and the facing is a
+    /// PREDICTIVE intercept rather than a bearing to the target.
+    #[test]
+    fn artillery_position_leads_a_crossing_target_on_its_authored_throttle() {
+        let none: [AiWorldEntity; 0] = [];
+
+        // A stationary target is the degenerate case: lead nothing, and with the
+        // bow already on it command no turn.
+        let still = plan_artillery_position(&artillery_input(&none));
+        assert!(
+            (still.0 - 0.15).abs() < 1e-6,
+            "the throttle is the authored `hold_speed`, got {}",
+            still.0
+        );
+        assert_eq!(
+            still.1, 0.0,
+            "a stationary target dead ahead needs no correction"
+        );
+
+        // Crossing square across the line of sight, at a named heading and speed.
+        let crossing = |yaw: f32, bolt: f32| {
+            let mut input = artillery_input(&none);
+            input.target_yaw = Some(yaw);
+            input.target_speed = 24.0;
+            input.projectile_speed = bolt;
+            plan_artillery_position(&input)
+        };
+
+        // To starboard (+X): the aim point moves ahead of it, so the commanded
+        // turn is to starboard.
+        let led = crossing(std::f32::consts::FRAC_PI_2, 35.0);
+        assert!(
+            led.1 > 0.0,
+            "the bow must turn toward where the target is GOING, got {}",
+            led.1
+        );
+
+        // ...and the other way, so the sign follows the target rather than being
+        // a fixed bias.
+        assert!(crossing(-std::f32::consts::FRAC_PI_2, 35.0).1 < 0.0);
+
+        // The lead is the FLIGHT TIME's doing: a bolt that arrives instantly has
+        // nothing to lead by, and the same crossing target then commands no turn
+        // at all. This is the assertion that would fail if the leg quietly
+        // tracked the live position and got its sign right by luck.
+        assert!(
+            crossing(std::f32::consts::FRAC_PI_2, 100_000.0).1.abs() < 1e-3,
+            "a bolt with no flight time has nothing to lead by"
+        );
+
+        // A target whose heading is unknown contributes no velocity: the solution
+        // degrades to "aim at where it is" rather than inventing a course.
+        let mut unknown = artillery_input(&none);
+        unknown.target_speed = 24.0;
+        assert_eq!(plan_artillery_position(&unknown).1, 0.0);
+
+        // ...as does an unresolvable lead speed, which is what a hull carrying no
+        // artillery bank at all publishes.
+        assert_eq!(
+            crossing(std::f32::consts::FRAC_PI_2, 0.0).1,
+            0.0,
+            "no flight speed must fall back to the target's live bearing, not to \
+             whichever way the hull happened to be pointing"
+        );
+    }
+
+    /// AC6, the additive half: a hazard BENDS the intercept facing and changes
+    /// nothing else. The thrust is untouched, so avoidance can never turn the
+    /// hold into a translation, and the bend is a sum rather than a substitution
+    /// — the leg still knows where its target is.
+    #[test]
+    fn artillery_position_folds_avoidance_onto_the_intercept_facing() {
+        let none: [AiWorldEntity; 0] = [];
+        let clean = plan_artillery_position(&artillery_input(&none));
+
+        let obstacle = [AiWorldEntity {
+            uuid: Uuid::from_u128(77),
+            // On the hull's projected path, off the starboard bow.
+            position: [6.0, 0.0, -34.0],
+            radius: 8.0,
+            size_rating: 8.0,
+            dangerous: true,
+            ..Default::default()
+        }];
+        let bent = plan_artillery_position(&artillery_input(&obstacle));
+
+        assert!(
+            bent.1 < clean.1,
+            "an obstacle off the starboard bow must push the facing to port \
+             ({} vs {})",
+            bent.1,
+            clean.1
+        );
+        assert_eq!(
+            bent.0, clean.0,
+            "and it must not touch the throttle: a hold that accelerated around a \
+             rock would be flying, not holding"
+        );
+
+        // The target itself is excluded from the scan — a hull deliberately
+        // holding station on a ship must not treat it as something to swerve
+        // around.
+        let target_as_obstacle = [AiWorldEntity {
+            uuid: Uuid::from_u128(9),
+            position: [0.0, 0.0, -180.0],
+            radius: 400.0,
+            size_rating: 400.0,
+            dangerous: true,
+            ..Default::default()
+        }];
+        assert_eq!(
+            plan_artillery_position(&artillery_input(&target_as_obstacle)).1,
+            clean.1,
+            "the target must be excluded from the avoidance scan"
+        );
     }
 
     // ── The shield-recovery standoff orbit (issue #788) ──────────────────────

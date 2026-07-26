@@ -1021,6 +1021,139 @@ mod tests {
         );
     }
 
+    /// Issue #792, AC4/AC7: the battleship's artillery bolt is aimed ONCE, at
+    /// launch, and a target that changes course afterwards evades it.
+    ///
+    /// Driven off the SHIPPED hull's authored bank rather than a fabricated one,
+    /// so it fails on the content as well as on the code: slow the bolt down and
+    /// this gets easier, speed it up and it eventually stops being true at all.
+    ///
+    /// Both halves are asserted, and the first is what makes the second mean
+    /// something. A target that HOLDS its course is hit — the prediction works —
+    /// and the identical shot against a target that reverses misses, with the
+    /// projectile's heading provably unchanged across the whole flight. Without
+    /// the control half a miss would be indistinguishable from a bolt that was
+    /// never aimed properly to begin with.
+    fn warhawk_artillery_bank() -> BlasterSystem {
+        let cfg = crate::entity_config::EntityConfig::from_toml(include_str!(
+            "../../assets/entities/ship_harrow_warhawk.toml"
+        ))
+        .expect("the shipped battleship hull must parse");
+        let bank = cfg
+            .weapons_console
+            .as_ref()
+            .expect("the battleship declares [weapons_console]")
+            .blaster_banks
+            .iter()
+            .max_by(|a, b| a.range.total_cmp(&b.range))
+            .expect("the battleship carries an artillery bank")
+            .clone();
+        BlasterSystem::new(bank.to_runtime())
+    }
+
+    /// Fire one artillery bolt at a target crossing at `+launch_vx`, then let the
+    /// target run at `vx_after` for the bolt's whole life. Returns whether the
+    /// bolt ever found it, and asserts the heading never changes on the way.
+    fn artillery_shot_finds_target(launch_vx: f32, vx_after: f32) -> bool {
+        // A capital-ship-sized target, so a miss here is a miss by a wide margin
+        // rather than by a rounding error.
+        const TARGET_RADIUS: f32 = 5.0;
+        const RANGE: f32 = 150.0;
+        let dt = 1.0 / 30.0;
+
+        let mut sys = warhawk_artillery_bank();
+        let mut counter = 0_u32;
+        let mut next_uuid = || {
+            counter += 1;
+            format!("bolt-{counter}")
+        };
+        let mut tx = 0.0_f32;
+        let tz = -RANGE;
+
+        sys.request_fire();
+        let launched = sys.tick(
+            dt,
+            &[(0.0, 0.0)],
+            0.0,
+            tx,
+            tz,
+            launch_vx,
+            0.0,
+            "shooter",
+            &mut next_uuid,
+        );
+        assert_eq!(launched.len(), 1, "one bolt per volley on this bank");
+        let heading = sys.in_flight[0].heading;
+
+        // Fly it out. The target now runs at `vx_after`, which the bolt has no
+        // way of learning: nothing in `BlasterProjectile::tick` reads a target.
+        for _ in 0..2000 {
+            tx += vx_after * dt;
+            sys.tick(
+                dt,
+                &[(0.0, 0.0)],
+                0.0,
+                tx,
+                tz,
+                vx_after,
+                0.0,
+                "shooter",
+                &mut next_uuid,
+            );
+            let Some(bolt) = sys.in_flight.first() else {
+                return false; // expired without finding anything
+            };
+            assert_eq!(
+                bolt.heading, heading,
+                "the launch heading must be frozen: a bolt that re-aimed would be \
+                 homing, which is exactly what AC4 forbids"
+            );
+            if !sys
+                .find_hits(&[("target".to_string(), tx, tz, TARGET_RADIUS)])
+                .is_empty()
+            {
+                return true;
+            }
+        }
+        panic!("the bolt must expire inside its own lifespan");
+    }
+
+    #[test]
+    fn a_target_that_changes_course_evades_the_artillery_bolt() {
+        // The crossing speed the control half is calibrated against. The shipped
+        // lead is FIRST-ORDER — `t_est` is the distance to where the target is
+        // now, not to where it will be — so it systematically under-leads, and
+        // the faster the crosser the wider the miss even on a held course. Ten
+        // units/s is comfortably inside that approximation's accuracy at this
+        // range, which is what makes "held course hits" a fair control rather
+        // than a coin toss about the estimator.
+        const CROSSING: f32 = 10.0;
+
+        // Holding course: the launch-time prediction puts the bolt where the
+        // target will be, and it connects.
+        assert!(
+            artillery_shot_finds_target(CROSSING, CROSSING),
+            "a target that keeps its course must be hit — otherwise the miss below \
+             proves nothing about course changes"
+        );
+
+        // Reversing after launch: the bolt flies to an intercept the target
+        // abandoned, and misses.
+        assert!(
+            !artillery_shot_finds_target(CROSSING, -CROSSING),
+            "a target that reverses after launch must evade a bolt already in the \
+             air"
+        );
+
+        // ...and simply stopping is enough. The evasion is not about outrunning
+        // the shot, it is about the shot being committed to a course the target
+        // no longer flies.
+        assert!(
+            !artillery_shot_finds_target(CROSSING, 0.0),
+            "a target that merely stops must also evade the committed bolt"
+        );
+    }
+
     #[test]
     fn predict_intercept_heading_zero_speed_falls_back() {
         // When speed is 0 or negative, must return the facing direction

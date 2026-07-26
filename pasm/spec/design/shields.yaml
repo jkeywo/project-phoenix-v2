@@ -83,6 +83,21 @@ entities:
       resolution: host-authoritative
       outputs: [updated focused shield arc]
 
+  - mechanic: shield-collapse-and-recovery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shield Collapse and Recovery
+      summary: A shield facing driven to zero collapses and stops absorbing for its authored offline duration, then comes back empty and climbs at its authored regeneration rate; sustained fire on a recovering facing collapses it again. Identical for the player's ship and every NPC.
+      rationale:
+        - "Issue #788 replaced the previous snap-back-to-full recovery. A collapse now costs a ship the whole climb rather than only the offline window, so there is a real interval during which a facing is partially recovered — which is what makes 'break off until shields are back to a fraction' a question anyone, human or AI, can answer or act on."
+    game_design:
+      architecture_links: [shield-arc-system, shield-damage-router]
+      participating_roles: [shields-operator]
+      reads: [shield-grid-information]
+      resolution: host-authoritative
+      outputs: [updated shield arc health, updated shield arc availability]
+
   - failure: shield-ai-damage-history-misread
     core:
       status: deprecated

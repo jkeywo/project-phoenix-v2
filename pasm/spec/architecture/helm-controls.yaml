@@ -553,46 +553,21 @@ entities:
       tests:
         - cargo test
 
-  - migration: helm-shared-motion-planner-rollout
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Helm Shared Motion Planner Rollout
-      summary: Completed migration (issue #745) from direct-write helm avoidance helpers to a shared desired-motion and hazard-assessment planning surface — both legacy doctrine symbols (operate_helm, operate_lateral_thrust) are retired and the shared planner is the sole doctrine consumer.
-      rationale:
-        - "Helm AI used to compute steering and lateral avoidance inside separate per-axis operators, each calling the legacy operate_helm / operate_lateral_thrust doctrine directly."
-        - "The shipped helm design centralises planning — helm_motion_planner (via helm_ai_decision) is now the single caller of the pure travel doctrine, renamed plan_helm_travel in #745, and the per-axis fine systems decode their own actuator scalar from the shared desired-motion contract."
-        - "Repository observation is file-level and several PASM entities share src/ship_plugin.rs, so this migration used explicit symbol-does-not-exist removal conditions rather than an imprecise caller allowlist; both conditions now hold."
-    migration_plan:
-      legacy_entities:
-        - helm-ai-operator
-        - helm-lateral-thrust-ai-operator
-      target_entities:
-        - helm-motion-planner
-        - helm-vertical-thrust-ai-operator
-      temporary_adapters:
-        - helm-ai-operator
-        - helm-lateral-thrust-ai-operator
-      target_symbols:
-        - desired-motion-state
-        - hazard-assessment-state
-      removal_conditions:
-        - predicate: symbol-does-not-exist
-          subject: operate_helm
-        - predicate: symbol-does-not-exist
-          subject: operate_lateral_thrust
-    implementation:
-      status: observed
-      paths:
-        - src/ship/helm_planner.rs
-        - src/ai/core.rs
-      symbols:
-        - helm_motion_planner
-        - plan_helm_travel
-        - DesiredMotion
-        - HazardAssessment
-      tests:
-        - cargo test
+  # The `helm-shared-motion-planner-rollout` migration entity was REMOVED here
+  # (issue #794 AC5). It recorded the #745 move from direct-write helm avoidance
+  # helpers onto the shared desired-motion / hazard-assessment planning surface.
+  # Both of its removal conditions held — neither `operate_helm` nor
+  # `operate_lateral_thrust` is defined anywhere in src/ (the surviving mentions
+  # are prose in doc comments and test-function names) — and its temporary
+  # adapters were satisfied, so the migration is complete and the entity has
+  # nothing left to track. `helm_motion_planner` and the pure `plan_helm_travel`
+  # it renamed to are documented by `helm-motion-planner` above.
+  #
+  # NOTE: this closes only #794 AC5. `legacy-ai-doctrine-retirement`
+  # (data-driven-fine-system-ai.yaml) and `ai-command-symmetry-migration`
+  # (npc-ai-factions.yaml) remain `proposed`; the residual hardcoded
+  # helm/shields decision branches and the top-level behaviour-doctrine parsing
+  # are still there.
 
   - component: helm-objective-aggregator
     core:
@@ -1006,6 +981,8 @@ entities:
         - "Issue #883 (AC5) CLOSED the #779 empty-facts gap on this axis. ai_helm_thrust constructed AiFacts::new() literally — an EMPTY snapshot — so any fact(...) guard on the longitudinal channel validated at load and was then false for ever. It now seeds the same hazard/availability snapshot #780 gave the secondary axes PLUS the new target-relative travel facts (seed_helm_travel_facts: target_valid, range_to_target, closing_rate, bearing_to_target, speed_fraction), computed host-side from the frame merged view and ShipPhysics so policy.rs stays Bevy-free. Engines may now also declare a #882 STATE MACHINE (HelmEnginesAiPolicyState, resolved through the shared resolve_helm_channel seam); every shipped hull remains stateless and unchanged."
         - "Issue #883 also seeds this host's AVAILABILITY facts honestly. ai_helm_thrust used to pass a hardcoded false for impulse_available and boost_available while ai_policy_state_tick and ai_helm_boost read them from the ship's own ImpulseConfigResource / BoostConfigResource — the #779 empty-facts trap one fact narrower, since a longitudinal guard on fact(boost_available) validated at load and then read 0 for ever. Both are now taken from those resources, because an absent fact and a fact pinned to 0 are equally silently-wrong to a guard."
         - "Issue #883 also gave this axis a second travel arm. When the ship publishes an active HelmPassSurface, helm_motion_planner sources desired motion from the pure plan_fly_through_pass instead of plan_helm_travel: a flat authored approach/escape throttle with NO decel ramp. Only the INBOUND leg of that arm is gated on a resolvable target; the ESCAPE leg reads no target at all and runs on the frozen heading even after the target dies or leaves radar. helm_destroy was not reused or mode-flagged for this — it brakes at stop_dist and re-faces, which is a station-keeping orbit, the opposite of a pass."
+        - "Issues #788/#790/#791/#792 grew that second arm from one leg set to four, all sourced the same way. The surface now also carries the shield-recovery standoff and its re-engage pivot (#788, plan_recovery_orbit), the shields-independent combat broadside orbit (#790, the same pure orbit arm at an authored radius), the bow-on torpedo bearing (#791) and the predictive artillery station-keep (#792, plan_artillery_position). Each leg supplies its own flat authored throttle — there is still no decel ramp on any of them — and each has #780's hazard contribution summed onto its facing before the shared clamp, so avoidance bends a ring or a hold and never changes a leg."
+        - "Issue #790 widened the arm's ENTRY gate, which had been a latent content trap. HelmPassSurface.active used to mean 'the fly-through pass is authored' and the recovery legs rode along on it because the destroyer authors both; a hull that circles and makes no pass authors no approach_speed or escape_speed and would have flown ordinary doctrine travel for ever, silently. active now means 'at least one complete leg set is authored', and the pass's own two throttles gate only the inbound and re-engage legs through the separate pass_legs flag — kept separate because those two are the planner's FALLBACK leg, and a fallback flown on an unauthored throttle is a ship coasting at zero into a fight."
         - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794 (see legacy-ai-doctrine-retirement)."
     architecture:
       kind: service
@@ -1035,6 +1012,8 @@ entities:
         - seed_helm_travel_facts
         - target_relative_motion
         - plan_fly_through_pass
+        - plan_recovery_orbit
+        - plan_artillery_position
         - resolve_helm_channel
         - HELM_LONGITUDINAL_CHANNEL
         - HELM_ACTUATE_DESIRED_TRAVEL_VERB
@@ -1049,14 +1028,15 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Steering AI Operator
-      summary: Data-authored #775 fine system whose stateless policy resolves a yaw-channel mode verb (actuate_desired_facing) to decide whether to actuate this tick; when it fires, the host emits SetSteering with the continuous magnitude decoded from the shared DesiredMotion desired-facing fact, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
+      summary: Data-authored #775 fine system whose policy resolves one of the yaw channel's mode verbs to decide whether — and against which host-flown leg — to actuate this tick; when it fires, the host emits SetSteering with the continuous magnitude decoded from the shared DesiredMotion desired-facing fact, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
       rationale:
         - "Issue #779 (AC1): Steering is authored independently of Engines. The DECISION to actuate flows through HelmSteeringAiPolicy (attached at spawn from [helm_console.steering_ai], else default_steering_ai_config) resolving the yaw channel to the actuate_desired_facing mode verb, replacing the pre-#779 unconditional branch in ai_helm_steering. Arc-bearing remains a facing override this axis owns on top."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar; the yaw magnitude stays sourced from DesiredMotion.desired_facing_local, decoded by decode_steering_from_facing. desired_facing_local stays a distinct public fact from desired_velocity_local (AC5). A 'hold' resolution emits nothing and yaw coasts."
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
         - "Issue #883 (AC5) closed the same empty-facts gap here: ai_helm_steering seeds the hazard/availability snapshot plus the target-relative travel facts before resolving, so a yaw guard actually evaluates."
         - "Issue #883 seeds this host's availability facts (impulse_available / boost_available) from the ship's own config resources rather than the hardcoded false ai_helm_steering used to pass — see the same note on ai_helm_thrust."
-        - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
+        - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
+        - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — at the time, the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS, then a pair). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
         - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
       kind: service
@@ -1082,7 +1062,13 @@ entities:
         - HelmSteeringAiPolicy
         - HelmSteeringAiPolicyState
         - HELM_HOLD_COMMITTED_HEADING_VERB
+        - HELM_HOLD_RECOVERY_ORBIT_VERB
+        - HELM_PIVOT_TO_REENGAGE_VERB
+        - HELM_HOLD_COMBAT_ORBIT_VERB
+        - HELM_HOLD_TORPEDO_BEARING_VERB
+        - HELM_HOLD_ARTILLERY_POSITION_VERB
         - HELM_STEERING_VERBS
+        - build_pass_surface
         - seed_helm_travel_facts
         - resolve_helm_channel
         - HELM_YAW_CHANNEL
@@ -1171,6 +1157,7 @@ entities:
         - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine while preserving the pre-#780 baseline exactly. HelmImpulseAiPolicy (attached at spawn from [helm_console.impulse_ai], else default_impulse_ai_config — unconditional permit) resolves the impulse channel to the engage_impulse mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts: impulse_available/boost_available). A hold resolution emits nothing."
         - "Availability + manoeuvre policy (AC6): impulse capability is the presence of ImpulseConfigResource — no config, no emit. The engage-vs-cancel decision itself stays host-side (decide_impulse geometry over the radar-gated visible view) and the authored doctrine use_impulse veto is unchanged, so the policy verb is an additional authored gate layered on top."
         - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); emits through the shared validate_and_admit seam like its siblings (AGENTS.md #6). Full removal of the residual hardcoded decision is the coordinated tail #794."
+        - "Issue #792 CONTENT CONSTRAINT, discovered on the first hull that holds station inside its own drive's cruise window: the impulse autopilot HARD-OVERRIDES commanded throttle, so a doctrine that commands a dead stop at an authored radius inside impulse_engage_distance is simply flown through its own hold. The Harrow warhawk commanded a stop at 180 units and was carried to 22. The fix is authored, not host-side — [helm_console.impulse_ai] idle = true holds the drive off on the hull's own fine-system policy — which is exactly what the #780 default (unconditional permit) is there to be overridden by. Any future hull whose held radius falls inside impulse_engage_distance needs the same declaration; the symptom is a station-keeping doctrine that appears to work in the pure planner and closes to knife range in the live sim."
     architecture:
       kind: service
       authority: authoritative

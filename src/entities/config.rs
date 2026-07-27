@@ -2929,9 +2929,22 @@ pub struct FineSystemAiTransitionToml {
 /// twelve shipped stateless blocks parse byte-identically and decode to a
 /// policy whose `machine` is `None`. A block that authors no `state` never
 /// enters the transition code path at all.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FineSystemAiConfigToml {
+    /// How many shared AI base ticks (`[global] ai_tick_hz`) pass between two
+    /// evaluations of this policy (PRD #774 §9, issue #889).
+    ///
+    /// `1` — the parse default — means "every base tick", which is what every
+    /// shipped policy authors today. A larger integer lets a host such as
+    /// Sensors, Power, Repair or Comms decide less often as **authored data**,
+    /// instead of the second hardcoded Rust `Timer` that #889 retired. The
+    /// field is typed `u32`, so a non-integer multiple of the base cadence is a
+    /// TOML type error at load; `0` is rejected by
+    /// [`validate_fine_system_ai_policy`] (a policy that never evaluates is an
+    /// `idle = true` declaration, not a cadence).
+    #[serde(default = "default_evaluate_every_ticks")]
+    pub evaluate_every_ticks: u32,
     /// Explicit idle marker. Mutually exclusive with `rule` and with `state`.
     #[serde(default)]
     pub idle: bool,
@@ -2953,6 +2966,29 @@ pub struct FineSystemAiConfigToml {
     /// Readable through the `memory(name)` atom by THIS fine system only.
     #[serde(default)]
     pub memory: std::collections::HashMap<String, f32>,
+}
+
+/// The parse default for [`FineSystemAiConfigToml::evaluate_every_ticks`]:
+/// evaluate on every shared AI base tick.
+pub(crate) fn default_evaluate_every_ticks() -> u32 {
+    1
+}
+
+impl Default for FineSystemAiConfigToml {
+    /// Hand-written rather than derived so that `..Default::default()` yields
+    /// the same `evaluate_every_ticks` the TOML parse default supplies. A
+    /// derived `0` would be a policy that never evaluates.
+    fn default() -> Self {
+        Self {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
+            idle: false,
+            param: std::collections::HashMap::new(),
+            rule: Vec::new(),
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl FineSystemAiConfigToml {
@@ -3120,6 +3156,7 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
         DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS,
     );
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param,
         rule: vec![
@@ -3183,6 +3220,7 @@ pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
 /// declare `idle = true` to make the Comms AI answer nothing at all.
 pub fn default_comms_response_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3211,6 +3249,7 @@ pub fn default_comms_response_ai_config() -> FineSystemAiConfigToml {
 /// from `DesiredMotion`, so no thrust value is pinned in Rust.
 pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3234,6 +3273,7 @@ pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
 /// planner's desired facing.
 pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3261,6 +3301,7 @@ pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
 /// dodge magnitude still comes from the shared hazard surface.
 pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3289,6 +3330,7 @@ pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
 /// of the policy verb.
 pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3316,6 +3358,7 @@ pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
 /// verb is an additional authored gate layered on top, defaulting to "permit".
 pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3343,6 +3386,7 @@ pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
 /// legal, distinct-from-silence declaration accepted by validation.
 pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: true,
         param: std::collections::HashMap::new(),
         rule: Vec::new(),
@@ -3365,6 +3409,7 @@ pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
 /// opt-out (AC1).
 pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3416,6 +3461,7 @@ pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
         default_shields_ai_health_ratio_threshold(),
     );
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param,
         rule: vec![
@@ -3497,6 +3543,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
     let helm = crate::modifiers::power_system::HELM_POWER_GROUP;
     let weapons = crate::modifiers::power_system::WEAPONS_POWER_GROUP;
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param,
         rule: vec![
@@ -3560,6 +3607,7 @@ pub fn default_power_ai_config() -> FineSystemAiConfigToml {
 /// validity before the volley starts.
 pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3589,6 +3637,7 @@ pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
 /// An explicit `idle` is the opt-out.
 pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![
@@ -3625,6 +3674,7 @@ pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
 /// this policy is a data-authored arbiter layered on top.
 pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
     FineSystemAiConfigToml {
+        evaluate_every_ticks: default_evaluate_every_ticks(),
         idle: false,
         param: std::collections::HashMap::new(),
         rule: vec![FineSystemAiRuleToml {
@@ -3713,6 +3763,18 @@ fn validate_policy_inner(
     valid_verbs: &[&str],
     host: Option<&crate::entities::ai_flag_hosts::AiHost>,
 ) -> Result<(), String> {
+    // Cadence first (issue #889): `evaluate_every_ticks` counts shared AI base
+    // ticks, so it has to be a POSITIVE integer. `u32` already makes a
+    // non-integer multiple of the base a TOML type error; zero would be a
+    // policy that never evaluates, which is `idle = true`, not a cadence.
+    if cfg.evaluate_every_ticks == 0 {
+        return Err(
+            "ai policy declares evaluate_every_ticks = 0: the value counts shared AI base \
+             ticks between evaluations and must be a positive integer. A policy that should \
+             never evaluate declares idle = true"
+                .into(),
+        );
+    }
     if cfg.idle {
         if !cfg.rule.is_empty() {
             return Err("ai policy declares idle = true but also carries rules".into());
@@ -9509,6 +9571,7 @@ when = "state_time >= param(surge_dwell_secs)"
         states: Vec<FineSystemAiStateToml>,
     ) -> FineSystemAiConfigToml {
         FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: Vec::new(),
@@ -9742,6 +9805,7 @@ when = "state_time >= param(surge_dwell_secs)"
     #[test]
     fn equal_priority_rules_on_one_channel_are_rejected() {
         let stateless = |rules: Vec<FineSystemAiRuleToml>| FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: rules,
@@ -9881,6 +9945,7 @@ when = "state_time >= param(surge_dwell_secs)"
     #[test]
     fn memory_reference_in_a_stateless_policy_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: vec![FineSystemAiRuleToml {
@@ -9908,6 +9973,7 @@ when = "state_time >= param(surge_dwell_secs)"
     #[test]
     fn state_time_reference_in_a_stateless_policy_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: vec![FineSystemAiRuleToml {
@@ -11783,6 +11849,7 @@ value = false
     #[test]
     fn idle_with_rules_is_contradictory_and_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: true,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -11824,6 +11891,7 @@ value = true
     #[test]
     fn unknown_channel_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -11846,6 +11914,7 @@ value = true
     #[test]
     fn unknown_verb_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -11868,6 +11937,7 @@ value = true
     #[test]
     fn undeclared_parameter_reference_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(), // no params declared
             rule: vec![FineSystemAiRuleToml {
@@ -11890,6 +11960,7 @@ value = true
     #[test]
     fn unknown_verb_surfaces_through_to_policy() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -11978,6 +12049,7 @@ idle = true
     #[test]
     fn unknown_helm_engines_verb_is_rejected() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -12003,6 +12075,7 @@ idle = true
     fn helm_wrong_channel_is_rejected() {
         // The Captain's `red_alert` channel is not a valid Steering channel.
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -12154,6 +12227,7 @@ verb = "engage_impulse"
     fn wrong_verb_on_secondary_helm_channel_is_rejected() {
         // The impulse verb on the boost channel is unknown to the boost host.
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![FineSystemAiRuleToml {
@@ -12679,6 +12753,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     #[test]
     fn comms_respond_verb_decodes_its_own_response_index_field() {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: vec![FineSystemAiRuleToml {
@@ -13133,13 +13208,31 @@ pub struct GlobalConfig {
     /// Short description shown below the title in the lobby.
     #[serde(default)]
     pub description: Option<String>,
-    /// Fixed rate (Hz) of the shared AI-helm sim tick that gates every
-    /// per-axis AI helm system (`ai_helm_thrust`, `ai_helm_steering`,
-    /// `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm
-    /// decision cadence from the host's frame rate (issue #803, PRD #620).
-    /// The default matches the old `AiLateralThrustTimer` period.
-    #[serde(default = "default_ai_helm_tick_hz")]
-    pub ai_helm_tick_hz: f32,
+    /// Fixed rate (Hz) of the ONE shared AI decision tick (issue #889).
+    ///
+    /// Gates every AI policy host — the six per-axis helm systems, the seven
+    /// weapons/shields/power deciders, and (through the derived slower cadence
+    /// below) Captain and Sensors — decoupling AI decision cadence from the
+    /// host's frame rate (issues #803, #889; PRD #620). The default matches the
+    /// old `AiLateralThrustTimer` period.
+    ///
+    /// Authored as `ai_tick_hz`. The pre-#889 key `ai_helm_tick_hz` remains a
+    /// serde alias — every shipped world TOML authors it — because the rate was
+    /// never helm-specific in anything but name.
+    #[serde(default = "default_ai_tick_hz", alias = "ai_helm_tick_hz")]
+    pub ai_tick_hz: f32,
+    /// Rate (Hz) of the DERIVED slower AI cadence: the `WorldSnapshot` /
+    /// doctrine-blackboard rebuild and the two policy hosts that read them
+    /// (Captain, Sensors).
+    ///
+    /// Before #889 this was a hardcoded 10 Hz `Timer` in `ai/server.rs` — a
+    /// designer-tunable decision rate living as a Rust literal, and a second AI
+    /// clock free to drift out of phase with the base one. It is now expressed
+    /// as authored data and realised as an integer multiple of [`Self::ai_tick_hz`]
+    /// (see [`Self::snapshot_every_ticks`]); a non-integer relationship between
+    /// the two is rejected by `world::config::parse_world`.
+    #[serde(default = "default_ai_snapshot_hz")]
+    pub ai_snapshot_hz: f32,
 }
 
 impl Default for GlobalConfig {
@@ -13148,13 +13241,54 @@ impl Default for GlobalConfig {
             seed: None,
             title: None,
             description: None,
-            ai_helm_tick_hz: default_ai_helm_tick_hz(),
+            ai_tick_hz: default_ai_tick_hz(),
+            ai_snapshot_hz: default_ai_snapshot_hz(),
         }
     }
 }
 
-fn default_ai_helm_tick_hz() -> f32 {
+impl GlobalConfig {
+    /// The number of base AI ticks per slower snapshot tick.
+    ///
+    /// `None` when the authored pair is not a positive integer relationship —
+    /// e.g. `ai_tick_hz = 25` against `ai_snapshot_hz = 10` gives 2.5, which is
+    /// a content error rather than something to silently round. Callers on the
+    /// hot path use [`Self::snapshot_every_ticks`], which is only reachable
+    /// after `parse_world` has rejected that case.
+    pub fn checked_snapshot_every_ticks(&self) -> Option<u32> {
+        if !(self.ai_tick_hz.is_finite() && self.ai_tick_hz > 0.0) {
+            return None;
+        }
+        if !(self.ai_snapshot_hz.is_finite() && self.ai_snapshot_hz > 0.0) {
+            return None;
+        }
+        let ratio = self.ai_tick_hz / self.ai_snapshot_hz;
+        let rounded = ratio.round();
+        if rounded < 1.0 || (ratio - rounded).abs() > SNAPSHOT_RATIO_EPSILON {
+            return None;
+        }
+        Some(rounded as u32)
+    }
+
+    /// [`Self::checked_snapshot_every_ticks`] with the parse-time default
+    /// applied, for the run-condition system that cannot return an error.
+    pub fn snapshot_every_ticks(&self) -> u32 {
+        self.checked_snapshot_every_ticks()
+            .unwrap_or_else(|| (default_ai_tick_hz() / default_ai_snapshot_hz()).round() as u32)
+    }
+}
+
+/// Tolerance on the `ai_tick_hz / ai_snapshot_hz` ratio. Both are authored as
+/// `f32`, so an exactly-integer relationship such as 30/10 can land a few ULPs
+/// off; 2.5 is nowhere near this band.
+const SNAPSHOT_RATIO_EPSILON: f32 = 1e-4;
+
+fn default_ai_tick_hz() -> f32 {
     30.0
+}
+
+fn default_ai_snapshot_hz() -> f32 {
+    10.0
 }
 
 /// Configuration for the grid-based asteroid spawner.

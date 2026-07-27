@@ -1642,6 +1642,22 @@ impl WorldEntity {
 pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     let raw: RawWorld = toml::from_str(toml_str).map_err(|e| e.to_string())?;
 
+    // The two AI clocks must be commensurate (issue #889). The slower snapshot
+    // cadence is DERIVED from the base tick as an integer multiple, so an
+    // authored pair that does not divide — `ai_tick_hz = 25` against the
+    // default `ai_snapshot_hz = 10`, giving 2.5 base ticks per snapshot tick —
+    // is a content error, not something to round silently at runtime.
+    if raw.global.checked_snapshot_every_ticks().is_none() {
+        return Err(format!(
+            "[global] ai_tick_hz = {} and ai_snapshot_hz = {} are not a positive integer \
+             relationship: the slower AI cadence is derived as a whole number of base ticks, \
+             so ai_tick_hz / ai_snapshot_hz must divide exactly (got {})",
+            raw.global.ai_tick_hz,
+            raw.global.ai_snapshot_hz,
+            raw.global.ai_tick_hz / raw.global.ai_snapshot_hz
+        ));
+    }
+
     let mut anchors: HashMap<String, [f32; 3]> = HashMap::with_capacity(raw.anchors.len());
     for (name, pos) in raw.anchors {
         let normalised = match pos.len() {
@@ -2084,24 +2100,60 @@ mod tests {
         assert_eq!(cfg.global.seed, None, "an unauthored seed stays unset");
     }
 
-    /// `[global] ai_helm_tick_hz` (issue #803): serde default when omitted,
+    /// `[global] ai_tick_hz` (issues #803, #889): serde default when omitted,
     /// authored value when present. The default is the one hardcoded value the
     /// TOML-parse rule allows, and it matches the old `AiLateralThrustTimer`
     /// period so worlds that don't author the key see no cadence change.
     #[test]
-    fn parse_world_reads_ai_helm_tick_hz() {
+    fn parse_world_reads_ai_tick_hz() {
         let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
         assert_eq!(
-            defaulted.global.ai_helm_tick_hz, 30.0,
-            "omitted ai_helm_tick_hz must default to 30 Hz"
+            defaulted.global.ai_tick_hz, 30.0,
+            "omitted ai_tick_hz must default to 30 Hz"
+        );
+        assert_eq!(
+            defaulted.global.ai_snapshot_hz, 10.0,
+            "omitted ai_snapshot_hz must default to the 10 Hz the retired \
+             hardcoded AiSnapshotTimer ran at"
         );
 
-        let authored =
-            parse_world("[global]\nai_helm_tick_hz = 12.5\n").expect("TOML should parse");
+        let authored = parse_world("[global]\nai_tick_hz = 20.0\n").expect("TOML should parse");
         assert_eq!(
-            authored.global.ai_helm_tick_hz, 12.5,
-            "an authored ai_helm_tick_hz must be read verbatim"
+            authored.global.ai_tick_hz, 20.0,
+            "an authored ai_tick_hz must be read verbatim"
         );
+    }
+
+    /// Every shipped world TOML authors the pre-#889 key. Promoting the field
+    /// to `ai_tick_hz` must not silently drop those authored rates back to the
+    /// serde default — the old key stays a serde alias.
+    #[test]
+    fn parse_world_still_reads_the_legacy_ai_helm_tick_hz_key() {
+        let legacy = parse_world("[global]\nai_helm_tick_hz = 60.0\n").expect("TOML should parse");
+        assert_eq!(
+            legacy.global.ai_tick_hz, 60.0,
+            "the pre-#889 `ai_helm_tick_hz` key must still set the shared AI \
+             tick rate — every shipped world authors it"
+        );
+    }
+
+    /// Issue #889: the slower AI cadence is DERIVED from the base tick as a
+    /// whole number of base ticks, so an authored pair that does not divide is
+    /// a content error. Before this, `ai_helm_tick_hz = 25` against the
+    /// hardcoded 10 Hz snapshot timer gave 2.5 snapshot ticks per helm tick
+    /// with nothing complaining.
+    #[test]
+    fn parse_world_rejects_a_non_integer_cadence_relationship() {
+        let err = parse_world("[global]\nai_tick_hz = 25.0\n")
+            .expect_err("25 Hz base against the 10 Hz default is 2.5 base ticks per snapshot");
+        assert!(
+            err.contains("ai_tick_hz") && err.contains("ai_snapshot_hz"),
+            "the load error must name both authored rates so the author can fix \
+             the pair; got: {err}"
+        );
+
+        parse_world("[global]\nai_tick_hz = 25.0\nai_snapshot_hz = 5.0\n")
+            .expect("25 Hz base against 5 Hz snapshot divides exactly (5 base ticks)");
     }
 
     #[test]

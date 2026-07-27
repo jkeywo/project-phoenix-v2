@@ -98,6 +98,11 @@ impl Plugin for WeaponsPlugin {
         // as admitted `blaster-{bank}` commands consumed by `handle_fire_blaster`.
         .register_admitted_consumer(ConsumerMatcher::prefix("blaster-"));
         app.init_resource::<crate::messages::InterSystemQueue>();
+        // The ONE shared AI decision cadence (issue #889): the three AI
+        // deciders registered below (`ai_phaser_auto_fire`,
+        // `ai_target_selection`, `tick_blaster_auto_fire`) were ungated, i.e.
+        // deciding once per rendered frame.
+        crate::ai::cadence::register_ai_cadence(app);
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
@@ -148,7 +153,11 @@ impl Plugin for WeaponsPlugin {
                     // Phaser auto-fire DECIDE (issue #846): emits to
                     // AdmittedCommands through the shared AI seam. Stays in
                     // `Input` so it keeps reading pre-physics `Transform`s.
-                    ai_phaser_auto_fire.in_set(crate::sim_sets::SimSet::Input),
+                    // Gated on the ONE shared AI cadence (issue #889): before
+                    // it, this ran once per rendered frame.
+                    ai_phaser_auto_fire
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .run_if(crate::ai::cadence::ai_tick_ready),
                     tick_weapons_arc_request.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
@@ -169,13 +178,17 @@ impl Plugin for WeaponsPlugin {
                     // aggregator derive from this write one tick later — so the set
                     // choice is about writer/writer atomicity, not about feeding
                     // any same-tick reader.
-                    ai_target_selection.in_set(crate::sim_sets::SimSet::Input),
+                    ai_target_selection
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .run_if(crate::ai::cadence::ai_tick_ready),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
                     // Blaster auto-fire DECIDE (issue #781): emits an admitted
                     // `ChargeBlasterStart` through the shared AI seam, converging
                     // with the human path at `handle_fire_blaster` (Physics).
                     // Stays in `Input` so it reads pre-physics `Transform`s.
-                    tick_blaster_auto_fire.in_set(crate::sim_sets::SimSet::Input),
+                    tick_blaster_auto_fire
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .run_if(crate::ai::cadence::ai_tick_ready),
                 ),
             )
             .add_systems(

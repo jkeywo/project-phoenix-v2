@@ -484,6 +484,12 @@ fn push(app: &mut App, token: &str, msg: ClientMessage) {
 }
 
 fn tick(app: &mut App) -> Vec<OutboundMessage> {
+    // Issue #889: the weapons AI deciders (`ai_target_selection`,
+    // `ai_phaser_auto_fire`, `tick_blaster_auto_fire`) are gated by
+    // `run_if(ai_tick_ready)` — before it they decided once per rendered frame.
+    // A fixture that wants a decision on this update ticks the latch by hand;
+    // the cadence itself is covered in `ai::cadence`.
+    crate::ai::cadence::arm_ai_tick(app);
     app.update();
     let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
     let mut out = app.world().resource::<Outbox>().0.clone();
@@ -5525,6 +5531,64 @@ fn set_local_last_attacker(app: &mut App, uuid: Option<String>) {
     set_last_attacker(app, entity, uuid);
 }
 
+/// Issue #889: `ai_target_selection` was UNGATED. `SimSet` is configured in
+/// Bevy's `Update`, so ungated meant one target decision per rendered frame —
+/// at the host's display refresh rate, over a `WorldSnapshot` rebuilt on an
+/// unrelated 10 Hz clock. It now shares the helm axes' fixed-rate latch.
+///
+/// The probe is the helm cadence tests' sentinel shape: a UUID no entity
+/// carries is stamped into `TacticalRadarSelection` before every frame, so a
+/// frame that leaves it standing is a frame the decider did not run on
+/// (retention cannot keep a lock on an entity that does not exist).
+///
+/// Note this fixture deliberately does NOT use the module's `tick`, which arms
+/// the latch by hand — it drives `Time` instead, because the throttle is the
+/// thing under test.
+#[test]
+fn ai_target_selection_runs_on_the_shared_ai_tick_not_per_frame() {
+    const SENTINEL: &str = "00000000-0000-0000-0000-0000000889ff";
+
+    let mut app = test_app();
+    let near_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target(&mut app, &near_uuid, 0.0, -50.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("target".into(), near_uuid.clone());
+    insert_destroy_objective_blackboard(&mut app, "target", 80.0);
+
+    // 10 ms per frame — under the 33.3 ms shared cadence period, i.e. what a
+    // 60 Hz rAF-driven host actually does.
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        std::time::Duration::from_millis(10),
+    ));
+
+    const FRAMES: usize = 12;
+    let mut ran = 0usize;
+    for _ in 0..FRAMES {
+        set_weapons_target(&mut app, Some(SENTINEL.to_string()));
+        app.update();
+        if get_weapons_target(&mut app).as_deref() != Some(SENTINEL) {
+            ran += 1;
+        }
+    }
+
+    assert!(
+        ran > 0,
+        "precondition: {FRAMES} frames x 10 ms spans several 33.3 ms periods, so the \
+         decider must run at least once — 0 runs means the probe is broken and this \
+         test proves nothing about cadence"
+    );
+    assert!(
+        ran <= FRAMES / 2,
+        "the shared AI tick must throttle ai_target_selection: at 10 ms/frame it ran \
+         on {ran} of {FRAMES} frames. Running every frame means the \
+         run_if(ai_tick_ready) gate is gone and target selection follows display \
+         refresh rate again (issue #889, PRD #620)"
+    );
+}
+
 #[test]
 fn tactical_ai_respects_radar_range() {
     let mut app = test_app();
@@ -7089,6 +7153,7 @@ fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
 /// from an authored `when` guard on the `torpedo_launch` channel.
 fn attach_launch_policy(app: &mut App, when: &str) {
     let ai = crate::entity_config::FineSystemAiConfigToml {
+        evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
         idle: false,
         param: Default::default(),
         rule: vec![crate::entity_config::FineSystemAiRuleToml {
@@ -10940,6 +11005,7 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
 /// Build a phaser-bank fire policy from a single guard expression.
 fn phaser_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
     crate::entities::config::FineSystemAiConfigToml {
+        evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
         idle: false,
         param: Default::default(),
         rule: vec![crate::entities::config::FineSystemAiRuleToml {
@@ -11883,6 +11949,10 @@ fn a_burning_bank_is_not_relit_while_its_sibling_may_still_open_fire() {
         let mut physics = app.world_mut().get_mut::<ShipPhysics>(npc).unwrap();
         physics.yaw = -(std::f32::consts::FRAC_PI_2 + 0.2);
     }
+    // Issue #889: `ai_phaser_auto_fire` runs on the shared AI cadence latch,
+    // which the update above consumed. The first update rides the
+    // initialises-`true` free run; this one has to tick the latch by hand.
+    crate::ai::cadence::arm_ai_tick(&mut app);
     app.update();
 
     assert_eq!(

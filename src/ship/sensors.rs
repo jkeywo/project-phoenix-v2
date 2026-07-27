@@ -111,6 +111,9 @@ impl Plugin for ShipSensorsPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::SENSORS_SYSTEM_ID,
         ));
+        // The ONE shared AI decision cadence (issue #889), which also derives
+        // the slower snapshot latch `operate_sensors_ai` gates on.
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_message::<CoordinationEnqueue>()
             .init_resource::<SensorsAiConfigResource>()
             .add_systems(
@@ -128,9 +131,14 @@ impl Plugin for ShipSensorsPlugin {
                     // Decide only (issue #828): emits admitted
                     // SetScienceTarget / ClearScienceTarget payloads; the
                     // single applier is `handle_sensors_messages` above.
+                    // Gated by `run_if` on the derived slower snapshot cadence
+                    // (issue #889) — the same rate the retired in-body
+                    // `Option<Res<AiSnapshotReady>>` check enforced in
+                    // production, minus its evaluate-every-tick fallback.
                     operate_sensors_ai
                         .in_set(crate::sim_sets::SimSet::Input)
-                        .before(handle_sensors_messages),
+                        .before(handle_sensors_messages)
+                        .run_if(crate::ai::cadence::ai_snapshot_ready),
                     tick_sensors_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
                     tick_sensors_threat_warning.in_set(crate::sim_sets::SimSet::Input),
                     publish_sensors_blackboard.in_set(crate::sim_sets::SimSet::Publish),
@@ -703,12 +711,15 @@ fn detectable_candidate(
 /// admitted command (and therefore no channel-3 `TargetDesignation` spam) —
 /// an AI selection now designates its target to Tactical exactly once, on
 /// change, the same as a human selection through the applier.
+/// # Cadence
+/// Gated by `run_if(ai_snapshot_ready)` at registration (issue #889), not by an
+/// `Option<Res<_>>` check inside the body. The in-body form fell back to
+/// evaluating EVERY tick whenever the resource was absent — which is every
+/// bare-`App` fixture in the crate — so the shipped cadence was not exercised
+/// by a single unit test. The rate is unchanged: the derived slower snapshot
+/// cadence, `[global] ai_tick_hz / ai_snapshot_hz` base ticks apart.
 pub fn operate_sensors_ai(
     sessions: Res<crate::lobby::Sessions>,
-    // Shared 10 Hz AI cadence latch (AGENTS.md rule #7), mirroring
-    // `operate_captain_ai`. `Option<Res<_>>` so bare-`App` fixtures without
-    // `AiPlugin` still pass parameter validation; absent ⇒ evaluate every tick.
-    ai_ready: Option<Res<crate::ai::server::AiSnapshotReady>>,
     mut ships: Query<
         (
             Option<&crate::entity_spawner::EntityUuid>,
@@ -762,10 +773,6 @@ pub fn operate_sensors_ai(
         Without<crate::server_app::Ship>,
     >,
 ) {
-    // Gate on the deterministic 10 Hz base cadence (AGENTS.md rule #7).
-    if !ai_ready.map(|r| r.0).unwrap_or(true) {
-        return;
-    }
     let console_range = ship_config.0.sensors_radar_range;
 
     // Canonical fallback selector for any ship missing an attached component

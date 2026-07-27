@@ -40,12 +40,22 @@ impl Plugin for CaptainPlugin {
             crate::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
+        // The ONE shared AI decision cadence (issue #889).
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             Update,
             (
+                // Gated by `run_if`, not by an `Option<Res<_>>` check inside the
+                // body (issue #889). The in-body form fell back to evaluating
+                // EVERY tick whenever the resource was absent — which is every
+                // bare-`App` fixture in the crate — so the shipped cadence was
+                // not exercised by a single unit test. The rate is unchanged:
+                // the derived slower snapshot cadence, `[global] ai_snapshot_hz`
+                // base ticks apart.
                 operate_captain_ai
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .before(handle_set_red_alert),
+                    .before(handle_set_red_alert)
+                    .run_if(crate::ai::cadence::ai_snapshot_ready),
                 handle_set_red_alert.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_view.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_objective_priority.in_set(crate::sim_sets::SimSet::Input),
@@ -210,11 +220,6 @@ fn handle_set_objective_priority(
 fn operate_captain_ai(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
-    // Shared 10 Hz AI cadence latch (issue #775 AC3). `Option<Res<_>>` so
-    // bare-`App` fixtures without `AiPlugin` still pass parameter validation;
-    // when absent the policy evaluates every tick (matching the other
-    // snapshot-resilient AI systems and the pre-#775 per-frame behaviour).
-    ai_ready: Option<Res<crate::ai::server::AiSnapshotReady>>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
@@ -225,10 +230,6 @@ fn operate_captain_ai(
         Option<&CaptainAiPolicy>,
     )>,
 ) {
-    // Gate on the deterministic 10 Hz base cadence.
-    if !ai_ready.map(|r| r.0).unwrap_or(true) {
-        return;
-    }
     let now = time.elapsed_secs();
     // Canonical fallback for any ship missing an attached policy component
     // (the bare-`App` unit fixtures). Real ships always carry one, authored or
@@ -621,6 +622,15 @@ mod tests {
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
+        // Issue #889: `operate_captain_ai` is gated by
+        // `run_if(ai_snapshot_ready)`, so a fixture that wants a decision on
+        // this update has to tick the latch. It used to be gated inside the
+        // system body by an `Option<Res<_>>` that fell back to evaluating every
+        // tick when absent — which is what every fixture below silently
+        // exercised, so the shipped cadence was covered by no test at all.
+        // Arming the latch by hand keeps these tests about decision CONTENT;
+        // the cadence itself is covered in `ai::cadence`.
+        crate::ai::cadence::arm_ai_tick(app);
         app.update();
         let out = app.world().resource::<Outbox>().0.clone();
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -1483,6 +1493,7 @@ mod tests {
 
     fn always_on_policy() -> crate::ai::policy::AiPolicy {
         crate::entities::config::FineSystemAiConfigToml {
+            evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![crate::entities::config::FineSystemAiRuleToml {

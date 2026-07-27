@@ -50,7 +50,7 @@ authored target.
 
 ### Shared sim tick (issue #803)
 
-All four systems share one `run_if(ai_helm_tick_ready)` gate. `AiHelmTickTimer` is a repeating timer; `tick_ai_helm_timer` advances it (after all four systems, so the flag is consumed before re-arming) and latches `AiHelmTickReady`. This decouples AI helm cadence from the rAF-driven frame rate — without it a 144 Hz host would steer on ~4x fresher data than a 60 Hz one, the nondeterminism PRD #620 exists to remove. The rate is TOML-authored: `[global] ai_helm_tick_hz` (`GlobalConfig::ai_helm_tick_hz` in `src/world/config.rs`, serde default 30 Hz), reconciled against the loaded world config each frame.
+All four systems share one `run_if(ai_tick_ready)` gate — since issue #889 the *same* gate every other AI policy host uses. `AiTickTimer` is a repeating timer; `tick_ai_cadence` (registered in Bevy's `Last`, so it always runs after the `Update` systems it gates) advances it and latches `AiTickReady`. This decouples AI cadence from the rAF-driven frame rate — without it a 144 Hz host would steer on ~4x fresher data than a 60 Hz one, the nondeterminism PRD #620 exists to remove. The rate is TOML-authored: `[global] ai_tick_hz` (`GlobalConfig::ai_tick_hz`, serde default 30 Hz; the pre-#889 key `ai_helm_tick_hz` remains a serde alias), reconciled against the loaded world config each frame. See `src/ai/cadence.rs`.
 
 ### Ordering
 

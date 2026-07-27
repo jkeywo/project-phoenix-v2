@@ -66,6 +66,12 @@ pub struct ConsoleAiPlugin;
 
 impl Plugin for ConsoleAiPlugin {
     fn build(&self, app: &mut App) {
+        // The ONE shared AI decision cadence (issue #889). Every decider below
+        // used to be UNGATED, and because `SimSet` is configured in Bevy's
+        // `Update` that meant one decision per rendered frame — at display
+        // refresh rate, over a `WorldSnapshot` rebuilt on an unrelated clock.
+        // They now share the helm axes' fixed-rate latch.
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             Update,
             (
@@ -79,7 +85,8 @@ impl Plugin for ConsoleAiPlugin {
                 ai_shield_focus
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
-                    .before(crate::ship::shields::handle_shields_messages),
+                    .before(crate::ship::shields::handle_shields_messages)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
                 // Decide only (issue #831, mirroring shields #826): emits
                 // admitted SetPowerGroupAllocation payloads; the single applier
                 // is `ship::power::handle_power_messages` (registered by
@@ -90,7 +97,8 @@ impl Plugin for ConsoleAiPlugin {
                 ai_power_allocation
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
-                    .before(crate::ship::power::handle_power_messages),
+                    .before(crate::ship::power::handle_power_messages)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
                 // Decide only. The apply half is
                 // `console::weapons::handle_fire_torpedo` (issue #846 —
                 // previously `integrate_weapons_state`, which drained the
@@ -112,7 +120,8 @@ impl Plugin for ConsoleAiPlugin {
                 ai_torpedo_auto_fire
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::sim_sets::AiTickLabel)
-                    .before(crate::console::weapons::handle_fire_torpedo),
+                    .before(crate::console::weapons::handle_fire_torpedo)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
                 // The loading half of the torpedo AI. `Input`, not `Physics`,
                 // and explicitly before the volley-target handler: the command
                 // it emits has to be consumed in the SAME tick, exactly as
@@ -121,10 +130,20 @@ impl Plugin for ConsoleAiPlugin {
                 // place before `tick_torpedo_lifecycle` (Physics) runs its
                 // auto-load block, so a tube starts loading the tick the order
                 // is given rather than the tick after.
+                //
+                // Gated on the shared base cadence like its launch half. The
+                // two run in different sets (`Input` load, `Physics` launch)
+                // but on the SAME latch, so a tube that is loaded and ready
+                // still launches in the tick the launch decider next fires —
+                // quantising both halves does not insert an extra tick between
+                // them.
                 ai_torpedo_load
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .before(crate::weapons_plugin::handle_set_torpedo_volley_target),
-                ai_frequency_hint.in_set(crate::sim_sets::SimSet::Input),
+                    .before(crate::weapons_plugin::handle_set_torpedo_volley_target)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
+                ai_frequency_hint
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .run_if(crate::ai::cadence::ai_tick_ready),
             ),
         );
     }
@@ -1194,8 +1213,14 @@ pub(crate) fn ai_torpedo_load(
 /// `tick_sensors_frequency_hint` explicitly skips ships that satisfy both of
 /// these conditions, so the two systems never double-emit for the same ship.
 fn ai_frequency_hint(
-    time: Res<Time>,
-
+    // The AUTHORED tick period, not `Time::delta` (issue #889). This system is
+    // gated by `run_if(ai_tick_ready)`, so it observes one shared AI tick per
+    // run — feeding it the frame delta would accumulate only the frames it
+    // happened to run on and stretch the authored hint delay by the
+    // frame-rate-to-tick-rate ratio (2x at 60 Hz, ~4.8x at 144 Hz), reversing
+    // the frame-independence the gate exists to provide. Same shape as
+    // `ai_policy_state_tick`'s `AiPolicyTickClock`.
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     sessions: Option<Res<crate::lobby::Sessions>>,
     mut ships: Query<
         (
@@ -1218,7 +1243,11 @@ fn ai_frequency_hint(
     )>,
     mut writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
 ) {
-    let dt = time.delta_secs();
+    let hz = world_config
+        .as_deref()
+        .map(|wc| wc.global.ai_tick_hz)
+        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().ai_tick_hz);
+    let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
     let sensors_sid = crate::system_registry::sensors_system_id();
 
     for (
@@ -2089,10 +2118,24 @@ mod tests {
     #[derive(Resource)]
     struct SourceShip(Entity);
 
-    fn tick_with_dt(app: &mut App, dt_secs: f32) {
-        let mut time = app.world_mut().resource_mut::<Time>();
-        time.advance_by(std::time::Duration::from_secs_f32(dt_secs));
-        app.update();
+    /// Advance the hint by `secs` of AI-TICK time.
+    ///
+    /// Issue #889: `ai_frequency_hint` runs under `run_if(ai_tick_ready)` and
+    /// advances its delay by one authored tick period per run, not by
+    /// `Time::delta` — otherwise the gate would stretch the authored delay by
+    /// the frame-rate-to-tick-rate ratio. So the fixture now drives AI TICKS
+    /// rather than one oversized wall-clock jump: `secs` of hint time is
+    /// `secs * ai_tick_hz` updates. Wall-clock is advanced alongside purely so
+    /// any other `Time` reader in the harness sees a consistent world.
+    fn tick_with_dt(app: &mut App, secs: f32) {
+        let hz = crate::entity_config::GlobalConfig::default().ai_tick_hz;
+        let period = 1.0 / hz;
+        let ticks = (secs * hz).ceil().max(1.0) as usize;
+        for _ in 0..ticks {
+            let mut time = app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(period));
+            app.update();
+        }
     }
 
     #[test]
@@ -2341,6 +2384,7 @@ station = "sensors"
     /// `level` payload just as authored TOML would.
     fn power_policy(params: &[(&str, f32)], rules: Vec<FineSystemAiRuleToml>) -> PowerAiPolicy {
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: params.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             rule: rules,
@@ -3158,6 +3202,7 @@ station = "sensors"
     /// `torpedo_load` channel.
     fn attach_load_policy(app: &mut App, e: Entity, when: &str) {
         let ai = crate::entity_config::FineSystemAiConfigToml {
+            evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
             rule: vec![crate::entity_config::FineSystemAiRuleToml {

@@ -23,43 +23,14 @@ use crate::entity_spawner::{BehaviourSection, EntityUuid};
 use crate::server_app::{LocalShip, Ship};
 use crate::ship_state::ShipPhysics;
 
-/// Repeating 10 Hz timer that gates `build_world_snapshot` and
-/// `aggregate_doctrine_blackboards`.  Both systems only need to run at the
-/// same cadence as the AI tick and the SimState broadcast — running them every
-/// Bevy frame (60 Hz) multiplies their cost 6× with no benefit.
-#[derive(Resource)]
-pub struct AiSnapshotTimer(pub Timer);
-
-impl Default for AiSnapshotTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(0.1, TimerMode::Repeating))
-    }
-}
-
-/// Boolean latch set each frame by `tick_ai_snapshot_timer`.
-/// `run_if` conditions must use read-only params, so the timer is advanced
-/// by a dedicated system that writes this flag, which the condition then reads.
-/// Initialises to `true` so the very first update always gets a snapshot
-/// (before the timer has had a chance to fire).
-#[derive(Resource)]
-pub struct AiSnapshotReady(pub bool);
-
-/// Advance the `AiSnapshotTimer` and set `AiSnapshotReady`.
-/// Runs unconditionally in `SimSet::Physics` before `AiTickLabel`.
-/// Only writes `true` when the timer fires; on frames where it doesn't fire
-/// the flag is explicitly cleared so the gated systems skip their work.
-fn tick_ai_snapshot_timer(
-    time: Res<Time>,
-    mut timer: ResMut<AiSnapshotTimer>,
-    mut ready: ResMut<AiSnapshotReady>,
-) {
-    ready.0 = timer.0.tick(time.delta()).just_finished();
-}
-
-/// Read-only run condition: fires only when `AiSnapshotReady` is true.
-fn ai_snapshot_ready(ready: Res<AiSnapshotReady>) -> bool {
-    ready.0
-}
+// The slower snapshot cadence that gates `build_world_snapshot` and
+// `aggregate_doctrine_blackboards` used to be a private, HARDCODED 10 Hz
+// `AiSnapshotTimer` living right here — a second AI clock, free to drift out of
+// phase with the helm one and unreachable from any world TOML. Issue #889
+// retired it: the rate is now authored as `[global] ai_snapshot_hz` and the
+// latch is DERIVED from the single `[global] ai_tick_hz` base tick as an
+// integer multiple. Both systems keep the identical gate under its new home.
+pub use crate::ai::cadence::{ai_snapshot_ready, AiSnapshotReady};
 
 // ── AiTokenRegistry ───────────────────────────────────────────────────────────
 
@@ -681,18 +652,11 @@ impl Plugin for AiPlugin {
         app.add_message::<AiEntityDestroyed>();
         app.add_message::<AiWaypointReached>();
         app.init_resource::<WorldSnapshot>();
-        app.init_resource::<AiSnapshotTimer>();
-        app.insert_resource(AiSnapshotReady(true));
-        // The snapshot systems run first (consuming AiSnapshotReady), then the
-        // timer system resets / arms the flag for the next frame.
-        // Explicit `.after()` ordering ensures the flag is consumed before it is
-        // written, even when the SimSet chain is not configured (e.g. in unit tests).
-        app.add_systems(
-            Update,
-            tick_ai_snapshot_timer
-                .after(build_world_snapshot)
-                .after(aggregate_doctrine_blackboards),
-        );
+        // The ONE shared AI decision cadence (issue #889), which also derives
+        // the slower snapshot latch these two systems gate on. Its tick system
+        // lives in `Last`, so the flag is consumed by every `Update` system it
+        // gates before it is re-armed — no per-system `.after()` edge needed.
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             Update,
             build_world_snapshot

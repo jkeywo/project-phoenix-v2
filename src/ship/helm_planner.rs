@@ -84,7 +84,7 @@ pub struct HelmMotionPlan {
 /// Assemble the shared desired-motion + hazard surface once per shared AI-helm
 /// sim tick (issue #741). Runs `.after(build_helm_ai_surfaces_frame)` (whose
 /// decision inputs it reads) and `.before` the per-axis helm AI (which consumes
-/// its output), under the same `run_if(ai_helm_tick_ready)` gate.
+/// its output), under the same `run_if(ai_tick_ready)` gate.
 ///
 /// Consumes the ship's authored [`HelmCapabilitySection`] when present, falling
 /// back to `Planar` / default tuning otherwise — no shipped hull authors

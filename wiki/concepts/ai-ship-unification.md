@@ -96,7 +96,7 @@ This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anch
 
 Directive selection distinguishes unresolved directives from resolved idle commands. `operate_helm` tries lower-priority directives only when a directive returns `None` (for example, a Destroy target name that is not yet visible); `Some((0.0, 0.0))` means the directive resolved and intentionally wants the ship to hold station. This prevents a high-priority Destroy objective that has reached weapons range from falling through to a lower-priority Patrol objective and sharply steering away from the target.
 
-Since issue #803 the four per-axis AI helm systems run on a shared fixed-rate sim tick (`[global] ai_helm_tick_hz`, default 30 Hz) rather than every frame, so a 144 Hz host makes the same decisions at the same cadence as a 60 Hz one. Physics integration (`integrate_ship_physics`) still runs every frame and caps its step at `1/30s`, so a long browser frame cannot be consumed as one oversized yaw step.
+Since issue #803 the four per-axis AI helm systems run on a shared fixed-rate sim tick (`[global] ai_tick_hz`, default 30 Hz) rather than every frame — and since issue #889 so does every other AI policy host, so a 144 Hz host makes the same decisions at the same cadence as a 60 Hz one. Physics integration (`integrate_ship_physics`) still runs every frame and caps its step at `1/30s`, so a long browser frame cannot be consumed as one oversized yaw step.
 
 ### Arc-bearing steering bias
 

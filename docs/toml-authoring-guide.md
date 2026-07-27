@@ -74,7 +74,8 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `seed` | u64 | `42` | Seeds deterministic generators (asteroid spawner, etc.). |
-| `ai_helm_tick_hz` | f32 | `30.0` | Fixed rate (Hz) of the shared AI-helm sim tick gating every per-axis AI helm system (thrust, steering, lateral thrust, impulse), decoupling AI helm decision cadence from the host frame rate (issue #803). |
+| `ai_tick_hz` | f32 | `30.0` | Fixed rate (Hz) of the ONE shared AI decision tick. Gates **every** AI policy host — the six per-axis helm systems, shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection — decoupling AI decision cadence from the host frame rate (issues #803, #889). Accepts the pre-#889 name `ai_helm_tick_hz` as an alias. |
+| `ai_snapshot_hz` | f32 | `10.0` | Rate (Hz) of the derived slower AI cadence: the `WorldSnapshot`/doctrine-blackboard rebuild and the two hosts that read them (Captain, Sensors). Realised as a whole number of `ai_tick_hz` ticks — `ai_tick_hz / ai_snapshot_hz` **must divide exactly**, or the world fails to load (issue #889). |
 
 ### `[anchors]`
 

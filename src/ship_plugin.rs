@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::console_bridge::AiChatterEvent;
 
+pub(crate) use crate::ai::cadence::ai_tick_ready;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
@@ -19,9 +20,9 @@ pub(crate) use crate::ship::helm_admission::{
 };
 pub(crate) use crate::ship::helm_ai::{
     ai_helm_boost, ai_helm_impulse, ai_helm_lateral_thrust, ai_helm_steering, ai_helm_thrust,
-    ai_helm_tick_ready, ai_helm_vertical_thrust, ai_policy_state_tick,
-    build_helm_ai_surfaces_frame, detect_reached_objective_completion, helm_axes_operate_ai,
-    tick_ai_helm_timer, AiHelmTickReady, AiHelmTickTimer, AiPolicyTickClock, HelmAiSurfacesFrame,
+    ai_helm_vertical_thrust, ai_policy_state_tick, build_helm_ai_surfaces_frame,
+    detect_reached_objective_completion, helm_axes_operate_ai, AiPolicyTickClock,
+    HelmAiSurfacesFrame,
 };
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::handle_impulse_messages;
@@ -46,13 +47,12 @@ impl Plugin for ShipPlugin {
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
             .add_message::<AiChatterEvent>();
-        // Shared AI-helm sim tick (issue #803): the timer/latch pair that
-        // gates all four per-axis AI helm systems, plus the dedicated system
-        // that advances it. The tick system runs `.after` every gated system
-        // so the latch is consumed before it is re-armed — the same
-        // consume-then-arm shape as `ai::server::tick_ai_snapshot_timer`.
-        app.init_resource::<AiHelmTickTimer>()
-            .insert_resource(AiHelmTickReady(true))
+        // The ONE shared AI decision cadence (issues #803, #889). Installed by
+        // every plugin that registers a gated system; the helper is idempotent
+        // and registers its tick system in `Last`, so the latch is always
+        // consumed by the `Update` systems it gates before it is re-armed.
+        crate::ai::cadence::register_ai_cadence(app);
+        app
             // The shared helm decision surface (issue #824): rebuilt once per
             // AI-helm sim tick by `build_helm_ai_surfaces_frame` and consumed
             // read-only by the four per-axis systems below.
@@ -62,20 +62,6 @@ impl Plugin for ShipPlugin {
             // decision surface above, and consumed read-only by the per-axis
             // helm AI below.
             .init_resource::<HelmMotionPlan>()
-            .add_systems(
-                Update,
-                tick_ai_helm_timer
-                    .after(ai_helm_thrust)
-                    .after(ai_helm_steering)
-                    .after(ai_helm_lateral_thrust)
-                    .after(ai_helm_vertical_thrust)
-                    .after(ai_helm_impulse)
-                    .after(ai_helm_boost)
-                    // The stateful-policy state tick (issue #882) is gated by
-                    // the same latch, so it too must consume the flag before
-                    // this system re-arms it.
-                    .after(ai_policy_state_tick),
-            )
             // Tick-derived clock for stateful policy `state_time` (issue #882).
             .init_resource::<AiPolicyTickClock>()
             .add_systems(
@@ -86,7 +72,7 @@ impl Plugin for ShipPlugin {
                 // every per-axis actuator system, so the state it COMMITS is the
                 // state those systems resolve their continuous outputs in —
                 // AC2's same-tick guarantee. Under the shared
-                // `run_if(ai_helm_tick_ready)` latch so state time advances on
+                // `run_if(ai_tick_ready)` latch so state time advances on
                 // the fixed AI cadence, never per frame (AC4).
                 ai_policy_state_tick
                     .in_set(crate::sim_sets::SimSet::Physics)
@@ -121,7 +107,7 @@ impl Plugin for ShipPlugin {
                     .before(ai_helm_vertical_thrust)
                     .before(ai_helm_impulse)
                     .before(ai_helm_boost)
-                    .run_if(ai_helm_tick_ready),
+                    .run_if(ai_tick_ready),
             )
             .add_systems(
                 Update,
@@ -138,7 +124,7 @@ impl Plugin for ShipPlugin {
                         .before(helm_motion_planner)
                         .before(ai_helm_lateral_thrust)
                         .before(ai_helm_impulse)
-                        .run_if(ai_helm_tick_ready),
+                        .run_if(ai_tick_ready),
                     // Shared desired-motion + hazard planner (issue #741). Runs
                     // between the decision-surface assembly it reads and the
                     // per-axis systems that consume its `HelmMotionPlan` output;
@@ -153,7 +139,7 @@ impl Plugin for ShipPlugin {
                         .before(ai_helm_thrust)
                         .before(ai_helm_steering)
                         .before(ai_helm_lateral_thrust)
-                        .run_if(ai_helm_tick_ready),
+                        .run_if(ai_tick_ready),
                     // `.after(AiTickLabel)`: this system reads the frame built
                     // from the viewscreen blackboard's scored objectives.
                     // `.before(process_helm_inputs)`: its emitted admitted
@@ -164,7 +150,7 @@ impl Plugin for ShipPlugin {
                         .before(process_helm_inputs)
                         // Shared AI-helm sim tick (issue #803) — one fixed-rate
                         // cadence for all four per-axis systems.
-                        .run_if(ai_helm_tick_ready),
+                        .run_if(ai_tick_ready),
                     // Applies commanded impulse/boost phase transitions (issue
                     // #695). Since #824 it runs AFTER `process_helm_inputs` —
                     // which is now the applier of admitted impulse commands into
@@ -285,7 +271,7 @@ impl Plugin for ShipPlugin {
                 .before(process_helm_inputs)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate
                 // cadence for all four per-axis systems.
-                .run_if(ai_helm_tick_ready),
+                .run_if(ai_tick_ready),
         );
 
         // Per-axis helm AI: impulse (issues #703, #824). Registered on its own
@@ -304,7 +290,7 @@ impl Plugin for ShipPlugin {
                 .before(process_helm_inputs)
                 // Shared AI-helm sim tick (issue #803) — one fixed-rate
                 // cadence for all four per-axis systems.
-                .run_if(ai_helm_tick_ready),
+                .run_if(ai_tick_ready),
         );
 
         // Per-axis helm AI: vertical thrust (issue #744). Same shape as its
@@ -322,7 +308,7 @@ impl Plugin for ShipPlugin {
                 .after(crate::sim_sets::AiTickLabel)
                 .after(helm_motion_planner)
                 .before(process_helm_inputs)
-                .run_if(ai_helm_tick_ready),
+                .run_if(ai_tick_ready),
         );
 
         // Per-axis helm AI: boost (issues #780, #881). Same shape as its
@@ -345,7 +331,7 @@ impl Plugin for ShipPlugin {
                 .after(crate::sim_sets::AiTickLabel)
                 .after(helm_motion_planner)
                 .before(process_helm_inputs)
-                .run_if(ai_helm_tick_ready),
+                .run_if(ai_tick_ready),
         );
 
         // Debug-only helm-path single-writer tripwire (issue #699). The frame

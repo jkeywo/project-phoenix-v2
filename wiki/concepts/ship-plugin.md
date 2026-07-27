@@ -31,7 +31,7 @@ Extracted from `simulation.rs` as part of the simulation split ([PRD #227](https
 
 | Resource | Defined In | Purpose |
 |---|---|---|
-| `AiHelmTickTimer` / `AiHelmTickReady` | `src/ship/helm_ai.rs` | Shared fixed-rate AI-helm sim tick (issue #803): one `run_if(ai_helm_tick_ready)` gate on all four per-axis AI helm systems (`ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust`, `ai_helm_impulse`), decoupling AI helm decision cadence from frame rate. Rate is TOML-authored via `[global] ai_helm_tick_hz` (default 30 Hz) |
+| `AiTickTimer` / `AiTickReady` / `AiSnapshotReady` | `src/ai/cadence.rs` | The ONE shared AI decision cadence (issues #803, #889): a `run_if(ai_tick_ready)` gate on every AI policy host — the six per-axis helm systems plus shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection — decoupling AI decision cadence from frame rate. Rate is TOML-authored via `[global] ai_tick_hz` (default 30 Hz, alias `ai_helm_tick_hz`); `AiSnapshotReady` is derived from it as a whole number of base ticks (`[global] ai_snapshot_hz`, default 10 Hz) and gates the `WorldSnapshot` rebuild, Captain and Sensors. Installed by `register_ai_cadence` from every plugin that registers a gated system |
 | `LastHelmInput` (pub) | `src/ship/components.rs` | Holds last thrust/steering (read by `ConsoleAiPlugin`) |
 | `CollisionCooldown` | `simulation.rs` | 1-second immunity after a collision hit |
 | `PendingArcBearingRequest` | `src/ship/components.rs` | Set by `process_coordination_lag` when AI Helm consumes an `ArcBearingRequest`; `ai_helm_steering` biases steering via `steer_toward`; cleared when the target is no longer visible or a phaser arc already bears |

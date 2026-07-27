@@ -3553,6 +3553,7 @@ mod tests {
         let mut app = comms_ai_response_app();
         let (msg_id, _) = seat_ai_dialogue(&mut app, "sender-uuid");
         let cfg = FineSystemAiConfigToml {
+            evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: std::collections::HashMap::new(),
             rule: vec![FineSystemAiRuleToml {

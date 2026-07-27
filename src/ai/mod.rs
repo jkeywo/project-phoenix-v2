@@ -1,3 +1,4 @@
+pub mod cadence;
 pub mod core;
 pub mod faction;
 pub mod lod;

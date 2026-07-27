@@ -1,3 +1,6 @@
+/// Which fine-system AI hosts can evaluate `flag()`/`counter()` guards, and the
+/// load-time rejection for the ones that cannot (issue #891 stage 1).
+pub mod ai_flag_hosts;
 pub mod celestial_visual;
 pub mod config;
 pub mod config_cache;

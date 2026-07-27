@@ -608,6 +608,30 @@ impl Predicate {
         }
     }
 
+    /// Collect every world-state atom — `flag(name)` and `counter(name)` —
+    /// referenced anywhere in the expression, rendered the way an author typed
+    /// it (issue #891).
+    ///
+    /// Unlike [`referenced_params`](Self::referenced_params) and
+    /// [`referenced_memory`](Self::referenced_memory), which exist to check a
+    /// name against a declaration, this exists to check the atom against its
+    /// HOST: `flag(...)` and `counter(...)` only ever read true where the host
+    /// passes a populated flag-store chain into evaluation, and most fine-system
+    /// hosts pass `&[]`. The rendered form (not the bare name) is collected so a
+    /// rejection can quote the offending atom back verbatim.
+    pub fn referenced_world_state(&self, out: &mut Vec<String>) {
+        match self {
+            Predicate::Flag { name } => out.push(format!("flag({name})")),
+            Predicate::Counter { name, .. } => out.push(format!("counter({name})")),
+            Predicate::Fact { .. } | Predicate::Bool(_) => {}
+            Predicate::Not(inner) => inner.referenced_world_state(out),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.referenced_world_state(out);
+                b.referenced_world_state(out);
+            }
+        }
+    }
+
     /// True when the expression reads `state_time` anywhere (issue #882).
     pub fn references_state_time(&self) -> bool {
         match self {

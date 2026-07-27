@@ -1,3 +1,4 @@
+use crate::entities::ai_flag_hosts as ai_hosts;
 use crate::region_effects::RegionEffectsConfig;
 use crate::region_shape::RegionShape;
 use serde::de::Error as SerdeError;
@@ -2774,9 +2775,34 @@ pub fn default_comms_target_selector_config() -> FineSystemAiSelectorToml {
 ///   - an unknown candidate source id,
 ///   - an unparseable `eligibility` or score `when` expression,
 ///   - a `param(...)` reference to a parameter the author never declared.
+///
+/// HOST-AGNOSTIC, for the same reason [`validate_fine_system_ai_policy`] is:
+/// the `flag(...)`/`counter(...)` check needs the host, so it lives in
+/// [`validate_fine_system_ai_selector_for`].
 pub fn validate_fine_system_ai_selector(
     cfg: &FineSystemAiSelectorToml,
     valid_sources: &[&str],
+) -> Result<(), String> {
+    validate_selector_inner(cfg, valid_sources, None)
+}
+
+/// [`validate_fine_system_ai_selector`] for a NAMED host, additionally
+/// rejecting a `flag(...)`/`counter(...)` reference in the `eligibility`
+/// expression or any score term's `when` that the host could never evaluate
+/// (issue #891 stage 1). Four of the five selector hosts pass `&[]`, so this is
+/// the same trap the policy hosts carry, on a second surface.
+pub fn validate_fine_system_ai_selector_for(
+    host: &crate::entities::ai_flag_hosts::AiHost,
+    cfg: &FineSystemAiSelectorToml,
+    valid_sources: &[&str],
+) -> Result<(), String> {
+    validate_selector_inner(cfg, valid_sources, Some(host))
+}
+
+fn validate_selector_inner(
+    cfg: &FineSystemAiSelectorToml,
+    valid_sources: &[&str],
+    host: Option<&crate::entities::ai_flag_hosts::AiHost>,
 ) -> Result<(), String> {
     for src in &cfg.sources {
         if !valid_sources.contains(&src.as_str()) {
@@ -2786,6 +2812,9 @@ pub fn validate_fine_system_ai_selector(
         }
     }
     let check_params = |pred: &crate::world::flags::Predicate, what: &str| -> Result<(), String> {
+        if let Some(host) = host {
+            host.check_guard(&format!("target selector {what}"), pred)?;
+        }
         let mut refs = Vec::new();
         pred.referenced_params(&mut refs);
         for name in refs {
@@ -3650,10 +3679,38 @@ pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
 /// legible. Note the scope on both: repeated priorities across DIFFERENT
 /// channels (a load rule and a launch rule both at 0) never compete, and are
 /// left alone.
+///
+/// HOST-AGNOSTIC. `flag(...)`/`counter(...)` guards only read true where the
+/// host passes a populated flag-store chain, and most hosts pass `&[]`
+/// (issue #891); that check needs to know WHICH host is being validated, so it
+/// lives in [`validate_fine_system_ai_policy_for`]. Every production call site
+/// in [`EntityConfig::from_toml`] uses that one — a test asserts it — and this
+/// entry point is for ad-hoc and unit-test validation of a policy with no host.
 pub fn validate_fine_system_ai_policy(
     cfg: &FineSystemAiConfigToml,
     valid_channels: &[&str],
     valid_verbs: &[&str],
+) -> Result<(), String> {
+    validate_policy_inner(cfg, valid_channels, valid_verbs, None)
+}
+
+/// [`validate_fine_system_ai_policy`] for a NAMED host, additionally rejecting a
+/// `flag(...)`/`counter(...)` guard the host could never evaluate (issue #891
+/// stage 1 — see [`crate::entities::ai_flag_hosts`]).
+pub fn validate_fine_system_ai_policy_for(
+    host: &crate::entities::ai_flag_hosts::AiHost,
+    cfg: &FineSystemAiConfigToml,
+    valid_channels: &[&str],
+    valid_verbs: &[&str],
+) -> Result<(), String> {
+    validate_policy_inner(cfg, valid_channels, valid_verbs, Some(host))
+}
+
+fn validate_policy_inner(
+    cfg: &FineSystemAiConfigToml,
+    valid_channels: &[&str],
+    valid_verbs: &[&str],
+    host: Option<&crate::entities::ai_flag_hosts::AiHost>,
 ) -> Result<(), String> {
     if cfg.idle {
         if !cfg.rule.is_empty() {
@@ -3707,7 +3764,7 @@ pub fn validate_fine_system_ai_policy(
         }
         let pred = crate::world::flags::parse_predicate(&r.when)
             .map_err(|e| format!("ai policy {what} has invalid `when` expression: {e}"))?;
-        check_policy_predicate(cfg, stateful, &pred, what)
+        check_policy_predicate(cfg, stateful, host, &pred, what)
     };
     for (idx, r) in cfg.rule.iter().enumerate() {
         check_rule(&format!("rule {idx}"), r)?;
@@ -3745,7 +3802,7 @@ pub fn validate_fine_system_ai_policy(
             }
             let pred = crate::world::flags::parse_predicate(&t.when)
                 .map_err(|e| format!("ai policy {what} has invalid `when` expression: {e}"))?;
-            check_policy_predicate(cfg, stateful, &pred, &what)?;
+            check_policy_predicate(cfg, stateful, host, &pred, &what)?;
         }
         check_transition_priorities(&s.id, &s.transition)?;
         for (idx, r) in s.rule.iter().enumerate() {
@@ -3856,12 +3913,22 @@ fn check_rule_priorities(scope: &str, rules: &[FineSystemAiRuleToml]) -> Result<
 /// rejections are AC6's "a memory or state-time reference in a stateless
 /// policy" — private state is meaningless without a state machine to own it,
 /// and silently reading `false` would be a trap.
+///
+/// `host` carries the same reasoning one step further (issue #891): a
+/// `flag(...)`/`counter(...)` reference is meaningless on a host that evaluates
+/// with an empty flag chain, and would likewise read `false` for ever. It is
+/// `None` only for host-less validation (unit tests, ad-hoc checks), where the
+/// question has no answer to give.
 fn check_policy_predicate(
     cfg: &FineSystemAiConfigToml,
     stateful: bool,
+    host: Option<&crate::entities::ai_flag_hosts::AiHost>,
     pred: &crate::world::flags::Predicate,
     what: &str,
 ) -> Result<(), String> {
+    if let Some(host) = host {
+        host.check_guard(&format!("ai policy {what}"), pred)?;
+    }
     let mut refs = Vec::new();
     pred.referenced_params(&mut refs);
     for name in refs {
@@ -4878,8 +4945,17 @@ impl EntityConfig {
         // (Red Alert) drives one output channel with one verb. Structural,
         // expression, channel, verb, and parameter errors are deterministic
         // content errors surfaced through serde so the entity fails to load.
+        //
+        // Every validator below is the `_for` variant, naming the host whose
+        // runtime evaluation the block feeds (issue #891 stage 1): that is what
+        // lets a `flag(...)`/`counter(...)` guard be rejected on the sixteen
+        // hosts that evaluate with an empty flag chain, instead of parsing,
+        // validating, and then reading false for ever. The bare
+        // `validate_fine_system_ai_*` entry points are host-less and must NOT be
+        // used here — `production_validation_names_its_host` asserts that.
         if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
-            validate_fine_system_ai_policy(
+            validate_fine_system_ai_policy_for(
+                &ai_hosts::CAPTAIN_RED_ALERT,
                 ai,
                 &[CAPTAIN_RED_ALERT_CHANNEL],
                 &[CAPTAIN_SET_RED_ALERT_VERB],
@@ -4895,7 +4971,8 @@ impl EntityConfig {
         // parameter references fail the entity load here, before any live tick.
         if let Some(hc) = config.helm_console.as_ref() {
             if let Some(ai) = hc.engines_ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_ENGINES,
                     ai,
                     &[HELM_LONGITUDINAL_CHANNEL],
                     &[HELM_ACTUATE_DESIRED_TRAVEL_VERB],
@@ -4903,15 +4980,21 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             }
             if let Some(ai) = hc.steering_ai.as_ref() {
-                validate_fine_system_ai_policy(ai, &[HELM_YAW_CHANNEL], HELM_STEERING_VERBS)
-                    .map_err(SerdeError::custom)?;
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_STEERING,
+                    ai,
+                    &[HELM_YAW_CHANNEL],
+                    HELM_STEERING_VERBS,
+                )
+                .map_err(SerdeError::custom)?;
             }
             // Secondary helm fine-actuator policies (issue #780): each drives its
             // own single channel with its own single mode verb. Wrong-axis verbs,
             // unknown channels, unparseable guards, and undeclared parameter
             // references fail the entity load here, before any live tick.
             if let Some(ai) = hc.lateral_ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_LATERAL,
                     ai,
                     &[HELM_LATERAL_CHANNEL],
                     &[HELM_ACTUATE_LATERAL_THRUST_VERB],
@@ -4919,7 +5002,8 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             }
             if let Some(ai) = hc.vertical_ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_VERTICAL,
                     ai,
                     &[HELM_VERTICAL_CHANNEL],
                     &[HELM_ACTUATE_VERTICAL_THRUST_VERB],
@@ -4927,7 +5011,8 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             }
             if let Some(ai) = hc.impulse_ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_IMPULSE,
                     ai,
                     &[HELM_IMPULSE_CHANNEL],
                     &[HELM_ENGAGE_IMPULSE_VERB],
@@ -4935,7 +5020,8 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
             }
             if let Some(ai) = hc.boost_ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::HELM_BOOST,
                     ai,
                     &[HELM_BOOST_CHANNEL],
                     &[HELM_ENGAGE_BOOST_VERB],
@@ -4954,14 +5040,24 @@ impl EntityConfig {
         if let Some(wc) = config.weapons_console.as_ref() {
             for bank in &wc.phaser_banks {
                 if let Some(ai) = bank.ai.as_ref() {
-                    validate_fine_system_ai_policy(ai, PHASER_BANK_CHANNELS, PHASER_BANK_VERBS)
-                        .map_err(SerdeError::custom)?;
+                    validate_fine_system_ai_policy_for(
+                        &ai_hosts::PHASER_BANK,
+                        ai,
+                        PHASER_BANK_CHANNELS,
+                        PHASER_BANK_VERBS,
+                    )
+                    .map_err(SerdeError::custom)?;
                 }
             }
             for bank in &wc.blaster_banks {
                 if let Some(ai) = bank.ai.as_ref() {
-                    validate_fine_system_ai_policy(ai, BLASTER_BANK_CHANNELS, BLASTER_BANK_VERBS)
-                        .map_err(SerdeError::custom)?;
+                    validate_fine_system_ai_policy_for(
+                        &ai_hosts::BLASTER_BANK,
+                        ai,
+                        BLASTER_BANK_CHANNELS,
+                        BLASTER_BANK_VERBS,
+                    )
+                    .map_err(SerdeError::custom)?;
                 }
             }
         }
@@ -4977,12 +5073,18 @@ impl EntityConfig {
         if let Some(tc) = config.torpedoes.as_ref() {
             for tube in &tc.tubes {
                 if let Some(ai) = tube.ai.as_ref() {
-                    validate_fine_system_ai_policy(ai, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS)
-                        .map_err(SerdeError::custom)?;
+                    validate_fine_system_ai_policy_for(
+                        &ai_hosts::TORPEDO_TUBE,
+                        ai,
+                        TORPEDO_TUBE_CHANNELS,
+                        TORPEDO_TUBE_VERBS,
+                    )
+                    .map_err(SerdeError::custom)?;
                 }
             }
             if let Some(ai) = tc.ai.as_ref() {
-                validate_fine_system_ai_policy(
+                validate_fine_system_ai_policy_for(
+                    &ai_hosts::TORPEDO_MAGAZINE,
                     ai,
                     TORPEDO_MAGAZINE_CHANNELS,
                     TORPEDO_MAGAZINE_VERBS,
@@ -5003,8 +5105,13 @@ impl EntityConfig {
             .as_ref()
             .and_then(|sc| sc.ai_policy.as_ref())
         {
-            validate_fine_system_ai_policy(ai, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_policy_for(
+                &ai_hosts::SHIELDS_FOCUS,
+                ai,
+                SHIELD_FOCUS_CHANNELS,
+                SHIELD_FOCUS_VERBS,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Power allocation policy before world
@@ -5022,8 +5129,13 @@ impl EntityConfig {
                 .as_ref()
                 .map(|sc| sc.power_groups.keys().map(|g| g.0.as_str()).collect())
                 .unwrap_or_default();
-            validate_fine_system_ai_policy(ai, &valid_channels, &[POWER_SET_ALLOCATION_VERB])
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_policy_for(
+                &ai_hosts::POWER_ALLOCATION,
+                ai,
+                &valid_channels,
+                &[POWER_SET_ALLOCATION_VERB],
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Sensors target selector before world
@@ -5036,8 +5148,12 @@ impl EntityConfig {
             .as_ref()
             .and_then(|c| c.selector.as_ref())
         {
-            validate_fine_system_ai_selector(sel, SENSORS_SELECTOR_SOURCES)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_selector_for(
+                &ai_hosts::SENSORS_SELECTOR,
+                sel,
+                SENSORS_SELECTOR_SOURCES,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Tactical target selector before world
@@ -5050,8 +5166,12 @@ impl EntityConfig {
             .as_ref()
             .and_then(|c| c.selector.as_ref())
         {
-            validate_fine_system_ai_selector(sel, TACTICAL_SELECTOR_SOURCES)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_selector_for(
+                &ai_hosts::TACTICAL_SELECTOR,
+                sel,
+                TACTICAL_SELECTOR_SOURCES,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Navigation target selector before world
@@ -5065,8 +5185,12 @@ impl EntityConfig {
             .as_ref()
             .and_then(|c| c.selector.as_ref())
         {
-            validate_fine_system_ai_selector(sel, NAVIGATION_SELECTOR_SOURCES)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_selector_for(
+                &ai_hosts::NAVIGATION_SELECTOR,
+                sel,
+                NAVIGATION_SELECTOR_SOURCES,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate an authored inline Repair target selector before world
@@ -5077,8 +5201,12 @@ impl EntityConfig {
         // tick. `[repair.selector]` is the first selector block outside a
         // `*_console` section.
         if let Some(sel) = config.repair.as_ref().and_then(|c| c.selector.as_ref()) {
-            validate_fine_system_ai_selector(sel, REPAIR_SELECTOR_SOURCES)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_selector_for(
+                &ai_hosts::REPAIR_SELECTOR,
+                sel,
+                REPAIR_SELECTOR_SOURCES,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Validate the authored Comms console AI blocks before world activation
@@ -5093,12 +5221,21 @@ impl EntityConfig {
             .as_ref()
             .and_then(|c| c.selector.as_ref())
         {
-            validate_fine_system_ai_selector(sel, COMMS_SELECTOR_SOURCES)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_selector_for(
+                &ai_hosts::COMMS_SELECTOR,
+                sel,
+                COMMS_SELECTOR_SOURCES,
+            )
+            .map_err(SerdeError::custom)?;
         }
         if let Some(ai) = config.comms_console.as_ref().and_then(|c| c.ai.as_ref()) {
-            validate_fine_system_ai_policy(ai, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
-                .map_err(SerdeError::custom)?;
+            validate_fine_system_ai_policy_for(
+                &ai_hosts::COMMS_RESPONSE,
+                ai,
+                COMMS_RESPOND_CHANNELS,
+                COMMS_RESPOND_VERBS,
+            )
+            .map_err(SerdeError::custom)?;
         }
 
         // Reject a doctrine entry whose `directive_*` fields do not match its

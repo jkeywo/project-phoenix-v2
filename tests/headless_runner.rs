@@ -24,7 +24,9 @@ use project_phoenix::messages::GamePhase;
 use project_phoenix::server_app::LocalShip;
 use project_phoenix::ship::control_source::ControlSource;
 use project_phoenix::ship::state::ShipPhysics;
-use project_phoenix::ship_plugin::{ActiveStationRatings, ShipSystemControlSources};
+use project_phoenix::ship_plugin::{
+    ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources,
+};
 
 fn test_args() -> HeadlessArgs {
     HeadlessArgs {
@@ -1766,4 +1768,212 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
          found:\n{inventory}"
     );
+}
+
+// ── #871: NPC hulls are stationed ships with nobody connected ────────────────
+
+/// Locate the one world-spawned NPC ship in a booted world: `Ship`, not
+/// `LocalShip`, and carrying its own station/system config.
+fn npc_ship_with_stations(
+    app: &mut App,
+) -> (
+    ShipConfigComponent,
+    ShipSystemControlSources,
+    ActiveStationRatings,
+) {
+    let mut q = app.world_mut().query_filtered::<(
+        &ShipConfigComponent,
+        &ShipSystemControlSources,
+        &ActiveStationRatings,
+    ), (With<project_phoenix::server_app::Ship>, Without<LocalShip>)>(
+    );
+    let mut found: Vec<_> = q
+        .iter(app.world())
+        .filter(|(cfg, _, _)| !cfg.0.stations.is_empty())
+        .map(|(cfg, cs, ar)| (cfg.clone(), cs.clone(), ar.clone()))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "patrol.toml spawns exactly one NPC ship; found {}",
+        found.len()
+    );
+    found.remove(0)
+}
+
+/// AC: an unmanned NPC hull reports `Backfill` on every station, and every
+/// system it carries is AI-operated and closed to human input — i.e. it behaves
+/// exactly as it did when its systems were ownerless `ai_only` declarations.
+///
+/// This boots the real world, so it covers the whole path: TOML → `EntityConfig`
+/// → `entities::spawner::spawn_entity` → `ship::rating::seed_boot_ratings`.
+#[test]
+fn an_unmanned_npc_hull_is_fully_backfilled_on_every_station() {
+    let args = test_args();
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    let (config, sources, ratings) = npc_ship_with_stations(&mut app);
+
+    assert!(
+        !config.0.stations.is_empty(),
+        "the NPC hull must declare crew stations — that is what #871 gave it"
+    );
+    for station in &config.0.stations {
+        assert_eq!(
+            ratings.0.get(&station.id).map(String::as_str),
+            Some(project_phoenix::ship::rating::BACKFILL_RATING),
+            "NPC station {:?} must report Backfill with nobody connected; got {:?}",
+            station.id,
+            ratings.0
+        );
+    }
+
+    for system in &config.0.systems {
+        let policy = sources.0.policy_for(&system.id);
+        assert!(
+            policy.operate_ai,
+            "NPC system {:?} (owner {:?}, ai_only {}) must be AI-operated on an \
+             unmanned hull",
+            system.id, system.station, system.ai_only
+        );
+        assert!(
+            !policy.accept_human_input,
+            "NPC system {:?} must not accept human input while backfilled",
+            system.id
+        );
+    }
+
+    // AC: `ai_only` survives only on ownerless systems. Everything a station
+    // owns dropped the flag.
+    for system in &config.0.systems {
+        if system.station.is_some() {
+            assert!(
+                !system.ai_only,
+                "station-owned system {:?} must not rely on ai_only",
+                system.id
+            );
+        }
+    }
+}
+
+/// AC: a human can take an NPC hull's Tactical seat and be admitted to its
+/// systems, exactly as at a backfilled player seat.
+///
+/// Both halves matter and the first is the mutation guard: while the seat is
+/// unmanned it reports `Backfill`, the AI holds the systems, and the human is
+/// REFUSED. Regress the spawner to the old blanket "set every declared system to
+/// Ai" seed and the ratings map is empty, so the Backfill assertion fails before
+/// the join is even attempted.
+///
+/// The join itself is the production seam: `ship::rating::apply_rating` (what
+/// `handle_station_rating_change` calls) followed by the real admission
+/// predicate `command_admission::is_command_authorized`, evaluated against the
+/// NPC ship's OWN config and control sources.
+#[test]
+fn a_human_can_take_an_npc_hull_tactical_seat() {
+    use project_phoenix::command_admission::is_command_authorized;
+    use project_phoenix::lobby::Sessions;
+    use project_phoenix::messages::{StationId, SystemControlPayload, SystemId};
+
+    let args = test_args();
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    let (config, mut sources, ratings) = npc_ship_with_stations(&mut app);
+    let tactical = StationId("tactical".into());
+    let radar = SystemId("tactical-radar".into());
+    let payload = SystemControlPayload::SetTarget {
+        uuid: "some-contact".into(),
+    };
+
+    assert!(
+        config.0.station(&tactical).is_some(),
+        "the NPC hull must declare a Tactical seat"
+    );
+    assert!(
+        config
+            .0
+            .systems_for_station(&tactical)
+            .any(|s| s.id == radar),
+        "the Tactical seat must own `tactical-radar` — the system #887 needs \
+         declared on NPC hulls to route AI target selection through admission"
+    );
+
+    // A human token that has claimed the Tactical seat.
+    let mut sessions = Sessions(project_phoenix::session::SessionManager::new());
+    sessions
+        .0
+        .register("player-token".into(), "Rook".into())
+        .expect("registration succeeds");
+    sessions
+        .0
+        .set_station("player-token", Some(tactical.clone()));
+
+    // ── Unmanned: Backfill, AI holds the radar, the human is refused ─────────
+    assert_eq!(
+        ratings.0.get(&tactical).map(String::as_str),
+        Some(project_phoenix::ship::rating::BACKFILL_RATING),
+        "the seat must boot on Backfill; an empty ratings map means the spawner \
+         regressed to the all-Ai seed and never applied a station rating at all"
+    );
+    assert!(
+        is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0),
+        "the backfilled seat's AI must hold the radar before the human sits down"
+    );
+    assert!(
+        !is_command_authorized(
+            "player-token",
+            &radar,
+            &payload,
+            &sources,
+            &sessions,
+            &config.0
+        ),
+        "a backfilled seat must refuse human input — that is what claiming it changes"
+    );
+
+    // ── Join the seat: exactly what `handle_station_rating_change` does ──────
+    project_phoenix::ship::rating::apply_rating(&config.0, &tactical, "Std", &mut sources.0);
+
+    assert!(
+        is_command_authorized(
+            "player-token",
+            &radar,
+            &payload,
+            &sources,
+            &sessions,
+            &config.0
+        ),
+        "a human holding the NPC hull's Tactical seat must be admitted to its radar"
+    );
+    assert!(
+        !is_command_authorized("ai:npc", &radar, &payload, &sources, &sessions, &config.0),
+        "the AI must stand down from a seat a human has taken"
+    );
+
+    // A token that holds no seat on this ship is still refused, so admission is
+    // gating on station tenure rather than merely on `accept_human_input`.
+    assert!(
+        !is_command_authorized(
+            "some-other-token",
+            &radar,
+            &payload,
+            &sources,
+            &sessions,
+            &config.0
+        ),
+        "only the seat's holder may drive its systems"
+    );
+
+    // Seats nobody claimed are untouched by the join.
+    let engineering = StationId("engineering".into());
+    for system in config.0.systems_for_station(&engineering) {
+        assert!(
+            sources.0.policy_for(&system.id).operate_ai,
+            "unclaimed seat {:?} keeps system {:?} on AI",
+            engineering,
+            system.id
+        );
+    }
 }

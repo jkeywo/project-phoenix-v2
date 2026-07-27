@@ -2399,44 +2399,47 @@ fn spawn_game_start_entities(
             let power_group_seed =
                 crate::power_plugin::authored_power_group_seed(&ship_config.0.power_groups);
             let (initial_control_sources, initial_active_ratings) = {
-                let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
-                let mut active_ratings: std::collections::HashMap<StationId, String> =
-                    std::collections::HashMap::new();
-                if let Some(ref sess) = sessions {
-                    let manned: std::collections::HashSet<_> = sess
-                        .0
-                        .players()
-                        .iter()
-                        .filter(|p| p.connected)
-                        .filter_map(|p| p.station.as_ref())
-                        .collect();
-                    for station in &ship_config.0.stations {
-                        // Manned stations apply the player's lobby-chosen
-                        // complexity toggle (if any), else the station's base
-                        // (first) rating. Unmanned stations are fully
-                        // AI-backfilled, as before.
-                        let rating_name = if manned.contains(&station.id) {
-                            sess.0
-                                .pending_rating_for(&station.id)
-                                .cloned()
-                                .or_else(|| station.ratings.first().map(|r| r.name.clone()))
-                                .unwrap_or_else(|| "Std".to_string())
-                        } else {
-                            crate::ship::rating::BACKFILL_RATING.to_string()
-                        };
-                        crate::ship::rating::apply_rating(
-                            &ship_config.0,
-                            &station.id,
-                            &rating_name,
-                            &mut resolver,
-                        );
-                        active_ratings.insert(station.id.clone(), rating_name);
+                // The shared boot-seeding path (issue #871) — the same
+                // `seed_boot_ratings` `entities::spawner` calls for every other
+                // hull. Only the per-station rating CHOICE differs here: this
+                // path knows about lobby sessions, so a manned station boots on
+                // the player's chosen complexity toggle instead of Backfill.
+                match sessions {
+                    Some(ref sess) => {
+                        let manned: std::collections::HashSet<_> = sess
+                            .0
+                            .players()
+                            .iter()
+                            .filter(|p| p.connected)
+                            .filter_map(|p| p.station.as_ref())
+                            .collect();
+                        let (resolver, active_ratings) =
+                            crate::ship::rating::seed_boot_ratings(&ship_config.0, |station| {
+                                // Manned stations apply the player's
+                                // lobby-chosen complexity toggle (if any), else
+                                // the station's base (first) rating. Unmanned
+                                // stations are fully AI-backfilled, as before.
+                                if manned.contains(&station.id) {
+                                    sess.0
+                                        .pending_rating_for(&station.id)
+                                        .cloned()
+                                        .or_else(|| station.ratings.first().map(|r| r.name.clone()))
+                                        .unwrap_or_else(|| "Std".to_string())
+                                } else {
+                                    crate::ship::rating::BACKFILL_RATING.to_string()
+                                }
+                            });
+                        (
+                            crate::ship_plugin::ShipSystemControlSources(resolver),
+                            crate::ship_plugin::ActiveStationRatings(active_ratings),
+                        )
                     }
+                    // No lobby at all: leave both empty, exactly as before.
+                    None => (
+                        crate::ship_plugin::ShipSystemControlSources::default(),
+                        crate::ship_plugin::ActiveStationRatings::default(),
+                    ),
                 }
-                (
-                    crate::ship_plugin::ShipSystemControlSources(resolver),
-                    crate::ship_plugin::ActiveStationRatings(active_ratings),
-                )
             };
             if let Some(ref mut sess) = sessions {
                 sess.0.clear_all_pending_ratings();

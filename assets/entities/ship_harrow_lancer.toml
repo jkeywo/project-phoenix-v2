@@ -144,64 +144,134 @@ base_priority  = 40.0
 target_speed   = 0.9
 maintain_range = 40.0
 
-# Ship systems. No stations on this hull, so every system is ownerless and
-# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+# ── Stations ──────────────────────────────────────────────────────────────────
+#
+# Crew stations (issue #871), mirroring `alliance_destroyer.toml` — the
+# comparable player hull for this light strike ship. See the fuller note in
+# `pirate_raider.toml`: every seat boots on the implicit `Backfill` rating, which
+# automates every system the station owns, so an unmanned hull behaves exactly as
+# it did when its systems were ownerless + `ai_only`.
+#
+# The auto-generated `shield-arc-all` system is the only thing left ownerless.
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "entity.ship_harrow_lancer.station.captain.description"
+rank = "Cpt."
+short_code = "CPT"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.ship_harrow_lancer.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "entity.ship_harrow_lancer.station.tactical.description"
+rank = "Lt. Cmdr."
+short_code = "TAC"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.ship_harrow_lancer.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Systems ───────────────────────────────────────────────────────────────────
+#
+# Red Alert authored explicitly (issue #871) rather than left to the #749
+# ownerless provision, so the Captain seat owns it. Control source is unchanged:
+# Backfill automates it.
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-ai_only = true
+station = "helm"
+
+# The Tactical radar (issue #871) — the system every player hull declares and no
+# NPC hull did, which is what blocked #887 from routing AI target selection
+# through admission.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 
 [[system]]
 id = "phaser-lash"
 kind = "phaser_bank"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "blaster-spike"
 kind = "blaster_bank"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-tube-lance"
 kind = "torpedo_tube"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-ai_only = true
+station = "engineering"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-ai_only = true
+station = "engineering"

@@ -70,10 +70,54 @@ directive_anchor = "requiem_courier_destination"
 base_priority    = 30.0
 target_speed     = 0.8
 
-# Ship systems (helm only - courier has no weapons)
-# Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
-# has no stations, so they are ownerless and `ai_only`. The NPC spawn path sets every declared system to
-# ControlSource::Ai, so these come up on AI precisely when the coarse helm does.
+# ── Stations ──────────────────────────────────────────────────────────────────
+#
+# Crew stations (issue #871), mirroring `alliance_courier.toml` — the comparable
+# player hull. That hull is a two-seat runabout whose Tactical seat is the
+# pilot-and-gunner position (it owns every helm axis) while the Captain seat owns
+# command and the support systems; this courier has the same shape minus the
+# blaster, so it takes the same two seats.
+#
+# See the fuller note in `pirate_raider.toml`: both seats boot on the implicit
+# `Backfill` rating, which automates every system the station owns, so an
+# unmanned courier behaves exactly as it did when its systems were ownerless +
+# `ai_only`. This hull declares no `[[shield_arc]]`, so after the restructure it
+# has NO ownerless systems left at all.
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "entity.ship_requiem_courier.station.captain.description"
+rank = "Cmdr."
+short_code = "CPT"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "entity.ship_requiem_courier.station.tactical.description"
+rank = "Ltn."
+short_code = "TAC"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Systems ───────────────────────────────────────────────────────────────────
+#
+# Red Alert authored explicitly (issue #871) rather than left to the #749
+# ownerless provision, so the Captain seat owns it. Control source is unchanged:
+# Backfill automates it.
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
+# Per-axis helm systems (issues #701/#703, declared in #800 and #704). Owned by
+# Tactical, mirroring `alliance_courier.toml`'s pilot-and-gunner seat.
 #
 # #800 declared thrust + steering. #704 adds impulse + lateral-thrust, which the
 # deleted `operate_helm_ai` monolith used to drive on this hull's behalf: an
@@ -86,40 +130,50 @@ target_speed     = 0.8
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-ai_only = true
+station = "tactical"
 
 # Boost drive axis (issue #801), declared for hull-uniformity with the player
 # ships: every helm axis is a declared system on every hull. No AI drives
-# boost, so on this stationless hull the declaration only gives the axis the
-# standard damage/repair surface.
+# boost, so the declaration gives the axis the standard damage/repair surface
+# plus a lever for a human in the seat.
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-ai_only = true
+station = "tactical"
+
+# The Tactical radar (issue #871) — the system every player hull declares and no
+# NPC hull did, which is what blocked #887 from routing AI target selection
+# through admission. Declared even though this courier is unarmed, so that
+# "every hull has a Tactical radar" is a rule with no exceptions to remember.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
-# NPCs have no `[power_groups.*]` block so `power_group` is omitted.
+# NPCs have no `[power_groups.*]` block so `power_group` is omitted. Owned by
+# the Captain seat, mirroring `alliance_courier.toml`.
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-ai_only = true
+station = "captain"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-ai_only = true
+station = "captain"

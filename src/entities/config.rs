@@ -7690,9 +7690,19 @@ hull_max_hp = 6
             .iter()
             .find(|s| s.id == expected)
             .unwrap_or_else(|| panic!("hull must declare `{}`", expected.0));
+        // Since #871 the hull carries crew stations, so the bank is owned by
+        // Tactical rather than being ownerless + `ai_only`. It is still
+        // AI-operated on an unmanned hull — the Tactical seat boots on the
+        // implicit `Backfill` rating, which automates every system it owns —
+        // but the ownership is now what says so, not the `ai_only` flag.
         assert!(
-            declared.ai_only,
-            "this hull has no stations, so the artillery bank is ownerless and AI"
+            !declared.ai_only,
+            "a station-owned system must not rely on `ai_only`"
+        );
+        assert_eq!(
+            declared.station,
+            Some(crate::messages::StationId("tactical".into())),
+            "the artillery bank belongs to the Tactical seat"
         );
     }
 
@@ -13299,13 +13309,36 @@ colour = [0.5, 0.5, 0.5]
             .unwrap_or_default()
     }
 
+    /// A minimal `[behaviour]` hull that authors no `red_alert` system, so the
+    /// #749 provision is exercised on a fixture rather than on a shipped hull.
+    ///
+    /// Every shipped hull authors its own `red_alert` since #871 gave the NPC
+    /// hulls a Captain seat to own it, so the provision has no shipped hull left
+    /// to fire on — but it is still live code for any hull authored without one,
+    /// which is what these fixtures keep covered.
+    const BARE_BEHAVIOUR_HULL: &str = r#"
+tags = ["ship"]
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+text = "Destroy hostiles"
+directive_kind = "Destroy"
+base_priority = 35.0
+
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+"#;
+
     #[test]
     fn behaviour_npc_without_red_alert_gets_ai_only_ownerless_provision() {
-        // The Harrow Lancer authors [behaviour] and shield arcs but no
-        // red_alert system. Spawn provisioning must add exactly one AI-only,
-        // ownerless red_alert capability so the AI captain can raise it.
-        let toml_str = include_str!("../../assets/entities/ship_harrow_lancer.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("harrow lancer must parse");
+        // A hull that authors [behaviour] but no red_alert system. Spawn
+        // provisioning must add exactly one AI-only, ownerless red_alert
+        // capability so the AI captain can raise it.
+        let config = EntityConfig::from_toml(BARE_BEHAVIOUR_HULL).expect("fixture must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(
             reds.len(),
@@ -13322,13 +13355,72 @@ colour = [0.5, 0.5, 0.5]
     }
 
     #[test]
-    fn pirate_raider_gets_red_alert_provision() {
-        // A second behaviour NPC to confirm the provisioning is not lancer-specific.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate raider must parse");
+    fn behaviour_npc_red_alert_provision_is_not_hull_specific() {
+        // A second, differently-shaped behaviour hull — shield arcs and a weapon
+        // rather than a bare helm axis — to confirm the provisioning keys off
+        // `[behaviour]` alone.
+        let toml_str = r#"
+tags = ["ship"]
+
+[[shield_arc]]
+id = "all"
+label = "All"
+center_deg = 0
+width_deg = 360
+max_hp = 15
+
+[weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+text = "Destroy hostiles"
+directive_kind = "Destroy"
+base_priority = 35.0
+
+[[system]]
+id = "phaser-fore"
+kind = "phaser_bank"
+ai_only = true
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("fixture must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(reds.len(), 1, "behaviour NPC provisioned one red_alert");
         assert!(reds[0].ai_only && reds[0].station.is_none());
+    }
+
+    #[test]
+    fn pirate_raider_authors_its_own_captain_owned_red_alert() {
+        // Since #871 this NPC hull carries a Captain seat and authors its own
+        // red_alert on it. Provisioning must be idempotent — no second system —
+        // and the authored ownership must survive. The control source is
+        // unchanged from the provisioned era: an unmanned Captain seat boots on
+        // `Backfill`, which automates every system it owns, so
+        // `operate_captain_ai` still raises Red Alert.
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate raider must parse");
+        let reds = red_alert_systems(&config);
+        assert_eq!(
+            reds.len(),
+            1,
+            "authored red_alert must not be double-provisioned"
+        );
+        assert_eq!(
+            reds[0].station,
+            Some(crate::messages::StationId("captain".into())),
+            "the Captain seat owns Red Alert"
+        );
+        assert!(
+            !reds[0].ai_only,
+            "a station-owned system must not rely on `ai_only`"
+        );
     }
 
     #[test]

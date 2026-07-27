@@ -90,7 +90,7 @@ Under #514, the coarse `shields` `[[system]]` block was **deleted** from `player
 
 After `ControlSourceResolver` was established as the control-gating authority (PRD #517), PRD #520 extended it to NPC ships. Each system has a dedicated AI Bevy system (helm: the four per-axis systems — see [AI Helm Decomposition](./ai-helm-decomposition.md)) that runs after `AiTickLabel` and is gated on `policy_for(system_id).operate_ai`. This makes the AI/human split uniform: the same gate that prevents a human from driving a Backfill console also enables the per-kind system to operate it.
 
-NPC ships carry `ShipSystemControlSources` seeded with `ControlSource::Ai` for all systems; player ships default to `ControlSource::Human` (modified by rating changes).
+Every ship — player and NPC alike — is seeded by `ship::rating::seed_boot_ratings` (`src/ship/rating.rs`, issue #871): each station applies its boot rating, then every ownerless `ai_only` system is set to `ControlSource::Ai`. A ship with nobody connected boots every station on the implicit `Backfill` rating, which automates all systems that station owns, so an unmanned NPC ends up `ControlSource::Ai` throughout. A manned station boots on its lobby-chosen rating instead, leaving its non-automated systems `Human` (modified thereafter by rating changes). NPC hulls are ordinary stationed ships with nobody in the seats — before #871 they declared no stations at all and the spawner set every declared system to `Ai` by fiat.
 
 See [AI Ship Unification](./ai-ship-unification.md) for the full architecture.
 

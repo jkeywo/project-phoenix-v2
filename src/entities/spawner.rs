@@ -258,13 +258,25 @@ pub fn spawn_entity(
                 coordination_lag_secs: 0.0,
             }),
         };
-        let mut resolver = crate::ship::control_source::ControlSourceResolver::new();
-        for system in &ship_config.0.systems {
-            resolver.set(
-                system.id.clone(),
-                crate::ship::control_source::ControlSource::Ai,
-            );
-        }
+        // Boot seeding (issue #871). Every hull spawned here comes up with
+        // nobody connected, so every station boots on `Backfill` — which is
+        // what "NPC" now means: a stationed ship with nobody in the seats.
+        //
+        // This is the SAME `seed_boot_ratings` the player game-start path in
+        // `server_app::spawn_game_start_entities` calls, not a parallel
+        // NPC-only rule. The blanket "set every declared system to Ai" loop
+        // that used to live here worked only because NPC hulls declared no
+        // stations at all; once they do, a system's control source has to come
+        // from its station's rating exactly as it does on a player hull, or a
+        // human taking an NPC seat could never be admitted.
+        //
+        // A hull with no stations (a bare `[behaviour]` entity, or one whose
+        // only systems are auto-generated) still ends up all-Ai: every one of
+        // its systems is `ai_only` and the second pass covers them.
+        let (resolver, active_ratings) =
+            crate::ship::rating::seed_boot_ratings(&ship_config.0, |_| {
+                crate::ship::rating::BACKFILL_RATING.to_string()
+            });
         // Seed the reactor from the ship's authored power groups (issue #762)
         // BEFORE `ship_config` is moved into the entity, so authored groups
         // beyond the canonical three (e.g. `ops`) are allocatable rather than
@@ -287,7 +299,7 @@ pub fn spawn_entity(
             ship_config,
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipSystemControlSources(resolver),
-            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::ship_plugin::ActiveStationRatings(active_ratings),
             crate::ship_plugin::CoordinationQueue::default(),
             ship_physics,
             crate::ship_plugin::HelmWaypointClearance::default(),

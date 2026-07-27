@@ -1,8 +1,8 @@
 use crate::messages::{StationId, SystemId};
-use crate::ship::config::ShipConfig;
+use crate::ship::config::{ShipConfig, StationConfig};
 use crate::ship::control_source::ControlSource;
 use crate::ship::control_source::ControlSourceResolver;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Rating name that automates every system owned by the station.
 pub const BACKFILL_RATING: &str = "Backfill";
@@ -77,6 +77,44 @@ pub fn available_ratings_for_station<'a>(
     let mut names: Vec<&str> = station.ratings.iter().map(|r| r.name.as_str()).collect();
     names.push(BACKFILL_RATING);
     names
+}
+
+/// Seed a freshly spawned ship's control sources and active-rating map — the
+/// ONE boot path for every hull, player or NPC (issue #871).
+///
+/// `rating_for` names the rating each station boots on. The player game-start
+/// path passes the lobby-chosen rating for a manned station and
+/// [`BACKFILL_RATING`] for an unmanned one; the generic entity spawner passes
+/// [`BACKFILL_RATING`] for every station, because "NPC" is just "a stationed
+/// ship with nobody connected yet".
+///
+/// Two passes, and the second is the one that is easy to forget:
+///
+/// 1. Every station applies its rating, which sets its owned systems to `Ai`
+///    (Backfill automates all of them) or `Human`.
+/// 2. Every `ai_only` system is set to `Ai`. Those are ownerless by
+///    construction — [`crate::ship::config::validate`] rejects an ownerless
+///    system that is not `ai_only` — so no station rating can ever reach them.
+///    They are the auto-generated ones: the per-arc `shield_arc` systems
+///    synthesised for a hull with no shields station, and the `red_alert`
+///    capability provisioned for a `[behaviour]` hull that authors none.
+///    Without this pass they would fall to `ControlSourceResolver`'s
+///    `Human` default and silently stop being AI-operated.
+pub fn seed_boot_ratings(
+    config: &ShipConfig,
+    rating_for: impl Fn(&StationConfig) -> String,
+) -> (ControlSourceResolver, HashMap<StationId, String>) {
+    let mut resolver = ControlSourceResolver::new();
+    let mut active_ratings: HashMap<StationId, String> = HashMap::new();
+    for station in &config.stations {
+        let rating_name = rating_for(station);
+        apply_rating(config, &station.id, &rating_name, &mut resolver);
+        active_ratings.insert(station.id.clone(), rating_name);
+    }
+    for system_id in ai_only_systems(config) {
+        resolver.set(system_id, ControlSource::Ai);
+    }
+    (resolver, active_ratings)
 }
 
 /// All system ids that are fully automated (no rating needed): `ai_only`
@@ -433,5 +471,150 @@ power_group = "ops"
             ControlSource::Human,
             "Manual rating should restore viewscreen to Human"
         );
+    }
+
+    // ── seed_boot_ratings (issue #871) ───────────────────────────────────
+
+    /// The behaviour-PRESERVATION proof for #871.
+    ///
+    /// Before #871, `entities::spawner::spawn_entity` seeded a `[behaviour]`
+    /// hull by setting **every declared system** to `ControlSource::Ai` in a
+    /// blanket loop, and NPC hulls declared no stations at all. This test
+    /// asserts the shared boot path reproduces that result exactly, for every
+    /// shipped hull: with nobody connected, every system in the hull's config —
+    /// station-owned or auto-generated — resolves to `Ai`.
+    ///
+    /// It runs over EVERY hull in `assets/entities/`, not just the NPC ones,
+    /// because the `alliance_*` hulls are spawned through this same path
+    /// whenever a world (or the duel harness) spawns one as an opponent. If a
+    /// station stops owning a system, or an `ai_only` system stops being
+    /// covered by the second pass, the system silently falls to the resolver's
+    /// `Human` default and its AI host stops running — which is exactly the
+    /// failure mode this issue had to avoid.
+    #[test]
+    fn every_shipped_hull_boots_fully_ai_when_nobody_is_connected() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let mut checked_hulls = 0usize;
+        let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .expect("assets/entities must be readable")
+            .map(|e| e.expect("readable dir entry").path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
+        entries.sort();
+
+        for path in entries {
+            let stem = path
+                .file_stem()
+                .expect("toml file has a stem")
+                .to_string_lossy()
+                .to_string();
+            let src = std::fs::read_to_string(&path).expect("hull template must be readable");
+            let config = crate::entities::config::EntityConfig::from_toml(&src)
+                .unwrap_or_else(|e| panic!("{stem} must parse: {e}"));
+            let Some(ship_config) = config.ship_config.as_ref() else {
+                continue; // scenery: no stations, no systems, nothing to seed
+            };
+            checked_hulls += 1;
+
+            let (resolver, active_ratings) =
+                seed_boot_ratings(ship_config, |_| BACKFILL_RATING.to_string());
+
+            for system in &ship_config.systems {
+                let policy = resolver.policy_for(&system.id);
+                assert!(
+                    policy.operate_ai,
+                    "{stem}: system {:?} must be AI-operated on an unmanned hull. \
+                     Owner: {:?}, ai_only: {}. An unowned, non-`ai_only` system \
+                     falls to the resolver's Human default and its AI host stops \
+                     running.",
+                    system.id, system.station, system.ai_only
+                );
+                assert!(
+                    !policy.accept_human_input,
+                    "{stem}: system {:?} must not accept human input while unmanned",
+                    system.id
+                );
+            }
+
+            for station in &ship_config.stations {
+                assert_eq!(
+                    active_ratings.get(&station.id).map(String::as_str),
+                    Some(BACKFILL_RATING),
+                    "{stem}: station {:?} must report Backfill when nobody is connected",
+                    station.id
+                );
+            }
+        }
+
+        assert!(
+            checked_hulls >= 12,
+            "expected every shipped hull to be checked, got {checked_hulls}"
+        );
+    }
+
+    /// The other half of the seat symmetry: a manned station's systems come up
+    /// on that station's authored rating, NOT on Backfill — which is what makes
+    /// a human at an NPC seat admissible at all.
+    #[test]
+    fn a_manned_station_boots_on_its_own_rating_and_leaves_its_systems_human() {
+        let config = parse();
+        let captain = StationId("captain".into());
+
+        let (resolver, active_ratings) = seed_boot_ratings(&config, |station| {
+            if station.id == captain {
+                "Manual".to_string()
+            } else {
+                BACKFILL_RATING.to_string()
+            }
+        });
+
+        assert_eq!(
+            active_ratings.get(&captain).map(String::as_str),
+            Some("Manual")
+        );
+        assert_eq!(
+            resolver.source_for(&SystemId("red-alert".into())),
+            ControlSource::Human,
+            "the Manual rating automates nothing, so the seated human drives red-alert"
+        );
+        assert_eq!(
+            resolver.source_for(&SystemId("phaser-fore".into())),
+            ControlSource::Ai,
+            "the unmanned Tactical station stays backfilled"
+        );
+    }
+
+    /// `ai_only` systems are ownerless by construction, so no station rating can
+    /// reach them. The second pass in `seed_boot_ratings` is what keeps them
+    /// AI-operated; without it they fall to the resolver's `Human` default.
+    #[test]
+    fn ownerless_ai_only_systems_are_seeded_ai_even_with_no_stations() {
+        let config = crate::ship::config::parse_and_validate(
+            r#"
+[[system]]
+id = "shield-arc-all"
+kind = "shield_arc"
+ai_only = true
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+ai_only = true
+"#,
+            &["shield_arc", "red_alert"],
+        )
+        .expect("fixture must validate");
+
+        let (resolver, active_ratings) =
+            seed_boot_ratings(&config, |_| BACKFILL_RATING.to_string());
+
+        assert!(active_ratings.is_empty(), "no stations, so no ratings");
+        for id in ["shield-arc-all", "red-alert"] {
+            assert_eq!(
+                resolver.source_for(&SystemId(id.into())),
+                ControlSource::Ai,
+                "{id} is ownerless + ai_only, so only the second pass can reach it"
+            );
+        }
     }
 }

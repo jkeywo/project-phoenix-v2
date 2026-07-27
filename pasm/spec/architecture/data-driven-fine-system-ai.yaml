@@ -138,6 +138,7 @@ entities:
       summary: Evaluates a fine system's inline policy from an immutable per-tick fact snapshot, resolves the highest-priority matching rule per typed output channel, and emits the resulting typed system input; a policy may optionally opt into a private state machine.
       rationale:
         - All fine systems must observe one consistent tick snapshot rather than partially applied decisions from earlier systems.
+        - "AMENDMENT to that first clause, and to PRD #774's implementation decision 'every policy reads the same immutable SNAPSHOT': the guarantee is real but there is no snapshot OBJECT and none is planned. It comes from SimSet ordering — every system writes its own blackboard exactly once per tick in SimSet::Publish, ship-wide aggregators run strictly after in SimSet::PublishAggregate, and any consumer ordered earlier (Input/Physics/Damage/Modifiers) therefore reads the values written on the PREVIOUS tick. src/sim_sets.rs:9-15 states this in the set's own doc comment: 'the frozen-snapshot guarantee comes from this set ordering, not from a separate snapshot type.' Introducing a literal per-tick snapshot type would be a rewrite of every host's fact seeding for zero behavioural gain, so the spec (§9) now names the Publish/PublishAggregate discipline as the mechanism and keeps only the requirement that matters — all policies evaluate from state frozen at the same point in the tick. The deliberate departure is #791's torpedo count, where the SAME-tick reading is the correct one and the host pins .after(handle_fire_torpedo)/.after(tick_torpedo_lifecycle) rather than take the one-tick-stale blackboard copy. The CADENCE half of the same PRD decision is a different matter and is genuinely unmet — see ai-policy-tick-scheduler and #889."
         - Typed verbs restricted by system kind preserve AI and human input symmetry and prevent arbitrary simulation writes.
         - "Resolving the highest-priority matching rule per channel keeps each tick's decision a pure function of the snapshot with no retained policy state. AMENDED BY #882: this is now conditionally false — a policy that OPTS IN to a state machine also reads its own retained state, state time and private memory. The unconditional part that survives is the invariant below."
         - "Issue #882 INVARIANT (the spine rule this runtime is now held to): stateless resolution is unchanged and the machine is strictly opt-in. AiPolicy::resolve_channel keeps its signature AND behaviour — its only edit was factoring its scan loop into the shared best_in helper, which the per-state path also calls, so priority/tie-break semantics are uniform. AiPolicy gains ONE field, machine: Option<AiPolicyMachine>; machine == None means no state, no memory, no transition scan is ever entered, and all twelve shipped Group A hosts are exactly that shape (pinned by stateless_policy_resolution_is_unchanged_by_the_optional_machine and, at a host, stateless_boost_policy_never_enters_the_state_machine_path). AC2's 'at most one transition per eligible tick' is enforced by the EVALUATOR, not by host discipline: resolve_transition returns Option<&AiPolicyTransition>, so no host can chain two. The one host system ai_policy_state_tick COMMITS the entered state before any output resolves, so the new state's continuous rules supply outputs in the same tick and every fine system observes the same committed state."
@@ -213,6 +214,7 @@ entities:
         - Integer evaluation multiples permit slower Sensors, Power, Repair, or Comms decisions without frame-dependent timers.
         - "The shipped precedent is the shared AI-helm sim tick (#803): one AiHelmTickTimer at [global] ai_helm_tick_hz (default 30 Hz) gates all four per-axis AI helm systems, decoupling AI decisions from host frame rate for P2P lockstep (PRD #620)."
         - "Issue #882 makes POLICY STATE TIME tick-derived on that same cadence. AiPolicyTickClock advances by exactly one authored 1/ai_helm_tick_hz period each time ai_policy_state_tick runs, and that system sits under the same run_if(ai_helm_tick_ready) latch as the per-axis helm systems (with tick_ai_helm_timer ordered .after it, so the latch is consumed before it is re-armed). state_time is therefore (clock - entered_at_secs): never Time::delta, never a Timer inside a policy — #784 retired the last per-frame AI timer and #882 does not reintroduce one. Ordering: ai_policy_state_tick runs .after(helm_motion_planner) (its transition guards read this tick's hazard surface) and .before every per-axis actuator system, so the state it commits is the state those systems resolve their outputs in. The authored per-system integer tick MULTIPLES remain proposed."
+        - "Issue #889 is the issue that CLOSES this component, and it states the gap plainly rather than leaving 'proposed' to imply merely-unfinished work. PRD #774's implementation decision requires every policy on the deterministic base cadence; the shipped cadence is fragmented three ways — the six helm axes on the shared ai_helm_tick_hz latch, Captain and Sensors on a HARDCODED 10 Hz AiSnapshotTimer (src/ai/server.rs:30-37, gated inside the system body by an Option<Res<_>> that falls back to every-tick when absent), and shields focus / power allocation / torpedo load and auto-fire / frequency hint / phaser and blaster auto-fire / AI target selection on NO gate at all. Because the sim sets are configured in Bevy's Update, ungated means ONCE PER RENDERED FRAME. The snapshot half of the same PRD decision is met by SimSet ordering (see fine-system-ai-policy-runtime); this half is not, and §9 of the spec now says so instead of claiming both. Two consequences worth keeping visible: a designer-tunable decision rate living as a Rust literal is an AGENTS.md #11 violation in its own right, and the same seed produces a different NPC firing PHASE between the fixed-timestep headless harness and the rAF-driven browser, which is what the #835 balance numbers were measured against."
     architecture:
       kind: scheduler
       authority: authoritative
@@ -240,6 +242,7 @@ entities:
         - "Issue #882 EXTENDED (did not fork) validate_fine_system_ai_policy with the state-graph checks. The idle-xor-rules check becomes idle xor (rules or states), and the existing per-rule channel/verb/parse_predicate/referenced_params loop now runs unchanged over each STATE's rules and each TRANSITION's `when` (diagnostics name the site, e.g. \"state 'cruise' rule 0\"). New rejections: an initial_state naming an undeclared state; states declared with no initial_state at all; a transition whose `to` names an undeclared state; duplicate state ids; an unreachable state, computed as a FIXPOINT walk from initial_state that follows transitions only out of states already known reachable (so a self-loop is not an entry AND a disconnected cluster — initial 'a'; 'b' -> 'c'; 'c' -> 'b' — is rejected, which a single pass crediting every transition target regardless of its source would have accepted); and a memory(...) or state_time reference in a STATELESS policy (private state has no owner without a machine, and silently reading false would be a trap). A memory(...) reference to an undeclared slot is rejected in a stateful policy too, mirroring the param(...) contract since #775. The shared checker is check_policy_predicate, backed by new Predicate::referenced_memory / Predicate::references_state_time."
         - "Issue #883 added the MIXED-DECLARATION rejection the #882 review flagged, and widened the Steering verb set. A policy declaring BOTH top-level `rule`s and `state`s is now rejected outright (rule XOR state). It used to validate and then fail twice, silently: a machine resolves exclusively through resolve_channel_in_state, so the top-level rules were dead code that looked live — and because the `stateful` flag is computed from the presence of states, a memory(...) reference inside one of those dead rules PASSED validation and then evaluated false for ever, since the stateless scan hands best_in an empty memory bag. Both honest shapes are untouched: every shipped canonical default is rule-only, and the destroyer's three policies are state-only (a_policy_with_both_top_level_rules_and_states_is_rejected / rule_xor_state_leaves_both_honest_shapes_valid). Separately, [helm_console.steering_ai] is now validated against HELM_STEERING_VERBS rather than the single #779 verb — the first channel in the schema with more than one legal verb — while every other axis keeps its single-verb slice, so a frozen-heading verb on the longitudinal/lateral/vertical/impulse/boost channel still fails the entity load. At #883 that slice held two verbs (actuate_desired_facing OR hold_committed_heading); it holds seven as of #792, and the wire-in is unchanged — the slice widened, the checker did not."
         - "Issues #788/#790/#791/#792 each widened HELM_STEERING_VERBS by one entry and changed nothing else about validation: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). The one validate_fine_system_ai_policy(cfg, valid_channels, valid_verbs) call site for [helm_console.steering_ai] still passes &[HELM_YAW_CHANNEL] and HELM_STEERING_VERBS, so an unknown yaw verb, a yaw verb authored on another axis's channel, an unparseable guard, an undeclared param(...) or an undeclared memory(...) still fails the entity load in EntityConfig::from_toml before any live tick. What is NOT validated, deliberately, is whether a hull authoring a verb also authors the parameter set that verb's host leg requires — the host degrades to the ordinary travel arm instead (HelmPassSurface.active / pass_legs), because a partially-authored leg is a content-tuning state a designer passes through, not a load failure."
+        - "DELIBERATE DIVERGENCE FROM PRD #774 US19, recorded so nobody restores the PRD's wording. US19 asks for 'unreachable states WARNED, so that failures are actionable without forbidding intentional terminal states'. The shipped check (src/entities/config.rs:3756-3784) returns Err — the entity fails to load — and the spec §11 has been amended to match the code rather than the other way round, because the code already draws exactly the distinction US19 cares about. A TERMINAL state (no outgoing transition) is never examined by the reachability walk and passes; only a state NOTHING CAN ENTER is rejected. So intentional terminal states are not forbidden, which was the whole concern behind the softer wording. An unenterable state cannot be an authoring choice — no runtime path reaches it, so nothing an author writes later can give it meaning — and this repository has no warning channel that fails CI, so downgrading would make the check worthless. The cost of a non-failing channel is visible in the same checker: check_policy_predicate validates param(...) and memory(...) references but NOT fact(...) names (facts are seeded host-side per system, with no registry to check against), so a mistyped fact name parses, validates, and reads false for ever."
     architecture:
       kind: configuration-validator
       authority: authoritative
@@ -276,3 +279,80 @@ entities:
         - per-system-ai-operator-suite
         - ai-command-symmetry-migration
       runs_in: [host-browser-runtime]
+    exceptions:
+      - rule: every-fine-system-decision-is-authored-policy-not-host-code
+        scope:
+          - helm-engines-ai-operator
+          - helm-steering-ai-operator
+        rationale: >-
+          Issue #779 moved the ACTUATION decision onto the authored spine, but not the decision
+          it gates. The longitudinal and yaw verbs are value-less MODE verbs — resolve_channel
+          decides only WHETHER to actuate this tick — while the continuous target itself is
+          still computed by the pure plan_helm_travel (src/ai/core.rs): it ranks the scored
+          objective pool, resolves the winning directive, and returns the (thrust, steering)
+          pair through helm_motion_planner's ordinary travel arm. Its arrival ramp, avoidance
+          bend and arc bearing are geometry an authored guard cannot currently express, and its
+          doctrine argument is the legacy [[behaviour.doctrine]] data this component exists to
+          retire. It is retained rather than reproduced because #883's authored leg verbs cover
+          only the legs a hull explicitly authors: an AI-flown hull with no complete leg set —
+          every Backfill player ship, and every NPC hull that has not been migrated — falls back
+          to this arm, and deleting it before those hulls author their own travel would leave
+          them coasting at zero into a fight.
+        temporary: true
+        removal_condition:
+          - helm-motion-planner-never-selects-the-plan-helm-travel-arm-for-an-ai-flown-hull
+          - plan-helm-travel-has-no-non-test-caller
+        approval_status: accepted
+
+      - rule: every-fine-system-decision-is-authored-policy-not-host-code
+        scope:
+          - helm-impulse-ai-operator
+        rationale: >-
+          Issue #780's engage_impulse verb is an authored PERMIT gate layered on top of a
+          host-side decision, not a replacement for it. The engage-versus-cancel call is still
+          decide_impulse's geometry (src/ai/core.rs) over range, bearing and ImpulsePhase, and
+          the authored doctrine use_impulse veto still sits in front of that, resolved through
+          DoctrineObjective::effective_use_impulse — which DEFAULTS TO TRUE for every non-Patrol
+          directive. The default is why the veto cannot be treated as already-dead content: it
+          is live on every hull whose scenario replaces the doctrine list, which is all of them.
+          The removal condition is therefore written against the code path rather than against
+          authored data. A grep for use_impulse under assets/ reads as satisfied TODAY — every
+          occurrence is comment prose in ship_harrow_warhawk.toml and
+          probe_artillery_standoff.toml explaining why the lever was deliberately NOT used —
+          while the veto path stays fully live through that default. Issue #792 is the standing
+          demonstration that the decision matters: the autopilot hard-overrides commanded
+          throttle, so a hull holding station inside impulse_engage_distance is flown through
+          its own gun line until its fine-system policy declares idle = true.
+        temporary: true
+        removal_condition:
+          - impulse-engage-and-cancel-geometry-is-readable-as-seeded-facts-in-authored-guards
+          - decide-impulse-and-effective-use-impulse-have-no-non-test-caller
+        approval_status: accepted
+
+      - rule: every-fine-system-decision-is-authored-policy-not-host-code
+        scope:
+          - shields-recent-damage-ai
+        rationale: >-
+          Issue #783 converted the Shields Backfill focus onto the authored spine while keeping
+          its ranking kernel. focus_shield_arc is a value-less verb — a gate deciding act versus
+          hold — and WHICH of the four arcs to focus is still tick_shield_focus_ai's argmax
+          (src/console_ai/core.rs:394): damage concentration over the authored window primary,
+          health imbalance fallback, clear otherwise. The authored windows and thresholds did
+          move into the policy param map and are read host-side into the kernel input, so the
+          tuning is data; the RANKING is not. Shields stayed on the channel/verb model rather
+          than the #776 target selector because its arcs are a fixed 4-set of in-ship indices
+          rather than UUID entities, so there is no candidate union to author — which is also
+          why retiring this kernel needs the channel to carry the arc, not a new selector host.
+        temporary: true
+        removal_condition:
+          - the-shield-focus-arc-is-carried-by-authored-content-not-a-host-argmax
+          - tick-shield-focus-ai-has-no-non-test-caller
+        approval_status: accepted
+    evidence:
+      - kind: test
+        reference: combat_test_develops_two_sided_combat_and_resolves
+        summary: >-
+          A seeded headless combat_test run (seed 9, deterministic, 400 sim-second budget)
+          reaches two-sided non-zero damage, at least one kill, and a Victory/Defeat outcome —
+          the deterministic home for "Combat Test loads and engages", which the Playwright smoke
+          suite deliberately does not assert.

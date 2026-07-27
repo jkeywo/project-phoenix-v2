@@ -356,7 +356,7 @@ often without introducing frame-dependent timers.
 
 For every eligible fine-system tick, evaluation order is:
 
-1. capture one immutable authoritative fact snapshot;
+1. read the tick's frozen authoritative facts (see below);
 2. validate or select the fine system's target;
 3. evaluate at most one state transition;
 4. apply transition-local memory changes;
@@ -365,10 +365,29 @@ For every eligible fine-system tick, evaluation order is:
    outputs winning their channels for that tick; and
 7. emit typed system inputs.
 
-All fine-system policies evaluate from the same tick snapshot. Their outputs
-are applied as a batch. A Sensors target change made this tick becomes visible
-to Tactical, Helm, or other policies on the next AI tick. Explicit Coordination
-messages retain their authored channel latency.
+All fine-system policies evaluate from authoritative state frozen at the same
+point in the tick. That guarantee comes from **set ordering, not from a separate
+snapshot type**: every system writes its own blackboard exactly once per tick in
+`SimSet::Publish`, ship-wide aggregators run strictly after it in
+`SimSet::PublishAggregate`, and any consumer ordered earlier therefore reads the
+values written on the previous tick (`src/sim_sets.rs`). A literal snapshot
+object is not required and is not planned; demanding one would be a rewrite for
+no behavioural gain. Where a host must read a live resource because the
+same-tick reading is the correct one — the torpedo in-flight count is the
+shipped example — it pins its ordering explicitly against that resource's
+writers rather than silently taking the one-tick-stale blackboard copy.
+
+The **cadence** half of this contract is not yet met, and is tracked by issue
+**#889**. Today the six Helm axes run on the shared `ai_helm_tick_hz` latch,
+Captain and Sensors on a separate hardcoded 10 Hz timer, and the remaining
+hosts on no gate at all — which, because the sim sets are configured in Bevy's
+`Update`, means once per rendered frame. Until #889 unifies them, "every policy
+evaluates from state frozen at the same point in the tick" holds and "every
+policy evaluates on the same deterministic base cadence" does not.
+
+Their outputs are applied as a batch. A Sensors target change made this tick
+becomes visible to Tactical, Helm, or other policies on the next AI tick.
+Explicit Coordination messages retain their authored channel latency.
 
 ## 10. Lifecycle
 
@@ -396,6 +415,7 @@ the root world activates. Required checks include:
   slot, candidate source, output channel, or verb;
 - invalid argument or comparison types;
 - missing or invalid initial state;
+- a state that nothing can enter (unreachable from the initial state);
 - competing equal-priority transitions;
 - competing equal-priority rules on one output channel;
 - writes to undeclared memory;
@@ -403,9 +423,25 @@ the root world activates. Required checks include:
 - use of a verb not owned by the fine-system kind; and
 - invalid evaluation interval or history window.
 
-A state unreachable from the initial state produces a warning. A state with no
-outgoing transition is valid and produces no warning. PASM and content lint
-must not manufacture behavioural certainty beyond these deterministic checks.
+A state that nothing can enter is a load error, not a warning. The check is a
+fixpoint walk from `initial_state` that follows transitions only out of states
+already known reachable, so it rejects a disconnected cluster (`initial = a`;
+`b -> c`; `c -> b`) as well as a plain zero-inbound orphan. A state with no
+OUTGOING transition is a valid terminal state and produces no finding: that is
+the distinction this check draws, and it is what keeps intentional terminal
+states legal while still rejecting dead content.
+
+The error must not be downgraded to a warning. An unenterable state is never an
+authoring choice — no runtime path reaches it, so nothing an author writes later
+can give it meaning. This repository also has no warning channel that fails CI,
+so a warning would be a finding nobody must act on. The standing evidence for
+what that costs is next door in the same checker: `check_policy_predicate`
+validates `param(...)` and `memory(...)` references, but **not** `fact(...)`
+names — facts are seeded host-side per system with no registry to check against
+— so a mistyped fact name parses, validates, and then reads false for ever. A
+channel that does not fail is a channel that does not protect. PASM and content
+lint must not manufacture behavioural certainty beyond these deterministic
+checks.
 
 ## 12. Combat Test movement policies
 
@@ -481,6 +517,39 @@ policy model. Exact values are authored in the relevant entity TOML.
   avoidance, after which ships gradually return to their authored cruise plane.
 - Destroyer, cruiser, and battleship tuning belongs to their TOML system
   policies and weapon/shield configuration, not Rust hull branches.
+
+### 12.5 Verification
+
+Combat Test engagement is proved by a **seeded headless run**, not by browser
+smoke coverage. A fixed-seed `combat_test` run on the headless binary — `cargo
+run --features headless --bin phoenix-headless -- --world
+assets/worlds/combat_test.toml`, which prints a JSON exit summary — must reach
+weapons discharged and non-zero damage on both sides, and a resolved outcome,
+within an authored sim-second budget.
+
+**This criterion is already met; it does not need implementing again.** The
+shipped instance is `combat_test_develops_two_sided_combat_and_resolves` in
+`tests/headless_runner.rs`: seed 9, deterministic scheduler, a 400 sim-second
+budget, asserting the player ledger carries both `damage_dealt > 0` and
+`damage_taken > 0` (the two-sided reading — a one-sided run shows neither), at
+least one kill across the run, and a Victory/Defeat classification rather than a
+draw or timeout. The ledger is built from the balance-event log, so a destroyed
+ship still appears in it.
+
+The run is **reproducible, not bit-identical**. At the shipped seed and tick
+rate, resolution has been measured across a 246-275 sim-second spread; the seed
+removes one source of drift rather than carrying the assertion, which is why the
+budget is 400 s and why every other assertion in it is a `> 0` that holds across
+the whole spread. A criterion phrased as bit-identical timing would be a false
+claim about this scenario.
+
+Playwright smoke coverage deliberately stops at world load, spawn anchors, and
+first-wave spawn (`tests/smoke/combat-test-scenario.spec.ts`). Proving
+*engagement* there would mean waiting on a weapon discharge through the
+BroadcastChannel PeerJS shim, which is precisely the time-sensitive class of
+assertion that suite excludes to stay fast. Engagement is therefore proved on
+the deterministic fixed-timestep runner instead, and should not be re-added to
+the smoke suite.
 
 ## 13. Migration
 

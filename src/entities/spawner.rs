@@ -719,18 +719,25 @@ pub fn spawn_entity(
         // player-only mechanic).
         entity_commands.insert(crate::modifiers::ShipModifiers::new());
         // Per-entity ShipRepairTeams — only insert when the entity TOML declares
-        // a [repair] block. Absent block means the ship has no repair teams
-        // (the default behaviour for NPCs today).
+        // repair TEAMS, i.e. a `[repair] repair_team_count` above zero. No
+        // count means the ship has no repair teams (the default behaviour for
+        // NPCs today).
+        //
+        // The gate is the COUNT and not the presence of `[repair]`, because
+        // since #885b every hull authors `[repair.selector]` and TOML cannot
+        // write that sub-table without bringing `[repair]` into existence — a
+        // presence gate would hand two teams to six NPC hulls that never had
+        // any. See `RepairConfig::declares_teams`.
         if let Some(repair_cfg) = &config.repair {
-            let team_count = if repair_cfg.repair_team_count > 0 {
-                repair_cfg.repair_team_count as usize
-            } else {
-                2
-            };
-            let timings = repair_cfg.to_runtime();
-            entity_commands.insert(crate::console::repair::server::ShipRepairTeams(
-                crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
-            ));
+            if repair_cfg.declares_teams() {
+                let timings = repair_cfg.to_runtime();
+                entity_commands.insert(crate::console::repair::server::ShipRepairTeams(
+                    crate::repair_teams::RepairTeams::new_with_timings(
+                        repair_cfg.repair_team_count as usize,
+                        timings,
+                    ),
+                ));
+            }
         }
         // All ship entities carry the Ship marker — player and NPC alike.
         // The LocalShip marker (not set here) is the viewscreen selector only.
@@ -1171,6 +1178,79 @@ mod tests {
         };
         app.update();
         entity
+    }
+
+    /// A `[repair]` table that exists only to carry `[repair.selector]` gives
+    /// the ship NO repair teams.
+    ///
+    /// This is the gate #885b stage 5b had to move. Every hull now authors
+    /// `[repair.selector]`, and TOML cannot write that sub-table without
+    /// bringing `[repair]` into existence — so the old "the block is present"
+    /// gate would have crewed two repair teams onto six NPC hulls that never had
+    /// any, purely as a side effect of a table header. The gate is the COUNT:
+    /// a ship has repair teams when its TOML says how many.
+    ///
+    /// Both directions are asserted, because a gate that only ever reads false
+    /// would pass the first half alone.
+    #[test]
+    fn repair_teams_are_gated_on_the_authored_count_not_on_the_repair_table() {
+        let selector_only = r#"
+[hull]
+hull_integrity = 100.0
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+base_priority = 40.0
+
+[repair.selector]
+sources = ["damaged-stations"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(source_repair_request) > 0"
+"#;
+        let config = EntityConfig::from_toml(selector_only).expect("selector-only [repair] parses");
+        assert!(
+            config
+                .repair
+                .as_ref()
+                .is_some_and(|r| r.selector.is_some() && !r.declares_teams()),
+            "precondition: `[repair.selector]` alone brings `[repair]` into existence \
+             but declares no teams"
+        );
+        let mut app = test_app();
+        let e = spawn_and_flush(&mut app, &config, Vec3::ZERO, "selector-only".into(), None);
+        assert!(
+            app.world()
+                .get::<crate::console::repair::server::ShipRepairTeams>(e)
+                .is_none(),
+            "a `[repair]` table carrying only a selector must NOT crew repair teams — \
+             authoring a ranking policy is not the same as declaring the capability it \
+             ranks for."
+        );
+        assert!(
+            app.world()
+                .get::<crate::console::repair::server::RepairTargetSelector>(e)
+                .is_some(),
+            "…while the selector itself is still attached: the teams gate dispatch, so \
+             a ship that gains them later already has its ranking."
+        );
+
+        let with_teams = format!("{selector_only}\n[repair]\nrepair_team_count = 3\n");
+        let config = EntityConfig::from_toml(&with_teams).expect("[repair] with a count parses");
+        let mut app = test_app();
+        let e = spawn_and_flush(&mut app, &config, Vec3::ZERO, "with-teams".into(), None);
+        let teams = app
+            .world()
+            .get::<crate::console::repair::server::ShipRepairTeams>(e)
+            .expect("an authored `repair_team_count` must crew that many teams");
+        assert_eq!(
+            teams.0.slots().len(),
+            3,
+            "the authored count is the team count, verbatim"
+        );
     }
 
     #[test]

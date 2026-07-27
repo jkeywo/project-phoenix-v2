@@ -565,3 +565,197 @@ damage_threshold   = 1.0
 damage_full_spike  = 30.0
 decay_rate_per_sec = 1.5
 source             = "shield"
+
+# ── AI target selectors (PRD #774 US7, issue #885b) ───────────────────────────
+#
+# The five per-system target selectors, AUTHORED rather than synthesised. Each
+# answers "which entity is this system's target?" for whoever operates the
+# station, and each reproduces exactly what the matching
+# `default_*_target_selector_config()` in `src/entities/config.rs` used to
+# invent at spawn. The reasoning behind every number lives on those functions
+# and on the constant blocks above them; `default_ai_policy_pins` spawns every
+# shipped hull and compares the two, so a transcription slip fails the build
+# rather than quietly changing how this ship picks targets.
+#
+# All five attach on `[behaviour]` ALONE, not on the console section they name,
+# so a hull owes all five whether or not it declares `[sensors_console]`,
+# `[navigation_console]`, `[repair]` or `[comms_console]`.
+#
+# `horizon` is a static outer bound, NOT the live range gate — each host owns
+# its own (Sensors' damage-scaled radar reach, Comms' authored `[comms].range`).
+# Do not "helpfully" tighten it to look like a range.
+#
+# A score term's magnitude is its own `weight` field. A `param` entry exists
+# only where a `when` guard names one: Repair's `deficit_band_*` and Comms'
+# `score_band_*` are the whole set.
+
+# Sensors — rank detectable hostiles by which SOURCE surfaced them:
+# combat-lock >> objective >> radar. `switch_margin` is 0 because the gaps
+# between the tiers ARE the anti-thrash mechanism.
+[sensors_console.selector]
+sources = ["combat-lock", "objective-destroy", "radar-contacts"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_combat_lock) > 0"
+weight = 1000.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_objective) > 0"
+weight = 100.0
+
+[[sensors_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1.0
+
+# Tactical — the ship's firing target. `combat-lock` is deliberately ABSENT from
+# the sources: it is Tactical's own output, so unioning it would be circular.
+# The current lock reaches the ranking as the host-pushed `source_retained`
+# retention candidate, which is why that marker appears in the guards but in no
+# source list.
+#
+# PRECEDENCE INVARIANT — terms are additive and one candidate can carry several
+# markers at once, so the weights are sized to beat the maximum non-objective
+# stack by more than `switch_margin`: 500 + 200 + 100 + 1 = 801 < 1000 - 50.
+# A named Destroy objective therefore always wins AND survives hysteresis
+# retention, while `retained` still exceeds `last_attacker` so an established
+# engagement is not broken off by a fresh attacker. Retune against that
+# inequality, not term by term.
+[weapons_console.selector]
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
+horizon = 1e9
+switch_margin = 50.0
+# Independent revalidation: `detectable` is required of everything, and beyond
+# that a candidate is engageable either because the host already vetted it
+# (objective order / last attacker / retained lock) OR because it is
+# independently hostile. That disjunction honours a mission naming a factionless
+# target while refusing a FRIENDLY Sensors designation, which carries only
+# `source_sensors_designation`.
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0)"
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_objective) > 0"
+weight = 1000.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_sensors_designation) > 0"
+weight = 500.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_retained) > 0"
+weight = 200.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_last_attacker) > 0"
+weight = 100.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1.0
+
+# Navigation — rank destinations into the shared Waypoint. Only the objective
+# source marks its resolved destination `reachable`, so this policy drives the
+# AI waypoint from objectives alone; `chart-contacts` is surfaced so an author
+# can widen the eligibility, and by default only ENRICHES a coincident objective
+# destination rather than independently steering the ship.
+[navigation_console.selector]
+sources = ["navigation-objectives", "chart-contacts"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(reachable) > 0"
+
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_nav_objective) > 0"
+weight = 100.0
+
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_chart_contact) > 0"
+weight = 1.0
+
+# Repair — rank this ship's damaged stations for the next free team. Two
+# additive ladders whose tier rungs STRICTLY dominate the deficit rungs
+# (3 x 100 = 300 < 1000), reproducing the retired `(tier desc, deficit desc)`
+# comparator. `assigned < 1` is what makes N free teams pick N DISTINCT
+# stations. `tier_ordinal` is the DamageTier discriminant (Operational 0,
+# Damaged 1, Disabled 2, Destroyed 3) — a structural enum ordinal, which is why
+# its bounds are literals rather than params; Destroyed is excluded because a
+# repair team alone cannot lift the latch.
+#
+# Authored on every hull whether or not it crews repair teams: the teams gate
+# dispatch, so a ship that gains them later already has its ranking.
+[repair.selector]
+sources = ["damaged-stations", "core-bucket"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(source_repair_request) > 0 and candidate_fact(assigned) < 1 and candidate_fact(tier_ordinal) > 0 and candidate_fact(tier_ordinal) < 3"
+
+# The bands sit INSIDE the urgent range and deliberately NOT at the DamageTier
+# thresholds — because tier strictly dominates, the deficit ladder only ever
+# discriminates within one tier, so bands at the tier boundaries would all fire
+# together for every Disabled station and discriminate nothing.
+[repair.selector.param]
+deficit_band_low = 0.80
+deficit_band_mid = 0.90
+deficit_band_high = 0.95
+
+[[repair.selector.score]]
+when = "candidate_fact(tier_ordinal) >= 1"
+weight = 1000.0
+
+[[repair.selector.score]]
+when = "candidate_fact(tier_ordinal) >= 2"
+weight = 1000.0
+
+[[repair.selector.score]]
+when = "candidate_fact(tier_ordinal) >= 3"
+weight = 1000.0
+
+[[repair.selector.score]]
+when = "candidate_fact(damage_fraction) >= param(deficit_band_low)"
+weight = 100.0
+
+[[repair.selector.score]]
+when = "candidate_fact(damage_fraction) >= param(deficit_band_mid)"
+weight = 100.0
+
+[[repair.selector.score]]
+when = "candidate_fact(damage_fraction) >= param(deficit_band_high)"
+weight = 100.0
+
+# Comms hail — rank who to hail. The most gated of the five, and the only one
+# whose eligibility reads a `self_fact`: `comms_available`, so a Disabled or
+# Destroyed Comms system stops the ship hailing at all. `source_hail_objective`
+# keeps the baseline — only targets an active Hail directive actually names are
+# ranked. `has_open_hail_thread < 1` is the anti-respam gate and it TERMINATES:
+# a hail arms it even when it fires no `on_hailed` template, and it re-arms on a
+# human `ClearComms` or on the target ceasing to be a live candidate, which is
+# what an unmanned ship relies on. `switch_margin` is 0 and the host passes no
+# current target: a hail is a ONE-SHOT event, so there is nothing to retain.
+[comms_console.selector]
+sources = ["hail-objectives", "comms-contacts"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(source_hail_objective) > 0 and candidate_fact(in_range) > 0 and candidate_fact(objective_score) > 0 and candidate_fact(has_open_hail_thread) < 1 and self_fact(comms_available) > 0"
+
+# The bands straddle the `base_priority` values the shipped content actually
+# authors (20 / 30 / 35 / 40 / 45 / 50 / 80 / 100), splitting them four ways.
+# Bands outside that range would fire for all or none and collapse the ranking
+# onto the smallest-UUID tie-break.
+[comms_console.selector.param]
+score_band_low = 25.0
+score_band_mid = 45.0
+score_band_high = 75.0
+
+[[comms_console.selector.score]]
+when = "candidate_fact(objective_score) >= param(score_band_low)"
+weight = 100.0
+
+[[comms_console.selector.score]]
+when = "candidate_fact(objective_score) >= param(score_band_mid)"
+weight = 100.0
+
+[[comms_console.selector.score]]
+when = "candidate_fact(objective_score) >= param(score_band_high)"
+weight = 100.0

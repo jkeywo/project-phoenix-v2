@@ -71,11 +71,15 @@
 //!   encodes a documented dominance invariant (`500 + 200 + 100 + 1 = 801 <
 //!   1000 − 50`) that makes an explicit mission objective strictly beat the
 //!   maximum stack of everything else, hysteresis included.
-//! - **Not one shipped hull authors a selector block.** Where the policies have
-//!   `alliance_cruiser`'s hand-written `[captain_console.ai]` as a worked
-//!   example proving a verbatim transcription round-trips, the selectors have
-//!   nothing: all 5 × 12 declarations are synthesised, and this suite is the
-//!   only baseline they can be diffed against.
+//! - **They had no shipped worked example.** Where the policies have
+//!   `alliance_cruiser`'s hand-written `[captain_console.ai]` proving a verbatim
+//!   transcription round-trips, all 5 × 10 selector declarations were
+//!   synthesised, and this suite was the only baseline they could be diffed
+//!   against. #885b stage 5b authored all fifty against it — see
+//!   `spawn_path::every_shipped_hull_authors_the_five_selectors_and_they_match_the_synthesisers`,
+//!   which is that diff, run over the real spawn path on every shipped hull.
+//!   The synthesisers still exist and still fire for anything that omits a
+//!   block; stage 5d deletes them, and this suite with them.
 //!
 //! # How the pins are layered
 //!
@@ -979,6 +983,11 @@ fn pin_power() {
 /// `switch_margin` is 0 — Sensors has NO hysteresis. The gap between tiers
 /// (1000 / 100 / 1) is itself the anti-thrash mechanism; there is no band in
 /// which a rival is ignored.
+///
+/// NO params. The three tier magnitudes are each score term's own authored
+/// `weight` field; the `combat_lock_weight` / `objective_weight` /
+/// `radar_weight` declarations this synthesiser used to carry were read by no
+/// guard and were deleted in #885b stage 5a.
 #[test]
 fn pin_sensors_selector() {
     assert_selector(
@@ -989,11 +998,7 @@ fn pin_sensors_selector() {
             horizon: 1.0e9,
             switch_margin: 0.0,
             eligibility: "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0",
-            params: &[
-                ("combat_lock_weight", 1000.0),
-                ("objective_weight", 100.0),
-                ("radar_weight", 1.0),
-            ],
+            params: &[],
             score: &[
                 ("candidate_fact(source_combat_lock) > 0", 1000.0),
                 ("candidate_fact(source_objective) > 0", 100.0),
@@ -1023,6 +1028,12 @@ fn pin_sensors_selector() {
 ///
 /// The weights are not four independent knobs; see
 /// `pin_tactical_objective_beats_the_maximum_non_objective_stack`.
+///
+/// NO params. Each of the five magnitudes is that score term's own authored
+/// `weight` field; the five identically-named param declarations this
+/// synthesiser used to carry were read by no guard and were deleted in #885b
+/// stage 5a. The dominance invariant is a property of the weights, and always
+/// was — retuning the deleted params never moved it.
 #[test]
 fn pin_tactical_selector() {
     assert_selector(
@@ -1044,13 +1055,7 @@ fn pin_tactical_selector() {
                           or candidate_fact(source_last_attacker) > 0 \
                           or candidate_fact(source_retained) > 0 \
                           or candidate_fact(hostile) > 0)",
-            params: &[
-                ("objective_weight", 1000.0),
-                ("sensors_designation_weight", 500.0),
-                ("retained_weight", 200.0),
-                ("last_attacker_weight", 100.0),
-                ("radar_weight", 1.0),
-            ],
+            params: &[],
             score: &[
                 ("candidate_fact(source_objective) > 0", 1000.0),
                 ("candidate_fact(source_sensors_designation) > 0", 500.0),
@@ -1071,6 +1076,11 @@ fn pin_tactical_selector() {
 /// eligibility to admit them without touching Rust; by default a chart contact
 /// can only ENRICH a coincident objective destination (see
 /// `pin_navigation_chart_contacts_enrich_but_never_steer`).
+///
+/// NO params. Both magnitudes are their score term's own authored `weight`
+/// field; the `objective_weight` / `chart_contact_weight` declarations this
+/// synthesiser used to carry were read by no guard and were deleted in #885b
+/// stage 5a.
 #[test]
 fn pin_navigation_selector() {
     assert_selector(
@@ -1081,7 +1091,7 @@ fn pin_navigation_selector() {
             horizon: 1.0e9,
             switch_margin: 0.0,
             eligibility: "candidate_fact(reachable) > 0",
-            params: &[("objective_weight", 100.0), ("chart_contact_weight", 1.0)],
+            params: &[],
             score: &[
                 ("candidate_fact(source_nav_objective) > 0", 100.0),
                 ("candidate_fact(source_chart_contact) > 0", 1.0),
@@ -1130,9 +1140,10 @@ fn pin_repair_selector() {
                           and candidate_fact(assigned) < 1 \
                           and candidate_fact(tier_ordinal) > 0 \
                           and candidate_fact(tier_ordinal) < 3",
+            // The three band thresholds and nothing else: they are the only
+            // selector params any guard reads. `tier_weight` / `deficit_weight`
+            // were declared here too until #885b stage 5a and were inert.
             params: &[
-                ("tier_weight", 1000.0),
-                ("deficit_weight", 100.0),
                 ("deficit_band_low", 0.80),
                 ("deficit_band_mid", 0.90),
                 ("deficit_band_high", 0.95),
@@ -1193,8 +1204,10 @@ fn pin_comms_hail_selector() {
                           and candidate_fact(objective_score) > 0 \
                           and candidate_fact(has_open_hail_thread) < 1 \
                           and self_fact(comms_available) > 0",
+            // The three band thresholds and nothing else. `score_band_weight`
+            // was declared here too until #885b stage 5a and was inert — the
+            // rung magnitude is each score term's own `weight` field.
             params: &[
-                ("score_band_weight", 100.0),
                 ("score_band_low", 25.0),
                 ("score_band_mid", 45.0),
                 ("score_band_high", 75.0),
@@ -1217,19 +1230,26 @@ fn pin_comms_hail_selector() {
     );
 }
 
-/// Only Repair and Comms actually REFERENCE a declared param from a guard.
+/// Only Repair and Comms reference a param from a guard — and now they are the
+/// only two that DECLARE one.
 ///
-/// Thirteen of the eighteen declared selector params are read by nothing: the
-/// score terms carry literal `weight:` fields, so retuning
-/// `param.objective_weight` on Sensors, Tactical or Navigation changes no
-/// behaviour whatsoever. `validate_fine_system_ai_selector` rejects a
+/// Until #885b stage 5a, thirteen of the eighteen declared selector params were
+/// read by nothing: a score term carries its own literal `weight:` field, so
+/// retuning `param.objective_weight` on Sensors, Tactical or Navigation changed
+/// no behaviour whatsoever. `validate_fine_system_ai_selector` rejects a
 /// `param(...)` reference to an UNDECLARED parameter, but nothing rejects an
-/// UNREFERENCED declaration — so this passes content validation silently.
+/// UNREFERENCED declaration, so those thirteen passed content validation
+/// silently while reading as levers.
 ///
-/// Pinned rather than fixed, because it is a live trap for #885: an author
-/// transcribing these blocks will carry the weight params across believing they
-/// are levers. They are documentation. Only the band thresholds
-/// (`deficit_band_*`, `score_band_*`) are wired to anything.
+/// They were deleted rather than wired up: `weight` is already an authored TOML
+/// field, so "designers retune without touching Rust" is delivered by authoring
+/// the block, not by adding a second indirection that has to be kept in sync
+/// with the field it duplicates. What remains is the legitimate use — a
+/// threshold a `when` guard actually names.
+///
+/// The second assertion is the ratchet that keeps it that way: declared and
+/// referenced must be the SAME set on every selector, so a re-introduced inert
+/// param fails here instead of quietly becoming documentation again.
 #[test]
 fn pin_which_selector_params_are_actually_referenced_by_a_guard() {
     let referenced: Vec<(&str, Vec<String>)> = all_selectors()
@@ -1255,19 +1275,19 @@ fn pin_which_selector_params_are_actually_referenced_by_a_guard() {
     assert_eq!(
         as_slices,
         vec![
-            // Three params declared, ZERO referenced.
+            // No params declared, so none referenced. The three tier weights
+            // are the score terms' own `weight` fields.
             ("sensors", vec![]),
-            // Five params declared, ZERO referenced.
+            // Likewise: five weights, all of them score-term fields.
             ("tactical", vec![]),
-            // Two params declared, ZERO referenced.
+            // Likewise: two weights, both score-term fields.
             ("navigation", vec![]),
-            // Five declared, THREE referenced: `tier_weight` and
-            // `deficit_weight` are inert.
+            // Three declared, THREE referenced — the band thresholds.
             (
                 "repair",
                 vec!["deficit_band_high", "deficit_band_low", "deficit_band_mid"]
             ),
-            // Four declared, THREE referenced: `score_band_weight` is inert.
+            // Three declared, THREE referenced — the band thresholds.
             (
                 "comms_hail",
                 vec!["score_band_high", "score_band_low", "score_band_mid"]
@@ -1277,6 +1297,21 @@ fn pin_which_selector_params_are_actually_referenced_by_a_guard() {
          param moves from inert to referenced (or back), the meaning of \
          retuning it changed, and #885's authored blocks must follow."
     );
+
+    // …and the ratchet: nothing may be DECLARED that no guard reads.
+    for ((name, block, _, cfg), (_, refs)) in all_selectors().iter().zip(&referenced) {
+        let mut declared: Vec<&str> = cfg.param.keys().map(String::as_str).collect();
+        declared.sort_unstable();
+        let referenced: Vec<&str> = refs.iter().map(String::as_str).collect();
+        assert_eq!(
+            declared, referenced,
+            "{name} ({block}): every declared selector param must be one a `when` or \
+             `eligibility` guard actually names. A declaration nothing reads is inert \
+             documentation that looks like a lever — thirteen of those were deleted in \
+             #885b stage 5a. A score term's magnitude belongs in its own authored \
+             `weight` field, not in a param restating it."
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2942,13 +2977,19 @@ mod spawn_path {
         );
     }
 
-    /// Assert all five selectors on a spawned hull are the canonical
+    /// Assert all five selectors on a spawned hull equal the canonical
     /// synthesised ones, verbatim.
     ///
-    /// Factored out because the interesting pin is that this holds for EVERY
-    /// shipped hull regardless of shape — no hull authors a `[*.selector]`
-    /// block, so #885 has 5 × 12 declarations to write and not one shipped
-    /// worked example to check a transcription against.
+    /// **This is the acceptance test for #885b stage 5b.** Before it, every
+    /// shipped hull got these five from Rust; now every shipped hull AUTHORS
+    /// them, and the assertion is unchanged — which is exactly the point. It
+    /// used to say "nobody has authored this"; it now says "what was authored
+    /// decodes to precisely what Rust used to invent". A transcription slip in
+    /// any of the ten `[*.selector]` blocks fails here, naming the hull and the
+    /// system, instead of quietly changing how that ship picks targets.
+    ///
+    /// It keeps its keep after stage 5d deletes the synthesisers only by being
+    /// deleted with them; until then it is the diff.
     fn assert_all_five_canonical(w: &World, e: Entity, hull: &str) {
         assert_eq!(
             w.get::<crate::ship::sensors::SensorsTargetSelector>(e)
@@ -2989,67 +3030,150 @@ mod spawn_path {
         );
     }
 
-    /// The five per-system target SELECTORS are a separate synthesised family
+    /// The five per-system target SELECTORS are a separate family
     /// (`default_*_target_selector_config`), outside the fourteen policies —
-    /// but they are attached at the same spawn and are equally unauthored.
+    /// but they are attached at the same spawn.
     ///
-    /// The Lancer is the sharpest case: it carries `[behaviour]` and a
-    /// `[weapons_console]` and nothing else, yet it is given all five. #885
-    /// lists them in scope ("five selectors … which today all run Rust-side
-    /// `*::default()` selectors with nothing authored at all"), and their
-    /// presence is what keeps "every AI-capable fine system declares intent"
-    /// false even after the fourteen are gone.
+    /// The Lancer used to be the sharpest case: `[behaviour]` and a
+    /// `[weapons_console]` and nothing else, yet given all five. Since #885b
+    /// stage 5b it AUTHORS all five, and this asserts the authored blocks decode
+    /// to the same selectors it was previously handed — the transcription check,
+    /// on the hull that had the least to transcribe from.
     #[test]
     fn the_five_selectors_are_also_synthesised_and_are_not_part_of_the_fourteen() {
         let (app, e) = spawn(LANCER, "lancer-selectors");
         assert_all_five_canonical(app.world(), e, "lancer");
     }
 
-    /// A selector is attached whether or not the hull carries the console
+    /// A minimal AI-bearing entity: `[behaviour]` and NOT ONE console section.
+    ///
+    /// This was the Harrow Lancer's shape until #885b stage 5b. It is a fixture
+    /// rather than a shipped hull because every shipped hull now authors all
+    /// five selectors, and `[sensors_console.selector]` cannot be written
+    /// without bringing `[sensors_console]` into existence — so no shipped file
+    /// omits those sections any more. The attachment RULE is unchanged, and a
+    /// fixture is the only thing left that can still exercise it.
+    const BARE_BEHAVIOUR_HULL: &str = r#"
+name = "test.bare_behaviour_hull"
+tags = ["ship"]
+
+[hull]
+hull_integrity = 100.0
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+base_priority = 40.0
+"#;
+
+    /// A selector is attached whether or not the entity carries the console
     /// section it belongs to.
     ///
-    /// The Lancer authors no `[sensors_console]`, no `[navigation_console]`, no
-    /// `[repair]` and no `[comms_console]` — yet it is given a Sensors,
-    /// Navigation, Repair and Comms-hail selector all the same, because the
-    /// spawn path gates the whole block on `[behaviour]` alone.
+    /// The fixture declares no console section at all — yet it is given all
+    /// five selectors, because the spawn path gates the whole block on
+    /// `[behaviour]` alone.
     ///
-    /// This is the mapping most likely to be missed when #885 authors per hull:
-    /// reading the Lancer's TOML gives no hint that four of its five selectors
-    /// exist, so a per-hull migration driven by "what sections does this file
-    /// have?" would drop them and the hull would silently lose its ranking.
+    /// This is the mapping stage 5b was most likely to miss: reading a bare
+    /// hull's TOML gives no hint that four of its five selectors exist, so a
+    /// per-hull migration driven by "what sections does this file have?" would
+    /// have dropped them and the hull would have silently lost its ranking.
+    /// Keeping the pin on a fixture keeps that rule enforced now that the
+    /// evidence has been authored away.
     #[test]
     fn selectors_are_attached_even_for_console_sections_the_hull_never_declares() {
-        let config = crate::entity_config::EntityConfig::from_toml(LANCER)
-            .expect("lancer template must parse");
+        let config = crate::entity_config::EntityConfig::from_toml(BARE_BEHAVIOUR_HULL)
+            .expect("the bare-behaviour fixture must parse");
         assert!(
             config.behaviour.is_some(),
-            "the Lancer is an AI-bearing hull — `[behaviour]` is the ONLY gate on the \
-             whole selector block."
+            "this is an AI-bearing entity — `[behaviour]` is the ONLY gate on the whole \
+             selector block."
         );
         assert!(
             config.sensors_console.is_none()
                 && config.navigation_console.is_none()
                 && config.repair.is_none()
-                && config.comms_console.is_none(),
-            "precondition: the Lancer declares none of these four console sections. \
-             If a future edit adds one, move this pin to a hull that still omits them \
-             rather than deleting it — the attachment rule is the point."
+                && config.comms_console.is_none()
+                && config.weapons_console.is_none(),
+            "precondition: the fixture declares no console section at all."
         );
 
-        let (app, e) = spawn(LANCER, "lancer-absent-sections");
-        assert_all_five_canonical(app.world(), e, "lancer");
+        let (app, e) = spawn(BARE_BEHAVIOUR_HULL, "bare-behaviour");
+        assert_all_five_canonical(app.world(), e, "bare-behaviour");
     }
 
-    /// …and a hull that DOES carry all the console sections still gets the
-    /// canonical selectors, because carrying `[sensors_console]` is not the
-    /// same as authoring `[sensors_console.selector]`.
+    /// Every shipped hull's five AUTHORED selector blocks decode to exactly what
+    /// the synthesisers used to invent for them.
     ///
-    /// The Battleship and the Alliance Cruiser both declare
+    /// The whole of #885b stage 5b in one assertion, over the real spawn path
+    /// and every shipped hull rather than the four the pins above happen to
+    /// name. Fifty authored declarations, fifty equalities.
+    #[test]
+    fn every_shipped_hull_authors_the_five_selectors_and_they_match_the_synthesisers() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&dir).expect("assets/entities must be readable") {
+            let path = entry.expect("readable dir entry").path();
+            if path.extension().is_none_or(|e| e != "toml") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .expect("toml file has a stem")
+                .to_string_lossy()
+                .to_string();
+            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            let config = crate::entity_config::EntityConfig::from_toml(&src)
+                .unwrap_or_else(|e| panic!("{stem} must parse: {e}"));
+            // `[behaviour]` is the gate on the whole selector block, so scenery
+            // is legitimately outside this pin.
+            if config.behaviour.is_none() {
+                continue;
+            }
+            assert!(
+                config
+                    .sensors_console
+                    .as_ref()
+                    .is_some_and(|c| c.selector.is_some())
+                    && config
+                        .weapons_console
+                        .as_ref()
+                        .is_some_and(|c| c.selector.is_some())
+                    && config
+                        .navigation_console
+                        .as_ref()
+                        .is_some_and(|c| c.selector.is_some())
+                    && config.repair.as_ref().is_some_and(|c| c.selector.is_some())
+                    && config
+                        .comms_console
+                        .as_ref()
+                        .is_some_and(|c| c.selector.is_some()),
+                "{stem}: an AI-bearing hull must AUTHOR all five `[*.selector]` blocks \
+                 (#885b stage 5b). A hull that omits one is silently handed a Rust-side \
+                 synthesised selector, which is exactly what PRD #774 US7 forbids."
+            );
+            let (app, e) = spawn(&src, &stem);
+            assert_all_five_canonical(app.world(), e, &stem);
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 10,
+            "ten shipped hulls carry `[behaviour]`; the scan found {checked}, so it is \
+             looking in the wrong place or a hull was added without its selectors."
+        );
+    }
+
+    /// …and the hulls that carried every console section all along run exactly
+    /// the same selectors, now from their own authored blocks.
+    ///
+    /// The Battleship and the Alliance Cruiser already declared
     /// `[sensors_console]`, `[weapons_console]`, `[navigation_console]` and
-    /// `[repair]`, and the Cruiser additionally hand-authors two AI POLICY
-    /// blocks. None of that buys a single authored selector. The two families
-    /// are independent, which is why #885 cannot treat "this hull has authored
-    /// AI" as "this hull is done".
+    /// `[repair]` before stage 5b, so they are the opposite shape from the bare
+    /// fixture: the selector sub-tables joined sections that already existed
+    /// rather than creating them. Carrying `[sensors_console]` never was the
+    /// same as authoring `[sensors_console.selector]`, and this pins that the
+    /// two shapes reach the same runtime selector.
     #[test]
     fn hulls_with_every_console_section_still_get_the_canonical_selectors() {
         for (toml, hull) in [(BATTLESHIP, "battleship"), (ALLIANCE_CRUISER, "cruiser")] {
@@ -3068,12 +3192,13 @@ mod spawn_path {
         }
     }
 
-    /// Authored per-weapon POLICY does not imply an authored SELECTOR.
+    /// Authored per-weapon POLICY is independent of the authored SELECTOR.
     ///
-    /// The Harrow Cruiser authors inline `ai` blocks on its torpedo tubes — the
-    /// hull most obviously "doing AI authoring" of the four — and still runs
-    /// all five canonical selectors. Pinned so the migration does not assume a
-    /// hull that authors anything has been dealt with.
+    /// The Harrow Cruiser authors inline `ai` blocks on its torpedo tubes — and
+    /// that bought it nothing towards its five selectors, which stage 5b had to
+    /// author separately. Pinned so the migration does not assume a hull that
+    /// authors anything has been dealt with; the same reasoning applies to the
+    /// seven policy kinds still owed.
     #[test]
     fn harrow_cruiser_authored_tube_policies_buy_it_no_authored_selector() {
         let (app, e) = spawn(HARROW_CRUISER, "harrow-cruiser-selectors");

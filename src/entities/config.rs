@@ -2157,8 +2157,12 @@ pub const COMMS_SELECTOR_SOURCES: &[&str] = &[
 /// `objective > retained > last-attacker > nearest`; each tier becomes an
 /// additive source weight, highest-first, with the Sensors-favour bonus (AC2)
 /// slotted between objective and retained. `switch_margin` is the anti-thrash
-/// hysteresis (AC5). Every value is overridable via `[weapons_console.selector]`
-/// fields or its `param` table, so no gameplay value is pinned into a live tick.
+/// hysteresis (AC5). Every value is overridable in `[weapons_console.selector]`
+/// — the weights as each `[[...score]]` table's own `weight` field, the margin
+/// and horizon as scalar fields — so no gameplay value is pinned into a live
+/// tick. NOT via a `param` table: a score term's magnitude is written directly
+/// and no guard here reads a `param(...)`, which is why the five weight params
+/// this synthesiser used to declare were deleted in #885b rather than wired up.
 ///
 /// PRECEDENCE INVARIANT — because the selector sums weights and a single
 /// candidate can carry several source markers at once (the ship's current lock
@@ -2188,8 +2192,11 @@ const DEFAULT_TACTICAL_RADAR_WEIGHT: f32 = 1.0;
 const DEFAULT_TACTICAL_SWITCH_MARGIN: f32 = 50.0;
 
 /// Parse-time fallbacks for the default Sensors selector (AGENTS.md rule #11
-/// parse-defaults only). Authors override every one via `[sensors_console.selector]`
-/// fields or its `param` table, so no gameplay value is pinned into a live tick.
+/// parse-defaults only). Authors override every one in
+/// `[sensors_console.selector]` — the three tier weights as each
+/// `[[...score]]` table's own `weight` field, the horizon and margin as scalar
+/// fields — so no gameplay value is pinned into a live tick. NOT via a `param`
+/// table; see the note on [`default_sensors_target_selector_config`].
 ///
 /// `HORIZON` is deliberately large: the Sensors host owns the live,
 /// damage-scaled horizon and pre-filters candidates to it (`effective_sensor_range`),
@@ -2206,8 +2213,10 @@ const DEFAULT_SELECTOR_RADAR_WEIGHT: f32 = 1.0;
 /// objective's destination; those objective destinations are the `reachable`
 /// tier here (`objective_weight`), dominating the enriching chart-contacts tier
 /// (`chart_contact_weight`). `switch_margin` is the anti-thrash hysteresis
-/// (AC3). Authors override every value via `[navigation_console.selector]`, so
-/// no gameplay value is pinned into a live tick.
+/// (AC3). Authors override every value in `[navigation_console.selector]` — the
+/// two weights as each `[[...score]]` table's own `weight` field — so no
+/// gameplay value is pinned into a live tick. NOT via a `param` table; see the
+/// note on [`default_navigation_target_selector_config`].
 const DEFAULT_NAV_OBJECTIVE_WEIGHT: f32 = 100.0;
 const DEFAULT_NAV_CHART_CONTACT_WEIGHT: f32 = 1.0;
 const DEFAULT_NAV_SWITCH_MARGIN: f32 = 0.0;
@@ -2394,21 +2403,19 @@ impl FineSystemAiSelectorToml {
 ///
 /// Reproduces the retired hardcoded Sensors tiers as data: prefer the combat
 /// lock, then a named objective target, then a radar hostile, all restricted
-/// to detectable, hostile contacts. All weights/horizon/margin are named
-/// parameters or parse-time defaults, so a designer can retune without Rust.
+/// to detectable, hostile contacts. Each tier's magnitude is the score term's
+/// own authored `weight` field and the horizon/margin are authored fields, so a
+/// designer retunes the ranking in TOML without touching Rust.
+///
+/// It declares NO `param` entries, and that is deliberate (issue #885b stage
+/// 5a). It used to declare `combat_lock_weight` / `objective_weight` /
+/// `radar_weight`, which no guard ever read: a score term's magnitude is written
+/// directly as `weight = 1000.0` and never reaches for `param(...)`. A `param`
+/// belongs here only when a `when` guard names it — as Repair's
+/// `deficit_band_*` and Comms' `score_band_*` do.
 pub fn default_sensors_target_selector_config() -> FineSystemAiSelectorToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        "combat_lock_weight".to_string(),
-        DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT,
-    );
-    param.insert(
-        "objective_weight".to_string(),
-        DEFAULT_SELECTOR_OBJECTIVE_WEIGHT,
-    );
-    param.insert("radar_weight".to_string(), DEFAULT_SELECTOR_RADAR_WEIGHT);
     FineSystemAiSelectorToml {
-        param,
+        param: std::collections::HashMap::new(),
         sources: SENSORS_SELECTOR_SOURCES
             .iter()
             .map(|s| s.to_string())
@@ -2464,30 +2471,19 @@ pub fn default_sensors_target_selector_config() -> FineSystemAiSelectorToml {
 /// designation, carrying only `source_sensors_designation`, is dropped rather
 /// than copied.
 ///
-/// All weights, the Sensors-favour bonus, the switch margin, and the horizon
-/// are named parameters or parse-time defaults, so a designer retunes Tactical
-/// target ranking without touching Rust (AGENTS.md rule #11).
+/// Every weight, the Sensors-favour bonus, the switch margin and the horizon are
+/// authored TOML fields, so a designer retunes Tactical target ranking without
+/// touching Rust (AGENTS.md rule #11) — the weights as each score term's own
+/// `weight` field.
+///
+/// It declares NO `param` entries (issue #885b stage 5a). The five it used to
+/// declare — `objective_weight`, `sensors_designation_weight`,
+/// `retained_weight`, `last_attacker_weight`, `radar_weight` — were read by no
+/// guard and merely restated the score terms' `weight` fields, so retuning one
+/// changed nothing. The dominance invariant lives in the weights themselves.
 pub fn default_tactical_target_selector_config() -> FineSystemAiSelectorToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        "objective_weight".to_string(),
-        DEFAULT_TACTICAL_OBJECTIVE_WEIGHT,
-    );
-    param.insert(
-        "sensors_designation_weight".to_string(),
-        DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT,
-    );
-    param.insert(
-        "retained_weight".to_string(),
-        DEFAULT_TACTICAL_RETAINED_WEIGHT,
-    );
-    param.insert(
-        "last_attacker_weight".to_string(),
-        DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT,
-    );
-    param.insert("radar_weight".to_string(), DEFAULT_TACTICAL_RADAR_WEIGHT);
     FineSystemAiSelectorToml {
-        param,
+        param: std::collections::HashMap::new(),
         sources: TACTICAL_SELECTOR_SOURCES
             .iter()
             .map(|s| s.to_string())
@@ -2548,17 +2544,16 @@ pub fn default_tactical_target_selector_config() -> FineSystemAiSelectorToml {
 /// canonical policy drives the waypoint from objectives alone (the retired
 /// contract). Chart contacts are surfaced so an author can weight them into
 /// eligible destinations without touching Rust; by default they merely enrich a
-/// coincident objective destination. All weights, the switch margin, and the
-/// horizon are named parameters or parse-time defaults (AGENTS.md rule #11).
+/// coincident objective destination. Both weights, the switch margin and the
+/// horizon are authored TOML fields (AGENTS.md rule #11), the weights as each
+/// score term's own `weight` field.
+///
+/// It declares NO `param` entries (issue #885b stage 5a): the
+/// `objective_weight` / `chart_contact_weight` declarations it used to carry
+/// were read by no guard and only restated the score terms' `weight` fields.
 pub fn default_navigation_target_selector_config() -> FineSystemAiSelectorToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert("objective_weight".to_string(), DEFAULT_NAV_OBJECTIVE_WEIGHT);
-    param.insert(
-        "chart_contact_weight".to_string(),
-        DEFAULT_NAV_CHART_CONTACT_WEIGHT,
-    );
     FineSystemAiSelectorToml {
-        param,
+        param: std::collections::HashMap::new(),
         sources: NAVIGATION_SELECTOR_SOURCES
             .iter()
             .map(|s| s.to_string())
@@ -2606,12 +2601,17 @@ pub fn default_navigation_target_selector_config() -> FineSystemAiSelectorToml {
 ///     or that an earlier team in this same tick was just dispatched to, is
 ///     excluded, so N free teams pick N DISTINCT stations (AC2/AC4).
 ///
-/// All weights, bands and the switch margin are named parameters or parse-time
-/// defaults, so a designer retunes repair priority without Rust (rule #11).
+/// All weights, bands and the switch margin are authored TOML fields, so a
+/// designer retunes repair priority without Rust (rule #11): the two ladders'
+/// magnitudes as each score term's own `weight` field, the band thresholds as
+/// the `deficit_band_*` params the guards actually name.
+///
+/// The `deficit_band_*` params are the only three declared here (issue #885b
+/// stage 5a). `tier_weight` and `deficit_weight` used to be declared too and
+/// were read by no guard — they merely restated the score terms' `weight`
+/// fields, so retuning them changed nothing.
 pub fn default_repair_target_selector_config() -> FineSystemAiSelectorToml {
     let mut param = std::collections::HashMap::new();
-    param.insert("tier_weight".to_string(), DEFAULT_REPAIR_TIER_WEIGHT);
-    param.insert("deficit_weight".to_string(), DEFAULT_REPAIR_DEFICIT_WEIGHT);
     param.insert(
         "deficit_band_low".to_string(),
         DEFAULT_REPAIR_DEFICIT_BAND_LOW,
@@ -2719,19 +2719,21 @@ pub fn default_repair_target_selector_config() -> FineSystemAiSelectorToml {
 ///     off `EntitySystemHull`: a Disabled or Destroyed Comms system stops the
 ///     ship hailing at all.
 ///
-/// All weights and bands are named parameters or parse-time defaults, so a
-/// designer retunes hail priority without Rust (rule #11). Comms RANGE is
-/// already authored via `[comms].range` and is deliberately NOT duplicated as a
-/// second constant here — the selector reads it as a seeded fact.
+/// All weights and bands are authored TOML fields, so a designer retunes hail
+/// priority without Rust (rule #11): the rung magnitude as each score term's own
+/// `weight` field, the band thresholds as the `score_band_*` params the guards
+/// actually name. Comms RANGE is already authored via `[comms].range` and is
+/// deliberately NOT duplicated as a second constant here — the selector reads it
+/// as a seeded fact.
+///
+/// The three `score_band_*` params are the only ones declared here (issue #885b
+/// stage 5a). `score_band_weight` used to be declared too and was read by no
+/// guard — it merely restated the score terms' `weight` fields.
 pub fn default_comms_target_selector_config() -> FineSystemAiSelectorToml {
     let mut param = std::collections::HashMap::new();
     param.insert("score_band_low".to_string(), DEFAULT_COMMS_SCORE_BAND_LOW);
     param.insert("score_band_mid".to_string(), DEFAULT_COMMS_SCORE_BAND_MID);
     param.insert("score_band_high".to_string(), DEFAULT_COMMS_SCORE_BAND_HIGH);
-    param.insert(
-        "score_band_weight".to_string(),
-        DEFAULT_COMMS_SCORE_BAND_WEIGHT,
-    );
     FineSystemAiSelectorToml {
         param,
         sources: COMMS_SELECTOR_SOURCES
@@ -4472,7 +4474,8 @@ impl PhaserCombatConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepairConfig {
-    /// Number of repair teams available to this ship (default 0 = legacy, treated as 2).
+    /// Number of repair teams available to this ship. Absent ⇒ 0 ⇒ this ship
+    /// has no repair teams — see [`Self::declares_teams`].
     #[serde(default)]
     pub repair_team_count: u32,
     /// Seconds a team spends travelling to a console (and the same again returning).
@@ -4514,6 +4517,31 @@ impl Default for RepairConfig {
 }
 
 impl RepairConfig {
+    /// Whether this block gives the ship repair TEAMS, as opposed to existing
+    /// only to carry `[repair.selector]`.
+    ///
+    /// Until #885b every NPC hull that authored no `[repair]` block had no
+    /// teams, and the spawner used the block's mere PRESENCE as the gate. That
+    /// stopped working the moment every hull had to author `[repair.selector]`
+    /// to satisfy PRD #774 US7: a selector is a ranking policy, and TOML has no
+    /// way to write `[repair.selector]` without also bringing `[repair]` into
+    /// existence. Presence would then have handed two repair teams to six NPC
+    /// hulls that never had any — a gameplay change smuggled in by a table
+    /// header.
+    ///
+    /// So the gate is the count: **a ship has repair teams when its TOML says
+    /// how many.** `repair_team_count = 0`, or omitted, means none. The
+    /// `[repair.selector]` block is attached to every AI-bearing ship either
+    /// way — the teams component is what gates dispatch, so a ship that gains
+    /// teams later already has its ranking.
+    ///
+    /// The PLAYER ship does not come through here: `spawn_game_start_entities`
+    /// gates its teams on `[hull]` and keeps its own `unwrap_or(2)` fallback,
+    /// so a player hull that omits the count still crews two teams.
+    pub fn declares_teams(&self) -> bool {
+        self.repair_team_count > 0
+    }
+
     /// Convert this TOML config into a runtime `RepairTimings`.
     pub fn to_runtime(&self) -> crate::repair_teams::RepairTimings {
         crate::repair_teams::RepairTimings {

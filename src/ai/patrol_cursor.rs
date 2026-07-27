@@ -85,6 +85,36 @@ pub fn cursor_target(
     anchors.get(waypoints[idx].as_str()).copied()
 }
 
+/// Has this non-looping route been flown to its end?
+///
+/// Separates the two very different reasons [`cursor_target`] returns `None`:
+/// the route is **finished** — the cursor has run past the last waypoint and the
+/// entity belongs where it is — versus the route is merely unflyable (empty, or
+/// the current anchor is unknown). A caller that treats "finished" as "no route"
+/// keeps flying: that is how the Requiem Courier reached its destination and
+/// then cruised straight on past it forever.
+///
+/// A looping route is never finished — it wraps. One whose anchors are *all*
+/// unknown settles on a valid index rather than running off the end (see
+/// "Settling" on [`advance_cursor`]), so it stays unfinished indefinitely.
+///
+/// # What "finished" does and does not mean
+///
+/// This is a question about the **cursor index**, not about whether the entity
+/// arrived anywhere. The unknown-anchor case reads as unfinished only for the
+/// single tick before [`advance_cursor`] skips past it: on a one-waypoint
+/// non-looping `Reach` whose anchor the world never defines, the next tick
+/// leaves `index == 1 == waypoints.len()` and this returns `true` from then on —
+/// the entity is classified as having *arrived* at a place that does not exist,
+/// and its caller parks it where it stands. Parking is a better end state than
+/// the endless drift it replaced, but it is not evidence the route was flown.
+/// An anchor no world defines is a content error, and nothing in this module can
+/// see it; `route_with_an_unknown_anchor_is_not_completed_only_until_the_skip`
+/// pins both halves.
+pub fn route_completed(current_index: usize, waypoints: &[String], loop_path: bool) -> bool {
+    !waypoints.is_empty() && !loop_path && current_index >= waypoints.len()
+}
+
 /// Name of the waypoint the entity has just reached, if the cursor's current
 /// waypoint resolves to a known anchor and `entity_pos` lies within
 /// `arrival_radius` of it.
@@ -990,6 +1020,81 @@ mod tests {
         );
         assert_eq!(cursor.index(), 0);
         assert!(reached.is_empty());
+    }
+
+    // ── route_completed ───────────────────────────────────────────────────
+
+    #[test]
+    fn route_completed_only_for_a_non_looping_route_past_its_end() {
+        let waypoints = route(&["a", "b"]);
+        assert!(
+            !route_completed(0, &waypoints, false),
+            "still flying to `a`"
+        );
+        assert!(
+            !route_completed(1, &waypoints, false),
+            "still flying to `b`"
+        );
+        assert!(route_completed(2, &waypoints, false), "flown to the end");
+    }
+
+    #[test]
+    fn route_completed_is_false_for_a_looping_or_empty_route() {
+        let waypoints = route(&["a", "b"]);
+        assert!(
+            !route_completed(2, &waypoints, true),
+            "a looping route wraps rather than finishing"
+        );
+        assert!(
+            !route_completed(0, &[], false),
+            "an empty route was never flown, so it is not finished"
+        );
+    }
+
+    /// The distinction the caller needs, and its limit. An unknown anchor also
+    /// makes `cursor_target` `None`, but on the tick it is first seen the route
+    /// is not finished — the cursor is about to skip past it.
+    ///
+    /// One skip later the guarantee is gone: a one-waypoint non-looping route
+    /// whose anchor is unknown reads as *finished*, and the caller parks a ship
+    /// that never went anywhere. Pinned here so the doc on `route_completed`
+    /// cannot drift into claiming the split survives advancement.
+    #[test]
+    fn route_with_an_unknown_anchor_is_not_completed_only_until_the_skip() {
+        let waypoints = route(&["missing"]);
+        let anchors = make_anchors(&[]);
+        let mut cursor = cursor_at(0);
+
+        assert_eq!(cursor_target(0, &waypoints, false, &anchors), None);
+        assert!(
+            !route_completed(cursor.index(), &waypoints, false),
+            "on the tick the unknown anchor is first seen, the route is unflyable, \
+             not finished"
+        );
+
+        let reached = advance_cursor(
+            &mut cursor,
+            &waypoints,
+            false,
+            [0.0, 0.0, 0.0],
+            &anchors,
+            20.0,
+        );
+
+        assert!(
+            reached.is_empty(),
+            "an unreachable waypoint is never announced as reached"
+        );
+        assert_eq!(
+            cursor.index(),
+            waypoints.len(),
+            "the cursor steps past the unknown anchor and off the end"
+        );
+        assert!(
+            route_completed(cursor.index(), &waypoints, false),
+            "one skip later the same unflyable route reads as finished — the entity is \
+             classified as arrived at a place that does not exist"
+        );
     }
 
     // ── cursor_target ─────────────────────────────────────────────────────

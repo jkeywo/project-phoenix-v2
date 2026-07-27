@@ -28,6 +28,21 @@ pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Valu
 /// * `behaviour.transition` arrays are **full-replacement** when the override
 ///   supplies one (this is the default for arrays in `merge_toml`).
 ///
+/// # An authored empty array clears the list
+///
+/// The by-id / by-name merges above only apply when the override actually
+/// supplies entries. An **explicitly authored empty array** (`doctrine = []`)
+/// means "clear this list", not "merge nothing in": it is the only way a
+/// scenario can take a behaviour *away* from a template, and it is what every
+/// other array in an override already does (`merge_toml` replaces arrays
+/// wholesale — see `override_replaces_array_wholesale`). Before this,
+/// `assets/worlds/probe_aggressor.toml`'s `behaviour = { doctrine = [] }` was a
+/// silent no-op: the "passive" hostile it describes kept the template's
+/// `destroy-hostiles` Destroy doctrine and opened fire first.
+///
+/// Omitting the key entirely is still the way to say "leave the template's list
+/// alone" — an absent key never reaches the merge.
+///
 /// Call this instead of `merge_toml` when resolving `WorldEntity` overrides.
 pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     let mut result = merge_toml(template, override_);
@@ -35,10 +50,15 @@ pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value)
     let t_beh = template.get("behaviour").and_then(|v| v.as_table());
     let o_beh = override_.get("behaviour").and_then(|v| v.as_table());
     if let (Some(tb), Some(ob)) = (t_beh, o_beh) {
-        // Post-process: re-apply by-name merge for behaviour.state
+        // Post-process: re-apply by-name merge for behaviour.state.
+        // Skipped for an empty override array, which `merge_toml` has already
+        // resolved to the cleared list — see "An authored empty array clears
+        // the list" above.
         if let (Some(t_states), Some(o_states)) = (
             tb.get("state").and_then(|v| v.as_array()),
-            ob.get("state").and_then(|v| v.as_array()),
+            ob.get("state")
+                .and_then(|v| v.as_array())
+                .filter(|a| !a.is_empty()),
         ) {
             let merged_states = merge_named_array(t_states, o_states);
             if let Some(result_beh) = result
@@ -50,10 +70,15 @@ pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value)
             }
         }
 
-        // Post-process: re-apply by-id merge for behaviour.doctrine
+        // Post-process: re-apply by-id merge for behaviour.doctrine.
+        // Skipped for an empty override array, which `merge_toml` has already
+        // resolved to the cleared list — see "An authored empty array clears
+        // the list" above.
         if let (Some(t_doctrines), Some(o_doctrines)) = (
             tb.get("doctrine").and_then(|v| v.as_array()),
-            ob.get("doctrine").and_then(|v| v.as_array()),
+            ob.get("doctrine")
+                .and_then(|v| v.as_array())
+                .filter(|a| !a.is_empty()),
         ) {
             let merged_doctrines = merge_id_array(t_doctrines, o_doctrines);
             if let Some(result_beh) = result
@@ -382,6 +407,143 @@ target_speed = 0.9
         assert_eq!(
             idle.get("target_speed").and_then(|v| v.as_float()),
             Some(0.0)
+        );
+    }
+
+    // ── merge_entity_config_toml: behaviour.doctrine by-id semantics ──────
+
+    fn doctrine_template() -> toml::Value {
+        toml::from_str(
+            r#"
+[behaviour]
+waypoint_arrival_radius = 20.0
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+base_priority = 45.0
+
+[[behaviour.doctrine]]
+id = "hold-station"
+base_priority = 20.0
+"#,
+        )
+        .unwrap()
+    }
+
+    fn doctrine_ids(merged: &toml::Value) -> Vec<String> {
+        merged
+            .get("behaviour")
+            .and_then(|b| b.get("doctrine"))
+            .and_then(|d| d.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn entity_merge_behaviour_doctrine_by_id_replaces_matching_entry_and_keeps_others() {
+        let override_: toml::Value = toml::from_str(
+            r#"
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+base_priority = 99.0
+"#,
+        )
+        .unwrap();
+
+        let result = merge_entity_config_toml(&doctrine_template(), &override_);
+        assert_eq!(
+            doctrine_ids(&result),
+            vec!["destroy-hostiles", "hold-station"],
+            "a non-empty override still merges by id and keeps unmentioned entries"
+        );
+        let destroy = result
+            .get("behaviour")
+            .unwrap()
+            .get("doctrine")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .clone();
+        assert_eq!(
+            destroy.get("base_priority").and_then(|v| v.as_float()),
+            Some(99.0)
+        );
+        assert_eq!(
+            destroy.get("directive_kind").and_then(|v| v.as_str()),
+            Some("Destroy"),
+            "unmentioned keys of a merged entry survive"
+        );
+    }
+
+    /// An explicitly authored `doctrine = []` clears the template's doctrine.
+    ///
+    /// This is a scenario's only subtractive lever: `probe_aggressor.toml`
+    /// spawns a hull whose whole purpose is to have NO Destroy directive, so
+    /// that it can never fire the first shot. While an empty array merged as a
+    /// no-op that hull kept its template `destroy-hostiles` doctrine and opened
+    /// fire proactively.
+    #[test]
+    fn entity_merge_empty_doctrine_override_clears_template_doctrine() {
+        let override_: toml::Value = toml::from_str("behaviour = { doctrine = [] }").unwrap();
+        let result = merge_entity_config_toml(&doctrine_template(), &override_);
+        assert!(
+            doctrine_ids(&result).is_empty(),
+            "an authored empty doctrine array must clear the list, got {:?}",
+            doctrine_ids(&result)
+        );
+        // Clearing the list does not disturb the rest of the behaviour block.
+        assert_eq!(
+            result
+                .get("behaviour")
+                .and_then(|b| b.get("waypoint_arrival_radius"))
+                .and_then(|v| v.as_float()),
+            Some(20.0)
+        );
+    }
+
+    /// An override that never mentions `doctrine` leaves the template's list
+    /// alone — the distinction the empty-array rule turns on.
+    #[test]
+    fn entity_merge_override_without_doctrine_key_keeps_template_doctrine() {
+        let override_: toml::Value =
+            toml::from_str("behaviour = { waypoint_arrival_radius = 5.0 }").unwrap();
+        let result = merge_entity_config_toml(&doctrine_template(), &override_);
+        assert_eq!(
+            doctrine_ids(&result),
+            vec!["destroy-hostiles", "hold-station"]
+        );
+    }
+
+    #[test]
+    fn entity_merge_empty_state_override_clears_template_states() {
+        let template: toml::Value = toml::from_str(
+            r#"
+[behaviour]
+initial_state = "patrol"
+
+[[behaviour.state]]
+name = "patrol"
+kind = "patrolling"
+"#,
+        )
+        .unwrap();
+        let override_: toml::Value = toml::from_str("behaviour = { state = [] }").unwrap();
+        let result = merge_entity_config_toml(&template, &override_);
+        let states = result
+            .get("behaviour")
+            .unwrap()
+            .get("state")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            states.is_empty(),
+            "an authored empty state array must clear the list"
         );
     }
 

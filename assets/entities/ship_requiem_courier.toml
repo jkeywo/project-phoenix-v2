@@ -50,6 +50,15 @@ sensor_range = 80.0
 #
 # (#572) Doctrine-based AI. Courier is non-combat — only objective is to
 # reach its destination. No Destroy doctrine.
+#
+# `Reach` reads the SINGULAR `directive_anchor`; `directive_anchors` (plural) is
+# the Patrol field. This entry authored the plural one, so the anchor resolved to
+# `""`, missed the world's anchor table, and the hull's only goal never resolved
+# — it sat still for the whole scenario. `validate_doctrine_directives`
+# (`src/entities/config.rs`) now fails the entity load on that mismatch.
+#
+# The anchor names a position in the world that spawns this hull:
+# `requiem_courier_destination` in `assets/worlds/before_the_fire.toml`.
 
 [behaviour]
 
@@ -57,7 +66,7 @@ sensor_range = 80.0
 id         = "reach-destination"
 text       = "entity.ship_requiem_courier.behaviour.doctrine.reach_destination.text"
 directive_kind = "Reach"
-directive_anchors = ["destination"]
+directive_anchor = "requiem_courier_destination"
 base_priority    = 30.0
 target_speed     = 0.8
 

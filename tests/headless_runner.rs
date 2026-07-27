@@ -684,8 +684,25 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
 /// run's end. The ledger, built from the balance-event log, keeps its row
 /// regardless — the player keeps its template name (`entity.alliance_cruiser.name`)
 /// while the world-spawned hostile is named `probe_target`.
+///
+/// # Why `damage_dealt > 0` is not enough on its own
+///
+/// That assertion holds whether or not the world's `doctrine = []` override
+/// actually strips the destroyer's doctrine: the player engages either way, and
+/// for a long time the override was a silent no-op (`merge_id_array` merged an
+/// empty array as "merge nothing in"), so the "passive" hostile carried its
+/// template `destroy-hostiles` Destroy directive, out-shot the player 318 damage
+/// to 29 and killed it. The test passed the whole time it was measuring nothing.
+///
+/// Nor does "who fired first" discriminate: the player wins that race either
+/// way — it just loses the fight. So the probe's *control condition* is checked
+/// directly instead. The spawned hostile must carry no doctrine at all (the
+/// override applied), and the ship with combat doctrine must be the one doing
+/// the damage.
 #[test]
 fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
+    use project_phoenix::entity_spawner::{BehaviourSection, EntityName};
+
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/probe_aggressor.toml".into(),
@@ -696,6 +713,31 @@ fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
     };
     let mut app = build_headless_app(&args).expect("app should build");
     run(&mut app, args.max_ticks);
+
+    // Control condition: the world spawned the hostile with `doctrine = []`, so
+    // the hull it actually flies must carry no standing doctrine — no Destroy
+    // directive, nothing to license an unprovoked engagement. Checked on the
+    // live entity because that is where a merge that quietly kept the template's
+    // list would show up.
+    let mut hostile_q = app
+        .world_mut()
+        .query::<(&EntityName, Option<&BehaviourSection>)>();
+    let hostile_doctrine_ids: Vec<String> = hostile_q
+        .iter(app.world())
+        .find(|(name, _)| name.0 == "probe_target")
+        .map(|(_, behaviour)| {
+            behaviour
+                .map(|b| b.0.doctrine.iter().map(|d| d.id.clone()).collect())
+                .unwrap_or_default()
+        })
+        .expect("the world spawns a hostile named probe_target");
+    assert!(
+        hostile_doctrine_ids.is_empty(),
+        "probe_target kept doctrine {hostile_doctrine_ids:?} — the world's \
+         `doctrine = []` override did not strip the template's list, so this \
+         probe is not measuring proactive engagement at all"
+    );
+
     let report = build_report(&mut app, &args, 0.0);
 
     let player = report
@@ -719,6 +761,24 @@ fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
         "the backfilled player dealt no damage; it did not proactively engage off \
          its template doctrine (the passive hostile cannot fire first): {:?}",
         report.damage_by_ship
+    );
+
+    // And the engagement is one-sided in the player's favour: doctrine is the
+    // only asymmetry between these two hulls, so a doctrine-less hostile that
+    // out-damages the player means the override leaked its Destroy directive
+    // back in.
+    let hostile_dealt = report
+        .damage_by_ship
+        .values()
+        .find(|l| l.name_id.as_deref() == Some("probe_target"))
+        .map(|l| l.damage_dealt)
+        .unwrap_or(0.0);
+    assert!(
+        player.damage_dealt > hostile_dealt,
+        "the doctrine-less hostile dealt {hostile_dealt} against the player's {}: \
+         the passive hull is fighting back harder than the aggressor, which is \
+         what a leaked template Destroy doctrine looks like",
+        player.damage_dealt
     );
 }
 
@@ -774,6 +834,90 @@ fn same_hull_duel_is_behaviourally_symmetric_across_seeds() {
             report.damage_by_ship
         );
     }
+}
+
+/// A shipped hull's only goal must actually resolve: the Requiem Courier flies
+/// its `Reach` directive to the anchor the scenario gives it.
+///
+/// `ship_requiem_courier.toml` is a non-combat hull whose entire behaviour is
+/// one `Reach` objective. It authored `directive_anchors` — the **Patrol**
+/// field — on that directive; `Reach` reads the singular `directive_anchor`, so
+/// the anchor resolved to `""`, `anchors.get("")` missed, the objective produced
+/// no travel decision, and the courier sat on its spawn anchor for the whole
+/// scenario. Nothing failed and nothing logged.
+///
+/// This boots the real `before_the_fire.toml`, so it covers the whole chain the
+/// bug ran through: the template's directive fields, the world's anchor table,
+/// `plan_helm_travel`'s `Reach` arm, and the per-axis helm actuators.
+#[test]
+fn requiem_courier_reaches_its_destination_anchor() {
+    use project_phoenix::entity_spawner::EntityName;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/before_the_fire.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(90.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+
+    // The destination the world authors for the courier, and its spawn anchor —
+    // read from the `WorldConfig` the app actually loaded (the same resource
+    // `simulate_low_lod_ships` reads) rather than copied out of the TOML. A
+    // designer retuning either anchor would otherwise fail this test with "its
+    // only goal did not resolve", which is the one thing that would not have
+    // happened.
+    let (destination, spawn) = {
+        let world_config = app
+            .world()
+            .resource::<project_phoenix::world::config::WorldConfig>();
+        let anchor_xz = |name: &str| {
+            let a = world_config
+                .anchors
+                .get(name)
+                .unwrap_or_else(|| panic!("before_the_fire.toml must declare the `{name}` anchor"));
+            [a[0], a[2]]
+        };
+        (
+            anchor_xz("requiem_courier_destination"),
+            anchor_xz("requiem_courier"),
+        )
+    };
+    let start_distance =
+        ((destination[0] - spawn[0]).powi(2) + (destination[1] - spawn[1]).powi(2)).sqrt();
+
+    let mut q = app.world_mut().query::<(&EntityName, &ShipPhysics)>();
+    let (x, z, forward_speed) = q
+        .iter(app.world())
+        .find(|(name, _)| name.0 == "world.entity.requiem_courier.name")
+        .map(|(_, physics)| (physics.x, physics.z, physics.forward_speed))
+        .expect("before_the_fire.toml spawns the Requiem Courier");
+
+    let distance = ((destination[0] - x).powi(2) + (destination[1] - z).powi(2)).sqrt();
+    assert!(
+        distance < start_distance,
+        "the courier has not moved toward its destination at all (still {distance:.1} u \
+         away, started {start_distance:.1} u away, now at [{x:.1}, {z:.1}]): its only \
+         goal did not resolve"
+    );
+    // Arrival is judged against the authored `waypoint_arrival_radius` (20 u by
+    // default), so it stops just inside that ring rather than on the anchor.
+    assert!(
+        distance < 25.0,
+        "the courier ended {distance:.1} u from its destination at [{x:.1}, {z:.1}] — \
+         it neither arrived nor is holding there"
+    );
+    // And it stays: a completed route is an arrival, not an absence of one. Its
+    // predecessor sailed straight through at cruise speed and kept going.
+    assert!(
+        forward_speed.abs() < 0.1,
+        "the courier is still making {forward_speed:.2} u/s at its destination — it is \
+         drifting past instead of holding station"
+    );
 }
 
 /// Issue #842 regression guard: `combat_test.toml` — a shipped defence

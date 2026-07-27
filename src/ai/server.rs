@@ -1040,9 +1040,44 @@ pub(crate) fn advance_objective_cursors(
 /// A low-LOD ship with an active Helm-relevant `Patrol`/`Reach` objective
 /// cheaply follows its route: it snaps its heading toward the waypoint its
 /// [`ObjectiveCursors`] entry currently points at and advances forward at
-/// `forward_speed`. Ships with no such objective (or a stalled/terminal route)
-/// keep the pre-existing dumb forward-drift so they don't regress to standing
-/// still.
+/// `forward_speed`. Ships with no such objective keep the pre-existing dumb
+/// forward-drift so they don't regress to standing still.
+///
+/// # Arriving is not the same as having nowhere to go
+///
+/// A ship that has flown a non-looping route to its end has *arrived*, and coasts
+/// to a stop where it is (`route_completed`). Lumping that in with "no route"
+/// and drifting on is what sent the Requiem Courier — whose whole behaviour is
+/// one `Reach` — sailing through its destination at cruise speed and out of the
+/// scenario, ~100 u past the anchor twenty seconds later and still going. The
+/// high-LOD path has always held station on arrival (`helm_navigate_to` returns
+/// a zero decision inside the arrival radius); this is the low-LOD path agreeing
+/// with it.
+///
+/// The dumb drift still covers the genuinely routeless cases: no objective, no
+/// cursor component, an empty route, or an anchor the world does not define.
+/// How long that last case drifts depends on the route:
+///
+/// * **Non-looping**: one tick. `advance_objective_cursors` steps past the
+///   unknown anchor on the same tick, and the cursor either lands on a waypoint
+///   that resolves or runs off the end, where `route_completed` takes over.
+/// * **Looping**: indefinitely. A lap that finds nowhere to steer settles the
+///   cursor on a *valid* index rather than running past the end (see "Settling"
+///   on `advance_cursor`), so `route_completed` is `false` by construction and
+///   this drift runs every tick for as long as the anchors stay undefined.
+///
+/// `ship_harrow_warhawk.toml` patrols `warhawk_patrol_a`/`_b`, which only
+/// `combat_test.toml` declares — `before_the_fire.toml` spawns the same hull and
+/// declares neither. It is inert there today because the speed ramp lives in the
+/// `Some(target_pos)` branch, so a hull that never had a flyable route sits at
+/// `forward_speed == 0` and drifts nowhere. A ship *demoted* from high LOD
+/// carrying real speed would drift on forever. That is deliberately left alone:
+/// it is the same drift every low-LOD ship with nothing to steer toward already
+/// gets (no objective, an untargeted Destroy with no hostile in range), and the
+/// defect in the warhawk case is content — a world that spawns a hull without
+/// declaring its patrol anchors — which holding station would hide rather than
+/// fix. Arrival is different in kind: there the route *did* resolve and the ship
+/// is where it was sent.
 ///
 /// Read-only with respect to the cursor: arrival detection and advancement
 /// belong to `advance_objective_cursors` in `SimSet::Modifiers`.
@@ -1141,10 +1176,25 @@ fn simulate_low_lod_ships(
                 physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
                 continue;
             }
-            // `target == None` (empty route / finished non-looping route /
-            // unknown anchor) → fall through to the dumb forward-move
-            // fallback below. The evaluator skips past unknown anchors on
-            // this same tick, so the drift lasts one tick at most.
+            // Route flown to its end: the ship is where its objective sent it.
+            // Coast to a stop on the same ramp it accelerated on rather than
+            // drifting on forever — see "Arriving is not the same as having
+            // nowhere to go" above.
+            if crate::ai::patrol_cursor::route_completed(index, &waypoints, loop_path) {
+                physics.forward_speed =
+                    (physics.forward_speed - LOW_LOD_ACCEL_PER_SEC * dt).max(0.0);
+                physics.x += physics.forward_speed * physics.yaw.sin() * dt;
+                physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
+                continue;
+            }
+
+            // `target == None` for a route that is not finished (empty route /
+            // unknown anchor) → fall through to the dumb forward-move fallback
+            // below. On a non-looping route the evaluator skips past an unknown
+            // anchor on this same tick, so that drift lasts one tick; a looping
+            // route with no resolvable anchor settles on a valid index instead
+            // and keeps drifting every tick — see "Arriving is not the same as
+            // having nowhere to go" above for why that is left as-is.
         }
 
         // Dumb forward-move fallback: no patrol objective, no cursor component,
@@ -2668,6 +2718,36 @@ range = 320
             cursor_state(&app, npc),
             vec![("reach-dock".to_string(), 1)],
             "a Reach cursor is a one-waypoint route: arriving moves it to the terminal index"
+        );
+
+        // Having arrived, the low-LOD ship coasts to a stop and stays put. It
+        // used to fall through to the dumb forward-drift the moment its route
+        // went terminal, which sailed the Requiem Courier — a hull whose whole
+        // behaviour is one Reach — clean through its destination and out of the
+        // scenario at cruise speed.
+        for _ in 0..20 {
+            tick_with_dt(&mut app, 0.1);
+        }
+        let arrived = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert_eq!(
+            arrived.forward_speed, 0.0,
+            "a ship that has flown its route to the end must come to rest"
+        );
+
+        for _ in 0..20 {
+            tick_with_dt(&mut app, 0.1);
+        }
+        let later = *app.world().get::<ShipPhysics>(npc).unwrap();
+        assert_eq!(
+            (later.x, later.z),
+            (arrived.x, arrived.z),
+            "a stopped ship must hold station, not resume drifting"
+        );
+        // And it stopped near where it arrived rather than crossing the map.
+        let drift = ((later.x - 500.0).powi(2) + (later.z - 500.0).powi(2)).sqrt();
+        assert!(
+            drift < 10.0,
+            "the ship coasted {drift} units past the anchor it arrived at"
         );
     }
 

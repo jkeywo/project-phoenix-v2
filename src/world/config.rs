@@ -984,8 +984,115 @@ pub struct CommsTemplate {
 
 // -- Parser helpers -----------------------------------------------------------
 
+/// Which directive kind reads each `add_objective` directive field, for error
+/// messages.
+///
+/// The mission-side twin of `DIRECTIVE_FIELD_OWNERS` in
+/// `src/entities/config.rs`. One shape difference: a mission objective names a
+/// `Destroy`/`Hail` target with the shared `target` field, where a doctrine
+/// entry has a `directive_target` and a `directive_hail_target` of its own.
+const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
+    ("directive_anchors", "Patrol"),
+    ("directive_loop", "Patrol"),
+    ("directive_anchor", "Reach / Retreat"),
+    ("target", "Destroy / Hail"),
+];
+
+/// Build the [`AiDirective`] for an `add_objective` action, rejecting a
+/// directive that authors a field belonging to a *different* kind as well as one
+/// that omits a field its own kind requires.
+///
+/// # Why the misplaced-field half exists
+///
+/// Each arm below reads exactly one field and ignores the rest, so authoring the
+/// neighbouring kind's field does nothing at all and says nothing about it. That
+/// is the same silent-nothing failure that lost the Requiem Courier its only
+/// goal on the entity side (`validate_doctrine_directives`,
+/// `src/entities/config.rs`) — `directive_anchors` (the **Patrol** field,
+/// plural) on a `Reach`, which reads the singular `directive_anchor`. A mission
+/// `add_objective` can author the identical mistake, so it gets the identical
+/// treatment: the world fails to parse rather than activating an objective that
+/// can never fire.
+///
+/// Absent-vs-default is the limit of what this can see, matching the entity
+/// side: `directive_loop = false` and `directive_anchors = []` carry no intent
+/// worth reporting, so only a field with a real value counts as authored.
+///
+/// `targets` (plural — the nav-radar marker list) is *not* a directive field and
+/// is legitimate alongside any kind; only the singular `target` is checked.
 fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
-    match raw.directive_kind.as_deref() {
+    let kind = raw.directive_kind.as_deref();
+    let allowed: &[&str] = match kind {
+        None | Some("None") => &[],
+        Some("Patrol") => &["directive_anchors", "directive_loop"],
+        Some("Destroy") | Some("Hail") => &["target"],
+        Some("Reach") | Some("Retreat") => &["directive_anchor"],
+        Some(other) => {
+            return Err(format!(
+                "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail",
+                other
+            ))
+        }
+    };
+
+    // Fields the author actually filled in with a value.
+    let authored: Vec<&str> = [
+        raw.directive_anchors
+            .as_deref()
+            .is_some_and(|a| !a.is_empty())
+            .then_some("directive_anchors"),
+        raw.directive_loop
+            .unwrap_or(false)
+            .then_some("directive_loop"),
+        raw.directive_anchor
+            .as_deref()
+            .is_some_and(|a| !a.is_empty())
+            .then_some("directive_anchor"),
+        raw.target
+            .as_deref()
+            .is_some_and(|t| !t.is_empty())
+            .then_some("target"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    // Misplaced fields are reported before missing ones, for the same reason as
+    // on the entity side: when both are true at once, "you set
+    // `directive_anchors` on a Reach" tells the author far more than "a Reach
+    // needs a `directive_anchor`".
+    for field in &authored {
+        if allowed.contains(field) {
+            continue;
+        }
+        let owner = DIRECTIVE_FIELD_OWNERS
+            .iter()
+            .find(|(f, _)| f == field)
+            .map(|(_, owner)| *owner)
+            .unwrap_or("no");
+        let reads = if allowed.is_empty() {
+            "no directive field".to_string()
+        } else {
+            allowed
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        };
+        return Err(match kind {
+            Some(k) => format!(
+                "Action 'add_objective': `{field}` is read only for a {owner} directive, but \
+                 directive_kind = \"{k}\", which reads {reads}. A field belonging to another \
+                 directive kind is silently ignored, so it is rejected here instead."
+            ),
+            None => format!(
+                "Action 'add_objective': `{field}` is read only for a {owner} directive, but no \
+                 directive_kind is authored, so nothing reads it."
+            ),
+        });
+    }
+
+    match kind {
         None | Some("None") => Ok(AiDirective::None),
         Some("Patrol") => Ok(AiDirective::Patrol {
             anchors: raw.directive_anchors.clone().unwrap_or_default(),
@@ -1013,6 +1120,8 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .clone()
                 .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
         }),
+        // Unreachable: the `allowed` match above already returned for an
+        // unknown kind.
         Some(other) => Err(format!(
             "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail",
             other
@@ -2875,6 +2984,132 @@ condition = "on_world_loaded"
             err.contains("Retreat") && err.contains("directive_anchor"),
             "error must name the directive and the missing field, got: {err}"
         );
+    }
+
+    // ── add_objective: a field belonging to another directive kind ─────────
+
+    /// The Requiem Courier bug, authored on the mission side: `Reach` reads the
+    /// singular `directive_anchor`, so the plural Patrol field does nothing at
+    /// all and says nothing about it. Rejected at parse rather than activating
+    /// an objective that can never fire.
+    #[test]
+    fn parse_world_rejects_patrol_anchors_on_a_reach_objective() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type              = "add_objective"
+  id                = "obj-reach"
+  text              = "Make the rendezvous."
+  directive_kind    = "Reach"
+  directive_anchors = ["rendezvous"]
+"#;
+        let err = parse_world(toml).expect_err("the Patrol field on a Reach must be rejected");
+        assert!(
+            err.contains("directive_anchors")
+                && err.contains("Patrol")
+                && err.contains("directive_anchor`"),
+            "error must name the misplaced field, its owner, and what Reach does read, \
+             got: {err}"
+        );
+    }
+
+    /// The reverse direction, and the shared `target` field: a Patrol reads
+    /// neither `directive_anchor` nor `target`.
+    #[test]
+    fn parse_world_rejects_reach_and_destroy_fields_on_a_patrol_objective() {
+        let anchor_on_patrol = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type             = "add_objective"
+  id               = "obj-patrol"
+  text             = "Walk the line."
+  directive_kind   = "Patrol"
+  directive_anchor = "somewhere"
+"#;
+        let err = parse_world(anchor_on_patrol).expect_err("Reach's field on a Patrol");
+        assert!(
+            err.contains("directive_anchor") && err.contains("Reach"),
+            "error must name the misplaced field and its owner, got: {err}"
+        );
+
+        let target_on_patrol = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-patrol"
+  text           = "Walk the line."
+  directive_kind = "Patrol"
+  target         = "wave_1"
+"#;
+        let err = parse_world(target_on_patrol).expect_err("Destroy's field on a Patrol");
+        assert!(
+            err.contains("`target`") && err.contains("Destroy"),
+            "error must name the misplaced field and its owner, got: {err}"
+        );
+    }
+
+    /// A directive field with no `directive_kind` at all reads as nothing too,
+    /// and gets its own message rather than the "which kind reads what" one.
+    #[test]
+    fn parse_world_rejects_a_directive_field_with_no_directive_kind() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type             = "add_objective"
+  id               = "obj-plain"
+  text             = "Do the thing."
+  directive_anchor = "somewhere"
+"#;
+        let err = parse_world(toml).expect_err("a directive field with no kind must be rejected");
+        assert!(
+            err.contains("directive_anchor") && err.contains("no directive_kind"),
+            "error must say nothing reads the field, got: {err}"
+        );
+    }
+
+    /// `targets` (plural) is the nav-radar marker list, not a directive field:
+    /// it is legitimate beside any kind and must not be swept up by the check.
+    /// Neither must a defaulted `directive_loop = false` on a non-Patrol, which
+    /// carries no authorial intent — the same absent-vs-default limit the entity
+    /// side documents.
+    #[test]
+    fn parse_world_allows_targets_and_defaulted_fields_beside_any_directive() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type             = "add_objective"
+  id               = "obj-reach"
+  text             = "Make the rendezvous."
+  targets          = ["Rendezvous Beacon"]
+  directive_kind   = "Reach"
+  directive_anchor = "rendezvous"
+  directive_loop   = false
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddObjective {
+                directive, targets, ..
+            } => {
+                assert_eq!(
+                    *directive,
+                    crate::messages::AiDirective::Reach {
+                        anchor: "rendezvous".into(),
+                    }
+                );
+                assert_eq!(targets, &vec!["Rendezvous Beacon".to_string()]);
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
     }
 
     #[test]

@@ -6,16 +6,23 @@
 # and given an EMPTY doctrine (`behaviour = { doctrine = [] }`). Harrow and
 # Federation are made mutually hostile at world-load.
 #
+# An override array that is authored EMPTY clears the template's list — see
+# "An authored empty array clears the list" in `src/entities/entity_override.rs`.
+# That is what makes the line below a real subtraction rather than a no-op; while
+# it merged by id and an empty list merged nothing, this hull kept its template
+# `destroy-hostiles` doctrine and won the fight it is supposed to lose.
+#
 # The point is the asymmetry of intent: the destroyer, with no Destroy doctrine,
-# can only ever acquire a target through the `last-attacker` tier — i.e. after it
-# has already been shot (see `ai_target_selection` in `src/console/weapons/mod.rs`).
-# It therefore cannot fire the first shot. The player, on the other hand, now
-# carries the default `[behaviour]` doctrine authored on its hull template
-# (#842), whose UNTARGETED Destroy licenses the nearest-hostile scan. So the only
-# ship that can open fire is the player — any damage it deals proves it engaged
-# PROACTIVELY off its template doctrine, not reactively after being hit. There is
-# deliberately no `add_objective` trigger: nothing but the template doctrine is
-# driving the player.
+# has nothing standing that licenses it to engage. It may still be handed a lock
+# by its own Sensors AI, and the `last-attacker` source can offer it whoever shot
+# it (see `ai_target_selection` in `src/console/weapons/mod.rs`), but it never
+# initiates — over this probe's 30 seconds it fires nothing at all. The player,
+# on the other hand, now carries the default `[behaviour]` doctrine authored on
+# its hull template (#842), whose UNTARGETED Destroy licenses the
+# nearest-hostile scan. So the only ship that can open fire is the player — any
+# damage it deals proves it engaged PROACTIVELY off its template doctrine, not
+# reactively after being hit. There is deliberately no `add_objective` trigger:
+# nothing but the template doctrine is driving the player.
 
 [global]
 seed = 842
@@ -47,7 +54,8 @@ condition = "on_world_loaded"
 
 # Spawn the passive hostile destroyer inside the player's phaser range (40u) at
 # t=0. The empty doctrine override strips the template's default combat doctrine,
-# leaving a hull that will only ever return fire once struck — never initiate.
+# leaving a hull with nothing standing that licenses it to engage — never an
+# initiator.
 [[trigger]]
 condition = "on_timer"
 after_secs = 0.0

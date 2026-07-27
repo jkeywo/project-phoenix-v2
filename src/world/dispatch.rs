@@ -1009,6 +1009,20 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // template as the fallback (a partial spawn is better than none)
                 // but surface the reason so the scenario author sees it rather
                 // than debugging silent inertness.
+                //
+                // One rejection is reachable from an override that looks
+                // perfectly well-formed on its own. Doctrine entries merge
+                // per-field by id (`merge_id_array`), so an override that flips
+                // an existing entry's `directive_kind` keeps the template's
+                // directive fields beside its own: a Patrol entry overridden to
+                // `directive_kind = "Reach"` arrives carrying both
+                // `directive_anchors` and `directive_anchor`, and
+                // `validate_doctrine_directives` rejects the pair. Clearing the
+                // stale field in the same override entry — `directive_anchors =
+                // []`, which `merge_toml` replaces wholesale — is the way
+                // through. Because this path warns rather than failing, the hull
+                // otherwise flies the doctrine the author meant to replace, so
+                // the warning below is the only signal there is.
                 match crate::entity_config::EntityConfig::from_toml(&merged_str) {
                     Ok(merged_config) => config = merged_config,
                     Err(e) => out.warnings.push(format!(

@@ -86,6 +86,134 @@ impl DoctrineObjective {
     }
 }
 
+/// Which directive kind reads each `directive_*` field, for error messages.
+///
+/// The parse side of this table is `parse_doctrine_directive`
+/// (`src/ai/core.rs`): a field a directive kind does not read is simply never
+/// looked at, which is why authoring the wrong one is silent.
+const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
+    ("directive_anchors", "Patrol"),
+    ("directive_loop", "Patrol"),
+    ("directive_target", "Destroy"),
+    ("directive_anchor", "Reach / Retreat"),
+    ("directive_hail_target", "Hail"),
+];
+
+/// Reject a doctrine entry that authors a `directive_*` field belonging to a
+/// *different* directive kind, or that omits one its own kind requires.
+///
+/// # Why this is a load-time error
+///
+/// `parse_doctrine_directive` reads exactly one field per kind and ignores the
+/// rest. `assets/entities/ship_requiem_courier.toml` authored
+/// `directive_anchors = ["destination"]` (the **Patrol** field, plural) on a
+/// `Reach` directive; `Reach` reads `directive_anchor` (singular), so the anchor
+/// resolved to `""`, `anchors.get("")` missed, and the courier's only goal never
+/// resolved — a shipped hull with nothing to do and no diagnostic anywhere. It
+/// is the same "silently reads as nothing" failure mode as an unvalidated
+/// `fact(...)` name, and gets the same treatment: the entity fails to load
+/// rather than reaching a live tick.
+///
+/// Absent-vs-default is the limit of what this can see: `directive_loop = false`
+/// and `directive_anchors = []` are indistinguishable from omission, so only a
+/// field carrying a real value is reported.
+///
+/// # The mission side has its own copy
+///
+/// A `add_objective` trigger action authors the same directive fields and can
+/// make the same mistake, so `parse_directive` (`src/world/config.rs`) runs the
+/// mirror of this check over `RawActionEntry`. It is a separate implementation
+/// rather than a shared one because the two field sets differ: a mission
+/// objective names its `Destroy`/`Hail` target with the shared `target` field,
+/// where a doctrine entry has `directive_target` and `directive_hail_target`.
+/// Keep the two in step — `DIRECTIVE_FIELD_OWNERS` exists on both sides.
+pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<(), String> {
+    for d in doctrine {
+        let kind = d.directive_kind.as_deref();
+        let (allowed, required): (&[&str], &[&str]) = match kind {
+            None | Some("None") => (&[], &[]),
+            Some("Patrol") => (&["directive_anchors", "directive_loop"], &[]),
+            Some("Destroy") => (&["directive_target"], &[]),
+            // Mirrors the world-side `parse_directive`, which already rejects a
+            // `Reach`/`Retreat` mission objective with no `directive_anchor`.
+            Some("Reach") | Some("Retreat") => (&["directive_anchor"], &["directive_anchor"]),
+            Some("Hail") => (&["directive_hail_target"], &[]),
+            Some(other) => {
+                return Err(format!(
+                    "doctrine '{}': unknown directive_kind '{other}'; \
+                     valid: Patrol, Destroy, Reach, Retreat, Hail",
+                    d.id
+                ))
+            }
+        };
+
+        // Fields the author actually filled in with a value.
+        let authored: Vec<&str> = [
+            (!d.directive_anchors.is_empty()).then_some("directive_anchors"),
+            d.directive_loop.then_some("directive_loop"),
+            d.directive_target.is_some().then_some("directive_target"),
+            d.directive_anchor
+                .as_deref()
+                .is_some_and(|a| !a.is_empty())
+                .then_some("directive_anchor"),
+            d.directive_hail_target
+                .is_some()
+                .then_some("directive_hail_target"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // Misplaced fields are reported before missing ones: authoring the
+        // neighbouring kind's field is the actual mistake, and "you set
+        // `directive_anchors` on a Reach" is far more use to the author than
+        // "a Reach needs a `directive_anchor`" when both are true at once.
+        for field in &authored {
+            if allowed.contains(field) {
+                continue;
+            }
+            let owner = DIRECTIVE_FIELD_OWNERS
+                .iter()
+                .find(|(f, _)| f == field)
+                .map(|(_, owner)| *owner)
+                .unwrap_or("no");
+            return Err(match kind {
+                Some(k) => format!(
+                    "doctrine '{}': `{field}` is read only for a {owner} directive, but \
+                     directive_kind = \"{k}\", which reads {}. A field belonging to another \
+                     directive kind is silently ignored, so it is rejected here instead.",
+                    d.id,
+                    if allowed.is_empty() {
+                        "no directive field".to_string()
+                    } else {
+                        allowed
+                            .iter()
+                            .map(|f| format!("`{f}`"))
+                            .collect::<Vec<_>>()
+                            .join(" / ")
+                    },
+                ),
+                None => format!(
+                    "doctrine '{}': `{field}` is read only for a {owner} directive, but no \
+                     directive_kind is authored, so nothing reads it.",
+                    d.id,
+                ),
+            });
+        }
+
+        for field in required {
+            if !authored.contains(field) {
+                return Err(format!(
+                    "doctrine '{}': directive_kind = \"{}\" requires a non-empty `{field}`",
+                    d.id,
+                    kind.unwrap_or("None"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn default_doctrine_target_speed() -> f32 {
     0.8
 }
@@ -4973,6 +5101,37 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
         }
 
+        // Reject a doctrine entry whose `directive_*` fields do not match its
+        // own `directive_kind` — see `validate_doctrine_directives`. Runs on the
+        // same surface as the selector/policy validators above, so a world
+        // `spawn_entity` override that authors a mismatched directive fails at
+        // load rather than resolving to a directive that can never fire.
+        //
+        // ── Overrides merge per-field, so flipping a kind can trip this ──
+        //
+        // An override reaches this check already merged: `merge_id_array`
+        // (`src/entities/entity_override.rs`) deep-merges a doctrine override
+        // into the template entry that shares its `id`, field by field. Change
+        // an existing entry's `directive_kind` and the template's directive
+        // fields come along with it — overriding `pirate_raider.toml`'s Patrol
+        // entry with `{ id = "patrol-sector", directive_kind = "Reach",
+        // directive_anchor = "x" }` yields a merged entry carrying BOTH
+        // `directive_anchors` (from the template) and `directive_anchor`, which
+        // this check rejects.
+        //
+        // The escape hatch is to clear the stale field inside the same override
+        // entry — `directive_anchors = []` — because `merge_toml` replaces
+        // arrays wholesale rather than merging them.
+        //
+        // That matters most on the `spawn_entity` path, where the rejection is
+        // NOT fatal: `world::dispatch::dispatch_spawn_entity` warns and keeps
+        // the template, so an author who misses this gets the very doctrine they
+        // were trying to replace — the silent-wrong-doctrine failure mode #838
+        // set out to end. Nothing shipped is in this shape.
+        if let Some(ref b) = config.behaviour {
+            validate_doctrine_directives(&b.doctrine).map_err(SerdeError::custom)?;
+        }
+
         // Clamp target_speed in every doctrine entry.
         if let Some(ref mut b) = config.behaviour {
             for d in &mut b.doctrine {
@@ -7906,6 +8065,137 @@ hull_max_hp = 6
             destroy.directive_kind.as_deref(),
             Some("Destroy"),
             "destroy-hostiles must carry directive_kind = 'Destroy'"
+        );
+    }
+
+    // ── validate_doctrine_directives ───────────────────────────────────────
+
+    fn doctrine_toml(body: &str) -> Result<EntityConfig, String> {
+        EntityConfig::from_toml(&format!("[behaviour]\n\n[[behaviour.doctrine]]\n{body}"))
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn reach_directive_with_plural_patrol_anchors_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "reach-destination"
+directive_kind = "Reach"
+directive_anchors = ["destination"]
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("directive_anchors") && err.contains("Reach"),
+            "the error must name the wrong field and the directive kind: {err}"
+        );
+    }
+
+    #[test]
+    fn reach_directive_without_an_anchor_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "reach-destination"
+directive_kind = "Reach"
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("directive_anchor"),
+            "the error must name the missing field: {err}"
+        );
+    }
+
+    #[test]
+    fn patrol_directive_with_singular_reach_anchor_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "patrol-sector"
+directive_kind = "Patrol"
+directive_anchor = "alpha"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("directive_anchor"), "{err}");
+    }
+
+    #[test]
+    fn destroy_directive_with_an_anchor_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+directive_anchor = "somewhere"
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("directive_anchor") && err.contains("Destroy"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn directive_field_without_a_directive_kind_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "hold-station"
+directive_target = "Starbase Alpha"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("directive_target"), "{err}");
+    }
+
+    #[test]
+    fn unknown_directive_kind_is_rejected() {
+        let err = doctrine_toml(
+            r#"
+id = "wander"
+directive_kind = "Wander"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("Wander"), "{err}");
+    }
+
+    /// The shapes every shipped hull and world override actually authors.
+    #[test]
+    fn well_formed_directives_of_every_kind_are_accepted() {
+        for body in [
+            "id = \"hold-station\"\nbase_priority = 20.0",
+            "id = \"destroy-hostiles\"\ndirective_kind = \"Destroy\"",
+            "id = \"assault\"\ndirective_kind = \"Destroy\"\ndirective_target = \"Starbase Alpha\"",
+            "id = \"patrol\"\ndirective_kind = \"Patrol\"\ndirective_anchors = [\"a\", \"b\"]\ndirective_loop = true",
+            "id = \"reach\"\ndirective_kind = \"Reach\"\ndirective_anchor = \"home\"",
+            "id = \"retreat\"\ndirective_kind = \"Retreat\"\ndirective_anchor = \"haven\"",
+            "id = \"hail\"\ndirective_kind = \"Hail\"\ndirective_hail_target = \"Axiom Station\"",
+        ] {
+            assert!(
+                doctrine_toml(body).is_ok(),
+                "well-formed doctrine must load: {body}"
+            );
+        }
+    }
+
+    /// Regression: the courier's only goal is a `Reach`, and it must name the
+    /// singular anchor field or the directive resolves to `""` and never fires.
+    #[test]
+    fn requiem_courier_reach_directive_names_a_singular_anchor() {
+        let toml_str = include_str!("../../assets/entities/ship_requiem_courier.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_requiem_courier.toml must parse");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        let reach = behaviour
+            .doctrine
+            .iter()
+            .find(|d| d.id == "reach-destination")
+            .expect("reach-destination doctrine must be present");
+        assert_eq!(reach.directive_kind.as_deref(), Some("Reach"));
+        assert_eq!(
+            reach.directive_anchor.as_deref(),
+            Some("requiem_courier_destination"),
+            "Reach reads `directive_anchor`; the plural Patrol field is ignored"
         );
     }
 

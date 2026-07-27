@@ -18,11 +18,25 @@ title = "world.reinforcements.global.title"
 description = "world.reinforcements.global.description"
 
 [anchors]
-# Spawn anchor: patrol_beta position from default.toml.
-# Defined here so spawn_immediate_entities_internal can resolve it when
-# loading this file as a layer (entity position resolution uses the layer's
-# own anchor map, not the base world's).
-patrol_beta = [500.0, 0.0, -300.0]
+# The raider's patrol circuit, copied verbatim from default.toml (the only
+# world that loads this layer).
+#
+# `patrol_beta` is also the spawn anchor, and has to be here for that reason
+# alone: entity position resolution uses the LAYER's own anchor map, not the
+# base world's, so `spawn_immediate_entities_internal` could not place the ship
+# without it.
+#
+# `patrol_alpha` and `patrol_gamma` are the other two waypoints of the
+# `pirate_raider_reinforcement.toml` patrol route this ship flies after the
+# pursue/attack phase ends. At runtime they resolve against default.toml's
+# table (doctrine anchors are read from the base world), so the route worked
+# without them — but a layer that names three waypoints and declares one
+# cannot be checked, and reads as two typos to anything that tries
+# (`validate_composition`, issue #888). Declaring the whole circuit states the
+# route this layer expects rather than leaving two thirds of it implied.
+patrol_alpha = [600.0, 0.0, -600.0]
+patrol_beta  = [500.0, 0.0, -300.0]
+patrol_gamma = [200.0, 0.0, -600.0]
 
 # ── Named entities ────────────────────────────────────────────────────────────
 

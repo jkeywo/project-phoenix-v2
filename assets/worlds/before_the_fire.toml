@@ -86,10 +86,30 @@ template_path = "assets/entities/ship_harrow_patrol.toml"
 name = "world.entity.ironveil.name"
 transform = { anchor = "ironveil_patrol_a" }
 
+# The Ashrender lurks; it does not patrol.
+#
+# The hull template's `patrol-warhawk` entry routes between `warhawk_patrol_a`
+# and `warhawk_patrol_b`, two anchors only `combat_test.toml` declares. Here the
+# pair resolved to nothing, so the battleship held station at `ashrender_start`
+# by accident rather than by instruction — and a hull demoted from high fidelity
+# carrying real speed would have drifted out of the scenario instead (issue
+# #888).
+#
+# Cleared rather than re-anchored, and deliberately: this scenario wants the
+# Ashrender waiting in the Kaleth nebula until `aphelion_armed` sends it in, and
+# `destroy-hostiles` still governs it the moment a target appears — so the
+# behaviour is exactly what it has always been, now stated instead of implied.
+# Inventing two waypoint positions would have been a design decision about this
+# scenario's geography dressed up as a lint fix. A later revision that does want
+# the battleship on a beat should declare real anchors here and re-author this
+# entry.
 [[entity]]
 template_path = "assets/entities/ship_harrow_warhawk.toml"
 name = "world.entity.ashrender.name"
 transform = { anchor = "ashrender_start" }
+overrides = { behaviour = { doctrine = [
+  { id = "patrol-warhawk", directive_kind = "None", directive_anchors = [], directive_loop = false },
+] } }
 
 [[entity]]
 template_path = "assets/entities/region_kaleth_nebula.toml"

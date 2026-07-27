@@ -62,6 +62,31 @@ side_b_3     = [ 55.0, 0.0, -30.0]
 side_b_4     = [ 80.0, 0.0,  30.0]
 side_b_5     = [ 80.0, 0.0, -30.0]
 
+# ── Home routes of substituted hulls (issue #888) ─────────────────────────────
+#
+# `--side-a`/`--side-b` drop an arbitrary shipped hull into the slots below, and
+# a hull arrives carrying its own `[[behaviour.doctrine]]` — including a patrol
+# route named after anchors of the scenario it normally fights in. The slot
+# overrides add an untargeted Destroy; they do NOT replace the hull's list
+# (`merge_id_array` keeps every template entry the override does not name by
+# id), so the route comes along and this arena has to say where it goes.
+#
+# A doctrine anchor no world declares is a goal the ship silently cannot pursue,
+# and it is rejected at load rather than resolving to nothing. So a route flown
+# in this arena is declared here, on the arena's OWN staging coordinates rather
+# than a geography invented for it: `ship_harrow_warhawk.toml` paces the side-B
+# line. Nothing changes behaviourally — every slot's Destroy scores 80 against
+# the hull's patrol at 20, so the route is never the served directive — but the
+# arena now states where the battleship would go instead of leaving it to a
+# lookup that misses.
+#
+# Fielding a hull whose route is not declared here fails the build and names the
+# anchor. That is the intended prompt: declare it on this line too, or stand the
+# hull's patrol entry down in the slot override
+# (`{ id = "...", directive_kind = "None", directive_anchors = [] }`).
+warhawk_patrol_a = [ 55.0, 0.0,  30.0]   # = side_b_2
+warhawk_patrol_b = [ 55.0, 0.0, -30.0]   # = side_b_3
+
 [player_spawn]
 anchor = "player_spawn"
 

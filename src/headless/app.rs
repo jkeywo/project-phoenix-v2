@@ -22,6 +22,7 @@ use bevy_rapier3d::plugin::TimestepMode;
 
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
+use crate::entities::ai_declaration_manifest;
 use crate::entity_config::EntityConfig;
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
@@ -74,11 +75,24 @@ fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
 /// error in ANY discovered template aborts the run, because unlike a parse
 /// failure it is silent and would corrupt the run's numbers rather than stop
 /// it. See the gate in [`build_headless_app`].
-fn preload_entity_templates(dir: &str) -> Result<(usize, Vec<MarkerFinding>), BuildError> {
+///
+/// The third return is the AI-declaration manifest (issue #885a): one rendered
+/// line per (template, AI-capable fine system), saying whether the template
+/// declared it or which synthesiser is filling it. Returned rather than logged
+/// here for the same reason as the marker findings — this runs before
+/// `LogPlugin` installs a subscriber, so anything emitted here goes nowhere.
+/// Diagnostic only; nothing about it gates the load, because the thing that
+/// gates is strict mode and that lives in `EntityConfig::from_toml`.
+fn preload_entity_templates(
+    dir: &str,
+) -> Result<(usize, Vec<MarkerFinding>, AiDeclarationReport), BuildError> {
     let entries =
         std::fs::read_dir(dir).map_err(|e| BuildError(format!("could not list {dir:?}: {e}")))?;
     let mut loaded = 0;
     let mut findings: Vec<MarkerFinding> = Vec::new();
+    // Accumulated across the whole template set so the summary is a fleet total
+    // rather than a per-file trickle.
+    let mut report = AiDeclarationReport::default();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
@@ -99,13 +113,59 @@ fn preload_entity_templates(dir: &str) -> Result<(usize, Vec<MarkerFinding>), Bu
         match EntityConfig::from_toml(&toml) {
             Ok(cfg) => {
                 findings.extend(validate_template_markers(&key, &toml, &cfg));
+                let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                let missing = ai_declaration_manifest::undeclared_keys(&cfg).len();
+                if missing > 0 {
+                    report.undeclared += missing;
+                    report.templates_with_gaps += 1;
+                    report
+                        .lines
+                        .extend(ai_declaration_manifest::manifest_lines(&stem, &cfg));
+                }
                 crate::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
             }
             Err(e) => warn!(target: "config", "template failed to parse, skipping: {key}: {e}"),
         }
     }
-    Ok((loaded, findings))
+    Ok((loaded, findings, report))
+}
+
+/// The fleet-wide AI-declaration manifest gathered while preloading templates
+/// (issue #885a), held until a `tracing` subscriber exists to receive it.
+#[derive(Default)]
+struct AiDeclarationReport {
+    /// AI-capable fine systems that declared neither a policy nor an explicit
+    /// idle state, across every template loaded.
+    undeclared: usize,
+    /// How many templates contributed at least one of those.
+    templates_with_gaps: usize,
+    /// One rendered line per (template, fine system) — the per-slot worklist.
+    lines: Vec<String>,
+}
+
+impl AiDeclarationReport {
+    /// Emit the manifest. `info` for the fleet total, `debug` for the per-slot
+    /// worklist: both sit under the default `warn` filter, so a normal run is
+    /// unchanged and `--log config=debug` is what asks for the breakdown.
+    fn emit(&self) {
+        if self.undeclared == 0 {
+            return;
+        }
+        info!(
+            target: "config",
+            "AI-declaration manifest: {} AI-capable fine system(s) across {} \
+             template(s) declare neither a policy nor an explicit idle state, so a \
+             Rust-side synthesiser supplies their automation (PRD #774 US7; issue \
+             #885b's worklist). Run with `--log config=debug` for the \
+             per-(template, system) breakdown.",
+            self.undeclared,
+            self.templates_with_gaps
+        );
+        for line in &self.lines {
+            debug!(target: "config", "{line}");
+        }
+    }
 }
 
 /// Model-marker contract check for one parsed template: resolve its rig
@@ -157,7 +217,7 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| "assets/entities".to_string());
-    let (loaded, marker_findings) = preload_entity_templates(&template_dir)?;
+    let (loaded, marker_findings, ai_declarations) = preload_entity_templates(&template_dir)?;
 
     // Model-marker contract gate (issue #758). This validates EVERY template
     // discovered in `template_dir` — not just the ones this run will actually
@@ -252,6 +312,12 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     for f in marker_findings.iter().filter(|f| !f.is_error()) {
         warn!(target: "assets", "marker validation [warn] {}", f.describe());
     }
+
+    // AI-declaration manifest (issue #885a), reported here for the same reason
+    // as the marker warnings above — it was gathered before the subscriber
+    // existed. Below the default `warn` filter, so it costs a normal run
+    // nothing and `--log config=debug` is what asks for it.
+    ai_declarations.emit();
 
     // Asset types and messages that `RenderPlugin` / `ViewscreenBorderPlugin`
     // would otherwise register. Simulation systems name these types even when

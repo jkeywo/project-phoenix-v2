@@ -1,3 +1,4 @@
+use crate::entities::ai_declaration_manifest::AiDeclarationMode;
 use crate::entities::ai_flag_hosts as ai_hosts;
 use crate::region_effects::RegionEffectsConfig;
 use crate::region_shape::RegionShape;
@@ -4706,7 +4707,27 @@ pub struct EntityConfig {
 }
 
 impl EntityConfig {
+    /// Parse and validate an entity TOML in the default AI-declaration mode.
+    ///
+    /// That mode is [`AiDeclarationMode::DEFAULT`], which is `Lenient` today:
+    /// an AI-capable fine system that declares neither a policy nor an explicit
+    /// idle state loads fine and gets one synthesised at spawn. Flipping that
+    /// one const to `Strict` (issue #885b's completion gate) makes the omission
+    /// a load error on every path through here at once — see
+    /// [`crate::entities::ai_declaration_manifest`].
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
+        Self::from_toml_in_mode(s, AiDeclarationMode::DEFAULT)
+    }
+
+    /// [`Self::from_toml`] with the AI-declaration mode chosen explicitly.
+    ///
+    /// Exists so tests can exercise `Strict` while the shipped default stays
+    /// `Lenient` — the alternative, a cargo feature, would flip under
+    /// `--all-features` and stop every shipped hull loading.
+    pub fn from_toml_in_mode(
+        s: &str,
+        ai_declarations: AiDeclarationMode,
+    ) -> Result<Self, toml::de::Error> {
         let mut value: toml::Value = toml::from_str(s)?;
         // Extract [[shield_arc]] blocks BEFORE stripping so we can populate
         // `EntityConfig.shield_arcs` and synthesise matching `[[system]]`
@@ -5273,6 +5294,20 @@ impl EntityConfig {
         if let Some(ref mut b) = config.behaviour {
             for d in &mut b.doctrine {
                 d.target_speed = d.target_speed.clamp(0.0, 1.0);
+            }
+        }
+
+        // Reject an AI-capable fine system that declares NEITHER a policy nor an
+        // explicit idle state (PRD #774 US7), when strict mode is on.
+        //
+        // Runs last, after every `if let Some(ai) = ...` validator above, and it
+        // is deliberately the mirror image of them: those check what an author
+        // DID write, this one checks what they did not. Until #885b flips
+        // `AiDeclarationMode::DEFAULT` the branch never runs on a shipped path,
+        // and the nineteen synthesisers keep filling the gap exactly as before.
+        if ai_declarations == AiDeclarationMode::Strict {
+            if let Some(err) = crate::entities::ai_declaration_manifest::strict_error(&config) {
+                return Err(SerdeError::custom(err));
             }
         }
 

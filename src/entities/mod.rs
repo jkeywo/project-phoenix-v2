@@ -1,3 +1,7 @@
+/// Which AI-capable fine systems each hull declares, which ones a synthesiser
+/// invents for it, and the (default-off) strict mode that turns a missing
+/// declaration into a load error (issue #885a).
+pub mod ai_declaration_manifest;
 /// Which fine-system AI hosts can evaluate `flag()`/`counter()` guards, and the
 /// load-time rejection for the ones that cannot (issue #891 stage 1).
 pub mod ai_flag_hosts;

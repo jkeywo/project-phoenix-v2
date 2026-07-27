@@ -784,10 +784,80 @@ base_priority  = 35.0
 target_speed   = 0.9
 maintain_range = 180.0
 
-# Ship systems (all AI-controlled - no human consoles)
-# Per-axis helm systems (issues #701/#703, declared in #800 and #704). This hull
-# has no stations, so they are ownerless and `ai_only`. The NPC spawn path sets every declared system to
-# ControlSource::Ai, so these come up on AI precisely when the coarse helm does.
+# ── Stations ──────────────────────────────────────────────────────────────────
+#
+# Crew stations (issue #871). See the fuller note in `pirate_raider.toml`: every
+# seat boots on the implicit `Backfill` rating, which automates every system the
+# station owns, so an unmanned hull behaves exactly as it did when its systems
+# were ownerless + `ai_only`.
+#
+# Four seats, not the nine `alliance_battleship.toml` carries. The player
+# battleship's Sensors / Shields / Navigation / Repair / Comms seats own systems
+# this hull does not declare, and DECLARING them here would not be a structural
+# change: it would switch on the Sensors, Shields-focus, Navigation, Repair and
+# Comms Backfill policies, all of which are gated on their own system's
+# `operate_ai` and none of which run on this hull today. That is authored
+# behaviour, i.e. #875–#877 content work, not #871's seat symmetry — so the seats
+# that exist are the ones with systems to own.
+#
+# The auto-generated `shield-arc-all` system is the only thing left ownerless.
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "entity.ship_harrow_warhawk.station.captain.description"
+rank = "Cpt."
+short_code = "CPT"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.ship_harrow_warhawk.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "entity.ship_harrow_warhawk.station.tactical.description"
+rank = "Lt. Cmdr."
+short_code = "TAC"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.ship_harrow_warhawk.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Systems ───────────────────────────────────────────────────────────────────
+#
+# Red Alert authored explicitly (issue #871) rather than left to the #749
+# ownerless provision, so the Captain seat owns it. Control source is unchanged:
+# Backfill automates it.
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
+# Per-axis helm systems (issues #701/#703, declared in #800 and #704), owned by
+# the Helm seat.
 #
 # #800 declared thrust + steering. #704 adds impulse + lateral-thrust, which the
 # deleted `operate_helm_ai` monolith used to drive on this hull's behalf: an
@@ -800,31 +870,39 @@ maintain_range = 180.0
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-ai_only = true
+station = "helm"
 
 # Boost drive axis (issue #801), declared for hull-uniformity with the player
 # ships: every helm axis is a declared system on every hull. No AI drives
-# boost, so on this stationless hull the declaration only gives the axis the
-# standard damage/repair surface.
+# boost, so the declaration gives the axis the standard damage/repair surface
+# plus a lever for a human at the Helm seat.
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-ai_only = true
+station = "helm"
+
+# The Tactical radar (issue #871) — the system every player hull declares and no
+# NPC hull did, which is what blocked #887 from routing AI target selection
+# through admission.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 
 # Fine Tactical systems (issue #512): port + starboard phaser banks. (The
 # torpedo tubes and their magazine arrived with #793 and are declared below,
@@ -832,7 +910,7 @@ ai_only = true
 [[system]]
 id = "phaser-port"
 kind = "phaser_bank"
-ai_only = true
+station = "tactical"
 
 # Ship-wide phaser settings (issue #801): firing mode + emitter frequency.
 # One declared system (NOT per-bank) so SetPhaserMode/SetPhaserFrequency
@@ -840,12 +918,12 @@ ai_only = true
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "phaser-starboard"
 kind = "phaser_bank"
-ai_only = true
+station = "tactical"
 
 # The bow artillery piece (issue #792), following the `blaster-<bank_id>`
 # convention (underscores folded to hyphens). Without this entry the bank is
@@ -853,7 +931,7 @@ ai_only = true
 [[system]]
 id = "blaster-bow-artillery"
 kind = "blaster_bank"
-ai_only = true
+station = "tactical"
 
 # The close-defence launchers (issue #793): one per tube, following the
 # `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
@@ -866,26 +944,26 @@ ai_only = true
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-tube-fore"
 kind = "torpedo_tube"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
-ai_only = true
+station = "tactical"
 
 # Fine Power systems (issue #513): reactor + battery for per-instance damage.
 # NPCs have no `[power_groups.*]` block so `power_group` is omitted.
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-ai_only = true
+station = "engineering"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-ai_only = true
+station = "engineering"

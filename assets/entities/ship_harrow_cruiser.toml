@@ -723,22 +723,92 @@ base_priority  = 40.0
 target_speed   = 0.8
 maintain_range = 42.0
 
-# Ship systems. No stations on this hull, so every system is ownerless and
-# `ai_only`; the NPC spawn path puts each one under `ControlSource::Ai`.
+# ── Stations ──────────────────────────────────────────────────────────────────
+#
+# Crew stations (issue #871). See the fuller note in `pirate_raider.toml`: every
+# seat boots on the implicit `Backfill` rating, which automates every system the
+# station owns, so an unmanned hull behaves exactly as it did when its systems
+# were ownerless + `ai_only`.
+#
+# Four seats, not the six `alliance_cruiser.toml` carries. The player cruiser's
+# Science and Comms seats own `sensors` / `sensor-radar` / `shields-system` /
+# `navigation` / `comms` systems that this hull does not declare, and DECLARING
+# them here would not be a structural change: it would switch on the Sensors,
+# Shields-focus, Navigation, Repair and Comms Backfill policies, all of which are
+# gated on their own system's `operate_ai` and none of which run on this hull
+# today. That is authored behaviour, i.e. #875–#877 content work, not #871's
+# seat symmetry — so the seats that exist are the ones with systems to own.
+#
+# The auto-generated `shield-arc-all` system is the only thing left ownerless.
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "entity.ship_harrow_cruiser.station.captain.description"
+rank = "Cpt."
+short_code = "CPT"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.ship_harrow_cruiser.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "entity.ship_harrow_cruiser.station.tactical.description"
+rank = "Lt. Cmdr."
+short_code = "TAC"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.ship_harrow_cruiser.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Systems ───────────────────────────────────────────────────────────────────
+#
+# Red Alert authored explicitly (issue #871) rather than left to the #749
+# ownerless provision, so the Captain seat owns it. Control source is unchanged:
+# Backfill automates it.
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
 [[system]]
 id = "helm-thrust"
 kind = "helm_thrust"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-steering"
 kind = "helm_steering"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-impulse"
 kind = "helm_impulse"
-ai_only = true
+station = "helm"
 
 # Declared for hull-uniformity with every other ship: no state in this doctrine
 # engages boost (and there is no `[helm_console.boost]` block), so the
@@ -746,12 +816,20 @@ ai_only = true
 [[system]]
 id = "helm-boost"
 kind = "helm_boost"
-ai_only = true
+station = "helm"
 
 [[system]]
 id = "helm-lateral-thrust"
 kind = "lateral_thrust"
-ai_only = true
+station = "helm"
+
+# The Tactical radar (issue #871) — the system every player hull declares and no
+# NPC hull did, which is what blocked #887 from routing AI target selection
+# through admission.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 
 # Fine Tactical systems (issue #512): one per phaser bank, following the
 # `phaser-<bank_id>` naming convention. Without these entries neither bank is
@@ -759,12 +837,12 @@ ai_only = true
 [[system]]
 id = "phaser-fore"
 kind = "phaser_bank"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "phaser-aft"
 kind = "phaser_bank"
-ai_only = true
+station = "tactical"
 
 # Ship-wide phaser settings: firing mode + emitter frequency. One declared system
 # (NOT per-bank) so SetPhaserMode/SetPhaserFrequency admission gates on a real
@@ -772,7 +850,7 @@ ai_only = true
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
-ai_only = true
+station = "tactical"
 
 # Fine torpedo systems (issue #791): one per tube, following the
 # `torpedo-tube-<tube_id>` convention (underscores folded to hyphens), plus the
@@ -782,24 +860,24 @@ ai_only = true
 [[system]]
 id = "torpedo-magazine"
 kind = "torpedo_magazine"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-tube-bow-port"
 kind = "torpedo_tube"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "torpedo-tube-bow-starboard"
 kind = "torpedo_tube"
-ai_only = true
+station = "tactical"
 
 [[system]]
 id = "power-reactor"
 kind = "power_reactor"
-ai_only = true
+station = "engineering"
 
 [[system]]
 id = "power-battery"
 kind = "power_battery"
-ai_only = true
+station = "engineering"

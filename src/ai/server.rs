@@ -1062,6 +1062,12 @@ pub(crate) fn advance_objective_cursors(
 /// can never touch the same entity. It deliberately does not opt into the
 /// debug `HelmPhysicsWriteGuard`. See the writer-policy table on `ShipPhysics`
 /// (`src/ship/state.rs`).
+///
+/// The "can never touch the same entity" claim above is not left to this
+/// comment: `low_lod_and_helm_ship_physics_writers_can_never_share_an_entity`
+/// (`tests/headless_runner.rs`) reads the access sets Bevy derived from both
+/// systems as the production plugins registered them, and fails if either
+/// filter is widened enough for the two to overlap.
 fn simulate_low_lod_ships(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,

@@ -38,6 +38,14 @@ use bevy::prelude::Component;
 /// When adding a new writer, prefer helm intent components. Only write these
 /// fields directly if the change is genuinely one of the above shapes — a
 /// correction that must land outside the helm integration — and add a row here.
+///
+/// This table is enforced, not just documented: the two tests at the end of
+/// `tests/headless_runner.rs` scan the real headless app for every scheduled
+/// system with mutable `ShipPhysics` access, pin the count against the rows
+/// above, and prove (through Bevy's own access prover) that the low-LOD
+/// substitute and the helm integrator can never be handed the same entity.
+/// Observers are in no schedule and so escape that scan — `handle_slow_zone_
+/// speed_clamp` is covered by this table alone.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct ShipPhysics {
     /// X position in world space.

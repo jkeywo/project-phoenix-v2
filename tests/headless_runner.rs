@@ -16,6 +16,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::prelude::*;
+use project_phoenix::ai_plugin::AiHighFidelity;
 use project_phoenix::balance::RunOutcome;
 use project_phoenix::headless::args::ticks_for_sim_seconds;
 use project_phoenix::headless::{build_headless_app, build_report, run, HeadlessArgs};
@@ -1365,4 +1366,260 @@ fn missing_world_file_is_a_clean_error() {
     };
     let err = build_headless_app(&args).unwrap_err().to_string();
     assert!(err.contains("could not read world"), "got: {err}");
+}
+
+// ── `ShipPhysics` writer disjointness (issues #699, #886) ────────────────────
+//
+// `simulate_low_lod_ships` (`src/ai/server.rs`) writes `ShipPhysics.x/z/yaw`
+// directly instead of going through helm intent + `integrate_ship_physics`.
+// That is sanctioned — see the writer-policy table on `ShipPhysics`
+// (`src/ship/state.rs`) — but the whole justification rests on one property:
+//
+//     No entity is ever moved by both the low-LOD substitute and the
+//     admitted/integrated helm path in the same tick.
+//
+// Today that holds structurally: `simulate_low_lod_ships` filters
+// `(With<Ship>, Without<AiHighFidelity>)` and `integrate_ship_physics` filters
+// `With<AiHighFidelity>`. Until now it was asserted only in a comment. Two
+// writers of `ShipPhysics` is the hazard issue #699 exists for, and the LOD
+// machinery has already produced six *silent* bugs (#692, #693, #695, #785,
+// #786, #882/#883) from components missed on one of its two spawn routes, so
+// the property is pinned here rather than trusted.
+//
+// These tests are deliberately *access-level*, not behavioural. They read the
+// `FilteredAccessSet` Bevy itself derived from each system as the production
+// plugins registered it, and ask Bevy's own disjointness prover
+// (`FilteredAccessSet::get_conflicts` — the machinery that decides whether two
+// systems may run in parallel) whether the two can ever be handed the same
+// entity. That is strictly stronger than spawning ships and watching them move:
+// it holds for every archetype that could ever exist, not just the ones a
+// fixture happened to create, so it cannot be fooled by a test ship missing the
+// component that actually breaks the feature in production.
+//
+// They run against the real headless app, so the filters exercised are the ones
+// actually registered — not a copy of the query signatures re-typed in a
+// fixture, which would keep passing after someone widened the real filter.
+
+/// A system in the real app that takes *mutable* access to `ShipPhysics`,
+/// together with the access set the schedule recorded for it.
+struct PhysicsWriter {
+    schedule: String,
+    /// Only meaningful when built with the `debug` feature — bevy compiles
+    /// system names out otherwise — so never assert on it. It is here to make a
+    /// CI failure legible.
+    name: String,
+    access: bevy::ecs::query::FilteredAccessSet,
+}
+
+/// Every mutable-`ShipPhysics` system in every schedule of `app`.
+///
+/// Must be called on an app that has been built but never run: `Schedule`
+/// initialization moves systems out of the graph into a private executable and
+/// takes their recorded access with them, so this is the only window in which
+/// the access set is reachable through public API.
+///
+/// Bevy observers are not part of any schedule and so never appear here —
+/// `handle_slow_zone_speed_clamp` (`src/regions/server.rs`) is one, and is
+/// covered by the writer-policy table rather than by this scan.
+fn ship_physics_writers(app: &mut App) -> Vec<PhysicsWriter> {
+    use bevy::ecs::schedule::Schedules;
+
+    let physics_id = app.world_mut().register_component::<ShipPhysics>();
+    let mut schedules = app
+        .world_mut()
+        .remove_resource::<Schedules>()
+        .expect("a built app always carries a Schedules resource");
+
+    let mut writers = Vec::new();
+    for (label, schedule) in schedules.iter_mut() {
+        let label = format!("{label:?}");
+        // Populates `SystemWithAccess::access` without building the schedule,
+        // which is what would move the systems out of reach.
+        schedule.graph_mut().systems.initialize(app.world_mut());
+        let systems = &schedule.graph().systems;
+        for (key, system, _conditions) in systems.iter() {
+            let entry = systems
+                .get(key)
+                .expect("key was just yielded by this container");
+            if entry
+                .access
+                .combined_access()
+                .has_component_write(physics_id)
+            {
+                writers.push(PhysicsWriter {
+                    schedule: label.clone(),
+                    name: system.name().to_string(),
+                    access: entry.access.clone(),
+                });
+            }
+        }
+    }
+    app.world_mut().insert_resource(schedules);
+    writers
+}
+
+/// Access set of a hypothetical system that writes `ShipPhysics` on exactly the
+/// ships selected by `F`. Conflict-testing a real writer against this asks
+/// "can that system ever be handed a ship matching `F`?".
+fn ship_physics_probe<F>(app: &mut App) -> bevy::ecs::query::FilteredAccessSet
+where
+    F: bevy::ecs::query::QueryFilter + Send + Sync + 'static,
+{
+    let mut probe = IntoSystem::into_system(|_q: Query<&mut ShipPhysics, F>| {});
+    probe.initialize(app.world_mut())
+}
+
+/// Splits the writers into those that can be handed a high-fidelity ship and
+/// those that can be handed a low-LOD one. A writer with no `AiHighFidelity`
+/// filter appears in both.
+fn classify_ship_physics_writers(
+    app: &mut App,
+    writers: &[PhysicsWriter],
+) -> (Vec<usize>, Vec<usize>) {
+    let touches_high_fi = ship_physics_probe::<With<AiHighFidelity>>(app);
+    let touches_low_lod = ship_physics_probe::<Without<AiHighFidelity>>(app);
+
+    let high_fi = (0..writers.len())
+        .filter(|&i| !writers[i].access.get_conflicts(&touches_high_fi).is_empty())
+        .collect();
+    let low_lod = (0..writers.len())
+        .filter(|&i| !writers[i].access.get_conflicts(&touches_low_lod).is_empty())
+        .collect();
+    (high_fi, low_lod)
+}
+
+/// Renders the writer inventory for an assertion message. Without the `debug`
+/// feature the names are placeholders, so the classification carries the
+/// information.
+fn describe_ship_physics_writers(
+    writers: &[PhysicsWriter],
+    high_fi: &[usize],
+    low_lod: &[usize],
+) -> String {
+    writers
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let kind = match (high_fi.contains(&i), low_lod.contains(&i)) {
+                (true, false) => "high-fidelity ships only",
+                (false, true) => "low-LOD ships only",
+                (true, true) => "unfiltered (can touch every ship)",
+                (false, false) => "matches no ship at all (?)",
+            };
+            format!("  - [{}] {} - {kind}", w.schedule, w.name)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The property `simulate_low_lod_ships`' direct `ShipPhysics` write depends on:
+/// the low-LOD substitute and the helm integrator can never be handed the same
+/// entity, so no ship is ever moved twice in a tick.
+#[test]
+fn low_lod_and_helm_ship_physics_writers_can_never_share_an_entity() {
+    let mut app = build_headless_app(&test_args()).expect("app should build");
+    let writers = ship_physics_writers(&mut app);
+    let (high_fi, low_lod) = classify_ship_physics_writers(&mut app, &writers);
+
+    let only_low_lod: Vec<usize> = low_lod
+        .iter()
+        .copied()
+        .filter(|i| !high_fi.contains(i))
+        .collect();
+    let only_high_fi: Vec<usize> = high_fi
+        .iter()
+        .copied()
+        .filter(|i| !low_lod.contains(i))
+        .collect();
+
+    let inventory = describe_ship_physics_writers(&writers, &high_fi, &low_lod);
+
+    assert_eq!(
+        only_low_lod.len(),
+        1,
+        "expected exactly ONE system writing ShipPhysics only on low-LOD ships \
+         (`simulate_low_lod_ships`, filtered `Without<AiHighFidelity>`). That system \
+         writes ShipPhysics.x/z/yaw directly instead of going through helm intent, and \
+         the only thing that makes it safe is that the helm integrator can never see \
+         the same entity. A count of 0 means its `Without<AiHighFidelity>` filter was \
+         widened or removed, so it now dead-reckons ships the helm path is also \
+         integrating: the ship advances twice per tick and every distance, arrival and \
+         intercept calculation downstream is silently wrong — nothing panics. Restore \
+         the filter, or move the system onto helm intent components and delete its row \
+         from the writer-policy table on `ShipPhysics` (src/ship/state.rs). \
+         ShipPhysics writers found:\n{inventory}"
+    );
+    assert_eq!(
+        only_high_fi.len(),
+        1,
+        "expected exactly ONE system writing ShipPhysics only on high-fidelity ships \
+         (`integrate_ship_physics`, filtered `With<AiHighFidelity>`). A count of 0 means \
+         the helm integrator's filter was widened, so it now also integrates the ships \
+         `simulate_low_lod_ships` is dead-reckoning: both writers advance the same \
+         ShipPhysics in one tick and the ship travels at roughly double speed along a \
+         heading neither system chose. See the writer-policy table on `ShipPhysics` \
+         (src/ship/state.rs). ShipPhysics writers found:\n{inventory}"
+    );
+
+    let low = &writers[only_low_lod[0]];
+    let helm = &writers[only_high_fi[0]];
+    assert!(
+        low.access.get_conflicts(&helm.access).is_empty(),
+        "the low-LOD ShipPhysics substitute and the helm integrator are no longer \
+         provably disjoint: Bevy's own access prover says they can be handed the same \
+         entity, so one ship can be moved by both in a single tick. That is the \
+         two-writer hazard issue #699 exists for, and it fails silently — the \
+         simulation keeps running, the ship just is not where anything thinks it is. \
+         Either restore the `With<AiHighFidelity>` / `Without<AiHighFidelity>` split \
+         that keeps them apart, or stop writing ShipPhysics directly from the low-LOD \
+         path. ShipPhysics writers found:\n{inventory}"
+    );
+}
+
+/// Reconciles the scan against the writer-policy table on `ShipPhysics`
+/// (`src/ship/state.rs`). A new system that mutates `ShipPhysics` fails here
+/// until it is either given a disjoint filter or written into that table.
+#[test]
+fn ship_physics_writer_inventory_matches_the_policy_table() {
+    let mut app = build_headless_app(&test_args()).expect("app should build");
+    let writers = ship_physics_writers(&mut app);
+    let (high_fi, low_lod) = classify_ship_physics_writers(&mut app, &writers);
+    let inventory = describe_ship_physics_writers(&writers, &high_fi, &low_lod);
+
+    // The scheduled writers named by the policy table: the helm integrator
+    // (`integrate_ship_physics`), the low-LOD substitute
+    // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`)
+    // and blaster recoil (`tick_blaster_system`). The table's fifth entry,
+    // `handle_slow_zone_speed_clamp`, is an observer and so is in no schedule —
+    // see `ship_physics_writers`.
+    assert_eq!(
+        writers.len(),
+        4,
+        "the number of scheduled systems writing ShipPhysics changed. Every writer \
+         beyond the helm integrator has to be a correction layered on top of it rather \
+         than a competing integrator, and has to be documented in the writer-policy \
+         table on `ShipPhysics` (src/ship/state.rs). Two systems integrating the same \
+         ship is the bug class issue #699 exists for, and it is silent: nothing panics, \
+         the ship simply moves further than everything downstream believes it did. If \
+         you added a writer, prefer helm intent components; if it genuinely must write \
+         directly, add its row to the table and update this count. ShipPhysics writers \
+         found:\n{inventory}"
+    );
+
+    // Exactly two of them are unfiltered corrections (collision response and
+    // blaster recoil): they deliberately apply to every ship, high-LOD and
+    // low-LOD alike, and their safety argument is that they are one-shot
+    // corrections rather than integrators — not filter disjointness.
+    let unfiltered = (0..writers.len())
+        .filter(|i| high_fi.contains(i) && low_lod.contains(i))
+        .count();
+    assert_eq!(
+        unfiltered, 2,
+        "expected exactly two unfiltered ShipPhysics correction writers (collision \
+         response and blaster recoil). A change here means a correction grew an \
+         `AiHighFidelity` filter, or an integrator lost one — either way the set of \
+         ships that get moved twice per tick has changed. Reconcile with the \
+         writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
+         found:\n{inventory}"
+    );
 }

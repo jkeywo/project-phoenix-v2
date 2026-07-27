@@ -44,6 +44,7 @@
 //     atom   := "(" expr ")"
 //             | "flag" "(" NAME ")"
 //             | "counter" "(" NAME ")" CMP INT
+//             | "history" "(" REDUCER "," NAME "," WINDOW ")" CMP OPERAND
 //
 // Precedence: `not` > `and` > `or`. Parens override. Standard math
 // precedence; equivalent to most boolean expression languages.
@@ -55,6 +56,7 @@
 // Predicates are parsed eagerly at world-load time. Parse errors include the
 // offending token and a position hint; no panics.
 
+use crate::bounded_history::BoundedHistory;
 use std::collections::HashMap;
 
 // ── Flag store ────────────────────────────────────────────────────────────
@@ -308,11 +310,38 @@ impl AiFacts {
 pub struct AiPolicyMemory {
     values: HashMap<String, f64>,
     state_time_secs: f64,
+    history: AiHistory,
 }
 
 impl AiPolicyMemory {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This system's bounded history windows, the surface behind the
+    /// `history(...)` atom (issue #890).
+    ///
+    /// Carried on this bag rather than as a fourth argument threaded through
+    /// every evaluation entry point, because it is the same KIND of thing the
+    /// bag already holds: per-fine-system retained state that the host writes
+    /// and the policy only reads, scoped so that no sibling system can observe
+    /// it and rebuilt from scratch by [`crate::ai::policy::AiPolicyRuntimeState::reset`]
+    /// when AI (re)gains control. Riding here is also what makes a history atom
+    /// readable in BOTH authorable positions on a stateful host — the
+    /// transition guards the state tick resolves, and the per-state rule guards
+    /// the per-axis actuator systems resolve later in the same tick — since both
+    /// already receive this bag.
+    pub fn history(&self) -> &AiHistory {
+        &self.history
+    }
+
+    /// Advance this system's history windows by exactly one sample.
+    ///
+    /// The ONE mutating entry point, deliberately named so a source scan can
+    /// find every fold site in the crate — see [`AiHistory::fold_history`] for
+    /// why there must only ever be one per shared AI tick.
+    pub fn fold_history(&mut self, specs: &[HistorySpec], facts: &AiFacts) {
+        self.history.fold_history(specs, facts);
     }
 
     /// Write one named private memory slot.
@@ -385,6 +414,243 @@ impl Operand {
             Operand::Param(name) => params.get(name),
         }
     }
+
+    /// Render the operand back the way an author typed it, for diagnostics.
+    fn render(&self) -> String {
+        match self {
+            Operand::Number(n) => {
+                if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{n}")
+                }
+            }
+            Operand::Param(name) => format!("param({name})"),
+        }
+    }
+}
+
+// ── Authored history operators (issue #890) ───────────────────────────────
+//
+// Every other atom in this grammar reads ONE tick. A decision like "has this
+// ship HELD its distance" or "is the gap actually opening" cannot be taken from
+// one tick and cannot be taken from a running aggregate either (a running
+// minimum never recovers from one bad sample). It needs the last N readings and
+// nothing older — [`crate::bounded_history::BoundedHistory`].
+//
+// Before #890 that shape existed only as host-side Rust: #788 and #789 each
+// invented a bespoke fact (`safe_distance_held`, `separation_progress`) with its
+// own hand-rolled window, capacity param and fold site, which is exactly the
+// per-question-Rust pattern PRD #774 §5.2 forbids. These types make the window
+// AUTHORABLE:
+//
+//     history(min, range_to_target, param(standoff_ticks)) >= param(safe_range)
+//     history(net_change, range_to_target, param(escape_ticks)) > param(min_progress)
+//
+// # Why a REDUCER and a comparison, rather than a `held(...)` predicate
+//
+// The grammar everywhere else is "one atom CMP one operand", and keeping that
+// shape means a history atom composes with `and`/`or`/`not` and with `param(...)`
+// operands for free. `min` over a full window compared `>=` IS
+// `BoundedHistory::all_at_least` (pinned by a test), `max ... <=` is its mirror,
+// and `net_change` is the trend question — one spelling covers both shipped
+// shapes and the four comparison directions, where a bespoke `held(...)` would
+// have needed a new primitive per direction.
+//
+// # Why every reducer is gated on a FULL window
+//
+// A partly-filled window measures a SHORTER span than the one the designer
+// authored. `min` over two samples of an authored eight would answer a question
+// nobody asked, and would do so most confidently right after a clear — exactly
+// when the window knows least. An unfilled window reduces to `None`, and an
+// absent reading makes the comparison `false`, the same contract `fact(...)`
+// carries.
+
+/// The names of the reducers a `history(...)` atom may use, for diagnostics.
+pub const HISTORY_REDUCERS: &[&str] = &["min", "max", "net_change"];
+
+/// Which scalar a `history(...)` atom reduces its bounded window to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HistoryReducer {
+    /// The smallest retained sample. `history(min, x, n) >= t` is "every one of
+    /// the last `n` readings of `x` was at least `t`".
+    Min,
+    /// The largest retained sample — the mirror of [`Self::Min`].
+    Max,
+    /// Newest sample minus oldest: which way, and how far, the reading has moved
+    /// across the authored span.
+    NetChange,
+}
+
+impl HistoryReducer {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "min" => Some(HistoryReducer::Min),
+            "max" => Some(HistoryReducer::Max),
+            "net_change" => Some(HistoryReducer::NetChange),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            HistoryReducer::Min => "min",
+            HistoryReducer::Max => "max",
+            HistoryReducer::NetChange => "net_change",
+        }
+    }
+
+    /// Reduce a window to one reading, or `None` while it is not yet full.
+    fn reduce(self, window: &BoundedHistory) -> Option<f64> {
+        if !window.is_full() {
+            return None;
+        }
+        match self {
+            HistoryReducer::Min => window.min(),
+            HistoryReducer::Max => window.max(),
+            HistoryReducer::NetChange => window.net_change(),
+        }
+    }
+}
+
+/// A RESOLVED window: which fact is sampled, and over how many shared AI ticks.
+///
+/// The identity of a window, and therefore the key the host folds under. The
+/// capacity is part of that identity on purpose: #789 needed two windows over
+/// the SAME reading with independent authored lengths (a level question and a
+/// trend question, tuned for different things), and keying on the fact alone
+/// would have silently coupled them.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct HistorySpec {
+    pub fact: String,
+    pub ticks: usize,
+}
+
+/// An UNRESOLVED window as authored: the fact name plus the window length,
+/// which may be a literal or a `param(...)` reference.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryWindow {
+    pub fact: String,
+    pub ticks: Operand,
+}
+
+impl HistoryWindow {
+    /// Resolve the authored length against the policy's parameters.
+    ///
+    /// `None` when the parameter is unknown, or the length is not a positive
+    /// whole number of ticks. Content validation rejects both at load, so a
+    /// live policy never takes this arm; evaluating it as "no window" rather
+    /// than panicking is the same no-panic contract every other atom keeps.
+    pub fn resolve(&self, params: &AiParams) -> Option<HistorySpec> {
+        let ticks = self.ticks.resolve(params)?;
+        if !ticks.is_finite() || ticks.fract() != 0.0 || ticks < 1.0 {
+            return None;
+        }
+        Some(HistorySpec {
+            fact: self.fact.clone(),
+            ticks: ticks as usize,
+        })
+    }
+}
+
+/// One authored `history(...)` atom, as collected out of an expression by
+/// [`Predicate::referenced_history`].
+///
+/// Carries the reducer as well as the window so a rejection can quote the atom
+/// back verbatim — with three reducers and two window spellings, "which one did
+/// I write?" is the author's immediate next question.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryRef {
+    pub reducer: HistoryReducer,
+    pub window: HistoryWindow,
+}
+
+impl HistoryRef {
+    /// The atom as the author typed it.
+    pub fn render(&self) -> String {
+        format!(
+            "history({}, {}, {})",
+            self.reducer.name(),
+            self.window.fact,
+            self.window.ticks.render()
+        )
+    }
+}
+
+/// One fine system's BOUNDED history windows (issue #890).
+///
+/// Bounded twice over, which is the whole reason this is not a `Vec` of
+/// readings. The SET of windows is fixed by the authored expression — the host
+/// folds exactly the specs its policy asks for and drops any other — and each
+/// window retains at most its authored capacity. Memory is therefore constant
+/// for the life of a run, however long the scenario lasts, and "recently" keeps
+/// meaning the same span from the first tick to the last.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiHistory {
+    windows: std::collections::BTreeMap<HistorySpec, BoundedHistory>,
+}
+
+impl AiHistory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Advance every declared window by EXACTLY ONE sample.
+    ///
+    /// # Call this once per shared AI tick, from one host, and nowhere else
+    ///
+    /// This is the sharp edge issue #789 documented and #890 exists to make
+    /// safe. The four per-axis helm actuator systems all resolve guards from the
+    /// same ship in the same tick; a window folded from each of them would
+    /// advance four times per shared tick, so an authored
+    /// `history(net_change, x, 30)` would silently measure a quarter of the span
+    /// the file says. The fold therefore belongs where the shared per-tick state
+    /// advance already happens, and `entities::ai_flag_hosts` records which host
+    /// that is for every AI policy surface — with a rejection at load for the
+    /// hosts where nothing folds, and a source scan that fails if a second fold
+    /// site appears.
+    ///
+    /// An ABSENT reading clears the window rather than skipping the tick. A
+    /// window that closed over a hole would span more real time than its
+    /// authored length while claiming not to — the reading either exists every
+    /// tick of the span or the span has not happened yet.
+    pub fn fold_history(&mut self, specs: &[HistorySpec], facts: &AiFacts) {
+        // Windows nobody asks for any more are dropped, so the map is exactly
+        // the authored set and cannot accumulate.
+        self.windows.retain(|spec, _| specs.contains(spec));
+        for spec in specs {
+            let window = self.windows.entry(spec.clone()).or_default();
+            // Re-applied every fold because the capacity comes from authored
+            // data a `default()` bag cannot see; `set_capacity` is a no-op when
+            // unchanged, so this can never reset the window.
+            window.set_capacity(spec.ticks);
+            match facts.get(&spec.fact) {
+                Some(value) => window.push(value),
+                None => window.clear(),
+            }
+        }
+    }
+
+    /// Reduce one window to a single reading; `None` when the window is unknown
+    /// or not yet full.
+    pub fn reduce(&self, spec: &HistorySpec, reducer: HistoryReducer) -> Option<f64> {
+        reducer.reduce(self.windows.get(spec)?)
+    }
+
+    /// The window folded under `spec`, if any. Read-only: only
+    /// [`Self::fold_history`] may advance one.
+    pub fn window(&self, spec: &HistorySpec) -> Option<&BoundedHistory> {
+        self.windows.get(spec)
+    }
+
+    /// How many distinct windows are being folded.
+    pub fn len(&self) -> usize {
+        self.windows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.windows.is_empty()
+    }
 }
 
 /// Parsed predicate expression.
@@ -407,6 +673,19 @@ pub enum Predicate {
     Fact {
         context: FactContext,
         name: String,
+        op: CmpOp,
+        rhs: Operand,
+    },
+    /// `history(REDUCER, fact_name, window) CMP operand` — a bounded window
+    /// over one fact's recent readings, reduced to a single scalar and compared
+    /// like any other atom (issue #890).
+    ///
+    /// Reads the OWNING fine system's own history bag, folded once per shared AI
+    /// tick by its host. Absent (window unknown, or not yet full) makes the
+    /// comparison `false`, never a panic.
+    History {
+        reducer: HistoryReducer,
+        window: HistoryWindow,
         op: CmpOp,
         rhs: Operand,
     },
@@ -520,6 +799,27 @@ impl Predicate {
                     _ => false,
                 }
             }
+            Predicate::History {
+                reducer,
+                window,
+                op,
+                rhs,
+            } => {
+                // An unresolvable window (unknown param, or a length content
+                // validation would have rejected) reads as no window at all,
+                // which makes the comparison false — the same absent-reading
+                // contract every other atom keeps.
+                let Some(spec) = window.resolve(params) else {
+                    return false;
+                };
+                match (
+                    memory.history().reduce(&spec, *reducer),
+                    rhs.resolve(params),
+                ) {
+                    (Some(lhs), Some(rhs)) => op.apply_f64(lhs, rhs),
+                    _ => false,
+                }
+            }
             Predicate::Bool(b) => *b,
             Predicate::Not(inner) => !inner.evaluate_ctx(
                 self_facts,
@@ -577,6 +877,16 @@ impl Predicate {
                     out.push(name.clone());
                 }
             }
+            // BOTH operands of a history atom are references an author can get
+            // wrong: the window length as often as the threshold.
+            Predicate::History { window, rhs, .. } => {
+                if let Operand::Param(name) = &window.ticks {
+                    out.push(name.clone());
+                }
+                if let Operand::Param(name) = rhs {
+                    out.push(name.clone());
+                }
+            }
             Predicate::Flag { .. } | Predicate::Counter { .. } | Predicate::Bool(_) => {}
             Predicate::Not(inner) => inner.referenced_params(out),
             Predicate::And(a, b) | Predicate::Or(a, b) => {
@@ -584,6 +894,43 @@ impl Predicate {
                 b.referenced_params(out);
             }
         }
+    }
+
+    /// Collect every `history(...)` atom in the expression (issue #890).
+    ///
+    /// Two callers, and they need the same answer for opposite reasons.
+    /// [`crate::ai::policy::AiPolicy::history_windows`] uses it to work out
+    /// which windows the HOST must fold this tick; content validation uses it to
+    /// reject an atom whose window is not a positive whole number of ticks, and
+    /// one authored on a host or a policy shape where nothing folds it.
+    pub fn referenced_history(&self, out: &mut Vec<HistoryRef>) {
+        match self {
+            Predicate::History {
+                reducer, window, ..
+            } => out.push(HistoryRef {
+                reducer: *reducer,
+                window: window.clone(),
+            }),
+            Predicate::Fact { .. }
+            | Predicate::Flag { .. }
+            | Predicate::Counter { .. }
+            | Predicate::Bool(_) => {}
+            Predicate::Not(inner) => inner.referenced_history(out),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.referenced_history(out);
+                b.referenced_history(out);
+            }
+        }
+    }
+
+    /// The first `history(...)` atom in the expression, if any (issue #890).
+    ///
+    /// The shorthand every rejection wants: an expression evaluated somewhere no
+    /// window is folded is rejected on its first history atom, quoted verbatim.
+    pub fn history_atom(&self) -> Option<HistoryRef> {
+        let mut refs = Vec::new();
+        self.referenced_history(&mut refs);
+        refs.into_iter().next()
     }
 
     /// Collect every `memory(name)` referenced anywhere in the expression
@@ -597,6 +944,7 @@ impl Predicate {
                 out.push(name.clone())
             }
             Predicate::Fact { .. }
+            | Predicate::History { .. }
             | Predicate::Flag { .. }
             | Predicate::Counter { .. }
             | Predicate::Bool(_) => {}
@@ -623,7 +971,7 @@ impl Predicate {
         match self {
             Predicate::Flag { name } => out.push(format!("flag({name})")),
             Predicate::Counter { name, .. } => out.push(format!("counter({name})")),
-            Predicate::Fact { .. } | Predicate::Bool(_) => {}
+            Predicate::Fact { .. } | Predicate::History { .. } | Predicate::Bool(_) => {}
             Predicate::Not(inner) => inner.referenced_world_state(out),
             Predicate::And(a, b) | Predicate::Or(a, b) => {
                 a.referenced_world_state(out);
@@ -636,7 +984,10 @@ impl Predicate {
     pub fn references_state_time(&self) -> bool {
         match self {
             Predicate::Fact { context, .. } => *context == FactContext::StateTime,
-            Predicate::Flag { .. } | Predicate::Counter { .. } | Predicate::Bool(_) => false,
+            Predicate::History { .. }
+            | Predicate::Flag { .. }
+            | Predicate::Counter { .. }
+            | Predicate::Bool(_) => false,
             Predicate::Not(inner) => inner.references_state_time(),
             Predicate::And(a, b) | Predicate::Or(a, b) => {
                 a.references_state_time() || b.references_state_time()
@@ -666,6 +1017,10 @@ enum Token {
     /// `state_time` — the owning fine system's state clock (issue #882). Unlike
     /// every other fact keyword this one takes NO argument list.
     StateTime,
+    /// `history` — the bounded-window atom (issue #890). Takes THREE arguments
+    /// (reducer, fact name, window length) where every other fact keyword takes
+    /// one.
+    History,
     Param,
     Bool(bool),
     Cmp(CmpOp),
@@ -809,6 +1164,7 @@ impl<'a> Tokeniser<'a> {
                 "target_fact" => Token::TargetFact,
                 "memory" => Token::Memory,
                 "state_time" => Token::StateTime,
+                "history" => Token::History,
                 "param" => Token::Param,
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),
@@ -982,6 +1338,9 @@ impl Parser {
                     rhs,
                 })
             }
+            // The bounded window (issue #890): three arguments, then the same
+            // `CMP operand` tail every fact atom carries.
+            Some((Token::History, p)) => self.parse_history_atom(p),
             Some((Token::Bool(b), _)) => Ok(Predicate::Bool(b)),
             Some((t, p)) => Err(format!("Unexpected token {t:?} at position {p}")),
             None => Err(format!(
@@ -1017,6 +1376,94 @@ impl Parser {
             op,
             rhs,
         })
+    }
+
+    /// Parse a `history(REDUCER, fact_name, window) CMP operand` atom
+    /// (issue #890).
+    ///
+    /// `at` is the position of the `history` keyword, so an unknown reducer is
+    /// reported against the atom rather than against whatever token happened to
+    /// follow it.
+    fn parse_history_atom(&mut self, at: usize) -> Result<Predicate, String> {
+        self.expect(&Token::LParen, "'(' after 'history'")?;
+        let reducer_name = self.expect_name("reducer inside history(...)")?;
+        let Some(reducer) = HistoryReducer::parse(&reducer_name) else {
+            return Err(format!(
+                "Unknown history reducer '{reducer_name}' at position {at}; valid \
+                 reducers are {}",
+                HISTORY_REDUCERS.join(", ")
+            ));
+        };
+        self.expect(&Token::Comma, "',' after the history reducer")?;
+        let fact = self.expect_name("fact name inside history(...)")?;
+        self.expect(
+            &Token::Comma,
+            "',' after the history fact name (history(...) takes a reducer, a fact \
+             name and a window length)",
+        )?;
+        let ticks = self.parse_window_length()?;
+        self.expect(&Token::RParen, "')' to close history(...)")?;
+        let op =
+            match self.bump() {
+                Some((Token::Cmp(op), _)) => op,
+                Some((t, p)) => {
+                    return Err(format!(
+                        "Expected comparison operator after history(...) but got {t:?} at \
+                     position {p}"
+                    ))
+                }
+                None => return Err(
+                    "Expected comparison operator after history(...) but reached end of predicate"
+                        .into(),
+                ),
+            };
+        let rhs = self.parse_operand()?;
+        Ok(Predicate::History {
+            reducer,
+            window: HistoryWindow { fact, ticks },
+            op,
+            rhs,
+        })
+    }
+
+    /// Parse the WINDOW LENGTH argument of a `history(...)` atom: a positive
+    /// whole number of shared AI ticks, or a `param(name)` naming one.
+    ///
+    /// A literal is checked here because the parser is the only place that sees
+    /// it; a `param(...)` is checked against its declared value by content
+    /// validation, which is the only place that sees THAT. Between them no
+    /// authored window can be fractional, zero or negative.
+    fn parse_window_length(&mut self) -> Result<Operand, String> {
+        match self.bump() {
+            Some((Token::Int(n), p)) => {
+                if n < 1 {
+                    return Err(format!(
+                        "history window length must be a positive whole number of shared \
+                         AI ticks, got {n} at position {p}"
+                    ));
+                }
+                Ok(Operand::Number(n as f64))
+            }
+            Some((Token::Num(n), p)) => Err(format!(
+                "history window length must be a WHOLE number of shared AI ticks, got \
+                 {n} at position {p}: the window counts ticks, it is not a duration"
+            )),
+            Some((Token::Param, _)) => {
+                self.expect(&Token::LParen, "'(' after 'param'")?;
+                let name = self.expect_name("name inside param(...)")?;
+                self.expect(&Token::RParen, "')' to close param(...)")?;
+                Ok(Operand::Param(name))
+            }
+            Some((t, p)) => Err(format!(
+                "Expected a positive whole number or param(...) as the history window \
+                 length but got {t:?} at position {p}"
+            )),
+            None => Err(
+                "Expected a positive whole number or param(...) as the history window \
+                 length but reached end of predicate"
+                    .into(),
+            ),
+        }
     }
 
     /// Parse the right-hand side of a `fact(...) CMP` comparison: a numeric
@@ -1057,6 +1504,7 @@ impl Parser {
             Some((Token::TargetFact, _)) => Ok("target_fact".to_string()),
             Some((Token::Memory, _)) => Ok("memory".to_string()),
             Some((Token::StateTime, _)) => Ok("state_time".to_string()),
+            Some((Token::History, _)) => Ok("history".to_string()),
             Some((Token::Param, _)) => Ok("param".to_string()),
             Some((t, p)) => Err(format!("Expected {ctx} but got {t:?} at position {p}")),
             None => Err(format!("Expected {ctx} but reached end of predicate")),
@@ -1787,5 +2235,344 @@ mod tests {
         assert!(parse_predicate("fact(state_time) > 0")
             .unwrap()
             .evaluate_with(&facts_with(&[("state_time", 4.0)]), &AiParams::new(), &[]));
+    }
+
+    // ── Authored history operators (issue #890) ─────────────────────────────
+
+    /// Drive one policy's history bag with a series of readings for one fact,
+    /// one reading per shared tick, and return the bag.
+    fn folded(fact: &str, ticks: usize, samples: &[Option<f64>]) -> AiPolicyMemory {
+        let spec = HistorySpec {
+            fact: fact.to_string(),
+            ticks,
+        };
+        let mut memory = AiPolicyMemory::new();
+        for sample in samples {
+            let mut facts = AiFacts::new();
+            if let Some(v) = sample {
+                facts.set(fact, *v);
+            }
+            memory.fold_history(std::slice::from_ref(&spec), &facts);
+        }
+        memory
+    }
+
+    fn history_says(src: &str, memory: &AiPolicyMemory, params: &AiParams) -> bool {
+        parse_predicate(src)
+            .expect("history expression parses")
+            .evaluate_stateful(&AiFacts::new(), memory, params, &[])
+    }
+
+    #[test]
+    fn a_history_atom_parses_with_a_literal_and_with_a_param_window() {
+        let literal = parse_predicate("history(min, range_to_target, 8) >= 40").unwrap();
+        let Predicate::History {
+            reducer,
+            window,
+            op,
+            rhs,
+        } = literal
+        else {
+            panic!("a history atom must parse to Predicate::History");
+        };
+        assert_eq!(reducer, HistoryReducer::Min);
+        assert_eq!(window.fact, "range_to_target");
+        assert_eq!(window.ticks, Operand::Number(8.0));
+        assert_eq!(op, CmpOp::Ge);
+        assert_eq!(rhs, Operand::Number(40.0));
+
+        let authored =
+            parse_predicate("history(net_change, range_to_target, param(w)) > param(gain)")
+                .unwrap();
+        let Predicate::History { window, rhs, .. } = authored else {
+            panic!("a history atom must parse to Predicate::History");
+        };
+        assert_eq!(window.ticks, Operand::Param("w".into()));
+        assert_eq!(rhs, Operand::Param("gain".into()));
+    }
+
+    /// AC: the THRESHOLD-OVER-WINDOW shape — "every sample in the window
+    /// satisfies a predicate" — is authorable, and reads false until the window
+    /// has actually been held for the authored span.
+    #[test]
+    fn threshold_over_window_answers_held_only_once_the_whole_window_qualifies() {
+        let params = params_with(&[("standoff_ticks", 3.0), ("safe_range", 40.0)]);
+        let guard = "history(min, range_to_target, param(standoff_ticks)) >= param(safe_range)";
+
+        // Two good samples of an authored three: not held yet.
+        let two = folded("range_to_target", 3, &[Some(50.0), Some(50.0)]);
+        assert!(
+            !history_says(guard, &two, &params),
+            "a partly-filled window is not a maintained distance"
+        );
+
+        let three = folded("range_to_target", 3, &[Some(50.0); 3]);
+        assert!(history_says(guard, &three, &params));
+
+        // One breach anywhere in the window answers no...
+        let breached = folded("range_to_target", 3, &[Some(50.0), Some(10.0), Some(50.0)]);
+        assert!(!history_says(guard, &breached, &params));
+        // ...and stops mattering once it ages out, which is the property a
+        // running minimum could never give.
+        let recovered = folded(
+            "range_to_target",
+            3,
+            &[Some(50.0), Some(10.0), Some(50.0), Some(50.0), Some(50.0)],
+        );
+        assert!(
+            history_says(guard, &recovered, &params),
+            "a stale breach must age out of a bounded window"
+        );
+    }
+
+    /// The equivalence that justifies expressing "has held" as a reducer plus a
+    /// comparison rather than inventing a `held(...)` predicate: `min` over a
+    /// full window compared `>=` IS `BoundedHistory::all_at_least`.
+    #[test]
+    fn min_over_a_full_window_is_exactly_all_at_least() {
+        let params = params_with(&[("w", 4.0), ("t", 12.5)]);
+        let guard = "history(min, x, param(w)) >= param(t)";
+        for series in [
+            vec![20.0, 30.0, 40.0, 50.0],
+            vec![12.5, 12.5, 12.5, 12.5],
+            vec![12.4, 99.0, 99.0, 99.0],
+            vec![99.0, 99.0, 99.0, 12.4],
+        ] {
+            let mut window = BoundedHistory::new(4);
+            for v in &series {
+                window.push(*v);
+            }
+            let bag = folded("x", 4, &series.iter().map(|v| Some(*v)).collect::<Vec<_>>());
+            assert_eq!(
+                history_says(guard, &bag, &params),
+                window.all_at_least(12.5),
+                "history(min, …) >= t must agree with all_at_least(t) for {series:?}"
+            );
+        }
+    }
+
+    /// AC: the NET-CHANGE-OVER-WINDOW shape — "is the quantity trending" — is
+    /// authorable, keeps its sign, and is absent (so `false`) until the window
+    /// spans the authored length.
+    #[test]
+    fn net_change_over_window_answers_the_trend_with_its_sign() {
+        let params = params_with(&[("w", 3.0), ("min_progress", 5.0)]);
+        let opening = "history(net_change, range_to_target, param(w)) > param(min_progress)";
+        let closing = "history(net_change, range_to_target, param(w)) < 0";
+
+        let short = folded("range_to_target", 3, &[Some(10.0), Some(40.0)]);
+        assert!(
+            !history_says(opening, &short, &params),
+            "a window shorter than the authored span measures a span nobody authored"
+        );
+
+        let opened = folded("range_to_target", 3, &[Some(10.0), Some(20.0), Some(40.0)]);
+        assert!(history_says(opening, &opened, &params));
+        assert!(!history_says(closing, &opened, &params));
+
+        let closed = folded("range_to_target", 3, &[Some(40.0), Some(20.0), Some(10.0)]);
+        assert!(!history_says(opening, &closed, &params));
+        assert!(
+            history_says(closing, &closed, &params),
+            "a shrinking gap is a NEGATIVE net change, not an absolute distance"
+        );
+    }
+
+    /// The shape #789 needed and could not express: two windows over the SAME
+    /// reading with independent authored lengths, tuned for different questions.
+    #[test]
+    fn two_windows_over_one_fact_keep_independent_authored_lengths() {
+        let specs = vec![
+            HistorySpec {
+                fact: "range".into(),
+                ticks: 2,
+            },
+            HistorySpec {
+                fact: "range".into(),
+                ticks: 5,
+            },
+        ];
+        let mut memory = AiPolicyMemory::new();
+        for v in [10.0, 20.0, 30.0] {
+            let mut facts = AiFacts::new();
+            facts.set("range", v);
+            memory.fold_history(&specs, &facts);
+        }
+        assert_eq!(memory.history().len(), 2, "two windows, not one shared one");
+        assert_eq!(
+            memory
+                .history()
+                .reduce(&specs[0], HistoryReducer::NetChange),
+            Some(10.0),
+            "the short window spans the last two readings"
+        );
+        assert_eq!(
+            memory
+                .history()
+                .reduce(&specs[1], HistoryReducer::NetChange),
+            None,
+            "the long window is not full yet, so it has no span to measure"
+        );
+    }
+
+    /// An absent reading is a HOLE, not a skipped tick: a window that closed
+    /// over one would span more real time than its authored length while
+    /// claiming not to.
+    #[test]
+    fn an_absent_reading_clears_the_window_instead_of_spanning_the_gap() {
+        let params = params_with(&[("w", 3.0)]);
+        let guard = "history(min, x, param(w)) >= 0";
+        let spanning = folded("x", 3, &[Some(1.0), Some(1.0), None, Some(1.0)]);
+        assert!(
+            !history_says(guard, &spanning, &params),
+            "the window must restart after a tick with no reading"
+        );
+        let refilled = folded("x", 3, &[Some(1.0), None, Some(1.0), Some(1.0), Some(1.0)]);
+        assert!(history_says(guard, &refilled, &params));
+    }
+
+    /// No unbounded buffers: the window keeps exactly its authored capacity
+    /// however long the scenario runs, and the SET of windows is the authored
+    /// set rather than everything ever asked for.
+    #[test]
+    fn a_folded_window_never_grows_past_its_authored_capacity() {
+        let spec = HistorySpec {
+            fact: "x".into(),
+            ticks: 4,
+        };
+        let mut memory = AiPolicyMemory::new();
+        for n in 0..10_000 {
+            let mut facts = AiFacts::new();
+            facts.set("x", n as f64);
+            memory.fold_history(std::slice::from_ref(&spec), &facts);
+            assert!(memory.history().window(&spec).unwrap().len() <= 4);
+        }
+        assert_eq!(memory.history().len(), 1);
+
+        // Re-authoring to a different set drops what is no longer asked for.
+        let other = HistorySpec {
+            fact: "y".into(),
+            ticks: 2,
+        };
+        memory.fold_history(std::slice::from_ref(&other), &AiFacts::new());
+        assert_eq!(memory.history().len(), 1);
+        assert!(memory.history().window(&spec).is_none());
+    }
+
+    /// A history atom outside a bag that anything folds is `false`, never a
+    /// panic — the same absent-reading contract `fact(...)` carries. The load
+    /// error that stops content getting here lives in `entities::config` /
+    /// `entities::ai_flag_hosts`.
+    #[test]
+    fn an_unfolded_history_atom_is_false_and_never_panics() {
+        let params = params_with(&[("w", 3.0)]);
+        let p = parse_predicate("history(min, x, param(w)) >= 0").unwrap();
+        assert!(!p.evaluate(&[]));
+        assert!(!p.evaluate_with(&AiFacts::new(), &params, &[]));
+        assert!(!p.evaluate_stateful(&AiFacts::new(), &AiPolicyMemory::new(), &params, &[]));
+        // An undeclared window param resolves to no window at all.
+        let bag = folded("x", 3, &[Some(1.0); 3]);
+        assert!(!history_says(
+            "history(min, x, param(missing)) >= 0",
+            &bag,
+            &AiParams::new()
+        ));
+    }
+
+    #[test]
+    fn history_atoms_compose_with_the_rest_of_the_grammar() {
+        let params = params_with(&[("w", 2.0)]);
+        let bag = folded("x", 2, &[Some(9.0), Some(9.0)]);
+        assert!(history_says(
+            "history(min, x, param(w)) > 5 and not history(max, x, param(w)) > 100",
+            &bag,
+            &params
+        ));
+        assert!(history_says(
+            "flag(nope) or history(min, x, param(w)) > 5",
+            &bag,
+            &params
+        ));
+    }
+
+    // ── Malformed history expressions are load errors that name the problem ──
+
+    #[test]
+    fn an_unknown_reducer_is_a_parse_error_naming_the_valid_ones() {
+        let err = parse_predicate("history(average, x, 4) > 0").unwrap_err();
+        assert!(err.contains("average"), "{err}");
+        assert!(err.contains("min") && err.contains("net_change"), "{err}");
+    }
+
+    #[test]
+    fn a_history_window_must_be_a_positive_whole_number_of_ticks() {
+        let fractional = parse_predicate("history(min, x, 2.5) > 0").unwrap_err();
+        assert!(fractional.contains("WHOLE number"), "{fractional}");
+        assert!(fractional.contains("2.5"), "{fractional}");
+
+        for src in ["history(min, x, 0) > 0", "history(min, x, -4) > 0"] {
+            let err = parse_predicate(src).unwrap_err();
+            assert!(err.contains("positive whole number"), "{src}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_history_atom_names_what_was_missing() {
+        // Missing the window argument entirely.
+        let err = parse_predicate("history(min, x) > 0").unwrap_err();
+        assert!(err.contains("window length"), "{err}");
+        // Missing the separator between reducer and fact.
+        let err = parse_predicate("history(min x, 4) > 0").unwrap_err();
+        assert!(err.contains("','"), "{err}");
+        // No comparison at all: a window reduces to a scalar, it is not itself
+        // a boolean.
+        let err = parse_predicate("history(min, x, 4)").unwrap_err();
+        assert!(err.contains("comparison operator"), "{err}");
+        // Nothing to compare against.
+        let err = parse_predicate("history(min, x, 4) >").unwrap_err();
+        assert!(err.contains("reached end of predicate"), "{err}");
+        // A window that is neither a literal nor a param.
+        let err = parse_predicate("history(min, x, fact(y)) > 0").unwrap_err();
+        assert!(err.contains("window length"), "{err}");
+    }
+
+    #[test]
+    fn history_remains_usable_as_a_flag_and_fact_name() {
+        // `history` was a legal identifier before #890; existing content that
+        // used it as a name must keep parsing.
+        let s = store_with(&[("history", 1)]);
+        assert!(parse_predicate("flag(history)").unwrap().evaluate(&[&s]));
+        assert!(parse_predicate("fact(history) > 0").unwrap().evaluate_with(
+            &facts_with(&[("history", 1.0)]),
+            &AiParams::new(),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn history_references_are_reportable_for_content_validation() {
+        let p = parse_predicate(
+            "history(min, a, param(w)) >= 1 and not history(net_change, b, 7) < param(t)",
+        )
+        .unwrap();
+        let mut refs = Vec::new();
+        p.referenced_history(&mut refs);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].render(), "history(min, a, param(w))");
+        assert_eq!(refs[1].render(), "history(net_change, b, 7)");
+        assert_eq!(
+            p.history_atom().unwrap().render(),
+            "history(min, a, param(w))"
+        );
+
+        // BOTH operands are declaration-checked references.
+        let mut params = Vec::new();
+        p.referenced_params(&mut params);
+        params.sort();
+        assert_eq!(params, vec!["t".to_string(), "w".to_string()]);
+
+        // And an expression with no window reports none.
+        let plain = parse_predicate("fact(x) > 0").unwrap();
+        assert!(plain.history_atom().is_none());
     }
 }

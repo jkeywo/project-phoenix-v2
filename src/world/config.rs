@@ -1633,6 +1633,27 @@ impl WorldEntity {
 
 // -- Parser -----------------------------------------------------------------
 
+/// Reject a `history(...)` atom in a WORLD expression (issue #890).
+///
+/// The bounded-window operator reads a per-fine-system history bag that an AI
+/// policy host folds once per shared AI tick. World triggers and entity `when`
+/// guards evaluate through [`crate::world::flags::Predicate::evaluate`], against
+/// a flag-store chain and nothing else — there is no bag, nothing folds one, and
+/// there is no per-system scope a window could even belong to. Left alone the
+/// atom would parse, load, and read `false` for the whole scenario.
+fn reject_world_history(pred: &crate::world::flags::Predicate, what: &str) -> Result<(), String> {
+    match pred.history_atom() {
+        Some(atom) => Err(format!(
+            "{what} reads {}: bounded history windows belong to an AI fine system's \
+             policy, which has a host to advance them once per shared AI tick. World \
+             expressions evaluate against flags alone, so the window would never fill \
+             and this would read false for the whole scenario",
+            atom.render()
+        )),
+        None => Ok(()),
+    }
+}
+
 /// Parse a unified world TOML string in a single pass.
 ///
 /// Validates that every anchor position has 2 or 3 components and normalises
@@ -1689,6 +1710,9 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             .into_iter()
             .map(|s| s.and_then(|src| crate::world::flags::parse_predicate(&src).ok()))
             .collect();
+        for pred in action_predicates.iter().flatten() {
+            reject_world_history(pred, "Trigger action 'when' predicate")?;
+        }
         let action_delays: Vec<f32> = delay_secs;
         let when = match raw_trigger.when {
             Some(src) => Some(
@@ -1697,6 +1721,9 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             ),
             None => None,
         };
+        if let Some(pred) = when.as_ref() {
+            reject_world_history(pred, "Trigger 'when' predicate")?;
+        }
         triggers.push(Trigger {
             condition,
             actions,
@@ -1770,13 +1797,17 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     let mut entities = raw.entities;
     for entity in &mut entities {
         if let Some(ref src) = entity.when.clone() {
-            entity.when_predicate =
-                Some(crate::world::flags::parse_predicate(src).map_err(|e| {
-                    format!(
-                        "Entity '{}' when predicate parse error: {e}",
-                        entity.template_path
-                    )
-                })?);
+            let pred = crate::world::flags::parse_predicate(src).map_err(|e| {
+                format!(
+                    "Entity '{}' when predicate parse error: {e}",
+                    entity.template_path
+                )
+            })?;
+            reject_world_history(
+                &pred,
+                &format!("Entity '{}' when predicate", entity.template_path),
+            )?;
+            entity.when_predicate = Some(pred);
         }
     }
 
@@ -3666,6 +3697,53 @@ when      = "flag(a) &&"
             err.contains("when") || err.contains("predicate"),
             "error must mention predicate/when: {err}"
         );
+    }
+
+    /// Issue #890: the bounded-window operator belongs to an AI fine system's
+    /// policy, which has a host to advance it once per shared AI tick. World
+    /// expressions evaluate against flags alone, so an atom authored here would
+    /// load and then read false for the whole scenario — the trap #779/#891
+    /// closed on two other surfaces, refused on this one before it opens.
+    #[test]
+    fn parse_world_rejects_a_history_atom_in_every_world_expression() {
+        let trigger_when = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+when      = "history(min, range_to_target, 30) > 0"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-cleanup"
+"#;
+        let action_when = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-cleanup"
+  when = "history(max, hull_pct, 12) < 1"
+"#;
+        let entity_when = r#"
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+when          = "history(net_change, hull_pct, 5) < 0"
+"#;
+        for (label, toml) in [
+            ("trigger `when`", trigger_when),
+            ("trigger action `when`", action_when),
+            ("entity `when`", entity_when),
+        ] {
+            let err = parse_world(toml)
+                .expect_err(&format!("a history atom in a {label} must fail the load"));
+            assert!(
+                err.contains("history(") && err.contains("AI fine system"),
+                "{label}: the error must quote the atom and say where windows live; \
+                 got: {err}"
+            );
+        }
     }
 
     #[test]

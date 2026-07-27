@@ -2816,6 +2816,22 @@ fn validate_selector_inner(
         if let Some(host) = host {
             host.check_guard(&format!("target selector {what}"), pred)?;
         }
+        // Unlike the flag chain, this one needs no host to answer (issue #890):
+        // a selector evaluates through `Predicate::evaluate_selector`, which
+        // hands in a DEFAULT private bag — there is no per-fine-system history
+        // for a per-candidate scoring pass to fold into, on any host. So the
+        // rejection fires on the host-less path too, and a `history(...)` in an
+        // eligibility or score term can never become a permanently-false term.
+        if let Some(atom) = pred.history_atom() {
+            return Err(format!(
+                "target selector {what} reads {}, but a target selector is evaluated \
+                 per candidate against a snapshot with no history bag: no window is \
+                 folded for it, so the comparison would read false for ever. A \
+                 windowed question belongs in the owning system's policy, which has \
+                 one",
+                atom.render()
+            ));
+        }
         let mut refs = Vec::new();
         pred.referenced_params(&mut refs);
         for name in refs {
@@ -4022,6 +4038,64 @@ fn check_policy_predicate(
             "ai policy {what} references state_time but the policy declares no states: \
              state time requires a stateful policy"
         ));
+    }
+    check_history_windows(cfg, stateful, pred, what)
+}
+
+/// Reject an authored `history(...)` atom the runtime could not honour
+/// (issue #890).
+///
+/// Two rejections, and they close the two halves of the same trap:
+///
+/// * a history atom in a STATELESS policy. The window is per-fine-system
+///   retained state carried on the same private bag as `memory(...)`, folded by
+///   the host that ticks the state machine — a policy with no machine is never
+///   ticked, so the window would never be advanced and the guard would read
+///   false for ever. (`AiHost::check_guard` catches the sibling case: a stateful
+///   policy on a host with no fold at all.)
+/// * a window length that is not a positive whole number of shared AI ticks. A
+///   literal is caught by the parser, which is the only place that sees it; a
+///   `param(...)` can only be checked HERE, against its declared value, and a
+///   fractional or zero one would silently disable the operator (a zero-capacity
+///   window retains nothing and is never full — see [`crate::bounded_history`]).
+fn check_history_windows(
+    cfg: &FineSystemAiConfigToml,
+    stateful: bool,
+    pred: &crate::world::flags::Predicate,
+    what: &str,
+) -> Result<(), String> {
+    let mut refs = Vec::new();
+    pred.referenced_history(&mut refs);
+    if refs.is_empty() {
+        return Ok(());
+    }
+    if !stateful {
+        return Err(format!(
+            "ai policy {what} reads {} but the policy declares no states: a bounded \
+             history window is per-fine-system retained state, advanced once per \
+             shared AI tick by the host that ticks the state machine, so it requires \
+             a stateful policy",
+            refs[0].render()
+        ));
+    }
+    for atom in &refs {
+        let ticks = match &atom.window.ticks {
+            crate::world::flags::Operand::Number(n) => *n,
+            // An UNDECLARED parameter is already the caller's error above; this
+            // arm only skips re-reporting it under a worse message.
+            crate::world::flags::Operand::Param(name) => match cfg.param.get(name) {
+                Some(value) => *value as f64,
+                None => continue,
+            },
+        };
+        if !ticks.is_finite() || ticks.fract() != 0.0 || ticks < 1.0 {
+            return Err(format!(
+                "ai policy {what} reads {} whose window length resolves to {ticks}: a \
+                 history window counts shared AI ticks, so it must be a positive whole \
+                 number",
+                atom.render()
+            ));
+        }
     }
     Ok(())
 }
@@ -9992,6 +10066,119 @@ when = "state_time >= param(surge_dwell_secs)"
         let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
         assert!(
             err.contains("state_time") && err.contains("no states"),
+            "got: {err}"
+        );
+    }
+
+    // ── Authored history operators (issue #890) ─────────────────────────────
+
+    /// A `history(...)` guard in a STATELESS policy — the same defect on the
+    /// third private atom. The window is per-fine-system retained state that
+    /// the state-machine host advances; a policy with no machine is never
+    /// ticked, so nothing would ever fill it.
+    #[test]
+    fn history_reference_in_a_stateless_policy_is_rejected() {
+        let mut cfg = FineSystemAiConfigToml {
+            rule: vec![FineSystemAiRuleToml {
+                priority: 0,
+                channel: HELM_BOOST_CHANNEL.to_string(),
+                when: "history(min, hazard_urgency, param(window_ticks)) >= 1".to_string(),
+                verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+                value: false,
+                level: 0,
+                response_index: 0,
+            }],
+            ..Default::default()
+        };
+        cfg.param.insert("window_ticks".to_string(), 8.0);
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("history(min, hazard_urgency, param(window_ticks))")
+                && err.contains("no states"),
+            "got: {err}"
+        );
+    }
+
+    /// The window length is a `param(...)` like any other reference, and an
+    /// undeclared one is rejected — the author never has to guess whether a
+    /// typo silently disabled the operator.
+    #[test]
+    fn an_undeclared_history_window_param_is_rejected() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.state[0].transition = vec![FineSystemAiTransitionToml {
+            priority: 0,
+            to: "cruise".to_string(),
+            when: "history(min, hazard_urgency, param(never_declared)) >= 1".to_string(),
+        }];
+        let err = validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+        assert!(
+            err.contains("undeclared parameter") && err.contains("never_declared"),
+            "got: {err}"
+        );
+    }
+
+    /// The half of the malformed-window check the parser cannot make: only the
+    /// hull knows what its parameter is worth. A zero-length window retains
+    /// nothing and is never full, so it would disable the guard in silence.
+    #[test]
+    fn a_non_integral_or_zero_history_window_param_is_rejected() {
+        for (value, needle) in [(8.5_f32, "8.5"), (0.0, "0"), (-3.0, "-3")] {
+            let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+            cfg.param.insert("window_ticks".to_string(), value);
+            cfg.state[0].transition = vec![FineSystemAiTransitionToml {
+                priority: 0,
+                to: "cruise".to_string(),
+                when: "history(min, hazard_urgency, param(window_ticks)) >= 1".to_string(),
+            }];
+            let err =
+                validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS).unwrap_err();
+            assert!(
+                err.contains("positive whole number") && err.contains(needle),
+                "window length {value} must be rejected naming the value; got: {err}"
+            );
+        }
+    }
+
+    /// An authored window of a positive whole number of ticks is accepted, in
+    /// every position a stateful policy can carry a guard.
+    #[test]
+    fn an_authored_history_window_validates_in_rules_and_transitions() {
+        let mut cfg = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
+        cfg.param.insert("window_ticks".to_string(), 30.0);
+        cfg.state[0].rule = vec![FineSystemAiRuleToml {
+            priority: 0,
+            channel: HELM_BOOST_CHANNEL.to_string(),
+            when: "history(net_change, hazard_urgency, param(window_ticks)) > 0".to_string(),
+            verb: HELM_ENGAGE_BOOST_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }];
+        cfg.state[0].transition = vec![FineSystemAiTransitionToml {
+            priority: 0,
+            to: "cruise".to_string(),
+            when: "history(min, hazard_urgency, param(window_ticks)) >= 1".to_string(),
+        }];
+        validate_fine_system_ai_policy(&cfg, BOOST_CHANNELS, BOOST_VERBS)
+            .expect("an authored positive whole window is valid content");
+    }
+
+    /// A target selector has no history bag on ANY host — it is evaluated per
+    /// candidate against a snapshot — so the rejection needs no host to answer
+    /// and fires on the host-less path too.
+    #[test]
+    fn a_history_reference_in_a_target_selector_is_rejected() {
+        let cfg: FineSystemAiSelectorToml = toml::from_str(
+            r#"
+            horizon = 100.0
+            switch_margin = 0.0
+            eligibility = "candidate_fact(detectable) > 0 and history(min, range_to_target, 30) > 0"
+            "#,
+        )
+        .expect("fixture selector parses");
+        let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
+        assert!(
+            err.contains("history(min, range_to_target, 30)") && err.contains("no history bag"),
             "got: {err}"
         );
     }

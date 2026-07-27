@@ -1,6 +1,8 @@
 //! Which fine-system AI hosts can actually evaluate `flag(...)` and
 //! `counter(...)` guards — and the load-time rejection for the ones that
-//! cannot (issue #891, stage 1).
+//! cannot (issue #891, stage 1). Issue #890 adds a second question of exactly
+//! the same shape: which hosts fold a bounded history window, and therefore
+//! where a `history(...)` guard can ever read anything but absent.
 //!
 //! # The trap this closes
 //!
@@ -87,6 +89,22 @@ pub struct AiHost {
     /// them must agree, so a stage-2 change that plumbs one and misses another
     /// fails the drift test rather than half-working.
     pub eval_sites: &'static [EvalSite],
+    /// Where this host advances its bounded history windows, or `None` when
+    /// nothing does (issue #890).
+    ///
+    /// `Some(site)` is a promise with two halves, both pinned by tests: that
+    /// function calls [`crate::world::flags::AiPolicyMemory::fold_history`], and
+    /// it is the ONLY function in the crate that calls it at all. Without the
+    /// second half a window could
+    /// quietly acquire a second fold site — the per-axis actuator systems all
+    /// resolve guards off the same ship in the same tick — and every authored
+    /// span would mean a fraction of what the file says.
+    ///
+    /// `None` makes a `history(...)` guard on this host a LOAD ERROR rather
+    /// than a permanently-absent reading. Widening the set is how a future host
+    /// gains the operator: add the fold, name it here, and the rejection stops
+    /// firing for that host alone.
+    pub history_fold: Option<EvalSite>,
 }
 
 // ── The nineteen hosts ───────────────────────────────────────────────────────
@@ -105,11 +123,24 @@ const HELM_MACHINE_SITES: &[EvalSite] = &[
     site("src/ship/helm_ai.rs", "tick_policy_machine"),
 ];
 
+/// The three helm axes that may author a #882 state machine are the only hosts
+/// that fold a bounded history window today (issue #890), and they all fold it
+/// in the one place their machines are advanced: `tick_policy_machine`, called
+/// once per fine system per shared AI tick from `ai_policy_state_tick`.
+///
+/// Their per-state RULE guards are resolved later in the same tick by the
+/// per-axis actuator systems, off the same per-system bag — so a window is
+/// readable in both authorable positions on these three, and folded in neither
+/// of them.
+const HELM_HISTORY_FOLD: Option<EvalSite> =
+    Some(site("src/ship/helm_ai.rs", "tick_policy_machine"));
+
 pub const CAPTAIN_RED_ALERT: AiHost = AiHost {
     system: "Captain",
     block: "[captain_console.ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: &[site("src/console/captain/server.rs", "operate_captain_ai")],
+    history_fold: None,
 };
 
 pub const HELM_ENGINES: AiHost = AiHost {
@@ -117,6 +148,7 @@ pub const HELM_ENGINES: AiHost = AiHost {
     block: "[helm_console.engines_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_MACHINE_SITES,
+    history_fold: HELM_HISTORY_FOLD,
 };
 
 pub const HELM_STEERING: AiHost = AiHost {
@@ -124,6 +156,7 @@ pub const HELM_STEERING: AiHost = AiHost {
     block: "[helm_console.steering_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_MACHINE_SITES,
+    history_fold: HELM_HISTORY_FOLD,
 };
 
 pub const HELM_LATERAL: AiHost = AiHost {
@@ -131,6 +164,7 @@ pub const HELM_LATERAL: AiHost = AiHost {
     block: "[helm_console.lateral_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_ACTUATOR_SITES,
+    history_fold: None,
 };
 
 pub const HELM_VERTICAL: AiHost = AiHost {
@@ -138,6 +172,7 @@ pub const HELM_VERTICAL: AiHost = AiHost {
     block: "[helm_console.vertical_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_ACTUATOR_SITES,
+    history_fold: None,
 };
 
 pub const HELM_IMPULSE: AiHost = AiHost {
@@ -145,6 +180,7 @@ pub const HELM_IMPULSE: AiHost = AiHost {
     block: "[helm_console.impulse_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_ACTUATOR_SITES,
+    history_fold: None,
 };
 
 pub const HELM_BOOST: AiHost = AiHost {
@@ -152,6 +188,7 @@ pub const HELM_BOOST: AiHost = AiHost {
     block: "[helm_console.boost_ai]",
     flag_chain: FlagChain::Empty,
     eval_sites: HELM_MACHINE_SITES,
+    history_fold: HELM_HISTORY_FOLD,
 };
 
 pub const PHASER_BANK: AiHost = AiHost {
@@ -162,6 +199,7 @@ pub const PHASER_BANK: AiHost = AiHost {
         "src/console/weapons/beam.rs",
         "phaser_bank_policy_fires",
     )],
+    history_fold: None,
 };
 
 pub const BLASTER_BANK: AiHost = AiHost {
@@ -172,6 +210,7 @@ pub const BLASTER_BANK: AiHost = AiHost {
         "src/console/weapons/blaster.rs",
         "blaster_bank_policy_fires",
     )],
+    history_fold: None,
 };
 
 pub const TORPEDO_TUBE: AiHost = AiHost {
@@ -188,6 +227,7 @@ pub const TORPEDO_TUBE: AiHost = AiHost {
             "torpedo_tube_launch_policy_fires",
         ),
     ],
+    history_fold: None,
 };
 
 pub const TORPEDO_MAGAZINE: AiHost = AiHost {
@@ -198,6 +238,7 @@ pub const TORPEDO_MAGAZINE: AiHost = AiHost {
         "src/console/weapons/torpedo.rs",
         "torpedo_magazine_grant_policy_fires",
     )],
+    history_fold: None,
 };
 
 pub const SHIELDS_FOCUS: AiHost = AiHost {
@@ -205,6 +246,7 @@ pub const SHIELDS_FOCUS: AiHost = AiHost {
     block: "[shields_console.ai_policy]",
     flag_chain: FlagChain::Empty,
     eval_sites: &[site("src/console_ai/server.rs", "ai_shield_focus")],
+    history_fold: None,
 };
 
 pub const POWER_ALLOCATION: AiHost = AiHost {
@@ -212,6 +254,7 @@ pub const POWER_ALLOCATION: AiHost = AiHost {
     block: "[power.ai_policy]",
     flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console_ai/server.rs", "ai_power_allocation")],
+    history_fold: None,
 };
 
 pub const COMMS_RESPONSE: AiHost = AiHost {
@@ -222,6 +265,7 @@ pub const COMMS_RESPONSE: AiHost = AiHost {
         "src/console/comms/server.rs",
         "operate_comms_response_ai",
     )],
+    history_fold: None,
 };
 
 pub const SENSORS_SELECTOR: AiHost = AiHost {
@@ -229,6 +273,7 @@ pub const SENSORS_SELECTOR: AiHost = AiHost {
     block: "[sensors_console.selector]",
     flag_chain: FlagChain::Empty,
     eval_sites: &[site("src/ship/sensors.rs", "operate_sensors_ai")],
+    history_fold: None,
 };
 
 pub const TACTICAL_SELECTOR: AiHost = AiHost {
@@ -236,6 +281,7 @@ pub const TACTICAL_SELECTOR: AiHost = AiHost {
     block: "[weapons_console.selector]",
     flag_chain: FlagChain::Empty,
     eval_sites: &[site("src/console/weapons/mod.rs", "ai_target_selection")],
+    history_fold: None,
 };
 
 pub const NAVIGATION_SELECTOR: AiHost = AiHost {
@@ -246,6 +292,7 @@ pub const NAVIGATION_SELECTOR: AiHost = AiHost {
         "src/console/navigation/mod.rs",
         "operate_navigation_ai",
     )],
+    history_fold: None,
 };
 
 pub const REPAIR_SELECTOR: AiHost = AiHost {
@@ -253,6 +300,7 @@ pub const REPAIR_SELECTOR: AiHost = AiHost {
     block: "[repair.selector]",
     flag_chain: FlagChain::Empty,
     eval_sites: &[site("src/console/repair/server.rs", "operate_repair_ai")],
+    history_fold: None,
 };
 
 pub const COMMS_SELECTOR: AiHost = AiHost {
@@ -260,6 +308,7 @@ pub const COMMS_SELECTOR: AiHost = AiHost {
     block: "[comms_console.selector]",
     flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console/comms/server.rs", "operate_comms_ai")],
+    history_fold: None,
 };
 
 /// Roll call. The drift tests iterate this, so a host added above and left out
@@ -287,15 +336,52 @@ pub const AI_HOSTS: &[AiHost] = &[
 ];
 
 impl AiHost {
-    /// Reject a guard expression that reads world state on a host whose runtime
-    /// evaluation gets no flag chain (issue #891 stage 1).
+    /// Reject a guard expression this host could never evaluate — world state
+    /// with no flag chain (issue #891 stage 1), or a bounded history window
+    /// nothing folds (issue #890).
     ///
     /// `what` is the validator's own rule/transition/term label, so the message
-    /// reads as one sentence with the rest of the content-error surface. The
-    /// offending atom is quoted back verbatim: with `flag(...)` and
+    /// reads as one sentence with the rest of the content-error surface.
+    pub fn check_guard(&self, what: &str, pred: &Predicate) -> Result<(), String> {
+        self.check_world_state(what, pred)?;
+        self.check_history(what, pred)
+    }
+
+    /// Reject a `history(...)` guard on a host that folds no window
+    /// (issue #890).
+    ///
+    /// Without this the atom would parse, validate, and then read ABSENT for
+    /// ever — the `fact(...)` trap #779 shipped, the `flag(...)` trap #891
+    /// closed, and precisely the failure this operator exists to stop content
+    /// authors walking into. A window that nobody advances is never full, and a
+    /// window that is never full reduces to nothing, so every comparison against
+    /// it is quietly `false`.
+    fn check_history(&self, what: &str, pred: &Predicate) -> Result<(), String> {
+        if self.history_fold.is_some() {
+            return Ok(());
+        }
+        let Some(atom) = pred.history_atom() else {
+            return Ok(());
+        };
+        Err(format!(
+            "{what} reads {}, but nothing folds a bounded history window for the {} \
+             system ({}) — no host advances one for it once per shared AI tick — so \
+             the window would never fill and the comparison would read false for \
+             ever. Remove it, or add the once-per-tick fold for that host and name \
+             it in ai_flag_hosts::AI_HOSTS",
+            atom.render(),
+            self.system,
+            self.block
+        ))
+    }
+
+    /// Reject a `flag(...)`/`counter(...)` guard on a host whose runtime
+    /// evaluation gets no flag chain (issue #891 stage 1).
+    ///
+    /// The offending atom is quoted back verbatim: with `flag(...)` and
     /// `counter(...)` both rejected here, "which one did I write?" is the
     /// author's immediate next question.
-    pub fn check_guard(&self, what: &str, pred: &Predicate) -> Result<(), String> {
+    fn check_world_state(&self, what: &str, pred: &Predicate) -> Result<(), String> {
         if self.flag_chain == FlagChain::Plumbed {
             return Ok(());
         }
@@ -556,6 +642,197 @@ mod tests {
              can ever read true: {unclaimed:?}. Add the host (or its extra eval \
              site) to AI_HOSTS."
         );
+    }
+
+    // ── The history fold (issue #890) ───────────────────────────────────────
+
+    /// The one method name that advances a bounded history window
+    /// (`AiPolicyMemory::fold_history` / `AiHistory::fold_history`), as it
+    /// appears at a CALL site. The two methods share one deliberately
+    /// distinctive name — not `fold` or `advance` — so this scan can be exact.
+    const HISTORY_FOLD_CALL: &str = ".fold_history(";
+
+    /// AC: a host that declares a fold site really folds there.
+    ///
+    /// Without this the classification would be an assertion in a comment, and
+    /// the load-time rejection would let a `history(...)` guard through onto a
+    /// host whose window nothing advances — which is the exact failure the
+    /// rejection exists to prevent.
+    #[test]
+    fn every_declared_history_fold_site_really_folds() {
+        for host in AI_HOSTS {
+            let Some(site) = host.history_fold else {
+                continue;
+            };
+            let src = read_non_test_source(site.file);
+            let body = function_body(&src, site.func);
+            assert!(
+                body.contains(HISTORY_FOLD_CALL),
+                "{} ({}) declares {}::{} as its history fold site, but that function \
+                 never calls `{HISTORY_FOLD_CALL}`. Either point the entry at the \
+                 function that advances the window, or set history_fold = None — a \
+                 host that folds nothing must reject history(...) at load rather \
+                 than let it read absent for ever",
+                host.system,
+                host.block,
+                site.file,
+                site.func
+            );
+        }
+    }
+
+    /// AC (the once-per-shared-tick guarantee, structurally): there is exactly
+    /// ONE fold site in the crate, and a host claims it.
+    ///
+    /// This is the guard against the sharp edge #789 documented. The per-axis
+    /// helm actuator systems all resolve guards off the same ship in the same
+    /// tick; a fold added to one of them would advance every authored window
+    /// several times per shared tick, so `history(net_change, x, 30)` would
+    /// silently measure a fraction of the span the file says — with every other
+    /// assertion in the suite still green. A new fold site now has to be
+    /// declared here, where the reviewer can see whether it runs once per tick.
+    #[test]
+    fn every_history_fold_in_the_crate_belongs_to_a_host() {
+        let root = crate_root();
+        let claimed: BTreeSet<(&str, &str)> = AI_HOSTS
+            .iter()
+            .filter_map(|h| h.history_fold)
+            .map(|s| (s.file, s.func))
+            .collect();
+        assert!(
+            !claimed.is_empty(),
+            "no host claims a fold site, so this scan would pass vacuously"
+        );
+
+        let mut files = Vec::new();
+        rust_files(&root.join("src"), &mut files);
+        let mut unclaimed: Vec<String> = Vec::new();
+        let mut seen = 0usize;
+        for path in files {
+            let rel = path
+                .strip_prefix(&root)
+                .expect("scanned file is under the crate root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let src = strip_test_module(&std::fs::read_to_string(&path).expect("readable source"));
+            let mut from = 0usize;
+            while let Some(hit) = src[from..].find(HISTORY_FOLD_CALL) {
+                let at = from + hit;
+                from = at + HISTORY_FOLD_CALL.len();
+                let Some(fn_at) = src[..at].rfind("fn ") else {
+                    continue;
+                };
+                let name: String = src[fn_at + 3..]
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                // `AiPolicyMemory::fold_history` delegates to
+                // `AiHistory::fold_history`. A call from the method of the same
+                // name is that delegation, not a second place a window advances.
+                if name == "fold_history" {
+                    continue;
+                }
+                seen += 1;
+                if !claimed.contains(&(rel.as_str(), name.as_str())) {
+                    unclaimed.push(format!("{rel}::{name}"));
+                }
+            }
+        }
+        unclaimed.sort();
+        unclaimed.dedup();
+        assert!(
+            unclaimed.is_empty(),
+            "these functions advance a bounded history window but no AiHost claims \
+             them as its fold site: {unclaimed:?}. A window must be folded EXACTLY \
+             ONCE per shared AI tick — four per-axis hosts folding the same ship's \
+             window would quarter every authored span. Add the host's history_fold \
+             entry, or move the fold to the shared per-tick host."
+        );
+        assert_eq!(
+            seen,
+            claimed.len(),
+            "expected exactly one fold call per claimed site; {seen} were found"
+        );
+    }
+
+    /// The hosts that fold a window today, pinned by name — the reading of how
+    /// far the operator has reached, exactly as the flag-chain roll call is.
+    #[test]
+    fn exactly_the_three_helm_machine_axes_fold_history_today() {
+        let folding: Vec<&str> = AI_HOSTS
+            .iter()
+            .filter(|h| h.history_fold.is_some())
+            .map(|h| h.system)
+            .collect();
+        assert_eq!(
+            folding,
+            vec!["Helm engines", "Helm steering", "Helm boost"],
+            "the set of history-folding hosts changed. Widening it is how a new \
+             host gains the operator — update this list, and check the new fold \
+             really runs once per shared AI tick. Anything else means a host \
+             silently lost its window and its authored guards have gone quiet."
+        );
+    }
+
+    #[test]
+    fn an_unfolded_host_rejects_history_and_nothing_else() {
+        let windowed =
+            crate::world::flags::parse_predicate("history(min, range_to_target, 30) >= 40")
+                .unwrap();
+        let err = CAPTAIN_RED_ALERT
+            .check_guard("rule 0", &windowed)
+            .unwrap_err();
+        assert!(err.contains("Captain"), "must name the system: {err}");
+        assert!(
+            err.contains("history(min, range_to_target, 30)"),
+            "must quote the atom: {err}"
+        );
+        assert!(
+            err.contains("folds a bounded history window"),
+            "must say plainly why: {err}"
+        );
+
+        // Nested under `not`/`and` is still a reference.
+        let nested =
+            crate::world::flags::parse_predicate("fact(a) > 0 and not history(max, b, 4) < 1")
+                .unwrap();
+        assert!(CAPTAIN_RED_ALERT.check_guard("rule 0", &nested).is_err());
+
+        // Everything else on an unfolded host is untouched by this check.
+        let plain = crate::world::flags::parse_predicate("fact(a) > param(b)").unwrap();
+        assert!(CAPTAIN_RED_ALERT.check_guard("rule 0", &plain).is_ok());
+    }
+
+    #[test]
+    fn folding_hosts_accept_history() {
+        let windowed = crate::world::flags::parse_predicate(
+            "history(min, range_to_target, param(w)) >= param(safe)",
+        )
+        .unwrap();
+        for host in [HELM_ENGINES, HELM_STEERING, HELM_BOOST] {
+            assert!(
+                host.check_guard("rule 0", &windowed).is_ok(),
+                "{} folds a window once per shared tick, so a history guard on it is \
+                 valid content",
+                host.system
+            );
+        }
+    }
+
+    /// The three helm hosts fold, but the three per-axis ACTUATOR axes sitting
+    /// beside them do not — and that asymmetry is the whole point. Their guards
+    /// are resolved by `helm_policy_actuates`, which has no per-system bag to
+    /// fold into, so a window authored there would read absent for ever.
+    #[test]
+    fn the_per_axis_actuator_hosts_reject_history() {
+        let windowed =
+            crate::world::flags::parse_predicate("history(min, hazard_urgency, 8) >= 1").unwrap();
+        for host in [HELM_LATERAL, HELM_VERTICAL, HELM_IMPULSE] {
+            let err = host
+                .check_guard("rule 0", &windowed)
+                .expect_err("an unfolded helm axis must reject a windowed guard");
+            assert!(err.contains(host.system), "{err}");
+        }
     }
 
     /// The three hosts that CAN read world flags today, pinned by name. Reading
@@ -865,6 +1142,131 @@ mod tests {
         );
         crate::entities::config::EntityConfig::from_toml(&mutated).expect(
             "the Power reactor passes a real flag chain, so a flag() guard on it is valid content",
+        );
+    }
+
+    // ── History, through the real entity-load path (issue #890) ─────────────
+
+    const DESTROYER: &str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+
+    /// The destroyer's own re-entry gate, which #788 could only express as a
+    /// bespoke host-folded fact. The window is authored on the same param the
+    /// bespoke plumbing already reads.
+    const AUTHORED_WINDOW: &str =
+        "history(min, range_to_target, param(safe_distance_window_ticks)) \
+                                   >= param(safe_range_margin)";
+
+    /// The destroyer's `recover` re-entry transition, which all THREE of its
+    /// machine axes author an independent copy of. Substituted in every copy, so
+    /// the mutation exercises each folded host rather than only the first.
+    const RECOVER_GUARD: &str = r#"when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0""#;
+
+    /// [`with_guard`] for a guard the hull authors once PER AXIS. Asserts the
+    /// expected count for the same reason `with_guard` asserts one: a
+    /// silently-missed substitution turns the test into a vacuous pass.
+    fn with_guard_everywhere(hull: &str, from: &str, to: &str, expected: usize) -> String {
+        assert_eq!(
+            hull.matches(from).count(),
+            expected,
+            "the guard being mutated must appear on every axis that authors it"
+        );
+        hull.replace(from, to)
+    }
+
+    /// AC: the two window shapes are authorable in a real hull's policy guard
+    /// and the hull LOADS — the mechanism reaches content, not just unit tests.
+    #[test]
+    fn a_history_guard_on_a_shipped_hull_loads() {
+        crate::entities::config::EntityConfig::from_toml(DESTROYER)
+            .expect("ship_harrow_destroyer loads as shipped");
+
+        // A transition guard (the position #788's bespoke fact was confined to),
+        // on all three of the hull's machine axes. A LITERAL window here because
+        // only the Steering axis declares the standoff length as a param — the
+        // authored-param spelling is exercised on the rule below.
+        let transition = with_guard_everywhere(
+            DESTROYER,
+            RECOVER_GUARD,
+            r#"when = "fact(shield_fraction) >= param(reentry_shield_fraction) and history(min, range_to_target, 60) >= 0""#,
+            3,
+        );
+        crate::entities::config::EntityConfig::from_toml(&transition).expect(
+            "the helm machine axes fold their window once per shared tick, so a \
+             windowed transition guard is valid content",
+        );
+
+        // And a per-state RULE guard — the position the bespoke facts could NOT
+        // be authored in, because the per-axis hosts never seeded them. Anchored
+        // on the recovery-orbit verb, which only the Steering axis authors, and
+        // with the window length AUTHORED as one of that axis's own params.
+        let rule = with_guard(
+            DESTROYER,
+            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
+            &format!("when = \"{AUTHORED_WINDOW}\"\n  verb = \"hold_recovery_orbit\""),
+        );
+        crate::entities::config::EntityConfig::from_toml(&rule)
+            .expect("a windowed per-state rule guard is valid content on the same host");
+    }
+
+    /// The NET-CHANGE shape too, over the hull's own authored `pressed_window_ticks`
+    /// — both operators the shipped doctrines hand-rolled are authorable, not
+    /// just the threshold one.
+    #[test]
+    fn a_net_change_guard_on_a_shipped_hull_loads() {
+        let mutated = with_guard(
+            DESTROYER,
+            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
+            "when = \"history(net_change, range_to_target, param(pressed_window_ticks)) > \
+             param(pressed_min_progress)\"\n  verb = \"hold_recovery_orbit\"",
+        );
+        crate::entities::config::EntityConfig::from_toml(&mutated)
+            .expect("a net-change window over the hull's authored span is valid content");
+    }
+
+    /// AC: a history operator authored where it cannot be evaluated is rejected
+    /// at LOAD, not silently false — on a real hull, through the real path.
+    #[test]
+    fn a_history_guard_on_an_unfolded_host_fails_to_load() {
+        let mutated = with_guard(
+            CRUISER,
+            r#"when = "fact(secs_since_combat) < param(combat_window_secs)""#,
+            r#"when = "history(min, secs_since_combat, 30) < param(combat_window_secs)""#,
+        );
+        let err = crate::entities::config::EntityConfig::from_toml(&mutated)
+            .expect_err("a history() guard on the Captain host must fail the load")
+            .to_string();
+        assert!(
+            err.contains("Captain") && err.contains("[captain_console.ai]"),
+            "the load error must name the system and its block: {err}"
+        );
+        assert!(
+            err.contains("history(min, secs_since_combat, 30)")
+                && err.contains("folds a bounded history window"),
+            "the load error must quote the atom and say plainly why: {err}"
+        );
+    }
+
+    /// AC: a malformed window length is a load error naming the problem — the
+    /// half of the check the parser cannot make, because only the hull knows
+    /// what its parameter is worth.
+    #[test]
+    fn a_fractional_window_param_fails_to_load() {
+        let windowed = with_guard(
+            DESTROYER,
+            "when = \"true\"\n  verb = \"hold_recovery_orbit\"",
+            &format!("when = \"{AUTHORED_WINDOW}\"\n  verb = \"hold_recovery_orbit\""),
+        );
+        let mutated = with_guard(
+            &windowed,
+            "safe_distance_window_ticks = 60.0",
+            "safe_distance_window_ticks = 60.5",
+        );
+        let err = crate::entities::config::EntityConfig::from_toml(&mutated)
+            .expect_err("a fractional window length must fail the load")
+            .to_string();
+        assert!(
+            err.contains("positive whole number") && err.contains("60.5"),
+            "the load error must name the problem and the offending value: {err}"
         );
     }
 

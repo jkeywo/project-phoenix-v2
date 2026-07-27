@@ -2462,6 +2462,35 @@ where
 
     fold_extra_memory(&mut state.memory);
 
+    // ── The ONE history fold (issue #890) ────────────────────────────────────
+    //
+    // Every authored `history(...)` window on this fine system advances by
+    // exactly one sample, here and nowhere else in the crate. This host runs
+    // under the shared `run_if(ai_tick_ready)` latch and is called once per fine
+    // system per tick, so "one call" is "one shared AI tick" — which is the
+    // whole property. Folding from the per-axis actuator systems instead (they
+    // all resolve guards off this same ship in this same tick) would advance a
+    // window four times a tick, so an authored 30-tick span would silently mean
+    // seven and a half: the sharp edge #789 documented and could only work
+    // around by keeping its bespoke facts out of rule guards altogether.
+    //
+    // `entities::ai_flag_hosts` records this function as the fold site for the
+    // three helm machine axes and rejects a `history(...)` guard at load on
+    // every host that has none; `ai_flag_hosts::tests` then re-derives that
+    // classification from this source, so a second fold site cannot appear
+    // quietly.
+    //
+    // Ordered BEFORE the transition scan below and before the per-axis systems
+    // run, so a window read from a transition guard and the same window read
+    // from a per-state rule guard are the same window at the same tick — the
+    // two authorable positions agree by construction.
+    //
+    // Deliberately NOT re-scoped on commit, unlike the running range minimum: a
+    // window is a measurement of the world over an authored span, and clearing
+    // it at a transition would make "has held for 30 ticks" unanswerable in the
+    // state that wants to ask.
+    state.memory.fold_history(&policy.history_windows(), facts);
+
     // Running minimum of the range, scoped to the state AND to the target's
     // identity (see the doc comment). A target switch restarts the fold at this
     // tick's range: carrying the previous target's minimum forward would let a
@@ -8327,6 +8356,193 @@ when = "state_time >= param(surge_dwell_secs)"
             boost_policy_state(&mut app).current,
             "surge",
             "on recovery the machine re-enters `surge` via its guard, from initial"
+        );
+    }
+
+    // ── Authored history operators, through the real host (issue #890) ───────
+
+    /// How many shared AI ticks the fixtures below author their window over.
+    ///
+    /// Deliberately not a small number and not a multiple of the number of
+    /// per-axis hosts: if the window were folded once per axis rather than once
+    /// per shared tick it would fill in two ticks rather than eight, and the
+    /// equality below reads that difference straight off.
+    const WINDOW_TICKS: usize = 8;
+
+    /// How many shared AI ticks the policy clock has counted. That clock
+    /// advances by exactly one authored period per run of
+    /// [`ai_policy_state_tick`], which runs under the shared `ai_tick_ready`
+    /// latch — so this is the number of SHARED ticks, whatever the frame rate
+    /// or the number of `app.update()` calls it took to reach them.
+    fn shared_ai_ticks(app: &App) -> usize {
+        let period = 1.0 / crate::entity_config::GlobalConfig::default().ai_tick_hz as f64;
+        (app.world().resource::<AiPolicyTickClock>().0 / period).round() as usize
+    }
+
+    /// Decode a boost policy through the REAL schema + host validation path, so
+    /// these fixtures exercise content authoring rather than a hand-built value.
+    fn validated_boost_policy(src: &str) -> crate::ai::policy::AiPolicy {
+        let cfg: crate::entities::config::FineSystemAiConfigToml =
+            toml::from_str(src).expect("the authored windowed boost policy parses");
+        crate::entities::config::validate_fine_system_ai_policy_for(
+            &crate::entities::ai_flag_hosts::HELM_BOOST,
+            &cfg,
+            &[crate::entities::config::HELM_BOOST_CHANNEL],
+            &[crate::entities::config::HELM_ENGAGE_BOOST_VERB],
+        )
+        .expect("a windowed guard on a folding host must pass real content validation");
+        cfg.to_policy().expect("decodes to a typed machine")
+    }
+
+    /// A machine whose TRANSITION asks a windowed question of a fact the host
+    /// seeds every tick. The window length is authored in TOML, not in Rust.
+    fn windowed_transition_policy() -> crate::ai::policy::AiPolicy {
+        validated_boost_policy(&format!(
+            r#"
+initial_state = "watching"
+
+[param]
+window_ticks = {WINDOW_TICKS}.0
+
+[[state]]
+id = "watching"
+
+[[state.transition]]
+priority = 0
+to = "armed"
+when = "history(min, boost_available, param(window_ticks)) >= 1"
+
+[[state]]
+id = "armed"
+
+[[state.rule]]
+priority = 0
+channel = "boost"
+when = "true"
+verb = "engage_boost"
+"#
+        ))
+    }
+
+    /// The same window in the OTHER authorable position: a per-state continuous
+    /// RULE guard, which `ai_helm_boost` resolves later in the same tick.
+    fn windowed_rule_policy() -> crate::ai::policy::AiPolicy {
+        validated_boost_policy(&format!(
+            r#"
+initial_state = "holding"
+
+[param]
+window_ticks = {WINDOW_TICKS}.0
+
+[[state]]
+id = "holding"
+
+[[state.rule]]
+priority = 0
+channel = "boost"
+when = "history(min, boost_available, param(window_ticks)) >= 1"
+verb = "engage_boost"
+"#
+        ))
+    }
+
+    /// Run until `done`, returning how many SHARED AI ticks it took.
+    fn ticks_until(app: &mut App, mut done: impl FnMut(&mut App) -> bool) -> Option<usize> {
+        for _ in 0..80 {
+            tick(app);
+            if done(app) {
+                return Some(shared_ai_ticks(app));
+            }
+        }
+        None
+    }
+
+    /// AC (the once-per-shared-tick fold): an authored window of N ticks fills
+    /// after exactly N SHARED AI ticks.
+    ///
+    /// This is the test that fails if the fold moves. `ai_policy_state_tick`
+    /// calls the fold once per fine system per gated tick; the four per-axis
+    /// actuator systems resolve guards off the same ship in the same tick and
+    /// fold nothing. Move the fold into `resolve_helm_channel` (or add a second
+    /// call anywhere on the per-tick path) and this window fills several times
+    /// faster — the transition commits at tick 2 or 3 instead of 8 — which is
+    /// exactly the failure #789 had to design around by keeping its bespoke
+    /// window facts out of rule guards altogether.
+    #[test]
+    fn an_authored_window_fills_after_exactly_that_many_shared_ai_ticks() {
+        let mut app = boost_ai_app(Some(windowed_transition_policy()));
+        let armed_at = ticks_until(&mut app, |app| boost_policy_state(app).current == "armed")
+            .expect("the authored window must fill within the drive");
+        assert_eq!(
+            armed_at, WINDOW_TICKS,
+            "an authored {WINDOW_TICKS}-tick window must take {WINDOW_TICKS} SHARED AI \
+             ticks to fill. Filling sooner means the window is being folded more than \
+             once per shared tick — the per-axis hosts resolve guards off this same \
+             ship in this same tick, and a fold in any of them makes every authored \
+             span mean a fraction of what the file says."
+        );
+        assert!(
+            boost_command(&mut app),
+            "the entered state's rule must engage boost through the admitted seam"
+        );
+    }
+
+    /// AC (evaluation scope): the SAME window is readable from a per-state RULE
+    /// guard, which a DIFFERENT system (`ai_helm_boost`) resolves later in the
+    /// same tick off the same per-fine-system bag.
+    ///
+    /// This is the position the #788/#789 bespoke facts could not be authored in
+    /// at all: those were seeded only in `ai_policy_state_tick`, so a rule guard
+    /// naming one parsed, validated, and read absent for ever. Here the two
+    /// positions agree by construction, and the timing proves it — the rule
+    /// fires on the same tick the window completes, not later and not sooner.
+    #[test]
+    fn a_windowed_rule_guard_fires_in_the_per_axis_host_on_the_same_tick() {
+        let mut app = boost_ai_app(Some(windowed_rule_policy()));
+        let engaged_at = ticks_until(&mut app, boost_command).expect("the guard must fire");
+        assert_eq!(
+            engaged_at, WINDOW_TICKS,
+            "a windowed RULE guard is resolved by ai_helm_boost from the window \
+             ai_policy_state_tick folded earlier in the same tick, so it must fire on \
+             the tick the authored window completes"
+        );
+    }
+
+    /// AC5 covers the window too, through the real host: a system that loses AI
+    /// control re-earns its window rather than resuming a stale one.
+    #[test]
+    fn losing_the_system_restarts_the_authored_window() {
+        let mut app = boost_ai_app(Some(windowed_transition_policy()));
+        // Nearly there, then the capability is stripped.
+        for _ in 0..6 {
+            tick(&mut app);
+        }
+        assert_ne!(boost_policy_state(&mut app).current, "armed");
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ship::components::BoostConfigResource>();
+        tick_twice(&mut app);
+        assert!(
+            boost_policy_state(&mut app).current == "watching"
+                && boost_policy_state(&mut app).memory.history().is_empty(),
+            "an unavailable system must drop the evidence it gathered while it was \
+             running, not bank it"
+        );
+
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship::components::BoostConfigResource {
+                enabled: true,
+                ..Default::default()
+            });
+        let before = shared_ai_ticks(&app);
+        let armed_at = ticks_until(&mut app, |app| boost_policy_state(app).current == "armed")
+            .expect("the window must re-fill after recovery");
+        assert_eq!(
+            armed_at - before,
+            WINDOW_TICKS,
+            "the window must be re-earned in full, not resumed"
         );
     }
 

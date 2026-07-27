@@ -42,7 +42,9 @@
 //! schema and content validation live in `entities::config`, and the predicate
 //! grammar lives in `world::flags`.
 
-use crate::world::flags::{AiFacts, AiParams, AiPolicyMemory, FlagStore, Predicate};
+use crate::world::flags::{
+    AiFacts, AiParams, AiPolicyMemory, FlagStore, HistoryRef, HistorySpec, Predicate,
+};
 
 /// The typed output a fired rule applies to its channel.
 ///
@@ -469,6 +471,54 @@ impl AiPolicy {
     /// The opt-in state machine, when this policy declares one (issue #882).
     pub fn machine(&self) -> Option<&AiPolicyMachine> {
         self.machine.as_ref()
+    }
+
+    /// Every `history(...)` atom this policy's guards contain, wherever they
+    /// sit — top-level rules, per-state rules and transitions (issue #890).
+    ///
+    /// All three positions, not merely the transitions: a state's continuous
+    /// rules are resolved by a DIFFERENT host later in the same tick, off the
+    /// same bag, so a window an author put in a rule guard has to be folded
+    /// exactly like one in a transition guard or it would read absent for ever
+    /// — the trap #779/#788/#789 kept re-opening.
+    pub fn history_refs(&self) -> Vec<HistoryRef> {
+        let mut out = Vec::new();
+        for rule in &self.rules {
+            rule.when.referenced_history(&mut out);
+        }
+        if let Some(machine) = &self.machine {
+            for state in &machine.states {
+                for rule in &state.rules {
+                    rule.when.referenced_history(&mut out);
+                }
+                for transition in &state.transitions {
+                    transition.when.referenced_history(&mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// The bounded history windows the HOST must fold for this policy, resolved
+    /// against its authored parameters (issue #890).
+    ///
+    /// Deduplicated, so two atoms asking the same question of the same span
+    /// share one window — and, equally, two atoms over the same fact with
+    /// DIFFERENT authored lengths get two, which is the shape #789 needed and
+    /// could not express.
+    ///
+    /// A window whose length does not resolve to a positive whole number is
+    /// dropped rather than guessed at; content validation rejects that at load,
+    /// so a live policy never has one.
+    pub fn history_windows(&self) -> Vec<HistorySpec> {
+        let mut specs: Vec<HistorySpec> = self
+            .history_refs()
+            .iter()
+            .filter_map(|h| h.window.resolve(&self.params))
+            .collect();
+        specs.sort();
+        specs.dedup();
+        specs
     }
 
     /// The id of the state a fresh (or reset) runtime enters (issue #882).
@@ -2034,6 +2084,209 @@ mod tests {
             st.memory.get("engagements"),
             Some(0.0),
             "reset restores the AUTHORED memory, not the drifted runtime value"
+        );
+    }
+
+    // ── Authored history operators (issue #890) ─────────────────────────────
+
+    /// A two-state machine whose TRANSITION asks a windowed question and whose
+    /// per-state RULE asks the other one, both over the same authored fact.
+    ///
+    /// Both positions matter: a transition guard is resolved by the state-tick
+    /// host, a per-state rule guard by a per-axis actuator system later in the
+    /// same tick. They read one bag, so they must agree.
+    fn windowed_policy() -> AiPolicy {
+        let mut params = AiParams::new();
+        params.set("standoff_ticks", 3.0);
+        params.set("safe_range", 40.0);
+        params.set("escape_ticks", 3.0);
+        AiPolicy {
+            params,
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "closing".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "closing".into(),
+                        rules: Vec::new(),
+                        transitions: vec![AiPolicyTransition {
+                            priority: 0,
+                            to: "standing_off".into(),
+                            when: parse_predicate(
+                                "history(min, range_to_target, param(standoff_ticks)) \
+                                 >= param(safe_range)",
+                            )
+                            .unwrap(),
+                        }],
+                    },
+                    AiPolicyState {
+                        id: "standing_off".into(),
+                        rules: vec![AiPolicyRule {
+                            priority: 0,
+                            channel: "longitudinal".into(),
+                            when: parse_predicate(
+                                "history(net_change, range_to_target, param(escape_ticks)) > 0",
+                            )
+                            .unwrap(),
+                            verb: AiPolicyVerb::ActuateDesiredTravel,
+                        }],
+                        transitions: Vec::new(),
+                    },
+                ],
+            }),
+        }
+    }
+
+    fn range_facts(range: f64) -> AiFacts {
+        let mut f = AiFacts::new();
+        f.set("range_to_target", range);
+        f
+    }
+
+    /// The host's contract: the windows a policy asks for, resolved against its
+    /// own authored params, collected from EVERY authorable guard position.
+    #[test]
+    fn history_windows_collects_every_authorable_position() {
+        let specs = windowed_policy().history_windows();
+        assert_eq!(
+            specs,
+            vec![crate::world::flags::HistorySpec {
+                fact: "range_to_target".into(),
+                ticks: 3,
+            }],
+            "one shared window: both guards ask the same fact over the same span"
+        );
+
+        // Two atoms over the same fact with DIFFERENT authored lengths are two
+        // windows, not one — the #789 shape.
+        let mut params = AiParams::new();
+        params.set("short", 2.0);
+        params.set("long", 9.0);
+        let two = AiPolicy {
+            params,
+            rules: vec![AiPolicyRule {
+                priority: 0,
+                channel: "c".into(),
+                when: parse_predicate(
+                    "history(min, r, param(short)) > 0 and history(net_change, r, param(long)) > 0",
+                )
+                .unwrap(),
+                verb: AiPolicyVerb::SetRedAlert(true),
+            }],
+            idle: false,
+            machine: None,
+        };
+        let specs = two.history_windows();
+        assert_eq!(specs.len(), 2);
+        assert_eq!(
+            specs.iter().map(|s| s.ticks).collect::<Vec<_>>(),
+            vec![2, 9]
+        );
+    }
+
+    /// AC: a windowed question is genuinely evaluated in a TRANSITION guard,
+    /// and only once the authored span has really been held.
+    #[test]
+    fn a_windowed_transition_guard_fires_only_after_the_authored_span() {
+        let policy = windowed_policy();
+        let specs = policy.history_windows();
+        let mut state = AiPolicyRuntimeState::reset(&policy, 0.0);
+
+        for tick in 1..=2 {
+            let facts = range_facts(50.0);
+            state.memory.fold_history(&specs, &facts);
+            assert!(
+                policy
+                    .resolve_transition(&state.current, &facts, &state.memory_at(tick as f64), &[])
+                    .is_none(),
+                "tick {tick}: a window shorter than the authored three has not been held"
+            );
+        }
+
+        let facts = range_facts(50.0);
+        state.memory.fold_history(&specs, &facts);
+        let to = policy
+            .resolve_transition(&state.current, &facts, &state.memory_at(3.0), &[])
+            .expect("the third sample completes the authored window")
+            .to
+            .clone();
+        assert_eq!(to, "standing_off");
+    }
+
+    /// AC: the SAME window is readable from a per-state RULE guard — the
+    /// position the #788/#789 bespoke facts could not be authored in.
+    #[test]
+    fn a_windowed_rule_guard_reads_the_same_folded_window() {
+        let policy = windowed_policy();
+        let specs = policy.history_windows();
+        let mut state = AiPolicyRuntimeState::reset(&policy, 0.0);
+        state.enter("standing_off", 0.0);
+
+        // Two samples of the authored three: the trend is not yet measurable.
+        for range in [10.0, 20.0] {
+            state.memory.fold_history(&specs, &range_facts(range));
+        }
+        assert_eq!(
+            policy.resolve_channel_in_state(
+                &state.current,
+                "longitudinal",
+                &range_facts(20.0),
+                &state.memory_at(2.0),
+                &[],
+            ),
+            None,
+            "a rule guard over an unfilled window must hold, not fire"
+        );
+
+        state.memory.fold_history(&specs, &range_facts(40.0));
+        assert_eq!(
+            policy.resolve_channel_in_state(
+                &state.current,
+                "longitudinal",
+                &range_facts(40.0),
+                &state.memory_at(3.0),
+                &[],
+            ),
+            Some(&AiPolicyVerb::ActuateDesiredTravel),
+            "the rule guard must read the window the host folded, exactly as the \
+             transition guard does"
+        );
+    }
+
+    /// AC5's reset covers the window too: a system that loses and regains AI
+    /// control never answers a windowed question from evidence gathered before
+    /// it was in charge.
+    #[test]
+    fn resetting_the_runtime_state_discards_the_history_windows() {
+        let policy = windowed_policy();
+        let specs = policy.history_windows();
+        let mut state = AiPolicyRuntimeState::reset(&policy, 0.0);
+        for _ in 0..3 {
+            state.memory.fold_history(&specs, &range_facts(50.0));
+        }
+        assert!(policy
+            .resolve_transition(
+                &state.current,
+                &range_facts(50.0),
+                &state.memory_at(3.0),
+                &[]
+            )
+            .is_some());
+
+        state = AiPolicyRuntimeState::reset(&policy, 4.0);
+        assert!(state.memory.history().is_empty());
+        assert!(
+            policy
+                .resolve_transition(
+                    &state.current,
+                    &range_facts(50.0),
+                    &state.memory_at(4.0),
+                    &[]
+                )
+                .is_none(),
+            "a re-entered policy must re-earn its window rather than inherit one"
         );
     }
 }

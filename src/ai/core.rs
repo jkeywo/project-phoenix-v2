@@ -456,7 +456,19 @@ pub fn score_doctrine_pool(
     pool
 }
 
-fn parse_doctrine_directive(
+/// Read one authored doctrine entry as the [`AiDirective`] the runtime will
+/// actually fly.
+///
+/// This is the **single** statement of which `directive_*` field each kind
+/// reads: `Patrol` takes the plural `directive_anchors`, `Reach`/`Retreat` the
+/// singular `directive_anchor`, and everything else takes neither. Public since
+/// issue #888 so the world-composition validator can ask the same question
+/// rather than re-deriving the field table a third time — a second copy is
+/// exactly how the Requiem courier ended up authoring `directive_anchors` on a
+/// `Reach` and resolving to nothing.
+///
+/// [`AiDirective`]: crate::messages::AiDirective
+pub fn parse_doctrine_directive(
     d: &crate::entity_config::DoctrineObjective,
 ) -> crate::messages::AiDirective {
     match d.directive_kind.as_deref() {

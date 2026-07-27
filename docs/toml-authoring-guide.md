@@ -88,6 +88,32 @@ starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 ```
 
+**A world must declare every anchor the hulls it spawns steer to** (issue #888).
+An entity template's `[[behaviour.doctrine]]` may name anchors — `Patrol` via
+`directive_anchors`, `Reach`/`Retreat` via `directive_anchor` — and those names
+resolve against this table, not against the template's home scenario. A
+reference nothing in the composition declares is rejected at load, naming the
+entity, the anchor and the world: unlike an entity name, an anchor has no
+runtime source, so a lookup that misses at load misses forever and the ship
+silently never pursues its goal.
+
+The effective doctrine is what counts, so a scenario that does not want a
+hull's route has a second option — stand the entry down in the instance's
+`overrides`, by the id the template gave it:
+
+```toml
+overrides = { behaviour = { doctrine = [
+  { id = "patrol-warhawk", directive_kind = "None", directive_anchors = [], directive_loop = false },
+] } }
+```
+
+Note that this is a per-id edit, not a replacement: an `overrides` doctrine list
+merges **by id** and keeps every template entry it does not name, so adding one
+directive does not remove the rest.
+
+Sub-worlds resolve against their base world's table as well as their own, so a
+layer whose ships fly a route the base world declares needs no copy of it.
+
 ### `[dust]`
 
 Ambient dust motes on the viewscreen. Parsed by `world::config::DustPfxConfig`,

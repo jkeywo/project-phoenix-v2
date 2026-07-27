@@ -161,6 +161,19 @@ ironveil_patrol_b  = [600.0, 0.0, 200.0]    # mid to starbase vicinity
 warhawk_patrol_a   = [1100.0, 0.0, -50.0]   # far east
 warhawk_patrol_b   = [700.0, 0.0, 50.0]     # mid east
 
+# There is deliberately NO `pirate_haven` here, and the raider spawns below say
+# so out loud (issue #888).
+#
+# `pirate_raider.toml` carries a `retreat-when-hurt` Retreat directive naming
+# that anchor, gated on hull < 30%. Declaring it would hand this scenario a
+# behaviour it cannot afford: victory is `on_all_destroyed`, so a wave that runs
+# for a haven at full throttle the moment it is nearly dead turns every ending
+# into a stern chase. Leaving the anchor undeclared used to be how that was
+# avoided — silently, by the directive resolving to nowhere and falling through
+# to the next one. Each raider override now clears the entry instead, which is
+# the same behaviour and the same fall-through, stated rather than inferred from
+# an absence.
+
 # ── Static map entities ───────────────────────────────────────────────────────
 
 # Star at world origin. Inner asteroid field rings the star at r=200..300.
@@ -290,6 +303,7 @@ after_secs = 0.0
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -317,6 +331,7 @@ when       = "counter(ship_power) >= 90"
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 1c: Harrow Destroyer at t=20 (issue #883).
@@ -354,6 +369,7 @@ after_secs = 45.0
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -397,6 +413,7 @@ after_secs = 60.0
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -424,6 +441,7 @@ when       = "counter(ship_power) >= 90"
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 4: Harrow Cruiser at t=120 (issue #790).
@@ -483,6 +501,7 @@ after_secs = 210.0
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -510,6 +529,7 @@ when       = "counter(ship_power) >= 90"
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 6: Harrow Cruiser at t=240 (issue #790).
@@ -562,6 +582,7 @@ after_secs = 270.0
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -589,6 +610,7 @@ when       = "counter(ship_power) >= 90"
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
+    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 8 (final): battleship at t=300

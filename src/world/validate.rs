@@ -33,6 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::entity_loader::TemplateLoader;
 use crate::world::config::{
     CommsDialogueNode, TriggerAction, TriggerCondition, WorldConfig, WorldEntity,
 };
@@ -452,6 +453,183 @@ pub fn validate_objectives(
     validate_objectives_in(path, source_text, config, &declared)
 }
 
+// ── Doctrine anchor references (issue #888) ──────────────────────────────────
+
+/// One entity instance a world spawns: the label to name it by in a finding,
+/// the template it is built from, and any inline `overrides` merged on top.
+///
+/// Covers both spawn paths — a static `[[entity]]` block and a `spawn_entity`
+/// trigger/comms action — because both hand the same hull the same doctrine.
+struct SpawnedInstance<'a> {
+    /// Best-effort identity for diagnostics: the authored `name`, else the
+    /// authored `id`, else the template path.
+    label: String,
+    template_path: &'a str,
+    overrides: Option<&'a toml::Value>,
+}
+
+/// Every entity instance a world config spawns, static blocks first, then the
+/// `spawn_entity` actions across every authored action list (triggers *and*
+/// comms responses — `collect_action_lists` walks both).
+fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
+    let mut out: Vec<SpawnedInstance<'_>> = config
+        .entities
+        .iter()
+        .map(|e| SpawnedInstance {
+            label: e
+                .name
+                .clone()
+                .or_else(|| e.id.clone())
+                .unwrap_or_else(|| e.template_path.clone()),
+            template_path: &e.template_path,
+            overrides: e.overrides.as_ref(),
+        })
+        .collect();
+
+    for actions in collect_action_lists(config) {
+        for action in actions {
+            if let TriggerAction::SpawnEntity {
+                template_path,
+                name,
+                overrides,
+                ..
+            } = action
+            {
+                out.push(SpawnedInstance {
+                    label: name.clone(),
+                    template_path,
+                    overrides: overrides.as_ref(),
+                });
+            }
+        }
+    }
+
+    out
+}
+
+/// The anchor names one spawned instance's *effective* doctrine references,
+/// paired with the directive kind that reads them.
+///
+/// Two deliberate choices:
+///
+/// * The doctrine read is the **effective** one — template plus any authored
+///   `overrides` — because a scenario may add, retarget or clear doctrine
+///   entries (`probe_artillery_standoff.toml` adds one by override). Judging
+///   the raw template would validate content no scenario runs.
+/// * Which fields count as anchors is asked of
+///   [`crate::ai_core::parse_doctrine_directive`], the same function the
+///   runtime flies, rather than re-derived from the `directive_*` field names.
+///   A third copy of that table is how the courier's `directive_anchors`-on-a-
+///   `Reach` survived in the first place.
+///
+/// A template that cannot be loaded or whose merge fails yields nothing: a
+/// missing template is a different defect with its own diagnostics (dispatch
+/// warns, the `[[entity]]` loader errors), and this validator must not turn it
+/// into a spurious anchor complaint — nor block a world whose templates simply
+/// are not reachable from wherever validation happens to run.
+fn doctrine_anchor_refs(
+    inst: &SpawnedInstance,
+    loader: &dyn TemplateLoader,
+) -> Vec<(String, &'static str)> {
+    let Some(template) = loader.load_template(inst.template_path) else {
+        return Vec::new();
+    };
+    let config = match inst.overrides {
+        None => template,
+        Some(overrides) => match crate::entity_loader::apply_overrides(&template, overrides) {
+            Ok(merged) => merged,
+            Err(_) => return Vec::new(),
+        },
+    };
+    let Some(behaviour) = config.behaviour.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for entry in &behaviour.doctrine {
+        match crate::ai_core::parse_doctrine_directive(entry) {
+            crate::messages::AiDirective::Patrol { anchors, .. } => {
+                out.extend(anchors.into_iter().map(|a| (a, "Patrol")));
+            }
+            crate::messages::AiDirective::Reach { anchor } => out.push((anchor, "Reach")),
+            crate::messages::AiDirective::Retreat { anchor } => out.push((anchor, "Retreat")),
+            _ => {}
+        }
+    }
+    // An empty anchor name is the *field-name* defect, already rejected at
+    // template load by `validate_doctrine_directives`; nothing to add here.
+    out.retain(|(anchor, _)| !anchor.is_empty());
+    out
+}
+
+/// Reject a doctrine anchor that no world in the composition declares
+/// (issue #888).
+///
+/// # Why this is an error and not a warning
+///
+/// Bare *entity* references that resolve nowhere are warnings (see
+/// [`validate_composition`]) because the name may belong to an entity created
+/// after load — `spawn_entity` registers fresh names into `name_to_uuid` at
+/// runtime, so a linter cannot tell a typo from a forward reference.
+///
+/// **Anchors have no such runtime source.** The anchor table is parsed once
+/// from `[anchors]` into `WorldConfig::anchors` and is never written again:
+/// no system anywhere takes the config as `ResMut`, and no trigger action
+/// declares an anchor. A doctrine anchor that misses at load misses on every
+/// tick forever, so there is nothing for a warning to be tentative about — the
+/// ship silently never pursues its goal, which is the same reads-as-nothing
+/// failure the unvalidated `fact(...)` names keep producing. It fails the load.
+///
+/// # Resolution scope
+///
+/// Against the union of the anchor tables of the root world **and its layer
+/// chain**, so a sub-world that spawns a hull steering to one of the base
+/// world's anchors (the `btf_path_*` shape) does not false-positive. That union
+/// is deliberately the *permissive* bound: doctrine anchors are looked up at
+/// runtime in the base `WorldConfig` alone, so an anchor declared only by a
+/// child would still miss. No shipped child world declares any anchor, so the
+/// distinction is theoretical today; the union is chosen because a validator
+/// that blocks activation must never be stricter than the composition contract
+/// it validates.
+fn validate_doctrine_anchors_in(
+    src: &WorldSource,
+    declared_anchors: &HashSet<&str>,
+    loader: &dyn TemplateLoader,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let mut reported: HashSet<(String, String)> = HashSet::new();
+
+    for inst in collect_spawned_instances(src.config) {
+        for (anchor, kind) in doctrine_anchor_refs(&inst, loader) {
+            if declared_anchors.contains(anchor.as_str()) {
+                continue;
+            }
+            if !reported.insert((inst.label.clone(), anchor.clone())) {
+                continue;
+            }
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: "unresolved-anchor",
+                message: format!(
+                    "entity '{}' (template '{}') has a {kind} doctrine directive referencing \
+                     anchor '{anchor}', which no world in the composition declares, in '{}'",
+                    inst.label, inst.template_path, src.path
+                ),
+                source: SourceLocation {
+                    file: src.path.clone(),
+                    // The anchor name is absent from this world by definition,
+                    // so point at the spawn site instead.
+                    line: line_of(src.toml, &inst.label)
+                        .or_else(|| line_of(src.toml, inst.template_path)),
+                    reference: anchor.clone(),
+                },
+            });
+        }
+    }
+
+    findings
+}
+
 /// Validate the effective composition (`world-authoring-validation-state`).
 ///
 /// Runs per-world identity checks, then resolves every authored entity
@@ -468,8 +646,25 @@ pub fn validate_objectives(
 ///
 /// Bare references that resolve nowhere are **not** errored (they may name
 /// runtime-spawned or engine-provided entities); they are reported as warnings
-/// so shipped worlds keep activating while authors still get feedback.
+/// so shipped worlds keep activating while authors still get feedback. Doctrine
+/// *anchors* are the deliberate exception — see
+/// [`validate_doctrine_anchors_in`].
+///
+/// Entity templates are resolved through the standard
+/// [`crate::entity_loader::WasmTemplateLoader`] (preloaded config cache first,
+/// filesystem fallback on native). Callers holding content the loader cannot
+/// see — a mod pack's own `assets/entities/*.toml`, say — use
+/// [`validate_composition_with`].
 pub fn validate_composition(root: &WorldSource, children: &[WorldSource]) -> Vec<WorldFinding> {
+    validate_composition_with(root, children, &crate::entity_loader::WasmTemplateLoader)
+}
+
+/// [`validate_composition`] with an explicit entity-template source.
+pub fn validate_composition_with(
+    root: &WorldSource,
+    children: &[WorldSource],
+    template_loader: &dyn TemplateLoader,
+) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
 
     // Per-world identity (duplicate names).
@@ -623,6 +818,27 @@ pub fn validate_composition(root: &WorldSource, children: &[WorldSource]) -> Vec
             child.toml,
             child.config,
             &composition_declared,
+        ));
+    }
+
+    // Doctrine anchor references (issue #888). Resolve against the union of
+    // the anchor tables declared across the effective composition, so a layer
+    // whose ships steer to the base world's anchors does not false-positive.
+    let mut declared_anchors: HashSet<&str> =
+        root.config.anchors.keys().map(String::as_str).collect();
+    for child in children {
+        declared_anchors.extend(child.config.anchors.keys().map(String::as_str));
+    }
+    findings.extend(validate_doctrine_anchors_in(
+        root,
+        &declared_anchors,
+        template_loader,
+    ));
+    for child in children {
+        findings.extend(validate_doctrine_anchors_in(
+            child,
+            &declared_anchors,
+            template_loader,
         ));
     }
 
@@ -1047,6 +1263,222 @@ condition = "on_world_loaded"
         assert!(
             has_error(&findings),
             "a duplicate objective declaration must block activation"
+        );
+    }
+
+    // ── doctrine anchor references (issue #888) ──────────────────────────────
+
+    /// Entity-template source for the doctrine-anchor fixtures: a fixed
+    /// path → TOML map, so they never reach the filesystem or the process-wide
+    /// config cache.
+    struct FakeTemplates(HashMap<String, String>);
+
+    impl FakeTemplates {
+        fn new(entries: &[(&str, &str)]) -> Self {
+            FakeTemplates(
+                entries
+                    .iter()
+                    .map(|(p, t)| (p.to_string(), t.to_string()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl TemplateLoader for FakeTemplates {
+        fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
+            crate::entity_config::EntityConfig::from_toml(self.0.get(path)?).ok()
+        }
+    }
+
+    /// A hull that patrols two named anchors.
+    const PATROLLER: &str = r#"
+name = "entity.patroller.name"
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id                = "patrol-route"
+text              = "entity.patroller.doctrine.patrol.text"
+directive_kind    = "Patrol"
+directive_anchors = ["route_a", "route_b"]
+directive_loop    = true
+base_priority     = 20.0
+"#;
+
+    fn patroller_templates() -> FakeTemplates {
+        FakeTemplates::new(&[("assets/entities/patroller.toml", PATROLLER)])
+    }
+
+    #[test]
+    fn doctrine_anchor_declared_nowhere_is_rejected() {
+        let root = cfg(r#"
+[[entity]]
+template_path = "assets/entities/patroller.toml"
+name = "ashrender"
+"#);
+        let root_toml = "name = \"ashrender\"";
+        let src = WorldSource::new("assets/worlds/scenario.toml", root_toml, &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+
+        let errs: Vec<_> = findings
+            .iter()
+            .filter(|f| f.category == "unresolved-anchor")
+            .collect();
+        assert_eq!(
+            errs.len(),
+            2,
+            "one error per unresolved route waypoint: {findings:?}"
+        );
+        assert!(
+            has_error(&findings),
+            "an unresolved anchor blocks the world"
+        );
+        for (err, anchor) in errs.iter().zip(["route_a", "route_b"]) {
+            assert_eq!(err.source.reference, anchor);
+            assert_eq!(err.source.file, "assets/worlds/scenario.toml");
+            // The message has to name all three so an author can act on it
+            // without opening the entity template.
+            assert!(err.message.contains("ashrender"), "{}", err.message);
+            assert!(err.message.contains(anchor), "{}", err.message);
+            assert!(
+                err.message.contains("assets/worlds/scenario.toml"),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn doctrine_anchor_the_world_declares_resolves() {
+        let root = cfg(r#"
+[anchors]
+route_a = [10.0, 0.0, 20.0]
+route_b = [30.0, 0.0, 40.0]
+
+[[entity]]
+template_path = "assets/entities/patroller.toml"
+name = "ashrender"
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            !has_error(&findings),
+            "declared anchors resolve: {findings:?}"
+        );
+    }
+
+    /// The case that makes the check non-trivial: a sub-world spawns a hull
+    /// whose route is declared by the world it layers onto (the `btf_path_*`
+    /// shape). A per-file linter would report two typos here.
+    #[test]
+    fn layered_world_inheriting_base_anchors_does_not_false_positive() {
+        let root = cfg(r#"
+[anchors]
+route_a = [10.0, 0.0, 20.0]
+route_b = [30.0, 0.0, 40.0]
+"#);
+        let child = cfg(r#"
+[[entity]]
+template_path = "assets/entities/patroller.toml"
+name = "reinforcement"
+"#);
+        let root_src = WorldSource::new("assets/worlds/base.toml", "", &root);
+        let child_src = WorldSource::new("assets/worlds/layer.toml", "", &child);
+        let findings = validate_composition_with(&root_src, &[child_src], &patroller_templates());
+        assert!(
+            !has_error(&findings),
+            "a layer inherits its base world's anchors: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn spawn_entity_trigger_doctrine_anchors_are_validated() {
+        // The `combat_test.toml` / `probe_artillery_standoff.toml` shape: the
+        // hull never appears in an `[[entity]]` block at all.
+        let root = cfg(r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/patroller.toml"
+  name          = "wave_1"
+  position      = [0.0, 0.0, 0.0]
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-anchor")
+            .expect("a spawn_entity trigger spawns an entity too");
+        assert!(err.is_error());
+        assert!(err.message.contains("wave_1"), "{}", err.message);
+    }
+
+    /// The lever the shipped worlds use to say "this hull has no patrol here"
+    /// (`before_the_fire.toml`, `probe_artillery_standoff.toml`): the doctrine
+    /// read is the *effective* one, so a by-id override that stands the
+    /// directive down resolves clean.
+    #[test]
+    fn override_standing_the_directive_down_resolves() {
+        let root = cfg(r#"
+[[entity]]
+template_path = "assets/entities/patroller.toml"
+name = "ashrender"
+overrides = { behaviour = { doctrine = [
+  { id = "patrol-route", directive_kind = "None", directive_anchors = [], directive_loop = false },
+] } }
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            !has_error(&findings),
+            "a stood-down directive references no anchor: {findings:?}"
+        );
+    }
+
+    /// The converse: an override that *introduces* a directive is checked too,
+    /// so a scenario cannot smuggle in an unresolvable anchor by override.
+    #[test]
+    fn override_introducing_a_reach_anchor_is_validated() {
+        let root = cfg(r#"
+[anchors]
+route_a = [10.0, 0.0, 20.0]
+route_b = [30.0, 0.0, 40.0]
+
+[[entity]]
+template_path = "assets/entities/patroller.toml"
+name = "courier"
+overrides = { behaviour = { doctrine = [
+  { id = "deliver", directive_kind = "Reach", directive_anchor = "destination", base_priority = 90.0 },
+] } }
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        let err = findings
+            .iter()
+            .find(|f| f.category == "unresolved-anchor")
+            .expect("an override-introduced Reach anchor must resolve too");
+        assert_eq!(err.source.reference, "destination");
+        assert!(err.message.contains("Reach"), "{}", err.message);
+    }
+
+    /// A template the loader cannot serve is somebody else's diagnostic (the
+    /// spawn path warns, the `[[entity]]` loader errors). It must not turn into
+    /// an anchor complaint, and must not block a world.
+    #[test]
+    fn unloadable_template_produces_no_anchor_finding() {
+        let root = cfg(r#"
+[[entity]]
+template_path = "assets/entities/nowhere.toml"
+name = "ghost"
+"#);
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(
+            !findings.iter().any(|f| f.category == "unresolved-anchor"),
+            "{findings:?}"
         );
     }
 

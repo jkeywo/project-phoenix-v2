@@ -20,11 +20,22 @@
 #     standoff is never exercised at all.
 #   * 300 is inside the hull's own 320-unit `sensor_range`, so it promotes to
 #     high fidelity on the first tick and its helm doctrine actually runs.
-#   * The doctrine is REPLACED wholesale by the `overrides` below, exactly as
-#     `duel.toml` and `combat_test.toml`'s wave 8 replace it, and — like both of
-#     them — it does not author `use_impulse`. So a fix that leaned on the hull's
-#     own `[[behaviour.doctrine]] use_impulse = false` would be erased here. The
-#     fix has to live somewhere a scenario doctrine cannot reach.
+#   * The doctrine is REPLACED by the `overrides` below, exactly as
+#     `combat_test.toml`'s wave 8 replaces it, and — like it — the replacement
+#     does not author `use_impulse`. So a fix that leaned on the hull's own
+#     `[[behaviour.doctrine]] use_impulse = false` would be erased here. The fix
+#     has to live somewhere a scenario doctrine cannot reach.
+#
+#     "Replaced" is by ID and not wholesale, which this file used to claim:
+#     `merge_id_array` keeps every template entry the override does not name.
+#     The `kill` entry below therefore lands ALONGSIDE `patrol-warhawk` and
+#     `destroy-hostiles`, and the patrol it left in place routes between
+#     `warhawk_patrol_a`/`_b` — anchors this probe declares nowhere, since it
+#     declares no anchors at all. The second override entry says what the header
+#     always meant: in this world the battleship has no patrol, only `kill`.
+#     (Issue #888; it costs nothing behaviourally, because an unresolvable
+#     Patrol was already steering the hull nowhere and `kill` outscores it 80
+#     to 20 regardless.)
 #
 # ── Why the hostility is one-directional ──────────────────────────────────────
 #
@@ -73,4 +84,5 @@ after_secs = 0.0
   overrides = { faction = "cccccccc-3333-4333-8333-cccccccccccc", behaviour = { doctrine = [
     { id = "kill", directive_kind = "Destroy",
       base_priority = 80.0, target_speed = 0.9, maintain_range = 25.0 },
+    { id = "patrol-warhawk", directive_kind = "None", directive_anchors = [], directive_loop = false },
   ] } }

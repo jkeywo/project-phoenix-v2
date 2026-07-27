@@ -24,27 +24,38 @@ pub fn resolve_entity(
 
     let config = match &entity_inst.overrides {
         None => template.clone(),
-        Some(overrides) => {
-            // Serialise the template to a toml::Value **losslessly** (issue
-            // #838): `to_toml_value` re-emits the `[[station]]`/`[[system]]`/
-            // `[power_groups]`/`[[shield_arc]]` blocks that a plain
-            // `toml::to_string` would drop (they live in `#[serde(skip)]`
-            // fields), so the merged config keeps the template's whole system
-            // suite instead of spawning a hull with no stations or weapons.
-            let template_value = template
-                .to_toml_value()
-                .map_err(|e| format!("template serialise error: {e}"))?;
-
-            let merged =
-                crate::entity_override::merge_entity_config_toml(&template_value, overrides);
-            let merged_str =
-                toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
-            EntityConfig::from_toml(&merged_str)
-                .map_err(|e| format!("merged parse error: {e:?}"))?
-        }
+        Some(overrides) => apply_overrides(template, overrides)?,
     };
 
     Ok(config)
+}
+
+/// Merge an authored `overrides` table on top of a resolved template.
+///
+/// Shared by every path that resolves an entity instance against its template:
+/// the `[[entity]]` loader above, and the world-composition validator's
+/// doctrine read (issue #888), which has to see the *effective* doctrine —
+/// `assets/worlds/probe_artillery_standoff.toml` adds a doctrine entry by
+/// override, and a validator reading the raw template would be judging content
+/// no scenario ever runs.
+///
+/// Serialises the template to a `toml::Value` **losslessly** (issue #838):
+/// `to_toml_value` re-emits the `[[station]]`/`[[system]]`/`[power_groups]`/
+/// `[[shield_arc]]` blocks that a plain `toml::to_string` would drop (they live
+/// in `#[serde(skip)]` fields), so the merged config keeps the template's whole
+/// system suite instead of spawning a hull with no stations or weapons.
+pub fn apply_overrides(
+    template: &EntityConfig,
+    overrides: &toml::Value,
+) -> Result<EntityConfig, String> {
+    let template_value = template
+        .to_toml_value()
+        .map_err(|e| format!("template serialise error: {e}"))?;
+
+    let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides);
+    let merged_str =
+        toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
+    EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))
 }
 
 /// Generate a new UUID string for a spawned entity.

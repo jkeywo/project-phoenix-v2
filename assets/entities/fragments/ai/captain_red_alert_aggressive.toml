@@ -1,0 +1,27 @@
+# Reusable Captain fine-system AI policy (issue #869 composition fixture).
+#
+# A FRAGMENT, not a hull. It is not a valid entity on its own and is never
+# parsed alone — `include_resolve` merges it into a declaring template and only
+# the resolved document is validated and spawned. It lives outside
+# `assets/entities/` for exactly that reason: everything directly in that
+# directory is scanned as a shipped hull.
+#
+# What it demonstrates: a generic AI behaviour authored ONCE and shared, while
+# every resolved hull still declares the policy inline as PRD #774 requires.
+# Composition is an authoring-time convenience; the runtime never sees a
+# fragment.
+#
+# Deliberately unconditional (`when = "true"`), so a hull that composes it is
+# observably driven by THIS policy rather than by the Rust-side synthesised
+# default, which stands down without combat facts.
+
+[captain_console]
+
+[captain_console.ai]
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = true

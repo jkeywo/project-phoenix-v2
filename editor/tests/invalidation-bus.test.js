@@ -7,8 +7,8 @@ describe('InvalidationBus', () => {
       const bus = new InvalidationBus();
       const calls = [];
       bus.onEntitySaved((path) => calls.push(path));
-      bus.fireEntitySaved('assets/entities/pirate_raider.toml');
-      expect(calls).toEqual(['assets/entities/pirate_raider.toml']);
+      bus.fireEntitySaved('assets/entities/ship_harrow_patrol.toml');
+      expect(calls).toEqual(['assets/entities/ship_harrow_patrol.toml']);
     });
   });
 

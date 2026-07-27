@@ -17,7 +17,7 @@ describe('CrossReferenceIndex', () => {
       {
         path: 'worlds/default.toml',
         worldState: {
-          entity: [{ name: 'raider_alpha', template_path: 'assets/entities/pirate_raider.toml' }],
+          entity: [{ name: 'raider_alpha', template_path: 'assets/entities/ship_harrow_patrol.toml' }],
         },
       },
     ]);

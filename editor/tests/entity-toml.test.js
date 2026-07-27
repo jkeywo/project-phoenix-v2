@@ -20,17 +20,17 @@ describe('entity-toml', () => {
       expect(result.hull.hull_integrity).toBe(100.0);
     });
 
-    it('parses pirate_raider.toml', () => {
-      const text = readEntity('pirate_raider.toml');
+    it('parses ship_harrow_patrol.toml', () => {
+      const text = readEntity('ship_harrow_patrol.toml');
       const result = parseEntityToml(text);
       expect(result.tags).toContain('ship');
       expect(result.tags).toContain('npc');
       expect(result.faction).toBeTruthy();
-      expect(result.hull.hull_integrity).toBe(30.0);
+      expect(result.hull.hull_integrity).toBe(120.0);
       expect(result.collider.shape).toBe('Capsule');
       expect(Array.isArray(result.behaviour.doctrine)).toBe(true);
       expect(result.behaviour.doctrine.length).toBeGreaterThanOrEqual(1);
-      expect(result.behaviour.doctrine[0].id).toBe('patrol-sector');
+      expect(result.behaviour.doctrine[0].id).toBe('patrol-ironveil');
     });
 
     it('parses asteroid_common_1_large.toml', () => {
@@ -81,7 +81,7 @@ describe('entity-toml', () => {
 
   describe('round-trip shipped entities', () => {
     const entityFiles = [
-      'pirate_raider.toml',
+      'ship_harrow_patrol.toml',
       'asteroid_common_1_large.toml',
       'asteroid_common_1_small.toml',
       'asteroid_common_1_cosmetic.toml',

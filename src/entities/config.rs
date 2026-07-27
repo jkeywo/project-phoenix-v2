@@ -5407,8 +5407,8 @@ impl EntityConfig {
         // (`src/entities/entity_override.rs`) deep-merges a doctrine override
         // into the template entry that shares its `id`, field by field. Change
         // an existing entry's `directive_kind` and the template's directive
-        // fields come along with it — overriding `pirate_raider.toml`'s Patrol
-        // entry with `{ id = "patrol-sector", directive_kind = "Reach",
+        // fields come along with it — overriding `ship_harrow_patrol.toml`'s
+        // Patrol entry with `{ id = "patrol-ironveil", directive_kind = "Reach",
         // directive_anchor = "x" }` yields a merged entry carrying BOTH
         // `directive_anchors` (from the template) and `directive_anchor`, which
         // this check rejects.
@@ -6857,52 +6857,61 @@ base_priority = 35.0
         assert_eq!(behaviour.doctrine[1].id, "destroy");
     }
 
-    // ── pirate_raider.toml compile-time template tests ─────────────────────
+    // ── ship_harrow_destroyer.toml compile-time template tests ─────────────
+    //
+    // (#892) These three used to load `pirate_raider.toml`, which was retired
+    // as a duplicate: its display string was literally "Harrow Destroyer", the
+    // same one `ship_harrow_destroyer.toml` publishes, on a 30-hull ship rather
+    // than a 900-hull one. They are re-pointed at the surviving hull rather
+    // than dropped — the claims (a Harrow NPC declares the Harrow faction, a
+    // positive hull, and both consoles) are about the shipped enemy destroyer,
+    // not about which file it lived in.
 
     #[test]
-    fn pirate_raider_template_parses_with_harrow_faction() {
-        // (#472) `pirate_raider.toml` was re-factioned from Pirate to Harrow
-        // so the player ship's auto-fire (Federation faction) engages it.
-        // Filename kept as `pirate_raider.toml` to avoid cascading rename
-        // across world TOMLs that reference it.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+    fn harrow_destroyer_template_parses_with_harrow_faction() {
+        // (#472) The enemy destroyer is Harrow-factioned so the player ship's
+        // auto-fire (Federation faction) engages it.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         let faction = config
             .faction
-            .expect("pirate_raider must declare a faction");
+            .expect("the Harrow Destroyer must declare a faction");
         assert_eq!(
             faction.to_string(),
             "cccccccc-3333-4333-8333-cccccccccccc",
-            "pirate_raider faction must be Harrow (#472)"
+            "the Harrow Destroyer's faction must be Harrow (#472)"
         );
     }
 
     #[test]
-    fn pirate_raider_template_has_hull() {
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+    fn harrow_destroyer_template_has_hull() {
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert!(
             config.hull.is_some(),
-            "pirate_raider must have a [hull] section"
+            "the Harrow Destroyer must have a [hull] section"
         );
         let hull = config.hull.as_ref().unwrap();
         assert!(
             hull.hull_integrity > 0.0,
-            "pirate_raider [hull] must have a positive hull_integrity value"
+            "the Harrow Destroyer's [hull] must have a positive hull_integrity value"
         );
     }
 
     #[test]
-    fn pirate_raider_template_has_helm_and_weapons_console() {
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+    fn harrow_destroyer_template_has_helm_and_weapons_console() {
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert!(
             config.helm_console.is_some(),
-            "pirate_raider must have a [helm_console]"
+            "the Harrow Destroyer must have a [helm_console]"
         );
         assert!(
             config.weapons_console.is_some(),
-            "pirate_raider must have a [weapons_console]"
+            "the Harrow Destroyer must have a [weapons_console]"
         );
     }
 
@@ -7108,17 +7117,16 @@ automated_systems = []
         // Verify each NPC TOML produces exactly one arc system, ai_only,
         // ownerless (no `shields` station declared on NPCs).
         for (path, expected_max_hp) in [
-            ("../../assets/entities/pirate_raider.toml", 15),
-            ("../../assets/entities/pirate_raider_reinforcement.toml", 15),
+            // (#892) `pirate_raider.toml` + `pirate_raider_reinforcement.toml`
+            // (15 each) were retired as duplicates; the Harrow Destroyer that
+            // replaced them in the combat-test waves takes their place here.
+            ("../../assets/entities/ship_harrow_destroyer.toml", 40),
             ("../../assets/entities/ship_harrow_patrol.toml", 60),
             ("../../assets/entities/ship_harrow_warhawk.toml", 120),
         ] {
             let toml_str = match path {
-                "../../assets/entities/pirate_raider.toml" => {
-                    include_str!("../../assets/entities/pirate_raider.toml")
-                }
-                "../../assets/entities/pirate_raider_reinforcement.toml" => {
-                    include_str!("../../assets/entities/pirate_raider_reinforcement.toml")
+                "../../assets/entities/ship_harrow_destroyer.toml" => {
+                    include_str!("../../assets/entities/ship_harrow_destroyer.toml")
                 }
                 "../../assets/entities/ship_harrow_patrol.toml" => {
                     include_str!("../../assets/entities/ship_harrow_patrol.toml")
@@ -7198,28 +7206,37 @@ hull_max_hp = 6
     }
 
     #[test]
-    fn pirate_raider_template_has_shields_block() {
-        // (#474) Harrow Destroyer has a single-facing shield (#471).
+    fn harrow_destroyer_template_has_shields_block() {
+        // (#474) The Harrow Destroyer has a single omni shield (#471).
         // (#514) Migrated to `[[shield_arc]]` block; `[shields_console]`
         // block was retired for NPCs.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        // (#892) Re-pointed off the retired `pirate_raider.toml` duplicate. The
+        // regen rate is load-bearing here, not incidental: the hull's #788
+        // recovery doctrine sits out its standoff orbit at exactly this rate.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         assert_eq!(
             config.shield_arcs.len(),
             1,
-            "pirate_raider must declare exactly one [[shield_arc]] block"
+            "the Harrow Destroyer must declare exactly one [[shield_arc]] block"
         );
         let arc = &config.shield_arcs[0];
         assert_eq!(arc.id, "all");
-        assert_eq!(arc.max_hp, Some(15));
-        assert!((arc.regen_per_sec.expect("regen") - 0.5).abs() < 1e-6);
+        assert_eq!(arc.max_hp, Some(40));
+        assert!((arc.regen_per_sec.expect("regen") - 4.0).abs() < 1e-6);
     }
 
     #[test]
-    fn pirate_raider_template_phaser_has_shield_pierce() {
+    fn ship_harrow_patrol_phaser_has_shield_pierce() {
         // (#474) Harrow weapons all have 0.1 pierce.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        // (#892) Re-pointed off the retired `pirate_raider.toml`. The Ironveil,
+        // not the Harrow Destroyer, inherits this claim: the Destroyer carries
+        // no phaser bank at all (blasters only — see
+        // `harrow_destroyer_carries_forward_blasters_and_no_torpedoes`), so it
+        // could not carry a phaser-pierce assertion.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let wc = config.weapons_console.as_ref().unwrap();
         let bank = wc.phaser_banks.first().expect("must have a phaser bank");
         assert_eq!(bank.shield_pierce, Some(0.1));
@@ -7577,7 +7594,7 @@ hull_max_hp = 6
         let hulls = [
             include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
             include_str!("../../assets/entities/ship_harrow_cruiser.toml"),
-            include_str!("../../assets/entities/pirate_raider.toml"),
+            include_str!("../../assets/entities/ship_harrow_patrol.toml"),
             include_str!("../../assets/entities/alliance_courier.toml"),
             include_str!("../../assets/entities/alliance_destroyer.toml"),
         ]
@@ -8332,19 +8349,25 @@ hull_max_hp = 6
     }
 
     #[test]
-    fn pirate_raider_template_has_doctrine_objectives() {
-        // (#572) FSM dissolved — pirate_raider now uses doctrine-based AI.
-        // Expects a Patrol objective (sector sweep) and a higher-priority
-        // Destroy objective (engage hostiles on sight).
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+    fn ship_harrow_patrol_template_has_doctrine_objectives() {
+        // (#572) FSM dissolved — NPC hulls use doctrine-based AI. Expects a
+        // Patrol objective (sector sweep) and a higher-priority Destroy
+        // objective (engage hostiles on sight).
+        //
+        // (#892) Re-pointed off the retired `pirate_raider.toml`. The Ironveil
+        // rather than the Harrow Destroyer, because the Destroyer authors a
+        // Destroy entry ONLY — it has no Patrol doctrine for the priority
+        // ordering here to compare against, and after #892 the Ironveil is the
+        // shipped hull that still carries both.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_patrol.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("ship_harrow_patrol.toml must parse");
         let behaviour = config
             .behaviour
-            .expect("pirate_raider must have a [behaviour] block");
+            .expect("the Ironveil must have a [behaviour] block");
         let ids: Vec<&str> = behaviour.doctrine.iter().map(|d| d.id.as_str()).collect();
         assert!(
-            ids.contains(&"patrol-sector"),
-            "must have patrol-sector doctrine"
+            ids.contains(&"patrol-ironveil"),
+            "must have patrol-ironveil doctrine"
         );
         assert!(
             ids.contains(&"destroy-hostiles"),
@@ -8358,21 +8381,23 @@ hull_max_hp = 6
         let patrol = behaviour
             .doctrine
             .iter()
-            .find(|d| d.id == "patrol-sector")
+            .find(|d| d.id == "patrol-ironveil")
             .unwrap();
         assert!(
             destroy.base_priority > patrol.base_priority,
-            "destroy-hostiles must outscore patrol-sector"
+            "destroy-hostiles must outscore patrol-ironveil"
         );
     }
 
     #[test]
-    fn pirate_raider_doctrine_destroy_has_correct_directive_kind() {
+    fn harrow_destroyer_doctrine_destroy_has_correct_directive_kind() {
         // (#572) FSM transitions dissolved — engagement logic now lives in the
         // utility scorer. Verify the destroy-hostiles objective carries the
         // Destroy directive kind so `ai_target_selection` picks it up.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        // (#892) Re-pointed off the retired `pirate_raider.toml`.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("ship_harrow_destroyer.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
         let destroy = behaviour
             .doctrine
@@ -13397,15 +13422,16 @@ ai_only = true
     }
 
     #[test]
-    fn pirate_raider_authors_its_own_captain_owned_red_alert() {
+    fn harrow_destroyer_authors_its_own_captain_owned_red_alert() {
         // Since #871 this NPC hull carries a Captain seat and authors its own
         // red_alert on it. Provisioning must be idempotent — no second system —
         // and the authored ownership must survive. The control source is
         // unchanged from the provisioned era: an unmanned Captain seat boots on
         // `Backfill`, which automates every system it owns, so
         // `operate_captain_ai` still raises Red Alert.
-        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("pirate raider must parse");
+        // (#892) Re-pointed off the retired `pirate_raider.toml`.
+        let toml_str = include_str!("../../assets/entities/ship_harrow_destroyer.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("the Harrow Destroyer must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(
             reds.len(),

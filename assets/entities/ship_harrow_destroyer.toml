@@ -862,12 +862,31 @@ maintain_range = 40.0
 # ── Stations ──────────────────────────────────────────────────────────────────
 #
 # Crew stations (issue #871), mirroring `alliance_destroyer.toml` — the
-# comparable player hull. See the fuller note in `pirate_raider.toml`: every seat
-# boots on the implicit `Backfill` rating, which automates every system the
-# station owns, so an unmanned hull behaves exactly as it did when its systems
-# were ownerless + `ai_only`.
+# comparable player hull.
 #
-# The auto-generated `shield-arc-all` system is the only thing left ownerless.
+# THE FULLER NOTE. This lived in `ship_harrow_destroyer.toml` until issue #892 retired
+# that hull as a display-name duplicate of this one; the other NPC hulls point
+# here for it.
+#
+# NPC hulls used to declare no stations at all: every system was ownerless +
+# `ai_only`, and the spawner set the lot to `ControlSource::Ai` by fiat. That
+# made "NPC" a different SHAPE of ship from a player hull rather than the same
+# ship with nobody aboard — a human could never be admitted to any of its
+# systems, because admission resolves a human token through the station that
+# owns the target system and there was no station to resolve to.
+#
+# Every seat boots on the implicit `Backfill` rating (see
+# `ship::rating::seed_boot_ratings`), which automates every system the station
+# owns — so an unmanned hull behaves exactly as it did when its systems were
+# `ai_only`.
+#
+# No `console` key: there is no authored HTML console for these hulls yet, so a
+# human taking a seat gets admission but no bespoke UI. `manual_overview` is
+# likewise omitted — the ship manual is published for the player's own hull.
+#
+# Only the AUTO-GENERATED systems stay ownerless + `ai_only`: the
+# `shield-arc-all` system synthesised from `[[shield_arc]]` above (no shields
+# station on this hull), which is the case `ai_only` exists for.
 
 [[station]]
 id = "captain"

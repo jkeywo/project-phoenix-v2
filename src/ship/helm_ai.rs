@@ -4390,7 +4390,7 @@ mod tests {
     /// deleting it would have removed both. #704 declares them; this test is what
     /// stops the gap re-opening, and it is deliberately a *table over every hull*
     /// rather than one hull per axis, because the previous shipped-hull tests
-    /// (`shipped_hull_config_drives_the_per_axis_helm_systems` on `pirate_raider`,
+    /// (`shipped_hull_config_drives_the_per_axis_helm_systems` on the enemy destroyer,
     /// `shipped_hull_config_drives_ai_helm_lateral_thrust` on `alliance_cruiser`)
     /// each pinned one hull and one axis pair, which is exactly how six hulls
     /// drifted without anything going red.
@@ -4400,7 +4400,10 @@ mod tests {
     /// hand-built fixture's idea of one.
     #[test]
     fn every_shipped_hull_declares_every_helm_axis() {
-        let hulls: [(&str, &str); 9] = [
+        // (#892) `pirate_raider` + `pirate_raider_reinforcement` were retired as
+        // duplicates of `ship_harrow_destroyer`'s display name; the surviving
+        // hull takes their two rows.
+        let hulls: [(&str, &str); 8] = [
             (
                 "alliance_battleship",
                 include_str!("../../assets/entities/alliance_battleship.toml"),
@@ -4418,12 +4421,8 @@ mod tests {
                 include_str!("../../assets/entities/alliance_destroyer.toml"),
             ),
             (
-                "pirate_raider",
-                include_str!("../../assets/entities/pirate_raider.toml"),
-            ),
-            (
-                "pirate_raider_reinforcement",
-                include_str!("../../assets/entities/pirate_raider_reinforcement.toml"),
+                "ship_harrow_destroyer",
+                include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
             ),
             (
                 "ship_harrow_patrol",
@@ -4515,8 +4514,9 @@ mod tests {
     /// simply structural — a non-zero intent has no other possible writer.
     #[test]
     fn shipped_hull_config_drives_the_per_axis_helm_systems() {
-        let resolver =
-            resolver_from_shipped_hull(include_str!("../../assets/entities/pirate_raider.toml"));
+        let resolver = resolver_from_shipped_hull(include_str!(
+            "../../assets/entities/ship_harrow_destroyer.toml"
+        ));
 
         // The declaration itself — what #800 adds, and what was missing.
         assert!(
@@ -4571,7 +4571,7 @@ mod tests {
     /// The `pre_800` arm is what makes this more than a restatement of
     /// `shipped_hull_config_drives_the_per_axis_helm_systems`: it pins that the
     /// hull's *declarations* are load-bearing. Strip `helm-thrust`/`helm-steering`
-    /// back out of `pirate_raider.toml` and the shipped arm keeps passing on a
+    /// back out of `ship_harrow_destroyer.toml` and the shipped arm keeps passing on a
     /// coarse fallback if one ever returns — this arm would not.
     #[test]
     fn shipped_hull_helm_is_driven_by_the_per_axis_declarations_alone() {
@@ -4586,8 +4586,9 @@ mod tests {
             (get_thrust_input(&mut app), get_steering_input(&mut app))
         };
 
-        let shipped =
-            resolver_from_shipped_hull(include_str!("../../assets/entities/pirate_raider.toml"));
+        let shipped = resolver_from_shipped_hull(include_str!(
+            "../../assets/entities/ship_harrow_destroyer.toml"
+        ));
 
         // The same hull as it behaved before #800: coarse helm on AI, the two
         // axes undeclared and therefore Human by default.
@@ -4672,8 +4673,9 @@ mod tests {
             });
 
         // Shipped-hull sources: coarse + both axes on AI.
-        let resolver =
-            resolver_from_shipped_hull(include_str!("../../assets/entities/pirate_raider.toml"));
+        let resolver = resolver_from_shipped_hull(include_str!(
+            "../../assets/entities/ship_harrow_destroyer.toml"
+        ));
         install_control_sources(&mut app, &resolver);
 
         tick(&mut app);
@@ -5094,7 +5096,7 @@ mod tests {
     /// The fallback only ever looked like a safety net: `home_position` was
     /// never seeded in production, so "retreat home" meant "fly to world
     /// origin" on every shipped ship. Retreat is authored doctrine with a real
-    /// anchor now (see `assets/entities/pirate_raider.toml`), and an anchor that
+    /// anchor now (`assets/worlds/patrol.toml` authors one on `raider_alpha`), and an anchor that
     /// resolves to nothing steers nowhere — see
     /// `ai_helm_steering_retreats_toward_anchor` for the resolvable case.
     #[test]
@@ -9343,11 +9345,11 @@ verb = "engage_boost"
 
     // ── E5 smoke tests (#553) ─────────────────────────────────────────────────
 
-    // (a) Pirate raider — verifies that an NPC ship with both stick axes on
+    // (a) Enemy NPC hull — verifies that an NPC ship with both stick axes on
     // Ai control satisfies `helm_axes_operate_ai`, the gate every per-ship
     // "is the AI flying this" consumer reads since #801.
     #[test]
-    fn pirate_raider_ai_helm_policy_routes_through_npc_path() {
+    fn npc_hull_ai_helm_policy_routes_through_npc_path() {
         use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
         let mut resolver = ControlSourceResolver::new();
@@ -9360,14 +9362,14 @@ verb = "engage_boost"
         let sources = ShipSystemControlSources(resolver);
         assert!(
             helm_axes_operate_ai(&sources),
-            "NPC raider helm axes must route through the AI helm path"
+            "NPC hull helm axes must route through the AI helm path"
         );
         assert!(
             !sources
                 .0
                 .policy_for(&crate::system_registry::helm_thrust_system_id())
                 .accept_human_input,
-            "NPC raider must not accept human helm input"
+            "an NPC hull must not accept human helm input"
         );
     }
 

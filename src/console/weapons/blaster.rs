@@ -387,7 +387,7 @@ pub(crate) fn tick_blaster_auto_fire(
 /// only ever yields ships with a blaster bank; building the velocity map from
 /// it silently resolved every blaster-less hull to `(0.0, 0.0)` and aimed the
 /// gun exactly where the target was standing. That is most of the shipped
-/// content — `pirate_raider` and `alliance_cruiser` author no blaster bank —
+/// content — `ship_harrow_patrol` and `alliance_cruiser` author no blaster bank —
 /// so the lead vanished against precisely the hulls the artillery shoots at.
 ///
 /// A plain second `Query<(&EntityUuid, &ShipPhysics), With<Ship>>` cannot

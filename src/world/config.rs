@@ -2511,7 +2511,7 @@ transform = { position = [0.0, 0.0, 0.0] }
 patrol_alpha = [300.0, 0.0, -300.0]
 
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
 name = "raider_alpha"
 transform = { anchor = "patrol_alpha" }
 "#;
@@ -2715,7 +2715,7 @@ transform = { position = [0.0, 0.0, 0.0] }
     #[test]
     fn resolve_entity_position_uses_anchor_when_set() {
         let entity = entity_with(
-            "assets/entities/pirate_raider.toml",
+            "assets/entities/ship_harrow_destroyer.toml",
             TransformConfig {
                 anchor: Some("patrol_alpha".into()),
                 ..Default::default()
@@ -2742,7 +2742,7 @@ transform = { position = [0.0, 0.0, 0.0] }
     #[test]
     fn resolve_entity_position_errors_on_unknown_anchor() {
         let entity = entity_with(
-            "assets/entities/pirate_raider.toml",
+            "assets/entities/ship_harrow_destroyer.toml",
             TransformConfig {
                 anchor: Some("ghost".into()),
                 ..Default::default()
@@ -2782,7 +2782,7 @@ transform = { position = [0.0, 0.0, 0.0] }
     #[test]
     fn resolve_entity_position_relative_to_adds_offset_to_referenced_entity() {
         let entity = entity_with(
-            "assets/entities/pirate_raider.toml",
+            "assets/entities/ship_harrow_destroyer.toml",
             TransformConfig {
                 relative_to: Some("starbase_alpha".into()),
                 offset: Some([10.0, 0.0, -5.0]),
@@ -2852,7 +2852,7 @@ name          = "starbase_alpha"
 transform     = { position = [100.0, 0.0, 200.0] }
 
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
 transform     = { relative_to = "starbase_alpha", offset = [10.0, 0.0, -5.0] }
 "#;
         let world = parse_world(toml).expect("parse");
@@ -3728,7 +3728,7 @@ entity    = "raider_alpha"
 "#;
         let entity_when = r#"
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
 when          = "history(net_change, hull_pct, 5) < 0"
 "#;
         for (label, toml) in [
@@ -4546,7 +4546,8 @@ message = "."
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
         let paths = entity_template_paths(&cfg);
         for required in &[
-            "assets/entities/pirate_raider.toml",
+            // (#892) `pirate_raider.toml` was retired; the Harrow Destroyer
+            // below now fills the waves it used to.
             "assets/entities/ship_harrow_patrol.toml",
             "assets/entities/ship_harrow_warhawk.toml",
             "assets/entities/ship_harrow_destroyer.toml",
@@ -5015,7 +5016,7 @@ condition = "on_world_loaded"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "raider_beta"
   position      = [100.0, 0.0, -50.0]
   rotation      = [0.0, 1.5707963, 0.0]
@@ -5034,7 +5035,7 @@ condition = "on_world_loaded"
                 groups: _,
                 overrides: _,
             } => {
-                assert_eq!(template_path, "assets/entities/pirate_raider.toml");
+                assert_eq!(template_path, "assets/entities/ship_harrow_destroyer.toml");
                 assert_eq!(name, "raider_beta");
                 assert!(anchor.is_none());
                 assert_eq!(*position, Some([100.0, 0.0, -50.0]));
@@ -5056,7 +5057,7 @@ condition = "on_world_loaded"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "raider_at_anchor"
   anchor        = "patrol_alpha"
 "#;

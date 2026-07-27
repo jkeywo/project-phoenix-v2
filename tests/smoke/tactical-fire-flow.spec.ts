@@ -39,7 +39,7 @@ spawn_on = "game_start"
 tags = ["ship"]
 
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
 transform     = { position = [-15.0, 0.0, -5.0] }
 spawn_on      = "game_start"
@@ -71,7 +71,7 @@ async function startGameWithTactical(context: BrowserContext) {
   // Without this patch the raider would produce a BeamStarted (attacking
   // the player) before the player fires, causing the test's
   // waitForMessage('BeamStarted') to pick up the wrong target_uuid.
-  await context.route('**/assets/entities/pirate_raider.toml', async (route) => {
+  await context.route('**/assets/entities/ship_harrow_patrol.toml', async (route) => {
     const response = await route.fetch();
     const text = await response.text();
     const patched = text

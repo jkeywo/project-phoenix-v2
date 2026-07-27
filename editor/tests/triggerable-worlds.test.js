@@ -90,7 +90,7 @@ describe('TriggerableWorlds', () => {
               condition: 'on_destroyed',
               entity: 'raider_alpha',
               action: [
-                { type: 'spawn', template: 'assets/entities/pirate_raider.toml' },
+                { type: 'spawn', template: 'assets/entities/ship_harrow_patrol.toml' },
                 { type: 'message', text: 'Mayday!' },
               ],
             },

@@ -11,7 +11,7 @@ Range-gated hailing for the Comms console. Entities opt in via a `[comms].range 
 ### TOML
 
 ```toml
-# assets/entities/player_ship.toml, station_outpost.toml, pirate_raider.toml, ...
+# assets/entities/player_ship.toml, station_outpost.toml, ship_harrow_patrol.toml, ...
 [comms]
 range = 500.0
 ```
@@ -67,9 +67,9 @@ While `range_active == false` (lobby phase, pure-handler tests), range gating is
 |---|---|---|
 | Player ship | 500 | `assets/entities/player_ship.toml` |
 | Starbase Alpha (station_outpost) | 800 | `assets/entities/station_outpost.toml` |
-| Pirate raider | 400 | `assets/entities/pirate_raider.toml` — calibrated so distress comms fire during typical phaser-range engagements |
+| Harrow patrol cruiser (Ironveil) | 600 | `assets/entities/ship_harrow_patrol.toml` — the ambient `raider_alpha` in `default.toml`/`patrol.toml` since #892 retired `pirate_raider.toml` (which carried 400) |
 
-Default world has ship at `(150, 0, 0)`, Starbase at `(500, 0, 0)` → distance 350, in range at game start. Raider at `(300, 0, -300)` → out of range until the player closes inside ~400u during combat.
+Default world has ship at `(150, 0, 0)`, Starbase at `(500, 0, 0)` → distance 350, in range at game start. Raider at `patrol_alpha` `(600, 0, -600)` → out of range until the player closes inside ~500u (the ship's own range is the binding constraint) during combat.
 
 ## Tests
 
@@ -86,4 +86,4 @@ Default world has ship at `(150, 0, 0)`, Starbase at `(500, 0, 0)` → distance 
 - `src/comms/server.rs` (CommsRuntime, range systems — relocated in #816)
 - `src/console/comms/server.rs` (handle_hail / handle_respond_to_message / current_sender_in_range)
 - `src/console/comms/client.rs`, `src/client_comms.rs`
-- `assets/entities/player_ship.toml`, `station_outpost.toml`, `pirate_raider.toml`
+- `assets/entities/player_ship.toml`, `station_outpost.toml`, `ship_harrow_patrol.toml`

@@ -126,7 +126,7 @@ maintain_range = 45.0
 #
 # Crew stations (issue #871), mirroring `alliance_destroyer.toml` — the
 # comparable player hull for this patrol escort. See the fuller note in
-# `pirate_raider.toml`: every seat boots on the implicit `Backfill` rating, which
+# `ship_harrow_destroyer.toml`: every seat boots on the implicit `Backfill` rating, which
 # automates every system the station owns, so an unmanned hull behaves exactly as
 # it did when its systems were ownerless + `ai_only`.
 #

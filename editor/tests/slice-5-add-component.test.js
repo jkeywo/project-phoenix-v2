@@ -4,11 +4,11 @@ import { setupEntityMode, fireClick } from './slice-5-helpers.js';
 /**
  * Slice 5 integration test: + Add Component → Region combo.
  *
- * - Open pirate_raider.toml.
+ * - Open ship_harrow_patrol.toml.
  * - Click + Add Component → submenu opens.
  * - Click Region combo.
  * - Assert that the `shape` and `effects` cards now exist (new sections).
- *   `tags` already existed on pirate_raider, so the Region combo's tags
+ *   `tags` already existed on ship_harrow_patrol, so the Region combo's tags
  *   section is skipped — verify the skip-warning surfaces via addCombo's
  *   return shape and that the existing tags section is left untouched.
  */
@@ -17,7 +17,7 @@ describe('Slice 5: + Add Component → Region combo', () => {
   let ctx;
   beforeEach(async () => {
     ctx = await setupEntityMode();
-    await ctx.view._internal.loadEntity('assets/entities/pirate_raider.toml');
+    await ctx.view._internal.loadEntity('assets/entities/ship_harrow_patrol.toml');
   });
 
   it('opens the picker when + Add Component is clicked', () => {
@@ -59,13 +59,13 @@ describe('Slice 5: + Add Component → Region combo', () => {
 
     // Original tags values are preserved (not overwritten with ['region']).
     const tagsCard = ctx.view.shell.getCard('tags');
-    expect(tagsCard.data).toEqual(['ship', 'npc', 'enemy']);
+    expect(tagsCard.data).toEqual(['ship', 'npc', 'comms_contact']);
 
     // Skip warning surfaced.
     expect(warnings.some((w) => /tags.*already present/i.test(w))).toBe(true);
 
     // Dirty + undo snapshot recorded.
-    const path = 'assets/entities/pirate_raider.toml';
+    const path = 'assets/entities/ship_harrow_patrol.toml';
     expect(ctx.modeShell.isDirty('Entity', path)).toBe(true);
     const undo = ctx.modeShell.getUndoHistory('Entity', path);
     expect(undo.length).toBe(1);

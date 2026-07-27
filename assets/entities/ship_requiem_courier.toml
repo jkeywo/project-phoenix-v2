@@ -78,7 +78,7 @@ target_speed     = 0.8
 # command and the support systems; this courier has the same shape minus the
 # blaster, so it takes the same two seats.
 #
-# See the fuller note in `pirate_raider.toml`: both seats boot on the implicit
+# See the fuller note in `ship_harrow_destroyer.toml`: both seats boot on the implicit
 # `Backfill` rating, which automates every system the station owns, so an
 # unmanned courier behaves exactly as it did when its systems were ownerless +
 # `ai_only`. This hull declares no `[[shield_arc]]`, so after the restructure it

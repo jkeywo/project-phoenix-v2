@@ -655,14 +655,20 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 /// for everything that is not a hull, means no AI-capable fine system at all.
 /// # What the shape of this table already says
 ///
-/// * Twelve hulls, 223 AI-capable fine-system slots, 206 of them undeclared —
-///   92%.
+/// * Ten hulls, 191 AI-capable fine-system slots, 174 of them undeclared — 91%.
+///
+///   Twelve hulls / 223 slots / 206 undeclared until issue #892 retired
+///   `pirate_raider.toml` and `pirate_raider_reinforcement.toml`. That is a
+///   burn-down of 32 by DELETION rather than by authoring: two hulls that
+///   declared nothing stopped shipping, so the ratchet drops without a single
+///   declaration being written. Worth naming, because "the number went down" is
+///   otherwise read as progress on US7 and this is not that.
 /// * **Twelve of the nineteen kinds are authored by nobody**: `lateral`,
 ///   `vertical`, `phaser_bank`, `blaster_bank`, `torpedo_magazine`,
 ///   `shields_focus`, `comms_response`, and all five selectors.
-/// * The selector family is 60 of 60 synthesised, so unlike the policies it has
+/// * The selector family is 50 of 50 synthesised, so unlike the policies it has
 ///   no shipped worked example to check a transcription against.
-/// * The only kinds any hull declares are `power` (4 of 12 hulls), `engines`
+/// * The only kinds any hull declares are `power` (4 of 10 hulls), `engines`
 ///   (3), `steering` (3), `torpedo_tube` (4 tubes of 15), `captain` (1),
 ///   `boost` (1) and `impulse` (1) — and no hull declares more than three.
 ///
@@ -768,48 +774,6 @@ pub const EXPECTED_UNDECLARED: &[(&str, &[&str])] = &[
             "torpedo_magazine",
             "torpedo_tube[aft]",
             "torpedo_tube[fore]",
-            "vertical",
-        ],
-    ),
-    (
-        "pirate_raider",
-        &[
-            "boost",
-            "captain",
-            "comms_response",
-            "comms_selector",
-            "engines",
-            "impulse",
-            "lateral",
-            "navigation_selector",
-            "phaser_bank[fore]",
-            "power",
-            "repair_selector",
-            "sensors_selector",
-            "shields_focus",
-            "steering",
-            "tactical_selector",
-            "vertical",
-        ],
-    ),
-    (
-        "pirate_raider_reinforcement",
-        &[
-            "boost",
-            "captain",
-            "comms_response",
-            "comms_selector",
-            "engines",
-            "impulse",
-            "lateral",
-            "navigation_selector",
-            "phaser_bank[fore]",
-            "power",
-            "repair_selector",
-            "sensors_selector",
-            "shields_focus",
-            "steering",
-            "tactical_selector",
             "vertical",
         ],
     ),
@@ -951,7 +915,7 @@ pub const EXPECTED_UNDECLARED: &[(&str, &[&str])] = &[
 /// May be LOWERED as #885b authors declarations. It must never be raised — a
 /// change that needs it raised is a change that widened the gap PRD #774 US7
 /// exists to close, and should author the declaration instead.
-pub const UNDECLARED_HIGH_WATER_MARK: usize = 206;
+pub const UNDECLARED_HIGH_WATER_MARK: usize = 174;
 
 #[cfg(test)]
 pub(crate) mod source_scan {
@@ -1378,36 +1342,36 @@ mod tests {
             rollup.push((kind.key.as_str(), declared, slots));
         }
         assert_eq!(
-            total, 223,
-            "the shipped hulls carry 223 AI-capable fine-system slots in total"
+            total, 191,
+            "the shipped hulls carry 191 AI-capable fine-system slots in total"
         );
         assert_eq!(
             rollup,
             vec![
-                ("captain", 1, 12),
-                ("engines", 3, 12),
-                ("steering", 3, 12),
-                ("lateral", 0, 12),
-                ("vertical", 0, 12),
-                ("impulse", 1, 12),
-                ("boost", 1, 12),
-                ("phaser_bank", 0, 14),
+                ("captain", 1, 10),
+                ("engines", 3, 10),
+                ("steering", 3, 10),
+                ("lateral", 0, 10),
+                ("vertical", 0, 10),
+                ("impulse", 1, 10),
+                ("boost", 1, 10),
+                ("phaser_bank", 0, 12),
                 ("blaster_bank", 0, 8),
                 ("torpedo_tube", 4, 15),
                 ("torpedo_magazine", 0, 6),
-                ("shields_focus", 0, 12),
-                ("power", 4, 12),
-                ("comms_response", 0, 12),
-                ("sensors_selector", 0, 12),
-                ("tactical_selector", 0, 12),
-                ("navigation_selector", 0, 12),
-                ("repair_selector", 0, 12),
-                ("comms_selector", 0, 12),
+                ("shields_focus", 0, 10),
+                ("power", 4, 10),
+                ("comms_response", 0, 10),
+                ("sensors_selector", 0, 10),
+                ("tactical_selector", 0, 10),
+                ("navigation_selector", 0, 10),
+                ("repair_selector", 0, 10),
+                ("comms_selector", 0, 10),
             ],
             "the per-kind roll-up moved. TWELVE of the nineteen kinds are authored by \
              nobody today (lateral, vertical, phaser_bank, blaster_bank, \
              torpedo_magazine, shields_focus, comms_response, and all five selectors), \
-             and the whole selector family is 60 of 60 synthesised — that is what \
+             and the whole selector family is 50 of 50 synthesised — that is what \
              makes #885b a content PRD rather than a tidy-up."
         );
     }

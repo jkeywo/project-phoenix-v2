@@ -4,7 +4,7 @@ import { setupEntityMode } from './slice-5-helpers.js';
 /**
  * Slice 5 integration test: behaviour-view validation banner (doctrine-based AI).
  *
- * Open pirate_raider.toml (doctrine format) and remove the directive_kind
+ * Open ship_harrow_patrol.toml (doctrine format) and remove the directive_kind
  * from the first doctrine entry. After re-render, the inline
  * `.entity-behaviour-error` banner should be present and reference the
  * missing field.
@@ -14,11 +14,11 @@ describe('Slice 5: behaviour validation surfaces inline', () => {
   let ctx;
   beforeEach(async () => {
     ctx = await setupEntityMode();
-    await ctx.view._internal.loadEntity('assets/entities/pirate_raider.toml');
+    await ctx.view._internal.loadEntity('assets/entities/ship_harrow_patrol.toml');
   });
 
   it('shows an inline validation banner when a doctrine entry is missing directive_kind', () => {
-    // Sanity: no banner before mutation — pirate_raider.toml validates cleanly.
+    // Sanity: no banner before mutation — ship_harrow_patrol.toml validates cleanly.
     const before = ctx.host.querySelectorAll('div')
       .filter((d) => d.classList.contains('entity-behaviour-error'));
     expect(before.length).toBe(0);

@@ -247,13 +247,13 @@ position      = [500.0, 0.0, 0.0]
 
 # NPC positioned at a named anchor
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
 anchor        = "patrol_alpha"
 
 # Entity positioned relative to another named entity
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 relative_to   = "starbase_alpha"
 offset        = [10.0, 0.0, -5.0]
 ```
@@ -405,7 +405,7 @@ position      = [500.0, 0.0, 0.0]
 
 # Named NPC at an anchor (PRD #337 slice 3)
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
 anchor        = "patrol_alpha"
 
@@ -674,9 +674,16 @@ next = "Helm"
 # … see §6.3 for the full station shape …
 ```
 
-### 2.2.2 Example — `assets/entities/pirate_raider.toml`
+### 2.2.2 Example — a minimal NPC ship
 
 NPC ship: legacy single-slot hull, AI behaviour, no `[stations]`.
+
+> **Historical.** This excerpt was taken from `pirate_raider.toml`, which issue
+> #892 retired as a display-name duplicate of `ship_harrow_destroyer.toml`. It
+> was already stale before that — the Pirate faction went in #472 and the
+> `[behaviour]` FSM dissolved in #572 — so read it as the *shape* of a minimal
+> NPC hull, not as shipped content. For a current one see
+> `assets/entities/ship_harrow_patrol.toml`.
 
 ```toml
 tags = ["ship", "npc", "enemy"]
@@ -1147,7 +1154,10 @@ Used by NPC entity templates.
 | `threshold` | f32 | none | For `hull_below` (0..1 fraction). |
 | `seconds` | f32 | none | For `on_timer` (since state entry). |
 
-#### Example (excerpt from `pirate_raider.toml`)
+#### Example (FSM-era excerpt, from the retired `pirate_raider.toml`)
+
+> The `[behaviour]` FSM this shows was dissolved in #572 and the hull retired in
+> #892; the section is kept only to document the legacy schema.
 
 ```toml
 [behaviour]

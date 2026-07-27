@@ -150,7 +150,7 @@ function makeWorld() {
     anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
     entity: [
       {
-        template_path: 'assets/entities/pirate_raider.toml',
+        template_path: 'assets/entities/ship_harrow_patrol.toml',
         name: 'raider_alpha',
         transform: { anchor: 'patrol_alpha' },
       },

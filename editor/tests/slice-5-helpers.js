@@ -163,7 +163,7 @@ export async function setupEntityMode(opts = {}) {
     if (mode === 'Entity') restoreCb = fn;
   };
 
-  const files = opts.files ?? ['pirate_raider.toml', 'alliance_battleship.toml'];
+  const files = opts.files ?? ['ship_harrow_patrol.toml', 'alliance_battleship.toml'];
 
   const io = {
     readFile: async (path) => fixture(path),

@@ -2163,7 +2163,8 @@ range = 320
 
     /// A hull carrying an authored `Retreat` gated at `threshold`, plus an
     /// ordinary always-on objective to outrank. Mirrors the shape shipped in
-    /// `assets/entities/pirate_raider.toml`.
+    /// `assets/worlds/patrol.toml`, which authors one on `raider_alpha` (#892 —
+    /// it used to ship on the retired `pirate_raider.toml`).
     fn retreat_behaviour(threshold: f32) -> crate::entity_config::BehaviourConfig {
         use crate::entity_config::{BehaviourConfig, DoctrineObjective};
         BehaviourConfig {

@@ -39,7 +39,7 @@ function makeWorld() {
     global: { seed: 42 },
     anchors: { patrol_alpha: [100, 0, 0] },
     entity: [{
-      template_path: 'assets/entities/pirate_raider.toml',
+      template_path: 'assets/entities/ship_harrow_patrol.toml',
       name: 'raider_alpha',
       transform: { anchor: 'patrol_alpha' },
     }],
@@ -135,7 +135,7 @@ describe('Slice 3 integration: select → override → clear cycle', () => {
     const before = getWorldContentData(world, index, 'assets/worlds/test.toml');
     expect(before.namedEntities).toEqual([{
       name: 'raider_alpha',
-      template_path: 'assets/entities/pirate_raider.toml',
+      template_path: 'assets/entities/ship_harrow_patrol.toml',
       refCount: 1,
     }]);
     expect(before.objectives).toEqual([{

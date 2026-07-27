@@ -179,10 +179,10 @@ mod tests {
     /// This test confirms that overriding `waypoint_arrival_radius` merges
     /// correctly while preserving the template's doctrine objectives.
     #[test]
-    fn pirate_raider_behaviour_override_merges_arrival_radius() {
-        let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
-            .expect("pirate_raider.toml must exist");
-        let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
+    fn harrow_destroyer_behaviour_override_merges_arrival_radius() {
+        let template_toml = std::fs::read_to_string("assets/entities/ship_harrow_destroyer.toml")
+            .expect("ship_harrow_destroyer.toml must exist");
+        let cache = make_cache("assets/entities/ship_harrow_destroyer.toml", &template_toml);
 
         let override_value: toml::Value = toml::from_str(
             r#"
@@ -193,7 +193,7 @@ waypoint_arrival_radius = 99.0
         .unwrap();
 
         let inst = WorldEntity {
-            template_path: "assets/entities/pirate_raider.toml".to_string(),
+            template_path: "assets/entities/ship_harrow_destroyer.toml".to_string(),
             overrides: Some(override_value),
             ..Default::default()
         };
@@ -216,13 +216,13 @@ waypoint_arrival_radius = 99.0
     /// (#572) FSM dissolved — override now targets `waypoint_arrival_radius`.
     #[test]
     fn world_inline_override_round_trips_behaviour_merge() {
-        let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
-            .expect("pirate_raider.toml must exist");
-        let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
+        let template_toml = std::fs::read_to_string("assets/entities/ship_harrow_destroyer.toml")
+            .expect("ship_harrow_destroyer.toml must exist");
+        let cache = make_cache("assets/entities/ship_harrow_destroyer.toml", &template_toml);
 
         let world_toml = r#"
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
 name          = "raider_alpha"
 transform     = { position = [150.0, 0.0, -20.0] }
 overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }

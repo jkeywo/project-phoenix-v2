@@ -426,48 +426,55 @@ position = [-0.25, -0.1, -0.25]
         assert!((t.rotation.angle_between(Quat::IDENTITY)).abs() < EPS);
     }
 
-    // ── Real-asset linkage (pirate_raider → dynasty_destroyer sidecar) ────────
+    // ── Real-asset linkage (alliance_destroyer → its own sidecar) ─────────────
 
-    /// End-to-end (pure, native) proof of marker linkage on the realistic test
-    /// target: the pirate_raider's `fore` phaser bank carries `marker =
-    /// "fore_emitter"`, its `[mesh] model` resolves to a sidecar that defines a
-    /// `fore_emitter` marker, and the resolver returns it.
+    /// End-to-end (pure, native) proof of marker linkage on a realistic test
+    /// target: the Alliance Destroyer's `omni` phaser bank carries `marker =
+    /// "phasers_omni"`, its `[mesh] model` resolves to a sidecar that defines a
+    /// `phasers_omni` marker, and the resolver returns it.
+    ///
+    /// (#892) This ran against `pirate_raider.toml` → `dynasty_destroyer.model.toml`
+    /// until that hull was retired as a duplicate. It was the ONLY entity
+    /// referencing either `dynasty_destroyer.glb` or its `fore_emitter` marker,
+    /// so there is no like-for-like replacement: the sidecar is now orphaned
+    /// content. The linkage claim itself is hull-agnostic, so it moves to a
+    /// shipped (hull, sidecar, marker) triple that still exists.
     #[test]
-    fn pirate_raider_fore_bank_marker_resolves_in_sidecar() {
+    fn alliance_destroyer_omni_bank_marker_resolves_in_sidecar() {
         use crate::entity_config::EntityConfig;
 
-        let ship_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
-            .expect("pirate_raider.toml must exist");
-        let cfg = EntityConfig::from_toml(&ship_toml).expect("pirate_raider must parse");
+        let ship_toml = std::fs::read_to_string("assets/entities/alliance_destroyer.toml")
+            .expect("alliance_destroyer.toml must exist");
+        let cfg = EntityConfig::from_toml(&ship_toml).expect("alliance_destroyer must parse");
 
-        // The fore bank links to a marker.
+        // The omni bank links to a marker.
         let weapons = cfg
             .weapons_console
             .as_ref()
             .expect("weapons_console present");
-        let fore_bank = weapons
+        let omni_bank = weapons
             .phaser_banks
             .iter()
-            .find(|b| b.id == "fore")
-            .expect("fore bank present");
-        let marker_name = fore_bank
+            .find(|b| b.id == "omni")
+            .expect("omni bank present");
+        let marker_name = omni_bank
             .marker
             .as_deref()
-            .expect("fore bank carries a marker name");
-        assert_eq!(marker_name, "fore_emitter");
+            .expect("omni bank carries a marker name");
+        assert_eq!(marker_name, "phasers_omni");
 
         // The mesh model resolves to a sidecar (default variant).
         let mesh = cfg.mesh.as_ref().expect("mesh present");
         let model_path = mesh.model.as_deref().expect("model path present");
         let path = sidecar_path(model_path, mesh.variant.as_deref());
-        assert_eq!(path, "assets/models/dynasty_destroyer.model.toml");
+        assert_eq!(path, "assets/models/alliance_destroyer.model.toml");
 
         // Parse the sidecar and resolve the linked marker.
         let rig_toml =
-            std::fs::read_to_string(&path).expect("dynasty_destroyer sidecar must exist");
+            std::fs::read_to_string(&path).expect("alliance_destroyer sidecar must exist");
         let rig = ModelRig::from_toml(&rig_toml).expect("sidecar must parse");
         rig.marker(marker_name)
-            .expect("fore_emitter marker must resolve in the sidecar");
+            .expect("phasers_omni marker must resolve in the sidecar");
 
         // Missing marker → None (caller falls back to origin).
         assert!(rig.marker("does_not_exist").is_none());

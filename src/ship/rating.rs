@@ -546,8 +546,13 @@ power_group = "ops"
             }
         }
 
+        // Ten since issue #892 retired `pirate_raider.toml` and
+        // `pirate_raider_reinforcement.toml` as display-name duplicates of
+        // `ship_harrow_destroyer.toml`. The floor is a "did the scan actually
+        // find the hulls?" guard, so it tracks the shipped count down; it must
+        // never be lowered to accommodate a hull that stopped parsing.
         assert!(
-            checked_hulls >= 12,
+            checked_hulls >= 10,
             "expected every shipped hull to be checked, got {checked_hulls}"
         );
     }

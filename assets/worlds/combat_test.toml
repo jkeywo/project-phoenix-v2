@@ -149,10 +149,11 @@ starbase_patrol_west  = [300.0, 0.0, 100.0]   # starbase + [-200, 0,    0]
 # (The high-LOD Destroy directive takes over once the player is within each
 # ship's sensor range.)
 #
-# Pirate raider (destroyer) patrol circuit: approach from north, east, south.
-patrol_alpha       = [850.0, 0.0, -400.0]   # north-east approach
-patrol_beta        = [900.0, 0.0, 100.0]    # due east
-patrol_gamma       = [850.0, 0.0, 600.0]    # south-east approach
+# There is no `patrol_alpha`/`_beta`/`_gamma` circuit any more (issue #892):
+# those three anchors existed solely for the retired `pirate_raider.toml`, and
+# the Harrow Destroyer that replaced it in waves 1/2/3/5/7 authors a Destroy
+# doctrine only — it has no Patrol route to resolve.
+#
 # Harrow cruiser patrol circuit: two waypoints between the outer belt and
 # starbase.
 ironveil_patrol_a  = [750.0, 0.0, -100.0]   # ring-outer to mid
@@ -161,18 +162,16 @@ ironveil_patrol_b  = [600.0, 0.0, 200.0]    # mid to starbase vicinity
 warhawk_patrol_a   = [1100.0, 0.0, -50.0]   # far east
 warhawk_patrol_b   = [700.0, 0.0, 50.0]     # mid east
 
-# There is deliberately NO `pirate_haven` here, and the raider spawns below say
-# so out loud (issue #888).
+# There is deliberately no `pirate_haven` here either, and since issue #892
+# there is nothing left that would read it.
 #
-# `pirate_raider.toml` carries a `retreat-when-hurt` Retreat directive naming
-# that anchor, gated on hull < 30%. Declaring it would hand this scenario a
-# behaviour it cannot afford: victory is `on_all_destroyed`, so a wave that runs
-# for a haven at full throttle the moment it is nearly dead turns every ending
-# into a stern chase. Leaving the anchor undeclared used to be how that was
-# avoided — silently, by the directive resolving to nowhere and falling through
-# to the next one. Each raider override now clears the entry instead, which is
-# the same behaviour and the same fall-through, stated rather than inferred from
-# an absence.
+# The retired `pirate_raider.toml` carried a `retreat-when-hurt` Retreat
+# directive naming that anchor, gated on hull < 30%, and every wave override had
+# to clear the entry: victory is `on_all_destroyed`, so a wave that runs for a
+# haven at full throttle the moment it is nearly dead turns every ending into a
+# stern chase. The Harrow Destroyer authors no Retreat at all, so the clearing
+# entries are gone with the hull — nothing to fall through to, and nothing to
+# state.
 
 # ── Static map entities ───────────────────────────────────────────────────────
 
@@ -296,14 +295,13 @@ after_secs = 0.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_1"
   anchor        = "enemy_n_outer"
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -324,22 +322,23 @@ when       = "counter(ship_power) >= 90"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_1b"
   position      = [900.0, 0.0, -560.0]
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 1c: Harrow Destroyer at t=20 (issue #883).
 #
-# The scenario's only fly-through interceptor, and the reason it is here: every
-# other wave flies the shared brake-and-orbit Destroy doctrine, so a pass that
-# does NOT brake is visible against them at a glance. It is dropped away from
-# the other spawn anchors so its inbound leg is a long clean run.
+# Since issue #892 this is the same hull the odd waves fly, and it is kept for
+# what distinguishes it from them: it is the only destroyer in the scenario that
+# comes straight for the PLAYER. The odd waves carry an `assault-starbase`
+# override that points them at Starbase Alpha until something shoots them, so
+# 1c's pass is the one the player meets head-on. It is dropped away from the
+# other spawn anchors so its inbound leg is a long clean run.
 #
 # Its doctrine is left as the hull authors it — no `overrides.behaviour` — since
 # the manoeuvre lives in the hull's `[helm_console.*_ai]` policy machines rather
@@ -362,14 +361,13 @@ after_secs = 45.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_2"
   anchor        = "enemy_se"
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -406,14 +404,13 @@ after_secs = 60.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_3"
   anchor        = "enemy_e"
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -434,14 +431,13 @@ when       = "counter(ship_power) >= 90"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_3b"
   position      = [1200.0, 0.0, 140.0]
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 4: Harrow Cruiser at t=120 (issue #790).
@@ -494,14 +490,13 @@ after_secs = 210.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_5"
   anchor        = "enemy_ese"
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -522,14 +517,13 @@ when       = "counter(ship_power) >= 90"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_5b"
   position      = [1100.0, 0.0, 390.0]
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 6: Harrow Cruiser at t=240 (issue #790).
@@ -575,14 +569,13 @@ after_secs = 270.0
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_7"
   anchor        = "enemy_s_outer"
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
   [[trigger.action]]
@@ -603,14 +596,13 @@ when       = "counter(ship_power) >= 90"
 
   [[trigger.action]]
   type          = "spawn_entity"
-  template_path = "assets/entities/pirate_raider.toml"
+  template_path = "assets/entities/ship_harrow_destroyer.toml"
   name          = "wave_7b"
   position      = [900.0, 0.0, 840.0]
   overrides = { behaviour = { doctrine = [
     { id = "assault-starbase", directive_kind = "Destroy", directive_target = "Starbase Alpha",
       base_priority = 50.0, target_speed = 0.9, maintain_range = 25.0,
       zero_gates = [{ condition = "not_attacked" }] },
-    { id = "retreat-when-hurt", directive_kind = "None", directive_anchor = "" },
   ] } }
 
 # Wave 8 (final): battleship at t=300

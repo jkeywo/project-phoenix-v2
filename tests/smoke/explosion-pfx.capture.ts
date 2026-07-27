@@ -40,7 +40,7 @@ spawn_on = "game_start"
 tags = ["ship"]
 
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
 transform     = { position = [0.0, 0.0, -15.0] }
 spawn_on      = "game_start"
@@ -54,7 +54,7 @@ test('capture ship death explosion on a one-shot phaser kill', async ({ context 
     route.fulfill({ contentType: 'text/plain', body: MINIMAL_TEST_WORLD }),
   );
   // Keep the raider stationary and passive.
-  await context.route('**/assets/entities/pirate_raider.toml', async (route) => {
+  await context.route('**/assets/entities/ship_harrow_patrol.toml', async (route) => {
     const response = await route.fetch();
     const text = await response.text();
     const patched = text

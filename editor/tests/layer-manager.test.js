@@ -21,7 +21,7 @@ const childAContent = {
   global: { seed: 1 },
   anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
   entity: [
-    { template_path: 'assets/entities/pirate_raider.toml', name: 'raider_alpha', transform: { anchor: 'patrol_alpha' } },
+    { template_path: 'assets/entities/ship_harrow_patrol.toml', name: 'raider_alpha', transform: { anchor: 'patrol_alpha' } },
   ],
 };
 
@@ -336,7 +336,7 @@ describe('integration: load root with two extra_worlds', () => {
   });
 
   it('setActiveLayer(child) → new spawn lands in child entity list', () => {
-    const newSpawn = { template_path: 'assets/entities/pirate_raider.toml', name: 'new_raider', transform: { position: [0.0, 0.0, 0.0] } };
+    const newSpawn = { template_path: 'assets/entities/ship_harrow_patrol.toml', name: 'new_raider', transform: { position: [0.0, 0.0, 0.0] } };
     const initialChildEntityCount = childAContent.entity.length;
 
     const lm = LayerManager.openRoot(ROOT_PATH, rootContent, extraWorldContents)

@@ -11,7 +11,7 @@ import { resolveEntityAppearance, RADAR_SHAPE_FALLBACK } from '../canvas-world.j
 
 describe('resolveEntityAppearance', () => {
   describe('entities with [radar_appearance]', () => {
-    it('pirate_raider returns red colour, radius 4, Triangle shape', () => {
+    it('a destroyer-icon NPC returns red colour, radius 4, Triangle shape', () => {
       const entity = {
         tags: ['ship', 'npc', 'enemy'],
         radar_appearance: { colour: [1.0, 0.2, 0.2], size: 4.0, icon: 'destroyer' },

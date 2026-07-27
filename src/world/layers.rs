@@ -182,7 +182,7 @@ mod tests {
 seed = 1
 
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_destroyer.toml"
 name = "raider_alpha"
 
 [[trigger]]

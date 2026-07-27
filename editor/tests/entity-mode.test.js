@@ -241,7 +241,7 @@ describe('EntityModeShell', () => {
     });
 
     it('setFileList stores file paths', () => {
-      const paths = ['assets/entities/alliance_battleship.toml', 'assets/entities/pirate_raider.toml'];
+      const paths = ['assets/entities/alliance_battleship.toml', 'assets/entities/ship_harrow_patrol.toml'];
       shell.setFileList(paths);
       expect(shell.getFileList()).toEqual(paths);
     });
@@ -263,10 +263,10 @@ describe('EntityModeShell', () => {
 
   describe('openFile (centre pane)', () => {
     it('opens a valid entity TOML', () => {
-      const text = readEntity('pirate_raider.toml');
-      const result = shell.openFile('assets/entities/pirate_raider.toml', text);
+      const text = readEntity('ship_harrow_patrol.toml');
+      const result = shell.openFile('assets/entities/ship_harrow_patrol.toml', text);
       expect(result.ok).toBe(true);
-      expect(shell.getActiveFile()).toBe('assets/entities/pirate_raider.toml');
+      expect(shell.getActiveFile()).toBe('assets/entities/ship_harrow_patrol.toml');
     });
 
     it('returns error for invalid TOML', () => {
@@ -288,8 +288,8 @@ describe('EntityModeShell', () => {
       expect(shell.getComponentCards()).toEqual([]);
     });
 
-    it('creates a card for each present section in pirate_raider.toml', () => {
-      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+    it('creates a card for each present section in ship_harrow_patrol.toml', () => {
+      shell.openFile('ship_harrow_patrol.toml', readEntity('ship_harrow_patrol.toml'));
       const cards = shell.getComponentCards();
       const sections = cards.map((c) => c.section);
       expect(sections).toContain('tags');
@@ -330,7 +330,7 @@ describe('EntityModeShell', () => {
     let card;
 
     beforeEach(() => {
-      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+      shell.openFile('ship_harrow_patrol.toml', readEntity('ship_harrow_patrol.toml'));
       card = shell.getCard('hull');
     });
 
@@ -370,12 +370,12 @@ describe('EntityModeShell', () => {
 
   describe('faction card fields', () => {
     it('faction card exists and has the correct UUID as its data', () => {
-      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+      shell.openFile('ship_harrow_patrol.toml', readEntity('ship_harrow_patrol.toml'));
       const factionCard = shell.getCard('faction');
       expect(factionCard).not.toBeNull();
       // The top-level faction field in TOML is a plain string UUID, not an object.
       // The card's data holds the string value directly.
-      // (#472) pirate_raider.toml was re-factioned from Pirate to Harrow.
+      // (#472) The Harrow hulls were re-factioned from Pirate to Harrow.
       expect(factionCard.data).toBe('cccccccc-3333-4333-8333-cccccccccccc');
     });
 
@@ -428,7 +428,7 @@ describe('EntityModeShell', () => {
       expect(opts).toContainEqual({ uuid: 'id2', name: 'Beta' });
     });
 
-    it('can resolve faction for pirate_raider with real faction files', () => {
+    it('can resolve a faction uuid against the real faction files', () => {
       const factionFiles = listDir('assets/factions')
         .filter((f) => f.endsWith('.toml'))
         .map((name) => ({ name, content: readFaction(name) }));
@@ -475,7 +475,7 @@ describe('EntityModeShell', () => {
     });
 
     it('returns real preview data after opening an entity', () => {
-      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+      shell.openFile('ship_harrow_patrol.toml', readEntity('ship_harrow_patrol.toml'));
       const preview = shell.getPreviewPane();
       // Not a placeholder — real preview shape
       expect(preview.placeholder).toBeUndefined();
@@ -495,7 +495,7 @@ describe('EntityModeShell', () => {
 
   describe('setSection + restoreParsed', () => {
     beforeEach(() => {
-      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+      shell.openFile('ship_harrow_patrol.toml', readEntity('ship_harrow_patrol.toml'));
     });
 
     it('setSection updates the active section and rebuilds cards', () => {

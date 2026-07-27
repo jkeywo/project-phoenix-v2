@@ -3,7 +3,7 @@
 // Intercepts the default world fetch so the server loads worlds/patrol.toml
 // instead of the production default world. After game start the raider entity
 // (tags: ["ship","npc","enemy"]) must appear in the WorldSetup entity list,
-// confirming that the pirate_raider.toml → patrol.toml → entity-spawn
+// confirming that the ship_harrow_patrol.toml → patrol.toml → entity-spawn
 // pipeline is wired end-to-end.
 
 import { test, expect, readHostPeerId, createTestClient, waitForWasmReady, stripHeavyEntities } from './fixtures';

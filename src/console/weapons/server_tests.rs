@@ -10484,7 +10484,7 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
 /// blaster-CARRYING ships ever landed in the map. Every other hull missed the
 /// lookup, resolved to `(0.0, 0.0)`, and the intercept solver aimed exactly at
 /// the target's live bearing with no lead whatsoever. That is most of the
-/// shipped content: `pirate_raider` and `alliance_cruiser` author no blaster
+/// shipped content: `ship_harrow_patrol` and `alliance_cruiser` author no blaster
 /// bank at all, which is to say precisely the hulls the artillery shoots at.
 ///
 /// The geometry is chosen so the correct answer is a round number and the

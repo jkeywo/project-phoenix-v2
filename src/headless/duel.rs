@@ -559,8 +559,8 @@ condition = "on_world_loaded"
         );
         // Literal path: a full path that exists is taken verbatim.
         assert_eq!(
-            resolve_template("assets/entities/pirate_raider.toml").unwrap(),
-            "assets/entities/pirate_raider.toml"
+            resolve_template("assets/entities/ship_harrow_patrol.toml").unwrap(),
+            "assets/entities/ship_harrow_patrol.toml"
         );
     }
 

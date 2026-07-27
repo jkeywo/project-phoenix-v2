@@ -235,7 +235,7 @@ entity = "raider_alpha"
         global: { seed: 7 },
         anchors: { spot: [0, 0, 0] },
         entity: [{
-          template_path: 'assets/entities/pirate_raider.toml',
+          template_path: 'assets/entities/ship_harrow_patrol.toml',
           name: 'raider_alpha',
           transform: { anchor: 'spot' },
           override: { hull: { max: 80 } },

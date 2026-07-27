@@ -49,7 +49,7 @@ describe('Slice 6: faction-save invalidation refreshes Entity Mode', () => {
       readFile: async (path) => fixture(path),
       listDirectory: async (rel) => {
         if (rel === 'assets/entities') {
-          return [{ name: 'pirate_raider.toml', kind: 'file' }];
+          return [{ name: 'ship_harrow_patrol.toml', kind: 'file' }];
         }
         return [];
       },

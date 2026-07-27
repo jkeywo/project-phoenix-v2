@@ -10140,6 +10140,223 @@ when = "state_time >= param(surge_dwell_secs)"
         );
     }
 
+    // ── AC5 through the real damage path (PRD #774, US15) ────────────────────
+    //
+    // The reset above is reached by moving a control SOURCE, and
+    // `stateful_policy_state_resets_when_the_system_is_unavailable_and_on_recovery`
+    // reaches it by stripping a capability component off the entity. Between
+    // them they cover the "AI gains control" half of US15 on both a synthetic
+    // policy and this shipped hull, so nothing below duplicates it.
+    //
+    // Neither is how a system goes offline in PLAY. In play the hull takes a
+    // hit, `sync_console_damage_tiers` reads the new damage tier and folds it
+    // into `ControlSourceResolver::offline_systems`, and `policy_for(..)
+    // .operate_ai` goes false as a consequence — and that chain, plus the repair
+    // that undoes it, is what US15's "repaired-system recovery" names. The test
+    // below is the only one that drives it.
+
+    /// Max HP the fixture below gives each damage-modelled fine helm system.
+    const HELM_ACTUATOR_MAX_HP: f32 = 20.0;
+
+    /// The three fine systems whose control sources gate the destroyer's three
+    /// authored machines: thrust gates Engines, steering gates Steering, boost
+    /// gates Boost.
+    fn helm_actuator_system_ids() -> [crate::messages::SystemId; 3] {
+        [
+            crate::system_registry::helm_thrust_system_id(),
+            crate::system_registry::helm_steering_system_id(),
+            crate::system_registry::helm_boost_system_id(),
+        ]
+    }
+
+    /// Extend the fixture ship's hull with a per-system entry for each of the
+    /// three helm actuators, leaving every entry it already had untouched.
+    ///
+    /// Every id is one the shipped destroyer already declares as a `[[system]]`;
+    /// what its TOML does not author is a `[[hull.system_hull]]` block for them
+    /// (it carries the scalar `hull_integrity` every NPC hull does). No shipped
+    /// hull combines the two today — the three that author helm machines are
+    /// Harrow NPCs, the four that author per-system hull are Alliance player
+    /// hulls — so putting authored doctrine on the damage path means composing
+    /// them here.
+    ///
+    /// The composition stops at the hull entry, which is the one thing a
+    /// designer would add to the TOML. Tier derivation, `sync_console_damage_tiers`,
+    /// the offline set and the policy gate are all production code from there on.
+    fn model_the_helm_actuators_in_the_hull(app: &mut App) {
+        let ship = find_ship_entity(app);
+        let mut config: Vec<(crate::messages::SystemId, f32)> = app
+            .world()
+            .entity(ship)
+            .get::<crate::entity_spawner::EntitySystemHull>()
+            .expect("the fixture ship carries a system hull")
+            .0
+            .entries()
+            .map(|(id, _current, max)| (id.clone(), max))
+            .collect();
+        config.extend(
+            helm_actuator_system_ids()
+                .into_iter()
+                .map(|id| (id, HELM_ACTUATOR_MAX_HP)),
+        );
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entity_spawner::EntitySystemHull(
+                crate::damage::SystemHull::from_config(&config),
+            ));
+    }
+
+    /// Shoot `system_id` down into the `Disabled` tier — below the disabled
+    /// threshold but not to zero, because `Destroyed` is unrepairable and the
+    /// second half of the test repairs.
+    fn shoot_out(app: &mut App, system_id: &crate::messages::SystemId) {
+        set_console_hp_direct(app, system_id.clone(), HELM_ACTUATOR_MAX_HP * 0.1);
+    }
+
+    /// Repair `system_id` back to full through the same `SystemHull::restore`
+    /// the repair-team tick calls.
+    fn repair_fully(app: &mut App, system_id: &crate::messages::SystemId) {
+        let ship = find_ship_entity(app);
+        let mut entity = app.world_mut().entity_mut(ship);
+        let mut hull = entity
+            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .expect("the fixture ship carries a system hull");
+        hull.0.restore(system_id, HELM_ACTUATOR_MAX_HP);
+    }
+
+    /// Whether the damage sync has this system in `offline_systems`.
+    fn is_damage_offline(app: &mut App, system_id: &crate::messages::SystemId) -> bool {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<ShipSystemControlSources>()
+            .expect("the fixture ship carries control sources")
+            .0
+            .is_offline(system_id)
+    }
+
+    /// US15: a destroyer that is mid-escape when its helm actuators are shot out
+    /// comes back off the repair flying a FRESH pass, not resuming the one it was
+    /// halfway through.
+    ///
+    /// The stale ACTION is what US15 is about, so the assertions are on the
+    /// admitted actuator surface rather than on a state string. The escape leg is
+    /// `hold_committed_heading` at the authored `escape_speed`: it ignores the
+    /// target entirely and flies a heading frozen at a merge that happened before
+    /// the damage. A destroyer that resumed it would come out of the repair
+    /// pointing at empty space and accelerating away from a target sitting on its
+    /// beam. A reset one re-acquires and hauls the bow onto it at the approach
+    /// throttle. Both throttles and both yaw modes differ, so the two are
+    /// distinguishable without reading a state name at all.
+    ///
+    /// Everything up to the damage is FLOWN, not written: `run_to_escape` drives a
+    /// real approach, merge and break-off, so the non-initial state under test is
+    /// one the shipped machines actually reached.
+    #[test]
+    fn helm_actuators_shot_out_mid_escape_come_back_off_the_repair_on_a_fresh_pass() {
+        let (mut app, uuid) = run_to_escape();
+        model_the_helm_actuators_in_the_hull(&mut app);
+
+        assert_eq!(
+            steering_state(&mut app),
+            "escape",
+            "precondition: a leg the machine flew its way into"
+        );
+        assert_eq!(engines_state(&mut app), "escape");
+        assert_eq!(boost_policy_state(&mut app).current, "escape");
+        let frozen = pass_surface(&mut app).escape_heading_rad;
+        let approach_speed = pass_surface(&mut app).approach_speed;
+        let escape_speed = pass_surface(&mut app).escape_speed;
+        assert!(
+            (escape_speed - approach_speed).abs() > 1e-3,
+            "precondition: the two legs must be flown at different authored \
+             throttles ({escape_speed} vs {approach_speed}), or the throttle \
+             assertion below cannot tell a fresh pass from a resumed escape"
+        );
+
+        // ── Shot out ─────────────────────────────────────────────────────────
+        // Two ticks, and both are load-bearing: `sync_console_damage_tiers` runs
+        // in `SimSet::Damage` and `ai_policy_state_tick` in `SimSet::Physics`, so
+        // the offline flag written on the first tick is what the machine reads on
+        // the second.
+        for system_id in helm_actuator_system_ids() {
+            shoot_out(&mut app, &system_id);
+        }
+        place_ship(&mut app, 0.0, -260.0, frozen, 20.0);
+        tick_twice(&mut app);
+
+        for system_id in helm_actuator_system_ids() {
+            assert!(
+                is_damage_offline(&mut app, &system_id),
+                "hull damage must put `{}` into offline_systems — if it does not, \
+                 nothing below is exercising the damage path at all",
+                system_id.0
+            );
+        }
+        assert_eq!(
+            steering_state(&mut app),
+            "acquire",
+            "a shot-out steering actuator must reset its machine to the authored \
+             initial state, not park it mid-escape"
+        );
+        assert_eq!(
+            engines_state(&mut app),
+            "acquire",
+            "Engines runs its own copy of the machine and resets on its own gate"
+        );
+        assert_eq!(
+            boost_policy_state(&mut app).current,
+            "acquire",
+            "and so does Boost"
+        );
+        assert!(
+            !pass_surface(&mut app).active,
+            "with the travel axes offline the planner is offered no pass at all"
+        );
+
+        // ── Repaired ─────────────────────────────────────────────────────────
+        for system_id in helm_actuator_system_ids() {
+            repair_fully(&mut app, &system_id);
+        }
+        // A target hard on the starboard beam, well inside the authored
+        // `commit_range`, with the hull pinned exactly on the heading the dead
+        // escape froze. Pinned rather than free-flown so the expected steering of
+        // a resumed escape is exactly zero — an `abs() < tolerance` band would
+        // wave through any quiet regression — and so the re-acquired run cannot
+        // open enough range to break off again while the assertions run.
+        set_bogey(&mut app, uuid, [200.0, 0.0, -260.0], 0.0, 0.0);
+        for _ in 0..3 {
+            place_ship(&mut app, 0.0, -260.0, frozen, 20.0);
+            tick(&mut app);
+        }
+
+        for system_id in helm_actuator_system_ids() {
+            assert!(
+                !is_damage_offline(&mut app, &system_id),
+                "the repair must take `{}` back out of offline_systems",
+                system_id.0
+            );
+        }
+        assert!(
+            get_steering_input(&mut app) > 0.5,
+            "the repaired destroyer must turn onto the bogey off its starboard \
+             beam; a resumed escape flies the frozen heading and commands no \
+             positive yaw at all, got steering {}",
+            get_steering_input(&mut app)
+        );
+        assert!(
+            (get_thrust_input(&mut app) - approach_speed).abs() < 1e-3,
+            "and it must run in at the authored approach throttle ({approach_speed}), \
+             not at the stale escape's {escape_speed}; got {}",
+            get_thrust_input(&mut app)
+        );
+        assert!(
+            !pass_surface(&mut app).escape,
+            "the published leg must be a fresh run-in, not the escape the damage \
+             interrupted"
+        );
+    }
+
     // ── The shield-recovery standoff orbit (issue #788) ──────────────────────
     //
     // Same posture as the fly-through tests above: the SHIPPED hull's authored

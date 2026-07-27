@@ -27,6 +27,12 @@ ship_start         = [200.0, 0.0, 150.0]
 axiom_station      = [350.0, 0.0,  50.0]
 research_outpost   = [-100.0, 0.0, 450.0]
 requiem_courier    = [-230.0, 0.0, -80.0]
+# Where the courier is carrying its warning: the target of the `Reach` directive
+# in `assets/entities/ship_requiem_courier.toml`. Outside the Axiom belt (outer
+# radius 260) and clear of the research outpost, so the hull parks in open space;
+# still ~530 u from the player's start, well inside its 800 u comms range, so it
+# stays hailable for the `requiem-override` thread after it arrives.
+requiem_courier_destination = [-320.0, 0.0, 260.0]
 ironveil_patrol_a  = [180.0, 0.0, -160.0]
 ironveil_patrol_b  = [320.0, 0.0, -280.0]
 ashrender_start    = [620.0, 0.0, -380.0]

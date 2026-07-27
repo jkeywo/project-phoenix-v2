@@ -1,9 +1,9 @@
 ---
 title: World Data
 type: entity
-tags: [world, scenario, transform, ambient_light, snapshot]
-sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, assets/worlds/default.toml]
-updated: 2026-07-16
+tags: [world, scenario, transform, ambient_light, snapshot, includes]
+sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, assets/worlds/default.toml]
+updated: 2026-07-27
 ---
 
 # World Data
@@ -73,6 +73,35 @@ Optional top-level `[ambient_light]` block on the world TOML. Applied by the `sp
 - `EntityConfig.name: Option<String>` (`src/entities/config.rs:1693`) is a template-level default. A `WorldEntity.name` override beats it. Both are stored as the `EntityName` component (`src/entities/spawner.rs:22`).
 - `[[light]]` array-of-tables on `EntityConfig` (`src/entities/config.rs`) spawns Bevy lights as children of the entity. Each `LightConfig` has `kind = "point" | "directional"`, `colour: [f32; 3]`, `intensity: f32`, optional `range: f32`. Collected into the `Lights` component (`src/entities/spawner.rs:28`) and instantiated by `render_spawned_entities` (`src/server_app.rs:2966`).
 - `[mesh].emissive: Option<f32>` on `EntityConfig` controls the StandardMaterial emissive multiplier (renderer default `0.4`; star templates use `2.0`).
+
+## Entity template composition (`includes`)
+
+An entity template may declare an ordered top-level `includes = ["...", ...]`. The
+paths resolve **relative to the declaring template**, are lexically canonicalised
+(`\` → `/`, `.`/`..` collapsed), and are merged depth-first in declared order, with
+the declaring template merged **last** so the includer wins. The merge is the same
+`entity_override::merge_entity_config_toml` an instance override uses, so
+`behaviour.state` reconciles by `name`, `behaviour.doctrine` by `id`, an authored
+empty array clears, and every other array (`tags`, `[[system]]`, `[[station]]`,
+`[[shield_arc]]`, weapon banks) replaces wholesale.
+
+Resolution is pure and lives in `src/entities/include_resolve.rs`. It returns one
+resolved TOML document plus **provenance** — which template authored each dotted
+field path and the include chain that reached it. Cycles, missing fragments,
+unparseable fragments, malformed `includes` lists, and an invalid *resolved*
+template are all load errors carrying the chain; only the fully resolved document
+is ever validated or spawned. `includes` never reaches `EntityConfig`
+(`deny_unknown_fields`), so nothing about composition exists at runtime.
+
+Both hosts walk the same closure: natively via `FsFragmentSource` (used by
+`FsTemplateLoader`, the headless template preload, and `build_layer_config_cache`),
+and in the browser via `config_cache::drain_resolved_templates`, which reports the
+fragments JS must still fetch through the existing `PENDING_QUEUE`/`IN_FLIGHT`
+pair. Fragments are held as raw text only and never enter the config cache.
+
+Shipped hulls are not composed yet — `assets/entities/fragments/` holds the
+mechanism fixtures, deliberately outside `assets/entities/` where every
+"shipped template still loads" scan would try to parse them as hulls.
 
 ## Lifecycle
 

@@ -1,0 +1,72 @@
+# Shared NPC escort core (issue #869 composition fixture).
+#
+# A FRAGMENT, not a hull — see the header of
+# `fragments/ai/captain_red_alert_aggressive.toml`.
+#
+# Carries the parts every small AI-driven escort repeats: the ownerless
+# `ai_only` system suite, a helm envelope, and a Destroy doctrine. It in turn
+# includes the reusable Captain policy, so resolving a hull that includes THIS
+# file exercises a nested include and a path relative to this file's own
+# directory (`ai/...`, not `fragments/ai/...`).
+
+includes = ["ai/captain_red_alert_aggressive.toml"]
+
+tags = ["ship", "npc", "enemy"]
+
+[hull]
+hull_integrity = 400.0
+
+[collider]
+shape = "Capsule"
+radius = 4.0
+length = 10.0
+
+[helm_console]
+max_speed = 10.0
+max_reverse_speed = 5.0
+acceleration = 4.0
+deceleration = 10.0
+max_yaw_rate = 0.2
+max_bank_deg = 5.0
+
+[ai_profile]
+aggression = 1.0
+sensor_range = 200.0
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+base_priority = 40.0
+target_speed = 0.9
+maintain_range = 40.0
+
+# No stations: every system is ownerless and `ai_only`, so the NPC spawn path
+# puts each one under `ControlSource::Ai`. The Red Alert system the Captain
+# policy above drives is synthesised by `EntityConfig::from_toml` for any hull
+# with a `[behaviour]` block, so it is deliberately not listed here.
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true

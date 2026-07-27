@@ -19,13 +19,11 @@ use {
     std::collections::VecDeque, wasm_bindgen::prelude::*,
 };
 
-// `RefCell` + `HashMap` are used by both the WASM thread-locals AND the
-// cross-target sidecar inbox below, so they live outside the cfg gate.
-// `HashSet` is only used inside the WASM block (the `tests` module imports
-// it locally).
+// `RefCell`, `HashMap` and `HashSet` are used by both the WASM thread-locals
+// AND the cross-target sidecar inbox / composable-template preload state below,
+// so they live outside the cfg gate.
 use std::cell::RefCell;
 use std::collections::HashMap;
-#[cfg(target_arch = "wasm32")]
 use std::collections::HashSet;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,6 +38,17 @@ use bevy::prelude::Resource;
 /// `asteroid_type_paths` and `cosmetic_type_paths` reference further entity
 /// templates (the asteroid variants). Those need to be enqueued for fetch
 /// alongside the top-level instance template paths.
+///
+/// # Its sibling: the include closure
+///
+/// This walks the transitive references a *parsed* config makes. Issue #869
+/// adds a second kind of transitive reference — a template's ordered
+/// `includes` — which cannot be discovered from a parsed config, because the
+/// key never reaches `EntityConfig` (it is `deny_unknown_fields`, and an
+/// include is authoring input, not runtime state). That closure is walked from
+/// the raw TOML instead, by [`drain_resolved_templates`] below, and the two
+/// feed the SAME `PENDING_QUEUE`/`IN_FLIGHT` pair so the preload-complete
+/// condition is unchanged.
 pub fn nested_template_paths(config: &crate::entity_config::EntityConfig) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(field) = &config.asteroid_field {
@@ -123,6 +132,128 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+// ── Composable-template preload (issue #869) ─────────────────────────────────
+//
+// Templates may declare an ordered `includes` list, and the fragments they name
+// have to be fetched before the declaring template can be resolved, validated
+// and cached. That is a *closure walk over raw TOML*, not over parsed configs,
+// so it cannot live inside `wasm_load_config`'s parse branch the way
+// `nested_template_paths` does.
+//
+// Ungated (native + wasm) for the same reason as the sidecar inbox above: the
+// browser is the only host that drives it, but the decision — "resolve now, or
+// fetch these first" — is the loader contract, and it must be assertable under
+// `cargo test`. `thread_local!` is also what makes that safe: libtest runs each
+// `#[test]` on its own thread, so these maps are per-test in the same way they
+// are per-page on WASM.
+
+thread_local! {
+    /// Raw TOML text for every template path the host has delivered, keyed by
+    /// canonical path. Holds BOTH entity templates and include fragments —
+    /// a fragment is never parsed on its own, so this is the only place its
+    /// text lives.
+    static RAW_TEMPLATE_TOML: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+
+    /// Paths requested as ENTITY templates (world instances, nested asteroid
+    /// variants), as `(requested, canonical)`. Only these become config-cache
+    /// entries; a fragment is authoring input and must never be spawnable.
+    static ENTITY_TEMPLATE_PATHS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+
+    /// Canonical entity paths already emitted by [`drain_resolved_templates`],
+    /// successfully or not, so neither result is produced twice.
+    static SETTLED_TEMPLATE_PATHS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+/// What the host should do next, after delivering one template's text.
+#[derive(Debug, Default)]
+pub struct TemplatePreloadProgress {
+    /// Fully resolved entity templates, paired with the path they were
+    /// requested under (which is the config-cache key world TOML looks up).
+    pub ready: Vec<(String, crate::entity_includes::ResolvedTemplate)>,
+    /// Canonical fragment paths that must still be fetched. Deduplicated.
+    pub fetch: Vec<String>,
+    /// Composition failures. Every one of these is a load error: the entity
+    /// never enters the config cache, so nothing partially composed spawns.
+    pub errors: Vec<crate::entity_includes::IncludeError>,
+}
+
+/// Record the raw TOML the host delivered for `path`.
+pub fn record_raw_template(path: &str, toml_str: String) {
+    let key = crate::entity_includes::canonical_template_path(path);
+    RAW_TEMPLATE_TOML.with(|m| {
+        m.borrow_mut().insert(key, toml_str);
+    });
+}
+
+/// Note that `path` was requested as an entity template, not as a fragment.
+pub fn mark_entity_template(path: &str) {
+    let canonical = crate::entity_includes::canonical_template_path(path);
+    ENTITY_TEMPLATE_PATHS.with(|v| {
+        let mut v = v.borrow_mut();
+        if !v.iter().any(|(_, c)| c == &canonical) {
+            v.push((path.to_string(), canonical));
+        }
+    });
+}
+
+/// Has the host already delivered text for `path`?
+///
+/// The queue guard for fragments: they never enter the config cache, so the
+/// cache-membership check that stops an entity template being fetched twice
+/// would not stop a fragment shared by five hulls being fetched five times.
+pub fn is_raw_template_delivered(path: &str) -> bool {
+    let key = crate::entity_includes::canonical_template_path(path);
+    RAW_TEMPLATE_TOML.with(|m| m.borrow().contains_key(&key))
+}
+
+/// Resolve every entity template whose include closure is now complete, and
+/// report what still has to be fetched.
+///
+/// Each entity template is emitted at most once — as `ready` or as an `error`,
+/// never both, never twice. Templates whose text has not arrived yet are simply
+/// not considered; absence of a *fragment* is reported as something to fetch,
+/// which is the whole point of the split.
+pub fn drain_resolved_templates() -> TemplatePreloadProgress {
+    let raw = RAW_TEMPLATE_TOML.with(|m| m.borrow().clone());
+    let entities = ENTITY_TEMPLATE_PATHS.with(|v| v.borrow().clone());
+    let mut progress = TemplatePreloadProgress::default();
+
+    for (requested, canonical) in entities {
+        let already = SETTLED_TEMPLATE_PATHS.with(|s| s.borrow().contains(&canonical));
+        if already || !raw.contains_key(&canonical) {
+            continue;
+        }
+        match crate::entity_includes::preload_step(&canonical, &raw) {
+            Ok(crate::entity_includes::PreloadStep::Ready(resolved)) => {
+                SETTLED_TEMPLATE_PATHS.with(|s| s.borrow_mut().insert(canonical));
+                progress.ready.push((requested, *resolved));
+            }
+            Ok(crate::entity_includes::PreloadStep::AwaitingIncludes(paths)) => {
+                for p in paths {
+                    if !progress.fetch.contains(&p) {
+                        progress.fetch.push(p);
+                    }
+                }
+            }
+            Err(e) => {
+                // Permanent: a cycle, an unparseable fragment or a malformed
+                // `includes` list never becomes resolvable by fetching more.
+                SETTLED_TEMPLATE_PATHS.with(|s| s.borrow_mut().insert(canonical));
+                progress.errors.push(e);
+            }
+        }
+    }
+    progress
+}
+
+/// Discard the composable-template preload state. Test seam, and the natural
+/// companion to [`clear_mod_pack_overlay`] for a same-page next round.
+pub fn clear_template_preload_state() {
+    RAW_TEMPLATE_TOML.with(|m| m.borrow_mut().clear());
+    ENTITY_TEMPLATE_PATHS.with(|v| v.borrow_mut().clear());
+    SETTLED_TEMPLATE_PATHS.with(|s| s.borrow_mut().clear());
+}
+
 // ── Session-scoped mod-pack overlay (issue #760) ─────────────────────────────
 //
 // A VALID host mod-pack upload installs an in-memory, exact-path -> TOML map
@@ -192,84 +323,99 @@ pub fn set_config_request_callback(callback: Function) {
     });
 }
 
-/// Load an entity config from a TOML string and insert it into the cache.
+/// Load an entity template from a TOML string, resolve its include closure and
+/// insert the resolved config into the cache.
+///
+/// The delivered text is recorded raw first, because it may be an include
+/// *fragment* rather than an entity template — a fragment is never parsed on
+/// its own and never enters the config cache. Whatever the delivery, every
+/// entity template whose closure is now complete is resolved and cached, and
+/// any fragment still missing is queued for fetch through the same
+/// `PENDING_QUEUE`/`IN_FLIGHT` pair as the entity templates.
 ///
 /// Returns Ok(true) when the last pending config is loaded (preload complete).
 /// Returns Ok(false) while there are still pending configs.
-/// Returns Err(JsValue) on parse failure (without crashing).
+/// Returns Err(JsValue) on parse/composition failure (without crashing).
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     // Mod-pack overlay wins for any overridden authored path (issue #760, AC2):
-    // when the session has an uploaded pack file at this exact path, parse the
-    // pack's content instead of the TOML JS fetched over HTTP.
+    // when the session has an uploaded pack file at this exact path, use the
+    // pack's content instead of the TOML JS fetched over HTTP. Fragments go
+    // through here too, so a pack may override a fragment (issue #869 US7).
     let toml_str = mod_pack_overlay_get(&path).unwrap_or(toml_str);
-    match EntityConfig::from_toml(&toml_str) {
-        Ok(config) => {
-            // Discover any nested template paths this config references
-            // (e.g. an [asteroid_field] section's asteroid_type_paths) and
-            // enqueue them for fetch before recording the config.
-            let nested = nested_template_paths(&config);
+    record_raw_template(&path, toml_str);
 
-            CONFIG_CACHE.with(|cache| {
-                cache.borrow_mut().insert(path.clone(), config);
-            });
+    IN_FLIGHT.with(|in_flight| {
+        in_flight.borrow_mut().remove(&path);
+    });
+    // Also remove from pending queue in case it wasn't drained before the
+    // fetch completed.
+    PENDING_QUEUE.with(|q| {
+        q.borrow_mut().retain(|p| p != &path);
+    });
 
-            IN_FLIGHT.with(|in_flight| {
-                in_flight.borrow_mut().remove(&path);
-            });
-
-            // Also remove from pending queue in case it wasn't drained before
-            // the fetch completed.
-            PENDING_QUEUE.with(|q| {
-                q.borrow_mut().retain(|p| p != &path);
-            });
-
-            for nested_path in nested {
-                queue_and_fire(nested_path);
-            }
-            // Check if preload is complete
-            let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
-            let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
-
-            if !has_pending && !has_in_flight {
-                PRELOAD_COMPLETE.with(|flag| {
-                    *flag.borrow_mut() = true;
-                });
-                Ok(JsValue::TRUE)
-            } else {
-                Ok(JsValue::FALSE)
+    let mut failures: Vec<String> = Vec::new();
+    let mut to_fetch: Vec<String> = Vec::new();
+    // Loop because caching one config can reveal NESTED entity templates
+    // (asteroid variants) whose own text may already have been delivered.
+    loop {
+        let progress = drain_resolved_templates();
+        for e in &progress.errors {
+            failures.push(e.to_string());
+        }
+        for p in progress.fetch {
+            if !to_fetch.contains(&p) {
+                to_fetch.push(p);
             }
         }
-        Err(e) => {
-            web_sys::console::error_1(&JsValue::from_str(&format!(
-                "Failed to parse entity config at {}: {:?}",
-                path, e
-            )));
-            // Remove from in-flight and pending so it doesn't block preload
-            IN_FLIGHT.with(|in_flight| {
-                in_flight.borrow_mut().remove(&path);
-            });
-            PENDING_QUEUE.with(|q| {
-                q.borrow_mut().retain(|p| p != &path);
-            });
-            // Even on parse failure, check if all configs are now done.
-            // A failed parse still counts as "processed"; we must not let a
-            // bad TOML permanently block finishInit().
-            let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
-            let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
-            if !has_pending && !has_in_flight {
-                PRELOAD_COMPLETE.with(|flag| {
-                    *flag.borrow_mut() = true;
-                });
-                // Return TRUE so handleConfigRequest calls finishInit().
-                Ok(JsValue::TRUE)
-            } else {
-                Err(JsValue::from_str(&format!(
-                    "Entity config parse error at {}: {:?}",
-                    path, e
-                )))
+        if progress.ready.is_empty() {
+            break;
+        }
+        for (requested, resolved) in progress.ready {
+            match resolved.parse() {
+                Ok(config) => {
+                    let nested = nested_template_paths(&config);
+                    CONFIG_CACHE.with(|cache| {
+                        cache.borrow_mut().insert(requested, config);
+                    });
+                    for nested_path in nested {
+                        mark_entity_template(&nested_path);
+                        queue_and_fire(nested_path);
+                    }
+                }
+                Err(e) => failures.push(e.to_string()),
             }
         }
+    }
+    for fragment in to_fetch {
+        queue_and_fire(fragment);
+    }
+
+    for message in &failures {
+        web_sys::console::error_1(&JsValue::from_str(&format!(
+            "Entity template failed to load: {message}"
+        )));
+    }
+
+    // Check if preload is complete. A failed template still counts as
+    // "processed" — `drain_resolved_templates` settles it — so a bad TOML must
+    // not permanently block finishInit().
+    let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
+    let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
+    if !has_pending && !has_in_flight {
+        PRELOAD_COMPLETE.with(|flag| {
+            *flag.borrow_mut() = true;
+        });
+        // Return TRUE so handleConfigRequest calls finishInit().
+        Ok(JsValue::TRUE)
+    } else if failures.is_empty() {
+        Ok(JsValue::FALSE)
+    } else {
+        Err(JsValue::from_str(&format!(
+            "Entity template error at {}: {}",
+            path,
+            failures.join("; ")
+        )))
     }
 }
 
@@ -309,6 +455,9 @@ pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValu
     });
 
     for p in entity_paths {
+        // These are ENTITY templates, not fragments: they become config-cache
+        // entries once their include closure resolves (issue #869).
+        mark_entity_template(&p);
         queue_and_fire(p);
     }
 
@@ -521,10 +670,20 @@ pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::Enti
 }
 
 /// Queue a path for fetching and fire the callback.
+///
+/// Two membership guards, not one: the config cache stops an already-resolved
+/// ENTITY template being refetched, and the raw-text store stops an include
+/// FRAGMENT being refetched (issue #869). Fragments never reach the config
+/// cache, so without the second guard a fragment shared by five hulls would be
+/// fetched once per hull — and, worse, would be re-queued every time, so
+/// `PENDING_QUEUE` would never drain and preload would never complete.
 #[cfg(target_arch = "wasm32")]
 fn queue_and_fire(path: String) {
     let mut should_fire = false;
 
+    if is_raw_template_delivered(&path) {
+        return;
+    }
     CONFIG_CACHE.with(|cache| {
         if !cache.borrow().contains_key(&path) {
             PENDING_QUEUE.with(|q| {
@@ -1047,6 +1206,215 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             None
         );
         assert_eq!(super::get_mod_manifest_toml(), None);
+    }
+
+    // ── Composable-template preload contract (issue #869) ────────────────
+    //
+    // This is the browser host's half of "included dependencies are
+    // preloaded": JS delivers one TOML at a time, and after each delivery the
+    // loader must say either "resolved, cache it" or "fetch these first".
+    // Driving it here rather than in a browser is the whole reason the state
+    // machine is ungated.
+
+    /// Paths are unique per test so the ungated thread-locals stay
+    /// order-independent even under `--test-threads=1`.
+    fn preload_path(test_name: &str, leaf: &str) -> String {
+        format!("assets/entities/__pre_{test_name}/{leaf}")
+    }
+
+    #[test]
+    fn a_composed_template_awaits_its_fragment_then_resolves() {
+        super::clear_template_preload_state();
+        let hull = preload_path("await", "hull.toml");
+        let fragment = preload_path("await", "frag/core.toml");
+
+        // 1. The world names the hull; JS fetches and delivers it.
+        super::mark_entity_template(&hull);
+        super::record_raw_template(
+            &hull,
+            "includes = [\"frag/core.toml\"]\nhull_id = \"H\"\n".to_string(),
+        );
+
+        let progress = super::drain_resolved_templates();
+        assert!(
+            progress.ready.is_empty(),
+            "a template whose fragment has not arrived must not be cached yet"
+        );
+        assert_eq!(
+            progress.fetch,
+            vec![fragment.clone()],
+            "the host must be told the canonical fragment path to fetch"
+        );
+        assert!(progress.errors.is_empty(), "absence is not an error");
+
+        // 2. JS fetches and delivers the fragment.
+        super::record_raw_template(
+            &fragment,
+            "class = \"escort\"\ntags = [\"npc\"]\n".to_string(),
+        );
+        let progress = super::drain_resolved_templates();
+        assert!(progress.fetch.is_empty());
+        assert_eq!(progress.ready.len(), 1);
+        let (requested, resolved) = &progress.ready[0];
+        assert_eq!(
+            requested, &hull,
+            "the config-cache key is the path the world asked for"
+        );
+        let config = resolved.parse().expect("the composed hull must be valid");
+        assert_eq!(config.class.as_deref(), Some("escort"));
+        assert_eq!(config.hull_id.as_deref(), Some("H"));
+        assert_eq!(config.tags, vec!["npc"]);
+    }
+
+    /// A fragment is authoring input. Delivering its text must never produce a
+    /// runtime template — only paths the world (or a nested reference) asked
+    /// for become config-cache entries.
+    #[test]
+    fn a_delivered_fragment_is_never_offered_as_an_entity_template() {
+        super::clear_template_preload_state();
+        let fragment = preload_path("frag_only", "core.toml");
+        super::record_raw_template(&fragment, "class = \"escort\"\n".to_string());
+
+        let progress = super::drain_resolved_templates();
+        assert!(progress.ready.is_empty());
+        assert!(progress.errors.is_empty());
+        assert!(
+            super::is_raw_template_delivered(&fragment),
+            "its text is held for composition, but it is not a template"
+        );
+    }
+
+    #[test]
+    fn an_entity_template_settles_exactly_once() {
+        super::clear_template_preload_state();
+        let hull = preload_path("once", "hull.toml");
+        super::mark_entity_template(&hull);
+        super::record_raw_template(&hull, "class = \"solo\"\n".to_string());
+
+        assert_eq!(super::drain_resolved_templates().ready.len(), 1);
+        assert!(
+            super::drain_resolved_templates().ready.is_empty(),
+            "a settled template must not be re-emitted on every later delivery"
+        );
+    }
+
+    #[test]
+    fn a_cycle_settles_as_an_error_rather_than_an_endless_fetch() {
+        super::clear_template_preload_state();
+        let a = preload_path("cycle", "a.toml");
+        let b = preload_path("cycle", "b.toml");
+        super::mark_entity_template(&a);
+        super::record_raw_template(&a, "includes = [\"b.toml\"]\n".to_string());
+        super::record_raw_template(&b, "includes = [\"a.toml\"]\n".to_string());
+
+        let progress = super::drain_resolved_templates();
+        assert!(progress.ready.is_empty());
+        assert!(
+            progress.fetch.is_empty(),
+            "a cycle is never resolved by fetching more"
+        );
+        assert_eq!(progress.errors.len(), 1);
+        assert_eq!(progress.errors[0].category(), "include-cycle");
+        assert!(
+            super::drain_resolved_templates().errors.is_empty(),
+            "the failure is reported once, then settled"
+        );
+    }
+
+    /// The refetch guard `queue_and_fire` relies on: a fragment never enters
+    /// the config cache, so cache membership cannot be what stops it being
+    /// requested once per including hull.
+    #[test]
+    fn delivered_raw_text_is_the_refetch_guard_for_fragments() {
+        super::clear_template_preload_state();
+        let fragment = preload_path("guard", "core.toml");
+        assert!(!super::is_raw_template_delivered(&fragment));
+        super::record_raw_template(&fragment, "class = \"x\"\n".to_string());
+        assert!(super::is_raw_template_delivered(&fragment));
+        assert!(
+            super::is_raw_template_delivered(&format!("./{fragment}")),
+            "the guard is keyed canonically, so a differently spelled path still hits"
+        );
+    }
+
+    /// Two hulls sharing one fragment: the second must resolve off the text the
+    /// first delivery already brought in, with no further fetch.
+    #[test]
+    fn a_shared_fragment_is_fetched_once_for_many_hulls() {
+        super::clear_template_preload_state();
+        let a = preload_path("shared", "a.toml");
+        let b = preload_path("shared", "b.toml");
+        let fragment = preload_path("shared", "core.toml");
+        for hull in [&a, &b] {
+            super::mark_entity_template(hull);
+            super::record_raw_template(hull, "includes = [\"core.toml\"]\n".to_string());
+        }
+
+        let progress = super::drain_resolved_templates();
+        assert_eq!(
+            progress.fetch,
+            vec![fragment.clone()],
+            "both hulls want the same fragment, and it is requested once"
+        );
+
+        super::record_raw_template(&fragment, "class = \"shared\"\n".to_string());
+        let progress = super::drain_resolved_templates();
+        assert_eq!(progress.ready.len(), 2);
+        for (_, resolved) in &progress.ready {
+            assert_eq!(
+                resolved.value.get("class").unwrap().as_str(),
+                Some("shared")
+            );
+        }
+    }
+
+    /// The browser walks the closure the same way the filesystem does. Same
+    /// fixture files, same resolved bytes — that is what "resolution must be
+    /// identical on native and WASM" means operationally.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_browser_walk_of_the_shipped_fixture_matches_the_filesystem_walk() {
+        super::clear_template_preload_state();
+        const HULL: &str = "assets/entities/fragments/composed_escort.toml";
+        let native = crate::entity_includes::resolve_from_disk(HULL)
+            .expect("the fixture hull resolves off disk");
+
+        // Simulate the browser: only the hull's own text is delivered first,
+        // and every further path comes from what the loader asks for.
+        super::mark_entity_template(HULL);
+        super::record_raw_template(HULL, std::fs::read_to_string(HULL).unwrap());
+        let mut fetches = 0;
+        let resolved = loop {
+            let progress = super::drain_resolved_templates();
+            assert!(
+                progress.errors.is_empty(),
+                "unexpected composition error: {:?}",
+                progress.errors
+            );
+            if let Some((_, resolved)) = progress.ready.into_iter().next() {
+                break resolved;
+            }
+            assert!(
+                !progress.fetch.is_empty(),
+                "neither ready nor awaiting anything — the walk stalled"
+            );
+            for path in progress.fetch {
+                fetches += 1;
+                let body = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                    panic!("the loader asked for {path}, which must exist: {e}")
+                });
+                super::record_raw_template(&path, body);
+            }
+            assert!(fetches < 16, "closure walk did not terminate");
+        };
+        assert_eq!(
+            fetches, 2,
+            "the hull's fragment and that fragment's own fragment, each fetched once"
+        );
+        assert_eq!(
+            resolved.toml, native.toml,
+            "the browser and the filesystem must resolve to the same bytes"
+        );
     }
 
     #[test]

@@ -89,6 +89,13 @@ pub trait TemplateLoader {
 }
 
 /// Native loader: reads the template TOML straight off the filesystem.
+///
+/// Resolves the template's `includes` closure first (issue #869), so an
+/// on-demand native template load sees exactly the same fully-composed document
+/// the browser preload assembles. A composition failure — cycle, missing
+/// fragment, invalid resolved template — collapses to `None` here for the same
+/// reason a parse error does: this module must not log, and the caller knows
+/// which spawn request asked. See the trait doc above.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FsTemplateLoader;
@@ -96,8 +103,7 @@ pub struct FsTemplateLoader;
 #[cfg(not(target_arch = "wasm32"))]
 impl TemplateLoader for FsTemplateLoader {
     fn load_template(&self, path: &str) -> Option<EntityConfig> {
-        let toml_str = std::fs::read_to_string(path).ok()?;
-        EntityConfig::from_toml(&toml_str).ok()
+        crate::entity_includes::load_entity_config(path).ok()
     }
 }
 
@@ -442,6 +448,103 @@ size_max = 2.0
         assert!(
             resolve_template_via(&fake, "assets/entities/unknown.toml").is_none(),
             "injected fake must report unknown templates as None"
+        );
+    }
+
+    // ── Composed templates on the on-demand native path (issue #869) ──────
+    //
+    // `FsTemplateLoader` is what resolves a template that no preload swept up
+    // — a `spawn_entity` trigger naming a hull the world never instanced, for
+    // one. If it did not resolve includes, a composed hull would spawn stripped
+    // of everything its fragments supply, silently.
+
+    const COMPOSED_FIXTURE: &str = "assets/entities/fragments/composed_escort.toml";
+
+    #[test]
+    fn fs_template_loader_resolves_a_composed_template_from_disk() {
+        let config = FsTemplateLoader
+            .load_template(COMPOSED_FIXTURE)
+            .expect("a composed hull must load through the on-demand native path");
+        assert_eq!(
+            config.class.as_deref(),
+            Some("escort"),
+            "the hull's own field survives"
+        );
+        assert!(
+            config
+                .ship_config
+                .as_ref()
+                .is_some_and(|s| s.systems.iter().any(|sys| sys.kind == "helm_thrust")),
+            "the shared fragment's system suite must reach the loaded config"
+        );
+        assert!(
+            config
+                .captain_console
+                .as_ref()
+                .and_then(|c| c.ai.as_ref())
+                .is_some(),
+            "the nested AI fragment's policy must reach the loaded config"
+        );
+    }
+
+    /// The WASM loader's native fallback goes through the same resolution, so a
+    /// composed hull behaves identically whichever loader a caller holds.
+    #[test]
+    fn wasm_template_loader_native_fallback_resolves_a_composed_template() {
+        let via_wasm = WasmTemplateLoader
+            .load_template(COMPOSED_FIXTURE)
+            .expect("native fallback must resolve the include closure too");
+        let via_fs = FsTemplateLoader.load_template(COMPOSED_FIXTURE).unwrap();
+        assert_eq!(via_wasm, via_fs);
+    }
+
+    /// A composition failure collapses to `None` exactly as a parse failure
+    /// does — this module cannot log, so the caller reports it (see the trait
+    /// doc). What must never happen is a partially composed config.
+    #[test]
+    fn fs_template_loader_returns_none_for_a_broken_include() {
+        let path = write_template_fixture("includes = [\"definitely_absent_fragment.toml\"]\n");
+        assert!(
+            FsTemplateLoader.load_template(&path).is_none(),
+            "a missing fragment must not yield a config with the fragment's parts \
+             silently missing"
+        );
+    }
+
+    /// An instance override still applies on top of a COMPOSED template, and
+    /// the two merges compose in the right order: fragments, then the hull,
+    /// then the instance.
+    #[test]
+    fn an_instance_override_applies_on_top_of_a_composed_template() {
+        let composed = FsTemplateLoader
+            .load_template(COMPOSED_FIXTURE)
+            .expect("fixture must load");
+        let mut cache = HashMap::new();
+        cache.insert(COMPOSED_FIXTURE.to_string(), composed);
+        let cache = ConfigCache::from(cache);
+
+        let inst = WorldEntity {
+            template_path: COMPOSED_FIXTURE.to_string(),
+            overrides: Some(
+                toml::from_str("[behaviour]\nwaypoint_arrival_radius = 77.0\n").unwrap(),
+            ),
+            ..Default::default()
+        };
+        let config = resolve_entity(&inst, &cache).expect("override must resolve");
+        let beh = config.behaviour.expect("composed hull keeps [behaviour]");
+        assert!(
+            (beh.waypoint_arrival_radius - 77.0).abs() < 1e-6,
+            "the instance override wins over the composed template"
+        );
+        assert!(
+            beh.doctrine.iter().any(|d| d.id == "destroy-hostiles"),
+            "the fragment's doctrine survives the instance merge"
+        );
+        assert!(
+            config
+                .ship_config
+                .is_some_and(|s| s.systems.iter().any(|sys| sys.kind == "helm_thrust")),
+            "the fragment's systems survive the instance merge (issue #838's round trip)"
         );
     }
 

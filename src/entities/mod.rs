@@ -15,6 +15,9 @@ pub mod config_cache;
 mod default_ai_policy_pins;
 pub mod entity_override;
 pub mod glb_visual;
+/// Ordered entity-template `includes`, resolved and merged into ONE final TOML
+/// document — with provenance — before validation and spawning (issue #869).
+pub mod include_resolve;
 pub mod loader;
 pub mod marker_validate;
 pub mod model_rig;

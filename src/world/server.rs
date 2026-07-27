@@ -1862,26 +1862,31 @@ fn build_layer_config_cache(
 ) -> crate::config_cache::ConfigCache {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use crate::entity_config::EntityConfig;
         let mut cache = crate::config_cache::get_config_cache();
         for entity in &_world_config.entities {
             if cache.contains_key(&entity.template_path) {
                 continue;
             }
-            match std::fs::read_to_string(&entity.template_path) {
-                Ok(toml_str) => {
-                    if let Ok(cfg) = EntityConfig::from_toml(&toml_str) {
-                        cache.insert(entity.template_path.clone(), cfg);
-                    } else {
-                        bevy::log::warn!(
-                            "build_layer_config_cache: failed to parse '{}' ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â entity will be skipped",
-                            entity.template_path
-                        );
-                    }
+            if std::fs::metadata(&entity.template_path).is_err()
+                && crate::config_cache::mod_pack_overlay_get(&entity.template_path).is_none()
+            {
+                // Template not on disk (e.g. test fixture); skip silently.
+                // spawn_immediate_entities_internal logs and continues for
+                // missing templates.
+                continue;
+            }
+            // The `includes` closure resolves here too (issue #869), so a
+            // composed hull referenced by a world reaches the layer cache fully
+            // merged — the same single document the browser preload assembles.
+            match crate::entity_includes::load_entity_config(&entity.template_path) {
+                Ok(cfg) => {
+                    cache.insert(entity.template_path.clone(), cfg);
                 }
-                Err(_) => {
-                    // Template not on disk (e.g. test fixture); skip silently.
-                    // spawn_immediate_entities_internal logs and continues for missing templates.
+                Err(e) => {
+                    bevy::log::warn!(
+                        "build_layer_config_cache: failed to resolve '{}' - entity will be skipped: {e}",
+                        entity.template_path
+                    );
                 }
             }
         }

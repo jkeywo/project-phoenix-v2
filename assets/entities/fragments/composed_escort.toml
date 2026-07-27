@@ -1,0 +1,25 @@
+# A hull composed entirely from fragments (issue #869 composition fixture).
+#
+# Declares almost nothing itself: the systems, helm envelope and doctrine come
+# from `npc_escort_core.toml`, and the Captain AI policy comes from the fragment
+# THAT includes. What this file adds is a specialisation — it raises the shared
+# doctrine's `base_priority` by id, which proves the includer wins while the
+# keys it never mentions (`directive_kind`, `target_speed`, `maintain_range`)
+# still come from the fragment.
+#
+# This is a mechanism fixture. Shipped hulls are NOT composed yet; migrating
+# them is issues #878 / #875.
+
+includes = ["npc_escort_core.toml"]
+
+class = "escort"
+hull_id = "FIXTURE-869"
+
+[radar_appearance]
+colour = [0.9, 0.3, 0.1]
+size = 10.0
+icon = "destroyer"
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+base_priority = 90.0

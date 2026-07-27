@@ -46,6 +46,7 @@ pub use weapons::torpedo;
 pub mod ship;
 pub use entities::config as entity_config;
 pub use entities::entity_override;
+pub use entities::include_resolve as entity_includes;
 pub use entities::loader as entity_loader;
 pub use entities::marker_validate;
 pub use entities::model_rig;

@@ -1561,6 +1561,58 @@ mod tests {
         );
     }
 
+    /// Issue #869 content fixture: a Captain policy authored in a reusable
+    /// FRAGMENT, composed into a hull through `includes`, drives Red Alert down
+    /// the ordinary admitted-command path.
+    ///
+    /// The point is that nothing here knows about composition. The runtime is
+    /// handed one fully resolved configuration; the fragment boundary exists
+    /// only while the template is being loaded.
+    #[test]
+    fn a_policy_authored_in_an_included_fragment_drives_red_alert() {
+        let config = crate::entity_includes::load_entity_config(
+            "assets/entities/fragments/composed_escort.toml",
+        )
+        .expect("the composed fixture hull must resolve and validate");
+        let composed = config
+            .captain_console
+            .as_ref()
+            .and_then(|c| c.ai.as_ref())
+            .expect(
+                "the resolved hull declares an inline Captain policy — one it never \
+                 authored itself, and which reached it through two levels of include",
+            )
+            .to_policy()
+            .expect("a policy that passed load validation must convert");
+        assert_ne!(
+            composed,
+            crate::entities::config::default_captain_ai_config()
+                .to_policy()
+                .unwrap(),
+            "the fragment's policy must differ from the synthesised default, or this \
+             test would still pass with composition removed entirely"
+        );
+
+        let mut app = test_app();
+        start_game(&mut app);
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_captain_policy(&mut app, composed);
+
+        // No combat activity whatsoever: the synthesised default stands down in
+        // this state, so a raised Red Alert can only have come from the
+        // fragment's unconditional rule.
+        tick(&mut app);
+        assert!(
+            get_red_alert(&mut app),
+            "the composed fragment's policy must reach ShipRedAlert through \
+             AdmittedCommands, exactly as an inline policy does"
+        );
+    }
+
     #[test]
     fn human_takeover_stops_ai_then_reacquisition_resets_from_facts() {
         // AC5 lifecycle: AI raises Red Alert in combat; a human takes the

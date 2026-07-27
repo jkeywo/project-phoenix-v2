@@ -106,11 +106,29 @@ fn preload_entity_templates(
             dir.trim_end_matches('/'),
             path.file_name().unwrap_or_default().to_string_lossy()
         );
-        let Ok(toml) = std::fs::read_to_string(&path) else {
+        if std::fs::read_to_string(&path).is_err() {
             warn!(target: "config", "template unreadable, skipping: {key}");
             continue;
+        }
+        // Resolve the template's `includes` closure BEFORE parsing (issue
+        // #869): only the fully composed document is ever validated, and it is
+        // the composed text that marker validation and the AI-declaration
+        // manifest must read.
+        //
+        // Note the deliberate asymmetry with the parse-skip policy below. A
+        // *composition* failure — cycle, missing fragment, malformed
+        // `includes` — aborts the whole build, because a template that
+        // declares includes has said it is incomplete on its own: skipping it
+        // would silently drop content the author explicitly assembled. A plain
+        // TOML parse error keeps the historical skip-with-warning, so one bad
+        // cosmetic asteroid still cannot stop a combat test.
+        let resolved = match crate::entity_includes::resolve_from_disk(&key) {
+            Ok(resolved) => resolved,
+            Err(e) => return Err(BuildError(format!("template composition failed: {e}"))),
         };
-        match EntityConfig::from_toml(&toml) {
+        let composed = resolved.is_composed();
+        let toml = resolved.toml.clone();
+        match resolved.parse() {
             Ok(cfg) => {
                 findings.extend(validate_template_markers(&key, &toml, &cfg));
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -124,6 +142,13 @@ fn preload_entity_templates(
                 }
                 crate::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
+            }
+            Err(e) if composed => {
+                // A composed template that does not validate is a load error:
+                // the offending combination exists in no single authored file,
+                // so skipping it would hide the one thing composition can get
+                // wrong that authoring cannot.
+                return Err(BuildError(format!("composed template is invalid: {e}")));
             }
             Err(e) => warn!(target: "config", "template failed to parse, skipping: {key}: {e}"),
         }
@@ -449,8 +474,12 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // back to `load_ship_config_from_disk`, which returns the *battleship*
     // roster regardless of `--ship` — so every station, and therefore every
     // backfilled AI system, would belong to the wrong hull.
-    let ship_toml = read_toml(&ship_path, "ship")?;
-    let ship_entity_config = EntityConfig::from_toml(&ship_toml)
+    // `read_toml` first so an unreadable ship still reports the io error it
+    // always did; composition then resolves any `includes` the hull declares
+    // (issue #869) so the native `PendingShipConfig` matches the composed hull
+    // the cache holds.
+    let _ = read_toml(&ship_path, "ship")?;
+    let ship_entity_config = crate::entity_includes::load_entity_config(&ship_path)
         .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
     let ship_config = ship_entity_config
         .ship_config

@@ -1026,7 +1026,21 @@ pub fn spawn_entity(
     // TOML section. Placed BEFORE the hull block: the hull block has an
     // early-return for the empty-hull case, so anything after it could be
     // skipped.
-    if let Some(sc) = &config.shields_console {
+    //
+    // The gate is the shield CONTENT, not the `[shields_console]` header. Since
+    // #885b every AI-bearing hull authors `[shields_console.ai_policy]`, and a
+    // sub-table cannot be written without bringing its parent into existence —
+    // so the header no longer distinguishes "this hull has shields" from "this
+    // hull declared its shields-focus policy". `ship_requiem_courier.toml` is
+    // exactly that shape: no `[[shield_arc]]`, no `[shields_console.base]`, and
+    // it must keep having no shield system at all. A `[shields_console]` block
+    // that authors neither therefore now means NO shields where it used to mean
+    // a default four-facing system; nothing shipped is in that state.
+    let shields_content = config
+        .shields_console
+        .as_ref()
+        .filter(|sc| sc.base.is_some() || !config.shield_arcs.is_empty());
+    if let Some(sc) = shields_content {
         use crate::weapons::shield::{ShieldFocusConfig, ShieldSystem};
         let ship_wide = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
         let shield_system = if !config.shield_arcs.is_empty() {
@@ -2079,6 +2093,96 @@ hull_integrity = 60.0
                 .is_none(),
             "entity without [shields_console] block must not have ShipShields"
         );
+    }
+
+    /// A `[shields_console]` that carries only an AI policy is not a shield
+    /// system.
+    ///
+    /// This is the shape #885b stage 5c created: `[shields_console.ai_policy]`
+    /// is a required declaration on every AI-bearing hull, and writing it brings
+    /// `[shields_console]` into existence whether or not the hull has shields.
+    /// `ship_requiem_courier.toml` is exactly this — no `[[shield_arc]]`, no
+    /// `[shields_console.base]` — and it must keep having no shields at all, so
+    /// the gate reads the shield CONTENT rather than the table header. The rule
+    /// change rides along: a block authoring neither used to mean a default
+    /// four-facing system and now means none.
+    #[test]
+    fn a_shields_console_holding_only_an_ai_policy_attaches_no_ship_shields() {
+        let mut app = test_app();
+        let toml = r#"
+[hull]
+hull_integrity = 60.0
+
+[shields_console.ai_policy]
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "shield_focus"
+when = "true"
+verb = "focus_shield_arc"
+"#;
+        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        assert!(
+            config.shields_console.is_some() && config.shield_arcs.is_empty(),
+            "precondition: the table exists but declares no shields"
+        );
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        assert!(
+            app.world()
+                .get::<crate::ship::shields::ShipShields>(spawned)
+                .is_none(),
+            "declaring a shields-focus POLICY must not conjure a shield system onto a \
+             hull that carries no arcs and no base config"
+        );
+    }
+
+    /// …and a hull with arcs is unaffected by which of the two branches it takes.
+    ///
+    /// The five Harrow hulls each declare one `[[shield_arc]]` and gained a
+    /// `[shields_console]` in stage 5c, moving them from the arcs-only fallback
+    /// branch onto the console branch. Both paths must build the same system, or
+    /// authoring a policy would have silently retuned five ships' shields.
+    #[test]
+    fn arcs_build_the_same_shield_system_with_or_without_a_shields_console() {
+        const ARC: &str = r#"
+[hull]
+hull_integrity = 60.0
+
+[[shield_arc]]
+id = "all"
+label = "test.arc"
+center_deg = 0.0
+width_deg = 360.0
+max_hp = 5
+regen_per_sec = 0.0
+"#;
+        let read = |toml: &str| {
+            let mut app = test_app();
+            let config = EntityConfig::from_toml(toml).expect("toml must parse");
+            let uuid = uuid::Uuid::new_v4().to_string();
+            let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+            let s = app
+                .world()
+                .get::<crate::ship::shields::ShipShields>(spawned)
+                .expect("a hull with an arc has shields");
+            (
+                format!("{:?}", s.0.facings),
+                format!("{:?}", s.0.focus_config),
+                s.1,
+            )
+        };
+        let (arcs_only, focus_only, freq_only) = read(ARC);
+        let (arcs_console, focus_console, freq_console) =
+            read(&format!("{ARC}\n[shields_console]\n"));
+        assert_eq!(arcs_only, arcs_console, "the facings must be identical");
+        assert_eq!(
+            focus_only, focus_console,
+            "an unauthored `[shields_console]` must supply exactly \
+             ShieldFocusConfig::default(), or stage 5c retuned five hulls' focus \
+             bonuses by writing a policy next door"
+        );
+        assert_eq!(freq_only, freq_console, "the first arc owns the frequency");
     }
 
     #[test]

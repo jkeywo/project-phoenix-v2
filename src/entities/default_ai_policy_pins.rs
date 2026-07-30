@@ -2638,19 +2638,24 @@ mod spawn_path {
     use bevy::prelude::*;
 
     /// The Harrow Lancer: the one shipped hull that carries all three weapon
-    /// kinds AND authors not a single AI policy block, so all fourteen
-    /// synthesisers fire on one entity.
+    /// kinds, so all fourteen policy slots exist on one entity.
+    ///
+    /// It authored NOT ONE of them until #885b stage 5c, which is why several
+    /// pins below moved onto [`UNAUTHORED_ARMED_HULL`]: the mapping they pin is
+    /// "authored nothing ⇒ Rust invents it", and no shipped hull is in that
+    /// state any more.
     const LANCER: &str = include_str!("../../assets/entities/ship_harrow_lancer.toml");
     /// The Alliance Battleship: two phaser banks, one blaster bank, five torpedo
-    /// tubes, none of them authoring an inline `ai` block — the per-weapon
-    /// derivation rule's shape pin.
+    /// tubes — the per-weapon derivation rule's shape pin, one policy per
+    /// authored id.
     const BATTLESHIP: &str = include_str!("../../assets/entities/alliance_battleship.toml");
-    /// The Harrow Cruiser: a MIXED hull. Its torpedo tubes author their own
-    /// policies while its phaser banks do not, so the "authored wins, absent is
-    /// synthesised" rule is observable per weapon on one ship.
+    /// The Harrow Cruiser: a MIXED hull. Its torpedo tubes author a doctrine of
+    /// their own while its phaser banks author the canonical default, so
+    /// "a policy belongs to ONE weapon" is observable per weapon on one ship.
     const HARROW_CRUISER: &str = include_str!("../../assets/entities/ship_harrow_cruiser.toml");
-    /// The Alliance Cruiser: authors `[captain_console.ai]` and
-    /// `[power.ai_policy]`, so those two synthesisers must NOT fire for it.
+    /// The Alliance Cruiser: hand-authored `[captain_console.ai]` and
+    /// `[power.ai_policy]` since long before #885b — the shipped worked example
+    /// that a verbatim transcription round-trips.
     const ALLIANCE_CRUISER: &str = include_str!("../../assets/entities/alliance_cruiser.toml");
     /// Axiom Station: a shipped entity with NO `[behaviour]` block at all. The
     /// negative half of the attachment mapping — nothing AI is attached to it.
@@ -2675,15 +2680,110 @@ mod spawn_path {
         (app, entity)
     }
 
+    /// An ARMED hull that authors `[behaviour]`, one phaser bank, one blaster
+    /// bank and one torpedo tube — and not a single AI block.
+    ///
+    /// This was the Harrow Lancer's exact shape (its weapon loadout is copied
+    /// here verbatim) until #885b stage 5c authored its last fourteen policies.
+    /// It is a fixture rather than a shipped hull because every shipped hull now
+    /// declares every slot, which is the whole point of the stage — and the
+    /// mapping "authored nothing ⇒ Rust invents it" is still the thing the
+    /// synthesisers are FOR, still live for a test fixture or a hand-written
+    /// world entity, and still what stage 5d is about to delete. A fixture is
+    /// the only thing left that can exercise it.
+    const UNAUTHORED_ARMED_HULL: &str = r#"
+name = "test.unauthored_armed_hull"
+tags = ["ship"]
+
+[hull]
+hull_integrity = 2000.0
+
+[helm_console]
+max_speed = 10.0
+max_reverse_speed = 5.0
+acceleration = 4.0
+deceleration = 10.0
+max_yaw_rate = 0.2
+max_bank_deg = 5.0
+
+[weapons_console]
+
+[[weapons_console.phaser_banks]]
+id = "lash"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+auto_arc_deg = 360.0
+beam_range = 90.0
+beam_damage_per_sec = 1.5
+beam_duration_secs = 6.0
+cooldown_secs = 3.0
+shield_pierce = 0.0
+beam_color = [1.0, 0.3, 0.1, 1.0]
+
+[[weapons_console.blaster_banks]]
+id = "spike"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+volley_count = 2
+volley_interval_secs = 0.5
+cooldown_secs = 3.0
+projectile_speed = 60.0
+collision_radius = 1.0
+visual_scale = 0.5
+damage = 2
+shield_pierce = 0.3
+range = 80.0
+
+[torpedoes]
+count = 40
+burst_interval_secs = 0.4
+damage_hull = 3
+damage_shields = 0
+speed = 30.0
+turn_rate_deg_per_sec = 120.0
+lifespan = 12.0
+load_time = 2.0
+detonation_radius = 6.0
+
+[[torpedoes.tubes]]
+id = "lance"
+facing_deg = 0.0
+fire_arc_deg = 360.0
+load_time = 3.0
+volley_max = 2
+
+[behaviour]
+
+[[behaviour.doctrine]]
+id = "destroy-hostiles"
+directive_kind = "Destroy"
+base_priority = 40.0
+"#;
+
     /// A hull that authors NOTHING gets all fourteen policies invented for it at
     /// spawn, each byte-identical to its synthesiser.
     ///
-    /// This is the mapping #885 AC1 replaces: today "declares intent" is
-    /// satisfied by Rust, not by authoring, and there is nothing for content
-    /// validation to reject.
+    /// This is the mapping #885 AC1 replaces: "declares intent" is satisfied by
+    /// Rust rather than by authoring, and there is nothing for content
+    /// validation to reject. Stage 5c took every shipped hull out of this state;
+    /// the fixture keeps the mapping itself pinned until stage 5d deletes the
+    /// synthesisers that implement it.
     #[test]
-    fn lancer_authoring_nothing_gets_every_policy_synthesised() {
-        let (app, e) = spawn(LANCER, "lancer");
+    fn a_hull_authoring_nothing_gets_every_policy_synthesised() {
+        let config = EntityConfig::from_toml(UNAUTHORED_ARMED_HULL)
+            .expect("the unauthored armed fixture must parse");
+        let helm = config.helm_console.as_ref().expect("fixture has a helm");
+        assert!(
+            config.captain_console.is_none()
+                && config.shields_console.is_none()
+                && config.power.is_none()
+                && config.comms_console.is_none()
+                && helm.engines_ai.is_none()
+                && helm.boost_ai.is_none(),
+            "precondition: the fixture authors NO AI block of any kind."
+        );
+
+        let (app, e) = spawn(UNAUTHORED_ARMED_HULL, "unauthored-armed");
         let w = app.world();
 
         macro_rules! pin_component {
@@ -2807,14 +2907,16 @@ mod spawn_path {
     }
 
     /// The per-weapon DERIVATION RULE, pinned as a shape rather than as one
-    /// hull's instance: one policy per authored bank/tube id, keyed by that id,
-    /// every one of them the canonical default when no inline `ai` is authored.
+    /// hull's instance: one policy per authored bank/tube id, keyed by that id.
     ///
     /// The Battleship is the widest case shipped — two phaser banks, one blaster
     /// bank, five torpedo tubes — so it also pins that the map size follows the
-    /// authored list length rather than any fixed count.
+    /// authored list length rather than any fixed count. Since #885b stage 5c
+    /// every one of those eight entries comes from an inline `ai` block on the
+    /// weapon itself rather than from the synthesiser, and each still decodes to
+    /// the canonical default: that is the transcription, checked per weapon.
     #[test]
-    fn battleship_derives_one_synthesised_policy_per_authored_weapon() {
+    fn battleship_derives_one_policy_per_authored_weapon() {
         let (app, e) = spawn(BATTLESHIP, "battleship");
         let w = app.world();
 
@@ -2860,39 +2962,41 @@ mod spawn_path {
              author five separate declarations here, not one shared block."
         );
 
-        // Every derived entry is the canonical default, since this hull authors
-        // no inline `ai` on any bank or tube.
+        // Every derived entry decodes to the canonical default: this hull's eight
+        // inline `ai` blocks are verbatim transcriptions of what the
+        // synthesisers used to invent for it.
         let phaser_default = decoded(default_phaser_bank_ai_config());
         for (id, policy) in phasers {
             assert_eq!(
                 policy, &phaser_default,
-                "phaser bank `{id}`: no inline `ai` authored ⇒ the canonical default."
+                "phaser bank `{id}`: the authored inline `ai` is the canonical default."
             );
         }
         let blaster_default = decoded(default_blaster_bank_ai_config());
         for (id, policy) in blasters {
             assert_eq!(
                 policy, &blaster_default,
-                "blaster bank `{id}`: no inline `ai` authored ⇒ the canonical default."
+                "blaster bank `{id}`: the authored inline `ai` is the canonical default."
             );
         }
         let tube_default = decoded(default_torpedo_tube_ai_config());
         for (id, policy) in tubes {
             assert_eq!(
                 policy, &tube_default,
-                "tube `{id}`: no inline `ai` authored ⇒ the canonical default."
+                "tube `{id}`: the authored inline `ai` is the canonical default."
             );
         }
     }
 
-    /// The synthesiser is a per-weapon FALLBACK, not a per-ship one: on a hull
-    /// that authors policies for its tubes but not for its phaser banks, only
-    /// the phaser banks get invented content.
+    /// A policy belongs to ONE weapon, not to the ship: on a hull whose tubes
+    /// fly a doctrine of their own while its phaser banks take the fleet
+    /// baseline, the two are genuinely different at runtime.
     ///
-    /// This is the property that makes #885 a per-declaration migration rather
-    /// than a per-hull one.
+    /// This is the property that made #885b a per-declaration migration rather
+    /// than a per-hull one, and it is why stage 5c had to author 124 separate
+    /// blocks instead of ten.
     #[test]
-    fn harrow_cruiser_synthesises_only_the_weapons_it_did_not_author() {
+    fn harrow_cruiser_tube_doctrine_does_not_reach_its_phaser_banks() {
         let (app, e) = spawn(HARROW_CRUISER, "harrow-cruiser");
         let w = app.world();
 
@@ -2905,8 +3009,8 @@ mod spawn_path {
         for (id, policy) in phasers {
             assert_eq!(
                 policy, &phaser_default,
-                "phaser bank `{id}`: this hull authors NO inline `ai` on its banks, so \
-                 the canonical unconditional-fire default is synthesised for each."
+                "phaser bank `{id}`: this hull's banks author the canonical \
+                 unconditional-fire policy, unaffected by what its TUBES say."
             );
         }
 
@@ -2919,20 +3023,21 @@ mod spawn_path {
         for (id, policy) in tubes {
             assert_ne!(
                 policy, &tube_default,
-                "tube `{id}`: this hull DOES author an inline `ai`, so the synthesiser \
-                 must not fire for it. Authored always wins over synthesised."
+                "tube `{id}`: this hull authors a salvo doctrine of its own (#791), \
+                 which must survive stage 5c's transcription of everything around it. \
+                 Matching the canonical default means that doctrine was flattened."
             );
         }
     }
 
-    /// The WORKED EXAMPLE #885 has to repeat ~200 times.
+    /// The WORKED EXAMPLE #885 repeated 174 times.
     ///
-    /// The Alliance Cruiser is one of the handful of hulls that already authors
-    /// `[captain_console.ai]` and `[power.ai_policy]` by hand — and both blocks
-    /// decode to policies **byte-identical to the synthesised defaults**. That
-    /// is the standard the migration is held to: transcribing the synthesiser
-    /// into TOML is expected to round-trip exactly, so a diff against this
-    /// suite's content pins is a sufficient check for the remaining hulls.
+    /// The Alliance Cruiser hand-authored `[captain_console.ai]` and
+    /// `[power.ai_policy]` long before this migration — and both blocks decode
+    /// to policies **byte-identical to the synthesised defaults**. That was the
+    /// standard the migration was held to: transcribing a synthesiser into TOML
+    /// round-trips exactly, which is what made a 174-declaration content edit a
+    /// behaviour-preserving one.
     ///
     /// If this test ever fails, either an authored block or its synthesiser
     /// drifted, and the two are no longer interchangeable — which is precisely
@@ -2963,17 +3068,18 @@ mod spawn_path {
              identical to the synthesiser down to the guard strings."
         );
 
-        // …while the systems it left unauthored are still invented for it.
-        // Authoring is per-SYSTEM, never per-hull: this hull declaring two
-        // blocks buys nothing for the other twelve fine systems.
+        // …and the twelve slots it left unauthored until stage 5c now read the
+        // same, from their own blocks. Authoring is per-SYSTEM, never per-hull:
+        // declaring two blocks bought this hull nothing for the other twelve,
+        // which is why each of them had to be written out.
         assert_eq!(
             w.get::<crate::ship::helm_ai::HelmEnginesAiPolicy>(e)
                 .expect("engines policy attached")
                 .0,
             decoded(default_engines_ai_config()),
-            "the same hull leaves `[helm_console.engines_ai]` unauthored, so Engines \
-             is still synthesised — the twelve remaining declarations this hull owes \
-             #885 are exactly the ones with no block in its TOML."
+            "`[helm_console.engines_ai]` was synthesised for this hull until stage 5c \
+             transcribed it, and the transcription must land on exactly the same \
+             policy the Rust default produced."
         );
     }
 
@@ -3161,6 +3267,292 @@ base_priority = 40.0
             checked, 10,
             "ten shipped hulls carry `[behaviour]`; the scan found {checked}, so it is \
              looking in the wrong place or a hull was added without its selectors."
+        );
+    }
+
+    /// The twelve (hull, slot) pairs where a hull authors a policy that
+    /// DELIBERATELY differs from the canonical default.
+    ///
+    /// Everything else on every shipped hull is a verbatim transcription, so the
+    /// test below asserts equality by default and inequality here — which makes
+    /// the exception list bidirectional. A bespoke doctrine quietly collapsing
+    /// back onto the canonical default fails just as loudly as a transcription
+    /// slip, and that is the failure this list exists for: these blocks are the
+    /// authored manoeuvres (#790–#792, #801) that make those three hulls fly
+    /// differently from everything else in the fleet.
+    ///
+    /// Slot keys are the `ai_declaration_manifest::Slot::key` form.
+    const BESPOKE_POLICIES: &[(&str, &str)] = &[
+        // The broadside orbit: a stateful engines/steering pair, plus two tubes
+        // that hold fire until the target's striking arc is actually down.
+        ("ship_harrow_cruiser", "engines"),
+        ("ship_harrow_cruiser", "steering"),
+        ("ship_harrow_cruiser", "torpedo_tube[bow_port]"),
+        ("ship_harrow_cruiser", "torpedo_tube[bow_starboard]"),
+        // The lance run, and the one hull in the fleet whose AI engages boost.
+        ("ship_harrow_destroyer", "engines"),
+        ("ship_harrow_destroyer", "steering"),
+        ("ship_harrow_destroyer", "boost"),
+        // The artillery platform: it holds position rather than closing, which
+        // is why its impulse axis is authored IDLE rather than permitting.
+        ("ship_harrow_warhawk", "engines"),
+        ("ship_harrow_warhawk", "steering"),
+        ("ship_harrow_warhawk", "impulse"),
+        ("ship_harrow_warhawk", "torpedo_tube[fore]"),
+        ("ship_harrow_warhawk", "torpedo_tube[aft]"),
+    ];
+
+    fn is_bespoke(hull: &str, slot: &str) -> bool {
+        BESPOKE_POLICIES.contains(&(hull, slot))
+    }
+
+    /// Assert one attached policy against the canonical default, in whichever
+    /// direction [`BESPOKE_POLICIES`] says.
+    fn assert_policy(hull: &str, slot: &str, got: &AiPolicy, canonical: FineSystemAiConfigToml) {
+        let canonical = decoded(canonical);
+        if is_bespoke(hull, slot) {
+            assert_ne!(
+                got, &canonical,
+                "{hull}/{slot}: this hull authors a DELIBERATELY different policy — a \
+                 manoeuvre of its own, not the fleet baseline. Matching the canonical \
+                 default means that doctrine was lost."
+            );
+        } else {
+            assert_eq!(
+                got, &canonical,
+                "{hull}/{slot}: the authored block must decode to EXACTLY what \
+                 the synthesiser used to invent. #885b changes no behaviour, so a \
+                 difference here is a transcription slip — or a deliberate retune \
+                 that belongs on BESPOKE_POLICIES with a reason."
+            );
+        }
+    }
+
+    /// **The acceptance test for #885b stage 5c**, and the direct extension of
+    /// the selector one above to the fourteen policy kinds.
+    ///
+    /// Every shipped hull AUTHORS all fourteen `default_*_ai_config()` slots it
+    /// has — every ship-level one, and one per phaser bank, blaster bank and
+    /// torpedo tube — and each authored block decodes to precisely what Rust
+    /// used to invent for it, bar the twelve bespoke doctrines above.
+    ///
+    /// Two assertions in one, deliberately. The `is_some()` half is the US7
+    /// claim (nothing is silently synthesised); the decode half is the claim
+    /// that satisfying US7 changed no behaviour. Either alone would let the
+    /// other regress.
+    #[test]
+    fn every_shipped_hull_authors_the_fourteen_policies_and_they_match_the_synthesisers() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/entities");
+        let (mut hulls, mut slots) = (0usize, 0usize);
+        for entry in std::fs::read_dir(&dir).expect("assets/entities must be readable") {
+            let path = entry.expect("readable dir entry").path();
+            if path.extension().is_none_or(|e| e != "toml") {
+                continue;
+            }
+            let hull = path
+                .file_stem()
+                .expect("toml file has a stem")
+                .to_string_lossy()
+                .to_string();
+            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            let config = crate::entity_config::EntityConfig::from_toml(&src)
+                .unwrap_or_else(|e| panic!("{hull} must parse: {e}"));
+            if config.behaviour.is_none() {
+                continue;
+            }
+
+            // ── The US7 half, read off the TOML: every ship-level block exists.
+            let helm = config
+                .helm_console
+                .as_ref()
+                .unwrap_or_else(|| panic!("{hull}: an AI-bearing hull declares `[helm_console]`"));
+            for (block, authored) in [
+                (
+                    "[captain_console.ai]",
+                    config
+                        .captain_console
+                        .as_ref()
+                        .is_some_and(|c| c.ai.is_some()),
+                ),
+                ("[helm_console.engines_ai]", helm.engines_ai.is_some()),
+                ("[helm_console.steering_ai]", helm.steering_ai.is_some()),
+                ("[helm_console.lateral_ai]", helm.lateral_ai.is_some()),
+                ("[helm_console.vertical_ai]", helm.vertical_ai.is_some()),
+                ("[helm_console.impulse_ai]", helm.impulse_ai.is_some()),
+                ("[helm_console.boost_ai]", helm.boost_ai.is_some()),
+                (
+                    "[shields_console.ai_policy]",
+                    config
+                        .shields_console
+                        .as_ref()
+                        .is_some_and(|s| s.ai_policy.is_some()),
+                ),
+                (
+                    "[power.ai_policy]",
+                    config.power.as_ref().is_some_and(|p| p.ai_policy.is_some()),
+                ),
+                (
+                    "[comms_console.ai]",
+                    config
+                        .comms_console
+                        .as_ref()
+                        .is_some_and(|c| c.ai.is_some()),
+                ),
+            ] {
+                assert!(
+                    authored,
+                    "{hull}: an AI-bearing hull must AUTHOR {block} (#885b stage 5c). \
+                     A hull that omits it is silently handed a Rust-side synthesised \
+                     policy, which is what PRD #774 US7 forbids."
+                );
+            }
+            for bank in config
+                .weapons_console
+                .iter()
+                .flat_map(|w| w.phaser_banks.iter())
+            {
+                assert!(
+                    bank.ai.is_some(),
+                    "{hull}: phaser bank `{}` must author its own inline `ai` — the \
+                     policy is per-BANK, so authoring one buys the next nothing.",
+                    bank.id
+                );
+            }
+            for bank in config
+                .weapons_console
+                .iter()
+                .flat_map(|w| w.blaster_banks.iter())
+            {
+                assert!(
+                    bank.ai.is_some(),
+                    "{hull}: blaster bank `{}` must author its own inline `ai`.",
+                    bank.id
+                );
+            }
+            for tube in config.torpedoes.iter().flat_map(|t| t.tubes.iter()) {
+                assert!(
+                    tube.ai.is_some(),
+                    "{hull}: torpedo tube `{}` must author its own inline `ai`.",
+                    tube.id
+                );
+            }
+            if let Some(t) = config.torpedoes.as_ref() {
+                assert!(
+                    t.ai.is_some(),
+                    "{hull}: a hull with `[torpedoes]` must author `[torpedoes.ai]` for \
+                     the shared magazine."
+                );
+            }
+
+            // ── The behaviour half, read off the real spawn path.
+            let (app, e) = spawn(&src, &hull);
+            let w = app.world();
+            macro_rules! ship_level {
+                ($ty:path, $slot:literal, $canonical:expr) => {{
+                    let got = w.get::<$ty>(e).unwrap_or_else(|| {
+                        panic!("{hull}/{}: policy component attached at spawn", $slot)
+                    });
+                    assert_policy(&hull, $slot, &got.0, $canonical);
+                    slots += 1;
+                }};
+            }
+            ship_level!(
+                crate::captain_plugin::CaptainAiPolicy,
+                "captain",
+                default_captain_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmEnginesAiPolicy,
+                "engines",
+                default_engines_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmSteeringAiPolicy,
+                "steering",
+                default_steering_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmLateralAiPolicy,
+                "lateral",
+                default_lateral_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmVerticalAiPolicy,
+                "vertical",
+                default_vertical_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmImpulseAiPolicy,
+                "impulse",
+                default_impulse_ai_config()
+            );
+            ship_level!(
+                crate::ship::helm_ai::HelmBoostAiPolicy,
+                "boost",
+                default_boost_ai_config()
+            );
+            ship_level!(
+                crate::ship::shields::ShieldsFocusAiPolicy,
+                "shields_focus",
+                default_shields_focus_ai_config()
+            );
+            ship_level!(
+                crate::power_plugin::PowerAiPolicy,
+                "power",
+                default_power_ai_config()
+            );
+            ship_level!(
+                crate::console::comms::server::CommsResponseAiPolicy,
+                "comms_response",
+                default_comms_response_ai_config()
+            );
+            if config.torpedoes.is_some() {
+                ship_level!(
+                    crate::weapons_plugin::TorpedoMagazineAiPolicy,
+                    "torpedo_magazine",
+                    default_torpedo_magazine_ai_config()
+                );
+            }
+
+            for (kind, map) in [
+                (
+                    "phaser_bank",
+                    w.get::<crate::weapons_plugin::PhaserBankAiPolicies>(e)
+                        .map(|c| &c.0),
+                ),
+                (
+                    "blaster_bank",
+                    w.get::<crate::weapons_plugin::BlasterBankAiPolicies>(e)
+                        .map(|c| &c.0),
+                ),
+                (
+                    "torpedo_tube",
+                    w.get::<crate::weapons_plugin::TorpedoTubeAiPolicies>(e)
+                        .map(|c| &c.0),
+                ),
+            ] {
+                for (id, policy) in map.into_iter().flatten() {
+                    let canonical = match kind {
+                        "phaser_bank" => default_phaser_bank_ai_config(),
+                        "blaster_bank" => default_blaster_bank_ai_config(),
+                        _ => default_torpedo_tube_ai_config(),
+                    };
+                    assert_policy(&hull, &format!("{kind}[{id}]"), policy, canonical);
+                    slots += 1;
+                }
+            }
+            hulls += 1;
+        }
+        assert_eq!(
+            hulls, 10,
+            "ten shipped hulls carry `[behaviour]`; the scan found {hulls}, so it is \
+             looking in the wrong place or a hull was added without its policies."
+        );
+        assert_eq!(
+            slots, 141,
+            "the fourteen policy kinds account for 141 of the fleet's 191 AI-capable \
+             fine-system slots (the other 50 are the selectors). All 141 are checked \
+             here; a change in this number means a hull, weapon or kind moved."
         );
     }
 

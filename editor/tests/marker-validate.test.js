@@ -8,6 +8,7 @@ import {
   CATEGORY_NO_RIG,
   RigIndex,
   collectMarkerRefs,
+  isPlayerFlyable,
   isValidMarkerName,
   roleAcceptsMarker,
   sidecarPathFor,
@@ -195,6 +196,23 @@ describe('validateEntityMarkers — representative systems, success and failure'
     expect(findings[0].severity).toBe('warning');
 
     expect(validateEntityMarkers(hull, RIG)).toEqual([]);
+  });
+
+  it('does not demand a bridge viewpoint from an NPC hull', () => {
+    // Every AI-bearing hull authors `[captain_console.ai]` since #885b, so the
+    // section is on NPC designs too and no longer means "a player flies this".
+    // The `npc` tag is what still says it — and dropping the tag brings the
+    // warning straight back, so the check has not been weakened for the hulls
+    // it exists for.
+    const npc = entity({ tags: ['ship', 'npc', 'enemy'], captain_console: { ai: { idle: true } } });
+    expect(validateEntityMarkers(npc, { markers: { engine_port: {} } })).toEqual([]);
+    expect(isPlayerFlyable(npc)).toBe(false);
+
+    const player = { ...npc, tags: ['ship'] };
+    expect(isPlayerFlyable(player)).toBe(true);
+    expect(validateEntityMarkers(player, { markers: { engine_port: {} } })[0].category).toBe(
+      CATEGORY_MISSING_CAMERA,
+    );
   });
 });
 

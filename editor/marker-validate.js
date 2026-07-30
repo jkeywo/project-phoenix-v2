@@ -39,6 +39,27 @@ export const CATEGORY_INCOMPATIBLE = 'incompatible-marker';
 export const CATEGORY_NO_RIG = 'unresolved-model-rig';
 export const CATEGORY_MISSING_CAMERA = 'missing-camera-marker';
 
+/** Content tag declaring a hull to be an NPC-only design (mirrors the engine). */
+export const NPC_HULL_TAG = 'npc';
+
+/**
+ * Whether a hull is one a player can fly, and so owes the viewscreen a default
+ * camera viewpoint. Mirrors `marker_validate::is_player_flyable`.
+ *
+ * `captain_console` used to answer this alone, and only because the player hulls
+ * were the only ones declaring the section. Since #885b every AI-bearing hull
+ * authors `[captain_console.ai]` — which cannot exist without its parent — so
+ * the section is on every hull and distinguishes nothing. The hull's own `tags`
+ * still do: NPC designs declare `npc`, player hulls declare none.
+ *
+ * @param {object} parsed  Parsed entity TOML.
+ */
+export function isPlayerFlyable(parsed) {
+  if (!parsed?.captain_console) return false;
+  const tags = Array.isArray(parsed.tags) ? parsed.tags : [];
+  return !tags.includes(NPC_HULL_TAG);
+}
+
 /**
  * Whether a marker name is compatible with a role. Only the `camera_`
  * namespace is reserved: cameras must sit inside it, weapons and effects must
@@ -223,7 +244,7 @@ export function validateEntityMarkers(parsed, rig) {
 
   // A hull a player can fly needs the default viewscreen camera, or the view
   // silently snaps to the ship's origin.
-  if (parsed?.captain_console && names !== null && !names.includes(DEFAULT_CAMERA_MARKER)) {
+  if (isPlayerFlyable(parsed) && names !== null && !names.includes(DEFAULT_CAMERA_MARKER)) {
     findings.push({
       path: 'mesh.model',
       severity: 'warning',

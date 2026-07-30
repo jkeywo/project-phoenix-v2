@@ -22,6 +22,7 @@
 //! | #885a, the count | 206 | — |
 //! | #892 retired two raider hulls | 174 | **deletion** |
 //! | #885b stage 5b authored all 50 selector blocks | 124 | **authoring** |
+//! | #885b stage 5c authored all 124 policy blocks | **0** | **authoring** |
 //!
 //! Those two burn-downs are not the same thing and the module says so wherever
 //! the number appears. Deletion drops the mark by taking undeclared hulls out
@@ -45,7 +46,9 @@
 //!    error. Default off — [`AiDeclarationMode::DEFAULT`] is `Lenient` and every
 //!    caller of [`EntityConfig::from_toml`] gets it — so nothing changes today.
 //!    #885b stage 5d flips that one const and every load path becomes strict at
-//!    once. It cannot flip while 124 slots are still undeclared.
+//!    once. Nothing blocks that flip any more: since stage 5c every shipped hull
+//!    declares every slot, which `tests::strict_mode_would_accept_every_shipped_hull_today`
+//!    asserts directly.
 //!
 //! Nothing here changes what a hull does. The synthesisers still fire, on
 //! exactly the slots this module reports.
@@ -677,230 +680,59 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 /// Keys are the [`Slot::key`] form. Hulls are the `assets/entities/` file stems.
 /// Entities absent from this table must have no undeclared slots at all — which,
 /// for everything that is not a hull, means no AI-capable fine system at all.
-/// # What the shape of this table already says
 ///
-/// * Ten hulls, 191 AI-capable fine-system slots, 124 of them undeclared — 65%.
+/// # The table is EMPTY, and that is the point
 ///
-///   174 until #885b stage 5b authored all fifty selector blocks. **That is a
-///   burn-down of 50 by AUTHORING**, and it is the first one: the previous drop
-///   (206 → 174, when #892 retired `pirate_raider.toml` and
-///   `pirate_raider_reinforcement.toml`) was a burn-down by DELETION — two
-///   hulls that declared nothing stopped shipping, so the ratchet fell without a
-///   single declaration being written. The two are worth distinguishing,
-///   because only one of them is progress on US7.
-/// * **Seven of the nineteen kinds are still authored by nobody**: `lateral`,
-///   `vertical`, `phaser_bank`, `blaster_bank`, `torpedo_magazine`,
-///   `shields_focus` and `comms_response`. It was twelve before stage 5b.
-/// * The selector family is now 50 of 50 AUTHORED — every hull carries all five
-///   `[*.selector]` blocks, transcribed verbatim from the synthesisers that
-///   used to invent them and pinned equal to them by
-///   `default_ai_policy_pins::spawn_path`. The synthesisers still exist and
-///   still fire for anything that omits a block; deleting them is stage 5d.
-/// * The kinds some hull declares are all five selectors (10 of 10 hulls each),
-///   `power` (4 of 10), `engines` (3), `steering` (3), `torpedo_tube` (4 tubes
-///   of 15), `captain` (1), `boost` (1) and `impulse` (1).
+/// Ten hulls, 191 AI-capable fine-system slots, **zero of them undeclared**.
+/// Every slot on every shipped hull now carries an authored block, transcribed
+/// verbatim from the synthesiser that used to invent it and pinned equal to it
+/// by `default_ai_policy_pins::spawn_path`.
 ///
-/// The exact roll-up is pinned by `tests::the_per_kind_rollup_is_what_the_module_doc_says`,
-/// so these claims cannot rot into prose that used to be true.
-pub const EXPECTED_UNDECLARED: &[(&str, &[&str])] = &[
-    (
-        "alliance_battleship",
-        &[
-            "blaster_bank[heavy-fore]",
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "phaser_bank[aft]",
-            "phaser_bank[fore]",
-            "shields_focus",
-            "steering",
-            "torpedo_magazine",
-            "torpedo_tube[aft-port]",
-            "torpedo_tube[aft-starboard]",
-            "torpedo_tube[fore-centre]",
-            "torpedo_tube[fore-port]",
-            "torpedo_tube[fore-starboard]",
-            "vertical",
-        ],
-    ),
-    (
-        "alliance_courier",
-        &[
-            "blaster_bank[fore]",
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "shields_focus",
-            "steering",
-            "vertical",
-        ],
-    ),
-    (
-        // The shipped worked example: `[captain_console.ai]` and
-        // `[power.ai_policy]` are hand-authored here and decode byte-identical
-        // to their synthesisers, which is the proof that verbatim transcription
-        // is behaviour-preserving. Fourteen slots on the same hull still owe a
-        // declaration.
-        "alliance_cruiser",
-        &[
-            "boost",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "phaser_bank[aft]",
-            "phaser_bank[fore]",
-            "shields_focus",
-            "steering",
-            "torpedo_magazine",
-            "torpedo_tube[aft]",
-            "torpedo_tube[fore_port]",
-            "torpedo_tube[fore_starboard]",
-            "vertical",
-        ],
-    ),
-    (
-        "alliance_destroyer",
-        &[
-            "blaster_bank[port]",
-            "blaster_bank[starboard]",
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "phaser_bank[omni]",
-            "shields_focus",
-            "steering",
-            "torpedo_magazine",
-            "torpedo_tube[aft]",
-            "torpedo_tube[fore]",
-            "vertical",
-        ],
-    ),
-    (
-        "ship_harrow_cruiser",
-        &[
-            "boost",
-            "captain",
-            "comms_response",
-            "impulse",
-            "lateral",
-            "phaser_bank[aft]",
-            "phaser_bank[fore]",
-            "power",
-            "shields_focus",
-            "torpedo_magazine",
-            "vertical",
-        ],
-    ),
-    (
-        "ship_harrow_destroyer",
-        &[
-            "blaster_bank[harrow-lance-port]",
-            "blaster_bank[harrow-lance-starboard]",
-            "captain",
-            "comms_response",
-            "impulse",
-            "lateral",
-            "power",
-            "shields_focus",
-            "vertical",
-        ],
-    ),
-    (
-        // Was the sharpest case before stage 5b: `[behaviour]` plus a
-        // `[weapons_console]` and nothing else, so four of its five selectors
-        // were invented for console sections its TOML never mentioned. It now
-        // authors all five, which is why it carries `[sensors_console]`,
-        // `[navigation_console]`, `[repair]` and `[comms_console]` sections
-        // that exist ONLY to hold a selector.
-        "ship_harrow_lancer",
-        &[
-            "blaster_bank[spike]",
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "phaser_bank[lash]",
-            "power",
-            "shields_focus",
-            "steering",
-            "torpedo_magazine",
-            "torpedo_tube[lance]",
-            "vertical",
-        ],
-    ),
-    (
-        "ship_harrow_patrol",
-        &[
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "phaser_bank[port]",
-            "phaser_bank[starboard]",
-            "power",
-            "shields_focus",
-            "steering",
-            "vertical",
-        ],
-    ),
-    (
-        "ship_harrow_warhawk",
-        &[
-            "blaster_bank[bow_artillery]",
-            "boost",
-            "captain",
-            "comms_response",
-            "lateral",
-            "phaser_bank[port]",
-            "phaser_bank[starboard]",
-            "power",
-            "shields_focus",
-            "torpedo_magazine",
-            "vertical",
-        ],
-    ),
-    (
-        "ship_requiem_courier",
-        &[
-            "boost",
-            "captain",
-            "comms_response",
-            "engines",
-            "impulse",
-            "lateral",
-            "power",
-            "shields_focus",
-            "steering",
-            "vertical",
-        ],
-    ),
-];
+/// The burn-down was 206 → 174 → 124 → **0**, and the steps are not the same
+/// kind of progress:
+///
+/// | step | mark | how |
+/// |---|---|---|
+/// | #885a counted the gap | 206 | — |
+/// | #892 retired two raider hulls | 174 | **deletion** |
+/// | #885b stage 5b authored all 50 selector blocks | 124 | **authoring** |
+/// | #885b stage 5c authored all 124 remaining policy blocks | **0** | **authoring** |
+///
+/// Deletion moved the number without a single declaration being written;
+/// authoring is the only half that is progress on US7, and it accounts for 174
+/// of the 206.
+///
+/// An empty table is not a dead one. It is now the **ratchet at its stop**:
+/// `tests::the_committed_worklist_matches_the_shipped_hulls` asserts exact
+/// equality, so adding a hull, a weapon bank, a torpedo tube or a nineteenth
+/// fine-system kind without authoring its declaration puts an entry back and
+/// fails, naming the hull and the system. That is the regression it exists to
+/// catch, and it can only be caught while the expected state is "nothing".
+///
+/// The synthesisers still exist and still fire for anything that omits a block
+/// — a test fixture, a hand-written world entity, a hull mid-edit. Deleting
+/// them, and flipping [`AiDeclarationMode::DEFAULT`] to
+/// [`AiDeclarationMode::Strict`] so that omission becomes a load error, is
+/// stage 5d. `tests::strict_mode_would_accept_every_shipped_hull_today` is the
+/// evidence that nothing blocks it.
+///
+/// The exact per-kind roll-up is pinned by
+/// `tests::the_per_kind_rollup_is_what_the_module_doc_says`, so these claims
+/// cannot rot into prose that used to be true.
+pub const EXPECTED_UNDECLARED: &[(&str, &[&str])] = &[];
 
 /// The ratchet: the total number of undeclared AI-capable fine systems across
 /// `assets/entities/`.
 ///
-/// May be LOWERED as #885b authors declarations. It must never be raised — a
-/// change that needs it raised is a change that widened the gap PRD #774 US7
-/// exists to close, and should author the declaration instead.
+/// **It is at zero and must stay there.** It may never be raised — a change that
+/// needs it raised is a change that widened the gap PRD #774 US7 exists to
+/// close, and should author the declaration instead.
 ///
-/// 206 → 174 → **124**. The first step was #892 deleting two hulls; the second
-/// is #885b stage 5b authoring all fifty selector blocks. Only the second is
-/// progress on US7 — see the note on [`EXPECTED_UNDECLARED`].
-pub const UNDECLARED_HIGH_WATER_MARK: usize = 124;
+/// 206 → 174 → 124 → **0**. The first step was #892 deleting two hulls; the
+/// second and third are #885b stages 5b and 5c authoring the fifty selector
+/// blocks and then the 124 policy blocks. Only the authoring steps are progress
+/// on US7 — see the note on [`EXPECTED_UNDECLARED`].
+pub const UNDECLARED_HIGH_WATER_MARK: usize = 0;
 
 #[cfg(test)]
 pub(crate) mod source_scan {
@@ -1359,32 +1191,32 @@ base_priority = 40.0
         assert_eq!(
             rollup,
             vec![
-                ("captain", 1, 10),
-                ("engines", 3, 10),
-                ("steering", 3, 10),
-                ("lateral", 0, 10),
-                ("vertical", 0, 10),
-                ("impulse", 1, 10),
-                ("boost", 1, 10),
-                ("phaser_bank", 0, 12),
-                ("blaster_bank", 0, 8),
-                ("torpedo_tube", 4, 15),
-                ("torpedo_magazine", 0, 6),
-                ("shields_focus", 0, 10),
-                ("power", 4, 10),
-                ("comms_response", 0, 10),
+                ("captain", 10, 10),
+                ("engines", 10, 10),
+                ("steering", 10, 10),
+                ("lateral", 10, 10),
+                ("vertical", 10, 10),
+                ("impulse", 10, 10),
+                ("boost", 10, 10),
+                ("phaser_bank", 12, 12),
+                ("blaster_bank", 8, 8),
+                ("torpedo_tube", 15, 15),
+                ("torpedo_magazine", 6, 6),
+                ("shields_focus", 10, 10),
+                ("power", 10, 10),
+                ("comms_response", 10, 10),
                 ("sensors_selector", 10, 10),
                 ("tactical_selector", 10, 10),
                 ("navigation_selector", 10, 10),
                 ("repair_selector", 10, 10),
                 ("comms_selector", 10, 10),
             ],
-            "the per-kind roll-up moved. SEVEN of the nineteen kinds are authored by \
-             nobody today (lateral, vertical, phaser_bank, blaster_bank, \
-             torpedo_magazine, shields_focus, comms_response) — it was twelve until \
-             #885b stage 5b authored the whole selector family, which is now 50 of 50 \
-             DECLARED. The remaining seven are what keeps #885b a content PRD rather \
-             than a tidy-up."
+            "the per-kind roll-up moved. Every one of the nineteen kinds is now \
+             DECLARED on every hull that has it — declared == slots on every row — \
+             after #885b stage 5b authored the five selectors and stage 5c the \
+             fourteen policies. A row where the two numbers differ is a fine system \
+             being handed automation nobody wrote, which is exactly what PRD #774 US7 \
+             forbids: author the block rather than editing this expectation."
         );
     }
 
@@ -1416,25 +1248,76 @@ base_priority = 40.0
         }
     }
 
+    /// **The completion gate for #885b, asserted directly.**
+    ///
+    /// Strict mode is still OFF (the test above pins that), but nothing is left
+    /// for it to reject: every shipped hull declares every one of its 191
+    /// AI-capable fine-system slots, so flipping
+    /// [`AiDeclarationMode::DEFAULT`] in stage 5d cannot stop a hull loading.
+    ///
+    /// This is deliberately stated as "strict mode ACCEPTS them" rather than as
+    /// "the worklist is empty": the worklist and the load path are two different
+    /// pieces of code, and a hull could in principle satisfy the manifest's
+    /// gating while failing [`strict_error`]. Running the real strict load over
+    /// every shipped file is what makes the claim about the switch rather than
+    /// about the ledger.
     #[test]
-    fn strict_mode_rejects_a_shipped_hull_and_names_the_worklist() {
-        let path = crate_root().join("assets/entities/ship_harrow_lancer.toml");
-        let src = std::fs::read_to_string(&path).expect("readable entity toml");
-        let err = EntityConfig::from_toml_in_mode(&src, AiDeclarationMode::Strict)
-            .expect_err(
-                "the Lancer still owes fourteen declarations, so strict mode must reject it",
-            )
-            .to_string();
+    fn strict_mode_would_accept_every_shipped_hull_today() {
+        let mut checked = 0usize;
+        for stem in hull_files() {
+            let path = crate_root().join(format!("assets/entities/{stem}.toml"));
+            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            let config = EntityConfig::from_toml(&src).expect("shipped entity parses");
+            assert_eq!(
+                strict_error(&config),
+                None,
+                "{stem}: this hull still owes a declaration, so #885b stage 5d cannot \
+                 flip AiDeclarationMode::DEFAULT to Strict — every shipped hull would \
+                 stop loading. Author the block named in the message."
+            );
+            EntityConfig::from_toml_in_mode(&src, AiDeclarationMode::Strict)
+                .unwrap_or_else(|e| panic!("{stem} must load in STRICT mode: {e}"));
+            checked += 1;
+        }
         assert!(
-            err.contains("[captain_console.ai]") && err.contains("default_captain_ai_config"),
-            "the error must name the block to author and the synthesiser filling the \
-             gap: {err}"
+            checked > 0,
+            "no entity was checked — the scan is looking in the wrong place"
         );
+    }
+
+    /// …and strict mode still rejects, and still names the worklist, for
+    /// anything that declares nothing.
+    ///
+    /// This was pointed at `ship_harrow_lancer.toml` until #885b stage 5c
+    /// authored its last fourteen policies. No shipped hull can play the part
+    /// any more — that is the whole achievement — so the fixture takes over,
+    /// which keeps the RULE under test rather than loosening the assertion to
+    /// whatever the fleet happens to still owe.
+    #[test]
+    fn strict_mode_rejects_an_undeclared_policy_and_names_the_worklist() {
+        let err = EntityConfig::from_toml_in_mode(BARE_BEHAVIOUR_HULL, AiDeclarationMode::Strict)
+            .expect_err("the fixture declares nothing, so strict mode must reject it")
+            .to_string();
+        for (block, synthesiser) in [
+            ("[captain_console.ai]", "default_captain_ai_config"),
+            ("[helm_console.lateral_ai]", "default_lateral_ai_config"),
+            (
+                "[shields_console.ai_policy]",
+                "default_shields_focus_ai_config",
+            ),
+            ("[power.ai_policy]", "default_power_ai_config"),
+            ("[comms_console.ai]", "default_comms_response_ai_config"),
+        ] {
+            assert!(
+                err.contains(block) && err.contains(synthesiser),
+                "the error must name the block to author and the synthesiser filling \
+                 the gap ({block} / {synthesiser}): {err}"
+            );
+        }
         assert!(
-            !err.contains("selector"),
-            "since #885b stage 5b every shipped hull authors all five `[*.selector]` \
-             blocks, so no selector may appear in a shipped hull's strict-mode \
-             worklist: {err}"
+            err.contains("or `idle = true` inside it"),
+            "a POLICY can declare idle in band, and the message must say so — unlike \
+             the four selectors with no idle field at all: {err}"
         );
     }
 
@@ -1766,21 +1649,43 @@ base_priority = 40.0
 
     // ── The rendered surface ─────────────────────────────────────────────────
 
+    /// The SYNTHESISED rendering, on the fixture — no shipped hull produces one
+    /// any more, which is stage 5c's result rather than a reason to stop
+    /// checking the rendering.
     #[test]
     fn manifest_lines_name_the_synthesiser_and_the_block_to_author() {
-        let lancer = parse("assets/entities/ship_harrow_lancer.toml");
-        let lines = manifest_lines("ship_harrow_lancer", &lancer);
-        assert_eq!(lines.len(), manifest(&lancer).len(), "one line per slot");
+        let bare = EntityConfig::from_toml(BARE_BEHAVIOUR_HULL)
+            .expect("the bare-behaviour fixture must parse");
+        let lines = manifest_lines("bare_behaviour_hull", &bare);
+        assert_eq!(lines.len(), manifest(&bare).len(), "one line per slot");
         let captain = lines
             .iter()
             .find(|l| l.contains(" captain "))
-            .expect("the Lancer's captain slot is rendered");
+            .expect("the fixture's captain slot is rendered");
         assert!(
             captain.contains("SYNTHESISED")
                 && captain.contains("default_captain_ai_config")
                 && captain.contains("[captain_console.ai]"),
             "a rendered line must be actionable on its own: {captain}"
         );
+    }
+
+    /// …and every slot on every shipped hull renders as DECLARED.
+    ///
+    /// The other half of the same surface: the load-time report a developer
+    /// actually reads must show no `SYNTHESISED` line for shipped content, or
+    /// the ledger and the report disagree about whether #885b is done.
+    #[test]
+    fn no_shipped_hull_renders_a_synthesised_line() {
+        for stem in hull_files() {
+            let c = parse(&format!("assets/entities/{stem}.toml"));
+            for line in manifest_lines(&stem, &c) {
+                assert!(
+                    !line.contains("SYNTHESISED"),
+                    "{stem}: this slot is still being invented in Rust: {line}"
+                );
+            }
+        }
     }
 
     #[test]

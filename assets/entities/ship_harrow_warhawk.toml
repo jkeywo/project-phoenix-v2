@@ -500,6 +500,19 @@ cooldown_secs = 4.0
 shield_pierce = 0.1
 beam_color = [1.0, 0.15, 0.05, 1.0]
 
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). One unconditional rule: when the host offers the bank a
+  # decision it fires. Every readiness gate — availability, cooldown, range,
+  # arc, target validity — is the host's and is unchanged; the policy is the
+  # authored DECISION layered on top, and `idle = true` is how a bank opts out.
+  [weapons_console.phaser_banks.ai]
+
+  [[weapons_console.phaser_banks.ai.rule]]
+  priority = 0
+  channel = "phaser_fire"
+  when = "true"
+  verb = "fire_phaser"
+
 # Starboard heavy bank.
 [[weapons_console.phaser_banks]]
 id = "starboard"
@@ -512,6 +525,19 @@ beam_duration_secs = 8.0
 cooldown_secs = 4.0
 shield_pierce = 0.1
 beam_color = [1.0, 0.15, 0.05, 1.0]
+
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). One unconditional rule: when the host offers the bank a
+  # decision it fires. Every readiness gate — availability, cooldown, range,
+  # arc, target validity — is the host's and is unchanged; the policy is the
+  # authored DECISION layered on top, and `idle = true` is how a bank opts out.
+  [weapons_console.phaser_banks.ai]
+
+  [[weapons_console.phaser_banks.ai.rule]]
+  priority = 0
+  channel = "phaser_fire"
+  when = "true"
+  verb = "fire_phaser"
 
 # ── The bow artillery piece (issue #792) ──────────────────────────────────────
 #
@@ -579,6 +605,18 @@ visual_scale = 2.5
 damage = 60
 shield_pierce = 0.15
 range = 200.0
+
+  # Open-fire policy for this bank (issue #781), AUTHORED rather than
+  # synthesised (#885b). Mirror of the phaser banks on the `blaster_fire`
+  # channel: unconditional, with the host still enforcing availability,
+  # cooldown, range, arc and target validity before the volley starts.
+  [weapons_console.blaster_banks.ai]
+
+  [[weapons_console.blaster_banks.ai.rule]]
+  priority = 0
+  channel = "blaster_fire"
+  when = "true"
+  verb = "fire_blaster"
 
 # ── The close-defence launchers (issue #793) ──────────────────────────────────
 #
@@ -1161,3 +1199,182 @@ weight = 100.0
 [[comms_console.selector.score]]
 when = "candidate_fact(objective_score) >= param(score_band_high)"
 weight = 100.0
+
+# ── AI fine-system policies (PRD #774 US7, issue #885b) ───────────────────────
+#
+# The ship-level AI policies, AUTHORED rather than synthesised. Each answers
+# "which verb does this fine system emit on which channel?" for whoever operates
+# the station, and each reproduces exactly what the matching
+# `default_*_ai_config()` in `src/entities/config.rs` used to invent at spawn.
+# The reasoning behind every rule lives on those functions;
+# `default_ai_policy_pins` spawns every shipped hull and compares the two, so a
+# transcription slip fails the build rather than quietly changing how this ship
+# behaves.
+#
+# Like the selectors above, these attach on `[behaviour]` ALONE, not on the
+# console section they name — so a hull owes them whether or not it declares
+# `[captain_console]`, `[shields_console]` or `[power]`. Authoring them is what
+# brings those sections into existence on hulls that carried none.
+#
+# A rule's `when` is a guard, not a capability check: the host keeps every
+# availability, cooldown, range and arc gate it had. `idle = true` (see Boost) is
+# a first-class declaration meaning "this system deliberately takes no AI
+# action" — it is NOT the same as an empty block, which validation rejects.
+
+# Captain — raise Red Alert while the ship has been in combat within
+# `combat_window_secs`, otherwise stand down. The window is a named parameter so
+# a designer retunes the ship's nerve without recompiling.
+[captain_console.ai]
+param = { combat_window_secs = 10.0 }
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "fact(secs_since_combat) < param(combat_window_secs)"
+verb = "set_red_alert"
+value = true
+
+[[captain_console.ai.rule]]
+priority = 0
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = false
+
+# Helm lateral — always actuate. The dodge (and the docking translation) run off
+# the shared hazard surface, so again only the decision is authored here.
+[helm_console.lateral_ai]
+
+[[helm_console.lateral_ai.rule]]
+priority = 0
+channel = "lateral"
+when = "true"
+verb = "actuate_lateral_thrust"
+
+# Helm vertical — always actuate. `VerticalMovementMode` stays a host-side
+# CAPABILITY gate rather than a policy scalar, so a Planar hull still takes no
+# vertical component no matter what this rule says.
+[helm_console.vertical_ai]
+
+[[helm_console.vertical_ai.rule]]
+priority = 0
+channel = "vertical"
+when = "true"
+verb = "actuate_vertical_thrust"
+
+# Helm boost — an explicit IDLE declaration, and the only one in the set. No AI
+# on this hull engages the boost drive, so the honest declaration is "takes no
+# AI boost action" rather than a rule that never fires. `idle = true` is a legal
+# declaration distinct from silence; an empty block is rejected at load. A hull
+# opts in by replacing this with a rule on the `boost` channel —
+# `ship_harrow_destroyer.toml` is the worked example.
+[helm_console.boost_ai]
+idle = true
+
+# Torpedo magazine — always grant a claim the host has already found legal. The
+# offline + non-empty gates remain the hard authority; this policy is the
+# authored arbiter layered on top, which is where a hull would ration rounds
+# between tubes.
+[torpedoes.ai]
+
+[[torpedoes.ai.rule]]
+priority = 0
+channel = "torpedo_magazine_grant"
+when = "true"
+verb = "grant_torpedo_round"
+
+# Shields focus — two rules on one channel, both emitting the value-less
+# `focus_shield_arc`. WHICH of the four arcs is focused is not in the policy: it
+# comes from the retained ranking kernel, which reads the four params below
+# directly out of `param`. `damage_window_secs`, `min_damage_window_secs` and
+# `health_ratio_threshold` are therefore live tunables even though no `when`
+# names them — do not delete them for looking unreferenced.
+#
+# The priority-10 damage rule and the priority-0 fallback emit the same verb and
+# the fallback is unconditional, so today the channel resolves identically
+# whatever `recent_damage_pct_max` reads. The rule is transcribed as-is because
+# this migration changes no behaviour; the redundancy is recorded on #885.
+[shields_console.ai_policy.param]
+damage_window_secs = 4.0
+min_damage_window_secs = 1.0
+damage_pct_threshold = 50.0
+health_ratio_threshold = 50.0
+
+[[shields_console.ai_policy.rule]]
+priority = 10
+channel = "shield_focus"
+when = "fact(recent_damage_pct_max) >= param(damage_pct_threshold)"
+verb = "focus_shield_arc"
+
+[[shields_console.ai_policy.rule]]
+priority = 0
+channel = "shield_focus"
+when = "true"
+verb = "focus_shield_arc"
+
+# Reactor + battery. Transcribed from `PowerConfig::default()`, which is what
+# this hull ran on before it declared the section: authoring
+# `[power.ai_policy]` cannot be done without bringing `[power]` into existence,
+# and the three fields are required, so they are written out at exactly the
+# values the Rust default supplied.
+[power]
+capacity = 100.0
+rates = [ 6, 5, 4, 2, -2, -6 ]
+emergency_threshold = 25.0
+
+# Power allocation — one rule pair per group. Each ELEVATE rule declares a
+# minimum battery reserve as a `param` its own guard reads, so a group rises
+# only while its trigger holds AND the battery can sustain it; the baseline
+# rules only ever LOWER allocation, and carry a zero reserve so that every rule
+# declares one. Groups this policy does not name hold their seeded level.
+[power.ai_policy.param]
+thrust_threshold = 0.7
+min_reserve_helm = 50.0
+min_reserve_weapons = 10.0
+min_reserve_baseline = 0.0
+
+[[power.ai_policy.rule]]
+priority = 10
+channel = "helm"
+when = "fact(thrust) >= param(thrust_threshold) and fact(battery_pct) >= param(min_reserve_helm)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "helm"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2
+
+[[power.ai_policy.rule]]
+priority = 10
+channel = "weapons"
+when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)"
+verb = "set_power_group_allocation"
+level = 3
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "weapons"
+when = "fact(battery_pct) >= param(min_reserve_baseline)"
+verb = "set_power_group_allocation"
+level = 2
+
+# Comms dialogue response — answer an open hail with its FIRST response. Guarded
+# twice, and both guards matter: an unguarded rule would re-emit a response the
+# router refuses, every tick, for as long as the dialogue stays open.
+#   * `comms_available` — a Disabled or Destroyed Comms system stops the ship
+#     answering as well as hailing.
+#   * `sender_in_range` — the router refuses a response whose sender has left
+#     comms range, so without this the officer's rejection re-flashes forever.
+# WHICH message is being answered comes from the host; only the response INDEX
+# rides the verb. A ship that should answer nothing declares `idle = true`.
+[comms_console.ai]
+
+[[comms_console.ai.rule]]
+priority = 0
+channel = "comms_respond"
+when = "fact(comms_available) > 0 and fact(sender_in_range) > 0"
+verb = "respond_to_message"
+response_index = 0

@@ -5309,11 +5309,26 @@ impl EntityConfig {
         // a wrong verb, an unparseable guard, or an undeclared `param(...)`
         // reserve fails the entity load here, before any live tick.
         if let Some(ai) = config.power.as_ref().and_then(|p| p.ai_policy.as_ref()) {
-            let valid_channels: Vec<&str> = config
+            // …and where the hull authors NO `[power_groups.*]` at all, the
+            // channel set is the canonical trio the runtime seeds it with.
+            // `PowerSystem::from_authored_groups` falls back to
+            // `seeded_with_defaults` (helm / weapons / sensors at level 2) for
+            // an empty authored map, and `ai_power_allocation` then resolves the
+            // policy against exactly those groups — so validating against an
+            // empty set would reject a policy the runtime is about to run.
+            // Nothing shipped hit this until #885b made every hull author
+            // `[power.ai_policy]`, including the six NPC hulls that declare no
+            // power groups.
+            let authored_channels: Vec<&str> = config
                 .ship_config
                 .as_ref()
                 .map(|sc| sc.power_groups.keys().map(|g| g.0.as_str()).collect())
                 .unwrap_or_default();
+            let valid_channels: Vec<&str> = if authored_channels.is_empty() {
+                crate::modifiers::power_system::POWER_GROUP_ORDER.to_vec()
+            } else {
+                authored_channels
+            };
             validate_fine_system_ai_policy_for(
                 &ai_hosts::POWER_ALLOCATION,
                 ai,
@@ -7860,9 +7875,9 @@ hull_max_hp = 6
             "the battleship mounts no boost drive: an artillery platform that lit \
              one would be leaving the firing position it just took up"
         );
-        assert!(
-            hc.boost_ai.is_none(),
-            "and authors no boost doctrine to go with the drive it does not have"
+        assert_idle_boost_declaration(
+            hc,
+            "the battleship: no boost doctrine to go with the drive it does not have",
         );
         assert!(
             hc.radar.is_none(),
@@ -11504,9 +11519,34 @@ when = "state_time >= param(surge_dwell_secs)"
             "the cruiser mounts no boost drive: a broadside orbit is flown at a \
              steady authored throttle"
         );
+        assert_idle_boost_declaration(
+            hc,
+            "the cruiser: no boost doctrine to go with the drive it does not have",
+        );
+    }
+
+    /// A hull says "this axis engages no boost" by AUTHORING an idle
+    /// declaration, not by leaving the block out.
+    ///
+    /// These assertions read `boost_ai.is_none()` until #885b stage 5c, when
+    /// every hull authored `[helm_console.boost_ai]`. Absence stopped meaning
+    /// "no boost doctrine" the moment a synthesised `idle = true` stopped
+    /// standing in for one — so the check moves onto the declaration rather than
+    /// off the property. It is strictly stronger than the old form: an empty
+    /// block, a rule on the `boost` channel, or a state machine all fail here,
+    /// where `is_none()` only ever caught the last two.
+    fn assert_idle_boost_declaration(hc: &HelmConsoleConfig, what: &str) {
+        let boost_ai = hc.boost_ai.as_ref().unwrap_or_else(|| {
+            panic!(
+                "{what} — but the axis must still DECLARE that (PRD #774 US7): an \
+                 omitted `[helm_console.boost_ai]` is silence, and silence is what \
+                 gets a Rust-side policy synthesised for it"
+            )
+        });
         assert!(
-            hc.boost_ai.is_none(),
-            "and authors no boost doctrine to go with the drive it does not have"
+            boost_ai.idle && boost_ai.rule.is_empty() && boost_ai.state.is_empty(),
+            "{what} — the declaration must be an explicit `idle = true` and nothing \
+             else, got {boost_ai:?}"
         );
     }
 
@@ -11821,6 +11861,57 @@ verb = "set_power_group_allocation"
 level = 2"#,
         );
         let err = EntityConfig::from_toml(&toml).unwrap_err().to_string();
+        assert!(err.contains("unknown channel"), "got: {err}");
+    }
+
+    /// A hull that authors NO `[power_groups.*]` validates against the trio the
+    /// runtime seeds it with, not against an empty set.
+    ///
+    /// `PowerSystem::from_authored_groups` falls back to
+    /// `seeded_with_defaults` — helm / weapons / sensors at level 2 — for an
+    /// empty authored map, and `ai_power_allocation` then resolves the policy
+    /// against exactly those groups. Validating against nothing would have
+    /// rejected a policy the runtime was about to run, and that is not
+    /// hypothetical: the six NPC hulls that declare no power groups had to
+    /// author `[power.ai_policy]` in #885b stage 5c, so they are all in this
+    /// state today.
+    #[test]
+    fn power_ai_policy_on_a_hull_with_no_authored_groups_validates_against_the_seeded_trio() {
+        let toml = |channel: &str| {
+            format!(
+                r#"
+name = "Grouper"
+
+[power]
+capacity = 100.0
+rates = [ 6, 5, 4, 2, -2, -6 ]
+emergency_threshold = 25.0
+
+[[power.ai_policy.rule]]
+priority = 0
+channel = "{channel}"
+when = "true"
+verb = "set_power_group_allocation"
+level = 2
+"#
+            )
+        };
+        for channel in crate::modifiers::power_system::POWER_GROUP_ORDER {
+            let cfg = EntityConfig::from_toml(&toml(channel)).unwrap_or_else(|e| {
+                panic!("`{channel}` is a group the runtime seeds, so it must validate: {e}")
+            });
+            assert!(
+                cfg.ship_config
+                    .as_ref()
+                    .is_none_or(|sc| sc.power_groups.is_empty()),
+                "precondition: this hull authors no `[power_groups.*]`"
+            );
+        }
+        // …and the check has not simply been switched off: a group neither
+        // authored nor seeded is still rejected.
+        let err = EntityConfig::from_toml(&toml("shields"))
+            .expect_err("`shields` is neither authored nor seeded")
+            .to_string();
         assert!(err.contains("unknown channel"), "got: {err}");
     }
 

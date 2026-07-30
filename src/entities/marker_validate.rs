@@ -31,8 +31,10 @@
 //!   (`console::captain::server`), so `camera_*` markers are viewpoints and
 //!   nothing else. A weapon or effect pointing at one is an authoring mistake,
 //!   as is a camera view pointing at a marker outside the namespace. Error.
-//! * **missing default camera** (`missing-camera-marker`) — an entity with a
-//!   `[captain_console]` (i.e. a hull a player can fly) whose rig declares no
+//! * **missing default camera** (`missing-camera-marker`) — a hull a player can
+//!   fly ([`is_player_flyable`]: a `[captain_console]` on a design not tagged
+//!   `npc` — see that function for why the section alone stopped meaning it)
+//!   whose rig declares no
 //!   [`crate::core::messages::CameraView`] default marker. The viewscreen
 //!   would silently snap to the ship's origin. Warning, because the hull is
 //!   still playable.
@@ -379,6 +381,28 @@ fn check_ref(
     None
 }
 
+/// The content tag that declares a hull to be an NPC-only design — one no
+/// player ever occupies the bridge of.
+pub const NPC_HULL_TAG: &str = "npc";
+
+/// Whether a hull is one a player can fly, and therefore one whose rig owes the
+/// viewscreen a default camera viewpoint.
+///
+/// `[captain_console]` used to answer this on its own, and did so only because
+/// the player hulls were the only ones that declared the section. #885b ended
+/// that: every AI-bearing hull now authors `[captain_console.ai]`, which cannot
+/// be written without bringing `[captain_console]` into existence, so the
+/// section is on all ten shipped hulls and distinguishes nothing.
+///
+/// The hull's own `tags` are what still say it: the NPC designs all declare
+/// [`NPC_HULL_TAG`] and the player hulls declare none. The check therefore stays
+/// exactly as strict where it matters — an Alliance hull whose rig loses
+/// `camera_fore` still fails — and stops demanding a bridge viewpoint from a
+/// design no bridge crew ever boards.
+pub fn is_player_flyable(config: &EntityConfig) -> bool {
+    config.captain_console.is_some() && !config.tags.iter().any(|t| t == NPC_HULL_TAG)
+}
+
 /// Validate every marker reference in one entity config against the rig its
 /// `[mesh]` selects.
 ///
@@ -401,7 +425,7 @@ pub fn validate_entity_markers(
 
     // A hull a player can fly needs the default camera viewpoint, or the
     // viewscreen silently snaps to the ship's origin.
-    if config.captain_console.is_some() {
+    if is_player_flyable(config) {
         if let Some(rig) = rig {
             let default_view = crate::core::messages::CameraView::default().marker_name;
             if rig.marker(&default_view).is_none() {
@@ -662,6 +686,45 @@ markers = [ "engine_port" ]
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].category, CATEGORY_NO_RIG);
         assert!(has_error(&findings));
+    }
+
+    /// The default-camera warning fires for a hull a player can fly, and only
+    /// for one.
+    ///
+    /// `[captain_console]` answered "can a player fly this?" on its own until
+    /// #885b stage 5c, when every AI-bearing hull — NPC designs included —
+    /// authored `[captain_console.ai]` and brought the section into existence.
+    /// The `npc` tag carries the distinction now, and both halves are asserted
+    /// here so re-pointing the gate cannot have quietly switched the check off:
+    /// the same rig, the same console, tag present ⇒ silent, tag absent ⇒ warned.
+    #[test]
+    fn the_default_camera_warning_follows_the_npc_tag_not_the_console() {
+        let bare_rig = ModelRig::from_toml(
+            "[markers.engine_port]\nposition = [0.0, 0.0, 0.0]\ndirection = [0.0, 0.0, 1.0]\n",
+        )
+        .expect("fixture rig parses");
+
+        let (toml, cfg) = entity("\n[captain_console]\n");
+        assert!(cfg.tags.is_empty(), "precondition: not an NPC design");
+        assert!(is_player_flyable(&cfg));
+        let findings = validate_entity_markers("f.toml", &toml, &cfg, Some(&bare_rig));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].category, CATEGORY_MISSING_CAMERA);
+        assert!(!findings[0].is_error(), "the hull is still playable");
+        // …and satisfied by a rig that declares the default viewpoint.
+        assert!(validate_entity_markers("f.toml", &toml, &cfg, Some(&rig())).is_empty());
+
+        // The same file, one tag different.
+        let (npc_toml, mut npc_cfg) = entity("\n[captain_console]\n");
+        npc_cfg.tags = vec!["ship".to_string(), NPC_HULL_TAG.to_string()];
+        assert!(npc_cfg.captain_console.is_some(), "precondition");
+        assert!(!is_player_flyable(&npc_cfg));
+        assert!(
+            validate_entity_markers("f.toml", &npc_toml, &npc_cfg, Some(&bare_rig)).is_empty(),
+            "an NPC design's rig owes the viewscreen nothing: no bridge crew ever \
+             boards it, and since #885b its `[captain_console]` exists only to hold \
+             the Red Alert policy it is now required to declare"
+        );
     }
 
     #[test]

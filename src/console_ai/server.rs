@@ -303,21 +303,19 @@ pub(crate) fn ai_shield_focus(
         }
 
         // Per-ship inline stateless Shields focus policy (issue #783). The
-        // authored windows/thresholds live in the policy `param` map (seeded from
-        // the retained typed `ShieldsAiConfigToml` defaults when the block is
-        // omitted), and the policy gates WHETHER the retained arc-ranking kernel
-        // acts this tick. A ship without the component (bare fixtures) falls back
-        // to the canonical default policy, which reproduces today's decisions.
-        let default_policy;
-        let policy: &crate::ai::policy::AiPolicy = match focus_policy_comp {
-            Some(p) => &p.0,
-            None => {
-                default_policy = crate::entities::config::default_shields_focus_ai_config()
-                    .to_policy()
-                    .unwrap_or_default();
-                &default_policy
-            }
+        // authored windows/thresholds live in the policy `param` map, and the
+        // policy gates WHETHER the retained arc-ranking kernel acts this tick.
+        //
+        // A ship without the component takes no damage-analysis action at all.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits
+        // `[shields_console.ai_policy]` at load, so an absent component means the
+        // declaration is missing and a missing declaration gets no automation
+        // (PRD #774 US7).
+        let Some(focus_policy_comp) = focus_policy_comp else {
+            continue;
         };
+        let policy: &crate::ai::policy::AiPolicy = &focus_policy_comp.0;
 
         // Authored windows/thresholds, read from the policy `param` map INSTEAD of
         // the typed `ai_cfg.*` (issue #783). Absent params fall back to the
@@ -545,14 +543,6 @@ fn ai_power_allocation(
 ) {
     let now = time.elapsed_secs();
 
-    // Canonical fallback policy for any ship missing an attached component (bare
-    // `App` unit fixtures). Real ships always carry one, authored or synthesised,
-    // attached at spawn. Built once per tick, not per ship. `to_policy` cannot
-    // fail: the synthesised default is well-formed.
-    let default_policy = crate::entities::config::default_power_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-
     // The read-only scenario flag chain (AC3), same for every ship this tick.
     let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
         Some(rt) => vec![&rt.flags],
@@ -605,10 +595,13 @@ fn ai_power_allocation(
             }
         };
 
-        let policy: &crate::ai::policy::AiPolicy = match policy_comp {
-            Some(p) => &p.0,
-            None => &default_policy,
+        // No attached `[power.ai_policy]` ⇒ no allocation decisions, and every
+        // group holds the level the reactor seeded. Since #885b stage 5d there
+        // is no synthesised stand-in.
+        let Some(policy_comp) = policy_comp else {
+            continue;
         };
+        let policy: &crate::ai::policy::AiPolicy = &policy_comp.0;
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
@@ -814,11 +807,6 @@ pub(crate) fn ai_torpedo_auto_fire(
     >,
 ) {
     let policy_sid = crate::system_registry::torpedo_magazine_system_id();
-    // Canonical fallback for any tube missing an attached policy (bare-`App`
-    // fixtures). Built once — unconditional launch (baseline, AC1).
-    let default_tube_policy = crate::entities::config::default_torpedo_tube_ai_config()
-        .to_policy()
-        .unwrap_or_default();
 
     for (
         entity_uuid,
@@ -976,13 +964,16 @@ pub(crate) fn ai_torpedo_auto_fire(
             // the tube's own authored launch policy over a seeded snapshot. Only a
             // tube whose policy fires `LaunchTorpedo` launches — an idle tube (or
             // one whose guard holds) is skipped, leaving other tubes free to fire
-            // (per-tube independence). The default launches unconditionally, so
-            // baseline auto-fire is preserved (AC1/AC2). The candidates all passed
-            // the host gates, so those facts are `true`; `target_facing_shields`
-            // passes through so a policy can still gate on the striking arc.
-            let launch_policy = tube_policies
-                .and_then(|p| p.0.get(&tube_id))
-                .unwrap_or(&default_tube_policy);
+            // (per-tube independence). The candidates all passed the host gates,
+            // so those facts are `true`; `target_facing_shields` passes through
+            // so a policy can still gate on the striking arc.
+            //
+            // A tube with NO entry does not launch: since #885b stage 5d there
+            // is no synthesised stand-in, and strict AI-declaration mode rejects
+            // a tube that authors no inline `ai` block at load.
+            let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(&tube_id)) else {
+                continue;
+            };
             let facts = crate::weapons_plugin::seed_torpedo_tube_launch_facts(
                 true,
                 true,
@@ -1074,11 +1065,6 @@ pub(crate) fn ai_torpedo_load(
     >,
 ) {
     let magazine_id = crate::system_registry::torpedo_magazine_system_id();
-    // Canonical fallback for any tube missing an attached policy (bare-`App`
-    // fixtures). Built once — unconditional load (baseline, AC1).
-    let default_tube_policy = crate::entities::config::default_torpedo_tube_ai_config()
-        .to_policy()
-        .unwrap_or_default();
 
     for (
         ship_entity,
@@ -1127,11 +1113,14 @@ pub(crate) fn ai_torpedo_load(
             // seeded fact snapshot. Only a tube whose policy fires `LoadTorpedo`
             // emits the volley order — an idle tube (or one whose guard holds)
             // is skipped, leaving other tubes free to load (per-tube
-            // independence). The default policy loads unconditionally, so
-            // baseline behaviour is preserved (AC1/AC2).
-            let policy = tube_policies
-                .and_then(|p| p.0.get(&tube_id))
-                .unwrap_or(&default_tube_policy);
+            // independence).
+            //
+            // A tube with NO entry does not load: since #885b stage 5d there is
+            // no synthesised stand-in, and strict AI-declaration mode rejects a
+            // tube that authors no inline `ai` block at load.
+            let Some(policy) = tube_policies.and_then(|p| p.0.get(&tube_id)) else {
+                continue;
+            };
             let tube_ref = torpedo_sys.0.tube(&tube_id);
             let facts = crate::weapons_plugin::seed_torpedo_tube_load_facts(
                 tube_ref.map(|t| t.loaded_count).unwrap_or(0),
@@ -1466,7 +1455,7 @@ mod tests {
     /// explicitly documents the wiring and lets a test swap in an authored one.
     fn default_focus_policy() -> ShieldsFocusAiPolicy {
         ShieldsFocusAiPolicy(
-            crate::entities::config::default_shields_focus_ai_config()
+            crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus")
                 .to_policy()
                 .unwrap(),
         )
@@ -1476,7 +1465,7 @@ mod tests {
     /// (0–100), every other authored number left at the default. Proves
     /// per-entity policy `param`s drive the decision (issue #783).
     fn focus_policy_with_health_ratio(pct: f32) -> ShieldsFocusAiPolicy {
-        let mut cfg = crate::entities::config::default_shields_focus_ai_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus");
         cfg.param.insert(
             crate::entities::config::SHIELD_FOCUS_HEALTH_RATIO_PARAM.to_string(),
             pct,
@@ -1499,7 +1488,7 @@ mod tests {
     /// Proves the `fact(...)` guard actually fires (facts are seeded, closing the
     /// #779 empty-facts sharp edge).
     fn damage_only_focus_policy() -> ShieldsFocusAiPolicy {
-        let mut cfg = crate::entities::config::default_shields_focus_ai_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus");
         cfg.param.insert("min_recent_damage".to_string(), 0.0);
         cfg.rule = vec![crate::entities::config::FineSystemAiRuleToml {
             priority: 10,
@@ -2374,8 +2363,7 @@ station = "sensors"
     // ── ai_power_allocation (inline stateless policy spine, issue #784) ──────
 
     use crate::entities::config::{
-        default_power_ai_config, FineSystemAiConfigToml, FineSystemAiRuleToml,
-        POWER_SET_ALLOCATION_VERB,
+        FineSystemAiConfigToml, FineSystemAiRuleToml, POWER_SET_ALLOCATION_VERB,
     };
     use crate::ship::power::PowerAiPolicy;
 
@@ -2408,7 +2396,11 @@ station = "sensors"
     }
 
     fn default_power_policy() -> PowerAiPolicy {
-        PowerAiPolicy(default_power_ai_config().to_policy().unwrap())
+        PowerAiPolicy(
+            crate::entities::authored_ai_pins::shipped_policy_toml("power")
+                .to_policy()
+                .unwrap(),
+        )
     }
 
     /// Wires the real production pair: the AI decide system
@@ -3103,6 +3095,19 @@ station = "sensors"
                 control_sources,
                 crate::weapons_plugin::TorpedoSystemResource(torpedoes),
                 AdmittedCommands::default(),
+                // The SHIPPED authored per-tube policy. Since #885b stage 5d a
+                // tube with no entry in `TorpedoTubeAiPolicies` is never ordered
+                // to load — there is no synthesised stand-in.
+                crate::weapons_plugin::TorpedoTubeAiPolicies(
+                    [(
+                        "fore_port".to_string(),
+                        crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_tube")
+                            .to_policy()
+                            .expect("the shipped torpedo-tube policy decodes"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
             ))
             .id();
         (app, e)

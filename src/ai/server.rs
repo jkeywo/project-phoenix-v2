@@ -1253,9 +1253,14 @@ mod tests {
         crate::weapons_plugin::BlasterSystemResource,
     ) {
         let cfg = crate::entity_config::EntityConfig::from_toml(
+            // Each bank AUTHORS its open-fire policy: since #885b stage 5d
+            // strict AI-declaration mode rejects a bank that declares neither a
+            // policy nor an explicit idle, because nothing would be synthesised
+            // for it and it would simply never fire.
             r#"
 name = "Armed"
 [weapons_console]
+
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0
@@ -1265,10 +1270,23 @@ beam_range = 200
 beam_damage_per_sec = 3
 beam_duration_secs = 4
 cooldown_secs = 4
+
+[[weapons_console.phaser_banks.ai.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "true"
+verb = "fire_phaser"
+
 [[weapons_console.blaster_banks]]
 id = "lance"
 facing_deg = 0
 range = 320
+
+[[weapons_console.blaster_banks.ai.rule]]
+priority = 0
+channel = "blaster_fire"
+when = "true"
+verb = "fire_blaster"
 "#,
         )
         .expect("fixture hull must parse");

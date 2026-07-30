@@ -2639,26 +2639,25 @@ fn spawn_game_start_entities(
             commands.insert_resource(ai_cfg);
 
             // Shields focus AI policy (issue #783) — player-ship half of the
-            // per-entity pattern in `spawner.rs`. Authored
-            // `[shields_console.ai_policy]` drives `ai_shield_focus`'s gate and
-            // supplies the authored windows/thresholds; absent, the canonical
-            // default policy (which reproduces today's decisions) is synthesised.
-            // Validated already in `EntityConfig::from_toml`.
-            let shields_focus_policy = match config
+            // per-entity pattern in `spawner.rs`. The authored
+            // `[shields_console.ai_policy]` block drives `ai_shield_focus`'s gate
+            // and supplies the authored windows/thresholds. Since #885b stage 5d
+            // there is no Rust-side synthesiser behind it: strict AI-declaration
+            // mode rejects an AI-capable hull that omits the block at load, so an
+            // unauthored policy means no component and no automation rather than
+            // one invented in Rust (PRD #774 US7). Validated already in
+            // `EntityConfig::from_toml`.
+            if let Some(ai) = config
                 .shields_console
                 .as_ref()
                 .and_then(|sc| sc.ai_policy.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_shields_focus_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            commands
-                .entity(spawned)
-                .insert(crate::ship::shields::ShieldsFocusAiPolicy(
-                    shields_focus_policy,
-                ));
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::shields::ShieldsFocusAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
 
             // Sensors AI config — the player-ship half of the same per-entity
             // pattern (issue #738 follow-up). `ai_frequency_hint` reads only the
@@ -2680,77 +2679,62 @@ fn spawn_game_start_entities(
             );
 
             // Sensors target selector (issue #776) — the player-ship half of the
-            // per-entity pattern. Authored `[sensors_console.selector]` drives
-            // `operate_sensors_ai`'s ranking under Backfill; absent, the
-            // canonical default selector is synthesised. Validated already in
+            // per-entity pattern. The authored `[sensors_console.selector]` block
+            // drives `operate_sensors_ai`'s ranking under Backfill. No
+            // synthesised stand-in since #885b stage 5d. Validated already in
             // `EntityConfig::from_toml`.
-            let sensors_selector = config
+            if let Some(s) = config
                 .sensors_console
                 .as_ref()
                 .and_then(|sc| sc.selector.as_ref())
-                .map(|s| s.to_selector().unwrap_or_default())
-                .unwrap_or_else(|| {
-                    crate::entities::config::default_sensors_target_selector_config()
-                        .to_selector()
-                        .unwrap_or_default()
-                });
-            commands
-                .entity(spawned)
-                .insert(crate::ship::sensors::SensorsTargetSelector {
-                    selector: sensors_selector,
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
+            {
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::sensors::SensorsTargetSelector {
+                        selector: s.to_selector().unwrap_or_default(),
+                        power_rating: config.power_rating.map(|r| r as f32),
+                    });
+            }
 
             // Tactical target selector (issue #777) — the player-ship half of
-            // the per-entity pattern. Authored `[weapons_console.selector]`
-            // drives `ai_target_selection`'s ranking under Backfill; absent, the
-            // canonical default selector is synthesised. Validated already in
-            // `EntityConfig::from_toml`.
-            let tactical_selector = config
+            // the per-entity pattern. The authored `[weapons_console.selector]`
+            // block drives `ai_target_selection`'s ranking under Backfill.
+            if let Some(s) = config
                 .weapons_console
                 .as_ref()
                 .and_then(|wc| wc.selector.as_ref())
-                .map(|s| s.to_selector().unwrap_or_default())
-                .unwrap_or_else(|| {
-                    crate::entities::config::default_tactical_target_selector_config()
-                        .to_selector()
-                        .unwrap_or_default()
-                });
-            commands
-                .entity(spawned)
-                .insert(crate::weapons_plugin::TacticalTargetSelector {
-                    selector: tactical_selector,
-                    power_rating: config.power_rating.map(|r| r as f32),
-                    // AC6 (issue #781): explicit radar idle from `[weapons_console]
-                    // selector_idle`, else baseline (radar runs its selector).
-                    idle: config
-                        .weapons_console
-                        .as_ref()
-                        .map(|wc| wc.selector_idle)
-                        .unwrap_or(false),
-                });
+            {
+                commands
+                    .entity(spawned)
+                    .insert(crate::weapons_plugin::TacticalTargetSelector {
+                        selector: s.to_selector().unwrap_or_default(),
+                        power_rating: config.power_rating.map(|r| r as f32),
+                        // AC6 (issue #781): explicit radar idle from `[weapons_console]
+                        // selector_idle`, else baseline (radar runs its selector).
+                        idle: config
+                            .weapons_console
+                            .as_ref()
+                            .map(|wc| wc.selector_idle)
+                            .unwrap_or(false),
+                    });
+            }
 
             // Navigation target selector (issue #778) — the player-ship half of
-            // the per-entity pattern. Authored `[navigation_console.selector]`
-            // drives `operate_navigation_ai`'s ranking under Backfill; absent,
-            // the canonical default selector is synthesised. Validated already in
-            // `EntityConfig::from_toml`.
-            let navigation_selector = config
+            // the per-entity pattern. The authored
+            // `[navigation_console.selector]` block drives
+            // `operate_navigation_ai`'s ranking under Backfill.
+            if let Some(s) = config
                 .navigation_console
                 .as_ref()
                 .and_then(|nc| nc.selector.as_ref())
-                .map(|s| s.to_selector().unwrap_or_default())
-                .unwrap_or_else(|| {
-                    crate::entities::config::default_navigation_target_selector_config()
-                        .to_selector()
-                        .unwrap_or_default()
-                });
-            commands
-                .entity(spawned)
-                .insert(crate::console::navigation::NavigationTargetSelector {
-                    selector: navigation_selector,
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
+            {
+                commands.entity(spawned).insert(
+                    crate::console::navigation::NavigationTargetSelector {
+                        selector: s.to_selector().unwrap_or_default(),
+                        power_rating: config.power_rating.map(|r| r as f32),
+                    },
+                );
+            }
 
             // Comms hail selector + dialogue-response policy (issue #786) — the
             // player-ship half of the per-entity pattern in `spawner.rs`, and
@@ -2765,9 +2749,12 @@ fn spawn_game_start_entities(
             // helper the spawner calls, so the two paths cannot drift.
             let (comms_selector, comms_response_policy) =
                 crate::console::comms::server::comms_console_ai_components(&config);
-            commands
-                .entity(spawned)
-                .insert((comms_selector, comms_response_policy));
+            if let Some(sel) = comms_selector {
+                commands.entity(spawned).insert(sel);
+            }
+            if let Some(policy) = comms_response_policy {
+                commands.entity(spawned).insert(policy);
+            }
 
             // Repair target selector (issue #785) — same player-ship gap. Less
             // severe than Comms because `operate_repair_ai`'s host is
@@ -2777,131 +2764,102 @@ fn spawn_game_start_entities(
             // `self_fact(power_rating)` was absent there too. Same shape as the
             // spawner's insert; the block is already validated in
             // `EntityConfig::from_toml`.
-            let repair_selector = config
-                .repair
-                .as_ref()
-                .and_then(|rc| rc.selector.as_ref())
-                .map(|s| s.to_selector().unwrap_or_default())
-                .unwrap_or_else(|| {
-                    crate::entities::config::default_repair_target_selector_config()
-                        .to_selector()
-                        .unwrap_or_default()
-                });
-            commands
-                .entity(spawned)
-                .insert(crate::console::repair::server::RepairTargetSelector {
-                    selector: repair_selector,
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
+            if let Some(s) = config.repair.as_ref().and_then(|rc| rc.selector.as_ref()) {
+                commands.entity(spawned).insert(
+                    crate::console::repair::server::RepairTargetSelector {
+                        selector: s.to_selector().unwrap_or_default(),
+                        power_rating: config.power_rating.map(|r| r as f32),
+                    },
+                );
+            }
 
             // Captain AI policy (issue #775) — the player ship half of the
-            // per-entity pattern above. Authored `[captain_console.ai]` drives
-            // `operate_captain_ai`; absent, the canonical default policy is
-            // synthesised. Validated already in `EntityConfig::from_toml`.
-            let captain_ai_policy =
-                match config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
-                    Some(ai) => ai.to_policy().unwrap_or_default(),
-                    None => crate::entities::config::default_captain_ai_config()
-                        .to_policy()
-                        .unwrap_or_default(),
-                };
-            commands
-                .entity(spawned)
-                .insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
+            // per-entity pattern above. The authored `[captain_console.ai]` block
+            // drives `operate_captain_ai`. Validated already in
+            // `EntityConfig::from_toml`.
+            if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+                commands
+                    .entity(spawned)
+                    .insert(crate::captain_plugin::CaptainAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
 
             // Helm Engines/Steering AI policies (issue #779) — player-ship half
-            // of the per-entity pattern in `spawner.rs`. Authored
-            // `[helm_console.engines_ai]` / `[helm_console.steering_ai]` drive
-            // `ai_helm_thrust`/`ai_helm_steering`; absent, the canonical defaults
-            // are synthesised. Validated already in `EntityConfig::from_toml`.
-            let engines_ai_policy = match config
+            // of the per-entity pattern in `spawner.rs`. The authored
+            // `[helm_console.engines_ai]` / `[helm_console.steering_ai]` blocks
+            // drive `ai_helm_thrust` / `ai_helm_steering`.
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.engines_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_engines_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            let steering_ai_policy = match config
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmEnginesAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.steering_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_steering_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmEnginesAiPolicy(engines_ai_policy));
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
-                    steering_ai_policy,
-                ));
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
 
             // Helm secondary-actuator AI policies (issue #780) — player-ship half
-            // of the per-entity pattern in `spawner.rs`. Authored
-            // `[helm_console.lateral_ai/vertical_ai/impulse_ai/boost_ai]` drive the
-            // secondary hosts; absent, the canonical defaults are synthesised.
-            // Validated already in `EntityConfig::from_toml`.
-            let lateral_ai_policy = match config
+            // of the per-entity pattern in `spawner.rs`. The authored
+            // `[helm_console.lateral_ai/vertical_ai/impulse_ai/boost_ai]` blocks
+            // drive the secondary hosts.
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.lateral_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_lateral_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            let vertical_ai_policy = match config
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmLateralAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.vertical_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_vertical_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            let impulse_ai_policy = match config
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.impulse_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_impulse_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            let boost_ai_policy = match config
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmImpulseAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
+            if let Some(ai) = config
                 .helm_console
                 .as_ref()
                 .and_then(|h| h.boost_ai.as_ref())
             {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_boost_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmLateralAiPolicy(lateral_ai_policy));
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
-                    vertical_ai_policy,
-                ));
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmImpulseAiPolicy(impulse_ai_policy));
-            commands
-                .entity(spawned)
-                .insert(crate::ship::helm_ai::HelmBoostAiPolicy(boost_ai_policy));
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::helm_ai::HelmBoostAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
 
             // Shields damage history — per-ship Component tracking HP deltas
             // for the AI damage-concentration algorithm. Initialised empty; resized
@@ -2979,6 +2937,53 @@ fn spawn_game_start_entities(
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.entity(spawned).insert(combat_cfg.clone());
                 commands.insert_resource(combat_cfg);
+
+                // Per-bank phaser / blaster open-fire AI policies (issue #781) —
+                // the player-ship half of `spawner.rs`'s per-weapon maps, added
+                // by #885b stage 5d.
+                //
+                // THIS PATH DID NOT EXIST BEFORE. Until the synthesisers were
+                // deleted the player ship carried no per-bank map at all and
+                // `ai_phaser_auto_fire` / `ai_blaster_auto_fire` silently fell
+                // back to a Rust-side default on every tick — the same "the
+                // player ship goes through a second attachment path" omission
+                // that bit #785, #786 and #882. Attaching the authored maps here
+                // is what keeps a backfilled player ship firing exactly as it
+                // did, now from its own TOML.
+                let phaser_bank_policies: std::collections::HashMap<
+                    String,
+                    crate::ai::policy::AiPolicy,
+                > = wc
+                    .phaser_banks
+                    .iter()
+                    .filter_map(|b| {
+                        let ai = b.ai.as_ref()?;
+                        Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
+                    })
+                    .collect();
+                commands
+                    .entity(spawned)
+                    .insert(crate::weapons_plugin::PhaserBankAiPolicies(
+                        phaser_bank_policies,
+                    ));
+                if !wc.blaster_banks.is_empty() {
+                    let blaster_bank_policies: std::collections::HashMap<
+                        String,
+                        crate::ai::policy::AiPolicy,
+                    > = wc
+                        .blaster_banks
+                        .iter()
+                        .filter_map(|b| {
+                            let ai = b.ai.as_ref()?;
+                            Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
+                        })
+                        .collect();
+                    commands
+                        .entity(spawned)
+                        .insert(crate::weapons_plugin::BlasterBankAiPolicies(
+                            blaster_bank_policies,
+                        ));
+                }
             } else {
                 // No [weapons_console] block — insert defaults so the entity-component
                 // path always finds a value on the LocalShip entity.
@@ -3007,6 +3012,31 @@ fn spawn_game_start_entities(
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.insert_resource(torpedo_res.clone());
                 commands.entity(spawned).insert(torpedo_res);
+
+                // Per-tube load/launch + shared-magazine grant AI policies
+                // (issue #782) — the player-ship half of `spawner.rs`'s maps,
+                // added by #885b stage 5d for the same reason as the phaser and
+                // blaster maps above: before it the player ship carried neither,
+                // and the torpedo hosts fell back to a Rust-side default every
+                // tick.
+                let tube_policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> =
+                    tc.tubes
+                        .iter()
+                        .filter_map(|t| {
+                            let ai = t.ai.as_ref()?;
+                            Some((t.id.clone(), ai.to_policy().unwrap_or_default()))
+                        })
+                        .collect();
+                commands
+                    .entity(spawned)
+                    .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(tube_policies));
+                if let Some(ai) = tc.ai.as_ref() {
+                    commands.entity(spawned).insert(
+                        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+                            ai.to_policy().unwrap_or_default(),
+                        ),
+                    );
+                }
             }
 
             // Power config — unconditionally insert as per-entity Component
@@ -3026,20 +3056,17 @@ fn spawn_game_start_entities(
             commands.entity(spawned).insert(power_config.clone());
             commands.insert_resource(power_config);
 
-            // Inline stateless Power allocation AI policy (issue #784) —
-            // unconditionally insert as a per-entity Component so
-            // `ai_power_allocation` iterating `With<Ship>` sees a value on the
-            // player ship. From `[power.ai_policy]` if authored, else the
-            // canonical default. `to_policy` cannot fail: validated at load.
-            let power_ai_policy = match config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-                Some(ai) => ai.to_policy().unwrap_or_default(),
-                None => crate::entities::config::default_power_ai_config()
-                    .to_policy()
-                    .unwrap_or_default(),
-            };
-            commands
-                .entity(spawned)
-                .insert(crate::ship::power::PowerAiPolicy(power_ai_policy));
+            // Inline stateless Power allocation AI policy (issue #784) — from the
+            // authored `[power.ai_policy]` block, so `ai_power_allocation`
+            // iterating `With<Ship>` sees the ship's own policy. `to_policy`
+            // cannot fail: validated at load.
+            if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
+                commands
+                    .entity(spawned)
+                    .insert(crate::ship::power::PowerAiPolicy(
+                        ai.to_policy().unwrap_or_default(),
+                    ));
+            }
 
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];

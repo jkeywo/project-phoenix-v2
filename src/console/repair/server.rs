@@ -367,13 +367,14 @@ pub const REPAIR_CORE_BUCKET_KEY: &str = "core";
 
 /// Per-ship resolved Repair target selector (issue #785).
 ///
-/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
-/// authored `[repair.selector]` or the canonical
-/// [`crate::entities::config::default_repair_target_selector_config`] default —
-/// plus the authored ship `power_rating`, which [`operate_repair_ai`] exposes to
-/// the selector's expressions as `self_fact(power_rating)`. Attached at spawn
-/// beside the Sensors/Tactical/Navigation selectors; ships without one fall back
-/// to the default selector inside [`operate_repair_ai`] (bare-`App` fixtures).
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`], decoded
+/// from the authored `[repair.selector]` block, plus the authored ship
+/// `power_rating`, which [`operate_repair_ai`] exposes to the selector's
+/// expressions as `self_fact(power_rating)`. Attached at spawn beside the
+/// Sensors/Tactical/Navigation selectors.
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component ranks nothing and [`operate_repair_ai`] skips it.
 /// Mirrors [`crate::console::navigation::NavigationTargetSelector`].
 #[derive(Component, Clone, Debug)]
 pub struct RepairTargetSelector {
@@ -381,17 +382,6 @@ pub struct RepairTargetSelector {
     pub selector: crate::ai::selector::TargetSelector,
     /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
     pub power_rating: Option<f32>,
-}
-
-impl Default for RepairTargetSelector {
-    fn default() -> Self {
-        Self {
-            selector: crate::entities::config::default_repair_target_selector_config()
-                .to_selector()
-                .unwrap_or_default(),
-            power_rating: None,
-        }
-    }
 }
 
 /// One repair candidate's observable readings, resolved host-side before the
@@ -662,11 +652,6 @@ pub fn operate_repair_ai(
         With<crate::server_app::Ship>,
     >,
 ) {
-    // Canonical fallback selector for any ship missing an attached component
-    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
-    // spawn. Built once per tick, not per ship (mirrors `operate_navigation_ai`).
-    let default_selector = RepairTargetSelector::default();
-
     for (
         entity_uuid,
         sources,
@@ -743,7 +728,11 @@ pub fn operate_repair_ai(
             .filter_map(|slot| committed_station_for_slot(slot, config))
             .collect();
 
-        let selector_comp = target_selector.unwrap_or(&default_selector);
+        // No authored `[repair.selector]` ⇒ no component ⇒ no dispatch ranking.
+        // Since #885b stage 5d there is no synthesised stand-in.
+        let Some(selector_comp) = target_selector else {
+            continue;
+        };
 
         // ── Candidate readings, built in sorted station-id order (AC1) ────────
         // Source `damaged-stations`: exactly the coordination-delivered repair
@@ -997,6 +986,17 @@ mod tests {
                 crate::ship_plugin::RepairHumanAlerted::default(),
                 crate::ship_plugin::LastSystemTiers::default(),
                 ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
+                // The AUTHORED `[repair.selector]` block every shipped hull
+                // carries. Since #885b stage 5d `operate_repair_ai` has no
+                // synthesised fallback — a ship with no selector dispatches
+                // nothing — so a fixture that wants dispatch must attach the
+                // declaration a real hull writes.
+                RepairTargetSelector {
+                    selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
+                        .to_selector()
+                        .expect("the shipped Repair selector decodes"),
+                    power_rating: None,
+                },
             ),
         ));
         app
@@ -1718,6 +1718,15 @@ mod tests {
                 queue,
                 npc_repair_config(),
                 crate::messages::AdmittedCommands::default(),
+                // The AUTHORED `[repair.selector]` block: since #885b stage 5d
+                // an NPC with no selector component ranks nothing and dispatches
+                // no team.
+                RepairTargetSelector {
+                    selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
+                        .to_selector()
+                        .expect("the shipped Repair selector decodes"),
+                    power_rating: None,
+                },
             ))
             .id()
     }
@@ -1963,8 +1972,8 @@ mod tests {
     /// 100, and each station gets a repair-request queue entry carrying the tier
     /// the hull actually reports (the coordination-delivered reading the AI
     /// ranks). `teams` is the team count. An optional authored selector is
-    /// attached as `RepairTargetSelector`; `None` exercises the canonical
-    /// default via the host fallback.
+    /// attached as `RepairTargetSelector`; `None` uses the
+    /// SHIPPED authored one (there is no host fallback since #885b stage 5d).
     fn spawn_two_station_npc(
         app: &mut App,
         source: crate::ship::control_source::ControlSource,
@@ -2013,6 +2022,15 @@ mod tests {
                 queue,
                 two_station_config(),
                 crate::messages::AdmittedCommands::default(),
+                // The AUTHORED `[repair.selector]` block, unless the caller
+                // supplies its own below. Since #885b stage 5d there is no host
+                // fallback: a ship with no selector component dispatches nothing.
+                RepairTargetSelector {
+                    selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
+                        .to_selector()
+                        .expect("the shipped Repair selector decodes"),
+                    power_rating: None,
+                },
             ))
             .id();
         if let Some(cfg) = selector {
@@ -2410,6 +2428,15 @@ mod tests {
                 queue,
                 config,
                 crate::messages::AdmittedCommands::default(),
+                // The AUTHORED `[repair.selector]` block — the deficit ladder
+                // under test lives in it, and since #885b stage 5d nothing
+                // supplies one for a ship that carries no component.
+                RepairTargetSelector {
+                    selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
+                        .to_selector()
+                        .expect("the shipped Repair selector decodes"),
+                    power_rating: None,
+                },
             ))
             .id();
 

@@ -948,45 +948,41 @@ pub(crate) fn detect_reached_objective_completion(
 
 /// Per-ship inline stateless **Engines** AI policy (issue #779).
 ///
-/// Attached to every ship at spawn: from the ship's `[helm_console.engines_ai]`
-/// block when authored, otherwise the canonical
-/// [`crate::entities::config::default_engines_ai_config`] policy. Read by
-/// [`ai_helm_thrust`], which resolves its `longitudinal` channel over a per-tick
-/// fact snapshot to decide *whether* to actuate the planner's desired travel —
-/// the DECISION now flows through a data-authored policy verb instead of an
-/// unconditional hardcoded branch. The continuous thrust magnitude still comes
-/// from the shared `DesiredMotion` planner fact (issue #741).
+/// Attached at spawn from the ship's authored `[helm_console.engines_ai]`
+/// block. Read by [`ai_helm_thrust`], which resolves its `longitudinal` channel
+/// over a per-tick fact snapshot to decide *whether* to actuate the planner's
+/// desired travel — the DECISION now flows through a data-authored policy verb
+/// instead of an unconditional hardcoded branch. The continuous thrust magnitude
+/// still comes from the shared `DesiredMotion` planner fact (issue #741).
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component takes no AI action on this axis.
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmEnginesAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-ship inline stateless **Steering** AI policy (issue #779). Mirror of
-/// [`HelmEnginesAiPolicy`] for the `yaw` channel: from
-/// `[helm_console.steering_ai]` when authored, else
-/// [`crate::entities::config::default_steering_ai_config`]. Read by
-/// [`ai_helm_steering`] to decide whether to actuate the planner's desired
-/// facing.
+/// [`HelmEnginesAiPolicy`] for the `yaw` channel: from the authored
+/// `[helm_console.steering_ai]` block. Read by [`ai_helm_steering`] to decide
+/// whether to actuate the planner's desired facing.
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmSteeringAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-ship inline stateless **Lateral Thrust** AI policy (issue #780). From
-/// `[helm_console.lateral_ai]` when authored, else
-/// [`crate::entities::config::default_lateral_ai_config`]. Read by
+/// the authored `[helm_console.lateral_ai]` block. Read by
 /// [`ai_helm_lateral_thrust`] to decide whether to actuate the dodge this tick;
 /// the continuous magnitude still comes from the shared hazard surface.
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmLateralAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-ship inline stateless **Vertical Thrust** AI policy (issue #780). From
-/// `[helm_console.vertical_ai]` when authored, else
-/// [`crate::entities::config::default_vertical_ai_config`]. Read by
+/// the authored `[helm_console.vertical_ai]` block. Read by
 /// [`ai_helm_vertical_thrust`] to decide whether to actuate the climb/return this
 /// tick; the authored `VerticalMovementMode` still gates the magnitude host-side.
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmVerticalAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-ship inline stateless **Impulse** AI policy (issue #780). From
-/// `[helm_console.impulse_ai]` when authored, else
-/// [`crate::entities::config::default_impulse_ai_config`]. Read by
+/// the authored `[helm_console.impulse_ai]` block. Read by
 /// [`ai_helm_impulse`] to decide whether the impulse manoeuvre is permitted this
 /// tick; the host still applies doctrine `use_impulse` and `decide_impulse`
 /// geometry.
@@ -994,8 +990,7 @@ pub struct HelmVerticalAiPolicy(pub crate::ai::policy::AiPolicy);
 pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Per-ship inline stateless **Boost** AI policy (issue #780). From
-/// `[helm_console.boost_ai]` when authored, else the idle
-/// [`crate::entities::config::default_boost_ai_config`] (no AI boost by default).
+/// the authored `[helm_console.boost_ai]` block.
 /// Read by [`ai_helm_boost`] to decide whether to engage boost this tick, emitted
 /// through the same admitted `SetBoost` seam a human uses.
 #[derive(Component, Clone, Debug, Default)]
@@ -2160,18 +2155,6 @@ pub(crate) fn ai_policy_state_tick(
     }
     let now = clock.0;
 
-    // Canonical (stateless) fallbacks for a ship missing an attached policy;
-    // built once per tick, mirroring the per-axis hosts.
-    let default_engines = crate::entities::config::default_engines_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-    let default_steering = crate::entities::config::default_steering_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-    let default_boost = crate::entities::config::default_boost_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-
     let world_seed = sim_rng.as_deref().map(|r| r.seed()).unwrap_or(0);
 
     for (
@@ -2191,9 +2174,18 @@ pub(crate) fn ai_policy_state_tick(
         mut runtime,
     ) in ships.iter_mut()
     {
-        let engines_policy = engines_policy.map(|p| &p.0).unwrap_or(&default_engines);
-        let steering_policy = steering_policy.map(|p| &p.0).unwrap_or(&default_steering);
-        let boost_policy = boost_policy.map(|p| &p.0).unwrap_or(&default_boost);
+        // Engines and Steering must BOTH be declared for the shared tick to mean
+        // anything: the STEERING policy's params seed the recovery/pressed
+        // readings every machine reads, and `build_pass_surface` below is a
+        // function of both. Since #885b stage 5d there is no synthesised
+        // stand-in — strict AI-declaration mode rejects an AI-capable hull that
+        // omits either block at load, so a ship missing one takes no helm AI
+        // action rather than being handed a policy nobody wrote.
+        let (Some(engines_policy), Some(steering_policy)) = (engines_policy, steering_policy)
+        else {
+            continue;
+        };
+        let (engines_policy, steering_policy) = (&engines_policy.0, &steering_policy.0);
 
         // One fact snapshot per ship per tick, shared by all three machines —
         // they must reason about the SAME world or they would reach different
@@ -2335,30 +2327,36 @@ pub(crate) fn ai_policy_state_tick(
         // ── Boost ────────────────────────────────────────────────────────────
         // Availability is part of this axis's AC5 reset gate: an absent or
         // feature-disabled boost holds the machine at `initial`.
+        //
+        // An undeclared `[helm_console.boost_ai]` leaves the machine untouched,
+        // for the same reason as above: no declaration, no automation.
         let boost_operable = sources
             .0
             .policy_for(&crate::system_registry::helm_boost_system_id())
             .operate_ai
             && boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        let entered = tick_policy_machine(
-            boost_policy,
-            &mut runtime.boost.0,
-            boost_operable,
-            &facts,
-            travel_target,
-            now,
-            physics.yaw,
-            // Boost's own extra host-written slot (issue #882): a running
-            // maximum of the hazard faced since the last reset.
-            |memory| {
-                let urgency = facts
-                    .get(HAZARD_URGENCY_FACT)
-                    .unwrap_or(0.0)
-                    .max(memory.get(PEAK_HAZARD_MEMORY).unwrap_or(0.0));
-                memory.set(PEAK_HAZARD_MEMORY, urgency);
-            },
-        );
-        if entered.is_some() {
+        let boost_policy = boost_policy.map(|p| &p.0);
+        let entered = boost_policy.and_then(|boost_policy| {
+            tick_policy_machine(
+                boost_policy,
+                &mut runtime.boost.0,
+                boost_operable,
+                &facts,
+                travel_target,
+                now,
+                physics.yaw,
+                // Boost's own extra host-written slot (issue #882): a running
+                // maximum of the hazard faced since the last reset.
+                |memory| {
+                    let urgency = facts
+                        .get(HAZARD_URGENCY_FACT)
+                        .unwrap_or(0.0)
+                        .max(memory.get(PEAK_HAZARD_MEMORY).unwrap_or(0.0));
+                    memory.set(PEAK_HAZARD_MEMORY, urgency);
+                },
+            )
+        });
+        if let (Some(_), Some(boost_policy)) = (entered.as_ref(), boost_policy) {
             // Count the entries into a boost-ENGAGING state. The host asks the
             // policy what the state it just entered does on this system's own
             // channel, so the counter needs no knowledge of authored state
@@ -3349,13 +3347,6 @@ pub(crate) fn ai_helm_thrust(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // Canonical fallback for any ship missing an attached policy component (bare
-    // `App` unit fixtures). Real ships always carry one, authored or
-    // synthesised, attached at spawn. Built once per tick, not per ship —
-    // mirrors `operate_captain_ai`.
-    let default_policy = crate::entities::config::default_engines_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -3405,7 +3396,15 @@ pub(crate) fn ai_helm_thrust(
         // narrower: a guard on `fact(boost_available)` would validate at load
         // and then read 0 for ever, which is silently wrong in the same way an
         // absent fact is.
-        let policy = engines_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        // No attached `[helm_console.engines_ai]` ⇒ no AI action on this axis.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(engines_policy) = engines_policy else {
+            continue;
+        };
+        let policy = &engines_policy.0;
         let mut facts = seed_helm_actuator_facts(
             Some(&sp.hazard),
             impulse_cfg.is_some(),
@@ -3481,11 +3480,6 @@ pub(crate) fn ai_helm_steering(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // Canonical fallback for ships missing an attached policy (bare-`App`
-    // fixtures); built once per tick — mirrors `ai_helm_thrust`.
-    let default_policy = crate::entities::config::default_steering_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -3533,7 +3527,15 @@ pub(crate) fn ai_helm_steering(
         // hazard contribution would stop composing onto the escape (AC3).
         // The availability pair is seeded honestly from the ship's own config
         // resources — see the note in `ai_helm_thrust`.
-        let policy = steering_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        // No attached `[helm_console.steering_ai]` ⇒ no AI action on this axis.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(steering_policy) = steering_policy else {
+            continue;
+        };
+        let policy = &steering_policy.0;
         let mut facts = seed_helm_actuator_facts(
             Some(&sp.hazard),
             impulse_cfg.is_some(),
@@ -3655,11 +3657,6 @@ pub(crate) fn ai_helm_impulse(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // Canonical fallback for ships missing an attached policy (bare-`App`
-    // fixtures); built once per tick — mirrors `ai_helm_thrust`.
-    let default_policy = crate::entities::config::default_impulse_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -3705,7 +3702,15 @@ pub(crate) fn ai_helm_impulse(
             boost_available,
             physics.y,
         );
-        let policy = impulse_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        // No attached `[helm_console.impulse_ai]` ⇒ no AI action on this axis.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(impulse_policy) = impulse_policy else {
+            continue;
+        };
+        let policy = &impulse_policy.0;
         if !helm_policy_actuates(
             policy,
             crate::entities::config::HELM_IMPULSE_CHANNEL,
@@ -3840,11 +3845,6 @@ pub(crate) fn ai_helm_lateral_thrust(
         With<crate::ai_plugin::AiHighFidelity>,
     >,
 ) {
-    // Canonical fallback for ships missing an attached policy; built once per
-    // tick — mirrors `ai_helm_thrust`.
-    let default_policy = crate::entities::config::default_lateral_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -3892,7 +3892,15 @@ pub(crate) fn ai_helm_lateral_thrust(
         // avoidance; a "hold" resolution emits nothing and lateral coasts.
         if docking_lateral.is_none() {
             let facts = seed_helm_actuator_facts(ship_plan.map(|sp| &sp.hazard), false, false, 0.0);
-            let policy = lateral_policy.map(|p| &p.0).unwrap_or(&default_policy);
+            // No attached `[helm_console.lateral_ai]` ⇒ no AI action on this axis.
+            // Since #885b stage 5d there is no synthesised stand-in: strict
+            // AI-declaration mode rejects an AI-capable hull that omits the block at
+            // load, so an absent component means the declaration is missing and a
+            // missing declaration gets no automation (PRD #774 US7).
+            let Some(lateral_policy) = lateral_policy else {
+                continue;
+            };
+            let policy = &lateral_policy.0;
             if !helm_policy_actuates(
                 policy,
                 crate::entities::config::HELM_LATERAL_CHANNEL,
@@ -3981,11 +3989,6 @@ pub(crate) fn ai_helm_vertical_thrust(
     >,
 ) {
     use crate::entity_config::VerticalMovementMode;
-    // Canonical fallback for ships missing an attached policy; built once per
-    // tick — mirrors `ai_helm_thrust`.
-    let default_policy = crate::entities::config::default_vertical_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -4021,7 +4024,15 @@ pub(crate) fn ai_helm_vertical_thrust(
             false,
             physics.y,
         );
-        let policy = vertical_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        // No attached `[helm_console.vertical_ai]` ⇒ no AI action on this axis.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(vertical_policy) = vertical_policy else {
+            continue;
+        };
+        let policy = &vertical_policy.0;
         if !helm_policy_actuates(
             policy,
             crate::entities::config::HELM_VERTICAL_CHANNEL,
@@ -4136,11 +4147,6 @@ pub(crate) fn ai_helm_boost(
     >,
     clock: Res<AiPolicyTickClock>,
 ) {
-    // Canonical fallback (idle) for ships missing an attached policy; built once
-    // per tick — mirrors `ai_helm_thrust`.
-    let default_policy = crate::entities::config::default_boost_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     for (
         entity,
         sources,
@@ -4194,7 +4200,15 @@ pub(crate) fn ai_helm_boost(
             physics,
             physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
         );
-        let policy = boost_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        // No attached `[helm_console.boost_ai]` ⇒ no AI action on this axis.
+        // Since #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(boost_policy) = boost_policy else {
+            continue;
+        };
+        let policy = &boost_policy.0;
         // Stateless (the shipped shape) resolves exactly as it always has.
         // A policy that opted into the #882 machine instead resolves the SAME
         // channel inside its current state — committed earlier this tick by
@@ -4830,8 +4844,14 @@ mod tests {
         // Anchor off the starboard bow so both axes must engage.
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         set_per_axis_helm_ai(&mut app);
-        attach_engines_policy(&mut app, crate::entity_config::default_engines_ai_config());
-        attach_steering_policy(&mut app, crate::entity_config::default_steering_ai_config());
+        attach_engines_policy(
+            &mut app,
+            crate::entities::authored_ai_pins::shipped_policy_toml("engines"),
+        );
+        attach_steering_policy(
+            &mut app,
+            crate::entities::authored_ai_pins::shipped_policy_toml("steering"),
+        );
 
         tick(&mut app);
 
@@ -4955,8 +4975,14 @@ mod tests {
         let anchor = "station-alpha";
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
-        attach_engines_policy(&mut app, crate::entity_config::default_engines_ai_config());
-        attach_steering_policy(&mut app, crate::entity_config::default_steering_ai_config());
+        attach_engines_policy(
+            &mut app,
+            crate::entities::authored_ai_pins::shipped_policy_toml("engines"),
+        );
+        attach_steering_policy(
+            &mut app,
+            crate::entities::authored_ai_pins::shipped_policy_toml("steering"),
+        );
 
         // Backfill: both axes AI → the policy actuates.
         set_per_axis_helm_ai(&mut app);
@@ -13472,12 +13498,13 @@ verb = "engage_boost"
             crate::weapons_plugin::BlasterSystemResource(banks),
             // The impulse drive, exactly as `entities::spawner` builds it — see
             // the doc comment for why its absence was load-bearing.
-            HelmImpulseAiPolicy(match hc.impulse_ai.as_ref() {
-                Some(ai) => ai.to_policy().expect("authored impulse policy decodes"),
-                None => crate::entities::config::default_impulse_ai_config()
+            HelmImpulseAiPolicy(
+                hc.impulse_ai
+                    .as_ref()
+                    .expect("the hull authors `[helm_console.impulse_ai]`")
                     .to_policy()
-                    .expect("the canonical impulse policy decodes"),
-            }),
+                    .expect("authored impulse policy decodes"),
+            ),
             ImpulseConfigResource {
                 charge_duration: hc.impulse_charge_duration,
                 speed_multiplier: hc.impulse_speed_multiplier,

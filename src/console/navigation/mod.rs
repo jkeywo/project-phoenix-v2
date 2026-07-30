@@ -448,31 +448,21 @@ fn publish_navigation_blackboard(
 
 /// Per-ship resolved Navigation target selector (issue #778).
 ///
-/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
-/// authored `[navigation_console.selector]` or the canonical
-/// [`crate::entities::config::default_navigation_target_selector_config`]
-/// default — plus the authored ship `power_rating`, which `operate_navigation_ai`
-/// exposes to the selector's expressions as `self_fact(power_rating)`. Attached
-/// at spawn alongside the Sensors/Tactical selectors; ships without one fall
-/// back to the default selector inside `operate_navigation_ai` (bare-`App`
-/// fixtures). Mirrors [`crate::ship::sensors::SensorsTargetSelector`].
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`], decoded
+/// from the authored `[navigation_console.selector]` block, plus the authored
+/// ship `power_rating`, which `operate_navigation_ai` exposes to the selector's
+/// expressions as `self_fact(power_rating)`. Attached at spawn alongside the
+/// Sensors/Tactical selectors.
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component ranks nothing and `operate_navigation_ai` skips
+/// it. Mirrors [`crate::ship::sensors::SensorsTargetSelector`].
 #[derive(Component, Clone, Debug)]
 pub struct NavigationTargetSelector {
     /// The resolved ranking policy.
     pub selector: crate::ai::selector::TargetSelector,
     /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
     pub power_rating: Option<f32>,
-}
-
-impl Default for NavigationTargetSelector {
-    fn default() -> Self {
-        Self {
-            selector: crate::entities::config::default_navigation_target_selector_config()
-                .to_selector()
-                .unwrap_or_default(),
-            power_rating: None,
-        }
-    }
 }
 
 /// Per-entity AI loop for navigation. Loops over ALL ship entities (player and NPC)
@@ -526,11 +516,6 @@ pub fn operate_navigation_ai(
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
-    // Canonical fallback selector for any ship missing an attached component
-    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
-    // spawn. Built once per tick, not per ship.
-    let default_selector = NavigationTargetSelector::default();
-
     let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
         .iter()
         .map(|(uuid, transform, name)| {
@@ -565,7 +550,12 @@ pub fn operate_navigation_ai(
         if !policy.operate_ai {
             continue;
         }
-        let selector_comp = target_selector.unwrap_or(&default_selector);
+        // No authored `[navigation_console.selector]` ⇒ no component ⇒ no
+        // destination ranking. Since #885b stage 5d there is no synthesised
+        // stand-in.
+        let Some(selector_comp) = target_selector else {
+            continue;
+        };
 
         let scored: Vec<crate::messages::ScoredObjective> = match blackboards
             .0
@@ -946,6 +936,17 @@ mod tests {
             ShipImpulse(crate::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
             crate::ship_state::ShipPhysics::default(),
+            // The AUTHORED `[navigation_console.selector]` block every shipped
+            // hull carries. Since #885b stage 5d `operate_navigation_ai` has no
+            // synthesised fallback — a ship with no selector ranks nothing — so
+            // a fixture that wants a waypoint must attach the declaration a real
+            // hull writes.
+            NavigationTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("navigation")
+                    .to_selector()
+                    .expect("the shipped Navigation selector decodes"),
+                power_rating: None,
+            },
         ));
         app
     }

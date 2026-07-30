@@ -4311,7 +4311,11 @@ base_priority = 35.0
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert(
             "fixture/raider.toml".into(),
-            EntityConfig::from_toml(raider_toml).unwrap(),
+            EntityConfig::from_toml_in_mode(
+                raider_toml,
+                crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+            )
+            .unwrap(),
         );
         let cache = crate::config_cache::ConfigCache::from(m);
 

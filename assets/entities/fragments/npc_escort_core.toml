@@ -8,8 +8,13 @@
 # includes the reusable Captain policy, so resolving a hull that includes THIS
 # file exercises a nested include and a path relative to this file's own
 # directory (`ai/...`, not `fragments/ai/...`).
+#
+# It also includes `ai/fleet_baseline.toml`, which carries the other fourteen
+# ship-level AI declarations. Since #885b stage 5d strict AI-declaration mode is
+# the default and there is no Rust-side synthesiser behind them, so a hull with
+# `[behaviour]` that omits one does not load at all.
 
-includes = ["ai/captain_red_alert_aggressive.toml"]
+includes = ["ai/captain_red_alert_aggressive.toml", "ai/fleet_baseline.toml"]
 
 tags = ["ship", "npc", "enemy"]
 

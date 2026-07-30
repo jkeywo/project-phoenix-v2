@@ -43,15 +43,11 @@
 //!    quietly widening the gap. [`UNDECLARED_HIGH_WATER_MARK`] is the ratchet:
 //!    it may be lowered, never raised.
 //! 3. [`AiDeclarationMode::Strict`] turns a missing declaration into a load
-//!    error. Default off — [`AiDeclarationMode::DEFAULT`] is `Lenient` and every
-//!    caller of [`EntityConfig::from_toml`] gets it — so nothing changes today.
-//!    #885b stage 5d flips that one const and every load path becomes strict at
-//!    once. Nothing blocks that flip any more: since stage 5c every shipped hull
-//!    declares every slot, which `tests::strict_mode_would_accept_every_shipped_hull_today`
-//!    asserts directly.
-//!
-//! Nothing here changes what a hull does. The synthesisers still fire, on
-//! exactly the slots this module reports.
+//!    error, and since #885b stage 5d it is the DEFAULT: every caller of
+//!    [`EntityConfig::from_toml`] gets it. Stage 5d also deleted the nineteen
+//!    synthesisers outright, so an undeclared AI-capable fine system now has no
+//!    Rust-side stand-in at all — it would simply never act. Rejecting it at
+//!    load is what stops that being a silent outcome.
 //!
 //! # Why the slot table is not simply hand-maintained
 //!
@@ -63,15 +59,16 @@
 //! * [`FineSystemKey`] is an ENUM and [`slots_of_kind`] matches on it
 //!   exhaustively, so a twentieth fine system cannot be added without the
 //!   compiler demanding its gating.
-//! * Every [`FineSystemKind`] records `spawn_sites`: the functions that call its
-//!   synthesiser. `tests::every_kind_is_synthesised_at_its_declared_spawn_sites`
-//!   RE-DERIVES that by reading the crate's own source, and
-//!   `tests::every_synthesiser_call_on_a_spawn_path_belongs_to_a_kind` walks
-//!   those functions for calls no kind claims.
-//! * `tests::every_synthesiser_definition_belongs_to_a_kind` scans
-//!   `src/entities/config.rs` for `default_*_ai_config` /
-//!   `default_*_target_selector_config` DEFINITIONS, so a new synthesiser cannot
-//!   appear anywhere without appearing here.
+//! * Every [`FineSystemKind`] records `spawn_sites`: the functions that attach
+//!   its runtime component.
+//!   `tests::every_kind_is_attached_at_every_one_of_its_spawn_sites` RE-DERIVES
+//!   that by reading the crate's own source, so a declaration wired up on the
+//!   NPC path and forgotten on the player one fails here — the omission that
+//!   shipped in #785, #786 and #882.
+//! * `tests::no_synthesiser_is_defined_or_called_anywhere` scans
+//!   `src/entities/config.rs` and every spawn site for `default_*_ai_config` /
+//!   `default_*_target_selector_config`, and requires ZERO. Stage 5d deleted
+//!   them; this is the ratchet that stops one coming back.
 //! * `tests::the_manifest_matches_the_real_spawner` spawns every shipped hull
 //!   through the real `spawn_entity` and checks the manifest's slot set against
 //!   the components actually attached. The gating in [`slots_of_kind`] mirrors
@@ -188,16 +185,20 @@ pub struct FineSystemKind {
     /// [`crate::entities::ai_flag_hosts`] rather than restated, so the authored
     /// block name and the system's human name have one home.
     pub host: &'static AiHost,
-    /// The `fn` in `src/entities/config.rs` that invents this declaration when
-    /// the hull authors none. Pinned against the spawn path by
-    /// `tests::every_kind_is_synthesised_at_its_declared_spawn_sites`.
-    pub synthesiser: &'static str,
+    /// The runtime component this declaration decodes into, by type name.
+    ///
+    /// Every function listed in `spawn_sites` must mention it — re-derived from
+    /// the crate's own source by
+    /// `tests::every_kind_is_attached_at_every_one_of_its_spawn_sites`. That is
+    /// the check that catches a declaration attached on the NPC path and not the
+    /// player one, which is how #785, #786 and #882 each shipped broken.
+    pub component: &'static str,
     pub idle_lever: IdleLever,
-    /// Every function that calls `synthesiser` on a spawn path. More than one
-    /// when the player ship's own attachment path re-invents the same
-    /// declaration (see the #885 comment on the double attachment), and ALL of
-    /// them are checked — deleting a synthesiser from one path and not the
-    /// other is this migration's most likely failure mode.
+    /// Every function that attaches this kind's `component`. More than one when
+    /// the player ship's own attachment path repeats what `spawn_entity` already
+    /// does (see the #885 comment on the double attachment), and ALL of them are
+    /// checked — wiring a declaration up on one path and not the other is this
+    /// area's most likely failure mode.
     pub spawn_sites: &'static [EvalSite],
 }
 
@@ -205,11 +206,12 @@ const fn site(file: &'static str, func: &'static str) -> EvalSite {
     EvalSite { file, func }
 }
 
-/// The generic per-entity spawn path. Every hull goes through it.
-const SPAWNER: &[EvalSite] = &[site("src/entities/spawner.rs", "spawn_entity")];
-/// The generic path PLUS the player ship's second attachment pass, which
-/// re-inserts a subset of the ship-level declarations over the top of what
-/// `spawn_entity` already attached.
+/// The generic per-entity spawn path PLUS the player ship's own attachment
+/// pass. The player ship never goes through `spawn_entity` at all, so anything
+/// listed here that
+/// `server_app` forgets is a declaration the player ship simply does not get.
+/// The four per-weapon kinds joined this list in #885b stage 5d, which is when
+/// their omission stopped being masked by a read-time synthesised fallback.
 const SPAWNER_AND_PLAYER: &[EvalSite] = &[
     site("src/entities/spawner.rs", "spawn_entity"),
     site("src/server_app.rs", "spawn_game_start_entities"),
@@ -227,133 +229,133 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     FineSystemKind {
         key: FineSystemKey::Captain,
         host: &ai_flag_hosts::CAPTAIN_RED_ALERT,
-        synthesiser: "default_captain_ai_config",
+        component: "CaptainAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Engines,
         host: &ai_flag_hosts::HELM_ENGINES,
-        synthesiser: "default_engines_ai_config",
+        component: "HelmEnginesAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Steering,
         host: &ai_flag_hosts::HELM_STEERING,
-        synthesiser: "default_steering_ai_config",
+        component: "HelmSteeringAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Lateral,
         host: &ai_flag_hosts::HELM_LATERAL,
-        synthesiser: "default_lateral_ai_config",
+        component: "HelmLateralAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Vertical,
         host: &ai_flag_hosts::HELM_VERTICAL,
-        synthesiser: "default_vertical_ai_config",
+        component: "HelmVerticalAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Impulse,
         host: &ai_flag_hosts::HELM_IMPULSE,
-        synthesiser: "default_impulse_ai_config",
+        component: "HelmImpulseAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Boost,
         host: &ai_flag_hosts::HELM_BOOST,
-        synthesiser: "default_boost_ai_config",
+        component: "HelmBoostAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::PhaserBank,
         host: &ai_flag_hosts::PHASER_BANK,
-        synthesiser: "default_phaser_bank_ai_config",
+        component: "PhaserBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER,
+        spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::BlasterBank,
         host: &ai_flag_hosts::BLASTER_BANK,
-        synthesiser: "default_blaster_bank_ai_config",
+        component: "BlasterBankAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER,
+        spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoTube,
         host: &ai_flag_hosts::TORPEDO_TUBE,
-        synthesiser: "default_torpedo_tube_ai_config",
+        component: "TorpedoTubeAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER,
+        spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::TorpedoMagazine,
         host: &ai_flag_hosts::TORPEDO_MAGAZINE,
-        synthesiser: "default_torpedo_magazine_ai_config",
+        component: "TorpedoMagazineAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
-        spawn_sites: SPAWNER,
+        spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::ShieldsFocus,
         host: &ai_flag_hosts::SHIELDS_FOCUS,
-        synthesiser: "default_shields_focus_ai_config",
+        component: "ShieldsFocusAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Power,
         host: &ai_flag_hosts::POWER_ALLOCATION,
-        synthesiser: "default_power_ai_config",
+        component: "PowerAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::CommsResponse,
         host: &ai_flag_hosts::COMMS_RESPONSE,
-        synthesiser: "default_comms_response_ai_config",
+        component: "CommsResponseAiPolicy",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: COMMS_HELPER,
     },
     FineSystemKind {
         key: FineSystemKey::SensorsSelector,
         host: &ai_flag_hosts::SENSORS_SELECTOR,
-        synthesiser: "default_sensors_target_selector_config",
+        component: "SensorsTargetSelector",
         idle_lever: IdleLever::Absent,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::TacticalSelector,
         host: &ai_flag_hosts::TACTICAL_SELECTOR,
-        synthesiser: "default_tactical_target_selector_config",
+        component: "TacticalTargetSelector",
         idle_lever: IdleLever::Field("[weapons_console] selector_idle"),
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::NavigationSelector,
         host: &ai_flag_hosts::NAVIGATION_SELECTOR,
-        synthesiser: "default_navigation_target_selector_config",
+        component: "NavigationTargetSelector",
         idle_lever: IdleLever::Absent,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::RepairSelector,
         host: &ai_flag_hosts::REPAIR_SELECTOR,
-        synthesiser: "default_repair_target_selector_config",
+        component: "RepairTargetSelector",
         idle_lever: IdleLever::Absent,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::CommsSelector,
         host: &ai_flag_hosts::COMMS_SELECTOR,
-        synthesiser: "default_comms_target_selector_config",
+        component: "CommsTargetSelector",
         idle_lever: IdleLever::Absent,
         spawn_sites: COMMS_HELPER,
     },
@@ -580,10 +582,9 @@ pub fn manifest_lines(label: &str, c: &EntityConfig) -> Vec<String> {
                     IdleLever::Field(f) => format!("idle         {f}"),
                     _ => "idle".to_string(),
                 },
-                Declared::Nothing => format!(
-                    "SYNTHESISED  {}() — author {}",
-                    slot.kind.synthesiser, slot.kind.host.block
-                ),
+                Declared::Nothing => {
+                    format!("UNDECLARED   author {}", slot.kind.host.block)
+                }
             };
             format!("{label}  {:<28}  {state}", slot.key())
         })
@@ -596,30 +597,36 @@ pub fn manifest_lines(label: &str, c: &EntityConfig) -> Vec<String> {
 
 /// Whether a missing fine-system declaration is a load error.
 ///
-/// Default OFF. [`EntityConfig::from_toml`] uses [`Self::DEFAULT`], so today
-/// every load path is [`Self::Lenient`] and the synthesisers fill the gap
-/// exactly as before. #885b's completion gate is to change [`Self::DEFAULT`] to
-/// [`Self::Strict`] — one const, no call-site churn, and every load path flips
-/// together.
+/// **Default ON since #885b stage 5d.** [`EntityConfig::from_toml`] uses
+/// [`Self::DEFAULT`], so every load path — shipped hulls, world entities,
+/// scenarios, the editor's validator — rejects an AI-capable fine system that
+/// declares neither a policy nor an explicit idle state. That is PRD #774 US7's
+/// actual requirement: automation cannot silently be omitted.
+///
+/// [`Self::Lenient`] survives for the one thing that still needs it: a test
+/// fixture that deliberately declares nothing, so that the strict path itself
+/// can be exercised against it. Nothing in production passes it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AiDeclarationMode {
-    /// Missing declarations are silently synthesised at spawn.
-    #[default]
+    /// Missing declarations are accepted and simply attach no policy. Kept for
+    /// fixtures that need to build an undeclared entity in order to test the
+    /// strict path.
     Lenient,
     /// A missing declaration on an AI-capable fine system fails the entity load.
+    #[default]
     Strict,
 }
 
 impl AiDeclarationMode {
     /// The mode [`EntityConfig::from_toml`] runs in. **This is the switch.**
-    pub const DEFAULT: Self = Self::Lenient;
+    pub const DEFAULT: Self = Self::Strict;
 }
 
 /// The strict-mode load error for an entity, or `None` when every AI-capable
 /// fine system on it is declared.
 ///
-/// The message names each undeclared slot, the block to author, and the
-/// synthesiser that is filling the gap today — so the error IS the worklist for
+/// The message names each undeclared slot, the block to author, and the runtime
+/// component that will simply not be attached — so the error IS the worklist for
 /// that hull. For the four selectors with no idle lever it says so, rather than
 /// telling an author to write something the schema has no field for.
 pub fn strict_error(c: &EntityConfig) -> Option<String> {
@@ -644,18 +651,19 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
                 }
             };
             format!(
-                "  {} — author {} {idle} (today {}() is synthesised for it)",
+                "  {} — author {} {idle} (without it no {} is attached and the system \
+                 never acts)",
                 slot.key(),
                 slot.kind.host.block,
-                slot.kind.synthesiser
+                slot.kind.component
             )
         })
         .collect();
     lines.sort();
     Some(format!(
         "strict AI-declaration mode: {} AI-capable fine system(s) declare neither a \
-         policy nor an explicit idle state (PRD #774 US7), so automation would be \
-         supplied silently by a Rust-side synthesiser:\n{}",
+         policy nor an explicit idle state (PRD #774 US7), so their automation would \
+         be neither authored nor run:\n{}",
         missing.len(),
         lines.join("\n")
     ))
@@ -868,69 +876,42 @@ mod tests {
         );
     }
 
-    /// AC: the declared synthesiser is not hand-maintained trivia — the spawn
-    /// path is read and checked.
+    /// AC: the declared attachment site is not hand-maintained trivia — the
+    /// spawn path is read and checked, on EVERY path the kind claims.
+    ///
+    /// This is the test that would have caught #785, #786 and #882: each of them
+    /// wired a declaration into `spawn_entity` and forgot
+    /// `spawn_game_start_entities`, so the player ship silently ran on a
+    /// Rust-side fallback instead of its own authored block.
     #[test]
-    fn every_kind_is_synthesised_at_its_declared_spawn_sites() {
+    fn every_kind_is_attached_at_every_one_of_its_spawn_sites() {
         for kind in FINE_SYSTEM_KINDS {
             for site in kind.spawn_sites {
                 let src = read_non_test_source(site.file);
                 let body = function_body(&src, site.func);
                 assert!(
-                    body.contains(&format!("{}(", kind.synthesiser)),
-                    "{}: {}::{} is declared a spawn site for `{}` but never calls it. \
-                     Either the synthesiser moved (point the site at where it went) or \
-                     it was DELETED — in which case this kind is no longer synthesised \
-                     and the worklist must lose its entries.",
+                    body.contains(kind.component),
+                    "{}: {}::{} is declared an attachment site for `{}` but never                      mentions it. Either the attachment moved (point the site at where                      it went) or this path never got it — which for                      `spawn_game_start_entities` means the PLAYER ship runs without                      the declaration its own TOML authors.",
                     kind.key.as_str(),
                     site.file,
                     site.func,
-                    kind.synthesiser
+                    kind.component
                 );
             }
         }
     }
 
-    /// AC: a NEW fine system cannot be synthesised on a spawn path without
-    /// appearing in the manifest.
+    /// AC: the nineteen synthesisers are GONE and cannot come back unnoticed.
+    ///
+    /// #885b stage 5d deleted every `default_*_ai_config()` /
+    /// `default_*_target_selector_config()`. A re-introduced one would restore
+    /// exactly what PRD #774 US7 forbids — automation supplied by Rust for a
+    /// system nobody declared — and would do it silently, because strict mode
+    /// only rejects what is *missing*, not what is quietly filled in. So the
+    /// scan is over both halves: the definitions in `config.rs`, and any call on
+    /// a spawn path.
     #[test]
-    fn every_synthesiser_call_on_a_spawn_path_belongs_to_a_kind() {
-        let claimed: BTreeSet<&str> = FINE_SYSTEM_KINDS.iter().map(|k| k.synthesiser).collect();
-        let sites: BTreeSet<(&str, &str)> = FINE_SYSTEM_KINDS
-            .iter()
-            .flat_map(|k| k.spawn_sites.iter().map(|s| (s.file, s.func)))
-            .collect();
-        let mut unclaimed: Vec<String> = Vec::new();
-        let mut seen = 0usize;
-        for (file, func) in sites {
-            let src = read_non_test_source(file);
-            let body = function_body(&src, func);
-            for name in synthesiser_names(body) {
-                seen += 1;
-                if !claimed.contains(name.as_str()) {
-                    unclaimed.push(format!("{file}::{func} calls {name}"));
-                }
-            }
-        }
-        assert!(
-            seen > 0,
-            "the scan found no synthesiser calls at all on any spawn site — it is \
-             looking in the wrong place and proves nothing"
-        );
-        unclaimed.sort();
-        unclaimed.dedup();
-        assert!(
-            unclaimed.is_empty(),
-            "these synthesisers fire on a spawn path but no FineSystemKind claims \
-             them, so their missing declarations are counted by nothing: {unclaimed:?}"
-        );
-    }
-
-    /// AC: a new synthesiser cannot be DEFINED without a kind either, even
-    /// before anything calls it.
-    #[test]
-    fn every_synthesiser_definition_belongs_to_a_kind() {
-        let claimed: BTreeSet<&str> = FINE_SYSTEM_KINDS.iter().map(|k| k.synthesiser).collect();
+    fn no_synthesiser_is_defined_or_called_anywhere() {
         let src = read_non_test_source("src/entities/config.rs");
         let defined: Vec<String> = src
             .lines()
@@ -948,22 +929,28 @@ mod tests {
                 is_synth.then_some(name)
             })
             .collect();
-        assert_eq!(
-            defined.len(),
-            FINE_SYSTEM_KINDS.len(),
-            "src/entities/config.rs defines {} synthesisers but the manifest declares \
-             {} kinds. Found: {defined:?}",
-            defined.len(),
-            FINE_SYSTEM_KINDS.len()
-        );
-        let unclaimed: Vec<&String> = defined
-            .iter()
-            .filter(|n| !claimed.contains(n.as_str()))
-            .collect();
         assert!(
-            unclaimed.is_empty(),
-            "these synthesisers are defined but no FineSystemKind claims them, so the \
-             fine systems they cover are invisible to the worklist: {unclaimed:?}"
+            defined.is_empty(),
+            "src/entities/config.rs defines AI synthesiser(s) again: {defined:?}.              Stage 5d deleted all nineteen; a hull that wants a baseline authors it              in TOML, and strict AI-declaration mode is what makes omitting it an              error rather than a silent Rust default."
+        );
+
+        let sites: BTreeSet<(&str, &str)> = FINE_SYSTEM_KINDS
+            .iter()
+            .flat_map(|k| k.spawn_sites.iter().map(|s| (s.file, s.func)))
+            .collect();
+        assert!(!sites.is_empty(), "the scan has no spawn sites to walk");
+        let mut called: Vec<String> = Vec::new();
+        for (file, func) in sites {
+            let src = read_non_test_source(file);
+            let body = function_body(&src, func);
+            for name in synthesiser_names(body) {
+                called.push(format!("{file}::{func} calls {name}"));
+            }
+        }
+        called.sort();
+        assert!(
+            called.is_empty(),
+            "these spawn paths call an AI synthesiser again: {called:?}"
         );
     }
 
@@ -1017,6 +1004,9 @@ mod tests {
     /// `[sensors_console]` into existence — so no shipped file omits them any
     /// more. The RULE is unchanged, and a fixture is the only thing left that
     /// can still exercise it.
+    ///
+    /// Since stage 5d it only loads under [`AiDeclarationMode::Lenient`]: strict
+    /// mode is the default and rejects it, which is the whole point of it.
     const BARE_BEHAVIOUR_HULL: &str = r#"
 name = "test.bare_behaviour_hull"
 tags = ["ship"]
@@ -1035,8 +1025,8 @@ base_priority = 40.0
     /// The gate that a per-hull migration is most likely to get wrong.
     #[test]
     fn ship_level_slots_gate_on_behaviour_alone_not_on_the_console_section() {
-        let bare = EntityConfig::from_toml(BARE_BEHAVIOUR_HULL)
-            .expect("the bare-behaviour fixture must parse");
+        let bare = EntityConfig::from_toml_in_mode(BARE_BEHAVIOUR_HULL, AiDeclarationMode::Lenient)
+            .expect("the bare-behaviour fixture must parse in lenient mode");
         assert!(
             bare.sensors_console.is_none()
                 && bare.navigation_console.is_none()
@@ -1232,13 +1222,17 @@ base_priority = 40.0
 
     // ── Strict mode ──────────────────────────────────────────────────────────
 
+    /// **PRD #774 US7, as a switch.** The default load mode is strict, so a
+    /// missing declaration is a load error on every path — and every shipped
+    /// hull still loads.
     #[test]
-    fn strict_mode_is_off_by_default_and_every_shipped_hull_still_loads() {
+    fn strict_mode_is_on_by_default_and_every_shipped_hull_still_loads() {
         assert_eq!(
             AiDeclarationMode::DEFAULT,
-            AiDeclarationMode::Lenient,
-            "strict mode must stay off until #885b's content migration lands, or every \
-             shipped hull stops loading"
+            AiDeclarationMode::Strict,
+            "strict AI-declaration mode is the default since #885b stage 5d: with the \
+             synthesisers deleted, an undeclared AI-capable fine system would simply \
+             never act, and US7 requires that to be an error rather than a silence"
         );
         for stem in hull_files() {
             let path = crate_root().join(format!("assets/entities/{stem}.toml"));
@@ -1250,10 +1244,8 @@ base_priority = 40.0
 
     /// **The completion gate for #885b, asserted directly.**
     ///
-    /// Strict mode is still OFF (the test above pins that), but nothing is left
-    /// for it to reject: every shipped hull declares every one of its 191
-    /// AI-capable fine-system slots, so flipping
-    /// [`AiDeclarationMode::DEFAULT`] in stage 5d cannot stop a hull loading.
+    /// Every shipped hull declares every one of its 191 AI-capable fine-system
+    /// slots, so the strict default cannot stop a hull loading.
     ///
     /// This is deliberately stated as "strict mode ACCEPTS them" rather than as
     /// "the worklist is empty": the worklist and the load path are two different
@@ -1262,7 +1254,7 @@ base_priority = 40.0
     /// every shipped file is what makes the claim about the switch rather than
     /// about the ledger.
     #[test]
-    fn strict_mode_would_accept_every_shipped_hull_today() {
+    fn strict_mode_accepts_every_shipped_hull() {
         let mut checked = 0usize;
         for stem in hull_files() {
             let path = crate_root().join(format!("assets/entities/{stem}.toml"));
@@ -1271,9 +1263,8 @@ base_priority = 40.0
             assert_eq!(
                 strict_error(&config),
                 None,
-                "{stem}: this hull still owes a declaration, so #885b stage 5d cannot \
-                 flip AiDeclarationMode::DEFAULT to Strict — every shipped hull would \
-                 stop loading. Author the block named in the message."
+                "{stem}: this hull still owes a declaration, and with strict mode the \
+                 default it will not load at all. Author the block named in the message."
             );
             EntityConfig::from_toml_in_mode(&src, AiDeclarationMode::Strict)
                 .unwrap_or_else(|e| panic!("{stem} must load in STRICT mode: {e}"));
@@ -1298,20 +1289,17 @@ base_priority = 40.0
         let err = EntityConfig::from_toml_in_mode(BARE_BEHAVIOUR_HULL, AiDeclarationMode::Strict)
             .expect_err("the fixture declares nothing, so strict mode must reject it")
             .to_string();
-        for (block, synthesiser) in [
-            ("[captain_console.ai]", "default_captain_ai_config"),
-            ("[helm_console.lateral_ai]", "default_lateral_ai_config"),
-            (
-                "[shields_console.ai_policy]",
-                "default_shields_focus_ai_config",
-            ),
-            ("[power.ai_policy]", "default_power_ai_config"),
-            ("[comms_console.ai]", "default_comms_response_ai_config"),
+        for (block, component) in [
+            ("[captain_console.ai]", "CaptainAiPolicy"),
+            ("[helm_console.lateral_ai]", "HelmLateralAiPolicy"),
+            ("[shields_console.ai_policy]", "ShieldsFocusAiPolicy"),
+            ("[power.ai_policy]", "PowerAiPolicy"),
+            ("[comms_console.ai]", "CommsResponseAiPolicy"),
         ] {
             assert!(
-                err.contains(block) && err.contains(synthesiser),
-                "the error must name the block to author and the synthesiser filling \
-                 the gap ({block} / {synthesiser}): {err}"
+                err.contains(block) && err.contains(component),
+                "the error must name the block to author and the runtime component that \
+                 will otherwise never be attached ({block} / {component}): {err}"
             );
         }
         assert!(
@@ -1516,49 +1504,12 @@ base_priority = 40.0
         }
     }
 
-    /// What the synthesiser for one kind decodes to. A `match` again, so the
-    /// nineteen synthesiser names cannot be silently re-pointed.
-    fn synthesised(key: FineSystemKey) -> Attached {
-        use crate::entities::config as c;
-        let policy = |cfg: c::FineSystemAiConfigToml| {
-            Attached::Policy(cfg.to_policy().expect("synthesised policy decodes"))
-        };
-        let selector = |cfg: c::FineSystemAiSelectorToml| {
-            Attached::Selector(cfg.to_selector().expect("synthesised selector decodes"))
-        };
-        match key {
-            FineSystemKey::Captain => policy(c::default_captain_ai_config()),
-            FineSystemKey::CommsResponse => policy(c::default_comms_response_ai_config()),
-            FineSystemKey::Engines => policy(c::default_engines_ai_config()),
-            FineSystemKey::Steering => policy(c::default_steering_ai_config()),
-            FineSystemKey::Lateral => policy(c::default_lateral_ai_config()),
-            FineSystemKey::Vertical => policy(c::default_vertical_ai_config()),
-            FineSystemKey::Impulse => policy(c::default_impulse_ai_config()),
-            FineSystemKey::Boost => policy(c::default_boost_ai_config()),
-            FineSystemKey::PhaserBank => policy(c::default_phaser_bank_ai_config()),
-            FineSystemKey::BlasterBank => policy(c::default_blaster_bank_ai_config()),
-            FineSystemKey::TorpedoTube => policy(c::default_torpedo_tube_ai_config()),
-            FineSystemKey::TorpedoMagazine => policy(c::default_torpedo_magazine_ai_config()),
-            FineSystemKey::ShieldsFocus => policy(c::default_shields_focus_ai_config()),
-            FineSystemKey::Power => policy(c::default_power_ai_config()),
-            FineSystemKey::SensorsSelector => selector(c::default_sensors_target_selector_config()),
-            FineSystemKey::TacticalSelector => {
-                selector(c::default_tactical_target_selector_config())
-            }
-            FineSystemKey::NavigationSelector => {
-                selector(c::default_navigation_target_selector_config())
-            }
-            FineSystemKey::RepairSelector => selector(c::default_repair_target_selector_config()),
-            FineSystemKey::CommsSelector => selector(c::default_comms_target_selector_config()),
-        }
-    }
-
     /// AC: the manifest's gating is what the real spawner does.
     ///
-    /// Every slot the manifest claims must actually be filled at spawn, and
-    /// every slot it calls undeclared must hold that kind's synthesised
-    /// declaration verbatim. Change the spawn gate without changing
-    /// [`slots_of_kind`] and this fails naming the hull and the system.
+    /// Every slot the manifest claims must actually be filled at spawn — and,
+    /// since #885b stage 5d, filled from the hull's OWN authored block, because
+    /// there is nothing else left to fill it from. Change the spawn gate without
+    /// changing [`slots_of_kind`] and this fails naming the hull and the system.
     #[test]
     fn the_manifest_matches_the_real_spawner() {
         let mut checked = 0usize;
@@ -1583,18 +1534,20 @@ base_priority = 40.0
                         slot.key()
                     )
                 });
-                if slot.declared == Declared::Nothing {
-                    assert_eq!(
-                        got,
-                        synthesised(slot.kind.key),
-                        "{stem}/{}: the manifest calls this undeclared, so the spawner \
-                         must have filled it with {}() verbatim. A mismatch means \
-                         either the hull DOES declare it (the worklist over-counts) or \
-                         the synthesised baseline moved.",
-                        slot.key(),
-                        slot.kind.synthesiser
-                    );
-                }
+                assert_ne!(
+                    slot.declared,
+                    Declared::Nothing,
+                    "{stem}/{}: an undeclared slot on a hull that LOADED. Since #885b \
+                     stage 5d strict mode is the default, so this is unreachable \
+                     through `from_toml` — reaching it means the load path stopped \
+                     checking.",
+                    slot.key()
+                );
+                assert!(
+                    matches!(got, Attached::Policy(_) | Attached::Selector(_)),
+                    "{stem}/{}: the attached declaration must decode",
+                    slot.key()
+                );
                 checked += 1;
             }
             // …and the other direction: no kind may be attached more times than
@@ -1649,13 +1602,13 @@ base_priority = 40.0
 
     // ── The rendered surface ─────────────────────────────────────────────────
 
-    /// The SYNTHESISED rendering, on the fixture — no shipped hull produces one
+    /// The UNDECLARED rendering, on the fixture — no shipped hull produces one
     /// any more, which is stage 5c's result rather than a reason to stop
     /// checking the rendering.
     #[test]
-    fn manifest_lines_name_the_synthesiser_and_the_block_to_author() {
-        let bare = EntityConfig::from_toml(BARE_BEHAVIOUR_HULL)
-            .expect("the bare-behaviour fixture must parse");
+    fn manifest_lines_name_the_block_to_author() {
+        let bare = EntityConfig::from_toml_in_mode(BARE_BEHAVIOUR_HULL, AiDeclarationMode::Lenient)
+            .expect("the bare-behaviour fixture must parse in lenient mode");
         let lines = manifest_lines("bare_behaviour_hull", &bare);
         assert_eq!(lines.len(), manifest(&bare).len(), "one line per slot");
         let captain = lines
@@ -1663,9 +1616,7 @@ base_priority = 40.0
             .find(|l| l.contains(" captain "))
             .expect("the fixture's captain slot is rendered");
         assert!(
-            captain.contains("SYNTHESISED")
-                && captain.contains("default_captain_ai_config")
-                && captain.contains("[captain_console.ai]"),
+            captain.contains("UNDECLARED") && captain.contains("[captain_console.ai]"),
             "a rendered line must be actionable on its own: {captain}"
         );
     }
@@ -1676,13 +1627,14 @@ base_priority = 40.0
     /// actually reads must show no `SYNTHESISED` line for shipped content, or
     /// the ledger and the report disagree about whether #885b is done.
     #[test]
-    fn no_shipped_hull_renders_a_synthesised_line() {
+    fn no_shipped_hull_renders_an_undeclared_line() {
         for stem in hull_files() {
             let c = parse(&format!("assets/entities/{stem}.toml"));
             for line in manifest_lines(&stem, &c) {
                 assert!(
-                    !line.contains("SYNTHESISED"),
-                    "{stem}: this slot is still being invented in Rust: {line}"
+                    !line.contains("UNDECLARED"),
+                    "{stem}: this slot is undeclared, and with the synthesisers deleted \
+                     it would never act at all: {line}"
                 );
             }
         }
@@ -1704,8 +1656,8 @@ base_priority = 40.0
             .find(|l| l.contains(" captain "))
             .expect("captain slot rendered");
         assert!(
-            captain.contains("declared") && !captain.contains("SYNTHESISED"),
-            "an authored block must not be reported as synthesised: {captain}"
+            captain.contains("declared") && !captain.contains("UNDECLARED"),
+            "an authored block must not be reported as undeclared: {captain}"
         );
     }
 }

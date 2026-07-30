@@ -949,11 +949,6 @@ fn ai_target_selection(
             .unwrap_or_else(|| uuid.to_string())
     };
 
-    // Canonical fallback selector for any ship missing an attached component
-    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
-    // spawn. Built once per tick, not per ship.
-    let default_selector = TacticalTargetSelector::default();
-
     for (
         ship_entity,
         ship_config,
@@ -984,13 +979,20 @@ fn ai_target_selection(
         // AC6). An authored `selector_idle = true` makes the radar take no AI
         // selection even when a tactical fine system is AI-operated — the
         // explicit opt-out that distinguishes "radar deliberately idle" from
-        // "no selector authored → default". `None` (bare-`App` fixtures) is not
-        // idle, preserving baseline behaviour.
-        let radar_idle = target_selector.map(|s| s.idle).unwrap_or(false);
+        // "radar ranks its candidates".
+        //
+        // An ABSENT component is the third case, and since #885b stage 5d it is
+        // also a stand-down rather than a synthesised default: no authored
+        // `[weapons_console.selector]` means no ranking exists to run, so the
+        // radar clears any stale lock and takes no selection.
+        let radar_idle = target_selector.is_none_or(|s| s.idle);
         if radar_idle || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             clear_locked_target_if_present(&mut blackboards);
             continue;
         }
+        let Some(selector_comp) = target_selector else {
+            continue;
+        };
 
         // Damage-scaled tactical radar range (issue #680). Scale the base
         // per-ship config range by the shared RadarRange modifier multiplier.
@@ -1181,7 +1183,6 @@ fn ai_target_selection(
 
         // Self context: position (the selector's own outer horizon filter) plus
         // the authored power rating, exposed as `self_fact(power_rating)` (AC2).
-        let selector_comp = target_selector.unwrap_or(&default_selector);
         let mut self_facts = crate::world::flags::AiFacts::new();
         if let Some(pr) = selector_comp.power_rating {
             self_facts.set("power_rating", pr as f64);

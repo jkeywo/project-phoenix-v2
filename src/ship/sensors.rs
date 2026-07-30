@@ -73,30 +73,20 @@ impl Default for SensorsAiConfigResource {
 
 /// Per-ship resolved Sensors target selector (issue #776).
 ///
-/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
-/// authored `[sensors_console.selector]` or the canonical
-/// [`crate::entities::config::default_sensors_target_selector_config`] default —
-/// plus the authored ship `power_rating`, which `operate_sensors_ai` exposes to
-/// the selector's expressions as `self_fact(power_rating)`. Attached at spawn
-/// alongside `SensorsAiConfigResource` / `CaptainAiPolicy`; ships without one
-/// fall back to the default selector inside `operate_sensors_ai`.
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`], decoded
+/// from the authored `[sensors_console.selector]` block, plus the authored ship
+/// `power_rating`, which `operate_sensors_ai` exposes to the selector's
+/// expressions as `self_fact(power_rating)`. Attached at spawn alongside
+/// `SensorsAiConfigResource` / `CaptainAiPolicy`.
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component ranks nothing and `operate_sensors_ai` skips it.
 #[derive(Component, Clone, Debug)]
 pub struct SensorsTargetSelector {
     /// The resolved ranking policy.
     pub selector: crate::ai::selector::TargetSelector,
     /// Authored ship power rating, seeded from `EntityConfig.power_rating`.
     pub power_rating: Option<f32>,
-}
-
-impl Default for SensorsTargetSelector {
-    fn default() -> Self {
-        Self {
-            selector: crate::entities::config::default_sensors_target_selector_config()
-                .to_selector()
-                .unwrap_or_default(),
-            power_rating: None,
-        }
-    }
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
@@ -775,11 +765,6 @@ pub fn operate_sensors_ai(
 ) {
     let console_range = ship_config.0.sensors_radar_range;
 
-    // Canonical fallback selector for any ship missing an attached component
-    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
-    // spawn. Built once per tick, not per ship.
-    let default_selector = SensorsTargetSelector::default();
-
     // Build the shared candidate snapshot once (world state is the same for
     // every ship this tick). Each entry: (uuid, [x, y, z], faction).
     let hostile_candidates: Vec<(String, [f32; 3], Option<uuid::Uuid>)> = hostile_ship_q
@@ -815,7 +800,11 @@ pub fn operate_sensors_ai(
         if !policy.operate_ai {
             continue;
         }
-        let selector_comp = target_selector.unwrap_or(&default_selector);
+        // No authored `[sensors_console.selector]` ⇒ no component ⇒ no science
+        // ranking. Since #885b stage 5d there is no synthesised stand-in.
+        let Some(selector_comp) = target_selector else {
+            continue;
+        };
 
         let range = effective_sensor_range(ai_profile, console_range, modifiers);
         let range_sq = range * range;
@@ -1589,6 +1578,18 @@ mod tests {
             // AdmittedCommands, applied by handle_sensors_messages.
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
+            // The AUTHORED Sensors selector every shipped hull carries. Since
+            // #885b stage 5d there is no synthesised stand-in inside
+            // `operate_sensors_ai`, so a fixture that wants a ranking has to
+            // attach the declaration a real hull authors — which is also what
+            // makes these tests exercise shipped content rather than a Rust
+            // default nobody wrote.
+            SensorsTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("sensors")
+                    .to_selector()
+                    .expect("the shipped Sensors selector decodes"),
+                power_rating: None,
+            },
         ));
 
         app
@@ -2398,6 +2399,14 @@ mod tests {
             crate::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::entity_spawner::FactionComponent(fed),
+            // Ship B needs its own authored selector, same as ship A: the
+            // declaration is per-entity and there is no synthesised fallback.
+            SensorsTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("sensors")
+                    .to_selector()
+                    .expect("the shipped Sensors selector decodes"),
+                power_rating: None,
+            },
         ));
 
         // A hostile beside each ship; each lies far outside the other's horizon.
@@ -2433,7 +2442,7 @@ mod tests {
         let enemy = uuid::Uuid::new_v4().to_string();
         spawn_faction_contact(&mut app, &enemy, 60.0, 0.0, harrow);
 
-        let mut cfg = crate::entities::config::default_sensors_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
         cfg.param.insert("min_rating".into(), 5.0);
         cfg.eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0 \
              and self_fact(power_rating) >= param(min_rating)"

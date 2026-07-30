@@ -617,11 +617,6 @@ pub fn handle_torpedo_magazine_inter_system(
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
     let magazine_id = crate::system_registry::torpedo_magazine_system_id();
-    // Canonical fallback for a ship/magazine missing an attached policy
-    // (bare-`App` fixtures). Built once — unconditional grant (baseline, AC1).
-    let default_magazine_policy = crate::entities::config::default_torpedo_magazine_ai_config()
-        .to_policy()
-        .unwrap_or_default();
     // Collect targeted claims: (source_entity, tube_id). Only claims for the
     // magazine system are relevant here — everything else is ignored.
     let claims: Vec<(Option<Entity>, String)> = queue
@@ -676,9 +671,13 @@ pub fn handle_torpedo_magazine_inter_system(
                 // `torpedoes_remaining`. Claims are still drained in queue order,
                 // so same-tick contention stays deterministic. Facts read the
                 // live counter plus this ship's in-flight count (the AC5 fact).
-                let mag_policy = mag_policy_opt
-                    .map(|p| &p.0)
-                    .unwrap_or(&default_magazine_policy);
+                //
+                // No attached policy ⇒ no grant. Since #885b stage 5d there is
+                // no synthesised stand-in, and strict AI-declaration mode
+                // rejects a `[torpedoes]` block that authors no `ai`.
+                let Some(mag_policy) = mag_policy_opt.map(|p| &p.0) else {
+                    continue;
+                };
                 let facts = seed_torpedo_magazine_facts(
                     torpedo_sys.0.torpedoes_remaining,
                     torpedo_sys.0.in_flight.len() as u32,

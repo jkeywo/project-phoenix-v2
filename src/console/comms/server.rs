@@ -750,14 +750,16 @@ pub(crate) fn handle_comms_channel2(
 
 /// Per-ship resolved Comms hail selector (issue #786).
 ///
-/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
-/// authored `[comms_console.selector]` or the canonical
-/// [`crate::entities::config::default_comms_target_selector_config`] default —
-/// plus the authored ship `power_rating`, which [`operate_comms_ai`] exposes to
-/// the selector's expressions as `self_fact(power_rating)`. Attached at spawn
-/// beside the Sensors/Tactical/Navigation/Repair selectors; ships without one
-/// fall back to the default selector inside [`operate_comms_ai`] (bare-`App`
-/// fixtures). Mirrors [`crate::console::navigation::NavigationTargetSelector`].
+/// Holds the ship's data-driven [`crate::ai::selector::TargetSelector`], decoded
+/// from the authored `[comms_console.selector]` block, plus the authored ship
+/// `power_rating`, which [`operate_comms_ai`] exposes to the selector's
+/// expressions as `self_fact(power_rating)`. Attached at spawn beside the
+/// Sensors/Tactical/Navigation/Repair selectors.
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component has no hail ranking and [`operate_comms_ai`] skips
+/// it, rather than being handed automation nobody authored (PRD #774 US7).
+/// Mirrors [`crate::console::navigation::NavigationTargetSelector`].
 #[derive(Component, Clone, Debug)]
 pub struct CommsTargetSelector {
     /// The resolved ranking policy.
@@ -766,37 +768,18 @@ pub struct CommsTargetSelector {
     pub power_rating: Option<f32>,
 }
 
-impl Default for CommsTargetSelector {
-    fn default() -> Self {
-        Self {
-            selector: crate::entities::config::default_comms_target_selector_config()
-                .to_selector()
-                .unwrap_or_default(),
-            power_rating: None,
-        }
-    }
-}
-
 /// Per-ship resolved Comms dialogue-response policy (issue #786).
 ///
-/// Holds the ship's inline stateless [`crate::ai::policy::AiPolicy`] — authored
-/// `[comms_console.ai]` or the canonical
-/// [`crate::entities::config::default_comms_response_ai_config`] default —
-/// resolved once per open dialogue by [`operate_comms_response_ai`] on the
-/// single `comms_respond` channel. Mirrors
-/// [`crate::ship::shields::ShieldsFocusAiPolicy`] / `PowerAiPolicy`.
+/// Holds the ship's inline stateless [`crate::ai::policy::AiPolicy`], decoded
+/// from the authored `[comms_console.ai]` block and resolved once per open
+/// dialogue by [`operate_comms_response_ai`] on the single `comms_respond`
+/// channel. Mirrors [`crate::ship::shields::ShieldsFocusAiPolicy`] /
+/// `PowerAiPolicy`.
+///
+/// Since #885b stage 5d there is no synthesised default behind it: a ship
+/// without the component answers nothing.
 #[derive(Component, Clone, Debug)]
 pub struct CommsResponseAiPolicy(pub crate::ai::policy::AiPolicy);
-
-impl Default for CommsResponseAiPolicy {
-    fn default() -> Self {
-        Self(
-            crate::entities::config::default_comms_response_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        )
-    }
-}
 
 /// Resolve a ship's two Comms-console AI components from its `EntityConfig`
 /// (issue #786).
@@ -816,35 +799,28 @@ impl Default for CommsResponseAiPolicy {
 /// canonical default always wins — and `self_fact/fact(power_rating)` is
 /// permanently absent (the #779 empty-facts failure mode).
 ///
-/// Falls back to the canonical defaults when the block (or a half of it) is not
-/// authored. `to_selector`/`to_policy` cannot fail for an authored block: both
+/// Each half is `None` when its block is unauthored, and the caller attaches
+/// nothing for it — since #885b stage 5d there is no synthesised fallback, and
+/// strict AI-declaration mode rejects an AI-capable hull that omits either block
+/// at load. `to_selector`/`to_policy` cannot fail for an authored block: both
 /// were validated in `EntityConfig::from_toml`.
 pub fn comms_console_ai_components(
     config: &crate::entity_config::EntityConfig,
-) -> (CommsTargetSelector, CommsResponseAiPolicy) {
+) -> (Option<CommsTargetSelector>, Option<CommsResponseAiPolicy>) {
     let selector = config
         .comms_console
         .as_ref()
         .and_then(|cc| cc.selector.as_ref())
-        .map(|s| s.to_selector().unwrap_or_default())
-        .unwrap_or_else(|| {
-            crate::entities::config::default_comms_target_selector_config()
-                .to_selector()
-                .unwrap_or_default()
-        });
-    let policy = match config.comms_console.as_ref().and_then(|cc| cc.ai.as_ref()) {
-        Some(ai) => ai.to_policy().unwrap_or_default(),
-        None => crate::entities::config::default_comms_response_ai_config()
-            .to_policy()
-            .unwrap_or_default(),
-    };
-    (
-        CommsTargetSelector {
-            selector,
+        .map(|s| CommsTargetSelector {
+            selector: s.to_selector().unwrap_or_default(),
             power_rating: config.power_rating.map(|r| r as f32),
-        },
-        CommsResponseAiPolicy(policy),
-    )
+        });
+    let policy = config
+        .comms_console
+        .as_ref()
+        .and_then(|cc| cc.ai.as_ref())
+        .map(|ai| CommsResponseAiPolicy(ai.to_policy().unwrap_or_default()));
+    (selector, policy)
 }
 
 /// One hail candidate's observable readings, resolved host-side before the pure
@@ -1230,11 +1206,6 @@ pub fn operate_comms_ai(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    // Canonical fallback selector for a ship missing the attached component
-    // (bare-`App` fixtures). Real ships carry one, authored or synthesised, at
-    // spawn. Built once per tick, not per ship (mirrors `operate_repair_ai`).
-    let default_selector = CommsTargetSelector::default();
-
     // The read-only scenario flag chain (AC4), same for every ship this tick.
     // Comms is the FIRST selector host to pass one — #776–#785 all passed `&[]`.
     let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
@@ -1261,7 +1232,12 @@ pub fn operate_comms_ai(
         if !policy.operate_ai {
             continue;
         }
-        let selector_comp = selector_comp.unwrap_or(&default_selector);
+        // No authored `[comms_console.selector]` ⇒ no component ⇒ no hail
+        // ranking. Since #885b stage 5d there is no synthesised stand-in: a
+        // system nobody declared is not handed automation (PRD #774 US7).
+        let Some(selector_comp) = selector_comp else {
+            continue;
+        };
 
         // Score the objective pool against the same conditions
         // `publish_comms_blackboard` uses (red alert + hull fraction).
@@ -1558,9 +1534,6 @@ pub fn operate_comms_response_ai(
     let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
         return;
     };
-    // Canonical fallback policy for a ship missing the attached component
-    // (bare-`App` fixtures). Built once per tick, not per ship.
-    let default_policy = CommsResponseAiPolicy::default();
     let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
         Some(rt) => vec![&rt.flags],
         None => Vec::new(),
@@ -1586,7 +1559,12 @@ pub fn operate_comms_response_ai(
             // dialogues. Stateless, so nothing to reset.
             continue;
         }
-        let policy = &policy_comp.unwrap_or(&default_policy).0;
+        // No authored `[comms_console.ai]` ⇒ no component ⇒ the ship answers
+        // nothing. There is no synthesised stand-in since #885b stage 5d.
+        let Some(policy_comp) = policy_comp else {
+            continue;
+        };
+        let policy = &policy_comp.0;
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
         let comms_available = comms_system_available(hull);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
@@ -1942,6 +1920,15 @@ mod tests {
             ShipSystemControlSources(resolver),
             crate::ship_plugin::ShipConfigComponent::default(),
             AdmittedCommands::default(),
+            // The AUTHORED `[comms_console.selector]` block every shipped hull
+            // carries. Since #885b stage 5d `operate_comms_ai` has no
+            // synthesised fallback — a ship with no selector hails nobody.
+            CommsTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail")
+                    .to_selector()
+                    .expect("the shipped Comms hail selector decodes"),
+                power_rating: None,
+            },
         ));
         app
     }
@@ -3504,6 +3491,22 @@ mod tests {
             ShipSystemControlSources(resolver),
             crate::ship_plugin::ShipConfigComponent::default(),
             AdmittedCommands::default(),
+            // The AUTHORED `[comms_console.ai]` block every shipped hull
+            // carries. Since #885b stage 5d `operate_comms_response_ai` has no
+            // synthesised fallback — a ship with no policy answers nothing.
+            CommsResponseAiPolicy(
+                crate::entities::authored_ai_pins::shipped_policy_toml("comms_response")
+                    .to_policy()
+                    .expect("the shipped Comms response policy decodes"),
+            ),
+            // …and the co-located hail selector, which is where the response
+            // host reads the ship's authored `power_rating` from.
+            CommsTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail")
+                    .to_selector()
+                    .expect("the shipped Comms hail selector decodes"),
+                power_rating: None,
+            },
         ));
         app
     }
@@ -3786,9 +3789,35 @@ mod tests {
                 .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
             q.single(app.world()).unwrap()
         };
-        app.world_mut()
-            .entity_mut(entity)
-            .insert((policy, selector));
+        // Each half is `None` when the fixture does not author it — since #885b
+        // stage 5d the helper no longer invents one — and the fixture app
+        // already carries the SHIPPED declaration for both, so an unauthored
+        // half simply keeps the baseline it started with.
+        assert!(
+            selector.is_some() || policy.is_some(),
+            "the fixture must author at least one half of `[comms_console]`, or it              tests nothing"
+        );
+        match selector {
+            Some(selector) => {
+                app.world_mut().entity_mut(entity).insert(selector);
+            }
+            // No authored selector block, but the fixture may still declare a
+            // ship `power_rating` — which rides the SELECTOR component in
+            // production, and which the response host reads off it. Carry it
+            // onto the baseline component rather than dropping it.
+            None => {
+                if let Some(rating) = config.power_rating {
+                    let mut e = app.world_mut().entity_mut(entity);
+                    let mut comp = e
+                        .get_mut::<CommsTargetSelector>()
+                        .expect("the fixture app attaches the shipped hail selector");
+                    comp.power_rating = Some(rating as f32);
+                }
+            }
+        }
+        if let Some(policy) = policy {
+            app.world_mut().entity_mut(entity).insert(policy);
+        }
     }
 
     /// FINDING 1/4 regression — `fact(power_rating)` must carry the ship's REAL

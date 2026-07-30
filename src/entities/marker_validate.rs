@@ -491,7 +491,11 @@ colour = [1.0, 1.0, 1.0]
 {body}
 "##
         );
-        let cfg = EntityConfig::from_toml(&toml).expect("fixture entity parses");
+        let cfg = EntityConfig::from_toml_in_mode(
+            &toml,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("fixture entity parses");
         (toml, cfg)
     }
 

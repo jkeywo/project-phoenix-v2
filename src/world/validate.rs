@@ -1290,6 +1290,38 @@ condition = "on_world_loaded"
         }
     }
 
+    /// The ship-level AI declarations an AI-bearing hull owes, appended to the
+    /// fixtures below (issue #885b stage 5d).
+    ///
+    /// Strict AI-declaration mode makes a `[behaviour]` hull that omits any of
+    /// them fail to load, and `entity_override::apply_overrides` re-parses the
+    /// MERGED document strictly — so an override-carrying fixture has to be a
+    /// hull a real world could ship, not a doctrine snippet. Taken verbatim from
+    /// the shared fragment rather than restated, so it cannot drift from it.
+    const BASELINE_AI: &str =
+        include_str!("../../assets/entities/fragments/ai/fleet_baseline.toml");
+
+    /// The one declaration the shared fragment deliberately leaves to its
+    /// includer (see that file's header).
+    const CAPTAIN_AI: &str = r#"
+[captain_console.ai]
+param = { combat_window_secs = 10.0 }
+
+[[captain_console.ai.rule]]
+priority = 10
+channel = "red_alert"
+when = "fact(secs_since_combat) < param(combat_window_secs)"
+verb = "set_red_alert"
+value = true
+
+[[captain_console.ai.rule]]
+priority = 0
+channel = "red_alert"
+when = "true"
+verb = "set_red_alert"
+value = false
+"#;
+
     /// A hull that patrols two named anchors.
     const PATROLLER: &str = r#"
 name = "entity.patroller.name"
@@ -1306,7 +1338,14 @@ base_priority     = 20.0
 "#;
 
     fn patroller_templates() -> FakeTemplates {
-        FakeTemplates::new(&[("assets/entities/patroller.toml", PATROLLER)])
+        FakeTemplates::new(&[(
+            "assets/entities/patroller.toml",
+            &format!(
+                "{PATROLLER}
+{CAPTAIN_AI}
+{BASELINE_AI}"
+            ),
+        )])
     }
 
     #[test]

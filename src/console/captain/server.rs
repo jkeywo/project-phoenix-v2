@@ -13,12 +13,13 @@ use crate::world::server::ObjectiveManagerRes;
 
 /// Per-ship inline stateless Captain AI policy (issue #775).
 ///
-/// Attached to every ship at spawn: from the ship's `[captain_console.ai]`
-/// block when authored, otherwise the canonical
-/// [`crate::entities::config::default_captain_ai_config`] policy. Read by
-/// [`operate_captain_ai`], which evaluates it over an immutable per-tick fact
-/// snapshot to decide the `red_alert` output channel — replacing the retired
-/// hardcoded `CaptainAi` combat-window controller.
+/// Attached at spawn from the ship's authored `[captain_console.ai]` block.
+/// Read by [`operate_captain_ai`], which evaluates it over an immutable per-tick
+/// fact snapshot to decide the `red_alert` output channel — replacing the
+/// retired hardcoded `CaptainAi` combat-window controller.
+///
+/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
+/// ship without the component takes no Red Alert decisions at all.
 #[derive(Component, Clone, Debug, Default)]
 pub struct CaptainAiPolicy(pub crate::ai::policy::AiPolicy);
 
@@ -231,12 +232,6 @@ fn operate_captain_ai(
     )>,
 ) {
     let now = time.elapsed_secs();
-    // Canonical fallback for any ship missing an attached policy component
-    // (the bare-`App` unit fixtures). Real ships always carry one, authored or
-    // synthesised, attached at spawn. Built once per tick, not per ship.
-    let default_policy = crate::entities::config::default_captain_ai_config()
-        .to_policy()
-        .unwrap_or_default();
 
     for (
         mut admitted,
@@ -254,6 +249,14 @@ fn operate_captain_ai(
         if !policy.operate_ai {
             continue;
         }
+        // No attached `[captain_console.ai]` ⇒ no Red Alert decisions. Since
+        // #885b stage 5d there is no synthesised stand-in: strict
+        // AI-declaration mode rejects an AI-capable hull that omits the block at
+        // load, so an absent component means the declaration is missing and a
+        // missing declaration gets no automation (PRD #774 US7).
+        let Some(ship_policy) = ship_policy else {
+            continue;
+        };
 
         // Build the immutable typed-fact snapshot for this evaluation from this
         // ship's own combat activity. `secs_since_combat` is absent when the
@@ -269,7 +272,7 @@ fn operate_captain_ai(
         }
 
         // Resolve the `red_alert` output channel over the snapshot.
-        let active_policy = ship_policy.map(|p| &p.0).unwrap_or(&default_policy);
+        let active_policy = &ship_policy.0;
         let should_be_red_alert = active_policy
             .resolve_channel(
                 crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
@@ -573,6 +576,16 @@ mod tests {
                 crate::messages::SystemId("captain".into()),
                 100.0,
             )])),
+            // The AUTHORED `[captain_console.ai]` block every shipped hull
+            // carries. Since #885b stage 5d `operate_captain_ai` has no
+            // synthesised fallback — a ship with no policy takes no Red Alert
+            // decision — so a fixture that wants the behaviour must attach the
+            // declaration a real hull writes.
+            CaptainAiPolicy(
+                crate::entities::authored_ai_pins::shipped_policy_toml("captain")
+                    .to_policy()
+                    .expect("the shipped Captain policy decodes"),
+            ),
         ));
         app
     }
@@ -1586,7 +1599,7 @@ mod tests {
             .expect("a policy that passed load validation must convert");
         assert_ne!(
             composed,
-            crate::entities::config::default_captain_ai_config()
+            crate::entities::authored_ai_pins::shipped_policy_toml("captain")
                 .to_policy()
                 .unwrap(),
             "the fragment's policy must differ from the synthesised default, or this \
@@ -2133,6 +2146,14 @@ mod tests {
                 crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
                     (crate::messages::SystemId("captain".into()), 100.0),
                 ])),
+                // The NPC authors its own Captain policy too — the declaration
+                // is per-ENTITY and nothing is synthesised for it since #885b
+                // stage 5d.
+                CaptainAiPolicy(
+                    crate::entities::authored_ai_pins::shipped_policy_toml("captain")
+                        .to_policy()
+                        .expect("the shipped Captain policy decodes"),
+                ),
             ))
             .id();
 

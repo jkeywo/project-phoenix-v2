@@ -423,11 +423,13 @@ mod tests {
 
     /// Files that call an evaluation entry point but host no authored content.
     ///
-    /// `default_ai_policy_pins` is declared `#[cfg(test)] mod` in
+    /// `authored_ai_pins` is declared `#[cfg(test)] mod` in
     /// `src/entities/mod.rs` (so its whole body is test code, with no in-file
     /// `#[cfg(test)] mod tests` marker for `strip_test_module` to find), and it
-    /// drives the synthesised defaults directly rather than hosting them.
-    const NON_HOST_FILES: &[&str] = &["src/entities/default_ai_policy_pins.rs"];
+    /// drives the shipped authored blocks directly rather than hosting them. It
+    /// replaced `default_ai_policy_pins`, which sat here for the same reason,
+    /// when #885b stage 5d deleted the synthesisers that suite pinned.
+    const NON_HOST_FILES: &[&str] = &["src/entities/authored_ai_pins.rs"];
 
     fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

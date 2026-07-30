@@ -48,18 +48,17 @@ pub struct TacticalRadarSelection(pub Option<String>);
 /// Per-ship resolved Tactical target selector (issue #777).
 ///
 /// The Tactical mirror of [`crate::ship::sensors::SensorsTargetSelector`]:
-/// holds the ship's data-driven [`crate::ai::selector::TargetSelector`] —
-/// authored `[weapons_console.selector]` or the canonical
-/// [`crate::entities::config::default_tactical_target_selector_config`] default
-/// — plus the authored ship `power_rating`, which `ai_target_selection` exposes
-/// to the selector's expressions as `self_fact(power_rating)`.
+/// holds the ship's data-driven [`crate::ai::selector::TargetSelector`], decoded
+/// from the authored `[weapons_console.selector]` block, plus the authored ship
+/// `power_rating`, which `ai_target_selection` exposes to the selector's
+/// expressions as `self_fact(power_rating)`.
 ///
 /// Attached at spawn on every ship (NPC and player) alongside
-/// `SensorsTargetSelector`; ships without one (bare-`App` fixtures) fall back to
-/// the default selector inside `ai_target_selection`. The selector RANKS
-/// candidates; it never writes authoritative state — the host applies the
-/// chosen UUID to `TacticalRadarSelection` directly, keeping Tactical the sole
-/// writer (AC4).
+/// `SensorsTargetSelector`. Since #885b stage 5d there is no Rust-side
+/// synthesised default behind it: a ship without the component ranks nothing and
+/// `ai_target_selection` skips it. The selector RANKS candidates; it never
+/// writes authoritative state — the host applies the chosen UUID to
+/// `TacticalRadarSelection` directly, keeping Tactical the sole writer (AC4).
 #[derive(Component, Clone, Debug)]
 pub struct TacticalTargetSelector {
     /// The resolved ranking policy.
@@ -73,18 +72,6 @@ pub struct TacticalTargetSelector {
     /// explicit AI-or-idle opt-out that distinguishes "the radar deliberately
     /// makes no AI selection" from "no selector authored → default selector".
     pub idle: bool,
-}
-
-impl Default for TacticalTargetSelector {
-    fn default() -> Self {
-        Self {
-            selector: crate::entities::config::default_tactical_target_selector_config()
-                .to_selector()
-                .unwrap_or_default(),
-            power_rating: None,
-            idle: false,
-        }
-    }
 }
 
 /// UUID of the last entity that attacked this ship. Written by the unified
@@ -782,13 +769,6 @@ pub(crate) fn ai_phaser_auto_fire(
 ) {
     use crate::entity_config::PhaserCombatConfig;
 
-    // Canonical fallback for any bank missing an attached policy (bare-`App`
-    // fixtures, or a ship spawned without the per-bank policy map). Built once —
-    // unconditional fire, so baseline auto-fire is preserved (AC1).
-    let default_bank_policy = crate::entities::config::default_phaser_bank_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-
     for (
         is_local,
         entity_uuid,
@@ -880,13 +860,14 @@ pub(crate) fn ai_phaser_auto_fire(
                 physics.yaw,
                 effective_range,
             );
-            // No authored banks: the legacy single implicit bank. Gate its fire
-            // on the ship-level default policy so an author can still declare an
-            // idle radar/idle default, but with no per-bank map fall back to
-            // unconditional fire (baseline).
-            let policy = bank_policies_opt
-                .and_then(|p| p.0.get(""))
-                .unwrap_or(&default_bank_policy);
+            // No authored banks: the legacy single implicit bank, whose id is the
+            // empty string. It has no `[[weapons_console.phaser_banks]]` entry
+            // and therefore no way to author a policy, so it is outside the
+            // #885b declaration model entirely — an absent policy leaves it
+            // firing on readiness alone, exactly as the deleted
+            // `default_phaser_bank_ai_config()` (`when = "true"`) did. A hull
+            // that authors a bank named `""` still gates on it.
+            let policy = bank_policies_opt.and_then(|p| p.0.get(""));
             let facts = seed_phaser_bank_facts(
                 true,
                 false,
@@ -898,7 +879,7 @@ pub(crate) fn ai_phaser_auto_fire(
             (ready
                 && !cooldown.is_bank_active("")
                 && !beam.is_bank_firing("")
-                && phaser_bank_policy_fires(policy, &facts))
+                && policy.is_none_or(|p| phaser_bank_policy_fires(p, &facts)))
             .then(String::new)
             .into_iter()
             .collect()
@@ -949,9 +930,13 @@ pub(crate) fn ai_phaser_auto_fire(
                     // Only a bank whose policy fires is selected; an idle bank (or one
                     // whose guard holds) is skipped, leaving other banks free to fire
                     // (per-bank independence, AC7).
-                    let policy = bank_policies_opt
-                        .and_then(|p| p.0.get(&b.id))
-                        .unwrap_or(&default_bank_policy);
+                    //
+                    // A bank with NO entry does not fire. Since #885b stage 5d
+                    // there is no synthesised stand-in: strict AI-declaration
+                    // mode rejects a bank that authors no inline `ai` block at
+                    // load, so an absent policy means the declaration is missing,
+                    // and a missing declaration gets no automation (PRD #774 US7).
+                    let policy = bank_policies_opt.and_then(|p| p.0.get(&b.id))?;
                     let facts = seed_phaser_bank_facts(
                         true,
                         false,

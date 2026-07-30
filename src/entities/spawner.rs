@@ -379,20 +379,19 @@ pub fn spawn_entity(
         };
         entity_commands.insert(power_config);
         // Inline stateless Power allocation AI policy (issue #784) — from the
-        // ship's `[power.ai_policy]` block if authored, else the canonical
-        // `default_power_ai_config` (which reproduces the retired stateful
-        // engine's helm←thrust / weapons←red-alert behaviour with reserve
-        // guards). Attached to every ship so `ai_power_allocation` resolves a
-        // data-authored per-group policy rather than the retired
-        // `PowerAiConfigResource` + `ShipPowerAiState` hysteresis. `to_policy`
-        // cannot fail here: the block was validated in `EntityConfig::from_toml`.
-        let power_ai_policy = match config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_power_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::power_plugin::PowerAiPolicy(power_ai_policy));
+        // ship's `[power.ai_policy]` block. Since #885b stage 5d there is no
+        // Rust-side synthesiser behind it: strict AI-declaration mode
+        // (`AiDeclarationMode::DEFAULT`) rejects an AI-capable hull that omits
+        // the block at load, so an AI-bearing entity always authors one and the
+        // `None` arm is reached only by a config built in code. Nothing is
+        // attached in that case — an undeclared system gets no automation, which
+        // is PRD #774 US7's requirement. `to_policy` cannot fail here: the block
+        // was validated in `EntityConfig::from_toml`.
+        if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
+            entity_commands.insert(crate::power_plugin::PowerAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
         // Per-entity power multipliers. Seeded from any per-console TOML
         // `power_multipliers` blocks (helm_console/weapons_console/sensors_console)
         // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
@@ -469,109 +468,87 @@ pub fn spawn_entity(
                 .unwrap_or_default(),
         );
         // Sensors target selector (issue #776) — the per-system ranking policy
-        // `operate_sensors_ai` runs to pick the science target. From
-        // `[sensors_console.selector]` if authored, else the canonical default.
-        // `to_selector` cannot fail here: the block was validated in
-        // `EntityConfig::from_toml`. Power rating is exposed to the selector as
-        // `self_fact(power_rating)`.
-        let sensors_selector = config
+        // `operate_sensors_ai` runs to pick the science target, from the
+        // authored `[sensors_console.selector]` block. Since #885b stage 5d
+        // there is no Rust-side synthesiser behind it: strict AI-declaration
+        // mode rejects an AI-capable hull that omits the block at load, so an
+        // unauthored selector means no component and therefore no ranking rather
+        // than an invented one. `to_selector` cannot fail here: the block was
+        // validated in `EntityConfig::from_toml`. Power rating is exposed to the
+        // selector as `self_fact(power_rating)`.
+        if let Some(s) = config
             .sensors_console
             .as_ref()
             .and_then(|sc| sc.selector.as_ref())
-            .map(|s| s.to_selector().unwrap_or_default())
-            .unwrap_or_else(|| {
-                crate::entities::config::default_sensors_target_selector_config()
-                    .to_selector()
-                    .unwrap_or_default()
+        {
+            entity_commands.insert(crate::ship::sensors::SensorsTargetSelector {
+                selector: s.to_selector().unwrap_or_default(),
+                power_rating: config.power_rating.map(|r| r as f32),
             });
-        entity_commands.insert(crate::ship::sensors::SensorsTargetSelector {
-            selector: sensors_selector,
-            power_rating: config.power_rating.map(|r| r as f32),
-        });
+        }
         // Tactical target selector (issue #777) — the per-system ranking policy
-        // `ai_target_selection` runs to pick the authoritative weapons target.
-        // From `[weapons_console.selector]` if authored, else the canonical
-        // default. `to_selector` cannot fail here: the block was validated in
-        // `EntityConfig::from_toml`. Power rating is exposed to the selector as
-        // `self_fact(power_rating)`.
-        let tactical_selector = config
+        // `ai_target_selection` runs to pick the authoritative weapons target,
+        // from the authored `[weapons_console.selector]` block.
+        if let Some(s) = config
             .weapons_console
             .as_ref()
             .and_then(|wc| wc.selector.as_ref())
-            .map(|s| s.to_selector().unwrap_or_default())
-            .unwrap_or_else(|| {
-                crate::entities::config::default_tactical_target_selector_config()
-                    .to_selector()
-                    .unwrap_or_default()
+        {
+            entity_commands.insert(crate::weapons_plugin::TacticalTargetSelector {
+                selector: s.to_selector().unwrap_or_default(),
+                power_rating: config.power_rating.map(|r| r as f32),
+                // AC6 (issue #781): explicit radar idle from `[weapons_console]
+                // selector_idle`, else the baseline (radar runs its selector).
+                idle: config
+                    .weapons_console
+                    .as_ref()
+                    .map(|wc| wc.selector_idle)
+                    .unwrap_or(false),
             });
-        entity_commands.insert(crate::weapons_plugin::TacticalTargetSelector {
-            selector: tactical_selector,
-            power_rating: config.power_rating.map(|r| r as f32),
-            // AC6 (issue #781): explicit radar idle from `[weapons_console]
-            // selector_idle`, else the baseline (radar runs its selector).
-            idle: config
-                .weapons_console
-                .as_ref()
-                .map(|wc| wc.selector_idle)
-                .unwrap_or(false),
-        });
+        }
         // Navigation target selector (issue #778) — the per-system ranking
         // policy `operate_navigation_ai` runs to rank objective destinations and
-        // eligible chart contacts into the shared Waypoint. From
-        // `[navigation_console.selector]` if authored, else the canonical
-        // default. `to_selector` cannot fail here: the block was validated in
-        // `EntityConfig::from_toml`. Power rating is exposed to the selector as
-        // `self_fact(power_rating)`.
-        let navigation_selector = config
+        // eligible chart contacts into the shared Waypoint, from the authored
+        // `[navigation_console.selector]` block.
+        if let Some(s) = config
             .navigation_console
             .as_ref()
             .and_then(|nc| nc.selector.as_ref())
-            .map(|s| s.to_selector().unwrap_or_default())
-            .unwrap_or_else(|| {
-                crate::entities::config::default_navigation_target_selector_config()
-                    .to_selector()
-                    .unwrap_or_default()
+        {
+            entity_commands.insert(crate::console::navigation::NavigationTargetSelector {
+                selector: s.to_selector().unwrap_or_default(),
+                power_rating: config.power_rating.map(|r| r as f32),
             });
-        entity_commands.insert(crate::console::navigation::NavigationTargetSelector {
-            selector: navigation_selector,
-            power_rating: config.power_rating.map(|r| r as f32),
-        });
+        }
         // Repair target selector (issue #785) — the per-system ranking policy
         // `operate_repair_ai` runs once per free repair team to rank the ship's
-        // damaged stations into ordinary admitted `DispatchRepairTeam` inputs.
-        // From `[repair.selector]` if authored, else the canonical default.
-        // `to_selector` cannot fail here: the block was validated in
-        // `EntityConfig::from_toml`. Attached to every AI-bearing ship, not only
-        // ships with a `[repair]` block — the teams component is what gates
-        // dispatch, and a ship that gains teams later still has its ranking.
-        let repair_selector = config
-            .repair
-            .as_ref()
-            .and_then(|rc| rc.selector.as_ref())
-            .map(|s| s.to_selector().unwrap_or_default())
-            .unwrap_or_else(|| {
-                crate::entities::config::default_repair_target_selector_config()
-                    .to_selector()
-                    .unwrap_or_default()
+        // damaged stations into ordinary admitted `DispatchRepairTeam` inputs,
+        // from the authored `[repair.selector]` block. Attached whenever the
+        // selector is authored, not only to ships that declare repair TEAMS —
+        // the teams component is what gates dispatch, and a ship that gains
+        // teams later still has its ranking.
+        if let Some(s) = config.repair.as_ref().and_then(|rc| rc.selector.as_ref()) {
+            entity_commands.insert(crate::console::repair::server::RepairTargetSelector {
+                selector: s.to_selector().unwrap_or_default(),
+                power_rating: config.power_rating.map(|r| r as f32),
             });
-        entity_commands.insert(crate::console::repair::server::RepairTargetSelector {
-            selector: repair_selector,
-            power_rating: config.power_rating.map(|r| r as f32),
-        });
+        }
         // Comms hail selector + dialogue-response policy (issue #786) — the two
-        // halves of the Comms console's AI, from `[comms_console.selector]` /
-        // `[comms_console.ai]` if authored, else the canonical defaults (which
-        // reproduce the retired filter+argmax and the retired
-        // `record_response(id, 0)` stub's DECISION, now routed through
-        // admission). Resolved by the SHARED
-        // `comms_console_ai_components` helper, because
+        // halves of the Comms console's AI, from the authored
+        // `[comms_console.selector]` / `[comms_console.ai]` blocks. Resolved by
+        // the SHARED `comms_console_ai_components` helper, because
         // `server_app::spawn_game_start_entities` must attach the identical pair
         // to the player ship — the only ship either Comms AI host actually runs
-        // on, since both are filtered `With<LocalShip>`.
+        // on, since both are filtered `With<LocalShip>`. Each half is `None` when
+        // its block is unauthored, and nothing is attached for it.
         let (comms_selector, comms_response_policy) =
             crate::console::comms::server::comms_console_ai_components(config);
-        entity_commands.insert(comms_selector);
-        entity_commands.insert(comms_response_policy);
+        if let Some(sel) = comms_selector {
+            entity_commands.insert(sel);
+        }
+        if let Some(policy) = comms_response_policy {
+            entity_commands.insert(policy);
+        }
         // Shields AI config — loaded from [shields_console.ai] if present,
         // otherwise the parse-time default. Inserted for every entity carrying
         // a `[behaviour]` block, alongside the sensors block above and inside
@@ -596,121 +573,92 @@ pub fn spawn_entity(
                 .unwrap_or_default(),
         );
         // Shields focus AI policy (issue #783) — the inline stateless
-        // `shield_focus` policy from `[shields_console.ai_policy]` if authored,
-        // else the canonical default (which reproduces today's decisions, kernel
-        // and all). Attached to every ship so `ai_shield_focus` resolves a
-        // data-authored gate + reads the authored windows/thresholds from the
-        // policy `param` map rather than the retired `ai_cfg.*` reads. `to_policy`
-        // cannot fail here: the block was validated in `EntityConfig::from_toml`.
-        let shields_focus_policy = match config
+        // `shield_focus` policy from the authored `[shields_console.ai_policy]`
+        // block, so `ai_shield_focus` resolves a data-authored gate + reads the
+        // authored windows/thresholds from the policy `param` map rather than the
+        // retired `ai_cfg.*` reads. `to_policy` cannot fail here: the block was
+        // validated in `EntityConfig::from_toml`.
+        if let Some(ai) = config
             .shields_console
             .as_ref()
             .and_then(|sc| sc.ai_policy.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_shields_focus_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::shields::ShieldsFocusAiPolicy(
-            shields_focus_policy,
-        ));
+            entity_commands.insert(crate::ship::shields::ShieldsFocusAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
         // Captain AI policy (issue #775) — the inline stateless Red Alert
-        // policy from `[captain_console.ai]` if authored, else the canonical
-        // default. Attached to every ship (player + NPC come through their own
-        // paths) so `operate_captain_ai` reads a data-authored policy rather
-        // than a hardcoded controller. `to_policy` cannot fail here: the block
-        // was validated in `EntityConfig::from_toml`.
-        let captain_ai_policy = match config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_captain_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::captain_plugin::CaptainAiPolicy(captain_ai_policy));
-        // Helm Engines/Steering AI policies (issue #779) — the inline stateless
-        // longitudinal/yaw policies from `[helm_console.engines_ai]` /
-        // `[helm_console.steering_ai]` if authored, else the canonical defaults.
-        // Attached to every ship so `ai_helm_thrust`/`ai_helm_steering` resolve a
-        // data-authored mode verb rather than actuating unconditionally.
-        // `to_policy` cannot fail here: both blocks were validated in
-        // `EntityConfig::from_toml`.
-        let engines_ai_policy = match config
+        // policy from the authored `[captain_console.ai]` block, so
+        // `operate_captain_ai` reads a data-authored policy rather than a
+        // hardcoded controller.
+        if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+            entity_commands.insert(crate::captain_plugin::CaptainAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
+        // Helm Engines/Steering AI policies (issue #779) — the inline
+        // longitudinal/yaw policies from the authored `[helm_console.engines_ai]`
+        // / `[helm_console.steering_ai]` blocks, so `ai_helm_thrust` /
+        // `ai_helm_steering` resolve a data-authored mode verb rather than
+        // actuating unconditionally.
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.engines_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_engines_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmEnginesAiPolicy(engines_ai_policy));
-        let steering_ai_policy = match config
+            entity_commands.insert(crate::ship::helm_ai::HelmEnginesAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.steering_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_steering_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
-            steering_ai_policy,
-        ));
+            entity_commands.insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
         // Helm secondary-actuator AI policies (issue #780): lateral / vertical /
-        // impulse / boost, from their `[helm_console.*_ai]` blocks if authored,
-        // else the canonical defaults (lateral/vertical unconditional actuate,
-        // impulse unconditional permit, boost idle). Attached to every ship so
+        // impulse / boost, from their authored `[helm_console.*_ai]` blocks, so
         // the secondary hosts resolve a data-authored mode verb rather than a
-        // hardcoded branch. `to_policy` cannot fail here (validated at load).
-        let lateral_ai_policy = match config
+        // hardcoded branch.
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.lateral_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_lateral_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmLateralAiPolicy(lateral_ai_policy));
-        let vertical_ai_policy = match config
+            entity_commands.insert(crate::ship::helm_ai::HelmLateralAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.vertical_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_vertical_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
-            vertical_ai_policy,
-        ));
-        let impulse_ai_policy = match config
+            entity_commands.insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.impulse_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_impulse_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmImpulseAiPolicy(impulse_ai_policy));
-        let boost_ai_policy = match config
+            entity_commands.insert(crate::ship::helm_ai::HelmImpulseAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
+        if let Some(ai) = config
             .helm_console
             .as_ref()
             .and_then(|h| h.boost_ai.as_ref())
         {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_boost_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::ship::helm_ai::HelmBoostAiPolicy(boost_ai_policy));
+            entity_commands.insert(crate::ship::helm_ai::HelmBoostAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
         // gets an empty modifier cache. Region-entry observers and
@@ -815,20 +763,17 @@ pub fn spawn_entity(
             combat_config,
         ));
         // Per-bank phaser open-fire AI policies (issue #781): each bank's inline
-        // `ai` block if authored, else the canonical default (unconditional
-        // fire) so baseline auto-fire is preserved. `to_policy` cannot fail here
-        // — every authored bank block was validated in `EntityConfig::from_toml`.
+        // authored `ai` block. A bank that authors none contributes no entry —
+        // since #885b stage 5d there is no synthesised fallback, and strict
+        // AI-declaration mode rejects an unauthored bank at load. `to_policy`
+        // cannot fail here — every authored bank block was validated in
+        // `EntityConfig::from_toml`.
         let phaser_bank_policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> =
             wc.phaser_banks
                 .iter()
-                .map(|b| {
-                    let policy = match b.ai.as_ref() {
-                        Some(ai) => ai.to_policy().unwrap_or_default(),
-                        None => crate::entities::config::default_phaser_bank_ai_config()
-                            .to_policy()
-                            .unwrap_or_default(),
-                    };
-                    (b.id.clone(), policy)
+                .filter_map(|b| {
+                    let ai = b.ai.as_ref()?;
+                    Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
                 })
                 .collect();
         entity_commands.insert(crate::weapons_plugin::PhaserBankAiPolicies(
@@ -873,36 +818,26 @@ pub fn spawn_entity(
         entity_commands.insert(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
 
         // Per-tube torpedo load + launch AI policies (issue #782): each tube's
-        // inline `ai` block if authored, else the canonical default
-        // (unconditional load + launch) so baseline behaviour is preserved.
+        // inline authored `ai` block. A tube that authors none contributes no
+        // entry — strict AI-declaration mode rejects that at load.
         // Validated at load, so `to_policy` cannot fail here.
         let tube_policies: std::collections::HashMap<String, crate::ai::policy::AiPolicy> = tc
             .tubes
             .iter()
-            .map(|t| {
-                let policy = match t.ai.as_ref() {
-                    Some(ai) => ai.to_policy().unwrap_or_default(),
-                    None => crate::entities::config::default_torpedo_tube_ai_config()
-                        .to_policy()
-                        .unwrap_or_default(),
-                };
-                (t.id.clone(), policy)
+            .filter_map(|t| {
+                let ai = t.ai.as_ref()?;
+                Some((t.id.clone(), ai.to_policy().unwrap_or_default()))
             })
             .collect();
         entity_commands.insert(crate::weapons_plugin::TorpedoTubeAiPolicies(tube_policies));
 
         // The shared magazine's grant AI policy (issue #782, AC1): the authored
-        // `[torpedoes].ai` block if present, else the canonical default
-        // (unconditional grant).
-        let magazine_policy = match tc.ai.as_ref() {
-            Some(ai) => ai.to_policy().unwrap_or_default(),
-            None => crate::entities::config::default_torpedo_magazine_ai_config()
-                .to_policy()
-                .unwrap_or_default(),
-        };
-        entity_commands.insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
-            magazine_policy,
-        ));
+        // `[torpedoes].ai` block.
+        if let Some(ai) = tc.ai.as_ref() {
+            entity_commands.insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+                ai.to_policy().unwrap_or_default(),
+            ));
+        }
     }
 
     // Blasters — attach a `BlasterSystemResource` component when the entity
@@ -920,22 +855,17 @@ pub fn spawn_entity(
                 blaster_systems,
             ));
             // Per-bank blaster open-fire AI policies (issue #781): each bank's
-            // inline `ai` block if authored, else the canonical default
-            // (unconditional fire). Validated at load, so `to_policy` cannot fail.
+            // inline authored `ai` block. A bank that authors none contributes no
+            // entry. Validated at load, so `to_policy` cannot fail.
             let blaster_bank_policies: std::collections::HashMap<
                 String,
                 crate::ai::policy::AiPolicy,
             > = wc
                 .blaster_banks
                 .iter()
-                .map(|b| {
-                    let policy = match b.ai.as_ref() {
-                        Some(ai) => ai.to_policy().unwrap_or_default(),
-                        None => crate::entities::config::default_blaster_bank_ai_config()
-                            .to_policy()
-                            .unwrap_or_default(),
-                    };
-                    (b.id.clone(), policy)
+                .filter_map(|b| {
+                    let ai = b.ai.as_ref()?;
+                    Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
                 })
                 .collect();
             entity_commands.insert(crate::weapons_plugin::BlasterBankAiPolicies(
@@ -1225,7 +1155,11 @@ horizon = 1e9
 switch_margin = 0.0
 eligibility = "candidate_fact(source_repair_request) > 0"
 "#;
-        let config = EntityConfig::from_toml(selector_only).expect("selector-only [repair] parses");
+        let config = EntityConfig::from_toml_in_mode(
+            selector_only,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("selector-only [repair] parses");
         assert!(
             config
                 .repair
@@ -1253,7 +1187,11 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         );
 
         let with_teams = format!("{selector_only}\n[repair]\nrepair_team_count = 3\n");
-        let config = EntityConfig::from_toml(&with_teams).expect("[repair] with a count parses");
+        let config = EntityConfig::from_toml_in_mode(
+            &with_teams,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("[repair] with a count parses");
         let mut app = test_app();
         let e = spawn_and_flush(&mut app, &config, Vec3::ZERO, "with-teams".into(), None);
         let teams = app
@@ -2364,7 +2302,11 @@ id = "tactical-radar"
 kind = "tactical_radar"
 ai_only = true
 "#;
-        let config = EntityConfig::from_toml(toml).expect("toml must parse");
+        let config = EntityConfig::from_toml_in_mode(
+            toml,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("toml must parse");
         assert!(
             config.ship_config.is_some(),
             "EntityConfig.ship_config must be populated from [[system]] blocks"

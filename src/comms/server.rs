@@ -904,6 +904,21 @@ pub(crate) mod tests {
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             crate::messages::AdmittedCommands::default(),
+            // The AUTHORED Comms console AI pair every shipped hull carries.
+            // Since #885b stage 5d neither host has a synthesised fallback, so a
+            // fixture whose subject is the AI answering (or being refused by)
+            // the router has to attach the declarations a real hull writes.
+            crate::console::comms::server::CommsResponseAiPolicy(
+                crate::entities::authored_ai_pins::shipped_policy_toml("comms_response")
+                    .to_policy()
+                    .expect("the shipped Comms response policy decodes"),
+            ),
+            crate::console::comms::server::CommsTargetSelector {
+                selector: crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail")
+                    .to_selector()
+                    .expect("the shipped Comms hail selector decodes"),
+                power_rating: None,
+            },
         ));
         app
     }

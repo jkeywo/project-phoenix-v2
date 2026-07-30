@@ -1408,8 +1408,8 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
             assert!(fetches < 16, "closure walk did not terminate");
         };
         assert_eq!(
-            fetches, 2,
-            "the hull's fragment and that fragment's own fragment, each fetched once"
+            fetches, 3,
+            "the hull's fragment and that fragment's own TWO fragments (the Captain              policy and the fleet-baseline AI declarations #885b stage 5d made              mandatory), each fetched once"
         );
         assert_eq!(
             resolved.toml, native.toml,

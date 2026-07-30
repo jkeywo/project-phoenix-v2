@@ -320,7 +320,85 @@ fn test_app() -> App {
         ShipImpulse(crate::impulse::ImpulseState::new()),
         ShipModifiers::new(),
     ));
+    attach_shipped_weapon_ai(&mut app, ship);
     app
+}
+
+/// Attach the SHIPPED authored weapons AI declarations to `ship`: the Tactical
+/// target selector, plus one per-bank / per-tube policy for every bank and tube
+/// the entity currently carries, and the shared magazine's grant policy.
+///
+/// Since #885b stage 5d the auto-fire hosts have no synthesised fallback — a
+/// bank with no entry in `PhaserBankAiPolicies` does not fire, and a ship with
+/// no `TacticalTargetSelector` ranks nothing. The ids are read off the entity's
+/// own weapon configs rather than listed, so a test that swaps in a different
+/// bank list only has to call this again.
+pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
+    use crate::entities::authored_ai_pins::{shipped_policy_toml, shipped_selector_toml};
+    let bank_policy = || {
+        shipped_policy_toml("phaser_bank")
+            .to_policy()
+            .expect("the shipped phaser-bank policy decodes")
+    };
+    let blaster_policy = || {
+        shipped_policy_toml("blaster_bank")
+            .to_policy()
+            .expect("the shipped blaster-bank policy decodes")
+    };
+    let tube_policy = || {
+        shipped_policy_toml("torpedo_tube")
+            .to_policy()
+            .expect("the shipped torpedo-tube policy decodes")
+    };
+
+    let phaser_ids: Vec<String> = app
+        .world()
+        .entity(ship)
+        .get::<PhaserCombatConfigResource>()
+        .map(|c| c.0.banks.iter().map(|b| b.id.clone()).collect())
+        .unwrap_or_default();
+    let blaster_ids: Vec<String> = app
+        .world()
+        .entity(ship)
+        .get::<crate::weapons_plugin::BlasterSystemResource>()
+        .map(|c| c.0.iter().map(|b| b.config.id.clone()).collect())
+        .unwrap_or_default();
+    let tube_ids: Vec<String> = app
+        .world()
+        .entity(ship)
+        .get::<TorpedoSystemResource>()
+        .map(|c| c.0.tubes.iter().map(|t| t.id.clone()).collect())
+        .unwrap_or_default();
+
+    app.world_mut().entity_mut(ship).insert((
+        crate::weapons_plugin::TacticalTargetSelector {
+            selector: shipped_selector_toml("tactical")
+                .to_selector()
+                .expect("the shipped Tactical selector decodes"),
+            power_rating: None,
+            idle: false,
+        },
+        crate::weapons_plugin::PhaserBankAiPolicies(
+            phaser_ids
+                .into_iter()
+                .map(|id| (id, bank_policy()))
+                .collect(),
+        ),
+        crate::weapons_plugin::BlasterBankAiPolicies(
+            blaster_ids
+                .into_iter()
+                .map(|id| (id, blaster_policy()))
+                .collect(),
+        ),
+        crate::weapons_plugin::TorpedoTubeAiPolicies(
+            tube_ids.into_iter().map(|id| (id, tube_policy())).collect(),
+        ),
+        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+            shipped_policy_toml("torpedo_magazine")
+                .to_policy()
+                .expect("the shipped torpedo-magazine policy decodes"),
+        ),
+    ));
 }
 
 // ── PR 7 test helpers — per-entity access to Weapons state ──────────────
@@ -4532,6 +4610,10 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
             Transform::default(),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, npc_entity);
 
     // Spawn target
     app.world_mut().spawn((
@@ -4610,6 +4692,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
             Transform::default(),
         ))
         .id();
+    attach_shipped_weapon_ai(app, npc);
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
@@ -4746,6 +4829,10 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
             }),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, ship_entity);
 
     // Target is directly to starboard (x=20, z=0): in range (distance 20 <
     // beam_range 50) but 90 degrees off the fore bank's 30-degree arc.
@@ -6396,7 +6483,8 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
     for system in &config.0.systems {
         resolver.set(system.id.clone(), ControlSource::Ai);
     }
-    app.world_mut()
+    let npc = app
+        .world_mut()
         .spawn((
             crate::simulation::Ship,
             config,
@@ -6424,7 +6512,9 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
             crate::entity_spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
         ))
-        .id()
+        .id();
+    attach_shipped_weapon_ai(app, npc);
+    npc
 }
 
 fn set_last_attacker(app: &mut App, entity: Entity, uuid: Option<String>) {
@@ -7059,6 +7149,10 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             bevy::prelude::Transform::default(),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, armed);
 
     // Deliberately NO `TorpedoSystemResource` component.
     let bare = app
@@ -9335,6 +9429,10 @@ ai_only = true
             crate::messages::AdmittedCommands::default(),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, npc_entity);
 
     // Target directly ahead of NPC (yaw=0, forward=-Z).
     app.world_mut().spawn((
@@ -9892,6 +9990,9 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
             Transform::default(),
         ))
         .id();
+    // The SHIPPED authored magazine-grant policy: since #885b stage 5d a ship
+    // with no `TorpedoMagazineAiPolicy` grants no claim at all.
+    attach_shipped_weapon_ai(&mut app, npc_entity);
 
     let npc_before = 10u32;
 
@@ -10433,6 +10534,10 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             Transform::from_xyz(10.0, 0.0, 10.0),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, npc_entity);
 
     // Spawn target directly ahead (-Z), well within blaster range.
     app.world_mut().spawn((
@@ -10551,6 +10656,10 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             Transform::from_xyz(10.0, 0.0, 10.0),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, shooter);
 
     // The target: a full `Ship` with live `ShipPhysics`, 100 units dead ahead,
     // yaw +90° → heading along +X at 20 u/s. It deliberately carries NO
@@ -10670,6 +10779,10 @@ fn a_blaster_carrying_target_is_led_identically() {
             Transform::from_xyz(10.0, 0.0, 10.0),
         ))
         .id();
+    // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
+    // bank with no policy entry does not fire and a ship with no Tactical
+    // selector ranks nothing.
+    attach_shipped_weapon_ai(&mut app, shooter);
 
     // Identical to the target above in every respect BUT the blaster bank.
     app.world_mut().spawn((
@@ -11326,8 +11439,11 @@ fn tactical_radar_idle_makes_no_ai_selection() {
     app.world_mut()
         .entity_mut(ship)
         .insert(crate::weapons_plugin::TacticalTargetSelector {
+            selector: crate::entities::authored_ai_pins::shipped_selector_toml("tactical")
+                .to_selector()
+                .expect("the shipped Tactical selector decodes"),
+            power_rating: None,
             idle: true,
-            ..Default::default()
         });
 
     // Provide a lockable objective target — a non-idle radar would acquire it.

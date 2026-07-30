@@ -91,7 +91,74 @@ pub fn test_app() -> App {
         HelmWaypointClearance::default(),
         crate::ai_plugin::ObjectiveCursors::default(),
     ));
+    attach_shipped_ai_declarations(&mut app, ship);
     app
+}
+
+/// Attach every SHIP-LEVEL AI declaration a shipped hull authors, decoded from
+/// the shipped TOML (issue #885b stage 5d).
+///
+/// Before stage 5d a bare-`App` fixture needed none of this: each AI host kept a
+/// tick-local fallback to a Rust-side `default_*_ai_config()` and a ship with no
+/// policy component behaved exactly like one carrying the canonical default.
+/// The synthesisers are gone, and with them that fallback — an undeclared fine
+/// system now takes no action at all, which is what PRD #774 US7 asks for and
+/// what strict AI-declaration mode enforces at load.
+///
+/// So a fixture that wants a ship to BEHAVE has to give it the declarations a
+/// real hull authors. Taking them from `assets/entities/` rather than from a
+/// hand-written literal is deliberate: the fixture then exercises shipped
+/// content, and cannot drift away from it.
+///
+/// The per-WEAPON declarations are not here — they are per bank and per tube, so
+/// a fixture that spawns weapons attaches its own map.
+pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
+    use crate::entities::authored_ai_pins::{shipped_policy_toml, shipped_selector_toml};
+    let policy = |kind: &str| {
+        shipped_policy_toml(kind)
+            .to_policy()
+            .expect("a shipped authored policy decodes")
+    };
+    let selector = |kind: &str| {
+        shipped_selector_toml(kind)
+            .to_selector()
+            .expect("a shipped authored selector decodes")
+    };
+    app.world_mut().entity_mut(ship).insert((
+        crate::captain_plugin::CaptainAiPolicy(policy("captain")),
+        crate::ship::helm_ai::HelmEnginesAiPolicy(policy("engines")),
+        crate::ship::helm_ai::HelmSteeringAiPolicy(policy("steering")),
+        crate::ship::helm_ai::HelmLateralAiPolicy(policy("lateral")),
+        crate::ship::helm_ai::HelmVerticalAiPolicy(policy("vertical")),
+        crate::ship::helm_ai::HelmImpulseAiPolicy(policy("impulse")),
+        crate::ship::helm_ai::HelmBoostAiPolicy(policy("boost")),
+        crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
+        crate::power_plugin::PowerAiPolicy(policy("power")),
+        crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),
+    ));
+    app.world_mut().entity_mut(ship).insert((
+        crate::ship::sensors::SensorsTargetSelector {
+            selector: selector("sensors"),
+            power_rating: None,
+        },
+        crate::weapons_plugin::TacticalTargetSelector {
+            selector: selector("tactical"),
+            power_rating: None,
+            idle: false,
+        },
+        crate::console::navigation::NavigationTargetSelector {
+            selector: selector("navigation"),
+            power_rating: None,
+        },
+        crate::console::repair::server::RepairTargetSelector {
+            selector: selector("repair"),
+            power_rating: None,
+        },
+        crate::console::comms::server::CommsTargetSelector {
+            selector: selector("comms_hail"),
+            power_rating: None,
+        },
+    ));
 }
 
 pub fn get_last_helm_input(app: &mut App) -> LastHelmInput {

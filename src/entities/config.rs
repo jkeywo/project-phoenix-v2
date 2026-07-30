@@ -1699,40 +1699,6 @@ fn default_cinematic_yaw_follow_rate() -> f32 {
 
 // ── Inline stateless fine-system AI policy (issue #775) ───────────────────────
 
-/// Parse-time fallback for the Captain Red Alert combat window, in seconds.
-///
-/// Sanctioned by AGENTS.md rule #11 as a parse-default only: it seeds the
-/// synthesised default Captain policy for ships that do not author
-/// `[captain_console.ai]`. Authors override it via the named
-/// `combat_window_secs` parameter, so no gameplay value is pinned in Rust.
-pub const DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS: f32 = 10.0;
-
-// ── Parse-time defaults for the synthesised Power allocation policy (#784) ────
-//
-// Sanctioned by AGENTS.md rule #11 as parse-defaults + vocabulary only: they
-// seed the synthesised [`default_power_ai_config`] for ships that do not author
-// `[power.ai_policy]`, reproducing the retired stateful engine's baseline. A
-// ship authoring the block overrides all of these with its own `param` reserves
-// and per-rule `level` payloads, so no gameplay value is pinned in Rust.
-
-/// Forward-thrust level (0.0–1.0) above which the default helm-elevation rule
-/// fires. Matches the retired `movement_thrust_threshold` default.
-pub const DEFAULT_POWER_THRUST_THRESHOLD: f32 = 0.7;
-/// Minimum battery reserve (0–100) for the default helm-elevation rule. Matches
-/// the retired `movement_battery_engage_min_pct` default.
-pub const DEFAULT_POWER_HELM_RESERVE: f32 = 50.0;
-/// Minimum battery reserve (0–100) for the default weapons-elevation rule.
-/// Matches the retired `red_alert_battery_engage_min_pct` default.
-pub const DEFAULT_POWER_WEAPONS_RESERVE: f32 = 10.0;
-/// Absolute allocation level the default elevate rules raise their group to.
-/// The canonical groups seed at level 2, so this reproduces the retired `+1`
-/// nudge (2 → 3) as an absolute target.
-pub const DEFAULT_POWER_ELEVATED_LEVEL: u8 = 3;
-/// Absolute allocation level the default baseline (fallback) rules hold their
-/// group at — the canonical seeded level, so a calm ship's baseline emit is a
-/// no-op the host skips.
-pub const DEFAULT_POWER_BASELINE_LEVEL: u8 = 2;
-
 /// The `red_alert` output channel: the one channel the Captain policy drives.
 pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
 /// The `set_red_alert` verb: the one typed verb the Captain policy emits.
@@ -2152,176 +2118,6 @@ pub const COMMS_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_COMMS_CONTACTS,
 ];
 
-/// Parse-time fallbacks for the default Tactical selector (AGENTS.md rule #11
-/// parse-defaults only). The retired tier order was
-/// `objective > retained > last-attacker > nearest`; each tier becomes an
-/// additive source weight, highest-first, with the Sensors-favour bonus (AC2)
-/// slotted between objective and retained. `switch_margin` is the anti-thrash
-/// hysteresis (AC5). Every value is overridable in `[weapons_console.selector]`
-/// — the weights as each `[[...score]]` table's own `weight` field, the margin
-/// and horizon as scalar fields — so no gameplay value is pinned into a live
-/// tick. NOT via a `param` table: a score term's magnitude is written directly
-/// and no guard here reads a `param(...)`, which is why the five weight params
-/// this synthesiser used to declare were deleted in #885b rather than wired up.
-///
-/// PRECEDENCE INVARIANT — because the selector sums weights and a single
-/// candidate can carry several source markers at once (the ship's current lock
-/// is commonly ALSO its Sensors designation, and may also be the last attacker
-/// and the nearest hostile), the weights are chosen so `objective_weight`
-/// strictly dominates the MAXIMUM achievable non-objective stack by more than
-/// `switch_margin`:
-///
-/// ```text
-///   sensors_designation + retained + last_attacker + radar
-///     = 500 + 200 + 100 + 1 = 801  <  1000 − 50 = 950  =  objective − margin
-/// ```
-///
-/// So an in-range named Destroy objective ALWAYS wins the ranking AND survives
-/// hysteresis retention — even against the ship's own retained Sensors
-/// designation. `retained` still exceeds `last_attacker`, so an established
-/// engagement is not broken off by a fresh attacker (the retired tier-2 > tier-3
-/// ordering). Retention thus has a bounded additive contribution AND
-/// switch-margin hysteresis; the invariant, not the mechanism name, is what
-/// guarantees objective primacy. This invariant is asserted in
-/// `default_tactical_selector_objective_dominates_max_non_objective_stack`.
-const DEFAULT_TACTICAL_OBJECTIVE_WEIGHT: f32 = 1000.0;
-const DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT: f32 = 500.0;
-const DEFAULT_TACTICAL_RETAINED_WEIGHT: f32 = 200.0;
-const DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT: f32 = 100.0;
-const DEFAULT_TACTICAL_RADAR_WEIGHT: f32 = 1.0;
-const DEFAULT_TACTICAL_SWITCH_MARGIN: f32 = 50.0;
-
-/// Parse-time fallbacks for the default Sensors selector (AGENTS.md rule #11
-/// parse-defaults only). Authors override every one in
-/// `[sensors_console.selector]` — the three tier weights as each
-/// `[[...score]]` table's own `weight` field, the horizon and margin as scalar
-/// fields — so no gameplay value is pinned into a live tick. NOT via a `param`
-/// table; see the note on [`default_sensors_target_selector_config`].
-///
-/// `HORIZON` is deliberately large: the Sensors host owns the live,
-/// damage-scaled horizon and pre-filters candidates to it (`effective_sensor_range`),
-/// so the selector's own horizon is a static outer bound, not the live gate.
-const DEFAULT_SELECTOR_HORIZON: f32 = 1.0e9;
-const DEFAULT_SELECTOR_SWITCH_MARGIN: f32 = 0.0;
-const DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT: f32 = 1000.0;
-const DEFAULT_SELECTOR_OBJECTIVE_WEIGHT: f32 = 100.0;
-const DEFAULT_SELECTOR_RADAR_WEIGHT: f32 = 1.0;
-
-/// Parse-time fallbacks for the default Navigation selector (issue #778,
-/// AGENTS.md rule #11 parse-defaults only). The retired Navigation AI ranked
-/// the scored objective pool and steered to the best positive Helm-relevant
-/// objective's destination; those objective destinations are the `reachable`
-/// tier here (`objective_weight`), dominating the enriching chart-contacts tier
-/// (`chart_contact_weight`). `switch_margin` is the anti-thrash hysteresis
-/// (AC3). Authors override every value in `[navigation_console.selector]` — the
-/// two weights as each `[[...score]]` table's own `weight` field — so no
-/// gameplay value is pinned into a live tick. NOT via a `param` table; see the
-/// note on [`default_navigation_target_selector_config`].
-const DEFAULT_NAV_OBJECTIVE_WEIGHT: f32 = 100.0;
-const DEFAULT_NAV_CHART_CONTACT_WEIGHT: f32 = 1.0;
-const DEFAULT_NAV_SWITCH_MARGIN: f32 = 0.0;
-
-/// Parse-time fallbacks for the default Repair selector (issue #785,
-/// AGENTS.md rule #11 parse-defaults only). The retired hardcoded Repair
-/// comparator sorted the repair-request queue by `(tier desc, deficit desc)`;
-/// here that becomes an additive utility over two ladders.
-///
-/// PRECEDENCE INVARIANT — tier STRICTLY dominates deficit. The tier ladder
-/// contributes `tier_weight` once per damage-tier ordinal step (Damaged = 1×,
-/// Disabled = 2×), while the deficit ladder contributes `deficit_weight` once
-/// per crossed damage-fraction band, so the maximum achievable deficit stack is
-///
-/// ```text
-///   3 × deficit_weight = 3 × 100 = 300  <  1000 = tier_weight
-/// ```
-///
-/// i.e. a single tier step always outranks the entire deficit ladder, exactly
-/// reproducing the retired comparator's "tier first, deficit only as the
-/// tie-break" ordering. Asserted in
-/// `default_repair_selector_tier_dominates_max_deficit_stack`.
-///
-/// The deficit ladder is a BANDED approximation of the retired continuous
-/// `deficit desc` tie-break, because an authored score term contributes a fixed
-/// weight when its boolean guard fires — the selector has no multiplicative
-/// term. Within one band the ranking falls through to the selector's documented
-/// smallest-key tie-break (station id), which is deterministic (AC4). Authors
-/// widen or narrow the bands via the `deficit_band_*` params without touching
-/// Rust.
-///
-/// WHY THE BANDS SIT INSIDE THE URGENT RANGE — do NOT "helpfully" realign them
-/// to the `DamageTier` thresholds (0.75 / 0.25 HP, `src/ship/damage.rs`). The
-/// deficit ladder only ever discriminates WITHIN one tier, because tier
-/// strictly dominates it. Bands placed AT the tier thresholds
-/// (0.25 / 0.5 / 0.75 damage fraction) are therefore all-or-nothing dead
-/// weight: every Disabled station is by definition above 0.75 damage, so all
-/// three bands fire for all of them and a station at 1/100 HP scores exactly
-/// what a station at 24/100 HP scores. Sitting inside the urgent range
-/// (0.80 / 0.90 / 0.95) instead, the ladder splits the Disabled tier into four
-/// buckets and the nearly-dead station actually outranks the barely-disabled
-/// one — which is the whole point of a tie-break. The Damaged tier's remaining
-/// span (0.25–0.75 damage) resolves on the deterministic station-id tie-break;
-/// an author who wants discrimination there re-points `deficit_band_low`.
-///
-/// `switch_margin` is 0: Repair's retained pick is the authoritative
-/// `TeamSlot`, and only Idle teams are dispatched, so there is no AI-side
-/// hysteresis to tune (see `operate_repair_ai`'s AC5 note).
-const DEFAULT_REPAIR_TIER_WEIGHT: f32 = 1000.0;
-const DEFAULT_REPAIR_DEFICIT_WEIGHT: f32 = 100.0;
-const DEFAULT_REPAIR_DEFICIT_BAND_LOW: f32 = 0.80;
-const DEFAULT_REPAIR_DEFICIT_BAND_MID: f32 = 0.90;
-const DEFAULT_REPAIR_DEFICIT_BAND_HIGH: f32 = 0.95;
-const DEFAULT_REPAIR_SWITCH_MARGIN: f32 = 0.0;
-
-/// Parse-time fallbacks for the default Comms hail selector (issue #786,
-/// AGENTS.md rule #11 parse-defaults only). The retired hardcoded Comms AI
-/// filtered the scored pool to positive, Comms-relevant `Hail` directives and
-/// took the FIRST one that resolved and was in range (`scored_pool` is sorted
-/// descending, so that was an implicit "highest score wins" argmax). Here that
-/// ordering becomes an authored BANDED score ladder.
-///
-/// WHY A BANDED LADDER AND NOT A SINGLE `objective_score` TERM — the #785
-/// lesson. A `ScoreTerm` contributes a FIXED weight when its boolean guard
-/// fires; the selector has no multiplicative term, so a continuous reading can
-/// only enter the ranking as a ladder of thresholds. One term guarded on
-/// `objective_score > 0` would give every eligible hail an identical score and
-/// collapse the whole ranking onto the selector's smallest-UUID tie-break —
-/// i.e. the POLICY would not rank at all (AC1). The ladder makes the ranking
-/// genuinely authored.
-///
-/// WHERE THE BANDS SIT AND WHY — the other #785 lesson: bands must be placed
-/// where the population actually is, or they discriminate nothing. Objective
-/// utility is `base_priority (+10 if mandatory) + condition modifiers`, and the
-/// shipped content authors `base_priority` at 20 / 30 / 35 / 40 / 45 / 50 / 80 /
-/// 100. Bands at 25 / 45 / 75 therefore split that population four ways:
-///
-/// ```text
-///   20            → 0 bands   (background chatter)
-///   30 / 35 / 40  → 1 band    (routine orders)
-///   45 / 50       → 2 bands   (priority orders)
-///   80 / 100      → 3 bands   (mission-critical)
-/// ```
-///
-/// Bands at, say, 100/200/300 would fire for nothing and every hail would tie;
-/// bands at 1/2/3 would fire for everything and every hail would tie. Within one
-/// band the ranking falls through to the selector's documented smallest-UUID
-/// tie-break, which is deterministic. Authors re-point `score_band_*` without
-/// touching Rust.
-///
-/// `switch_margin` is 0 and the host passes `current: None`: a hail is a
-/// ONE-SHOT event, not a retained target, so there is nothing to apply
-/// hysteresis to (see `operate_comms_ai`'s AC5 note).
-const DEFAULT_COMMS_SCORE_BAND_WEIGHT: f32 = 100.0;
-const DEFAULT_COMMS_SCORE_BAND_LOW: f32 = 25.0;
-const DEFAULT_COMMS_SCORE_BAND_MID: f32 = 45.0;
-const DEFAULT_COMMS_SCORE_BAND_HIGH: f32 = 75.0;
-const DEFAULT_COMMS_SWITCH_MARGIN: f32 = 0.0;
-
-/// Parse-time fallback: the response index the canonical Comms response policy
-/// picks (issue #786). Reproduces the retired `handle_comms_channel2` stub's
-/// hardcoded `record_response(&id, 0)` — the FIRST available response — with the
-/// difference that it now travels through admission and the real router.
-const DEFAULT_COMMS_RESPONSE_INDEX: u8 = 0;
-
 /// One authored additive utility term (`[[sensors_console.selector.score]]`,
 /// issue #776): a guard expression plus the weight it contributes to a
 /// candidate's score when it fires.
@@ -2395,379 +2191,6 @@ impl FineSystemAiSelectorToml {
             eligibility,
             score,
         })
-    }
-}
-
-/// The canonical default Sensors target selector synthesised for ships that do
-/// not author `[sensors_console.selector]` (issue #776).
-///
-/// Reproduces the retired hardcoded Sensors tiers as data: prefer the combat
-/// lock, then a named objective target, then a radar hostile, all restricted
-/// to detectable, hostile contacts. Each tier's magnitude is the score term's
-/// own authored `weight` field and the horizon/margin are authored fields, so a
-/// designer retunes the ranking in TOML without touching Rust.
-///
-/// It declares NO `param` entries, and that is deliberate (issue #885b stage
-/// 5a). It used to declare `combat_lock_weight` / `objective_weight` /
-/// `radar_weight`, which no guard ever read: a score term's magnitude is written
-/// directly as `weight = 1000.0` and never reaches for `param(...)`. A `param`
-/// belongs here only when a `when` guard names it — as Repair's
-/// `deficit_band_*` and Comms' `score_band_*` do.
-pub fn default_sensors_target_selector_config() -> FineSystemAiSelectorToml {
-    FineSystemAiSelectorToml {
-        param: std::collections::HashMap::new(),
-        sources: SENSORS_SELECTOR_SOURCES
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        horizon: DEFAULT_SELECTOR_HORIZON,
-        switch_margin: DEFAULT_SELECTOR_SWITCH_MARGIN,
-        // Only detectable, hostile contacts are eligible — this is the
-        // hidden/friendly drop (AC4), expressed over the candidate context.
-        eligibility: "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0".to_string(),
-        score: vec![
-            ScoreTermToml {
-                when: "candidate_fact(source_combat_lock) > 0".to_string(),
-                weight: DEFAULT_SELECTOR_COMBAT_LOCK_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_objective) > 0".to_string(),
-                weight: DEFAULT_SELECTOR_OBJECTIVE_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_radar) > 0".to_string(),
-                weight: DEFAULT_SELECTOR_RADAR_WEIGHT,
-            },
-        ],
-    }
-}
-
-/// The canonical default Tactical target selector synthesised for ships that
-/// do not author `[weapons_console.selector]` (issue #777).
-///
-/// Encodes the retired hardcoded Tactical tier chain as data. The old tier
-/// order was `objective ≫ retained ≫ last-attacker ≫ nearest-hostile`; each
-/// tier becomes an additive source weight, highest-first, and the advisory
-/// Sensors designation gets its own favour bonus (AC2) — below explicit mission
-/// orders (`objective`) but above the retained lock and whoever last shot us.
-///
-/// Because the selector SUMS weights and one entity can carry several source
-/// markers (the current lock is commonly also the Sensors designation, and may
-/// also be the last attacker and nearest hostile), a naive high `retained`
-/// weight would let `sensors_designation + retained` overtake a distinct
-/// in-range `objective` — the ship would refuse to retarget onto its explicit
-/// mission objective. The weights are therefore sized so `objective` strictly
-/// dominates the maximum achievable non-objective stack by more than
-/// `switch_margin` (see the PRECEDENCE INVARIANT on the constant block above:
-/// 500 + 200 + 100 + 1 = 801 < 1000 − 50). Retention keeps a bounded additive
-/// contribution (still > `last_attacker`, so an established engagement is not
-/// broken off by a fresh attacker) AND the selector's switch-margin hysteresis;
-/// the invariant, not the mechanism, is what guarantees objective primacy.
-///
-/// Independent revalidation (AC3) is the eligibility guard: a candidate is
-/// engageable when it is detectable AND either an explicit target the host
-/// already vetted (`source_objective` / `source_last_attacker` /
-/// `source_retained`) OR independently hostile — so a friendly Sensors
-/// designation, carrying only `source_sensors_designation`, is dropped rather
-/// than copied.
-///
-/// Every weight, the Sensors-favour bonus, the switch margin and the horizon are
-/// authored TOML fields, so a designer retunes Tactical target ranking without
-/// touching Rust (AGENTS.md rule #11) — the weights as each score term's own
-/// `weight` field.
-///
-/// It declares NO `param` entries (issue #885b stage 5a). The five it used to
-/// declare — `objective_weight`, `sensors_designation_weight`,
-/// `retained_weight`, `last_attacker_weight`, `radar_weight` — were read by no
-/// guard and merely restated the score terms' `weight` fields, so retuning one
-/// changed nothing. The dominance invariant lives in the weights themselves.
-pub fn default_tactical_target_selector_config() -> FineSystemAiSelectorToml {
-    FineSystemAiSelectorToml {
-        param: std::collections::HashMap::new(),
-        sources: TACTICAL_SELECTOR_SOURCES
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        horizon: DEFAULT_SELECTOR_HORIZON,
-        switch_margin: DEFAULT_TACTICAL_SWITCH_MARGIN,
-        // AC3 independent revalidation. Detectable is a precondition for every
-        // candidate; beyond that, an explicit target the host already vetted
-        // (objective order / last attacker / retained lock) is engageable
-        // regardless of faction, while any other candidate — crucially the
-        // advisory Sensors designation and auto-acquired radar contacts — must
-        // be independently `hostile`. This is what makes Tactical refuse a
-        // friendly Sensors pick (AC3) while still honouring a mission that
-        // names a factionless assault target.
-        eligibility: "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 \
-                      or candidate_fact(source_last_attacker) > 0 \
-                      or candidate_fact(source_retained) > 0 \
-                      or candidate_fact(hostile) > 0)"
-            .to_string(),
-        // Additive source weights, highest-first. The `source_retained` term is
-        // bounded (see the PRECEDENCE INVARIANT): it exceeds `last_attacker` so
-        // an established lock is not stolen by a fresh attacker, but the whole
-        // non-objective stack stays below `objective − switch_margin`.
-        score: vec![
-            ScoreTermToml {
-                when: "candidate_fact(source_objective) > 0".to_string(),
-                weight: DEFAULT_TACTICAL_OBJECTIVE_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_sensors_designation) > 0".to_string(),
-                weight: DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_retained) > 0".to_string(),
-                weight: DEFAULT_TACTICAL_RETAINED_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_last_attacker) > 0".to_string(),
-                weight: DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_radar) > 0".to_string(),
-                weight: DEFAULT_TACTICAL_RADAR_WEIGHT,
-            },
-        ],
-    }
-}
-
-/// The canonical default Navigation target selector synthesised for ships that
-/// do not author `[navigation_console.selector]` (issue #778).
-///
-/// Encodes the retired hardcoded Navigation AI ranking as data. The old path
-/// picked the top positive Helm-relevant objective and resolved its directive
-/// to a destination; here that destination is the sole `reachable` candidate of
-/// the `navigation-objectives` source and always outweighs the `chart-contacts`
-/// tier. Because the default eligibility admits only `reachable` candidates —
-/// and only the objective source marks its resolved destination reachable — the
-/// canonical policy drives the waypoint from objectives alone (the retired
-/// contract). Chart contacts are surfaced so an author can weight them into
-/// eligible destinations without touching Rust; by default they merely enrich a
-/// coincident objective destination. Both weights, the switch margin and the
-/// horizon are authored TOML fields (AGENTS.md rule #11), the weights as each
-/// score term's own `weight` field.
-///
-/// It declares NO `param` entries (issue #885b stage 5a): the
-/// `objective_weight` / `chart_contact_weight` declarations it used to carry
-/// were read by no guard and only restated the score terms' `weight` fields.
-pub fn default_navigation_target_selector_config() -> FineSystemAiSelectorToml {
-    FineSystemAiSelectorToml {
-        param: std::collections::HashMap::new(),
-        sources: NAVIGATION_SELECTOR_SOURCES
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        // The Navigation chart is the whole-system view, not a radar: the host
-        // owns no live horizon gate (a Destroy hand-off deliberately steers the
-        // Helm toward something it cannot yet see), so the selector's own
-        // horizon is a static outer bound, matching Sensors/Tactical.
-        horizon: DEFAULT_SELECTOR_HORIZON,
-        switch_margin: DEFAULT_NAV_SWITCH_MARGIN,
-        // Only reachable destinations are eligible. The objective source marks
-        // its resolved destination reachable; chart contacts do not, so the
-        // canonical policy reproduces the retired "objectives drive the AI
-        // waypoint" contract. An author may widen this to admit chart contacts.
-        eligibility: "candidate_fact(reachable) > 0".to_string(),
-        score: vec![
-            ScoreTermToml {
-                when: "candidate_fact(source_nav_objective) > 0".to_string(),
-                weight: DEFAULT_NAV_OBJECTIVE_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(source_chart_contact) > 0".to_string(),
-                weight: DEFAULT_NAV_CHART_CONTACT_WEIGHT,
-            },
-        ],
-    }
-}
-
-/// The canonical default Repair target selector synthesised for ships that do
-/// not author `[repair.selector]` (issue #785).
-///
-/// Encodes the retired hardcoded Repair comparator as data. `operate_repair_ai`
-/// used to sort the repair-request queue by `(tier desc, deficit desc)` and hand
-/// the top unassigned station to the lowest free team; here the same ordering is
-/// an additive utility whose tier ladder strictly dominates its deficit ladder
-/// (see the PRECEDENCE INVARIANT on the constant block above).
-///
-/// Eligibility does the AC1 + AC2 work:
-///   - `source_repair_request > 0` — only stations coordination actually
-///     reported are ranked. This is what preserves the baseline: the
-///     `core-bucket` source is surfaced for authors but carries no repair
-///     request of its own, so by default it never independently selects (the
-///     same shape as Navigation's `chart-contacts`).
-///   - `assigned < 1` — a station a team is already Travelling to, Repairing,
-///     or that an earlier team in this same tick was just dispatched to, is
-///     excluded, so N free teams pick N DISTINCT stations (AC2/AC4).
-///
-/// All weights, bands and the switch margin are authored TOML fields, so a
-/// designer retunes repair priority without Rust (rule #11): the two ladders'
-/// magnitudes as each score term's own `weight` field, the band thresholds as
-/// the `deficit_band_*` params the guards actually name.
-///
-/// The `deficit_band_*` params are the only three declared here (issue #885b
-/// stage 5a). `tier_weight` and `deficit_weight` used to be declared too and
-/// were read by no guard — they merely restated the score terms' `weight`
-/// fields, so retuning them changed nothing.
-pub fn default_repair_target_selector_config() -> FineSystemAiSelectorToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        "deficit_band_low".to_string(),
-        DEFAULT_REPAIR_DEFICIT_BAND_LOW,
-    );
-    param.insert(
-        "deficit_band_mid".to_string(),
-        DEFAULT_REPAIR_DEFICIT_BAND_MID,
-    );
-    param.insert(
-        "deficit_band_high".to_string(),
-        DEFAULT_REPAIR_DEFICIT_BAND_HIGH,
-    );
-    FineSystemAiSelectorToml {
-        param,
-        sources: REPAIR_SELECTOR_SOURCES
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        // Repair candidates are the operating ship's OWN stations, so every
-        // candidate sits at the ship's position and the horizon never gates.
-        // Kept at the shared static outer bound for consistency with the other
-        // selector hosts.
-        horizon: DEFAULT_SELECTOR_HORIZON,
-        switch_margin: DEFAULT_REPAIR_SWITCH_MARGIN,
-        // AC2 eligibility: an unassigned, coordination-reported station whose
-        // damage is actually repairable. `tier_ordinal` is the DamageTier
-        // discriminant (Operational 0, Damaged 1, Disabled 2, Destroyed 3) — a
-        // structural enum ordinal, not a tunable gameplay value. Destroyed is
-        // excluded because a repair team alone cannot lift the latch.
-        eligibility: "candidate_fact(source_repair_request) > 0 \
-                      and candidate_fact(assigned) < 1 \
-                      and candidate_fact(tier_ordinal) > 0 \
-                      and candidate_fact(tier_ordinal) < 3"
-            .to_string(),
-        score: vec![
-            // Tier ladder — one `tier_weight` step per ordinal reached.
-            ScoreTermToml {
-                when: "candidate_fact(tier_ordinal) >= 1".to_string(),
-                weight: DEFAULT_REPAIR_TIER_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(tier_ordinal) >= 2".to_string(),
-                weight: DEFAULT_REPAIR_TIER_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(tier_ordinal) >= 3".to_string(),
-                weight: DEFAULT_REPAIR_TIER_WEIGHT,
-            },
-            // Deficit ladder — the banded stand-in for the retired continuous
-            // `deficit desc` tie-break. Bounded to 3 × deficit_weight so it can
-            // never overturn a tier step.
-            ScoreTermToml {
-                when: "candidate_fact(damage_fraction) >= param(deficit_band_low)".to_string(),
-                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(damage_fraction) >= param(deficit_band_mid)".to_string(),
-                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(damage_fraction) >= param(deficit_band_high)".to_string(),
-                weight: DEFAULT_REPAIR_DEFICIT_WEIGHT,
-            },
-        ],
-    }
-}
-
-/// The canonical default Comms hail selector synthesised for ships that do not
-/// author `[comms_console.selector]` (issue #786).
-///
-/// Encodes the retired hardcoded Comms filter+argmax as data. `operate_comms_ai`
-/// used to `filter(score > 0 && relevance contains Comms && directive is Hail)`
-/// and then `find_map` the first entry that resolved to a UUID and was in range;
-/// here the filter becomes the `eligibility` guard and the implicit
-/// highest-score-first ordering becomes the authored banded `score` ladder (see
-/// the PRECEDENCE / BAND-PLACEMENT notes on the constant block above).
-///
-/// Eligibility does the AC1 + AC2 work:
-///   - `source_hail_objective > 0` — only targets an active `Hail` directive
-///     actually names are ranked. This is what preserves the baseline: the
-///     `comms-contacts` source is surfaced for authors but carries no directive
-///     of its own, so by default a contact never independently hails (the same
-///     shape as Navigation's `chart-contacts`, #778).
-///   - `in_range > 0` — the AC2 comms-range gate, seeded host-side from
-///     `CommsRuntime.range_flags` honouring `range_active`. Defence in depth:
-///     `handle_hail` keeps its own hard server-side range check.
-///   - `objective_score > 0` — the zero-gate drop, exactly the retired
-///     `s.score > 0.0` filter.
-///   - `has_open_hail_thread < 1` — the anti-respam gate, read from the
-///     AUTHORITATIVE `CommsRuntime.open_hails` record that `handle_hail` writes
-///     for every hail (human officer or AI) rather than from the retired
-///     `CommsAiHailState.last_hailed` AI memory. It is TERMINATING: a hail that
-///     fires no `on_hailed` template still arms it, so a standing directive
-///     cannot re-emit every tick. It re-arms on two externally-driven events —
-///     a human officer's `ClearComms`, and the target ceasing to be a live hail
-///     candidate (its directive gone, or out of range), which `operate_comms_ai`
-///     retires per tick. The second is what an UNMANNED ship relies on: there is
-///     no scripted `ClearComms`, so without it a later `Hail` directive naming
-///     an already-hailed contact would be dropped forever. Termination survives
-///     because a standing directive's target stays a candidate every tick.
-///     Deliberately NOT `has_unread_from_sender` — that fact is true of any
-///     inbound message whatever its provenance, so gating on it would let a
-///     scenario-pushed greeting permanently suppress a legitimate hail.
-///   - `self_fact(comms_available) > 0` — the AC2 system-availability gate, read
-///     off `EntitySystemHull`: a Disabled or Destroyed Comms system stops the
-///     ship hailing at all.
-///
-/// All weights and bands are authored TOML fields, so a designer retunes hail
-/// priority without Rust (rule #11): the rung magnitude as each score term's own
-/// `weight` field, the band thresholds as the `score_band_*` params the guards
-/// actually name. Comms RANGE is already authored via `[comms].range` and is
-/// deliberately NOT duplicated as a second constant here — the selector reads it
-/// as a seeded fact.
-///
-/// The three `score_band_*` params are the only ones declared here (issue #885b
-/// stage 5a). `score_band_weight` used to be declared too and was read by no
-/// guard — it merely restated the score terms' `weight` fields.
-pub fn default_comms_target_selector_config() -> FineSystemAiSelectorToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert("score_band_low".to_string(), DEFAULT_COMMS_SCORE_BAND_LOW);
-    param.insert("score_band_mid".to_string(), DEFAULT_COMMS_SCORE_BAND_MID);
-    param.insert("score_band_high".to_string(), DEFAULT_COMMS_SCORE_BAND_HIGH);
-    FineSystemAiSelectorToml {
-        param,
-        sources: COMMS_SELECTOR_SOURCES
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        // Comms candidates are hail TARGETS, not spatial destinations: comms
-        // reach is the authored `[comms].range` radius, already resolved into
-        // the `in_range` fact by `update_comms_range_flags`. The host therefore
-        // places every candidate at the ship's own origin so the planar horizon
-        // never double-gates what range already decided; the value is kept at
-        // the shared static outer bound for consistency with the other hosts.
-        horizon: DEFAULT_SELECTOR_HORIZON,
-        switch_margin: DEFAULT_COMMS_SWITCH_MARGIN,
-        eligibility: "candidate_fact(source_hail_objective) > 0 \
-                      and candidate_fact(in_range) > 0 \
-                      and candidate_fact(objective_score) > 0 \
-                      and candidate_fact(has_open_hail_thread) < 1 \
-                      and self_fact(comms_available) > 0"
-            .to_string(),
-        score: vec![
-            ScoreTermToml {
-                when: "candidate_fact(objective_score) >= param(score_band_low)".to_string(),
-                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(objective_score) >= param(score_band_mid)".to_string(),
-                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
-            },
-            ScoreTermToml {
-                when: "candidate_fact(objective_score) >= param(score_band_high)".to_string(),
-                weight: DEFAULT_COMMS_SCORE_BAND_WEIGHT,
-            },
-        ],
     }
 }
 
@@ -3158,556 +2581,6 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         COMMS_RESPOND_VERB => crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index),
         other => return Err(format!("unknown ai policy verb '{other}'")),
     })
-}
-
-/// The canonical default Captain Red Alert policy synthesised for ships that
-/// do not author `[captain_console.ai]` (issue #775).
-///
-/// Two rules on the single `red_alert` channel: raise Red Alert while the ship
-/// has been in combat within the authored `combat_window_secs`, otherwise
-/// stand down. Equivalent behaviour to the retired hardcoded `CaptainAi`, but
-/// now data-shaped and with the window as a named parameter.
-pub fn default_captain_ai_config() -> FineSystemAiConfigToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        "combat_window_secs".to_string(),
-        DEFAULT_CAPTAIN_COMBAT_WINDOW_SECS,
-    );
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param,
-        rule: vec![
-            FineSystemAiRuleToml {
-                priority: 10,
-                channel: CAPTAIN_RED_ALERT_CHANNEL.to_string(),
-                when: "fact(secs_since_combat) < param(combat_window_secs)".to_string(),
-                verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
-                value: true,
-                level: 0,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: CAPTAIN_RED_ALERT_CHANNEL.to_string(),
-                when: "true".to_string(),
-                verb: CAPTAIN_SET_RED_ALERT_VERB.to_string(),
-                value: false,
-                level: 0,
-                response_index: 0,
-            },
-        ],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Comms dialogue-response policy synthesised for ships
-/// that do not author `[comms_console.ai]` (issue #786).
-///
-/// BASELINE PRESERVATION. The retired behaviour was a three-line stub inside
-/// `handle_comms_channel2`: `if policy.operate_ai && !responses.is_empty() {
-/// inbox.record_response(&id, 0) }` — an unconditional "always take the first
-/// response" that wrote the inbox DIRECTLY, bypassing admission and bypassing
-/// `handle_respond_to_message` entirely (so no trigger action ever fired and no
-/// follow-up ever advanced). This single rule reproduces exactly that DECISION
-/// — priority 0, `when "true"`, `response_index = 0` — while the emission now
-/// travels through `emit_ai_command` → `AdmittedCommands` → the real router, so
-/// an AI answer fires the response's actions and advances its follow-up just
-/// like a human answer (AGENTS.md rule #6).
-///
-/// # Why the rule is GUARDED rather than `when = "true"`
-///
-/// The retired stub ran only on channel-2 ARRIVAL, so it could not repeat and
-/// its sender was present by construction. This policy is re-resolved every
-/// tick against every open dialogue, so an unconditional rule would re-emit a
-/// response the router rejects, forever:
-///
-///   - `fact(sender_in_range) > 0` — `handle_respond_to_message` refuses a
-///     response whose sender has left comms range. Without this the AI re-emits
-///     the doomed `RespondToMessage` (re-flashing the officer's rejection) every
-///     tick until the sender returns. Baseline-preserving: the retired stub's
-///     sender was always in range.
-///   - `fact(comms_available) > 0` — the AC2 system-availability gate, read off
-///     `EntitySystemHull`: a Disabled or Destroyed Comms system stops the ship
-///     ANSWERING as well as hailing.
-///
-/// An author gates or re-points it without Rust: raise a higher-priority rule
-/// guarded on `fact(is_urgent)`, `fact(response_count)`, a scenario flag, …, or
-/// declare `idle = true` to make the Comms AI answer nothing at all.
-pub fn default_comms_response_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: COMMS_RESPOND_CHANNEL.to_string(),
-            when: "fact(comms_available) > 0 and fact(sender_in_range) > 0".to_string(),
-            verb: COMMS_RESPOND_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: DEFAULT_COMMS_RESPONSE_INDEX,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Engines (longitudinal thrust) policy synthesised for
-/// ships that do not author `[helm_console.engines_ai]` (issue #779).
-///
-/// One unconditional rule on the `longitudinal` channel: always actuate the
-/// planner's desired travel. This reproduces the pre-#779 behaviour, where
-/// `ai_helm_thrust` emitted `SetThrust` every tick — but now the *decision* to
-/// actuate flows through a data-authored policy verb a designer can gate, rather
-/// than a hardcoded unconditional branch. The continuous magnitude still comes
-/// from `DesiredMotion`, so no thrust value is pinned in Rust.
-pub fn default_engines_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: HELM_LONGITUDINAL_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: HELM_ACTUATE_DESIRED_TRAVEL_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Steering (yaw) policy synthesised for ships that do
-/// not author `[helm_console.steering_ai]` (issue #779). Mirror of
-/// [`default_engines_ai_config`] on the `yaw` channel: always actuate the
-/// planner's desired facing.
-pub fn default_steering_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: HELM_YAW_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: HELM_ACTUATE_DESIRED_FACING_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Lateral Thrust policy synthesised for ships that do not
-/// author `[helm_console.lateral_ai]` (issue #780).
-///
-/// One unconditional rule on the `lateral` channel: always actuate. This
-/// reproduces the pre-#780 baseline, where `ai_helm_lateral_thrust` ran the dodge
-/// (and docking translation) every tick — the DECISION to actuate now flows
-/// through a data-authored policy verb a designer can gate, while the continuous
-/// dodge magnitude still comes from the shared hazard surface.
-pub fn default_lateral_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: HELM_LATERAL_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: HELM_ACTUATE_LATERAL_THRUST_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Vertical Thrust policy synthesised for ships that do not
-/// author `[helm_console.vertical_ai]` (issue #780).
-///
-/// One unconditional rule on the `vertical` channel: always actuate. Baseline
-/// preserving — the pre-#780 `ai_helm_vertical_thrust` ran the bounded/full-3D
-/// climb-and-return every tick, gated only on the authored `VerticalMovementMode`
-/// (which stays a host-side capability gate, not a policy scalar). A `Planar`
-/// hull still takes no vertical component because the host zeroes it regardless
-/// of the policy verb.
-pub fn default_vertical_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: HELM_VERTICAL_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: HELM_ACTUATE_VERTICAL_THRUST_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Impulse policy synthesised for ships that do not author
-/// `[helm_console.impulse_ai]` (issue #780).
-///
-/// One unconditional rule on the `impulse` channel: the policy always PERMITS the
-/// impulse manoeuvre. This preserves the pre-#780 baseline exactly, because the
-/// engage-vs-cancel decision itself is still made host-side from the authored
-/// doctrine `use_impulse` fact and the `decide_impulse` geometry — the policy
-/// verb is an additional authored gate layered on top, defaulting to "permit".
-pub fn default_impulse_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: HELM_IMPULSE_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: HELM_ENGAGE_IMPULSE_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Boost policy synthesised for ships that do not author
-/// `[helm_console.boost_ai]` (issue #780).
-///
-/// An explicit **idle** declaration: today no AI ever engages boost, so the
-/// baseline-preserving default is "takes no AI boost action". A hull opts in by
-/// authoring `[helm_console.boost_ai]` with a rule on the `boost` channel; until
-/// then `ai_helm_boost` resolves `None` every tick and emits nothing. Idle is a
-/// legal, distinct-from-silence declaration accepted by validation.
-pub fn default_boost_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: true,
-        param: std::collections::HashMap::new(),
-        rule: Vec::new(),
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default phaser-bank open-fire policy synthesised for AI-capable
-/// phaser banks that do not author an inline `ai` block (issue #781).
-///
-/// One unconditional rule on the `phaser_fire` channel: always fire. This
-/// reproduces the pre-#781 baseline exactly, where a bank auto-fired whenever the
-/// host found it off-cooldown with the target in range and arc — the host still
-/// enforces all of those readiness gates, and the DECISION to open fire now flows
-/// through a data-authored policy verb a designer can gate (mirrors
-/// [`default_engines_ai_config`]). No fire threshold/range/arc/cooldown is pinned
-/// in the verb; those stay TOML on the bank config. An explicit `idle` is the
-/// opt-out (AC1).
-pub fn default_phaser_bank_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: PHASER_FIRE_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: PHASER_FIRE_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Shields focus policy synthesised for ships that do not
-/// author `[shields_console.ai_policy]` (issue #783).
-///
-/// Two rules on the `shield_focus` channel, both emitting the value-less
-/// `focus_shield_arc` verb: a priority-10 DAMAGE rule that fires when the most
-/// concentrated arc's recent incoming-damage share reaches the authored
-/// `damage_pct_threshold`, and a priority-0 IMBALANCE FALLBACK rule guarded
-/// `true`. Because the fallback is unconditional, the retained arc-ranking kernel
-/// (`tick_shield_focus_ai`) still runs every tick exactly as it did before #783 —
-/// so OMITTING the block reproduces today's decisions bit-for-bit (baseline
-/// preservation). The kernel owns the 4-way argmax (damage-concentration primary,
-/// health-imbalance fallback); this policy owns only the authored numbers and the
-/// gate. All four params are seeded from the retained typed `default_shields_ai_*`
-/// values so the kernel reads the same windows/thresholds it always did. An
-/// explicit `idle` is the opt-out.
-pub fn default_shields_focus_ai_config() -> FineSystemAiConfigToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        SHIELD_FOCUS_DAMAGE_WINDOW_PARAM.to_string(),
-        default_shields_ai_damage_window_secs(),
-    );
-    param.insert(
-        SHIELD_FOCUS_MIN_DAMAGE_WINDOW_PARAM.to_string(),
-        default_shields_ai_min_damage_window_secs(),
-    );
-    param.insert(
-        SHIELD_FOCUS_DAMAGE_PCT_PARAM.to_string(),
-        default_shields_ai_damage_pct_threshold(),
-    );
-    param.insert(
-        SHIELD_FOCUS_HEALTH_RATIO_PARAM.to_string(),
-        default_shields_ai_health_ratio_threshold(),
-    );
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param,
-        rule: vec![
-            FineSystemAiRuleToml {
-                priority: 10,
-                channel: SHIELD_FOCUS_CHANNEL.to_string(),
-                // The concentration fact is a percentage (0–100) so it compares
-                // directly against the authored `damage_pct_threshold` — the
-                // predicate grammar has no arithmetic, so the host seeds the fact
-                // already scaled.
-                when: format!(
-                    "fact(recent_damage_pct_max) >= param({SHIELD_FOCUS_DAMAGE_PCT_PARAM})"
-                ),
-                verb: SHIELD_FOCUS_VERB.to_string(),
-                value: false,
-                level: 0,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: SHIELD_FOCUS_CHANNEL.to_string(),
-                when: "true".to_string(),
-                verb: SHIELD_FOCUS_VERB.to_string(),
-                value: false,
-                level: 0,
-                response_index: 0,
-            },
-        ],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default Power allocation policy synthesised for ships that do
-/// not author `[power.ai_policy]` (issue #784).
-///
-/// Reproduces the retired stateful engine's two behaviours as inline stateless
-/// per-group rules with reserve guards, so OMITTING the block preserves baseline
-/// behaviour:
-///   - `helm`: a priority-10 rule that elevates helm power to level 3 while
-///     forward thrust is sustained AND the battery is at or above the authored
-///     `min_reserve_helm` floor, with a priority-0 `true` fallback that holds
-///     helm at its baseline level 2.
-///   - `weapons`: the same shape keyed on red alert with a `min_reserve_weapons`
-///     floor.
-///
-/// Every rule declares a MINIMUM PERMITTED BATTERY RESERVE (AC2): the elevate
-/// rules gate on `fact(battery_pct) >= param(min_reserve_*)`, and the baseline
-/// rules — which only ever LOWER allocation — carry a `0` reserve param so they
-/// too declare one while never being able to cause a brownout. Because an
-/// elevate guard cannot fire below its reserve, allocation never rises when the
-/// battery can't sustain it (AC5 brownout avoidance) — replacing the retired
-/// global emergency exception with per-rule reserve guards.
-///
-/// The magnitudes (3 elevated, 2 baseline) and thresholds are parse-time
-/// defaults + vocabulary in Rust (sanctioned by AGENTS.md rule #11); a ship that
-/// authors `[power.ai_policy]` overrides them entirely with its own `level`
-/// payloads and `param` reserves. Groups the ship authors but this default does
-/// not name (e.g. `sensors`, `ops`) resolve to `None` and hold their seeded
-/// level.
-pub fn default_power_ai_config() -> FineSystemAiConfigToml {
-    let mut param = std::collections::HashMap::new();
-    param.insert(
-        POWER_THRUST_THRESHOLD_PARAM.to_string(),
-        DEFAULT_POWER_THRUST_THRESHOLD,
-    );
-    param.insert(
-        POWER_HELM_RESERVE_PARAM.to_string(),
-        DEFAULT_POWER_HELM_RESERVE,
-    );
-    param.insert(
-        POWER_WEAPONS_RESERVE_PARAM.to_string(),
-        DEFAULT_POWER_WEAPONS_RESERVE,
-    );
-    // A shared zero-reserve param the lowering baseline rules reference so every
-    // rule declares a reserve (AC2) without ever gating a de-allocation.
-    param.insert(POWER_BASELINE_RESERVE_PARAM.to_string(), 0.0);
-    let helm = crate::modifiers::power_system::HELM_POWER_GROUP;
-    let weapons = crate::modifiers::power_system::WEAPONS_POWER_GROUP;
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param,
-        rule: vec![
-            FineSystemAiRuleToml {
-                priority: 10,
-                channel: helm.to_string(),
-                when: format!(
-                    "fact({POWER_THRUST_FACT}) >= param({POWER_THRUST_THRESHOLD_PARAM}) \
-                     and fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_HELM_RESERVE_PARAM})"
-                ),
-                verb: POWER_SET_ALLOCATION_VERB.to_string(),
-                value: false,
-                level: DEFAULT_POWER_ELEVATED_LEVEL,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: helm.to_string(),
-                when: format!(
-                    "fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_BASELINE_RESERVE_PARAM})"
-                ),
-                verb: POWER_SET_ALLOCATION_VERB.to_string(),
-                value: false,
-                level: DEFAULT_POWER_BASELINE_LEVEL,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 10,
-                channel: weapons.to_string(),
-                when: format!(
-                    "fact({POWER_RED_ALERT_FACT}) > 0 \
-                     and fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_WEAPONS_RESERVE_PARAM})"
-                ),
-                verb: POWER_SET_ALLOCATION_VERB.to_string(),
-                value: false,
-                level: DEFAULT_POWER_ELEVATED_LEVEL,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: weapons.to_string(),
-                when: format!(
-                    "fact({POWER_BATTERY_PCT_FACT}) >= param({POWER_BASELINE_RESERVE_PARAM})"
-                ),
-                verb: POWER_SET_ALLOCATION_VERB.to_string(),
-                value: false,
-                level: DEFAULT_POWER_BASELINE_LEVEL,
-                response_index: 0,
-            },
-        ],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default blaster-bank open-fire policy synthesised for AI-capable
-/// blaster banks that do not author an inline `ai` block (issue #781). Mirror of
-/// [`default_phaser_bank_ai_config`] on the `blaster_fire` channel: always fire,
-/// with the host still enforcing availability, cooldown, range, arc, and target
-/// validity before the volley starts.
-pub fn default_blaster_bank_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: BLASTER_FIRE_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: BLASTER_FIRE_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default torpedo-tube policy synthesised for AI-capable tubes
-/// that do not author an inline `ai` block (issue #782).
-///
-/// Two unconditional rules — one on the `torpedo_load` channel, one on the
-/// `torpedo_launch` channel — so a tube with no authored policy keeps loading and
-/// launching exactly as before (AC1 baseline). The host still enforces loaded
-/// state, magazine availability, target validity, range, and arc; the DECISION to
-/// load or launch now flows through data-authored policy verbs a designer can
-/// gate. No count/range/arc is pinned in the verbs; those stay TOML on the tube.
-/// An explicit `idle` is the opt-out.
-pub fn default_torpedo_tube_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: TORPEDO_LOAD_CHANNEL.to_string(),
-                when: "true".to_string(),
-                verb: TORPEDO_LOAD_VERB.to_string(),
-                value: false,
-                level: 0,
-                response_index: 0,
-            },
-            FineSystemAiRuleToml {
-                priority: 0,
-                channel: TORPEDO_LAUNCH_CHANNEL.to_string(),
-                when: "true".to_string(),
-                verb: TORPEDO_LAUNCH_VERB.to_string(),
-                value: false,
-                level: 0,
-                response_index: 0,
-            },
-        ],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
-}
-
-/// The canonical default torpedo-magazine policy synthesised for a shared
-/// magazine that does not author an inline `ai` block (issue #782). One
-/// unconditional rule on the `torpedo_magazine_grant` channel: always grant. This
-/// reproduces the pre-#782 baseline where every claim that passed the offline +
-/// non-empty gates was granted; the offline gate remains the hard authority and
-/// this policy is a data-authored arbiter layered on top.
-pub fn default_torpedo_magazine_ai_config() -> FineSystemAiConfigToml {
-    FineSystemAiConfigToml {
-        evaluate_every_ticks: default_evaluate_every_ticks(),
-        idle: false,
-        param: std::collections::HashMap::new(),
-        rule: vec![FineSystemAiRuleToml {
-            priority: 0,
-            channel: TORPEDO_MAGAZINE_CHANNEL.to_string(),
-            when: "true".to_string(),
-            verb: TORPEDO_MAGAZINE_GRANT_VERB.to_string(),
-            value: false,
-            level: 0,
-            response_index: 0,
-        }],
-        initial_state: None,
-        state: Vec::new(),
-        memory: std::collections::HashMap::new(),
-    }
 }
 
 /// Validate an inline fine-system AI policy before world activation
@@ -4873,21 +3746,24 @@ pub struct EntityConfig {
 impl EntityConfig {
     /// Parse and validate an entity TOML in the default AI-declaration mode.
     ///
-    /// That mode is [`AiDeclarationMode::DEFAULT`], which is `Lenient` today:
-    /// an AI-capable fine system that declares neither a policy nor an explicit
-    /// idle state loads fine and gets one synthesised at spawn. Flipping that
-    /// one const to `Strict` (issue #885b's completion gate) makes the omission
-    /// a load error on every path through here at once — see
-    /// [`crate::entities::ai_declaration_manifest`].
+    /// That mode is [`AiDeclarationMode::DEFAULT`], and since #885b stage 5d it
+    /// is `Strict`: an AI-capable fine system that declares neither a policy nor
+    /// an explicit idle state is a LOAD ERROR here, on every path at once. The
+    /// synthesisers that used to fill the gap are gone, so an undeclared system
+    /// would simply never act — see [`crate::entities::ai_declaration_manifest`].
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         Self::from_toml_in_mode(s, AiDeclarationMode::DEFAULT)
     }
 
     /// [`Self::from_toml`] with the AI-declaration mode chosen explicitly.
     ///
-    /// Exists so tests can exercise `Strict` while the shipped default stays
-    /// `Lenient` — the alternative, a cargo feature, would flip under
-    /// `--all-features` and stop every shipped hull loading.
+    /// The only remaining caller of [`AiDeclarationMode::Lenient`] is a test
+    /// fixture that is deliberately NOT a complete hull: a snippet exercising
+    /// beam colours, torpedo fields or marker resolution declares no AI and has
+    /// no business authoring nineteen blocks to say so. Nothing in production
+    /// passes it — `ai_declaration_manifest::tests` asserts the default is
+    /// `Strict`, and the spawner attaches nothing for an undeclared system
+    /// either way.
     pub fn from_toml_in_mode(
         s: &str,
         ai_declarations: AiDeclarationMode,
@@ -5880,7 +4756,11 @@ fire_arc_deg = 180.0
 auto_arc_deg = 180.0
 beam_color = [1.0, 0.5, 0.2, 0.9]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let w = config
             .weapons_console
             .expect("weapons_console must be Some");
@@ -5898,7 +4778,11 @@ facing_deg = 0.0
 fire_arc_deg = 180.0
 auto_arc_deg = 180.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let w = config
             .weapons_console
             .expect("weapons_console must be Some");
@@ -6776,7 +5660,11 @@ hull_integrity = 50.0
 
 [behaviour]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         assert!(config.hull.is_some());
         assert!(config.behaviour.is_some());
     }
@@ -6797,7 +5685,11 @@ directive_loop = true
 base_priority = 20.0
 target_speed = 0.5
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let behaviour = config.behaviour.expect("behaviour must be Some");
         assert_eq!(behaviour.doctrine.len(), 1);
         let d = &behaviour.doctrine[0];
@@ -6822,7 +5714,11 @@ base_priority = 35.0
 target_speed = 0.8
 maintain_range = 25.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let d = &config.behaviour.unwrap().doctrine[0];
         assert_eq!(d.id, "destroy-hostiles");
         assert_eq!(d.directive_kind.as_deref(), Some("Destroy"));
@@ -6841,7 +5737,11 @@ text = "Patrol"
 base_priority = 10.0
 target_speed = -0.5
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let d = &config.behaviour.unwrap().doctrine[0];
         assert_eq!(d.target_speed, 0.0, "negative target_speed must clamp to 0");
     }
@@ -6857,7 +5757,11 @@ text = "Pursue"
 base_priority = 10.0
 target_speed = 1.5
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let d = &config.behaviour.unwrap().doctrine[0];
         assert_eq!(d.target_speed, 1.0, "target_speed > 1 must clamp to 1");
     }
@@ -6867,7 +5771,11 @@ target_speed = 1.5
         let toml_str = r##"
 [behaviour]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let behaviour = config.behaviour.expect("behaviour must be Some");
         assert!(
             behaviour.doctrine.is_empty(),
@@ -6893,7 +5801,11 @@ text = "Destroy"
 directive_kind = "Destroy"
 base_priority = 35.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let behaviour = config.behaviour.expect("behaviour must be Some");
         assert_eq!(behaviour.doctrine.len(), 2);
         assert_eq!(behaviour.doctrine[0].id, "patrol");
@@ -8456,9 +7368,15 @@ hull_max_hp = 6
 
     // ── validate_doctrine_directives ───────────────────────────────────────
 
+    /// A doctrine-only fixture. Lenient: the subject is directive validation, and
+    /// a bare `[behaviour]` snippet is not a hull — see
+    /// [`EntityConfig::from_toml_in_mode`].
     fn doctrine_toml(body: &str) -> Result<EntityConfig, String> {
-        EntityConfig::from_toml(&format!("[behaviour]\n\n[[behaviour.doctrine]]\n{body}"))
-            .map_err(|e| e.to_string())
+        EntityConfig::from_toml_in_mode(
+            &format!("[behaviour]\n\n[[behaviour.doctrine]]\n{body}"),
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .map_err(|e| e.to_string())
     }
 
     #[test]
@@ -8599,7 +7517,11 @@ turn_rate_deg_per_sec = 90.0
 lifespan = 25.0
 load_time = 8.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes must be Some");
         assert_eq!(t.count, 12);
         assert_eq!(t.damage_hull, 60);
@@ -8622,7 +7544,11 @@ load_time = 8.0
 [torpedoes]
 count = 99
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes must be Some");
         assert_eq!(t.count, 99, "override applied");
         assert_eq!(t.damage_hull, 50, "default preserved");
@@ -8894,7 +7820,11 @@ beam_damage_per_sec = 12.0
 beam_duration_secs = 4.0
 cooldown_secs = 7.5
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         let combat = PhaserCombatConfig::from_weapons_console(&wc);
         assert_eq!(combat.banks.len(), 1);
@@ -8930,7 +7860,11 @@ facing_deg = 90.0
 fire_arc_deg = 180.0
 auto_arc_deg = 120.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         assert_eq!(wc.phaser_banks.len(), 2);
         assert_eq!(wc.phaser_banks[0].id, "port");
@@ -8956,7 +7890,11 @@ facing_deg = -90.0
 fire_arc_deg = 180.0
 auto_arc_deg = 120.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         assert_eq!(wc.phaser_banks[0].shield_pierce, None);
     }
@@ -8973,7 +7911,11 @@ fire_arc_deg = 180.0
 auto_arc_deg = 120.0
 shield_pierce = 0.6
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let wc = config.weapons_console.expect("weapons_console");
         assert_eq!(wc.phaser_banks[0].shield_pierce, Some(0.6));
     }
@@ -8989,7 +7931,11 @@ id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 90.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes");
         assert_eq!(t.shield_pierce, 0.0);
         // Propagates into the runtime config that the in-flight torpedo
@@ -9009,7 +7955,11 @@ id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 90.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes");
         assert!((t.shield_pierce - 0.5).abs() < 1e-6);
         assert!((t.to_runtime().shield_pierce - 0.5).abs() < 1e-6);
@@ -9193,7 +8143,11 @@ id = "aft"
 facing_deg = 180.0
 fire_arc_deg = 90.0
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes");
         assert_eq!(t.tubes.len(), 3);
         assert_eq!(t.tubes[0].id, "fore_port");
@@ -9209,7 +8163,11 @@ fire_arc_deg = 90.0
 [torpedoes]
 count = 10
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("parse must succeed");
         let t = config.torpedoes.expect("torpedoes");
         assert!(
             t.tubes.is_empty(),
@@ -9588,7 +8546,7 @@ value = false
 
     #[test]
     fn default_captain_policy_validates_and_resolves() {
-        let cfg = default_captain_ai_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("captain");
         assert!(validate_fine_system_ai_policy(&cfg, CHANNELS, VERBS).is_ok());
         assert!(cfg.to_policy().is_ok());
     }
@@ -9603,20 +8561,62 @@ value = false
     #[test]
     fn every_shipped_stateless_default_still_parses_as_stateless() {
         let shipped: Vec<(&str, FineSystemAiConfigToml)> = vec![
-            ("captain", default_captain_ai_config()),
-            ("comms_response", default_comms_response_ai_config()),
-            ("engines", default_engines_ai_config()),
-            ("steering", default_steering_ai_config()),
-            ("lateral", default_lateral_ai_config()),
-            ("vertical", default_vertical_ai_config()),
-            ("impulse", default_impulse_ai_config()),
-            ("boost", default_boost_ai_config()),
-            ("phaser_bank", default_phaser_bank_ai_config()),
-            ("blaster_bank", default_blaster_bank_ai_config()),
-            ("torpedo_tube", default_torpedo_tube_ai_config()),
-            ("torpedo_magazine", default_torpedo_magazine_ai_config()),
-            ("shields_focus", default_shields_focus_ai_config()),
-            ("power", default_power_ai_config()),
+            (
+                "captain",
+                crate::entities::authored_ai_pins::shipped_policy_toml("captain"),
+            ),
+            (
+                "comms_response",
+                crate::entities::authored_ai_pins::shipped_policy_toml("comms_response"),
+            ),
+            (
+                "engines",
+                crate::entities::authored_ai_pins::shipped_policy_toml("engines"),
+            ),
+            (
+                "steering",
+                crate::entities::authored_ai_pins::shipped_policy_toml("steering"),
+            ),
+            (
+                "lateral",
+                crate::entities::authored_ai_pins::shipped_policy_toml("lateral"),
+            ),
+            (
+                "vertical",
+                crate::entities::authored_ai_pins::shipped_policy_toml("vertical"),
+            ),
+            (
+                "impulse",
+                crate::entities::authored_ai_pins::shipped_policy_toml("impulse"),
+            ),
+            (
+                "boost",
+                crate::entities::authored_ai_pins::shipped_policy_toml("boost"),
+            ),
+            (
+                "phaser_bank",
+                crate::entities::authored_ai_pins::shipped_policy_toml("phaser_bank"),
+            ),
+            (
+                "blaster_bank",
+                crate::entities::authored_ai_pins::shipped_policy_toml("blaster_bank"),
+            ),
+            (
+                "torpedo_tube",
+                crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_tube"),
+            ),
+            (
+                "torpedo_magazine",
+                crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_magazine"),
+            ),
+            (
+                "shields_focus",
+                crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus"),
+            ),
+            (
+                "power",
+                crate::entities::authored_ai_pins::shipped_policy_toml("power"),
+            ),
         ];
         for (name, cfg) in shipped {
             assert!(
@@ -9998,7 +8998,7 @@ when = "state_time >= param(surge_dwell_secs)"
         // verbatim — a load rule and a launch rule, both at priority 0 — so a
         // check scoped to priority alone would have broken every tube on every
         // hull that authors no inline block.
-        let default = default_torpedo_tube_ai_config();
+        let default = crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_tube");
         assert_eq!(default.rule.len(), 2);
         assert_eq!(default.rule[0].priority, default.rule[1].priority);
         assert_ne!(default.rule[0].channel, default.rule[1].channel);
@@ -10341,7 +9341,7 @@ when = "state_time >= param(surge_dwell_secs)"
     /// latter.)
     #[test]
     fn rule_xor_state_leaves_both_honest_shapes_valid() {
-        let stateless = default_boost_ai_config();
+        let stateless = crate::entities::authored_ai_pins::shipped_policy_toml("boost");
         assert!(validate_fine_system_ai_policy(&stateless, BOOST_CHANNELS, BOOST_VERBS).is_ok());
         let stateful = stateful_cfg(Some("cruise"), vec![boost_state("cruise", &[])]);
         assert!(stateful.rule.is_empty(), "the fixture must be state-only");
@@ -11591,7 +10591,7 @@ idle = true
 
     #[test]
     fn default_phaser_and_blaster_bank_policies_validate_and_resolve() {
-        let p = default_phaser_bank_ai_config();
+        let p = crate::entities::authored_ai_pins::shipped_policy_toml("phaser_bank");
         assert!(
             validate_fine_system_ai_policy(&p, PHASER_BANK_CHANNELS, PHASER_BANK_VERBS).is_ok()
         );
@@ -11600,7 +10600,7 @@ idle = true
         assert!(!pp.idle);
         assert_eq!(pp.rules.len(), 1);
 
-        let b = default_blaster_bank_ai_config();
+        let b = crate::entities::authored_ai_pins::shipped_policy_toml("blaster_bank");
         assert!(
             validate_fine_system_ai_policy(&b, BLASTER_BANK_CHANNELS, BLASTER_BANK_VERBS).is_ok()
         );
@@ -11698,7 +10698,7 @@ value = false
 
     #[test]
     fn default_shields_focus_policy_validates_and_resolves() {
-        let s = default_shields_focus_ai_config();
+        let s = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus");
         assert!(
             validate_fine_system_ai_policy(&s, SHIELD_FOCUS_CHANNELS, SHIELD_FOCUS_VERBS).is_ok()
         );
@@ -11793,10 +10793,10 @@ default_level = 1
 
     #[test]
     fn default_power_policy_validates_and_resolves() {
-        // The synthesised default reproduces the retired engine as four rules
+        // The shipped authored block reproduces the retired engine as four rules
         // (helm elevate + baseline, weapons elevate + baseline), all emitting the
         // value-carrying allocation verb, and every rule declares a reserve param.
-        let cfg = default_power_ai_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("power");
         // Validated against the canonical group channels.
         assert!(validate_fine_system_ai_policy(
             &cfg,
@@ -11807,11 +10807,23 @@ default_level = 1
         let p = cfg.to_policy().expect("default power policy resolves");
         assert!(!p.idle);
         assert_eq!(p.rules.len(), 4);
-        // The elevate rules carry the absolute magnitude in the verb payload.
-        assert!(p.rules.iter().any(|r| r.verb
-            == crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(
-                DEFAULT_POWER_ELEVATED_LEVEL
-            )));
+        // The elevate rules carry the absolute magnitude in the verb payload, and
+        // the elevated level is strictly above the baseline one — the authored
+        // numbers themselves are the designer's business (#885b stage 5d deleted
+        // the Rust constants they used to have to match).
+        let levels: Vec<u8> = p
+            .rules
+            .iter()
+            .filter_map(|r| match r.verb {
+                crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(level) => Some(level),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(levels.len(), 4, "every rule carries an allocation payload");
+        assert!(
+            levels.iter().max() > levels.iter().min(),
+            "the elevate rules must raise their group above the baseline rules, or              the whole policy is a no-op: {levels:?}"
+        );
         assert!(cfg.param.contains_key(POWER_HELM_RESERVE_PARAM));
         assert!(cfg.param.contains_key(POWER_WEAPONS_RESERVE_PARAM));
     }
@@ -12030,7 +11042,7 @@ verb = "focus_shield_arc"
 
     #[test]
     fn default_torpedo_tube_and_magazine_policies_validate_and_resolve() {
-        let t = default_torpedo_tube_ai_config();
+        let t = crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_tube");
         assert!(
             validate_fine_system_ai_policy(&t, TORPEDO_TUBE_CHANNELS, TORPEDO_TUBE_VERBS).is_ok()
         );
@@ -12039,7 +11051,7 @@ verb = "focus_shield_arc"
         assert!(!tp.idle);
         assert_eq!(tp.rules.len(), 2);
 
-        let m = default_torpedo_magazine_ai_config();
+        let m = crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_magazine");
         assert!(validate_fine_system_ai_policy(
             &m,
             TORPEDO_MAGAZINE_CHANNELS,
@@ -12076,7 +11088,11 @@ when = "fact(target_facing_shields) <= 0"
 verb = "launch_torpedo"
 value = false
 "#;
-        let cfg = EntityConfig::from_toml(toml).expect("tube ai must parse + validate");
+        let cfg = EntityConfig::from_toml_in_mode(
+            toml,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("tube ai must parse + validate");
         let tube = &cfg.torpedoes.unwrap().tubes[0];
         let policy = tube.ai.as_ref().unwrap().to_policy().unwrap();
         assert_eq!(policy.rules.len(), 2);
@@ -12136,7 +11152,11 @@ fire_arc_deg = 90.0
 [torpedoes.tubes.ai]
 idle = true
 "#;
-        let cfg = EntityConfig::from_toml(toml).expect("tube idle ai must parse");
+        let cfg = EntityConfig::from_toml_in_mode(
+            toml,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("tube idle ai must parse");
         let tube = &cfg.torpedoes.unwrap().tubes[0];
         assert!(tube.ai.as_ref().unwrap().to_policy().unwrap().idle);
     }
@@ -12329,7 +11349,7 @@ value = true
 
     #[test]
     fn default_helm_policies_validate_and_resolve() {
-        let eng = default_engines_ai_config();
+        let eng = crate::entities::authored_ai_pins::shipped_policy_toml("engines");
         assert!(validate_fine_system_ai_policy(&eng, ENGINES_CHANNELS, ENGINES_VERBS).is_ok());
         let eng_policy = eng.to_policy().expect("engines policy resolves");
         assert_eq!(
@@ -12342,7 +11362,7 @@ value = true
             "the default Engines policy actuates desired travel unconditionally"
         );
 
-        let steer = default_steering_ai_config();
+        let steer = crate::entities::authored_ai_pins::shipped_policy_toml("steering");
         assert!(validate_fine_system_ai_policy(&steer, STEERING_CHANNELS, STEERING_VERBS).is_ok());
         let steer_policy = steer.to_policy().expect("steering policy resolves");
         assert_eq!(
@@ -12481,7 +11501,7 @@ max_speed = 30.0
     fn default_secondary_helm_policies_validate_and_resolve() {
         // Lateral / vertical / impulse default to unconditional actuate/permit;
         // boost defaults to explicit idle (no AI boost).
-        let lat = default_lateral_ai_config();
+        let lat = crate::entities::authored_ai_pins::shipped_policy_toml("lateral");
         assert!(validate_fine_system_ai_policy(&lat, LATERAL_CHANNELS, LATERAL_VERBS).is_ok());
         assert_eq!(
             lat.to_policy().unwrap().resolve_channel(
@@ -12492,7 +11512,7 @@ max_speed = 30.0
             Some(&crate::ai::policy::AiPolicyVerb::ActuateLateralThrust),
         );
 
-        let vert = default_vertical_ai_config();
+        let vert = crate::entities::authored_ai_pins::shipped_policy_toml("vertical");
         assert!(validate_fine_system_ai_policy(&vert, VERTICAL_CHANNELS, VERTICAL_VERBS).is_ok());
         assert_eq!(
             vert.to_policy().unwrap().resolve_channel(
@@ -12503,7 +11523,7 @@ max_speed = 30.0
             Some(&crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust),
         );
 
-        let imp = default_impulse_ai_config();
+        let imp = crate::entities::authored_ai_pins::shipped_policy_toml("impulse");
         assert!(validate_fine_system_ai_policy(&imp, IMPULSE_CHANNELS, IMPULSE_VERBS).is_ok());
         assert_eq!(
             imp.to_policy().unwrap().resolve_channel(
@@ -12514,7 +11534,7 @@ max_speed = 30.0
             Some(&crate::ai::policy::AiPolicyVerb::EngageImpulse),
         );
 
-        let boost = default_boost_ai_config();
+        let boost = crate::entities::authored_ai_pins::shipped_policy_toml("boost");
         assert!(validate_fine_system_ai_policy(&boost, BOOST_CHANNELS, BOOST_VERBS).is_ok());
         let boost_policy = boost.to_policy().unwrap();
         assert!(
@@ -12646,7 +11666,7 @@ weight = 1.0
 
     #[test]
     fn default_sensors_selector_is_valid_and_resolves() {
-        let cfg = default_sensors_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
         assert!(validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).is_ok());
         let resolved = cfg.to_selector().expect("default selector resolves");
         assert_eq!(resolved.score.len(), 3);
@@ -12654,7 +11674,7 @@ weight = 1.0
 
     #[test]
     fn selector_unknown_source_is_rejected() {
-        let mut cfg = default_sensors_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
         cfg.sources.push("mystery-source".into());
         let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("mystery-source"), "got: {err}");
@@ -12662,7 +11682,7 @@ weight = 1.0
 
     #[test]
     fn selector_unparseable_eligibility_is_rejected() {
-        let mut cfg = default_sensors_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
         cfg.eligibility = "candidate_fact(hostile) >".into();
         let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("eligibility"), "got: {err}");
@@ -12670,7 +11690,7 @@ weight = 1.0
 
     #[test]
     fn selector_undeclared_param_reference_is_rejected() {
-        let mut cfg = default_sensors_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("sensors");
         cfg.eligibility = "self_fact(power_rating) >= param(never_declared)".into();
         let err = validate_fine_system_ai_selector(&cfg, SENSORS_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("never_declared"), "got: {err}");
@@ -12732,7 +11752,7 @@ weight = 1.0
 
     #[test]
     fn default_navigation_selector_is_valid_and_resolves() {
-        let cfg = default_navigation_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("navigation");
         assert!(validate_fine_system_ai_selector(&cfg, NAVIGATION_SELECTOR_SOURCES).is_ok());
         let resolved = cfg.to_selector().expect("default selector resolves");
         // objective + chart-contact tiers.
@@ -12741,7 +11761,7 @@ weight = 1.0
 
     #[test]
     fn navigation_selector_unknown_source_is_rejected() {
-        let mut cfg = default_navigation_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("navigation");
         cfg.sources.push("radar-contacts".into());
         let err = validate_fine_system_ai_selector(&cfg, NAVIGATION_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("radar-contacts"), "got: {err}");
@@ -12802,7 +11822,7 @@ weight = 1.0
 
     #[test]
     fn default_tactical_selector_is_valid_and_resolves() {
-        let cfg = default_tactical_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("tactical");
         assert!(validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).is_ok());
         let resolved = cfg.to_selector().expect("default selector resolves");
         // objective, sensors-designation, retained, last-attacker, radar.
@@ -12815,33 +11835,45 @@ weight = 1.0
     /// than `switch_margin`, so an in-range named Destroy objective always wins
     /// the ranking AND survives hysteresis retention — even against the ship's
     /// own current lock coinciding with its Sensors designation.
+    ///
+    /// This was a `const {}` block over the synthesiser's Rust constants until
+    /// #885b stage 5d deleted them. It is now the arithmetic form of the same
+    /// invariant read off the SHIPPED authored weights, so a designer retuning
+    /// the block in TOML is held to it — which is what the constants were really
+    /// standing in for. The behavioural form lives in
+    /// `entities::authored_ai_pins::tactical_objective_beats_the_maximum_non_objective_stack`.
     #[test]
-    fn default_tactical_selector_objective_dominates_max_non_objective_stack() {
-        // Const-block asserts: the invariant is over compile-time constants, so
-        // this is a static guard, not a runtime check (clippy).
-        const {
-            let max_non_objective = DEFAULT_TACTICAL_SENSORS_DESIGNATION_WEIGHT
-                + DEFAULT_TACTICAL_RETAINED_WEIGHT
-                + DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT
-                + DEFAULT_TACTICAL_RADAR_WEIGHT;
-            // objective must dominate the max non-objective stack by more than
-            // the switch margin — otherwise a stacked non-objective candidate can
-            // beat, or be retained over, an explicit Destroy objective (#777).
-            assert!(
-                max_non_objective
-                    < DEFAULT_TACTICAL_OBJECTIVE_WEIGHT - DEFAULT_TACTICAL_SWITCH_MARGIN
-            );
-            // Retention must still outrank a fresh last attacker so an
-            // established engagement is not broken off (retired tier-2 > tier-3).
-            assert!(DEFAULT_TACTICAL_RETAINED_WEIGHT > DEFAULT_TACTICAL_LAST_ATTACKER_WEIGHT);
-        }
+    fn shipped_tactical_selector_objective_dominates_max_non_objective_stack() {
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("tactical");
+        let weight = |fact: &str| {
+            cfg.score
+                .iter()
+                .find(|t| t.when.contains(fact))
+                .unwrap_or_else(|| panic!("the authored Tactical selector scores `{fact}`"))
+                .weight
+        };
+        let max_non_objective = weight("source_sensors_designation")
+            + weight("source_retained")
+            + weight("source_last_attacker")
+            + weight("source_radar");
+        assert!(
+            max_non_objective < weight("source_objective") - cfg.switch_margin,
+            "objective must dominate the max non-objective stack by more than the \
+             switch margin, or a stacked non-objective candidate can beat — or be \
+             retained over — an explicit Destroy objective (#777)."
+        );
+        assert!(
+            weight("source_retained") > weight("source_last_attacker"),
+            "retention must still outrank a fresh last attacker so an established \
+             engagement is not broken off (the retired tier-2 > tier-3 ordering)."
+        );
     }
 
     #[test]
     fn tactical_selector_rejects_combat_lock_source() {
         // `combat-lock` is Tactical's OWN output — unioning it would be
         // circular, so it is not a registered Tactical source.
-        let mut cfg = default_tactical_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("tactical");
         cfg.sources.push(SELECTOR_SOURCE_COMBAT_LOCK.into());
         let err = validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains(SELECTOR_SOURCE_COMBAT_LOCK), "got: {err}");
@@ -12864,32 +11896,60 @@ eligibility = "candidate_fact(detectable) > 0"
 
     // ── Repair selector (issue #785) ────────────────────────────────────────
 
-    /// BASELINE PRESERVATION: the default Repair selector reproduces the retired
+    /// BASELINE PRESERVATION: the shipped Repair selector reproduces the retired
     /// `(tier desc, deficit desc)` comparator, so a single damage-tier step must
     /// strictly dominate the entire deficit ladder.
+    ///
+    /// Read off the AUTHORED block since #885b stage 5d deleted the constants
+    /// this used to be a `const {}` block over. The behavioural form lives in
+    /// `entities::authored_ai_pins::repair_one_tier_step_beats_the_whole_deficit_ladder`.
     #[test]
-    fn default_repair_selector_tier_dominates_max_deficit_stack() {
-        const {
-            // Three bands, each worth one `deficit_weight`.
-            let max_deficit_stack = 3.0 * DEFAULT_REPAIR_DEFICIT_WEIGHT;
-            assert!(max_deficit_stack < DEFAULT_REPAIR_TIER_WEIGHT);
-            // ...and it must survive hysteresis retention too.
-            assert!(max_deficit_stack < DEFAULT_REPAIR_TIER_WEIGHT - DEFAULT_REPAIR_SWITCH_MARGIN);
-            // The bands are a monotone ladder over the [0,1] damage fraction.
-            assert!(DEFAULT_REPAIR_DEFICIT_BAND_LOW < DEFAULT_REPAIR_DEFICIT_BAND_MID);
-            assert!(DEFAULT_REPAIR_DEFICIT_BAND_MID < DEFAULT_REPAIR_DEFICIT_BAND_HIGH);
-            assert!(DEFAULT_REPAIR_DEFICIT_BAND_HIGH < 1.0);
-            // ...and they sit INSIDE the urgent range, strictly above the
-            // Damaged→Disabled damage-fraction boundary (1 − 0.25 HP). Bands
-            // placed AT the tier thresholds all fire together for every
-            // Disabled station and discriminate nothing — see the const doc.
-            assert!(DEFAULT_REPAIR_DEFICIT_BAND_LOW > 1.0 - 0.25);
-        }
+    fn shipped_repair_selector_tier_dominates_max_deficit_stack() {
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("repair");
+        let tier: Vec<f32> = cfg
+            .score
+            .iter()
+            .filter(|t| t.when.contains("tier_ordinal"))
+            .map(|t| t.weight)
+            .collect();
+        let deficit: Vec<f32> = cfg
+            .score
+            .iter()
+            .filter(|t| t.when.contains("damage_fraction"))
+            .map(|t| t.weight)
+            .collect();
+        assert_eq!(tier.len(), 3, "three tier rungs");
+        assert_eq!(deficit.len(), 3, "three deficit bands");
+        let max_deficit_stack: f32 = deficit.iter().sum();
+        let one_tier_step = tier[0];
+        assert!(
+            max_deficit_stack < one_tier_step - cfg.switch_margin,
+            "the whole deficit ladder must lose to ONE tier step, hysteresis included, \
+             or the AI starts sending teams to nearly-dead minor stations ahead of \
+             disabled critical ones."
+        );
+
+        let band = |key: &str| {
+            *cfg.param
+                .get(key)
+                .unwrap_or_else(|| panic!("the authored Repair selector declares `{key}`"))
+        };
+        let (low, mid, high) = (
+            band("deficit_band_low"),
+            band("deficit_band_mid"),
+            band("deficit_band_high"),
+        );
+        assert!(low < mid && mid < high && high < 1.0, "a monotone ladder");
+        // ...and they sit INSIDE the urgent range, strictly above the
+        // Damaged→Disabled damage-fraction boundary (1 − 0.25 HP). Bands placed
+        // AT the tier thresholds all fire together for every Disabled station
+        // and discriminate nothing.
+        assert!(low > 1.0 - 0.25);
     }
 
     #[test]
     fn default_repair_selector_config_validates() {
-        let cfg = default_repair_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("repair");
         assert!(
             validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).is_ok(),
             "the canonical Repair selector must validate against its own sources"
@@ -12902,7 +11962,7 @@ eligibility = "candidate_fact(detectable) > 0"
 
     #[test]
     fn repair_selector_rejects_unregistered_source() {
-        let mut cfg = default_repair_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("repair");
         cfg.sources.push(SELECTOR_SOURCE_RADAR_CONTACTS.into());
         let err = validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains(SELECTOR_SOURCE_RADAR_CONTACTS), "got: {err}");
@@ -12910,7 +11970,7 @@ eligibility = "candidate_fact(detectable) > 0"
 
     #[test]
     fn repair_selector_undeclared_param_is_rejected() {
-        let mut cfg = default_repair_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("repair");
         cfg.eligibility = "candidate_fact(damage_fraction) >= param(nope)".to_string();
         let err = validate_fine_system_ai_selector(&cfg, REPAIR_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("nope"), "got: {err}");
@@ -12974,24 +12034,36 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     /// population of authored `base_priority` values (20 … 100), or every hail
     /// scores identically and the "ranking" collapses onto the selector's
     /// smallest-UUID tie-break.
+    ///
+    /// Read off the AUTHORED block since #885b stage 5d deleted the constants
+    /// this used to be a `const {}` block over. The behavioural form lives in
+    /// `entities::authored_ai_pins::comms_band_ladder_ranks_hails_by_objective_utility`.
     #[test]
-    fn default_comms_selector_bands_are_a_monotone_ladder_over_real_scores() {
-        const {
-            assert!(DEFAULT_COMMS_SCORE_BAND_LOW < DEFAULT_COMMS_SCORE_BAND_MID);
-            assert!(DEFAULT_COMMS_SCORE_BAND_MID < DEFAULT_COMMS_SCORE_BAND_HIGH);
-            // Straddles the shipped authoring range: the lowest band sits above
-            // the cheapest authored priority (20) and the highest below the
-            // dearest (100), so all four buckets are reachable.
-            assert!(DEFAULT_COMMS_SCORE_BAND_LOW > 20.0);
-            assert!(DEFAULT_COMMS_SCORE_BAND_HIGH < 100.0);
-            // A hail is a one-shot event: nothing to retain, so no hysteresis.
-            assert!(DEFAULT_COMMS_SWITCH_MARGIN == 0.0);
-        }
+    fn shipped_comms_selector_bands_are_a_monotone_ladder_over_real_scores() {
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
+        let band = |key: &str| {
+            *cfg.param
+                .get(key)
+                .unwrap_or_else(|| panic!("the authored Comms selector declares `{key}`"))
+        };
+        let (low, mid, high) = (
+            band("score_band_low"),
+            band("score_band_mid"),
+            band("score_band_high"),
+        );
+        assert!(low < mid && mid < high, "a monotone ladder");
+        // Straddles the shipped authoring range: the lowest band sits above the
+        // cheapest authored priority (20) and the highest below the dearest
+        // (100), so all four buckets are reachable.
+        assert!(low > 20.0);
+        assert!(high < 100.0);
+        // A hail is a one-shot event: nothing to retain, so no hysteresis.
+        assert_eq!(cfg.switch_margin, 0.0);
     }
 
     #[test]
     fn default_comms_selector_config_validates() {
-        let cfg = default_comms_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
         assert!(
             validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).is_ok(),
             "the canonical Comms selector must validate against its own sources"
@@ -13012,7 +12084,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     ///     enforces.
     #[test]
     fn default_comms_selector_eligibility_names_the_anti_respam_and_availability_gates() {
-        let cfg = default_comms_target_selector_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
         assert!(
             cfg.eligibility
                 .contains("candidate_fact(has_open_hail_thread) < 1"),
@@ -13033,7 +12105,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn comms_selector_rejects_unregistered_source() {
-        let mut cfg = default_comms_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
         cfg.sources.push(SELECTOR_SOURCE_RADAR_CONTACTS.into());
         let err = validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains(SELECTOR_SOURCE_RADAR_CONTACTS), "got: {err}");
@@ -13041,7 +12113,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn comms_selector_undeclared_param_is_rejected() {
-        let mut cfg = default_comms_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
         cfg.eligibility = "candidate_fact(objective_score) >= param(nope)".to_string();
         let err = validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).unwrap_err();
         assert!(err.contains("nope"), "got: {err}");
@@ -13049,7 +12121,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn comms_selector_bad_guard_is_rejected() {
-        let mut cfg = default_comms_target_selector_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_selector_toml("comms_hail");
         cfg.eligibility = "candidate_fact(in_range) >>> 0".to_string();
         assert!(validate_fine_system_ai_selector(&cfg, COMMS_SELECTOR_SOURCES).is_err());
     }
@@ -13066,7 +12138,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     /// `comms_available` (AC2 — a Destroyed Comms system answers nothing).
     #[test]
     fn default_comms_response_ai_config_reproduces_the_retired_stub_decision() {
-        let cfg = default_comms_response_ai_config();
+        let cfg = crate::entities::authored_ai_pins::shipped_policy_toml("comms_response");
         assert!(
             validate_fine_system_ai_policy(&cfg, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
                 .is_ok(),
@@ -13079,7 +12151,10 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             "AC2 system availability and the router's range precondition are both \
              named — an unguarded rule re-emits rejected responses every tick"
         );
-        assert_eq!(cfg.rule[0].response_index, DEFAULT_COMMS_RESPONSE_INDEX);
+        assert_eq!(
+            cfg.rule[0].response_index, 0,
+            "the shipped policy answers with the FIRST response, reproducing the              retired `record_response(id, 0)` stub's decision"
+        );
         let policy = cfg.to_policy().expect("must resolve to a typed policy");
         assert_eq!(
             policy.rules[0].verb,
@@ -13120,7 +12195,8 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn comms_response_policy_rejects_wrong_verb_and_unknown_channel() {
-        let mut wrong_verb = default_comms_response_ai_config();
+        let mut wrong_verb =
+            crate::entities::authored_ai_pins::shipped_policy_toml("comms_response");
         wrong_verb.rule[0].verb = POWER_SET_ALLOCATION_VERB.to_string();
         let err = validate_fine_system_ai_policy(
             &wrong_verb,
@@ -13130,7 +12206,8 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         .unwrap_err();
         assert!(err.contains(POWER_SET_ALLOCATION_VERB), "got: {err}");
 
-        let mut wrong_channel = default_comms_response_ai_config();
+        let mut wrong_channel =
+            crate::entities::authored_ai_pins::shipped_policy_toml("comms_response");
         wrong_channel.rule[0].channel = "shield_focus".to_string();
         let err = validate_fine_system_ai_policy(
             &wrong_channel,
@@ -13143,7 +12220,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn comms_response_policy_rejects_undeclared_param() {
-        let mut cfg = default_comms_response_ai_config();
+        let mut cfg = crate::entities::authored_ai_pins::shipped_policy_toml("comms_response");
         cfg.rule[0].when = "fact(response_count) > param(nope)".to_string();
         let err = validate_fine_system_ai_policy(&cfg, COMMS_RESPOND_CHANNELS, COMMS_RESPOND_VERBS)
             .unwrap_err();
@@ -13482,7 +12559,11 @@ ai_only = true
         // A hull that authors [behaviour] but no red_alert system. Spawn
         // provisioning must add exactly one AI-only, ownerless red_alert
         // capability so the AI captain can raise it.
-        let config = EntityConfig::from_toml(BARE_BEHAVIOUR_HULL).expect("fixture must parse");
+        let config = EntityConfig::from_toml_in_mode(
+            BARE_BEHAVIOUR_HULL,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("fixture must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(
             reds.len(),
@@ -13534,7 +12615,11 @@ id = "phaser-fore"
 kind = "phaser_bank"
 ai_only = true
 "#;
-        let config = EntityConfig::from_toml(toml_str).expect("fixture must parse");
+        let config = EntityConfig::from_toml_in_mode(
+            toml_str,
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect("fixture must parse");
         let reds = red_alert_systems(&config);
         assert_eq!(reds.len(), 1, "behaviour NPC provisioned one red_alert");
         assert!(reds[0].ai_only && reds[0].station.is_none());

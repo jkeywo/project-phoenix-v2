@@ -1329,7 +1329,7 @@ mod tests {
         // `param`s from the retained typed `default_shields_ai_*()` values, so a
         // ship that omits `[shields_console.ai_policy]` feeds the kernel exactly
         // the windows/thresholds it always did.
-        let policy = crate::entities::config::default_shields_focus_ai_config()
+        let policy = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus")
             .to_policy()
             .unwrap();
         let typed = crate::ship::shields::ShieldsAiConfigResource::default();
@@ -1364,7 +1364,7 @@ mod tests {
         // The kernel is unchanged: feeding it windows/thresholds read from the
         // default policy `param` map yields the identical decision to feeding the
         // typed defaults directly, over a concentrated-damage scenario.
-        let policy = crate::entities::config::default_shields_focus_ai_config()
+        let policy = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus")
             .to_policy()
             .unwrap();
         let p = |name: &str| policy.params.get(name).unwrap() as f32;

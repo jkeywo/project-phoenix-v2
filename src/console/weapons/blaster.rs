@@ -258,12 +258,6 @@ pub(crate) fn tick_blaster_auto_fire(
         ship_q.iter().len()
     );
 
-    // Canonical fallback for any bank missing an attached policy (bare-`App`
-    // fixtures). Built once — unconditional fire (baseline, AC1).
-    let default_bank_policy = crate::entities::config::default_blaster_bank_ai_config()
-        .to_policy()
-        .unwrap_or_default();
-
     for (
         entity_uuid,
         control_sources,
@@ -336,9 +330,13 @@ pub(crate) fn tick_blaster_auto_fire(
             // resolve its own authored open-fire policy over a seeded readiness
             // snapshot. An idle bank (or one whose guard holds) is skipped,
             // leaving other banks free to fire (per-bank independence, AC7).
-            let policy = bank_policies_opt
-                .and_then(|p| p.0.get(&bank.config.id))
-                .unwrap_or(&default_bank_policy);
+            //
+            // A bank with NO entry does not fire: since #885b stage 5d there is
+            // no synthesised stand-in, and strict AI-declaration mode rejects a
+            // bank that authors no inline `ai` block at load.
+            let Some(policy) = bank_policies_opt.and_then(|p| p.0.get(&bank.config.id)) else {
+                continue;
+            };
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc);
             if blaster_bank_policy_fires(policy, &facts) {
                 banks_to_fire.push(bank.config.id.clone());

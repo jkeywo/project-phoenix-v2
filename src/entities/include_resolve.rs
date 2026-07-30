@@ -1342,11 +1342,19 @@ base_priority = 10.0
 id = "patrol-lane"
 directive_kind = "Destroy"
 "#;
+        // Lenient: these two snippets are doctrine fixtures, not hulls, and
+        // the point is the RESOLVED document's doctrine reconciliation. Strict
+        // AI-declaration mode would reject both for the fifteen declarations
+        // neither was ever meant to carry — see `EntityConfig::from_toml_in_mode`.
+        let lenient = crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient;
         assert!(
-            EntityConfig::from_toml(FRAGMENT).is_ok(),
+            EntityConfig::from_toml_in_mode(FRAGMENT, lenient).is_ok(),
             "fragment is valid alone"
         );
-        assert!(EntityConfig::from_toml(HULL).is_ok(), "hull is valid alone");
+        assert!(
+            EntityConfig::from_toml_in_mode(HULL, lenient).is_ok(),
+            "hull is valid alone"
+        );
 
         let hull_with_include = format!("includes = [\"base.toml\"]\n{HULL}");
         let resolved = resolve(
@@ -1633,13 +1641,16 @@ directive_kind = "Destroy"
         const COMPOSED: &str = "assets/entities/fragments/composed_escort.toml";
         const CORE: &str = "assets/entities/fragments/npc_escort_core.toml";
         const CAPTAIN: &str = "assets/entities/fragments/ai/captain_red_alert_aggressive.toml";
+        /// The fourteen other ship-level AI declarations, which every AI-bearing
+        /// hull has owed since #885b stage 5d made strict mode the default.
+        const BASELINE: &str = "assets/entities/fragments/ai/fleet_baseline.toml";
 
         #[test]
         fn the_composed_fixture_hull_resolves_off_disk() {
             let resolved = resolve_from_disk(COMPOSED).expect("fixture hull must resolve");
             assert_eq!(
                 resolved.provenance.sources(),
-                vec![CAPTAIN, CORE, COMPOSED],
+                vec![CAPTAIN, BASELINE, CORE, COMPOSED],
                 "depth-first in declared order, declaring hull last"
             );
         }

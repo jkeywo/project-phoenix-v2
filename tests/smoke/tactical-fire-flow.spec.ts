@@ -135,8 +135,15 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
   // Get the raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
+  // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
+  // the player's cruiser and one hostile — so `npc` is unambiguous here.
+  // This deliberately does NOT also require an `enemy` tag: that tag is purely
+  // descriptive (nothing in `src/` or `gui/` reads it; hostility comes from
+  // factions), it was carried by the retired pirate_raider hull and not by the
+  // Ironveil that replaced it, and requiring it made this test depend on a
+  // hull's self-description rather than on what the world actually spawns.
   const raider = entities.find(
-    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc') && e.tags.includes('enemy'),
+    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc'),
   );
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
@@ -196,8 +203,15 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   // Get raider UUID from WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
+  // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
+  // the player's cruiser and one hostile — so `npc` is unambiguous here.
+  // This deliberately does NOT also require an `enemy` tag: that tag is purely
+  // descriptive (nothing in `src/` or `gui/` reads it; hostility comes from
+  // factions), it was carried by the retired pirate_raider hull and not by the
+  // Ironveil that replaced it, and requiring it made this test depend on a
+  // hull's self-description rather than on what the world actually spawns.
   const raider = entities.find(
-    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc') && e.tags.includes('enemy'),
+    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc'),
   );
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
@@ -275,8 +289,15 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
   // Get raider UUID.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000) as any;
   const entities: any[] = worldSetup?.data?.world?.entities ?? [];
+  // Select on `npc` alone. MINIMAL_TEST_WORLD spawns exactly two entities —
+  // the player's cruiser and one hostile — so `npc` is unambiguous here.
+  // This deliberately does NOT also require an `enemy` tag: that tag is purely
+  // descriptive (nothing in `src/` or `gui/` reads it; hostility comes from
+  // factions), it was carried by the retired pirate_raider hull and not by the
+  // Ironveil that replaced it, and requiring it made this test depend on a
+  // hull's self-description rather than on what the world actually spawns.
   const raider = entities.find(
-    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc') && e.tags.includes('enemy'),
+    (e: any) => Array.isArray(e.tags) && e.tags.includes('npc'),
   );
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;

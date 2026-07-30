@@ -33,6 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::entity_includes::FragmentSource;
 use crate::entity_loader::TemplateLoader;
 use crate::world::config::{
     CommsDialogueNode, TriggerAction, TriggerCondition, WorldConfig, WorldEntity,
@@ -630,6 +631,82 @@ fn validate_doctrine_anchors_in(
     findings
 }
 
+/// Reject an entity template whose include closure cannot be composed
+/// (issue #906).
+///
+/// # Why this joins the world-finding flow at all
+///
+/// The `includes` resolver (issue #869) has been on every production load path
+/// since the commit that added it, but each host handled a composition failure
+/// *privately*: `world::server::build_layer_config_cache` warned and skipped,
+/// `entity_loader::FsTemplateLoader` returned `None`, the browser preload logged
+/// to the JS console. The net effect was that a world with a broken include
+/// silently lost an entity — nothing reached the editor's validation badge, and
+/// nothing reached the atomic-activation gate ([`has_error`]). Composition is a
+/// content error like any other, so it is reported like any other.
+///
+/// # Why it is an ERROR and never a warning
+///
+/// A template that declares `includes` has said it is incomplete on its own.
+/// Spawning it from the fragments that happened to resolve would put a
+/// half-assembled hull in the world, which is the one outcome composition must
+/// never produce. [`crate::entity_includes::IncludeError`] has no warning
+/// severity for the same reason.
+///
+/// The finding's `source` is the resolver's own: the file that *declared* the
+/// bad include, with a best-effort line, which is the file the author has to
+/// edit. The world and entity that pulled it in are named in the message
+/// instead, since one broken fragment can be reached from many worlds.
+fn validate_template_composition_in(
+    src: &WorldSource,
+    fragments: &dyn FragmentSource,
+    seen: &mut HashSet<String>,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for inst in collect_spawned_instances(src.config) {
+        // Key on the CANONICAL path, matching what `composition_finding` does
+        // internally. Authored spellings of one template vary freely —
+        // `./assets/x.toml`, `assets/./x.toml`, backslashes on Windows — and
+        // keying on the raw string would let two spellings of one hull produce
+        // two findings for one broken include, which is exactly the duplication
+        // this set exists to prevent.
+        if !seen.insert(crate::entity_includes::canonical_template_path(
+            inst.template_path,
+        )) {
+            continue;
+        }
+        let Some(mut finding) =
+            crate::entity_includes::composition_finding(inst.template_path, fragments)
+        else {
+            continue;
+        };
+        finding.message = format!(
+            "entity '{}' (template '{}') could not be composed, from '{}': {}",
+            inst.label, inst.template_path, src.path, finding.message
+        );
+        findings.push(finding);
+    }
+    findings
+}
+
+/// Composition findings for one world's entity templates, for callers that hold
+/// a single [`WorldConfig`] rather than a whole effective composition — the
+/// Bevy `Startup` spawn gate in `world::server`.
+///
+/// `path`/`toml` are accepted for symmetry with [`validate_entity_identity`] and
+/// [`validate_objectives`]; the spawn gate passes `""` for both, exactly as it
+/// does there. Findings carry the resolver's own source location regardless.
+pub fn validate_template_composition(
+    path: &str,
+    toml: &str,
+    config: &WorldConfig,
+    fragments: &dyn FragmentSource,
+) -> Vec<WorldFinding> {
+    let src = WorldSource::new(path, toml, config);
+    let mut seen = HashSet::new();
+    validate_template_composition_in(&src, fragments, &mut seen)
+}
+
 /// Validate the effective composition (`world-authoring-validation-state`).
 ///
 /// Runs per-world identity checks, then resolves every authored entity
@@ -660,10 +737,31 @@ pub fn validate_composition(root: &WorldSource, children: &[WorldSource]) -> Vec
 }
 
 /// [`validate_composition`] with an explicit entity-template source.
+///
+/// Include fragments still come from the host source
+/// ([`crate::entity_includes::HostFragmentSource`]) — a `TemplateLoader` serves
+/// parsed configs and cannot serve raw fragment text. Use
+/// [`validate_composition_with_fragments`] to control both.
 pub fn validate_composition_with(
     root: &WorldSource,
     children: &[WorldSource],
     template_loader: &dyn TemplateLoader,
+) -> Vec<WorldFinding> {
+    validate_composition_with_fragments(
+        root,
+        children,
+        template_loader,
+        &crate::entity_includes::HostFragmentSource,
+    )
+}
+
+/// [`validate_composition_with`] with an explicit *fragment* source as well —
+/// the raw-TOML channel include resolution reads (issue #906).
+pub fn validate_composition_with_fragments(
+    root: &WorldSource,
+    children: &[WorldSource],
+    template_loader: &dyn TemplateLoader,
+    fragments: &dyn FragmentSource,
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
 
@@ -839,6 +937,23 @@ pub fn validate_composition_with(
             child,
             &declared_anchors,
             template_loader,
+        ));
+    }
+
+    // Entity-template composition (issue #906). Deduplicated across the WHOLE
+    // effective composition: a hull spawned by both the root and a child has
+    // one broken include, not two.
+    let mut composed_seen: HashSet<String> = HashSet::new();
+    findings.extend(validate_template_composition_in(
+        root,
+        fragments,
+        &mut composed_seen,
+    ));
+    for child in children {
+        findings.extend(validate_template_composition_in(
+            child,
+            fragments,
+            &mut composed_seen,
         ));
     }
 
@@ -1549,5 +1664,182 @@ name = "ghost"
             checked > 0,
             "expected at least one shipped world to validate"
         );
+    }
+
+    // ── Template composition joins the finding flow (issue #906) ─────────────
+
+    fn fragments(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect()
+    }
+
+    fn one_entity_world(template_path: &str, name: &str) -> String {
+        format!("[[entity]]\ntemplate_path = \"{template_path}\"\nname = \"{name}\"\n")
+    }
+
+    /// The whole point of the issue: a world whose entity template cannot be
+    /// composed FAILS VALIDATION instead of quietly losing the entity.
+    #[test]
+    fn a_missing_fragment_blocks_activation_instead_of_dropping_the_entity() {
+        let world_toml = one_entity_world("assets/entities/broken.toml", "broken_one");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[(
+            "assets/entities/broken.toml",
+            "includes = [\"fragments/absent.toml\"]\nname = \"B\"\n",
+        )]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+
+        assert!(
+            has_error(&findings),
+            "a broken include must gate activation: {findings:?}"
+        );
+        let f = findings
+            .iter()
+            .find(|f| f.category == "include-missing")
+            .unwrap_or_else(|| panic!("expected an include-missing finding: {findings:?}"));
+        assert_eq!(
+            f.source.file, "assets/entities/broken.toml",
+            "the finding names the file that DECLARED the bad include"
+        );
+        assert_eq!(f.source.line, Some(1));
+        assert!(
+            f.message.contains("broken_one") && f.message.contains("assets/worlds/w.toml"),
+            "the message names the entity and the world that pulled it in: {}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn an_include_cycle_blocks_activation() {
+        let world_toml = one_entity_world("assets/entities/a.toml", "looper");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[
+            ("assets/entities/a.toml", "includes = [\"b.toml\"]\n"),
+            ("assets/entities/b.toml", "includes = [\"a.toml\"]\n"),
+        ]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        assert!(findings.iter().any(|f| f.category == "include-cycle"));
+        assert!(has_error(&findings));
+    }
+
+    #[test]
+    fn a_malformed_includes_declaration_blocks_activation() {
+        let world_toml = one_entity_world("assets/entities/bad.toml", "bad_one");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[("assets/entities/bad.toml", "includes = \"not-an-array\"\n")]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        assert!(findings.iter().any(|f| f.category == "include-malformed"));
+        assert!(has_error(&findings));
+    }
+
+    /// A hull spawned by both layers has ONE broken include, not two.
+    #[test]
+    fn one_broken_template_is_reported_once_across_the_composition() {
+        let root_toml = one_entity_world("assets/entities/broken.toml", "root_one");
+        let root = cfg(&root_toml);
+        let child_toml = one_entity_world("assets/entities/broken.toml", "child_one");
+        let child = cfg(&child_toml);
+        let root_src = WorldSource::new("assets/worlds/root.toml", &root_toml, &root);
+        let child_src = WorldSource::new("assets/worlds/child.toml", &child_toml, &child);
+        let source = fragments(&[(
+            "assets/entities/broken.toml",
+            "includes = [\"fragments/absent.toml\"]\n",
+        )]);
+
+        let findings = validate_composition_with_fragments(
+            &root_src,
+            &[child_src],
+            &patroller_templates(),
+            &source,
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.category.starts_with("include-"))
+                .count(),
+            1,
+            "{findings:?}"
+        );
+    }
+
+    /// Two authored SPELLINGS of one path are still one broken hull.
+    ///
+    /// Authors write `./assets/…` as readily as `assets/…`, and the resolver
+    /// canonicalises before it does anything, so both spellings reach the same
+    /// template and produce the same fault. Deduplicating on the raw string
+    /// would report it twice — the same duplication
+    /// `one_broken_template_is_reported_once_across_the_composition` rules out
+    /// for two worlds, arriving instead through the back door of punctuation.
+    #[test]
+    fn two_spellings_of_one_template_are_reported_once() {
+        let world_toml = format!(
+            "{}{}",
+            one_entity_world("assets/entities/broken.toml", "plain"),
+            one_entity_world("./assets/entities/broken.toml", "dotted"),
+        );
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[(
+            "assets/entities/broken.toml",
+            "includes = [\"fragments/absent.toml\"]\n",
+        )]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.category.starts_with("include-"))
+                .count(),
+            1,
+            "one broken hull, spelled two ways, is one finding: {findings:?}"
+        );
+    }
+
+    /// A template the fragment source cannot see is NOT a composition error —
+    /// a validator must not manufacture one out of its own blindness. This is
+    /// what keeps every fixture world in this file (whose template paths are
+    /// not on disk) validating exactly as it did before #906.
+    #[test]
+    fn a_template_the_source_cannot_see_produces_no_composition_finding() {
+        let world_toml = one_entity_world("assets/entities/nowhere.toml", "ghost");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
+        assert!(!has_error(&findings), "{findings:?}");
+    }
+
+    #[test]
+    fn a_template_that_composes_cleanly_produces_no_composition_finding() {
+        let world_toml = one_entity_world("assets/entities/good.toml", "good_one");
+        let config = cfg(&world_toml);
+        let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
+        let source = fragments(&[
+            ("assets/entities/hull_core.toml", "class = \"escort\"\n"),
+            (
+                "assets/entities/good.toml",
+                "includes = [\"hull_core.toml\"]\nname = \"G\"\n",
+            ),
+        ]);
+
+        let findings =
+            validate_composition_with_fragments(&src, &[], &patroller_templates(), &source);
+        assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
+        assert!(!has_error(&findings), "{findings:?}");
     }
 }

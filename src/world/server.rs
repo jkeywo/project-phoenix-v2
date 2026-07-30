@@ -436,6 +436,17 @@ pub fn spawn_immediate_entities_internal(
         "",
         world_config,
     ));
+    // Entity-template composition (issue #906): a template whose `includes`
+    // closure is broken — a cycle, a missing fragment, a malformed `includes`
+    // list, or a composed document that does not validate — also blocks
+    // activation. Before this, `build_layer_config_cache` warned and skipped,
+    // so the world spawned MINUS that entity and nothing reached this gate.
+    identity.extend(crate::world::validate::validate_template_composition(
+        "",
+        "",
+        world_config,
+        &crate::entity_includes::HostFragmentSource,
+    ));
     if crate::world::validate::has_error(&identity) {
         bevy::log::error!(
             target: "world",
@@ -1883,8 +1894,14 @@ fn build_layer_config_cache(
                     cache.insert(entity.template_path.clone(), cfg);
                 }
                 Err(e) => {
+                    // Warn only: this builds a cache, it does not decide
+                    // whether the world activates. Since #906 the decision
+                    // belongs to `validate_template_composition`, which
+                    // `spawn_immediate_entities_internal` consults before it
+                    // spawns anything — so a composition failure now blocks the
+                    // whole world instead of quietly costing it one entity.
                     bevy::log::warn!(
-                        "build_layer_config_cache: failed to resolve '{}' - entity will be skipped: {e}",
+                        "build_layer_config_cache: failed to resolve '{}': {e}",
                         entity.template_path
                     );
                 }
@@ -4205,6 +4222,95 @@ pub(crate) mod tests {
             .get::<Transform>(spawned[0])
             .expect("spawned entity must have a Transform");
         assert_eq!(transform.translation, Vec3::new(500.0, 0.0, 0.0));
+    }
+
+    /// Issue #906: a template whose include closure is broken must BLOCK the
+    /// spawn, not cost the world one entity.
+    ///
+    /// Before this, `build_layer_config_cache` warned and skipped, so the
+    /// template simply never entered the cache and the world came up silently
+    /// short. The fragment source is seeded through
+    /// `config_cache::record_raw_template` — the same channel the browser
+    /// preload delivers text on — so the test needs no files on disk.
+    #[test]
+    fn spawn_is_blocked_when_an_entity_template_cannot_be_composed() {
+        use crate::entity_config::EntityConfig;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
+        use std::collections::HashMap;
+
+        crate::config_cache::clear_template_preload_state();
+        crate::config_cache::record_raw_template(
+            "fixture/broken.toml",
+            "includes = [\"absent.toml\"]\n".to_string(),
+        );
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/broken.toml".into(),
+            name: Some("broken_one".into()),
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([0.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/station.toml".into(),
+            name: Some("innocent_bystander".into()),
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([10.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        world_cfg
+            .name_to_uuid
+            .insert("broken_one".into(), "broken-uuid".into());
+        world_cfg
+            .name_to_uuid
+            .insert("innocent_bystander".into(), "bystander-uuid".into());
+
+        // Both templates are in the cache: the ONLY thing that can stop the
+        // spawn is the composition finding, not a cache miss.
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert(
+            "fixture/broken.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        m.insert(
+            "fixture/station.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        let cache = crate::config_cache::ConfigCache::from(m);
+
+        let spawn = |cfg: &UnifiedWorldConfig| -> usize {
+            let mut app = App::new();
+            app.add_plugins(bevy::time::TimePlugin);
+            app.insert_resource(cfg.clone());
+            let spawned: Vec<Entity> = {
+                let cfg = app.world().resource::<UnifiedWorldConfig>().clone();
+                let mut commands = app.world_mut().commands();
+                spawn_immediate_entities_internal(&mut commands, &cfg, &cache, None, None)
+            };
+            app.update();
+            spawned.len()
+        };
+
+        assert_eq!(
+            spawn(&world_cfg),
+            0,
+            "a composition failure must block the WHOLE world — the bystander must \
+             not spawn either, or activation was not atomic"
+        );
+
+        // Control: the same world, with the broken template's includes fixed,
+        // spawns both. Without this the assertion above could pass for any
+        // reason at all.
+        crate::config_cache::record_raw_template("fixture/broken.toml", "class = \"ok\"\n".into());
+        assert_eq!(spawn(&world_cfg), 2, "the control world must spawn both");
+
+        crate::config_cache::clear_template_preload_state();
     }
 
     // -- PRD #337 slice 3: NPCs through unified pipeline ------------------

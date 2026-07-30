@@ -185,6 +185,17 @@ pub fn record_raw_template(path: &str, toml_str: String) {
     });
 }
 
+/// The raw TOML the host delivered for `path`, if any.
+///
+/// The read side of [`record_raw_template`], and the browser's only source of
+/// fragment text: `entity_includes::HostFragmentSource` consults it so include
+/// resolution — and the composition validation built on it (issue #906) — works
+/// on WASM, where there is no filesystem to fall back to.
+pub fn raw_template_text(path: &str) -> Option<String> {
+    let key = crate::entity_includes::canonical_template_path(path);
+    RAW_TEMPLATE_TOML.with(|m| m.borrow().get(&key).cloned())
+}
+
 /// Note that `path` was requested as an entity template, not as a fragment.
 pub fn mark_entity_template(path: &str) {
     let canonical = crate::entity_includes::canonical_template_path(path);

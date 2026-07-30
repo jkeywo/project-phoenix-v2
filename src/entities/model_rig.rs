@@ -441,11 +441,11 @@ position = [-0.25, -0.1, -0.25]
     /// shipped (hull, sidecar, marker) triple that still exists.
     #[test]
     fn alliance_destroyer_omni_bank_marker_resolves_in_sidecar() {
-        use crate::entity_config::EntityConfig;
-
-        let ship_toml = std::fs::read_to_string("assets/entities/alliance_destroyer.toml")
-            .expect("alliance_destroyer.toml must exist");
-        let cfg = EntityConfig::from_toml(&ship_toml).expect("alliance_destroyer must parse");
+        // Through the include resolver (issue #906) so the linkage claim keeps
+        // holding once the hull is composed.
+        let cfg =
+            crate::entity_includes::load_entity_config("assets/entities/alliance_destroyer.toml")
+                .expect("alliance_destroyer must compose and parse");
 
         // The omni bank links to a marker.
         let weapons = cfg

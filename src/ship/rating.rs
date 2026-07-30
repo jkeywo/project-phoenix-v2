@@ -508,8 +508,10 @@ power_group = "ops"
                 .expect("toml file has a stem")
                 .to_string_lossy()
                 .to_string();
-            let src = std::fs::read_to_string(&path).expect("hull template must be readable");
-            let config = crate::entities::config::EntityConfig::from_toml(&src)
+            // Through the include resolver (issue #906) so this keeps covering
+            // a hull once it is composed.
+            let key = path.to_string_lossy().replace('\\', "/");
+            let config = crate::entity_includes::load_entity_config(&key)
                 .unwrap_or_else(|e| panic!("{stem} must parse: {e}"));
             let Some(ship_config) = config.ship_config.as_ref() else {
                 continue; // scenery: no stations, no systems, nothing to seed

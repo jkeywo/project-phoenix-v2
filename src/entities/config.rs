@@ -4558,8 +4558,11 @@ hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
             "assets/entities/alliance_cruiser.toml",
             "assets/entities/alliance_destroyer.toml",
         ] {
-            let text = std::fs::read_to_string(path).expect("hull TOML must be readable");
-            let config = EntityConfig::from_toml(&text).expect("hull TOML must parse");
+            // Through the include resolver (issue #906) so a composed hull is
+            // judged on its resolved document — a raw read would assert on the
+            // unresolved text and silently stop covering the hull.
+            let config =
+                crate::entity_includes::load_entity_config(path).expect("hull TOML must parse");
             let color = &config
                 .helm_console
                 .as_ref()
@@ -4964,8 +4967,11 @@ max_speed = 30.0
             if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).expect("template must be readable");
-            EntityConfig::from_toml(&text).unwrap_or_else(|e| {
+            // Resolved first (issue #906) — the strict schema applies to the
+            // COMPOSED document, which is the only thing that ever reaches
+            // `EntityConfig`.
+            let key = path.to_string_lossy().replace('\\', "/");
+            crate::entity_includes::load_entity_config(&key).unwrap_or_else(|e| {
                 panic!(
                     "entity template {} failed strict parse: {e}",
                     path.display()
@@ -8420,11 +8426,10 @@ count = 10
             if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                 continue;
             }
-            let text = match std::fs::read_to_string(&path) {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let cfg: EntityConfig = match toml::from_str(&text) {
+            // Through the include resolver (issue #906) so a composed hull is
+            // judged on its resolved document.
+            let key = path.to_string_lossy().replace('\\', "/");
+            let cfg: EntityConfig = match crate::entity_includes::load_entity_config(&key) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
@@ -8545,9 +8550,10 @@ count = 10
             if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                 continue;
             }
+            // Through the include resolver (issue #906) so a composed hull is
+            // judged on its resolved document.
             let file = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("entity readable");
-            let cfg = match EntityConfig::from_toml(&toml) {
+            let cfg = match crate::entity_includes::load_entity_config(&file) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
@@ -9141,8 +9147,12 @@ when = "state_time >= param(surge_dwell_secs)"
             if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                 continue;
             }
-            let toml = std::fs::read_to_string(&path).expect("readable template");
-            if let Err(e) = EntityConfig::from_toml(&toml) {
+            // Through the include resolver (issue #906), not `from_toml` on the
+            // raw bytes: the day a shipped hull declares `includes`, a raw read
+            // would assert on the UNRESOLVED text and this guard would quietly
+            // stop covering it.
+            let key = path.to_string_lossy().replace('\\', "/");
+            if let Err(e) = crate::entity_includes::load_entity_config(&key) {
                 panic!("shipped template {} no longer loads: {e}", path.display());
             }
             checked += 1;

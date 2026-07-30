@@ -956,11 +956,30 @@ mod tests {
 
     // ── Gating ───────────────────────────────────────────────────────────────
 
+    /// One shipped template through the real load path — include resolution
+    /// included (issue #906), so a composed hull is judged on its resolved
+    /// document rather than on the text of its own file.
     fn parse(rel: &str) -> EntityConfig {
         let path = crate_root().join(rel);
-        let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("{rel} must be readable: {e}"));
-        EntityConfig::from_toml(&src).unwrap_or_else(|e| panic!("{rel} must parse: {e}"))
+        let key = path.to_string_lossy().replace('\\', "/");
+        crate::entity_includes::load_entity_config(&key)
+            .unwrap_or_else(|e| panic!("{rel} must parse: {e}"))
+    }
+
+    /// The RESOLVED text of one shipped template (issue #906).
+    ///
+    /// For the handful of assertions that need the TOML itself rather than a
+    /// parsed config — `from_toml_in_mode`, which has no resolver-aware wrapper,
+    /// and `spawn`, which parses the text it is handed. Reading the file
+    /// directly would hand them the UNRESOLVED text the day a hull declares
+    /// `includes`, which is exactly the silent coverage loss this issue exists
+    /// to prevent.
+    fn shipped_toml(rel: &str) -> String {
+        let path = crate_root().join(rel);
+        let key = path.to_string_lossy().replace('\\', "/");
+        crate::entity_includes::resolve_from_disk(&key)
+            .unwrap_or_else(|e| panic!("{rel} must compose: {e}"))
+            .toml
     }
 
     fn hull_files() -> Vec<String> {
@@ -1235,8 +1254,10 @@ base_priority = 40.0
              never act, and US7 requires that to be an error rather than a silence"
         );
         for stem in hull_files() {
-            let path = crate_root().join(format!("assets/entities/{stem}.toml"));
-            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            // Resolved first (issue #906): the default mode applies to the
+            // COMPOSED document, which is the only thing that ever reaches
+            // `EntityConfig` on a real load path.
+            let src = shipped_toml(&format!("assets/entities/{stem}.toml"));
             EntityConfig::from_toml(&src)
                 .unwrap_or_else(|e| panic!("{stem} must still load in the default mode: {e}"));
         }
@@ -1257,8 +1278,9 @@ base_priority = 40.0
     fn strict_mode_accepts_every_shipped_hull() {
         let mut checked = 0usize;
         for stem in hull_files() {
-            let path = crate_root().join(format!("assets/entities/{stem}.toml"));
-            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            // Resolved first (issue #906) — strict mode judges the COMPOSED
+            // document, so a composed hull must not be read raw here.
+            let src = shipped_toml(&format!("assets/entities/{stem}.toml"));
             let config = EntityConfig::from_toml(&src).expect("shipped entity parses");
             assert_eq!(
                 strict_error(&config),
@@ -1333,8 +1355,7 @@ base_priority = 40.0
 
     #[test]
     fn strict_mode_accepts_scenery() {
-        let path = crate_root().join("assets/entities/station_axiom.toml");
-        let src = std::fs::read_to_string(&path).expect("readable entity toml");
+        let src = shipped_toml("assets/entities/station_axiom.toml");
         EntityConfig::from_toml_in_mode(&src, AiDeclarationMode::Strict)
             .expect("scenery has no AI-capable fine system, so strict mode has nothing to demand");
     }
@@ -1514,8 +1535,10 @@ base_priority = 40.0
     fn the_manifest_matches_the_real_spawner() {
         let mut checked = 0usize;
         for stem in hull_files() {
-            let path = crate_root().join(format!("assets/entities/{stem}.toml"));
-            let src = std::fs::read_to_string(&path).expect("readable entity toml");
+            // Resolved first (issue #906): `spawn` below is handed this same
+            // text, so a composed hull would otherwise be spawned from its
+            // unresolved file and the manifest compared against the wrong ship.
+            let src = shipped_toml(&format!("assets/entities/{stem}.toml"));
             let config = EntityConfig::from_toml(&src).expect("shipped entity parses");
             let slots = manifest(&config);
             if slots.is_empty() {
@@ -1578,8 +1601,8 @@ base_priority = 40.0
     /// silence about it is real rather than a gap in the manifest.
     #[test]
     fn an_entity_with_no_slots_gets_no_ai_declaration_attached() {
-        let path = crate_root().join("assets/entities/station_axiom.toml");
-        let src = std::fs::read_to_string(&path).expect("readable entity toml");
+        // Resolved first (issue #906) — `spawn` below is handed this same text.
+        let src = shipped_toml("assets/entities/station_axiom.toml");
         let config = EntityConfig::from_toml(&src).expect("station parses");
         assert!(manifest(&config).is_empty(), "precondition");
 

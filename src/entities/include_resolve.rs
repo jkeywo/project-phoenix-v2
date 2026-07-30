@@ -92,20 +92,61 @@ const DOCTRINE_ARRAY: &str = "behaviour.doctrine";
 
 /// Where the resolver gets template text from, keyed by canonical path.
 ///
-/// Pure by contract — the resolver never touches a filesystem or a config cache
-/// itself. Object-safe (`&self`, no generics) so callers hold a
-/// `&dyn FragmentSource`, exactly like [`crate::entity_loader::TemplateLoader`].
+/// This trait is the ONLY seam through which text enters the resolver: the
+/// resolver functions themselves ([`resolve_template`], [`preload_step`] and the
+/// merge below them) never touch a filesystem or a config cache. Individual
+/// *implementations* of the trait certainly do — `FsFragmentSource` reads the
+/// disk and [`HostFragmentSource`] reads the config cache as well — which is
+/// exactly the point of putting the seam here.
+///
+/// Object-safe (`&self`, no generics) so callers hold a `&dyn FragmentSource`,
+/// exactly like [`crate::entity_loader::TemplateLoader`].
 ///
 /// A `None` means "not available *yet*" as much as "does not exist"; which of
-/// those it is depends on the caller's [`MissingPolicy`].
+/// those it is depends on the caller's [`MissingPolicy`] and on
+/// [`FragmentSource::absence_is_final`].
 pub trait FragmentSource {
     /// The raw TOML text at `path`, or `None` when it cannot be served.
     fn read(&self, path: &str) -> Option<String>;
+
+    /// Whether a `None` from [`FragmentSource::read`] is the FINAL answer.
+    ///
+    /// `true` for a source that already holds everything it will ever hold: the
+    /// filesystem, a fixture map, a mod-pack overlay. A fragment it cannot
+    /// serve does not exist, and a validator may say so.
+    ///
+    /// `false` for a source that fills INCREMENTALLY, where absence means "not
+    /// delivered yet". The browser is the one that matters: raw templates
+    /// arrive asynchronously, so a root can be in hand a whole layer-load
+    /// before the fragment it includes. A validator that read that race as a
+    /// fault would condemn a perfectly good world — see
+    /// [`composition_finding`].
+    ///
+    /// # Why this has NO default
+    ///
+    /// A default could only be `true`, and `true` is the answer that fails
+    /// destructively: an incrementally-filling source that omits the method
+    /// gets its in-flight fragments read as faults, and the world blanks
+    /// permanently, because the layer is marked loaded and never retried. The
+    /// safe answer must not be reachable by omission.
+    ///
+    /// It also has to be a compile-time obligation rather than a tested one.
+    /// The dangerous case — someone deletes
+    /// [`HostFragmentSource::absence_is_final`] — is invisible to a native
+    /// suite, because `true` IS the native answer, so CI would stay green
+    /// while the browser broke. With no default, that deletion is a build
+    /// error on both targets instead.
+    fn absence_is_final(&self) -> bool;
 }
 
 impl FragmentSource for std::collections::HashMap<String, String> {
     fn read(&self, path: &str) -> Option<String> {
         self.get(path).cloned()
+    }
+
+    /// A fixture map is complete by construction: what it lacks does not exist.
+    fn absence_is_final(&self) -> bool {
+        true
     }
 }
 
@@ -113,13 +154,19 @@ impl FragmentSource for BTreeMap<String, String> {
     fn read(&self, path: &str) -> Option<String> {
         self.get(path).cloned()
     }
+
+    /// A fixture map — or an uploaded mod pack's file set, which is fully in
+    /// hand before validation begins — is complete by construction.
+    fn absence_is_final(&self) -> bool {
+        true
+    }
 }
 
 /// Filesystem adapter for the pure resolver above.
 ///
-/// The one I/O-touching item in this file, mirroring how
-/// `entity_loader::FsTemplateLoader` sits beside the pure resolution in
-/// `loader.rs`. The mod-pack overlay is consulted FIRST so an uploaded pack's
+/// One of the two I/O-touching items in this file (see also
+/// [`HostFragmentSource`]), mirroring how `entity_loader::FsTemplateLoader` sits
+/// beside the pure resolution in `loader.rs`. The mod-pack overlay is consulted FIRST so an uploaded pack's
 /// fragment wins over the shipped one, matching how every other content channel
 /// resolves an authored path (issue #760 AC2, #869 US7).
 #[cfg(not(target_arch = "wasm32"))]
@@ -131,6 +178,12 @@ impl FragmentSource for FsFragmentSource {
     fn read(&self, path: &str) -> Option<String> {
         crate::config_cache::mod_pack_overlay_get(path)
             .or_else(|| std::fs::read_to_string(path).ok())
+    }
+
+    /// The filesystem is authoritative and the overlay is installed whole, so
+    /// a fragment neither can serve genuinely does not exist.
+    fn absence_is_final(&self) -> bool {
+        true
     }
 }
 
@@ -814,6 +867,140 @@ pub fn resolve_from_disk(path: &str) -> Result<ResolvedTemplate, IncludeError> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_entity_config(path: &str) -> Result<EntityConfig, IncludeError> {
     resolve_from_disk(path)?.parse()
+}
+
+// ── Composition as a world finding (issue #906) ──────────────────────────────
+
+/// The fragment source a HOST resolves against, on either target.
+///
+/// Mirrors [`crate::entity_loader::WasmTemplateLoader`]'s three-step lookup, one
+/// layer lower down (raw text rather than parsed configs):
+///
+/// 1. the session mod-pack overlay, so an uploaded pack's fragment wins;
+/// 2. the raw templates the host has already delivered — on WASM this is the
+///    *only* source, since there is no filesystem;
+/// 3. the filesystem, on native.
+///
+/// Compiles on both targets so callers can name it unconditionally, which is
+/// what lets [`crate::world::validate::validate_composition`] carry a default
+/// source without a `cfg` split at every call site.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HostFragmentSource;
+
+impl FragmentSource for HostFragmentSource {
+    fn read(&self, path: &str) -> Option<String> {
+        if let Some(text) = crate::config_cache::mod_pack_overlay_get(path) {
+            return Some(text);
+        }
+        if let Some(text) = crate::config_cache::raw_template_text(path) {
+            return Some(text);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::fs::read_to_string(path).ok()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            None
+        }
+    }
+
+    /// Native: the filesystem is authoritative, so absence is final.
+    ///
+    /// Browser: it is NOT. `RAW_TEMPLATE_TOML` fills one delivery at a time, so
+    /// a fragment this source cannot serve may simply be still in flight. The
+    /// initial preload waits for the queue to drain before it declares itself
+    /// complete, but the runtime layer load does not: `world::server` builds the
+    /// layer cache and spawns the moment the layer TOML arrives, while that
+    /// layer's entity templates were only just queued. Treating that race as a
+    /// composition fault would blank the entire world — permanently, since the
+    /// layer is marked loaded and never retried.
+    fn absence_is_final(&self) -> bool {
+        !cfg!(target_arch = "wasm32")
+    }
+}
+
+/// Compose `path` for VALIDATION, reporting a composition failure as a
+/// [`WorldFinding`] the world-finding flow can gate on (issue #906).
+///
+/// Every load path already resolves includes; each one handled a failure
+/// privately (warn-and-skip, `None`, a `BuildError`, a JS console error), so a
+/// world with a broken include quietly lost an entity instead of failing
+/// validation. This is the seam that turns the `IncludeError`'s own finding —
+/// which already carries the right severity, category and source line — into
+/// something [`crate::world::validate::has_error`] sees.
+///
+/// # What is deliberately NOT reported
+///
+/// * **A root template the source cannot serve at all.** A missing template is
+///   a different defect with its own diagnostics (dispatch warns, the
+///   `[[entity]]` loader errors), and a validator that runs where the content
+///   is not reachable — a test fixture path, a browser before preload — must
+///   not manufacture an error out of its own blindness. Same policy as
+///   `world::validate::doctrine_anchor_refs`.
+/// * **A fragment the source cannot serve YET.** The same blindness one level
+///   down, and the reason this function walks the closure with
+///   [`preload_step`] rather than [`resolve_template`]. A source that fills
+///   incrementally — the browser's raw-template channel — routinely holds a
+///   root before the fragment it includes, and reading that race as a fault
+///   would fail validation for the whole world and lose every entity in it. A
+///   source whose absence IS final ([`FragmentSource::absence_is_final`], true
+///   for the filesystem and for every fixture map) still reports the missing
+///   fragment, with the declaring file and line.
+/// * **A root template that is not valid TOML on its own.** That is the plain
+///   parse error every host has always skipped with a warning (one bad
+///   cosmetic asteroid must not stop a combat test); it is not a *composition*
+///   failure and this function must not silently promote it to one. Detected
+///   as `include-parse` whose chain is the root alone — an unparseable
+///   *fragment* always has the includer above it in the chain.
+/// * **A resolved document that fails `EntityConfig` validation when nothing
+///   was composed.** Same reason. When something WAS composed it is reported,
+///   because the offending combination then exists in no single authored file
+///   — exactly the failure mode composition introduces, and the same asymmetry
+///   `headless::app::preload_entity_templates` already applies.
+pub fn composition_finding(path: &str, source: &dyn FragmentSource) -> Option<WorldFinding> {
+    let root = canonical_template_path(path);
+    // Blindness is not a finding — see the doc above.
+    source.read(&root)?;
+
+    // `preload_step`, not `resolve_template`: absence must stay separable from
+    // the faults. Cycles, malformed `includes` declarations and unparseable
+    // fragments all still error under this policy, so no real diagnostic is
+    // traded away for the separation.
+    let resolved = match preload_step(&root, source) {
+        Ok(PreloadStep::Ready(resolved)) => *resolved,
+        Ok(PreloadStep::AwaitingIncludes(_)) => {
+            if !source.absence_is_final() {
+                // Still in flight — see the doc above.
+                return None;
+            }
+            // Absence is final, so the fragment genuinely does not exist.
+            // Re-walk under the failing policy purely to get the located
+            // `include-missing` finding, which names the file that DECLARED the
+            // bad include rather than just the paths still outstanding.
+            return resolve_template(&root, source)
+                .err()
+                .map(|e| finding_of(&e));
+        }
+        Err(e) => {
+            if e.chain.len() == 1 && e.category() == "include-parse" {
+                return None;
+            }
+            return Some(finding_of(&e));
+        }
+    };
+    if !resolved.is_composed() {
+        return None;
+    }
+    resolved.parse().err().map(|e| finding_of(&e))
+}
+
+/// The error's own finding, with the include chain folded into the message so a
+/// reader of the validation badge sees which fragment chain reached the fault.
+fn finding_of(e: &IncludeError) -> WorldFinding {
+    let mut finding = e.finding.clone();
+    finding.message = format!("{} [include chain: {}]", finding.message, e.chain_display());
+    finding
 }
 
 #[cfg(test)]
@@ -1779,6 +1966,586 @@ directive_kind = "Destroy"
             assert!(FsFragmentSource
                 .read("assets/entities/fragments/definitely_absent.toml")
                 .is_none());
+        }
+    }
+
+    // ── The shipped tree (issue #906) ────────────────────────────────────────
+    //
+    // The byte-stability tests above prove the MECHANISM: `resolve_with` hands
+    // back the root text untouched when nothing was composed, so an uncomposed
+    // template is never round-tripped through `toml::to_string`. These prove
+    // the same thing over the content that actually ships, and pin the one
+    // condition under which the `include_str!` sites that bake hull bytes into
+    // the binary are allowed to stay as they are.
+    #[cfg(not(target_arch = "wasm32"))]
+    mod shipped_tree {
+        use super::*;
+
+        /// Every shipped hull: the `.toml` files directly in
+        /// `assets/entities/`, repo-relative with forward slashes (the form
+        /// every template path is authored in).
+        ///
+        /// Deliberately NOT recursive. `assets/entities/fragments/` is the
+        /// fragment tree — nothing there is spawnable, and it already holds a
+        /// composed mechanism fixture (`composed_escort.toml`), so a recursive
+        /// walk would assert byte-identity over the one file that must not have
+        /// it.
+        fn shipped_templates() -> Vec<String> {
+            let dir = std::path::Path::new("assets/entities");
+            let mut out: Vec<String> = std::fs::read_dir(dir)
+                .expect("assets/entities must be readable")
+                .map(|e| e.expect("readable dir entry").path())
+                .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .collect();
+            out.sort();
+            out
+        }
+
+        /// A directory walk asserting every shipped template resolves
+        /// byte-identically to its own file contents, while no hull declares
+        /// `includes`.
+        ///
+        /// No snapshot files: the file IS the expectation. This test failing is
+        /// not a regression — see the message it prints.
+        #[test]
+        fn every_shipped_template_resolves_to_its_own_bytes() {
+            let templates = shipped_templates();
+            assert!(
+                templates.len() > 20,
+                "the walk found only {} templates — it is not reaching the shipped \
+                 content it is supposed to be guarding",
+                templates.len()
+            );
+            for path in &templates {
+                let on_disk = std::fs::read_to_string(path)
+                    .unwrap_or_else(|e| panic!("{path} must be readable: {e}"));
+                let resolved =
+                    resolve_from_disk(path).unwrap_or_else(|e| panic!("{path} must resolve: {e}"));
+                assert_eq!(
+                    resolved.toml, on_disk,
+                    "{path} no longer resolves to its own bytes. This hull is now \
+                     composed; that is EXPECTED and correct — it is not a bug to \
+                     undo. Drop it from this walk and assert on the RESOLVED \
+                     document instead (`resolve_from_disk(path).toml`).\n\
+                     Then fix every test that reads this hull's RAW text, of which \
+                     there are two kinds and this is the tripwire for BOTH: (1) \
+                     `include_str!` sites, which \
+                     `include_str_baked_hulls_are_all_uncomposed` names for you; and \
+                     (2) runtime disk reads — `fs::read_to_string(path)` followed by \
+                     `EntityConfig::from_toml`, which no scan can enumerate, so grep \
+                     for `read_to_string` under `src/` and route each through \
+                     `entity_includes::load_entity_config` (or `resolve_from_disk` \
+                     where the raw text itself is needed)."
+                );
+            }
+        }
+
+        /// Where a baked asset path sits in the tree.
+        ///
+        /// `assets/entities/*.toml` is a spawnable HULL; anything under
+        /// `assets/entities/fragments/` is a FRAGMENT, which is not spawnable
+        /// and is the thing hulls compose FROM. The scan below reports the two
+        /// separately, because "this file bakes a composed hull" and "this file
+        /// bakes a fragment that has itself grown includes" send an author to
+        /// completely different fixes.
+        fn is_fragment(asset_path: &str) -> bool {
+            asset_path.starts_with("assets/entities/fragments/")
+        }
+
+        /// The literal inside `include_str!( … "…" )`, and how far past it to
+        /// resume scanning, given the text immediately after `include_str!(`.
+        ///
+        /// `None` when the macro's argument is not a plain string literal — a
+        /// `concat!`, a `const`, a nested macro — none of which bake a path
+        /// this scan can name.
+        fn baked_literal(after_open: &str) -> Option<(&str, usize)> {
+            let quote = after_open.find(|c: char| !c.is_whitespace())?;
+            if after_open.as_bytes()[quote] != b'"' {
+                return None;
+            }
+            let body = &after_open[quote + 1..];
+            let end = body.find('"')?;
+            Some((&body[..end], quote + 1 + end))
+        }
+
+        /// Shipped entity-asset paths baked into the binary by `include_str!`,
+        /// paired with the source file that bakes them.
+        ///
+        /// Tolerates rustfmt's wrapping: a long path is routinely pushed onto
+        /// the line after `include_str!(`, so the scan skips whitespace before
+        /// expecting the opening quote. Searching for the contiguous bytes
+        /// `include_str!("` instead would silently miss every wrapped site —
+        /// and it is the wrapped ones, being the long paths, that are most
+        /// likely to be assets.
+        ///
+        /// Walks BOTH crate source roots. `tests/` is not decoration: the
+        /// headless runner's integration tests bake a hull with
+        /// `include_str!("../assets/entities/…")` exactly as `src/` does, and a
+        /// scan that only saw `src/` would leave those sites unenumerated — the
+        /// AC asks for every site to be named or excused, and a site the scan
+        /// cannot see is neither. Any future source root (`benches/`,
+        /// `examples/`) belongs in this list for the same reason.
+        const SOURCE_ROOTS: [&str; 2] = ["src", "tests"];
+
+        fn include_str_baked_hulls() -> Vec<(String, String)> {
+            fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+                let entries = std::fs::read_dir(dir)
+                    .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
+                for entry in entries {
+                    let path = entry.expect("readable dir entry").path();
+                    if path.is_dir() {
+                        walk(&path, out);
+                        continue;
+                    }
+                    if path.extension().is_none_or(|e| e != "rs") {
+                        continue;
+                    }
+                    let file = path.to_string_lossy().replace('\\', "/");
+                    let src = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("{file} must be readable: {e}"));
+                    let mut rest = src.as_str();
+                    while let Some(i) = rest.find("include_str!(") {
+                        rest = &rest[i + "include_str!(".len()..];
+                        // Not a plain string literal (a `concat!`, a macro
+                        // argument): nothing to bake, and `rest` has already
+                        // advanced, so the walk cannot stall here.
+                        let Some((literal, consumed)) = baked_literal(rest) else {
+                            continue;
+                        };
+                        // The literal is relative to the declaring FILE; the
+                        // repo-relative form is whatever follows the assets
+                        // prefix, which is unambiguous.
+                        if let Some(j) = literal.find("assets/entities/") {
+                            out.push((file.clone(), literal[j..].to_string()));
+                        }
+                        rest = &rest[consumed..];
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            for root in SOURCE_ROOTS {
+                walk(std::path::Path::new(root), &mut out);
+            }
+            out.sort();
+            out.dedup();
+            out
+        }
+
+        /// THE EXCUSE for the `include_str!` sites, recorded where a future
+        /// author trips over it (issue #906).
+        ///
+        /// `include_str!` bakes a hull's bytes into the binary at COMPILE time.
+        /// There is no seam at which resolution could run: the resolver needs a
+        /// fragment source at runtime, so a baked template can never see a
+        /// resolved document. Migrating every site would mean turning each into
+        /// a disk load inside the test body — a large mechanical change to
+        /// tests that mostly assert on ONE authored field of ONE hull and are
+        /// all correct today.
+        ///
+        /// So they are excused, on a condition this test enforces: **every hull
+        /// reached by an `include_str!` must be uncomposed.** While that holds,
+        /// the baked bytes and the resolved document are the same text (proved
+        /// by `every_shipped_template_resolves_to_its_own_bytes` above) and the
+        /// excuse costs nothing. The moment #875/#878 compose one of these
+        /// hulls, this test names the exact sites that must move — strictly
+        /// better than a frozen list, because it covers `include_str!` sites
+        /// added after this was written too.
+        #[test]
+        fn include_str_baked_hulls_are_all_uncomposed() {
+            let baked = include_str_baked_hulls();
+            assert!(
+                baked.len() > 20,
+                "the source scan found only {} baked hull sites — it has stopped \
+                 finding them, so it is guarding nothing",
+                baked.len()
+            );
+            // Every source root must actually contribute, or the enumeration
+            // this AC rests on is silently partial. `tests/` is the one that
+            // was missed first time round: `tests/headless_runner.rs` bakes a
+            // hull through `../assets/entities/…`, and a src-only scan would
+            // excuse a site it had never looked at.
+            //
+            // Spelled out as literals rather than read from `SOURCE_ROOTS`:
+            // deriving them would let the guard shrink in step with the thing
+            // it is guarding, which is exactly the regression to catch.
+            for root in ["src", "tests"] {
+                let prefix = format!("{root}/");
+                assert!(
+                    baked.iter().any(|(site, _)| site.starts_with(&prefix)),
+                    "no baked `include_str!` site was found under {root}/ — either \
+                     the scan no longer reaches that source root, or the root has \
+                     been renamed and SOURCE_ROOTS is stale. Sites found: {:?}",
+                    baked.iter().map(|(s, _)| s).collect::<Vec<_>>()
+                );
+            }
+            let mut composed: Vec<String> = Vec::new();
+            for (site, asset) in &baked {
+                let resolved = resolve_from_disk(asset)
+                    .unwrap_or_else(|e| panic!("{site} bakes {asset}, which must resolve: {e}"));
+                if resolved.is_composed() {
+                    // Naming the KIND matters: a composed hull sends the author
+                    // to the resolved document, a composed fragment sends them
+                    // to the fragment tree. Reporting a fragment as a hull is
+                    // the wrong diagnosis.
+                    let kind = if is_fragment(asset) {
+                        "composed fragment"
+                    } else {
+                        "composed hull"
+                    };
+                    composed.push(format!("{site} bakes {kind} {asset}"));
+                }
+            }
+            assert!(
+                composed.is_empty(),
+                "these `include_str!` sites bake an entity asset that is now COMPOSED, \
+                 so they assert on unresolved text. Replace each with a disk load \
+                 through `entity_includes::load_entity_config` (or `resolve_from_disk` \
+                 where the raw text is needed for line lookups). A `composed fragment` \
+                 is a different diagnosis from a `composed hull`: the fragment tree \
+                 has grown a level, so check what ELSE includes it before changing \
+                 the site:\n{}",
+                composed.join("\n")
+            );
+        }
+
+        /// A fragment is not a hull, and the scan must not call one the other.
+        ///
+        /// `src/world/validate.rs` bakes `fragments/ai/fleet_baseline.toml`,
+        /// which is a FRAGMENT. If a fragment ever grows its own `includes`,
+        /// reporting it as a composed *hull* would send the author looking for
+        /// a spawnable template that does not exist — the wrong diagnosis, and
+        /// the wrong fix.
+        #[test]
+        fn the_scan_tells_a_fragment_apart_from_a_hull() {
+            assert!(is_fragment(
+                "assets/entities/fragments/ai/fleet_baseline.toml"
+            ));
+            assert!(!is_fragment("assets/entities/alliance_cruiser.toml"));
+            let baked = include_str_baked_hulls();
+            let fragments: Vec<&(String, String)> =
+                baked.iter().filter(|(_, a)| is_fragment(a)).collect();
+            assert!(
+                !fragments.is_empty(),
+                "no baked site reaches the fragment tree any more, so the \
+                 hull/fragment distinction in the failure message is guarding \
+                 nothing — check the scan is still parsing before removing it"
+            );
+            assert!(
+                fragments.len() < baked.len(),
+                "the scan must still reach hulls too, or `is_fragment` has \
+                 stopped discriminating"
+            );
+        }
+
+        /// rustfmt wraps a long `include_str!` path onto the next line, and the
+        /// scan above must still see it.
+        ///
+        /// This is the mechanism in isolation. The wrapped form is not
+        /// hypothetical — see the test below, which proves the real tree
+        /// contains sites only this tolerance reaches.
+        #[test]
+        fn the_scan_reads_a_wrapped_include_str_literal() {
+            let one_line = "include_str!(\"../../assets/entities/x.toml\")";
+            let wrapped = "include_str!(\n            \"../../assets/entities/x.toml\"\n        )";
+            for src in [one_line, wrapped] {
+                let after = &src[src.find("include_str!(").expect("the macro") + 13..];
+                let (literal, _) = baked_literal(after)
+                    .unwrap_or_else(|| panic!("the scan must read the literal out of: {src:?}"));
+                assert_eq!(literal, "../../assets/entities/x.toml");
+            }
+            assert!(
+                baked_literal("concat!(\"a\", \"b\"))").is_none(),
+                "a non-literal argument bakes no path this scan can name"
+            );
+        }
+
+        /// …and the tolerance is load-bearing over the REAL tree: there are
+        /// sites a contiguous `include_str!("` search cannot see.
+        ///
+        /// Stated as a comparison rather than as a frozen list of files so it
+        /// stays true when rustfmt reflows. If this ever fails because the two
+        /// counts converged, the tolerance has become free rather than wrong —
+        /// but check that the scan has not simply stopped parsing first.
+        #[test]
+        fn the_scan_covers_sites_a_contiguous_search_would_miss() {
+            let found = include_str_baked_hulls();
+            // The superseded algorithm, run per SITE: the contiguous bytes
+            // `include_str!("`, which a wrapped literal never matches.
+            let mut contiguous: std::collections::HashSet<(String, String)> =
+                std::collections::HashSet::new();
+            for (file, _) in &found {
+                let src = std::fs::read_to_string(file).expect("scanned file readable");
+                let mut rest = src.as_str();
+                while let Some(i) = rest.find("include_str!(\"") {
+                    rest = &rest[i + "include_str!(\"".len()..];
+                    let Some(end) = rest.find('"') else { break };
+                    let literal = &rest[..end];
+                    rest = &rest[end..];
+                    if let Some(j) = literal.find("assets/entities/") {
+                        contiguous.insert((file.clone(), literal[j..].to_string()));
+                    }
+                }
+            }
+            let missed: Vec<String> = found
+                .iter()
+                .filter(|pair| !contiguous.contains(*pair))
+                .map(|(file, asset)| format!("{file} bakes {asset}"))
+                .collect();
+            assert!(
+                !missed.is_empty(),
+                "no baked site needs the whitespace tolerance any more — verify the \
+                 scan is still parsing before relaxing it"
+            );
+        }
+    }
+
+    // ── Composition as a world finding (issue #906) ──────────────────────────
+
+    mod composition_findings {
+        use super::*;
+        use crate::world::validate::{has_error, Severity};
+
+        fn source(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(p, t)| (p.to_string(), t.to_string()))
+                .collect()
+        }
+
+        #[test]
+        fn a_missing_fragment_becomes_an_error_finding_naming_the_declaring_file() {
+            let src = source(&[(
+                "e/hull.toml",
+                "includes = [\"absent.toml\"]\nname = \"H\"\n",
+            )]);
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(f.severity, Severity::Error);
+            assert_eq!(f.category, "include-missing");
+            assert_eq!(
+                f.source.file, "e/hull.toml",
+                "the finding names the file that DECLARED the bad include"
+            );
+            assert_eq!(f.source.line, Some(1));
+            assert!(f.message.contains("include chain"), "{}", f.message);
+            assert!(has_error(&[f]), "an error finding must gate activation");
+        }
+
+        #[test]
+        fn a_cycle_becomes_an_error_finding() {
+            let src = source(&[
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+                ("e/frag.toml", "includes = [\"hull.toml\"]\n"),
+            ]);
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(f.category, "include-cycle");
+        }
+
+        #[test]
+        fn a_malformed_includes_declaration_becomes_an_error_finding() {
+            let src = source(&[("e/hull.toml", "includes = 7\n")]);
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(f.category, "include-malformed");
+            assert_eq!(f.source.file, "e/hull.toml");
+        }
+
+        #[test]
+        fn a_composed_document_that_is_not_a_valid_entity_becomes_an_error_finding() {
+            let src = source(&[
+                ("e/frag.toml", "not_a_real_key = 1\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+            ]);
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(
+                f.category, "include-invalid-template",
+                "the offending combination exists in no single authored file"
+            );
+        }
+
+        #[test]
+        fn a_template_the_source_cannot_serve_is_not_a_composition_finding() {
+            let src = source(&[]);
+            assert!(
+                composition_finding("e/hull.toml", &src).is_none(),
+                "a validator must not manufacture an error out of its own blindness — \
+                 a missing template has its own diagnostics"
+            );
+        }
+
+        #[test]
+        fn an_uncomposed_template_that_is_not_valid_toml_is_not_a_composition_finding() {
+            let src = source(&[("e/hull.toml", "this is not toml\n")]);
+            assert!(
+                composition_finding("e/hull.toml", &src).is_none(),
+                "a plain parse error keeps its historical skip-with-warning; it is not \
+                 a composition failure"
+            );
+        }
+
+        #[test]
+        fn an_uncomposed_template_that_is_not_a_valid_entity_is_not_a_composition_finding() {
+            let src = source(&[("e/hull.toml", "not_a_real_key = 1\n")]);
+            assert!(composition_finding("e/hull.toml", &src).is_none());
+        }
+
+        #[test]
+        fn an_unparseable_fragment_is_a_composition_finding() {
+            let src = source(&[
+                ("e/frag.toml", "this is not toml\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+            ]);
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(f.category, "include-parse");
+        }
+
+        /// The host source's answer to `absence_is_final` is target-dependent,
+        /// and the browser answer is the one that matters — so it is also the
+        /// one `cargo test` can never observe.
+        ///
+        /// The structural guard against losing that answer is that
+        /// [`FragmentSource::absence_is_final`] has no default: delete
+        /// `HostFragmentSource`'s override and the crate stops compiling, on
+        /// both targets. This test pins the *values* on top of that. The native
+        /// arm runs in CI; the wasm arm is compiled only under `wasm32` and so
+        /// runs only under a wasm test runner — it is written as an assertion
+        /// rather than a comment so that if this crate ever grows one, the
+        /// claim is already being checked rather than merely described.
+        #[test]
+        fn the_host_source_answers_absence_by_target() {
+            #[cfg(not(target_arch = "wasm32"))]
+            assert!(
+                HostFragmentSource.absence_is_final(),
+                "on native the filesystem is authoritative, so a fragment that \
+                 cannot be read genuinely does not exist and validation may say so"
+            );
+            #[cfg(target_arch = "wasm32")]
+            assert!(
+                !HostFragmentSource.absence_is_final(),
+                "in the browser the raw-template channel fills one delivery at a \
+                 time, so an unread fragment may still be in flight; calling that \
+                 final blanks the world permanently"
+            );
+        }
+
+        /// A source that fills INCREMENTALLY — the browser's raw-template
+        /// channel, where a root can be in hand a whole layer-load before the
+        /// fragment it includes.
+        struct StillFilling(HashMap<String, String>);
+
+        impl FragmentSource for StillFilling {
+            fn read(&self, path: &str) -> Option<String> {
+                self.0.get(path).cloned()
+            }
+            fn absence_is_final(&self) -> bool {
+                false
+            }
+        }
+
+        fn still_filling(pairs: &[(&str, &str)]) -> StillFilling {
+            StillFilling(source(pairs))
+        }
+
+        /// The wasm hazard, stated directly: a fragment that has not been
+        /// delivered YET is not a fault.
+        ///
+        /// If this reported, `has_error` would gate the world, and
+        /// `spawn_immediate_entities_internal` would return zero entities — for
+        /// a world whose only sin is that its fragments are still arriving. The
+        /// runtime layer load never retries, so the loss would be permanent
+        /// rather than a frame of lag.
+        #[test]
+        fn a_fragment_that_has_not_arrived_yet_is_not_a_composition_finding() {
+            let src =
+                still_filling(&[("e/hull.toml", "includes = [\"frag.toml\"]\nname = \"H\"\n")]);
+            assert!(
+                composition_finding("e/hull.toml", &src).is_none(),
+                "a source that is still filling must not have its own race read \
+                 back to it as a broken include"
+            );
+        }
+
+        /// …and the blindness is not permanent: once the fragment lands, the
+        /// same pair is composed and validated like any other.
+        #[test]
+        fn the_same_pair_validates_once_the_fragment_arrives() {
+            let good = still_filling(&[
+                ("e/frag.toml", "class = \"cruiser\"\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\nname = \"H\"\n"),
+            ]);
+            assert!(composition_finding("e/hull.toml", &good).is_none());
+
+            let bad = still_filling(&[
+                ("e/frag.toml", "not_a_real_key = 1\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\nname = \"H\"\n"),
+            ]);
+            let f = composition_finding("e/hull.toml", &bad)
+                .expect("a delivered fragment is judged, not excused");
+            assert_eq!(f.category, "include-invalid-template");
+        }
+
+        /// Deferring on ABSENCE must not defer on the faults. A cycle is a
+        /// fault no delivery can fix, and it is still reported from a source
+        /// that is still filling.
+        #[test]
+        fn the_real_faults_are_still_reported_while_a_source_is_still_filling() {
+            let cyclic = still_filling(&[
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+                ("e/frag.toml", "includes = [\"hull.toml\"]\n"),
+            ]);
+            assert_eq!(
+                composition_finding("e/hull.toml", &cyclic)
+                    .expect("a cycle is not a delivery race")
+                    .category,
+                "include-cycle"
+            );
+
+            let malformed = still_filling(&[("e/hull.toml", "includes = 7\n")]);
+            assert_eq!(
+                composition_finding("e/hull.toml", &malformed)
+                    .expect("a malformed declaration is not a delivery race")
+                    .category,
+                "include-malformed"
+            );
+
+            let unparseable = still_filling(&[
+                ("e/frag.toml", "this is not toml\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+            ]);
+            assert_eq!(
+                composition_finding("e/hull.toml", &unparseable)
+                    .expect("a delivered but unparseable fragment is not a delivery race")
+                    .category,
+                "include-parse"
+            );
+        }
+
+        /// The default the other way round: a source that already holds
+        /// everything it will ever hold — the filesystem, every fixture map —
+        /// still reports a genuinely missing fragment, with the declaring file
+        /// and line intact.
+        #[test]
+        fn a_source_whose_absence_is_final_still_reports_the_missing_fragment() {
+            let src = source(&[(
+                "e/hull.toml",
+                "includes = [\"absent.toml\"]\nname = \"H\"\n",
+            )]);
+            assert!(
+                src.absence_is_final(),
+                "a fixture map holds everything it will ever hold"
+            );
+            let f = composition_finding("e/hull.toml", &src).expect("a finding");
+            assert_eq!(f.category, "include-missing");
+            assert_eq!(f.source.file, "e/hull.toml");
+            assert_eq!(f.source.line, Some(1));
+        }
+
+        #[test]
+        fn a_template_that_composes_cleanly_produces_no_finding() {
+            let src = source(&[
+                ("e/frag.toml", "class = \"cruiser\"\n"),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\nname = \"H\"\n"),
+            ]);
+            assert!(composition_finding("e/hull.toml", &src).is_none());
         }
     }
 }

@@ -149,6 +149,18 @@ mod tests {
         ConfigCache::from(m)
     }
 
+    /// A one-entry cache holding a SHIPPED hull, loaded exactly as the runtime
+    /// loads it — include closure resolved first (issue #906). Reading the file
+    /// and calling `from_toml` on it would silently start asserting on
+    /// unresolved text the day the hull declares `includes`.
+    fn cache_from_disk(path: &str) -> ConfigCache {
+        let config = crate::entity_includes::load_entity_config(path)
+            .unwrap_or_else(|e| panic!("{path} must compose and parse: {e}"));
+        let mut m = HashMap::new();
+        m.insert(path.to_string(), config);
+        ConfigCache::from(m)
+    }
+
     #[test]
     fn resolve_missing_template_returns_err() {
         let cache = ConfigCache::from(HashMap::new());
@@ -180,9 +192,7 @@ mod tests {
     /// correctly while preserving the template's doctrine objectives.
     #[test]
     fn harrow_destroyer_behaviour_override_merges_arrival_radius() {
-        let template_toml = std::fs::read_to_string("assets/entities/ship_harrow_destroyer.toml")
-            .expect("ship_harrow_destroyer.toml must exist");
-        let cache = make_cache("assets/entities/ship_harrow_destroyer.toml", &template_toml);
+        let cache = cache_from_disk("assets/entities/ship_harrow_destroyer.toml");
 
         let override_value: toml::Value = toml::from_str(
             r#"
@@ -216,9 +226,7 @@ waypoint_arrival_radius = 99.0
     /// (#572) FSM dissolved — override now targets `waypoint_arrival_radius`.
     #[test]
     fn world_inline_override_round_trips_behaviour_merge() {
-        let template_toml = std::fs::read_to_string("assets/entities/ship_harrow_destroyer.toml")
-            .expect("ship_harrow_destroyer.toml must exist");
-        let cache = make_cache("assets/entities/ship_harrow_destroyer.toml", &template_toml);
+        let cache = cache_from_disk("assets/entities/ship_harrow_destroyer.toml");
 
         let world_toml = r#"
 [[entity]]
@@ -267,9 +275,7 @@ overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
     /// un-overridden template. `to_toml_value` + a defaulted `text` fix both.
     #[test]
     fn override_on_system_bearing_hull_preserves_systems_faction_and_textless_doctrine() {
-        let template_toml = std::fs::read_to_string("assets/entities/alliance_destroyer.toml")
-            .expect("alliance_destroyer.toml must exist");
-        let cache = make_cache("assets/entities/alliance_destroyer.toml", &template_toml);
+        let cache = cache_from_disk("assets/entities/alliance_destroyer.toml");
         let template_system_count = cache
             .get("assets/entities/alliance_destroyer.toml")
             .unwrap()

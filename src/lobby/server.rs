@@ -1769,8 +1769,9 @@ mod tests {
     /// the resulting manual. This is the integration path the pure `ship::manual`
     /// module can't cover on its own (it never sees `EntityConfig`).
     fn manual_from_hull(path: &str) -> crate::ship::manual::ShipManualWire {
-        let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-        let config = crate::entity_config::EntityConfig::from_toml(&src)
+        // Through the include resolver (issue #906) — the same document the
+        // runtime hull load produces, composed or not.
+        let config = crate::entity_includes::load_entity_config(path)
             .unwrap_or_else(|e| panic!("parse {path}: {e}"));
         let topology = config
             .ship_config

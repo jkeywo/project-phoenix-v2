@@ -1,6 +1,12 @@
 // Host mod-pack upload validation (issue #760).
 //
-// Pure Rust module — no Bevy, no wasm_bindgen. Consumes the store-only ZIP the
+// Pure Rust module — no Bevy, no wasm_bindgen, and no host I/O: every source of
+// content OUTSIDE the uploaded archive arrives through an injected seam
+// (`resolve_base` for base content text, a `TemplateLoader` for parsed entity
+// templates). That is what keeps the module natively testable, and it is not
+// decorative — reaching for a host default instead is precisely how the
+// composition check first came to validate a pack against content the pack does
+// not contain (see `PackFragments` below). Consumes the store-only ZIP the
 // editor mod-pack exporter (issue #759, `editor/mod-pack-export.js`) produces
 // and validates it *atomically*: the whole pack is accepted only when every
 // step passes. On any failure — malformed archive, off-whitelist path, missing
@@ -16,8 +22,9 @@
 //   * `world::manifest::{parse_manifest, validate_manifest}` for the required
 //     `scenarios.toml` manifest, resolving each root world against BOTH the
 //     pack contents and base content;
-//   * `world::validate::{validate_composition, has_error}` for every
-//     manifest-listed world's authored references.
+//   * `world::validate::{validate_composition_with_fragments, has_error}` for
+//     every manifest-listed world's authored references, and for the `includes`
+//     closure of every entity template those worlds spawn (issue #906).
 //
 // Acceptance is gated on `has_error` (definite errors block; warnings are
 // non-blocking, consistent with #757/#759). The Bevy/wasm adapter that turns a
@@ -27,10 +34,13 @@
 
 use std::collections::BTreeMap;
 
+use crate::entity_includes::FragmentSource;
+use crate::entity_loader::TemplateLoader;
 use crate::world::config::parse_world;
 use crate::world::manifest::{parse_manifest, validate_manifest};
 use crate::world::validate::{
-    has_error, validate_composition, Severity, SourceLocation, WorldFinding, WorldSource,
+    has_error, validate_composition_with_fragments, Severity, SourceLocation, WorldFinding,
+    WorldSource,
 };
 
 /// The manifest path a mod pack always carries (top-level in the archive).
@@ -204,20 +214,65 @@ fn archive_error(category: &'static str, reference: &str, message: String) -> Wo
     }
 }
 
+/// The raw-TOML source an uploaded pack's entity composition resolves against
+/// (issue #906).
+///
+/// Pack files FIRST, then base content through the caller's resolver — the same
+/// order, and for the same reason, as the world resolution above: a pack that
+/// carries a fragment must be validated against the fragment it carries.
+///
+/// The alternative — letting the composition check fall back to the host's
+/// default fragment source — reads the session overlay (not installed yet: the
+/// whole point of atomic validation is that nothing is applied until the pack
+/// passes), then the host's raw templates, then disk. A pack whose hull includes
+/// a fragment carried INSIDE the pack would then be rejected for an
+/// `include-missing` that is untrue, and on wasm the same case would be deferred
+/// and never checked at all.
+struct PackFragments<'a, F: Fn(&str) -> Option<String>> {
+    files: &'a BTreeMap<String, String>,
+    resolve_base: &'a F,
+}
+
+impl<F: Fn(&str) -> Option<String>> FragmentSource for PackFragments<'_, F> {
+    fn read(&self, path: &str) -> Option<String> {
+        self.files
+            .get(path)
+            .cloned()
+            .or_else(|| (self.resolve_base)(path))
+    }
+
+    /// Final. Upload validation is a one-shot decision over an archive that is
+    /// wholly in hand, and the caller's `resolve_base` is expected to be able to
+    /// see base content by the time a pack can be uploaded (it is a
+    /// pre-scenario action, after the base preload has drained). Deferring here
+    /// would mean accepting a pack whose composition was never checked.
+    fn absence_is_final(&self) -> bool {
+        true
+    }
+}
+
 /// Validate an uploaded mod-pack ZIP atomically (issue #760, AC1).
 ///
-/// `zip_bytes` is the raw uploaded archive. `resolve_base_world` resolves a
-/// world path against BASE content (returning `None` when the host has not
-/// fetched it), so a manifest root world may resolve either inside the pack or
-/// against shipped content. Composition references are validated per
-/// manifest-listed world against the pack + base worlds.
+/// `zip_bytes` is the raw uploaded archive. `resolve_base` resolves an authored
+/// path against BASE content (returning `None` when the host has not fetched
+/// it) — worlds for the manifest, and raw entity/fragment TOML for include
+/// resolution — so a manifest root world may resolve either inside the pack or
+/// against shipped content, and a pack hull may include a shipped fragment.
+/// `template_loader` supplies PARSED entity templates for the reference checks
+/// that need them (doctrine anchors); it is injected rather than defaulted so
+/// this module keeps no host dependency of its own.
+///
+/// Composition references are validated per manifest-listed world against the
+/// pack + base worlds, and each spawned template's `includes` closure against
+/// the pack's own files + base ([`PackFragments`]).
 ///
 /// The returned [`ValidatedModPack`] carries error findings on any failure and
 /// the overlay files + manifest on success; the caller applies the overlay only
 /// when [`ValidatedModPack::is_accepted`] holds.
 pub fn validate_mod_pack(
     zip_bytes: &[u8],
-    resolve_base_world: impl Fn(&str) -> Option<String>,
+    resolve_base: impl Fn(&str) -> Option<String>,
+    template_loader: &dyn TemplateLoader,
 ) -> ValidatedModPack {
     // 1. Parse the store ZIP — a malformed / non-store / CRC-mismatched archive
     //    rejects the whole pack.
@@ -293,12 +348,7 @@ pub fn validate_mod_pack(
         }
     };
 
-    let resolve = |path: &str| {
-        files
-            .get(path)
-            .cloned()
-            .or_else(|| resolve_base_world(path))
-    };
+    let resolve = |path: &str| files.get(path).cloned().or_else(|| resolve_base(path));
     // Bind a shared reference so the same resolver serves both the manifest
     // validation here and the per-world composition checks below (`&F: Fn` is
     // Copy, so this passes by value without moving the closure).
@@ -337,7 +387,15 @@ pub fn validate_mod_pack(
             .iter()
             .map(|(p, toml, c)| WorldSource::new(p.clone(), toml, c))
             .collect();
-        findings.extend(validate_composition(&root_src, &child_srcs));
+        findings.extend(validate_composition_with_fragments(
+            &root_src,
+            &child_srcs,
+            template_loader,
+            &PackFragments {
+                files: &files,
+                resolve_base: &resolve_base,
+            },
+        ));
     }
 
     // 7. On success, hand back the supported authored files (excluding the
@@ -442,6 +500,21 @@ mod tests {
         None
     }
 
+    /// A host that serves no parsed entity templates at all.
+    ///
+    /// The reference checks that consult a `TemplateLoader` (doctrine anchors)
+    /// read it as "unknown template", which is what these packs' worlds mean:
+    /// they declare no entities. Injecting it — rather than letting the module
+    /// reach for the host loader — is what keeps these tests independent of the
+    /// filesystem and the wasm thread-locals.
+    struct NoTemplates;
+
+    impl TemplateLoader for NoTemplates {
+        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
+            None
+        }
+    }
+
     // ── store ZIP reader ─────────────────────────────────────────────────────
 
     #[test]
@@ -518,7 +591,7 @@ mod tests {
             ),
             ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
         ]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(
             result.is_accepted(),
             "unexpected findings: {:?}",
@@ -540,7 +613,7 @@ mod tests {
         // nothing (AC1).
         let mut zip = create_store_zip(&[("scenarios.toml", "manifest")]);
         zip.truncate(20); // cut off inside the first local header
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert_eq!(result.findings[0].category, "invalid-archive");
@@ -551,7 +624,7 @@ mod tests {
         // Bytes with no local-file-header signature parse as an empty archive,
         // so the required manifest is absent — still an atomic rejection with
         // nothing applied.
-        let result = validate_mod_pack(b"not a zip at all", no_base);
+        let result = validate_mod_pack(b"not a zip at all", no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert!(result
@@ -563,7 +636,7 @@ mod tests {
     #[test]
     fn missing_manifest_rejects_whole_pack() {
         let zip = create_store_zip(&[("assets/worlds/x.toml", &simple_world("t"))]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -579,7 +652,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/secret/keys.toml", "danger = true"),
         ]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -594,7 +667,7 @@ mod tests {
             "scenarios.toml",
             &manifest_for("ghost", "assets/worlds/ghost.toml"),
         )]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -609,7 +682,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/entities/broken.toml", "not valid ["),
         ]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -640,7 +713,7 @@ entity = "raider"
             ),
             ("assets/worlds/bad.toml", bad_world),
         ]);
-        let result = validate_mod_pack(&zip, no_base);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -663,7 +736,129 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, base);
+        let result = validate_mod_pack(&zip, base, &NoTemplates);
+        assert!(result.is_accepted(), "findings: {:?}", result.findings);
+    }
+
+    // ── Composition resolves against the PACK's own files (issue #906) ───────
+
+    /// A world spawning one entity template, for the composition tests below.
+    fn world_spawning(template_path: &str, name: &str) -> String {
+        format!(
+            "[global]\ntitle = \"world.pack.title\"\n\n\
+             [[entity]]\ntemplate_path = \"{template_path}\"\nname = \"{name}\"\n"
+        )
+    }
+
+    /// A pack that carries BOTH a composed hull and the fragment it includes
+    /// validates.
+    ///
+    /// This is the case a host-defaulted fragment source gets wrong: it looks in
+    /// the session overlay (not installed — validation is atomic and comes
+    /// first), then the host's raw templates, then disk, and finds a fragment
+    /// that exists only inside the archive in none of them. The pack would be
+    /// rejected for an `include-missing` that is not true.
+    ///
+    /// The base resolver deliberately knows the HULL: the pack overrides a
+    /// shipped hull with a composed one and supplies the fragment itself. That
+    /// detail is what gives the test teeth — a composition check that cannot
+    /// see the root at all reports nothing by design (blindness is not a
+    /// finding), so a base that knew neither file would let a wrong fragment
+    /// source pass unnoticed.
+    #[test]
+    fn pack_carrying_a_hull_and_its_fragment_validates() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modc", "assets/worlds/modc.toml"),
+            ),
+            (
+                "assets/worlds/modc.toml",
+                &world_spawning("assets/entities/pack_hull.toml", "pack_one"),
+            ),
+            (
+                "assets/entities/pack_hull.toml",
+                "includes = [\"pack_core.toml\"]\nname = \"Pack Hull\"\n",
+            ),
+            ("assets/entities/pack_core.toml", "class = \"escort\"\n"),
+        ]);
+        let base = |p: &str| {
+            if p == "assets/entities/pack_hull.toml" {
+                // The shipped hull the pack replaces. It declares the same
+                // include, and the base resolver canNOT serve that fragment —
+                // so if composition resolves against base instead of the pack,
+                // it reports `include-missing` and the pack is wrongly rejected.
+                Some("includes = [\"pack_core.toml\"]\nname = \"Shipped Hull\"\n".to_string())
+            } else {
+                None
+            }
+        };
+        let result = validate_mod_pack(&zip, base, &NoTemplates);
+        assert!(
+            result.is_accepted(),
+            "a pack's hull must compose against the fragment the pack itself \
+             carries: {:?}",
+            result.findings
+        );
+    }
+
+    /// The same pack MINUS the fragment is rejected — the check is real, not
+    /// merely permissive.
+    #[test]
+    fn pack_carrying_a_hull_without_its_fragment_is_rejected() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("modd", "assets/worlds/modd.toml"),
+            ),
+            (
+                "assets/worlds/modd.toml",
+                &world_spawning("assets/entities/pack_hull.toml", "pack_one"),
+            ),
+            (
+                "assets/entities/pack_hull.toml",
+                "includes = [\"pack_core.toml\"]\nname = \"Pack Hull\"\n",
+            ),
+        ]);
+        let result = validate_mod_pack(&zip, no_base, &NoTemplates);
+        assert!(!result.is_accepted(), "findings: {:?}", result.findings);
+        assert!(
+            result
+                .findings
+                .iter()
+                .any(|f| f.category == "include-missing"),
+            "expected an include-missing finding: {:?}",
+            result.findings
+        );
+    }
+
+    /// A pack hull may include a SHIPPED fragment: what the pack does not carry
+    /// falls through to the injected base resolver, exactly as a manifest root
+    /// world does.
+    #[test]
+    fn pack_hull_may_include_a_base_fragment() {
+        let zip = create_store_zip(&[
+            (
+                "scenarios.toml",
+                &manifest_for("mode", "assets/worlds/mode.toml"),
+            ),
+            (
+                "assets/worlds/mode.toml",
+                &world_spawning("assets/entities/pack_hull.toml", "pack_one"),
+            ),
+            (
+                "assets/entities/pack_hull.toml",
+                "includes = [\"base_core.toml\"]\nname = \"Pack Hull\"\n",
+            ),
+        ]);
+        let base = |p: &str| {
+            if p == "assets/entities/base_core.toml" {
+                Some("class = \"escort\"\n".to_string())
+            } else {
+                None
+            }
+        };
+        let result = validate_mod_pack(&zip, base, &NoTemplates);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 }

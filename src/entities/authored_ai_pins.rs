@@ -89,11 +89,14 @@ fn entity_stems() -> Vec<String> {
     out
 }
 
-/// One shipped entity, parsed through the real (strict) load path.
+/// One shipped entity, parsed through the real (strict) load path — INCLUDING
+/// include resolution (issue #906), so this stays the real load path once a hull
+/// is composed rather than quietly becoming an assertion on unresolved text.
 fn entity(stem: &str) -> EntityConfig {
     let path = crate_root().join(format!("assets/entities/{stem}.toml"));
-    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{stem} readable: {e}"));
-    EntityConfig::from_toml(&src).unwrap_or_else(|e| panic!("{stem} must load: {e}"))
+    let key = path.to_string_lossy().replace('\\', "/");
+    crate::entity_includes::load_entity_config(&key)
+        .unwrap_or_else(|e| panic!("{stem} must load: {e}"))
 }
 
 /// Every AI-BEARING shipped hull (`[behaviour]` is the gate), stem and config.

@@ -1083,14 +1083,27 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 /// returned, after which JS re-reads `wasm_get_scenario_catalog`.
 ///
 /// Each finding is a JS object `{ severity, category, message, file, line }`.
-/// Manifest root worlds resolve against the pack first, then base worlds the
-/// host has already fetched (`peek_pending_world_toml`).
+/// Manifest root worlds — and the include fragments the pack's entity templates
+/// pull in — resolve against the pack first, then against base content the host
+/// has already fetched (`peek_pending_world_toml` for worlds,
+/// `raw_template_text` for entity/fragment TOML).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_mod_pack(bytes: &[u8]) -> Array {
-    let result = crate::world::mod_pack::validate_mod_pack(bytes, |path| {
-        crate::config_cache::peek_pending_world_toml(path)
-    });
+    let result = crate::world::mod_pack::validate_mod_pack(
+        bytes,
+        |path| {
+            // Base content the host has already fetched, by authored path:
+            // world TOML for the manifest, and raw entity/fragment TOML so a
+            // pack hull may include a SHIPPED fragment. The session overlay is
+            // deliberately not consulted — validation is atomic, so the pack
+            // being judged is not installed, and any previously installed pack
+            // has been cleared before this upload.
+            crate::config_cache::peek_pending_world_toml(path)
+                .or_else(|| crate::config_cache::raw_template_text(path))
+        },
+        &crate::entity_loader::WasmTemplateLoader,
+    );
 
     let arr = Array::new();
     for finding in &result.findings {

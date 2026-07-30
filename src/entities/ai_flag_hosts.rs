@@ -1405,8 +1405,10 @@ mod tests {
         for entry in std::fs::read_dir(&dir).expect("assets/entities must be readable") {
             let path = entry.expect("readable dir entry").path();
             if path.extension().is_some_and(|e| e == "toml") {
-                let src = std::fs::read_to_string(&path).expect("readable entity toml");
-                crate::entities::config::EntityConfig::from_toml(&src).unwrap_or_else(|e| {
+                // Through the include resolver (issue #906): a raw read would
+                // assert on unresolved text the day a hull declares `includes`.
+                let key = path.to_string_lossy().replace('\\', "/");
+                crate::entity_includes::load_entity_config(&key).unwrap_or_else(|e| {
                     panic!("{} must still load: {e}", path.display());
                 });
                 checked += 1;

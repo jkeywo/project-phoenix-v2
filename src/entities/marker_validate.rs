@@ -830,10 +830,18 @@ mod shipped_assets {
             if path.extension().and_then(|e| e.to_str()) != Some("toml") {
                 continue;
             }
+            // Through the include resolver (issue #906). Marker validation
+            // scans RAW TEXT for line numbers, so it must be handed the
+            // resolved document — the one `EntityConfig` was parsed from — not
+            // the hull's own file, or a composed hull would be line-mapped
+            // against text its markers do not appear in.
             let file = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("entity readable");
-            let cfg = EntityConfig::from_toml(&toml)
-                .unwrap_or_else(|e| panic!("{file} must parse: {e:?}"));
+            let resolved = crate::entity_includes::resolve_from_disk(&file)
+                .unwrap_or_else(|e| panic!("{file} must compose: {e}"));
+            let toml = resolved.toml.clone();
+            let cfg = resolved
+                .parse()
+                .unwrap_or_else(|e| panic!("{file} must parse: {e}"));
             checked_refs += collect_marker_refs(&cfg).len();
             let rig = rig_for(&cfg);
             for f in validate_entity_markers(&file, &toml, &cfg, rig.as_ref()) {

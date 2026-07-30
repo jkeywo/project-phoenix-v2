@@ -334,6 +334,14 @@ pub struct SimRngAndLog<'w> {
 /// the remaining publishers still query the `LocalShip` entity only and
 /// migrate to per-entity publishing in later issues. The broadcast pipeline
 /// reads from this component.
+///
+/// Stays a `HashMap`: every `publish_*_blackboard` system writes into this map
+/// each tick, and `SystemId` keys are long strings with shared prefixes
+/// (`torpedo-tube-fore-port` against `…-fore-starboard`), which a `BTreeMap`
+/// would compare several times per operation. Iteration order still reaches the
+/// wire, so `broadcast_blackboard_updates` sorts the (much smaller) set of
+/// *changed* entries instead — ordering where it is observed rather than
+/// everywhere it is written.
 #[derive(Component, Default, Clone)]
 pub struct ShipSystemBlackboards(
     pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
@@ -1619,10 +1627,19 @@ pub fn broadcast_blackboard_updates(
             return;
         };
         let last = world.resource::<LastBroadcastBlackboards>();
-        bb.0.iter()
-            .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
-            .map(|(id, bb)| (id.clone(), bb.clone()))
-            .collect()
+        let mut changed: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> =
+            bb.0.iter()
+                .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
+                .map(|(id, bb)| (id.clone(), bb.clone()))
+                .collect();
+        // Sorted because this vec becomes the `BlackboardUpdate` payload, and
+        // it was collected from a `HashMap` whose order follows `RandomState`'s
+        // per-process seed — two `--seed` runs emitted the same updates in a
+        // different order every time. Sorting the changed set (a handful of
+        // entries) rather than ordering the map itself keeps the per-tick
+        // publish writes on cheap hash lookups.
+        changed.sort_by(|a, b| a.0.cmp(&b.0));
+        changed
     };
 
     let viewers = visibility::connected_viewers(world);
@@ -1993,8 +2010,19 @@ fn reconcile_runtime_entities(
         return;
     }
 
-    // Emit EntitySpawned for new entities.
-    for (uuid, entity) in &current {
+    // Emit EntitySpawned for new entities, in UUID order.
+    //
+    // Iterating `current` directly announced the same ships in a different
+    // order on every run, because `HashMap` order follows `RandomState`'s
+    // per-process seed. Only the *newly seen* ids are sorted — almost always
+    // none, and a handful on the tick a wave spawns — so this stays off the
+    // per-tick cost of walking every entity.
+    let mut newly_seen: Vec<(&String, &Entity)> = current
+        .iter()
+        .filter(|(uuid, _)| !registry.reported.contains(*uuid))
+        .collect();
+    newly_seen.sort_by(|a, b| a.0.cmp(b.0));
+    for (uuid, entity) in newly_seen {
         if registry.reported.insert(uuid.clone()) {
             if let Ok((
                 _,

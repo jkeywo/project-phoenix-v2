@@ -196,7 +196,11 @@ pub struct StationId(pub String);
 ///
 /// System ids are ship-wide unique authoring keys such as `phaser-fore` or
 /// `torpedo-tube-aft`. They are distinct from world entity UUIDs.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `Ord` so system ids can key a `BTreeMap`. The per-ship blackboard map is one,
+/// because its iteration order reaches the wire: a `HashMap` ordered those
+/// updates by `RandomState`'s per-process seed, so no two runs of the same
+/// seeded binary emitted the same byte stream.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SystemId(pub String);
 
 /// Stable, designer-authored identifier for an operator-facing power group.

@@ -148,7 +148,15 @@ pub struct SystemHullEntry {
 /// Pure struct — `ship/damage.rs` is Bevy-free per AGENTS.md rule 9.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SystemHull {
-    entries: HashMap<SystemId, SystemHullEntry>,
+    /// A `BTreeMap`, so `values()` yields a stable order. Float addition is not
+    /// associative and `HashMap` iteration order follows `RandomState`'s
+    /// per-process seed, so the hull totals below differed in their last bits
+    /// between two runs of the same seeded binary (observed: 0.6000061 vs
+    /// 0.5999756). Those totals feed damage-tier thresholds, so the drift did
+    /// not stay cosmetic — seeded duels diverged into different outcomes.
+    /// Ordering here rather than looking each id up through `order` keeps the
+    /// sums a single walk, with no per-entry lookup.
+    entries: std::collections::BTreeMap<SystemId, SystemHullEntry>,
     /// Ordered list of system ids (matches TOML insertion order).
     order: Vec<SystemId>,
 }
@@ -158,7 +166,7 @@ impl SystemHull {
     /// thresholds and derived display names. All systems start at full HP.
     pub fn from_config(config: &[(SystemId, f32)]) -> Self {
         let mut order = Vec::with_capacity(config.len());
-        let mut entries = HashMap::with_capacity(config.len());
+        let mut entries = std::collections::BTreeMap::new();
         for (sid, max) in config {
             let display_name = sid.0.clone();
             if !entries.contains_key(sid) {
@@ -181,7 +189,7 @@ impl SystemHull {
     /// Display names default to the raw `SystemId` string.
     pub fn from_config_with_tiers(config: &[(SystemId, f32, ConsoleTierConfig)]) -> Self {
         let mut order = Vec::with_capacity(config.len());
-        let mut entries = HashMap::with_capacity(config.len());
+        let mut entries = std::collections::BTreeMap::new();
         for (sid, max, tc) in config {
             let display_name = sid.0.clone();
             if !entries.contains_key(sid) {
@@ -207,7 +215,7 @@ impl SystemHull {
         config: Vec<(SystemId, String, f32, ConsoleTierConfig)>,
     ) -> Self {
         let mut order = Vec::with_capacity(config.len());
-        let mut entries = HashMap::with_capacity(config.len());
+        let mut entries = std::collections::BTreeMap::new();
         for (sid, display_name, max, tc) in config {
             if !entries.contains_key(&sid) {
                 order.push(sid.clone());

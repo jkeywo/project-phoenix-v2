@@ -443,6 +443,11 @@ pub(crate) fn tick_blaster_system(
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // Projectile ids come off the seeded stream (issue: seeded runs were not
+    // reproducible). `Option<Res<_>>` for the same reason as every other
+    // `SimRng` call site — a bare `Res` fails parameter validation in the
+    // bare-`App` weapons fixtures.
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     let dt = time.delta_secs();
     let now = time.elapsed_secs();
@@ -528,7 +533,10 @@ pub(crate) fn tick_blaster_system(
                 target_vx,
                 target_vz,
                 &source_uuid,
-                &mut || uuid::Uuid::new_v4().to_string(),
+                // Was `Uuid::new_v4()`, i.e. OS randomness — which made every
+                // projectile id differ between two `--seed` runs of the same
+                // binary, and those ids key the in-flight/hit bookkeeping.
+                &mut || crate::sim_rng::assign_uuid_with(sim_rng.as_deref()),
             );
             for ev in &events {
                 // ── Recoil impulse (issue #638) ─────────────────────────────

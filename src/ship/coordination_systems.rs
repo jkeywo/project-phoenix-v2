@@ -7,7 +7,8 @@ use crate::messages::{ClientMessage, CoordinationPayload};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
     CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance, PendingArcBearingRequest,
-    RepairHumanAlerted, ShipConfigComponent, ShipSystemControlSources,
+    PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
+    ShipSystemControlSources,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -201,6 +202,7 @@ pub fn process_coordination_lag(
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
+            Option<&mut PendingTacticalFrequencyHint>,
             // Read-only, and only for the #737 popup gate below: the same
             // damage store and repair-team state machine the visibility
             // projection reads, so the popup cannot drift from the wire rule.
@@ -226,6 +228,7 @@ pub fn process_coordination_lag(
         mut alerted,
         mut repair_queue,
         mut pending_shields_threat,
+        mut pending_tactical_hint,
         entity_hull,
         entity_teams,
         is_local,
@@ -258,11 +261,25 @@ pub fn process_coordination_lag(
             // Backfill and NPC spawn produce), otherwise the steering axis —
             // the axis helm-directed coordination (arc bearings, navigation
             // clearances) actually drives — is the representative. Every
-            // other target resolves through `policy_for` as before; station
-            // keys with no registered system (e.g. `"tactical"`) get the
-            // default Human policy, unchanged from when the coarse tactical
-            // id was undeclared.
+            // other target resolves through `policy_for` as before.
+            //
+            // Issue #873: the Tactical station key gets the same treatment, for
+            // the same reason. `SystemId("tactical")` is a *station* key with no
+            // registered `[[system]]` behind it (#801 deleted the coarse block),
+            // so `policy_for` resolved it to the `Human` default on every hull —
+            // which made a BACKFILLED Tactical invisible to the router. A
+            // frequency hint or target designation aimed at an AI-run Tactical
+            // could only Suppress (human sender) or raise an ownerless broadcast
+            // popup (AI sender); it could never Consume, and the AI running the
+            // guns never saw it. `any_tactical_system_operates_ai` is the
+            // Tactical analogue of `helm_axes_operate_ai` — the same predicate
+            // `ai_target_selection` and `tick_npc_auto_match_frequency` already
+            // use to decide the guns are on AI — so the bus and the gunnery now
+            // agree about who is holding Tactical. When it is false the key
+            // falls through to `policy_for` exactly as before, so a human-held
+            // Tactical routes unchanged.
             let helm_key = crate::system_registry::helm_station_key();
+            let tactical_key = crate::system_registry::tactical_station_key();
             let (target_policy, target_control) = if msg.target == helm_key {
                 if helm_axes_operate_ai(control_sources) {
                     (
@@ -276,6 +293,16 @@ pub fn process_coordination_lag(
                         control_sources.0.source_for(&rep),
                     )
                 }
+            } else if msg.target == tactical_key
+                && crate::console::weapons::shared::any_tactical_system_operates_ai(
+                    control_sources,
+                    &ship_config.0,
+                )
+            {
+                (
+                    crate::ship::control_source::control_tick_policy(ControlSource::Ai),
+                    ControlSource::Ai,
+                )
             } else {
                 (
                     control_sources.0.policy_for(&msg.target),
@@ -350,6 +377,21 @@ pub fn process_coordination_lag(
                         {
                             if let Some(pending) = pending_shields_threat.as_deref_mut() {
                                 pending.0 = Some(*bearing_rad);
+                            }
+                        }
+                    }
+                    // A backfilled Tactical folds a consumed Sensors frequency
+                    // hint into its phaser frequency (issue #873) rather than
+                    // dropping it on the floor. `apply_tactical_frequency_hint`
+                    // reads this next tick. The sender may be a human on
+                    // Sensors or that ship's own Sensors AI — the payload is
+                    // identical and nothing here inspects `sender_origin`,
+                    // which is what makes a human-crewed Sensors console able
+                    // to advise a backfilled Tactical at all.
+                    if target_policy.operate_ai && msg.target == tactical_key {
+                        if let CoordinationPayload::FrequencyHint { frequency } = &msg.payload {
+                            if let Some(pending) = pending_tactical_hint.as_deref_mut() {
+                                pending.0 = Some(*frequency);
                             }
                         }
                     }
@@ -809,6 +851,782 @@ mod tests {
         app.world_mut()
             .entity_mut(ship)
             .insert(crate::console::repair::server::ShipRepairTeams(teams));
+    }
+
+    // ── Issue #873: a human-operated station feeds the backfilled AI ─────────
+    //
+    // Rule 6 on the coordination bus. A coordination fact is derived from
+    // authoritative system state and emitted regardless of who holds the
+    // sending console; `sender_origin` is stamped afterwards and used for one
+    // thing only — picking Consume / Popup / Suppress at delivery time. The
+    // emit-side halves of this live in `ship::sensors` and `console_ai::server`;
+    // what these tests cover is the delivery side, including the backfilled
+    // Tactical that the router could not see at all before this issue.
+
+    /// Seat a human on Sensors and on Tactical-adjacent nothing else, so the
+    /// remaining stations backfill to AI. Modelled on `start_game_with_engineer`.
+    fn start_game_with_sensors_officer(app: &mut App) {
+        for (token, name, station) in [
+            ("captain", "Alice", "Captain"),
+            ("sensors", "Spock", "Sensors"),
+        ] {
+            push(
+                app,
+                token,
+                ClientMessage::Identify {
+                    token: token.into(),
+                    name: name.into(),
+                },
+            );
+            tick(app);
+            push(
+                app,
+                token,
+                ClientMessage::SelectStation {
+                    station: station.into(),
+                },
+            );
+            tick(app);
+        }
+        for token in ["captain", "sensors"] {
+            push(app, token, ClientMessage::SetReady { ready: true });
+        }
+        tick(app);
+        assert_eq!(
+            app.world()
+                .resource::<Sessions>()
+                .0
+                .holder_for_station(&crate::messages::StationId("sensors".into())),
+            Some("sensors"),
+            "test setup must seat a human on Sensors"
+        );
+    }
+
+    /// Put every tactical FINE system (phaser banks, torpedo tubes, the
+    /// magazine) on `source` — the set `any_tactical_system_operates_ai`
+    /// inspects, moved as one, which is what claiming or vacating the Tactical
+    /// station does.
+    fn set_tactical_fine_systems(app: &mut App, source: ControlSource) {
+        let ids: Vec<SystemId> = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipConfigComponent, With<Ship>>();
+            let cfg = q.single(app.world()).expect("ship config").clone();
+            cfg.0
+                .systems
+                .iter()
+                .filter(|s| {
+                    matches!(
+                        s.kind.as_str(),
+                        crate::system_registry::PHASER_BANK_KIND
+                            | crate::system_registry::TORPEDO_TUBE_KIND
+                            | crate::system_registry::TORPEDO_MAGAZINE_KIND
+                    )
+                })
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        assert!(
+            !ids.is_empty(),
+            "the shipped hull must declare tactical fine systems for this fixture to mean anything"
+        );
+        for id in ids {
+            set_fine_control_source(app, id, source);
+        }
+    }
+
+    /// The shape an unmanned Tactical station backfills to.
+    fn backfill_tactical_to_ai(app: &mut App) {
+        set_tactical_fine_systems(app, ControlSource::Ai);
+    }
+
+    /// Give the ship the two components the Tactical hint path needs, which
+    /// `test_app` does not spawn: the landing slot and the thing that moves.
+    fn give_ship_tactical_frequency_surface(app: &mut App) {
+        let ship = find_ship_entity(app);
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship_plugin::PendingTacticalFrequencyHint::default(),
+            crate::ship_state::ShipPhaserFrequency(0.1),
+        ));
+    }
+
+    /// Register the react half in the set production puts it in
+    /// (`SimSet::Input`), so the tick boundary these tests reason about is the
+    /// real one: `process_coordination_lag` lands a value in `Modifiers`, and
+    /// the applier reads it in the FOLLOWING tick's `Input`.
+    fn add_tactical_hint_applier(app: &mut App) {
+        app.add_systems(
+            Update,
+            crate::console::weapons::apply_tactical_frequency_hint
+                .in_set(crate::sim_sets::SimSet::Input),
+        );
+    }
+
+    /// Arm the REAL Sensors emitter (`tick_sensors_frequency_hint`) on this
+    /// ship, rather than hand-writing the `CoordinationEnqueue` it would have
+    /// produced.
+    ///
+    /// Three pieces of authoritative state, and nothing about who is sitting
+    /// where: the hull is made low-fidelity (that emitter serves ships without
+    /// `AiHighFidelity`; the high-fidelity twin
+    /// `tick_frequency_hint_high_fidelity` reads the same facts through the
+    /// operator reaction-delay model), the viewscreen's frozen Combat Lock names
+    /// a target, and that target carries a shield frequency to read.
+    ///
+    /// Ordered `.before(handle_coordination_enqueue)` so the emit lands on the
+    /// bus the same tick it is written rather than at the mercy of intra-set
+    /// ordering.
+    fn arm_real_sensors_frequency_emitter(app: &mut App, target_uuid: &str, frequency: f32) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ai_plugin::AiHighFidelity>()
+            .insert(crate::ship::sensors::SensorsFrequencyState::default());
+        {
+            let mut blackboards = app
+                .world_mut()
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+                .expect("ship carries system blackboards");
+            blackboards.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                crate::messages::SystemBlackboard::Viewscreen(
+                    crate::messages::ViewscreenBlackboard {
+                        combat_lock: Some(target_uuid.to_string()),
+                        ..Default::default()
+                    },
+                ),
+            );
+        }
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.to_string()),
+            crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), frequency),
+        ));
+        app.add_systems(
+            Update,
+            crate::ship::sensors::tick_sensors_frequency_hint
+                .in_set(crate::sim_sets::SimSet::Input)
+                .before(handle_coordination_enqueue),
+        );
+    }
+
+    /// Arm the REAL high-fidelity Sensors emitter — the one the PLAYER SHIP
+    /// runs, and therefore the one the issue is actually about.
+    ///
+    /// `arm_real_sensors_frequency_emitter` above removes `AiHighFidelity` to
+    /// reach `tick_sensors_frequency_hint`. That is a real path, but it is the
+    /// path a DEMOTED NPC hull takes: `server_app::spawn_game_start_entities`
+    /// gives `LocalShip` `ai_high_fidelity_components()` at spawn and
+    /// `ai::server::lod_ai_ships` never evaluates `LocalShip`, so the player
+    /// hull is permanently high-fidelity. A human on the player ship's Sensors
+    /// is served by `tick_frequency_hint_high_fidelity` — which until this
+    /// fixture existed was only ever exercised in a bare-`App` fixture in
+    /// `console_ai::server` that stops at a collector box and never touches the
+    /// bus, the router, or the applier.
+    ///
+    /// So: the marker STAYS, and the emitter is registered under the same
+    /// `ai_tick_ready` cadence production gates it with, so what gets pinned end
+    /// to end is the chain the player ship really takes.
+    fn arm_real_high_fidelity_sensors_emitter(app: &mut App, target_uuid: &str, frequency: f32) {
+        let ship = find_ship_entity(app);
+        assert!(
+            app.world()
+                .get::<crate::ai_plugin::AiHighFidelity>(ship)
+                .is_some(),
+            "this fixture is the PLAYER-ship chain: the hull must keep AiHighFidelity, \
+             otherwise it is silently testing the demoted-NPC emitter instead"
+        );
+        {
+            let mut blackboards = app
+                .world_mut()
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+                .expect("ship carries system blackboards");
+            blackboards.0.insert(
+                crate::system_registry::viewscreen_system_id(),
+                crate::messages::SystemBlackboard::Viewscreen(
+                    crate::messages::ViewscreenBlackboard {
+                        combat_lock: Some(target_uuid.to_string()),
+                        ..Default::default()
+                    },
+                ),
+            );
+        }
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(target_uuid.to_string()),
+            crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), frequency),
+        ));
+        crate::ai::cadence::register_ai_cadence(app);
+        app.add_systems(
+            Update,
+            crate::console_ai_plugin::tick_frequency_hint_high_fidelity
+                .in_set(crate::sim_sets::SimSet::Input)
+                .before(handle_coordination_enqueue)
+                .run_if(crate::ai::cadence::ai_tick_ready),
+        );
+    }
+
+    /// How many emitter runs the AUTHORED reaction delay takes, read from the
+    /// same two authored defaults the emitter itself reads (rule 11: no literal
+    /// tick count here — an authored change must move the fixture with it).
+    fn authored_reaction_delay_runs() -> usize {
+        let delay =
+            crate::ship::sensors::SensorsAiConfigResource::default().frequency_hint_delay_secs;
+        let hz = crate::entity_config::GlobalConfig::default().ai_tick_hz;
+        (delay * hz).ceil() as usize
+    }
+
+    fn ship_phaser_frequency(app: &mut App) -> f32 {
+        let ship = find_ship_entity(app);
+        app.world()
+            .get::<crate::ship_state::ShipPhaserFrequency>(ship)
+            .expect("ship carries a phaser frequency")
+            .0
+    }
+
+    fn coordination_popups(app: &App) -> usize {
+        app.world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .filter(|(_, msg)| {
+                matches!(
+                    msg,
+                    crate::messages::ServerMessage::CoordinationPopup { .. }
+                )
+            })
+            .count()
+    }
+
+    fn enqueue_coordination(
+        app: &mut App,
+        sender_origin: ControlSource,
+        target: SystemId,
+        payload: CoordinationPayload,
+    ) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .resource_mut::<Messages<CoordinationEnqueue>>()
+            .write(CoordinationEnqueue {
+                source_entity: ship,
+                sender_origin,
+                target,
+                payload,
+                sender_label: "Sensors".into(),
+            });
+    }
+
+    /// AC5, end to end in ONE app. A human sits at Sensors; Tactical is unmanned
+    /// and backfilled to AI. The ship's own Sensors emitter derives a frequency
+    /// advisory from authoritative state, the bus routes it, and the AI running
+    /// the guns acts on it.
+    ///
+    /// Nothing is hand-written here: the chain starts at the REAL emitter
+    /// `ship::sensors::tick_sensors_frequency_hint`, armed only with ship state
+    /// (a viewscreen Combat Lock on a target whose shields carry 0.83), and ends
+    /// at the phaser frequency. A stub `CoordinationEnqueue` would have proved
+    /// the routing and reaction halves while leaving the half this issue
+    /// actually changed — whether a human-held Sensors console emits at all —
+    /// asserted only in a different app, in a different module.
+    ///
+    /// Before #873 this produced nothing at all, for either of two reasons:
+    /// the emitter stood down on a human-held console, and `SystemId("tactical")`
+    /// is a station key with no registered `[[system]]`, so it resolved to the
+    /// default `Human` policy no matter who was really running the guns — and a
+    /// human-origin message to a "human" target is `Suppress`. The AI Tactical
+    /// could not be told anything by the human sitting three feet away from it.
+    ///
+    /// The origin is read back off the ship's LIVE control sources rather than
+    /// written as a literal, so the test would stop being about a human the
+    /// moment seating one stopped making Sensors human-held.
+    #[test]
+    fn human_sensors_advisory_reaches_and_moves_a_backfilled_tactical() {
+        let mut app = routing_test_app();
+        add_tactical_hint_applier(&mut app);
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+        arm_real_sensors_frequency_emitter(&mut app, "harrow-raider-1", 0.83);
+
+        assert_eq!(
+            get_ship_control_sources(&mut app)
+                .0
+                .source_for(&crate::system_registry::sensors_system_id()),
+            ControlSource::Human,
+            "the fixture must actually leave Sensors in human hands"
+        );
+
+        // Tick 1: tick_sensors_frequency_hint (Input) reads the Combat Lock and
+        //         the target's shield frequency and writes CoordinationEnqueue →
+        //         handle_coordination_enqueue queues it (lag 0) →
+        //         process_coordination_lag (Modifiers) consumes it into the
+        //         pending slot, because Tactical operates AI.
+        // Tick 2: apply_tactical_frequency_hint (Input) folds it into the guns.
+        tick(&mut app);
+        tick(&mut app);
+
+        let frequency = ship_phaser_frequency(&mut app);
+        assert!(
+            (frequency - 0.83).abs() < f32::EPSILON,
+            "a backfilled Tactical must act on the human Sensors officer's advisory, and \
+             the advisory must come from the ship's own emitter reading the locked target's \
+             shields; phaser frequency is {frequency}, expected 0.83"
+        );
+        assert_eq!(
+            coordination_popups(&app),
+            0,
+            "an advisory consumed by an AI station must not also raise a popup"
+        );
+    }
+
+    /// AC5 on the chain the PLAYER SHIP actually takes, end to end in ONE app.
+    ///
+    /// The test above proves the low-fidelity (demoted-NPC) emitter. This one
+    /// proves the high-fidelity emitter, and it is the one the issue is about:
+    /// the player hull is permanently high-fidelity, so a human sitting at the
+    /// player ship's Sensors is served by `tick_frequency_hint_high_fidelity`,
+    /// never by `tick_sensors_frequency_hint`. Both are kept — a ship can be on
+    /// either side of the LOD split and both must feed a backfilled Tactical.
+    ///
+    /// It also pins the consequence that reading the spec would otherwise get
+    /// backwards: on the player ship a HUMAN Sensors officer's advisory carries
+    /// the authored `frequency_hint_delay_secs` reaction delay, exactly as the
+    /// AI's does. That is deliberate. An advisory that is instant for a human
+    /// sender and delayed for an AI one is a human-vs-AI branch on a
+    /// coordination fact (AGENTS.md rule 6); and the "instant" path it replaced
+    /// delivered nothing at all, because it addressed the Tactical station key,
+    /// which resolves to the `Human` policy default, making a human-origin hint
+    /// route Human→Human = Suppress.
+    ///
+    /// So the delay is asserted in both directions: silent well inside it,
+    /// delivered past it.
+    #[test]
+    fn human_sensors_advisory_reaches_a_backfilled_tactical_on_the_player_ships_high_fidelity_chain(
+    ) {
+        let mut app = routing_test_app();
+        add_tactical_hint_applier(&mut app);
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+        arm_real_high_fidelity_sensors_emitter(&mut app, "harrow-raider-1", 0.83);
+
+        assert_eq!(
+            get_ship_control_sources(&mut app)
+                .0
+                .source_for(&crate::system_registry::sensors_system_id()),
+            ControlSource::Human,
+            "the fixture must actually leave Sensors in human hands"
+        );
+        let before = ship_phaser_frequency(&mut app);
+        assert!(
+            (before - 0.83).abs() > f32::EPSILON,
+            "the fixture must start away from the advised frequency"
+        );
+
+        let runs = authored_reaction_delay_runs();
+        // Well inside the authored reaction delay.
+        for _ in 0..runs / 2 {
+            tick(&mut app);
+        }
+        assert!(
+            (ship_phaser_frequency(&mut app) - before).abs() < f32::EPSILON,
+            "the authored Sensors reaction delay applies to a human sender too — half \
+             of it must not be enough; phaser frequency already moved to {}",
+            ship_phaser_frequency(&mut app)
+        );
+
+        // Past it, plus the router tick and the applier tick.
+        for _ in 0..(runs - runs / 2 + 3) {
+            tick(&mut app);
+        }
+        let frequency = ship_phaser_frequency(&mut app);
+        assert!(
+            (frequency - 0.83).abs() < f32::EPSILON,
+            "on the permanently-high-fidelity PLAYER hull, a human Sensors officer's \
+             advisory must still reach and move the backfilled Tactical; phaser \
+             frequency is {frequency}, expected 0.83"
+        );
+        assert_eq!(
+            coordination_popups(&app),
+            0,
+            "an advisory consumed by an AI station must not also raise a popup"
+        );
+    }
+
+    /// The same delivery, from the ship's own Sensors AI. Both origins must
+    /// reach the backfilled Tactical identically — that symmetry is the point,
+    /// and asserting only the human half would let an origin branch survive on
+    /// the other side.
+    #[test]
+    fn ai_sensors_advisory_reaches_a_backfilled_tactical_the_same_way() {
+        let mut app = routing_test_app();
+        add_tactical_hint_applier(&mut app);
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+
+        enqueue_coordination(
+            &mut app,
+            ControlSource::Ai,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        );
+        tick(&mut app);
+        tick(&mut app);
+
+        let ship = find_ship_entity(&mut app);
+        assert!(
+            (app.world()
+                .get::<crate::ship_state::ShipPhaserFrequency>(ship)
+                .unwrap()
+                .0
+                - 0.83)
+                .abs()
+                < f32::EPSILON,
+            "an AI-origin advisory must reach a backfilled Tactical too"
+        );
+        assert_eq!(
+            coordination_popups(&app),
+            0,
+            "before #873 this AI→backfilled-Tactical hint fell through to the ownerless \
+             branch and BROADCAST a popup to every connected client, because the tactical \
+             station key resolves to no [[system]] and therefore no station holder"
+        );
+    }
+
+    /// AC3. A human-held Tactical must route exactly as it did before: the new
+    /// branch is only taken when `any_tactical_system_operates_ai` holds, so a
+    /// manned Tactical still falls through to `policy_for` and an AI-origin
+    /// advisory still surfaces to the human.
+    #[test]
+    fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
+        let mut app = routing_test_app();
+        start_game_with_sensors_officer(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+        // No `backfill_tactical_to_ai` — every tactical fine system stays on
+        // the default Human source.
+
+        enqueue_coordination(
+            &mut app,
+            ControlSource::Ai,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        );
+        tick(&mut app);
+        tick(&mut app);
+
+        assert!(
+            coordination_popups(&app) > 0,
+            "a human Tactical must still be shown an AI-origin advisory"
+        );
+        let ship = find_ship_entity(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<crate::ship_plugin::PendingTacticalFrequencyHint>(ship)
+                .unwrap()
+                .0,
+            None,
+            "nothing may be consumed on the AI's behalf while a human holds Tactical"
+        );
+    }
+
+    /// The handover window. `process_coordination_lag` lands a value in
+    /// `Modifiers` and `apply_tactical_frequency_hint` reads it in the NEXT
+    /// tick's `Input` — so there is exactly one tick in which a human can claim
+    /// Tactical after the router decided the addressee was an AI.
+    ///
+    /// The applier must therefore re-ask the router's own question,
+    /// `any_tactical_system_operates_ai`, and DROP the value when the answer has
+    /// changed. Applying it would overwrite the frequency the human just dialled
+    /// with an advisory addressed to nobody, and the human would have no idea
+    /// why their guns detuned.
+    ///
+    /// Dropped, not deferred: the slot is emptied either way, so the stale hint
+    /// cannot re-assert itself the moment the AI takes Tactical back.
+    #[test]
+    fn a_hint_pending_when_a_human_claims_tactical_is_dropped_not_applied() {
+        let mut app = routing_test_app();
+        add_tactical_hint_applier(&mut app);
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+
+        enqueue_coordination(
+            &mut app,
+            ControlSource::Human,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        );
+        // Tick 1 only: the router has consumed the hint into the pending slot,
+        // and the applier has not yet run on it.
+        tick(&mut app);
+        let ship = find_ship_entity(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<crate::ship_plugin::PendingTacticalFrequencyHint>(ship)
+                .unwrap()
+                .0,
+            Some(0.83),
+            "precondition: the router must have landed the hint, so what follows is \
+             about the applier and not about the hint never arriving"
+        );
+
+        // A human takes Tactical inside the window.
+        set_tactical_fine_systems(&mut app, ControlSource::Human);
+        let dialled_by_the_human = ship_phaser_frequency(&mut app);
+        tick(&mut app);
+
+        assert!(
+            (ship_phaser_frequency(&mut app) - dialled_by_the_human).abs() < f32::EPSILON,
+            "a hint addressed to the AI that held Tactical a tick ago must not overwrite \
+             the frequency its human successor is holding; phaser frequency moved to {}",
+            ship_phaser_frequency(&mut app)
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::ship_plugin::PendingTacticalFrequencyHint>(ship)
+                .unwrap()
+                .0,
+            None,
+            "the stale hint must be DROPPED, not left pending — otherwise it lands the \
+             moment Tactical goes back to AI, long after the fact that produced it"
+        );
+    }
+
+    /// The applier drains the slot even for a ship it cannot act on.
+    ///
+    /// `apply_tactical_frequency_hint` takes everything but the slot itself as
+    /// `Option`. If `ShipPhaserFrequency` or `ShipConfigComponent` were required,
+    /// a `Ship` missing one would be filtered OUT of the query rather than
+    /// iterated — its pending hint would never be drained, and would then apply
+    /// the moment the missing component appeared, carrying a frequency from an
+    /// arbitrarily old tick. Every shipped spawn site attaches all of them today,
+    /// so this is a latent hole rather than a live bug; the point of pinning it
+    /// is that the doc-comment's "consumed exactly once" is then an invariant of
+    /// the system rather than a property of the current spawn sites.
+    #[test]
+    fn a_pending_hint_is_drained_even_on_a_ship_that_cannot_apply_it() {
+        let mut app = routing_test_app();
+        add_tactical_hint_applier(&mut app);
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+
+        // A ship with the slot but nothing to move.
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .remove::<crate::ship_state::ShipPhaserFrequency>();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship_plugin::PendingTacticalFrequencyHint(Some(0.83)));
+
+        tick(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<crate::ship_plugin::PendingTacticalFrequencyHint>(ship)
+                .unwrap()
+                .0,
+            None,
+            "the slot must be drained even when the hint cannot be applied — leaving it \
+             set makes the value land later, out of time with the fact that produced it"
+        );
+
+        // The frequency surface appears afterwards; the stale hint must be gone.
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::ship_state::ShipPhaserFrequency(0.1));
+        tick(&mut app);
+        assert!(
+            (ship_phaser_frequency(&mut app) - 0.1).abs() < f32::EPSILON,
+            "a hint dropped on a previous tick must not re-assert itself once the \
+             missing component appears; phaser frequency moved to {}",
+            ship_phaser_frequency(&mut app)
+        );
+    }
+
+    /// AC2, Helm half. A human on Tactical asks the backfilled Helm to come
+    /// about; the AI Helm must receive the request rather than have it
+    /// suppressed as "two humans who can just talk to each other".
+    #[test]
+    fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
+        let mut app = routing_test_app();
+        start_game_with_sensors_officer(&mut app);
+        set_helm_control_source(&mut app, ControlSource::Ai);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(PendingArcBearingRequest::default());
+
+        let target_uuid = uuid::Uuid::new_v4();
+        enqueue_coordination(
+            &mut app,
+            ControlSource::Human,
+            crate::system_registry::helm_station_key(),
+            CoordinationPayload::ArcBearingRequest {
+                uuid: target_uuid.to_string(),
+                label: "Harrow Raider".into(),
+                family: crate::messages::WeaponFamily::Phasers,
+                arcs: Vec::new(),
+            },
+        );
+        tick(&mut app);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world()
+                .get::<PendingArcBearingRequest>(ship)
+                .unwrap()
+                .target,
+            Some(target_uuid),
+            "a backfilled Helm must act on a human-origin arc-bearing request"
+        );
+        assert_eq!(
+            coordination_popups(&app),
+            0,
+            "an AI Helm consumes silently; there is no console holder to pop up at"
+        );
+    }
+
+    // ── Issue #873: the power brownout advisory, at DELIVERY ────────────────
+    //
+    // `tick_power_brownout_advisory` used to stamp `sender_origin:
+    // ControlSource::Ai` as a literal. It now reads the ship's live
+    // `power-reactor` control source. `ship::power`'s own test asserts the tag
+    // at the point of emission, which is not enough to call the consequence
+    // deliberate: the tag is the ONLY input `route_coordination` has, so
+    // changing it changes who is shown the advisory. AC3 says existing
+    // consume/popup/suppress behaviour is unchanged, and for this advisory it is
+    // NOT — so the change is pinned here, on the delivery side, in both
+    // directions.
+    //
+    // The behaviour that changed: with a human at Power and a human at Helm, a
+    // brownout used to pop up at the Helm because it claimed AI origin. It now
+    // routes Human→Human = Suppress. That is the correct reading of the rule the
+    // router already implements — two humans on the same bridge talk to each
+    // other, the bus does not interrupt them — and a hardcoded origin is exactly
+    // the bug class this issue removes. It is a deliberate behaviour change, not
+    // an oversight, which is why it has a test of its own.
+
+    /// Arm the REAL brownout emitter on this ship: the two components its query
+    /// takes, the reactor on `power_source`, and the system itself in the set
+    /// `ShipPowerPlugin` registers it in (`SimSet::Modifiers`, ordered before
+    /// `process_coordination_lag` so the write and the routing of it are the
+    /// production order). `ShipPlugin` — the only plugin `test_app` installs —
+    /// does not carry `ShipPowerPlugin`, so without this the emitter would never
+    /// run and BOTH tests below would pass for the wrong reason.
+    ///
+    /// A `CoordEnqueueBox` collector comes with it for exactly that reason: each
+    /// test asserts the advisory was really emitted before asserting what
+    /// delivery did with it.
+    fn arm_brownout_advisory(app: &mut App, power_source: ControlSource) {
+        let ship = find_ship_entity(app);
+        app.world_mut().entity_mut(ship).insert((
+            crate::ship::power::ShipPowerSystem(
+                crate::modifiers::power_system::PowerSystem::default(),
+            ),
+            crate::ship::power::PowerBrownoutState::default(),
+        ));
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
+            for mut cs in q.iter_mut(app.world_mut()) {
+                cs.0.set(
+                    crate::system_registry::power_reactor_system_id(),
+                    power_source,
+                );
+            }
+        }
+        app.init_resource::<CoordEnqueueBox>()
+            .add_systems(PostUpdate, collect_coord)
+            .add_systems(
+                Update,
+                crate::ship::power::tick_power_brownout_advisory
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .before(process_coordination_lag),
+            );
+    }
+
+    fn brownout_advisories(app: &App) -> usize {
+        app.world()
+            .resource::<CoordEnqueueBox>()
+            .0
+            .iter()
+            .filter(|e| matches!(&e.payload, CoordinationPayload::PowerBrownout { .. }))
+            .count()
+    }
+
+    /// Push total allocation past the supply ceiling so the battery drains and
+    /// the rising edge fires. Same lever `ship::power`'s own brownout tests use.
+    fn drive_ship_into_brownout(app: &mut App) {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut crate::ship::power::ShipPowerSystem, With<Ship>>();
+        for mut ps in q.iter_mut(app.world_mut()) {
+            let _ = ps.0.set_group_allocation(
+                &crate::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
+                3,
+            );
+        }
+    }
+
+    /// The changed case. Human at Power, human at Helm → Suppress.
+    #[test]
+    fn a_human_power_officers_brownout_is_suppressed_at_a_human_helm() {
+        let mut app = routing_test_app();
+        // Seats a human on Helm (and Captain, and Repair).
+        start_game_with_engineer(&mut app);
+        arm_brownout_advisory(&mut app, ControlSource::Human);
+        assert!(
+            !helm_axes_operate_ai(&get_ship_control_sources(&mut app)),
+            "fixture precondition: Helm must be in human hands, or the Suppress \
+             branch is not the one under test"
+        );
+
+        drive_ship_into_brownout(&mut app);
+        for _ in 0..4 {
+            tick(&mut app);
+        }
+
+        assert!(
+            brownout_advisories(&app) > 0,
+            "precondition: the fixture must actually EMIT a brownout advisory, or the \
+             popup assertion below passes for the wrong reason"
+        );
+        assert_eq!(
+            coordination_popups(&app),
+            0,
+            "a human Power officer's brownout must not interrupt a human Helm — before \
+             issue #873 the advisory stamped a literal ControlSource::Ai and took the \
+             AI→human popup branch no matter who was at Power. This behaviour CHANGED, \
+             deliberately: the tag now reports the live reactor control source, so \
+             Human→Human routes to Suppress like every other same-origin advisory"
+        );
+    }
+
+    /// The unchanged case, asserted alongside it so the fix cannot be mistaken
+    /// for "brownouts stopped being delivered".
+    #[test]
+    fn an_ai_power_brownout_still_pops_up_at_a_human_helm() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+        arm_brownout_advisory(&mut app, ControlSource::Ai);
+
+        drive_ship_into_brownout(&mut app);
+        for _ in 0..4 {
+            tick(&mut app);
+        }
+
+        assert!(
+            brownout_advisories(&app) > 0,
+            "precondition: the fixture must actually EMIT a brownout advisory"
+        );
+        assert!(
+            coordination_popups(&app) > 0,
+            "an AI-run reactor's brownout must still reach the human Helm exactly as it \
+             did before issue #873 — only the human-at-Power case changed"
+        );
     }
 
     #[test]

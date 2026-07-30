@@ -2464,6 +2464,9 @@ fn spawn_game_start_entities(
                 .insert(crate::ship_plugin::PendingArcBearingRequest::default())
                 .insert(crate::ship_plugin::DockingMotionIntent::default())
                 .insert(crate::ship::shields::PendingShieldsThreatBearing::default())
+                // Sensors→Tactical frequency advisory a backfilled Tactical
+                // consumes off the channel-3 bus (issue #873).
+                .insert(crate::ship_plugin::PendingTacticalFrequencyHint::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
                     x: pos.x,
@@ -2660,7 +2663,7 @@ fn spawn_game_start_entities(
             }
 
             // Sensors AI config — the player-ship half of the same per-entity
-            // pattern (issue #738 follow-up). `ai_frequency_hint` reads only the
+            // pattern (issue #738 follow-up). `tick_frequency_hint_high_fidelity` reads only the
             // Component, and the spawner attaches one to every entity with a
             // `[behaviour]` block; without this, `[sensors_console.ai]` authored
             // on a player-class ship was silently ignored end to end. Behaviour-

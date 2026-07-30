@@ -9833,7 +9833,7 @@ fn the_unengaged_hostile_was_engageable_all_along() {
 // ── issue #692 (audit finding B1): tick_npc_auto_match_frequency gate ──
 //
 // Both frequency-hint systems must be gated on `AiHighFidelity`. The
-// `tick_frequency_hint` path already is (`ai_frequency_hint`); these two
+// `tick_frequency_hint` path already is (`tick_frequency_hint_high_fidelity`); these two
 // tests cover the newly-added gate on the NPC auto-match path.
 
 /// Spawns a target entity that `tick_npc_auto_match_frequency` can read a

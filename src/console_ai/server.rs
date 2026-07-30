@@ -13,8 +13,10 @@
 //!   admitted `SetShieldArcFocus` payloads via
 //!   `command_admission::validate_and_admit` and the human path's
 //!   `ship::shields::handle_shields_messages` applies them same-tick.
-//! - `ai_frequency_hint` — wires `console_ai::tick_frequency_hint`, which had
-//!   no caller anywhere prior to this issue.
+//! - `tick_frequency_hint_high_fidelity` (named `ai_frequency_hint` until issue
+//!   #873 took the operator branch out of it) — wires
+//!   `console_ai::tick_frequency_hint`, which had no caller anywhere prior to
+//!   this issue.
 //!
 //! Issue #694 (preliminary) added `ai_torpedo_auto_fire` /
 //! `integrate_torpedo_intents`, replacing the old fused torpedo sub-block
@@ -40,18 +42,19 @@ use crate::console_ai::shields_emit::emit_shields_ai_command;
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
 pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
-/// Matches `[[station.rating]].ai_tuning.auto_hint` for the Sensors station.
-/// Consulted by `ai_frequency_hint` via a per-ship claimed/unclaimed split
-/// mirroring `AI_RULE_TORPEDO_AUTO_FIRE`'s use in `ai_torpedo_auto_fire`:
-/// `ShipConfig::sensors_station()` resolves the owning station per-ship (no
-/// global "Tactical" assumption), so a claimed NPC never sees a human
-/// session's rating and an unclaimed ship (every NPC, and the player ship
-/// before anyone takes Sensors) hints unconditionally.
-pub const AI_RULE_AUTO_HINT: &str = "auto_hint";
+// `AI_RULE_AUTO_HINT` ("auto_hint") was deleted by issue #873. It gated the
+// Sensors frequency hint on whether a *human session* held the Sensors station
+// and, if so, on that holder's active rating — so a coordination fact derived
+// entirely from authoritative ship state stopped being emitted the moment a
+// human sat down. That is the human/AI branch AGENTS.md rule 6 forbids, and no
+// shipped hull authored the key anyway. Do not reintroduce it: a station rating
+// tunes what a console offers its own operator, never whether the ship's state
+// reaches the rest of the bridge.
 pub const AI_RULE_MOVEMENT_RULE: &str = "movement_rule";
 pub const AI_RULE_RED_ALERT_RULE: &str = "red_alert_rule";
 
-/// Per-ship persistent state for `ai_frequency_hint`'s delayed-hint timer.
+/// Per-ship persistent state for `tick_frequency_hint_high_fidelity`'s
+/// delayed-hint timer.
 /// Bevy-facing wrapper around `console_ai::FrequencyHintState`.
 ///
 /// Present only while the ship carries `AiHighFidelity` — bundled alongside
@@ -141,7 +144,12 @@ impl Plugin for ConsoleAiPlugin {
                     .in_set(crate::sim_sets::SimSet::Input)
                     .before(crate::weapons_plugin::handle_set_torpedo_volley_target)
                     .run_if(crate::ai::cadence::ai_tick_ready),
-                ai_frequency_hint
+                // Not an AI-operator decider despite living in this plugin
+                // (issue #873): it emits the ship's Sensors frequency advisory
+                // for every high-fidelity hull regardless of who holds Sensors.
+                // It stays under `ai_tick_ready` because its reaction-delay
+                // model advances by the authored tick period, not `Time::delta`.
+                tick_frequency_hint_high_fidelity
                     .in_set(crate::sim_sets::SimSet::Input)
                     .run_if(crate::ai::cadence::ai_tick_ready),
             ),
@@ -1185,32 +1193,45 @@ pub(crate) fn ai_torpedo_load(
 
 // ── Frequency-hint AI ─────────────────────────────────────────────────────────
 
-/// AI frequency-hint decision system (issue #692).
+/// High-fidelity Sensors frequency-hint emitter (issues #692, #873).
 ///
-/// Wires the previously-orphaned `console_ai::tick_frequency_hint`: for
-/// ships whose Sensors is AI-operated, waits
+/// Wires `console_ai::tick_frequency_hint`: waits
 /// `SensorsAiConfigResource::frequency_hint_delay_secs` after a target lock
-/// before emitting a `FrequencyHint` coordination message to Tactical —
-/// replicating a Low-complexity Sensors operator's reaction delay, rather
-/// than the instantaneous readout `ship::sensors::tick_sensors_frequency_hint`
-/// provides for human-held Sensors.
+/// before emitting a `FrequencyHint` coordination message to Tactical,
+/// replicating a Sensors operator's reaction delay rather than the instantaneous
+/// readout `ship::sensors::tick_sensors_frequency_hint` produces.
 ///
-/// # Gating
-/// - `ShipSystemControlSources.policy_for(sensors_system_id()).operate_ai`.
-/// - `AiHighFidelity` (query filter).
-/// - Claimed/unclaimed Sensors station distinction, mirroring
-///   `ai_torpedo_auto_fire`'s `AI_RULE_TORPEDO_AUTO_FIRE` gate: when a session
-///   holds this ship's Sensors station, the hint additionally requires the
-///   holder's active rating to declare the `auto_hint` `ai_tuning` rule; when
-///   unclaimed (the NPC case — no human ever mans a synthetic ship's Sensors),
-///   the hint fires unconditionally. `ShipConfigComponent`/`ActiveStationRatings`
-///   are read as `Option` so ships in tests or contexts that predate this gate
-///   (no config, no ratings) fall back to "unclaimed" rather than being
-///   silently excluded from the query.
+/// # Gating — `AiHighFidelity` and nothing else
 ///
-/// `tick_sensors_frequency_hint` explicitly skips ships that satisfy both of
-/// these conditions, so the two systems never double-emit for the same ship.
-fn ai_frequency_hint(
+/// The only gate is the `AiHighFidelity` query filter, i.e. the hull's
+/// simulation level of detail. `tick_sensors_frequency_hint` skips exactly the
+/// ships this one serves, so the two never double-emit and every ship emits
+/// through one of them.
+///
+/// Issue #873 removed two gates that were both, underneath, the same
+/// human-vs-AI branch:
+///
+/// * `policy_for(sensors).operate_ai` — a human on Sensors silenced this
+///   emitter and diverted the fact to the immediate path instead, so the hint's
+///   timing (and, across a lag boundary, its content) depended on who was
+///   holding the console.
+/// * The `auto_hint` `ai_tuning` rule, consulted only when a *session held* the
+///   Sensors station. No shipped hull authors `auto_hint`, so in practice a
+///   human sitting down at Sensors on a high-fidelity ship silenced the ship's
+///   frequency advisory outright — a coordination fact whose existence turned
+///   on the presence of a human. A station rating may tune what a console shows
+///   its own operator; it may not decide whether the ship's authoritative state
+///   reaches the rest of the bridge.
+///
+/// `sender_origin` is resolved at the write below and used for nothing but the
+/// delivery-time routing tag (AGENTS.md rule 6).
+/// `pub(crate)` so the end-to-end AC5 fixture in `ship::coordination_systems`
+/// can register the emitter the PLAYER ship actually runs. The player hull is
+/// permanently high-fidelity (`server_app::spawn_game_start_entities` gives
+/// `LocalShip` the marker at spawn and `ai::server::lod_ai_ships` never
+/// evaluates `LocalShip`), so this — not `tick_sensors_frequency_hint` — is the
+/// emitter behind a human Sensors officer's advisory on the player ship.
+pub(crate) fn tick_frequency_hint_high_fidelity(
     // The AUTHORED tick period, not `Time::delta` (issue #889). This system is
     // gated by `run_if(ai_tick_ready)`, so it observes one shared AI tick per
     // run — feeding it the frame delta would accumulate only the frames it
@@ -1219,7 +1240,6 @@ fn ai_frequency_hint(
     // the frame-independence the gate exists to provide. Same shape as
     // `ai_policy_state_tick`'s `AiPolicyTickClock`.
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    sessions: Option<Res<crate::lobby::Sessions>>,
     mut ships: Query<
         (
             Entity,
@@ -1227,8 +1247,6 @@ fn ai_frequency_hint(
             &crate::server_app::ShipSystemBlackboards,
             &mut ShipFrequencyHintState,
             Option<&crate::ship::sensors::SensorsAiConfigResource>,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::ship_plugin::ActiveStationRatings>,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -1248,53 +1266,11 @@ fn ai_frequency_hint(
     let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
     let sensors_sid = crate::system_registry::sensors_system_id();
 
-    for (
-        entity,
-        control_sources,
-        blackboards,
-        mut hint_state,
-        ai_config_comp,
-        ship_config_comp,
-        active_ratings_comp,
-    ) in ships.iter_mut()
-    {
-        let policy = control_sources.0.policy_for(&sensors_sid);
-        if !policy.operate_ai {
-            // Not (or no longer) AI-driven — reset so a later hand-back to
-            // AI control doesn't fire an instantly-stale hint.
-            *hint_state = ShipFrequencyHintState::default();
-            continue;
-        }
-
-        // Claimed/unclaimed Sensors distinction (issue #692 follow-up: the
-        // `auto_hint` rule key was parsed but never consulted). No
-        // `ShipConfigComponent` or no claimed session both fall back to
-        // "unclaimed" — hint unconditionally, matching the NPC default.
-        let auto_hint_enabled = match (&ship_config_comp, &sessions) {
-            (Some(ship_config), Some(sessions)) => {
-                let sensors_station = ship_config.0.sensors_station().unwrap_or_else(|| {
-                    crate::messages::StationId(crate::system_registry::SENSORS_SYSTEM_ID.into())
-                });
-                match sessions.0.holder_for_station(&sensors_station) {
-                    Some(_) => active_ratings_comp
-                        .and_then(|r| r.0.get(&sensors_station))
-                        .is_some_and(|rating| {
-                            ship_config
-                                .0
-                                .has_ai_rule(&sensors_station, rating, AI_RULE_AUTO_HINT)
-                        }),
-                    None => true,
-                }
-            }
-            _ => true,
-        };
-        if !auto_hint_enabled {
-            continue;
-        }
-
+    for (entity, control_sources, blackboards, mut hint_state, ai_config_comp) in ships.iter_mut() {
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
-        // identical to how the human twin `tick_sensors_frequency_hint` and the
-        // firing paths now read it — never the tactical radar's live selection.
+        // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
+        // and the firing paths read it — never the tactical radar's live
+        // selection.
         let locked_target = match blackboards
             .0
             .get(&crate::system_registry::viewscreen_system_id())
@@ -2037,10 +2013,10 @@ mod tests {
         );
     }
 
-    // ── ai_frequency_hint ─────────────────────────────────────────────────
+    // ── tick_frequency_hint_high_fidelity ─────────────────────────────────
 
     /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock from
-    /// its `TacticalRadarSelection` before `ai_frequency_hint` reads the frozen
+    /// its `TacticalRadarSelection` before the hint emitter reads the frozen
     /// fact — standing in for the radar publisher + viewscreen aggregator the
     /// full app runs, exactly like the other frequency/firing test harnesses.
     fn seed_viewscreen_from_selection(
@@ -2078,7 +2054,11 @@ mod tests {
             .add_message::<CoordinationEnqueue>()
             .add_systems(
                 Update,
-                (seed_viewscreen_from_selection, ai_frequency_hint).chain(),
+                (
+                    seed_viewscreen_from_selection,
+                    tick_frequency_hint_high_fidelity,
+                )
+                    .chain(),
             )
             .add_systems(PostUpdate, collect_coord);
 
@@ -2118,7 +2098,7 @@ mod tests {
 
     /// Advance the hint by `secs` of AI-TICK time.
     ///
-    /// Issue #889: `ai_frequency_hint` runs under `run_if(ai_tick_ready)` and
+    /// Issue #889: the hint emitter runs under `run_if(ai_tick_ready)` and
     /// advances its delay by one authored tick period per run, not by
     /// `Time::delta` — otherwise the gate would stretch the authored delay by
     /// the frame-rate-to-tick-rate ratio. So the fixture now drives AI TICKS
@@ -2137,7 +2117,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_frequency_hint_propagates_after_delay_for_ai_operated_sensors() {
+    fn frequency_hint_propagates_after_the_authored_reaction_delay() {
         let mut app = freq_hint_test_app();
         // 4s exceeds the 3s default delay in a single tick.
         tick_with_dt(&mut app, 4.0);
@@ -2166,7 +2146,7 @@ mod tests {
 
     #[test]
     fn npc_frequency_hint_reads_its_own_tuning_not_the_global_resource() {
-        // Issue #738 isolation, mirroring the shields case: `ai_frequency_hint`
+        // Issue #738 isolation, mirroring the shields case: the hint emitter
         // used to resolve its delay as
         // `per_entity_component.unwrap_or(&*global_resource)` while iterating
         // every ship, so any write to that Resource would have applied
@@ -2222,8 +2202,23 @@ mod tests {
         );
     }
 
+    /// Issue #873, replacing `ai_frequency_hint_skips_ships_where_sensors_are
+    /// _not_ai_operated`.
+    ///
+    /// That test pinned the branch this issue exists to delete: the emitter
+    /// stood down whenever a human held Sensors, so the ship's frequency
+    /// advisory came from the AI operator path rather than from authoritative
+    /// state. Its premise is gone, so it is re-pointed at the rule that
+    /// replaced it — the same fact, from the same state, for a human-held
+    /// console — with a strictly stronger assertion: not merely that something
+    /// is emitted, but that it carries the human origin as a routing TAG.
+    ///
+    /// `sender_origin == Human` is the whole point. It proves the emitter read
+    /// the control source (so the tag is live, not a hardcoded `Ai` the way
+    /// `tick_power_brownout_advisory` used to stamp one) while proving the
+    /// value did not gate the emission.
     #[test]
-    fn ai_frequency_hint_skips_ships_where_sensors_are_not_ai_operated() {
+    fn frequency_hint_fires_from_a_human_held_sensors_station_and_tags_it_human() {
         let mut app = freq_hint_test_app();
         let source = app.world().resource::<SourceShip>().0;
         app.world_mut()
@@ -2236,24 +2231,45 @@ mod tests {
                 ControlSource::Human,
             );
 
-        app.update();
+        tick_with_dt(&mut app, 4.0);
 
         let coord = &app.world().resource::<CoordBox>().0;
-        assert!(
-            !coord
-                .iter()
-                .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
-            "human-operated Sensors must not be hinted by the AI system"
+        let hint = coord
+            .iter()
+            .find(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. }))
+            .expect(
+                "a human-held Sensors console must still feed the ship's coordination bus \
+                 — the fact comes from authoritative state, not from who is sitting there",
+            );
+        assert_eq!(
+            hint.sender_origin,
+            ControlSource::Human,
+            "sender_origin must report the live control source, and be used only as a \
+             delivery-routing tag"
         );
+        match &hint.payload {
+            CoordinationPayload::FrequencyHint { frequency } => assert!(
+                (*frequency - 0.75).abs() < f32::EPSILON,
+                "the human-sent hint must carry the same authoritative shield frequency \
+                 the AI-sent one does"
+            ),
+            other => panic!("expected FrequencyHint, got {other:?}"),
+        }
     }
 
-    // ── ai_frequency_hint: AI_RULE_AUTO_HINT claimed/unclaimed gate ─────────
+    // ── The retired `auto_hint` rating gate (issue #873) ────────────────────
     //
-    // `ai_torpedo_auto_fire`'s claimed/unclaimed pattern: an unclaimed Sensors
-    // station (no human session holder — every NPC, and any ship before a
-    // human takes Sensors) hints unconditionally; once claimed, the hint
-    // additionally requires the holder's active rating to declare
-    // `auto_hint` in its `ai_tuning` table.
+    // These two tests used to pin a claimed/unclaimed split copied from
+    // `ai_torpedo_auto_fire`: once a human session held Sensors, the hint
+    // additionally required that holder's active rating to declare `auto_hint`
+    // in its `ai_tuning` table, and stayed silent otherwise.
+    //
+    // That is a coordination fact whose emission turned on the presence of a
+    // human, which AGENTS.md rule 6 forbids and issue #873 removes. Both are
+    // kept — the fixture is exactly the interesting one — and re-pointed at the
+    // surviving rule: the rating table is now irrelevant to emission in BOTH
+    // directions, which takes two tests to state and could not be stated by
+    // deleting either.
 
     fn sensors_ship_config() -> crate::ship::config::ShipConfig {
         let toml = r#"
@@ -2307,7 +2323,7 @@ station = "sensors"
     }
 
     #[test]
-    fn ai_frequency_hint_fires_when_claimed_station_rating_declares_auto_hint() {
+    fn frequency_hint_fires_when_a_claimed_station_rating_declares_auto_hint() {
         let mut app = freq_hint_test_app();
         claim_sensors_station(&mut app, "op1", "Assisted");
 
@@ -2319,12 +2335,15 @@ station = "sensors"
                 .iter()
                 .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
             "a claimed Sensors station whose active rating declares auto_hint \
-             must still be hinted by the AI system"
+             must be hinted"
         );
     }
 
+    /// The half that changed. `"Std"` is a rating with no `ai_tuning` table at
+    /// all, held by a live session — the configuration that used to silence the
+    /// ship's frequency advisory completely.
     #[test]
-    fn ai_frequency_hint_stays_silent_when_claimed_station_rating_lacks_auto_hint() {
+    fn frequency_hint_fires_when_a_claimed_station_rating_lacks_auto_hint() {
         let mut app = freq_hint_test_app();
         claim_sensors_station(&mut app, "op1", "Std");
 
@@ -2332,16 +2351,17 @@ station = "sensors"
 
         let coord = &app.world().resource::<CoordBox>().0;
         assert!(
-            !coord
+            coord
                 .iter()
                 .any(|m| matches!(&m.payload, CoordinationPayload::FrequencyHint { .. })),
-            "a claimed Sensors station on a rating without auto_hint in its \
-             ai_tuning table must not be hinted by the AI system"
+            "a station rating's ai_tuning table must not decide whether a coordination \
+             fact derived from authoritative state is emitted at all (issue #873): a human \
+             on a rating without auto_hint still feeds the ship's backfilled Tactical"
         );
     }
 
     #[test]
-    fn ai_frequency_hint_fires_unconditionally_when_sensors_station_is_unclaimed() {
+    fn frequency_hint_fires_unconditionally_when_sensors_station_is_unclaimed() {
         let mut app = freq_hint_test_app();
         let source = app.world().resource::<SourceShip>().0;
 

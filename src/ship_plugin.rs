@@ -8,8 +8,8 @@ pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
     CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, ImpulseConfigResource,
     LastHelmInput, LastSystemTiers, PendingArcBearingRequest, PendingShipConfig,
-    RepairHumanAlerted, ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources,
-    BANK_LERP_RATE,
+    PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
+    ShipPhysicsConfigResource, ShipSystemControlSources, BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
     handle_coordination_enqueue, handle_coordination_messages, process_coordination_lag,

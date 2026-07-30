@@ -351,6 +351,9 @@ pub fn spawn_entity(
         // facing-only arc-bearing request above.
         entity_commands.insert(crate::ship_plugin::DockingMotionIntent::default());
         entity_commands.insert(crate::ship::shields::PendingShieldsThreatBearing::default());
+        // Sensors→Tactical frequency advisory a backfilled Tactical consumes
+        // off the channel-3 bus (issue #873).
+        entity_commands.insert(crate::ship_plugin::PendingTacticalFrequencyHint::default());
         entity_commands.insert(crate::ship_plugin::LastSystemTiers::default());
         entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());
         entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());
@@ -454,7 +457,7 @@ pub fn spawn_entity(
         // otherwise the parse-time default. Inserted for EVERY entity that
         // carries a `[behaviour]` block (i.e. every ship spawned through this
         // path); it used to be inserted only when the TOML also carried the
-        // `.ai` sub-section, and `ai_frequency_hint` then fell back to the
+        // `.ai` sub-section, and `tick_frequency_hint_high_fidelity` then fell back to the
         // global Resource. The player ship does not come through here at all —
         // `server_app::spawn_game_start_entities` attaches its copy.
         entity_commands.insert(

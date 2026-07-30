@@ -229,7 +229,16 @@ impl ShipConfig {
 
     /// The station whose holder is authoritative for this ship's Sensors
     /// system, mirroring [`weapons_station`](Self::weapons_station)'s
-    /// claimed/unclaimed resolution for the `auto_hint` `ai_tuning` rule.
+    /// per-ship station resolution.
+    ///
+    /// Its one production caller was the `auto_hint` claimed/unclaimed gate in
+    /// the frequency-hint emitter, which issue #873 deleted: whether a human
+    /// session held Sensors decided whether the ship emitted a coordination
+    /// fact at all, which is the human/AI branch AGENTS.md rule 6 forbids. The
+    /// accessor itself is sound and stays — resolving a hull's Sensors owner
+    /// without assuming the station is called `"sensors"` is a real question —
+    /// but a new caller should be sure it is asking "who do I address this
+    /// to?", never "may this be emitted?".
     ///
     /// Returns `None` for ships with no human Sensors owner (NPCs declare no
     /// `station` on their `sensors` system, if they declare one at all);

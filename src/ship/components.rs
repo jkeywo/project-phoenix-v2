@@ -69,6 +69,69 @@ pub struct PendingArcBearingRequest {
     pub arcs: Vec<crate::messages::WeaponEmitterArc>,
 }
 
+/// Pending Sensors→Tactical shield-frequency advisory, delivered via the
+/// channel-3 coordination bus (issue #873).
+///
+/// The Tactical *station key* (`SystemId("tactical")`) is not a registered fine
+/// system, so before #873 a `FrequencyHint` aimed at it could only ever resolve
+/// to the default `Human` policy — Popup or Suppress, never Consume. A
+/// backfilled Tactical was therefore invisible to the router: the advisory
+/// either vanished (human sender) or broadcast an ownerless popup to every
+/// connected client (AI sender), and in neither case reached the AI that was
+/// actually running the guns.
+///
+/// `process_coordination_lag` now resolves the Tactical key through
+/// [`crate::console::weapons::shared::any_tactical_system_operates_ai`] — the
+/// Tactical analogue of the Helm's `helm_axes_operate_ai` — and lands a consumed
+/// hint here. [`crate::console::weapons::apply_tactical_frequency_hint`] reads
+/// it the following tick and sets the ship's phaser frequency.
+///
+/// `None` = nothing pending. The applier `take()`s it, so a hint is applied
+/// exactly once.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PendingTacticalFrequencyHint(pub Option<f32>);
+
+/// The per-ship channel-3 BUS SLOTS, named once (issue #873).
+///
+/// Every member is the same shape: `process_coordination_lag` lands a consumed
+/// coordination payload in it, and a system one tick later folds that value into
+/// the receiving system's state. Each is inserted by hand at
+/// [`PER_SHIP_BUS_SPAWN_SITES`], and a ship that misses one silently cannot
+/// RECEIVE that advisory at all — the router writes into a component that is not
+/// there, and nothing anywhere warns.
+///
+/// That is the failure mode `#785`, `#786`, `#882` and `#885` each shipped: a
+/// per-ship component wired into `entities::spawner::spawn_entity` and forgotten
+/// in `server_app::spawn_game_start_entities`, which is the path the PLAYER ship
+/// takes. `tests::every_per_ship_bus_component_is_attached_at_every_spawn_site`
+/// re-derives the attachment from the crate's own source, so the omission fails
+/// a test instead of shipping.
+///
+/// # Why not [`crate::ai_plugin::ai_high_fidelity_components`]
+///
+/// That set is the obvious-looking home and is the WRONG one: it is removed
+/// wholesale on LOD demotion. These slots must survive demotion — a ship dropped
+/// to low fidelity still runs the immediate emitters and still has a backfilled
+/// Helm/Tactical/Shields to feed — so they belong to the ship, not to its
+/// fidelity. Adding one there would make advisories silently stop landing the
+/// moment a ship left the player's neighbourhood.
+///
+/// Names, not types, because the guard is a source scan over two hand-rolled
+/// insert sites; a constructor would let the scan see only the constructor's
+/// name and stop checking the members.
+pub const PER_SHIP_BUS_COMPONENTS: &[&str] = &[
+    "PendingArcBearingRequest",
+    "PendingShieldsThreatBearing",
+    "PendingTacticalFrequencyHint",
+];
+
+/// The two functions that attach [`PER_SHIP_BUS_COMPONENTS`]. The player ship
+/// never goes through `spawn_entity`, so both must be checked.
+pub const PER_SHIP_BUS_SPAWN_SITES: &[(&str, &str)] = &[
+    ("src/entities/spawner.rs", "spawn_entity"),
+    ("src/server_app.rs", "spawn_game_start_entities"),
+];
+
 /// A distinct docking intent (issue #742): the UUID of the dock the Helm AI is
 /// closing on, or `None` when not docking.
 ///
@@ -258,3 +321,104 @@ impl Default for BankConfigResource {
 /// How quickly the ship's visual roll lerps toward the target bank angle.
 /// Used as the serde default for `HelmConsoleConfig::bank_lerp_rate`.
 pub const BANK_LERP_RATE: f32 = 5.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::ai_declaration_manifest::source_scan::{
+        function_body, read_non_test_source,
+    };
+    use std::collections::BTreeSet;
+
+    /// AC: the per-ship bus slots reach the PLAYER ship too.
+    ///
+    /// `spawn_game_start_entities` is a hand-rolled second spawn path that
+    /// `entities::spawner::spawn_entity` does not feed, and four separate issues
+    /// (#785, #786, #882, #885) shipped a per-ship component attached on one and
+    /// not the other. The failure is always silent — the router writes into a
+    /// component that is not on the entity, so the advisory simply never lands.
+    ///
+    /// Same technique as
+    /// `ai_declaration_manifest::tests::every_kind_is_attached_at_every_one_of_its_spawn_sites`,
+    /// which covers the AI *config* components. This covers the bus slots, which
+    /// that manifest's `FINE_SYSTEM_KINDS` walk cannot see at all.
+    #[test]
+    fn every_per_ship_bus_component_is_attached_at_every_spawn_site() {
+        assert!(
+            !PER_SHIP_BUS_COMPONENTS.is_empty() && !PER_SHIP_BUS_SPAWN_SITES.is_empty(),
+            "the scan must have something to check"
+        );
+        for (file, func) in PER_SHIP_BUS_SPAWN_SITES {
+            let src = read_non_test_source(file);
+            let body = function_body(&src, func);
+            for component in PER_SHIP_BUS_COMPONENTS {
+                assert!(
+                    body.contains(component),
+                    "{file}::{func} never mentions `{component}`. Either the attachment \
+                     moved (point PER_SHIP_BUS_SPAWN_SITES at where it went) or this path \
+                     never got it — and for `spawn_game_start_entities` that means the \
+                     PLAYER ship cannot RECEIVE that coordination advisory at all, \
+                     silently."
+                );
+            }
+        }
+    }
+
+    /// AC: the class cannot grow a member in silence.
+    ///
+    /// The test above only checks the components someone remembered to name. A
+    /// new `Pending*` bus slot added to `ship::components` or `ship::shields`
+    /// without joining [`PER_SHIP_BUS_COMPONENTS`] would be back to having no
+    /// spawn-site guard — the same hole one layer up. So the roll call is
+    /// re-derived from the source, and anything deliberately outside the class
+    /// has to say so here.
+    #[test]
+    fn every_pending_ship_component_either_joins_the_bus_class_or_is_excused() {
+        /// Not a channel-3 bus slot: a deferred whole-config apply, attached and
+        /// consumed by the config-load path, not written by
+        /// `process_coordination_lag`.
+        const NOT_BUS_SLOTS: &[&str] = &["PendingShipConfig"];
+
+        let mut found: BTreeSet<String> = BTreeSet::new();
+        for file in ["src/ship/components.rs", "src/ship/shields.rs"] {
+            for line in read_non_test_source(file).lines() {
+                let Some(rest) = line.trim_start().strip_prefix("pub struct Pending") else {
+                    continue;
+                };
+                let tail: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                found.insert(format!("Pending{tail}"));
+            }
+        }
+
+        let accounted: BTreeSet<&str> = PER_SHIP_BUS_COMPONENTS
+            .iter()
+            .chain(NOT_BUS_SLOTS.iter())
+            .copied()
+            .collect();
+        let unaccounted: Vec<&String> = found
+            .iter()
+            .filter(|name| !accounted.contains(name.as_str()))
+            .collect();
+        assert!(
+            unaccounted.is_empty(),
+            "{unaccounted:?} is a per-ship `Pending*` component that is neither in \
+             PER_SHIP_BUS_COMPONENTS nor excused in NOT_BUS_SLOTS. If it is a channel-3 \
+             bus slot, add it to the class so the spawn-site guard covers it; if it is \
+             not, excuse it here with the reason."
+        );
+        let stale: Vec<&&str> = PER_SHIP_BUS_COMPONENTS
+            .iter()
+            .chain(NOT_BUS_SLOTS.iter())
+            .filter(|c| !found.contains(**c))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "{stale:?} is named here but no longer defined in the scanned files — a \
+             rename or a move would leave the spawn-site guard checking a string nothing \
+             uses, which passes for the wrong reason"
+        );
+    }
+}

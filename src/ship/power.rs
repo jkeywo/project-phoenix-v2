@@ -10,7 +10,6 @@ use crate::modifiers::power_system::{
     power_level_for_group, PowerConfig, PowerSystem, HELM_POWER_GROUP, POWER_GROUP_ORDER,
     SENSORS_POWER_GROUP, WEAPONS_POWER_GROUP,
 };
-use crate::ship::control_source::ControlSource;
 use crate::ship_plugin::CoordinationEnqueue;
 
 // ── Resources ──────────────────────────────────────────────────────────────────
@@ -572,6 +571,19 @@ fn system_id_for_power_group(group: &str) -> Option<SystemId> {
 ///
 /// Debounced via [`PowerBrownoutState`]: fires once on transition into
 /// brownout and clears when the condition resolves, allowing re-fire.
+///
+/// # `sender_origin`
+///
+/// Resolved from the ship's own `power-reactor` control source — the allocation
+/// surface, i.e. the system whose state *is* the brownout, and the same
+/// representative `handle_power_messages` admits against. Until issue #873 this
+/// was hardcoded to `ControlSource::Ai`, which is a routing-tag lie in the
+/// opposite direction from the emit-side branches that issue removed: a
+/// human-operated Power console's advisory claimed AI origin, so
+/// `route_coordination` raised a popup at a human Helm/Tactical where two humans
+/// on the same bridge should simply talk to each other (Suppress). Nothing here
+/// branches on the value — it is stamped and forgotten, exactly as
+/// `detect_damage_tier_crossings` stamps its own.
 pub fn tick_power_brownout_advisory(
     mut ships: Query<
         (
@@ -579,13 +591,17 @@ pub fn tick_power_brownout_advisory(
             &ShipPowerSystem,
             &mut PowerBrownoutState,
             Option<&PowerConfigResource>,
+            &crate::ship_plugin::ShipSystemControlSources,
         ),
         With<crate::server_app::Ship>,
     >,
     config_res: Option<Res<PowerConfigResource>>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (entity, power, mut brownout_state, config_comp) in ships.iter_mut() {
+    for (entity, power, mut brownout_state, config_comp, control_sources) in ships.iter_mut() {
+        let sender_origin = control_sources
+            .0
+            .source_for(&crate::system_registry::power_reactor_system_id());
         let total = power.0.total();
         let cfg_default;
         let cfg: &PowerConfigResource = match config_comp {
@@ -617,7 +633,7 @@ pub fn tick_power_brownout_advisory(
                     if let Some(sys_id) = system_id_for_power_group(&group_id.0) {
                         writer.write(CoordinationEnqueue {
                             source_entity: entity,
-                            sender_origin: ControlSource::Ai,
+                            sender_origin,
                             target: sys_id,
                             payload: CoordinationPayload::PowerBrownout {
                                 group: group_id.0.clone(),
@@ -1913,6 +1929,60 @@ mod tests {
                     );
                 }
                 _ => panic!("unexpected payload type"),
+            }
+        }
+    }
+
+    /// Issue #873. The brownout advisory's `sender_origin` must report the
+    /// Power console's LIVE control source, not a hardcoded `ControlSource::Ai`.
+    ///
+    /// The hardcode was a routing-tag lie in the opposite direction from the
+    /// emit-side branches #873 removed: `route_coordination` reads the tag to
+    /// pick Consume / Popup / Suppress, so a human-operated Power console's
+    /// advisory claimed AI origin and raised a popup at a human Helm or
+    /// Tactical, where two humans on the same bridge should simply talk
+    /// (Suppress). The tag is stamped and forgotten — it is checked here at the
+    /// point of emission precisely because nothing downstream may re-derive it.
+    #[test]
+    fn brownout_advisory_tags_the_live_power_control_source() {
+        use crate::control_source::ControlSource;
+        for source in [ControlSource::Human, ControlSource::Ai] {
+            let mut app = brownout_test_app();
+            start_game(&mut app);
+            {
+                let mut q = app
+                    .world_mut()
+                    .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+                for mut cs in q.iter_mut(app.world_mut()) {
+                    cs.0.set(crate::system_registry::power_reactor_system_id(), source);
+                }
+            }
+            let _ = tick(&mut app);
+            let _ = drain_coord(&mut app);
+
+            // total=7 → draining → every group above idle emits.
+            {
+                let mut q = app
+                    .world_mut()
+                    .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+                if let Ok(mut ps) = q.single_mut(app.world_mut()) {
+                    let _ =
+                        ps.0.set_group_allocation(&PowerGroupId(HELM_POWER_GROUP.into()), 3);
+                }
+            }
+            let _ = tick(&mut app);
+            let emitted = drain_coord(&mut app);
+            assert!(
+                !emitted.is_empty(),
+                "fixture must actually produce a brownout advisory for {source:?}"
+            );
+            for e in &emitted {
+                assert_eq!(
+                    e.sender_origin, source,
+                    "PowerBrownout must carry the reactor's live control source as its \
+                     routing tag; a hardcoded origin sends a human Power officer's \
+                     advisory down the AI→human popup path"
+                );
             }
         }
     }

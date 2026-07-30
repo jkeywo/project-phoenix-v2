@@ -42,7 +42,7 @@ pub struct SensorsThreatState {
 }
 
 /// TOML-loaded configuration for the Sensors AI controller
-/// (`console_ai::server::ai_frequency_hint`, issue #692).
+/// (`console_ai::server::tick_frequency_hint_high_fidelity`, issue #692).
 ///
 /// Loaded from `[sensors_console.ai]` in the ship entity TOML. Defaults are
 /// used when the section is absent.
@@ -54,7 +54,7 @@ pub struct SensorsThreatState {
 /// in `server_app::spawn_game_start_entities`), so it has only ever held
 /// `Self::default()`. Every read goes through the per-entity Component, which
 /// the spawner and `spawn_game_start_entities` both attach; see
-/// `console_ai::server::ai_frequency_hint`. Do not reintroduce a `Res<_>` read
+/// `console_ai::server::tick_frequency_hint_high_fidelity`. Do not reintroduce a `Res<_>` read
 /// here: it applies one ship's tuning to every ship.
 #[derive(Resource, Component, Clone, Debug)]
 pub struct SensorsAiConfigResource {
@@ -220,12 +220,23 @@ pub fn handle_sensors_messages(
 /// through the coordination bus alongside the player's. Each emission
 /// stamps its source ship so the enqueue handler routes it correctly.
 ///
-/// Skips ships whose Sensors is fully AI-operated (`operate_ai` policy) AND
-/// which carry `AiHighFidelity` (issue #692) — those ships hand off to
-/// `console_ai::server::ai_frequency_hint`, which replicates a Low-complexity
-/// operator's reaction delay via `console_ai::tick_frequency_hint` instead of
-/// this system's immediate readout. Human-held Sensors (the overwhelmingly
-/// common case for the player ship) is unaffected.
+/// # Which ships this system serves
+///
+/// Ships that do NOT carry `AiHighFidelity`. High-fidelity ships hand off to
+/// `console_ai::server::tick_frequency_hint_high_fidelity`, which routes the
+/// same authoritative reading through `console_ai::tick_frequency_hint`'s
+/// operator reaction-delay model instead of this system's immediate readout.
+///
+/// That split is a **level-of-detail** split, and since issue #873 it is
+/// nothing else. It used to also require the ship's Sensors to be
+/// `operate_ai`, which made the hint's existence, content and timing depend on
+/// *who was holding the console* — the exact human/AI branch downstream of
+/// admission that AGENTS.md rule 6 forbids, and the reason a human on Sensors
+/// fed a different bus than the AI did. Whoever holds Sensors, the ship emits
+/// the same fact at the same moment from the same authoritative state; only the
+/// simulation fidelity of the hull decides which of the two models produces it,
+/// and `sender_origin` below is a routing tag stamped after that decision, never
+/// an input to it.
 pub fn tick_sensors_frequency_hint(
     mut ship_q: Query<
         (
@@ -244,12 +255,10 @@ pub fn tick_sensors_frequency_hint(
     )>,
 ) {
     for (entity, blackboards, control_sources, mut state, is_high_fidelity) in ship_q.iter_mut() {
-        if is_high_fidelity
-            && control_sources
-                .0
-                .policy_for(&crate::system_registry::sensors_system_id())
-                .operate_ai
-        {
+        // LOD split only (issue #873) — see this system's doc comment. Do NOT
+        // re-add an `operate_ai` conjunct here: it would put the emission of a
+        // coordination fact back under the control of who holds the console.
+        if is_high_fidelity {
             continue;
         }
 
@@ -1279,6 +1288,106 @@ mod tests {
             state_before, state_after,
             "state should not change when target is unchanged"
         );
+    }
+
+    /// Issue #873: the hand-off to the high-fidelity emitter is a
+    /// level-of-detail split and NOTHING else.
+    ///
+    /// It used to be `AiHighFidelity && policy_for(sensors).operate_ai`, so on a
+    /// high-fidelity hull the ship's frequency advisory changed shape — timing,
+    /// and across the delivery lag its content — according to who was holding
+    /// the console, and could be silenced outright by the `auto_hint` rating
+    /// gate on the other side. Now both origins take the same path.
+    ///
+    /// Asserted in both directions across two ticks (the second is where the
+    /// on-change debounce would let a late emit through) and for both control
+    /// sources, because a one-sided assertion would still pass with the
+    /// `operate_ai` conjunct restored.
+    #[test]
+    fn high_fidelity_ships_hand_off_regardless_of_who_holds_sensors() {
+        for source in [ControlSource::Human, ControlSource::Ai] {
+            let mut app = test_app();
+            start_game_with_sensors_and_tactical(&mut app);
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(crate::ai_plugin::AiHighFidelity);
+            {
+                let mut cs = app
+                    .world_mut()
+                    .entity_mut(ship)
+                    .take::<crate::ship_plugin::ShipSystemControlSources>()
+                    .unwrap();
+                cs.0.set(crate::system_registry::sensors_system_id(), source);
+                app.world_mut().entity_mut(ship).insert(cs);
+            }
+            app.world_mut().resource_mut::<EnqueueLog>().0.clear();
+
+            set_local_weapons_target(&mut app, Some("asteroid-1".into()));
+            tick(&mut app);
+            tick(&mut app);
+
+            let log = app.world().resource::<EnqueueLog>();
+            assert!(
+                !log.0
+                    .iter()
+                    .any(|e| matches!(&e.payload, CoordinationPayload::FrequencyHint { .. })),
+                "a high-fidelity hull's frequency hint belongs to \
+                 `tick_frequency_hint_high_fidelity` whoever holds Sensors ({source:?}); \
+                 emitting here too would double-send, and gating this skip on \
+                 `operate_ai` is the origin branch issue #873 removed"
+            );
+        }
+    }
+
+    /// The other side of the same split: a hull with no `AiHighFidelity` marker
+    /// is served HERE, and again regardless of origin — the immediate readout is
+    /// not "the human path".
+    #[test]
+    fn low_fidelity_ships_emit_here_regardless_of_who_holds_sensors() {
+        for source in [ControlSource::Human, ControlSource::Ai] {
+            let mut app = test_app();
+            start_game_with_sensors_and_tactical(&mut app);
+            let ship = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+                .single(app.world())
+                .unwrap();
+            {
+                let mut cs = app
+                    .world_mut()
+                    .entity_mut(ship)
+                    .take::<crate::ship_plugin::ShipSystemControlSources>()
+                    .unwrap();
+                cs.0.set(crate::system_registry::sensors_system_id(), source);
+                app.world_mut().entity_mut(ship).insert(cs);
+            }
+            app.world_mut().resource_mut::<EnqueueLog>().0.clear();
+
+            set_local_weapons_target(&mut app, Some("asteroid-1".into()));
+            tick(&mut app);
+
+            let log = app.world().resource::<EnqueueLog>();
+            let hint = log
+                .0
+                .iter()
+                .find(|e| matches!(&e.payload, CoordinationPayload::FrequencyHint { .. }))
+                .unwrap_or_else(|| panic!("expected a FrequencyHint with Sensors on {source:?}"));
+            assert_eq!(
+                hint.sender_origin, source,
+                "sender_origin must report the live control source and be used only as a \
+                 delivery-routing tag"
+            );
+            assert_eq!(
+                hint.target,
+                crate::system_registry::tactical_station_key(),
+                "the hint is addressed to Tactical either way"
+            );
+        }
     }
 
     /// Verifies that operate_sensors_ai skips entities where Sensors is Human,

@@ -176,6 +176,15 @@ impl Plugin for WeaponsPlugin {
                         .in_set(crate::sim_sets::SimSet::Input)
                         .run_if(crate::ai::cadence::ai_tick_ready),
                     tick_npc_auto_match_frequency.in_set(crate::sim_sets::SimSet::Input),
+                    // Applies a Sensors frequency hint a backfilled Tactical
+                    // consumed off the channel-3 bus last tick (issue #873).
+                    // Ordered AFTER the omniscient auto-match so an advisory
+                    // that actually arrived is the value that sticks: the bus
+                    // is the modelled information path, the auto-match is the
+                    // fallback for a ship with nobody on Sensors at all.
+                    apply_tactical_frequency_hint
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(tick_npc_auto_match_frequency),
                     // Blaster auto-fire DECIDE (issue #781): emits an admitted
                     // `ChargeBlasterStart` through the shared AI seam, converging
                     // with the human path at `handle_fire_blaster` (Physics).
@@ -1347,6 +1356,76 @@ fn tick_npc_auto_match_frequency(
         if let crate::console_ai::FrequencyMatchOutput::Match { frequency } = output {
             phaser_freq.0 = frequency;
         }
+    }
+}
+
+/// Apply a channel-3 `FrequencyHint` that a backfilled Tactical has consumed
+/// (issue #873).
+///
+/// This is the "react" half of the Sensors→Tactical advisory. The routing half
+/// lives in `process_coordination_lag`, which only lands a value in
+/// [`PendingTacticalFrequencyHint`] when this ship's Tactical actually operates
+/// AI *and* the message has served its full coordination lag — so the reaction
+/// delay is the bus's, not a second timer here.
+///
+/// Deliberately blind to the *sender's* origin (AGENTS.md rule 6): the hint is
+/// applied whether it came from a human on Sensors or from that ship's own
+/// Sensors AI. Nothing here reads `sender_origin` — by the time a value lands in
+/// the slot the router has already decided it may be consumed.
+///
+/// # Why the receiver's control source IS re-checked
+///
+/// The router's decision and this application are a tick apart:
+/// `process_coordination_lag` (Modifiers) lands the value, and this runs in the
+/// FOLLOWING tick's Input. A human claiming Tactical inside that window used to
+/// get their freshly-dialled phaser frequency silently overwritten by an
+/// advisory addressed to the AI that was holding the guns a tick ago. So the
+/// applier repeats the router's own predicate,
+/// [`shared::any_tactical_system_operates_ai`], and **drops** — never applies —
+/// a value whose addressee no longer exists. That is not a human/AI branch on
+/// behaviour: it is the same admission question the router asked, re-asked
+/// because the answer can change between the two.
+///
+/// `take()` unconditionally, applied conditionally: a hint is consumed exactly
+/// once either way, so a dropped value cannot re-assert itself on a later tick.
+///
+/// # Why everything but the slot itself is `Option`
+///
+/// The slot is the only component this system requires. If any of the other
+/// three were taken non-optionally, a `Ship` missing one would be filtered OUT
+/// of the query rather than iterated — so its pending hint would never be
+/// drained, and a hint from an arbitrarily old tick would apply the moment the
+/// missing component appeared. Every shipped spawn site attaches all four today,
+/// so that was latent rather than live; taking them as `Option` and `take()`ing
+/// before any of them is needed makes the "consumed exactly once" sentence above
+/// an invariant of this system instead of a property of the current spawn sites.
+/// A ship that cannot answer the predicate, or has no frequency to move, DROPS
+/// the hint — the same disposition as an addressee that stopped being AI.
+pub(crate) fn apply_tactical_frequency_hint(
+    mut ship_q: Query<
+        (
+            &mut crate::ship_plugin::PendingTacticalFrequencyHint,
+            Option<&mut crate::ship_state::ShipPhaserFrequency>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (mut pending, phaser_freq, control_sources, ship_config) in ship_q.iter_mut() {
+        // Drain FIRST, unconditionally — before any early-out below can skip it.
+        let Some(frequency) = pending.0.take() else {
+            continue;
+        };
+        let (Some(mut phaser_freq), Some(control_sources), Some(ship_config)) =
+            (phaser_freq, control_sources, ship_config)
+        else {
+            continue;
+        };
+        if !shared::any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+            continue;
+        }
+        phaser_freq.0 = frequency;
     }
 }
 

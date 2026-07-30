@@ -131,9 +131,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Console AI Orchestrator Plugin
-      summary: Registers the console AI decide systems that wire previously-orphaned pure helpers in console_ai::core into active Bevy systems for shields focus, power allocation, torpedo auto-fire, and delayed sensors frequency hinting.
+      summary: Registers the console AI decide systems that wire previously-orphaned pure helpers in console_ai::core into active Bevy systems for shields focus, power allocation, and torpedo auto-fire; it also hosts the ship's reaction-delayed sensors frequency-hint emitter, which is not an AI-operator decider and runs for every high-fidelity hull whoever holds Sensors.
       rationale:
-        - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/ai_torpedo_load, and ai_frequency_hint into ConsoleAiPlugin's Update schedule. Issue #846 retired the last intent-component transport: ai_torpedo_auto_fire now emits FireTorpedo through emit_ai_command, and ai_torpedo_load already emitted SetTorpedoVolleyTarget through the same seam."
+        - "Issue #873: tick_frequency_hint_high_fidelity (formerly ai_frequency_hint) is registered here for cadence, not category. Its source says so explicitly — \"Not an AI-operator decider despite living in this plugin\" — because it emits the ship's Sensors frequency advisory from authoritative state for every AiHighFidelity hull regardless of who holds Sensors, and stays under ai_tick_ready only because its reaction-delay model advances by the authored tick period rather than Time::delta."
+        - "This entity previously modeled a dormant registration seam (\"deprecated-console-ai-plugin\") that installed no systems. Issues #692-#694 wired ai_shield_focus/integrate_shield_state, ai_power_allocation/integrate_power_state, ai_torpedo_auto_fire/ai_torpedo_load, and the frequency-hint emitter into ConsoleAiPlugin's Update schedule. Issue #846 retired the last intent-component transport: ai_torpedo_auto_fire now emits FireTorpedo through emit_ai_command, and ai_torpedo_load already emitted SetTorpedoVolleyTarget through the same seam."
         - "Issue #826 (admission symmetry): ai_shield_focus no longer writes an intent component — it emits admitted SetShieldArcFocus payloads through command_admission::validate_and_admit with its ship's own ai:<uuid> token, and ship::shields::handle_shields_messages (registered by ShipShieldsPlugin, same SimSet::Physics, one explicit before-edge from the emit) is the single applier for human and AI alike; integrate_shield_state and ShieldArcIntents are deleted."
         - "Issue #831 (admission symmetry, power): ai_power_allocation follows the same pattern — it emits admitted SetPowerGroupAllocation payloads targeting POWER_REACTOR_SYSTEM_ID (on-change vs. the current allocation) through validate_and_admit, and ship::power::handle_power_messages (registered by ShipPowerPlugin, moved to SimSet::Physics with one explicit before-edge from the emit) is the single applier for human and AI alike; integrate_power_state, PowerReactorIntents, and PowerReactorCommand are deleted. Issue #846 completed the work: ai_torpedo_auto_fire retired TorpedoIntents and now emits FireTorpedo through emit_ai_command — no intent components survive anywhere."
     architecture:
@@ -150,5 +151,5 @@ entities:
     implementation:
       status: declared
       paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app.rs]
-      symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, ai_frequency_hint]
+      symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, tick_frequency_hint_high_fidelity]
       tests: [cargo test]

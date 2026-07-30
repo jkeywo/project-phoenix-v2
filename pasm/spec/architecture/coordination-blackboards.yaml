@@ -111,6 +111,8 @@ entities:
       rationale:
         - Coordination latency should affect the message path consistently without freezing stale ownership decisions at send time.
         - "Coordination targets live in the station-id namespace since #801: a channel-3 message is addressed to a crew station (e.g. helm_station_key / tactical_station_key), not to a declared system. The wire strings are unchanged."
+        - "A station key has no registered [[system]] behind it, so policy_for resolves it to the Human default. #801 already special-cased the Helm key through helm_axes_operate_ai; issue #873 added the Tactical analogue, any_tactical_system_operates_ai (the predicate the gunnery AI itself uses), so a BACKFILLED Tactical is visible to the router. Before that a hint aimed at an AI-run Tactical could only Suppress (human sender) or raise an ownerless broadcast popup (AI sender), never Consume. When the predicate is false the key falls through to policy_for unchanged, so a human-held Tactical routes exactly as before."
+        - "Issue #873 also gave the consumed FrequencyHint somewhere to land: PendingTacticalFrequencyHint, a per-ship slot written in SimSet::Modifiers and read by apply_tactical_frequency_hint in the FOLLOWING tick's SimSet::Input. Because a human can claim Tactical inside that one-tick window, the applier re-asks any_tactical_system_operates_ai and DROPS the pending value when the answer has changed, rather than overwriting a frequency the new human holder just set. Nothing on either side reads sender_origin — it is stamped by the emitter and used only to pick Consume/Popup/Suppress at delivery."
     architecture:
       kind: coordination-service
       authority: authoritative
@@ -120,8 +122,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship_plugin.rs, src/core/messages.rs]
-      symbols: [CoordinationLagQueue, CoordinationPayload]
+      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship_plugin.rs, src/core/messages.rs, src/console/weapons/mod.rs]
+      symbols: [CoordinationLagQueue, CoordinationPayload, PendingTacticalFrequencyHint, apply_tactical_frequency_hint]
       messages: [SendCoordination, CoordinationPopup]
       tests: [cargo test, tests/client/sim-state.test.js]
 

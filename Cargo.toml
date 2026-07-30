@@ -58,10 +58,19 @@ rand = "0.9"
 noise = "0.9"
 toml = "1.0"
 strum = { version = "0.28.0", features = ["derive"] }
+# The fleet's cross-runtime measurement contract (issue #868). Phoenix's first
+# vellum crate — pinned to the rev pyproject.toml already pins for pasm, so the
+# repo carries one vellum rev rather than two. The `json` feature is on because
+# CI stores the capture artifact; `Baseline` round-trips RON without it.
+vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "efdb2d034e07baadd93e3cbf257ba8b3a3a571a9", features = ["json"] }
 
 # Native: parallel physics enabled
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy_rapier3d = { version = "0.33", features = ["parallel"] }
+# Baselines are authored RON read by the headless harness, which is native-only
+# (`src/headless` is cfg'd off under wasm). Keeping the reader here means the
+# browser build carries no parser it cannot reach.
+ron = "0.12"
 
 # WASM: no parallel, uses single-threaded runtime
 # getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")

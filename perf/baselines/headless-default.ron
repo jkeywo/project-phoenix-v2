@@ -1,0 +1,37 @@
+// Baseline for the default headless scenario (issue #868).
+//
+// Recorded from three release runs of `--sim-seconds 60` against
+// assets/worlds/default.toml. Run-to-run spread on one machine was under 3%.
+//
+// PROVENANCE WARNING: these numbers were recorded on a developer desktop, not
+// on the CI runner that compares against them. A GitHub-hosted runner is
+// materially slower, so the first CI captures are expected to warn until this
+// file is re-recorded from one of them. That is survivable precisely because
+// the comparison is warnings-only and gates nothing — re-record from a CI
+// capture artifact, in its own reviewable commit, before anyone considers
+// promoting Verdict::Fail to a merge gate.
+//
+// Tolerances are wider than vellum-perf's defaults (0.25 / 1.0) for the same
+// reason: a tolerance that cries wolf gets ignored rather than obeyed, and
+// this one is knowingly calibrated against the wrong machine.
+//
+// sim.tick is held at p95 rather than max on purpose. The first tick of a run
+// loads assets and costs 35-46ms; that is startup, not steady-state simulation,
+// and a max-based expectation would measure the loader.
+(
+    scenario: "headless-default",
+    expectations: {
+        "sim.tick": (
+            unit: millis,
+            statistic: p95,
+            expected: 0.78,
+            tolerance: (warn: 0.5, fail: 2.0),
+        ),
+        "sim.run": (
+            unit: seconds,
+            statistic: mean,
+            expected: 2.40,
+            tolerance: (warn: 0.5, fail: 2.0),
+        ),
+    },
+)

@@ -22,7 +22,7 @@ jobs:
       # Shared step, fleet-standard: uv setup, uv sync, pasm validate, pasm scan.
       # Keeps this repo's invocation from drifting from the rest of the fleet.
       - name: Validate PASM model
-        uses: jkeywo/vellum/actions/pasm-validate@eb367a5dbc095c684af88db40c5af929a5e09c0b
+        uses: jkeywo/vellum/actions/pasm-validate@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
         with:
           spec-path: pasm/spec
           scan: gate
@@ -55,7 +55,7 @@ jobs:
       # exposes no shared-key; rust-cache's default key is per-job, and each of
       # these keys had exactly one job, so the caches stay separate as before.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@eb367a5dbc095c684af88db40c5af929a5e09c0b
+        uses: jkeywo/vellum/actions/setup-fleet-rust@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
@@ -81,7 +81,7 @@ jobs:
       # Shared step: toolchain + cache. The wasm target is also declared in
       # rust-toolchain.toml; passed here too so the action is self-describing.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@eb367a5dbc095c684af88db40c5af929a5e09c0b
+        uses: jkeywo/vellum/actions/setup-fleet-rust@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
         with:
           targets: wasm32-unknown-unknown
 
@@ -264,6 +264,69 @@ jobs:
             }
           }
           NODE
+
+  # ── Performance measurement (issue #868, warnings-only) ──────────────────────
+  #
+  # Not in `deploy`'s `needs`, and deliberately so: this job reports, it does not
+  # gate. `Verdict::Fail` becomes a merge gate only once the runner methodology
+  # is stable enough that a red build means a regression rather than a noisy
+  # neighbour. Until then a regression is something a human reads in the summary.
+  perf:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@efdb2d034e07baadd93e3cbf257ba8b3a3a571a9
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      # The `test` job runs `cargo test` with default features, where the
+      # headless module does not exist — so the collector's own tests only run
+      # if this job runs them. They assert on machinery (baseline parsing,
+      # comparison classification, sample counts), never on a duration.
+      - name: Test the perf machinery
+        run: cargo test --features headless --lib headless::perf
+
+      # Release, because a debug-build measurement describes a binary nobody
+      # ships. The committed baseline was recorded the same way.
+      - name: Build headless runner
+        run: cargo build --release --features headless --bin phoenix-headless
+
+      # The comparison prints to stderr and exits 0 regardless of verdict; the
+      # capture is the artifact a regression is diagnosed from.
+      - name: Measure the default headless scenario
+        run: |
+          mkdir -p target/perf
+          ./target/release/phoenix-headless \
+            --sim-seconds 60 \
+            --report target/perf/run-report.json \
+            --perf-capture target/perf/capture.json \
+            2> target/perf/perf-report.txt
+          cat target/perf/perf-report.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '## Performance'
+            echo
+            echo '```'
+            cat target/perf/perf-report.txt 2>/dev/null || echo 'no report produced'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-capture
+          path: target/perf/
+          retention-days: 14
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:

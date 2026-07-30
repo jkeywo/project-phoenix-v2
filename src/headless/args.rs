@@ -25,6 +25,11 @@ const DEFAULT_WORLD: &str = "assets/worlds/default.toml";
 /// `duel::apply_duel_sides` rather than silently ignored.
 const DUEL_WORLD: &str = "assets/worlds/duel.toml";
 const DEFAULT_SHIP: &str = "assets/entities/alliance_cruiser.toml";
+/// The scenario a capture is filed under when `--perf-scenario` is absent.
+/// Named for the setup, not the run: only captures of the same scenario are
+/// comparable, and `perf/baselines/<scenario>.ron` is where its expectations
+/// live.
+const DEFAULT_PERF_SCENARIO: &str = "headless-default";
 
 pub const HELP: &str = "\
 phoenix-headless — run the simulation with no window, no renderer, and the
@@ -78,6 +83,18 @@ OUTPUT
     --report-format <F>   'json' (exit summary only) or 'ndjson' (also stream every
                           outbound message, one JSON object per line) [default: json]
     --fail-on-game-over   Exit non-zero if the run ends in GamePhase::GameOver
+
+PERFORMANCE
+    --perf-capture <PATH> Sample per-tick and whole-run wall time and write the
+                          capture JSON here ('-' for stdout). Absent, no
+                          measurement is collected at all. Sampling brackets the
+                          harness loop from outside, so a measured run steps
+                          identically to an unmeasured one.
+    --perf-scenario <N>   Scenario the capture is filed under, and the baseline
+                          it is compared against, at perf/baselines/<N>.ron
+                          [default: headless-default]. A missing baseline is not an
+                          error: the capture is still written. Comparison is
+                          warnings-only and never changes the exit code.
 
 DETERMINISM
     --deterministic       Pin the scheduler to one thread, so system execution
@@ -155,6 +172,14 @@ pub struct HeadlessArgs {
     /// Side-B ship list from `--side-b` (issue #844). Empty when absent. All
     /// entries fill NPC slots on the enemy side.
     pub side_b: Vec<String>,
+    /// Where to write the performance capture from `--perf-capture` (issue
+    /// #868). `None` leaves the harness-loop collector off entirely, so an
+    /// ordinary run pays nothing for measurement it did not ask for.
+    pub perf_capture_path: Option<String>,
+    /// Scenario name a capture is filed under, and the baseline file it is
+    /// compared against. Measurement is only meaningful between runs of the
+    /// *same* scenario, so this names the setup rather than the run.
+    pub perf_scenario: String,
 }
 
 impl Default for HeadlessArgs {
@@ -173,6 +198,8 @@ impl Default for HeadlessArgs {
             seed: None,
             side_a: Vec::new(),
             side_b: Vec::new(),
+            perf_capture_path: None,
+            perf_scenario: DEFAULT_PERF_SCENARIO.to_string(),
         }
     }
 }
@@ -264,6 +291,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                 };
             }
             "--fail-on-game-over" => out.fail_on_game_over = true,
+            "--perf-capture" => out.perf_capture_path = Some(value()?),
+            "--perf-scenario" => {
+                let v = value()?;
+                if v.trim().is_empty() {
+                    return Err("--perf-scenario expects a name".into());
+                }
+                out.perf_scenario = v;
+            }
             "--deterministic" => out.deterministic = true,
             "--seed" => {
                 let v = value()?;

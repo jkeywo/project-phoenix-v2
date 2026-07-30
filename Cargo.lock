@@ -4355,11 +4355,13 @@ dependencies = [
  "js-sys",
  "noise",
  "rand 0.9.4",
+ "ron",
  "serde",
  "serde_json",
  "strum",
  "toml",
  "uuid",
+ "vellum-perf",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -5485,6 +5487,15 @@ name = "vec_map"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
+
+[[package]]
+name = "vellum-perf"
+version = "0.1.0"
+source = "git+https://github.com/jkeywo/vellum?rev=efdb2d034e07baadd93e3cbf257ba8b3a3a571a9#efdb2d034e07baadd93e3cbf257ba8b3a3a571a9"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "version_check"

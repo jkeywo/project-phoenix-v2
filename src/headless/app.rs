@@ -20,6 +20,7 @@ use bevy::time::{TimePlugin, TimeUpdateStrategy};
 use bevy::transform::TransformPlugin;
 use bevy_rapier3d::plugin::TimestepMode;
 
+use super::perf::TickSampler;
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
 use crate::entities::ai_declaration_manifest;
@@ -573,11 +574,27 @@ fn headless_auto_start(
 /// Driving the loop by hand also gives the tick budget and the exit condition
 /// for free.
 pub fn run(app: &mut App, max_ticks: u64) -> u64 {
+    run_sampled(app, max_ticks, None)
+}
+
+/// `run`, with the harness-loop performance collector attached (issue #868).
+///
+/// Sampling brackets `app.update()` from outside, so the simulation cannot
+/// observe it and a measured run steps identically to an unmeasured one. The
+/// sampler is passed in rather than created here because the caller owns the
+/// capture the run produces.
+pub fn run_sampled(app: &mut App, max_ticks: u64, mut sampler: Option<&mut TickSampler>) -> u64 {
     app.finish();
     app.cleanup();
     let mut ticks = 0;
     while ticks < max_ticks {
+        if let Some(sampler) = sampler.as_deref_mut() {
+            sampler.tick_begin();
+        }
         app.update();
+        if let Some(sampler) = sampler.as_deref_mut() {
+            sampler.tick_end();
+        }
         ticks += 1;
         if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
             break;

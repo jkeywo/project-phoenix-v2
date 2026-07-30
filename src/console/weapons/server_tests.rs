@@ -1,4 +1,4 @@
-use super::shared::{any_bank_accepts_human_input, system_is_registered};
+use super::shared::system_is_registered;
 use super::*;
 use crate::ai_plugin::AiTokenRegistry;
 use crate::damage::SystemHull;
@@ -91,12 +91,23 @@ station = "tactical"
 id = "torpedo-tube-aft"
 kind = "torpedo_tube"
 station = "tactical"
+
+# Declared so `any_blaster_bank_operates_ai` (which reads the ship CONFIG, not
+# the `BlasterSystemResource` component) can see a blaster group on fixtures
+# that attach one. Inert for ships that attach none: the auto-fire query
+# requires `&BlasterSystemResource`, so a hull without the component is never
+# iterated.
+[[system]]
+id = "blaster-fore"
+kind = "blaster_bank"
+station = "tactical"
 "#;
     crate::ship_plugin::ShipConfigComponent(
         crate::ship::config::parse_and_validate(
             TOML,
             &[
                 "phaser_bank",
+                "blaster_bank",
                 "torpedo_tube",
                 "torpedo_magazine",
                 "tactical_radar",
@@ -758,6 +769,11 @@ fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<Outboun
 #[test]
 fn valid_target_within_range_replies_with_target_lock_confirmed() {
     let mut app = test_app();
+    // The lock horizon is the ship's OWN authored `[weapons_console.radar]
+    // range` since issue #887 (per-ship, so it works on an NPC too), not the
+    // `LocalShip`-only `ShipClientConfigResource`. Author one, as every shipped
+    // player hull does.
+    set_tactical_radar_range(&mut app, 300.0);
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
 
@@ -789,6 +805,9 @@ fn valid_target_within_range_replies_with_target_lock_confirmed() {
 #[test]
 fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
     let mut app = test_app();
+    // See `valid_target_within_range_...`: the horizon is this ship's own
+    // authored radar range (issue #887).
+    set_tactical_radar_range(&mut app, 300.0);
     setup_weapons_world(&mut app, 400.0, 0.0);
     start_game_with_weapons(&mut app);
 
@@ -5479,6 +5498,12 @@ fn set_tactical_control_source(app: &mut App, source: crate::ship::control_sourc
         world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         for sysid in [
+            // The tactical RADAR is what licenses AI target selection since
+            // issue #887 — the lock belongs to the radar, so the radar's own
+            // policy is the gate. Without it here, "put Tactical under AI"
+            // would set every weapon Ai and leave the lock human-held, which
+            // is a different ship from the one these tests mean.
+            crate::system_registry::tactical_radar_system_id(),
             crate::system_registry::phaser_fore_system_id(),
             crate::system_registry::phaser_aft_system_id(),
             crate::system_registry::torpedo_tube_fore_port_system_id(),
@@ -6496,6 +6521,11 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
                 z,
                 ..Default::default()
             },
+            // Every ship the Tactical AI decides for needs one: since issue
+            // #887 the decision travels to `handle_set_target` as an admitted
+            // `SetTarget` rather than being written straight to the component.
+            // `entities/spawner.rs` inserts this on every spawned NPC.
+            crate::messages::AdmittedCommands::default(),
             TacticalRadarSelection::default(),
             ActiveBeam::default(),
             PhaserCooldown::default(),
@@ -6673,12 +6703,16 @@ fn human_tactical_leaves_locked_target_empty_and_keeps_the_human_lock() {
     );
 }
 
-/// Put the ship in the mixed-rating shape that makes `handle_set_target`
-/// and `ai_target_selection` run in the same tick: the phaser banks are
-/// Human (so `any_bank_accepts_human_input` admits SetTarget) while the
-/// torpedo magazine is Ai (so `any_tactical_system_operates_ai` runs the
-/// selector). This is an ordinary config, not a contrived one — it is what a
-/// ship looks like when Tactical is crewed but the magazine is backfilled.
+/// Put the ship in the mixed-rating shape a crewed Tactical station with
+/// backfilled torpedoes actually has: the radar and the phaser banks are Human,
+/// the magazine and every tube are Ai. `alliance_cruiser`'s shipped `Simplified`
+/// rating is the mirror image (automated banks, crewed radar); either way the
+/// point is that Tactical is NOT uniformly one source.
+///
+/// Pre-#887 this was the shape in which the two writers of
+/// `TacticalRadarSelection` overlapped, held apart only by a `.before` edge.
+/// Since #887 the radar's own policy is the gate, so the overlap is
+/// unrepresentable: an Ai tube cannot license the selector on a Human radar.
 fn set_mixed_tactical_control_sources(app: &mut App) {
     use crate::ship::control_source::ControlSource;
     let world = app.world_mut();
@@ -6686,6 +6720,7 @@ fn set_mixed_tactical_control_sources(app: &mut App) {
         world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         for sysid in [
+            crate::system_registry::tactical_radar_system_id(),
             crate::system_registry::phaser_fore_system_id(),
             crate::system_registry::phaser_aft_system_id(),
         ] {
@@ -6702,11 +6737,12 @@ fn set_mixed_tactical_control_sources(app: &mut App) {
     }
 }
 
-/// The mixed-rating shape above is only interesting if both gates really do
-/// fire on it. Pin that directly, so the regression test below can't quietly
-/// decay into a test of a ship the tactical AI never touches.
+/// The mixed-rating shape is only interesting if it really is mixed. Pin that
+/// the AI half is live — `any_tactical_system_operates_ai` still holds — while
+/// the radar stays the human's, so the regression test below can't quietly
+/// decay into a test of a ship with no AI on it at all.
 #[test]
-fn mixed_rating_ship_admits_human_set_target_and_runs_the_tactical_ai() {
+fn mixed_rating_ship_has_live_tactical_ai_but_a_human_radar() {
     let mut app = test_app();
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
@@ -6720,23 +6756,33 @@ fn mixed_rating_ship_admits_human_set_target_and_runs_the_tactical_ai() {
     let (control_sources, ship_config) = q.single(world).expect("local ship");
 
     assert!(
-        any_bank_accepts_human_input(control_sources, &ship_config.0),
-        "a Human phaser bank must still admit the human's SetTarget"
-    );
-    assert!(
         any_tactical_system_operates_ai(control_sources, &ship_config.0),
-        "an Ai torpedo magazine must still run the tactical AI — if this \
-         ever goes false the two writers stop overlapping and the ordering \
-         regression below stops being reachable"
+        "an Ai torpedo magazine must keep the Tactical surface partly AI — if this \
+         goes false the ship stops being mixed and the regression below is unreachable"
+    );
+    let radar = control_sources
+        .0
+        .policy_for(&crate::system_registry::tactical_radar_system_id());
+    assert!(
+        radar.accept_human_input && !radar.operate_ai,
+        "the radar itself must stay the human's — that is the whole asymmetry \
+         issue #887 closes"
     );
 }
 
 #[test]
 fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
     let mut app = test_app();
+    set_tactical_radar_range(&mut app, 300.0);
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
     set_mixed_tactical_control_sources(&mut app);
+    // A live untargeted Destroy objective plus a hostile the selector would
+    // happily acquire: if the AI ran on this ship at all, it would take the lock.
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    let poacher = uuid::Uuid::new_v4().to_string();
+    spawn_factioned_target(&mut app, &poacher, 0.0, -10.0, federation_faction());
 
     push(
         &mut app,
@@ -6753,9 +6799,8 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
     assert_eq!(
         get_weapons_target(&mut app).as_deref(),
         Some("target-uuid"),
-        "the human's SetTarget must survive the tick it was admitted in: \
-         ai_target_selection has to see it and carry it into its own selection, \
-         not apply a decision made before the human's lock existed"
+        "the human's SetTarget must survive the tick it was admitted in — the \
+         Ai magazine must not license the selector to hand the lock to {poacher}"
     );
 
     // And it must still be there next tick — a lock clobbered on tick N is
@@ -6784,12 +6829,17 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
 fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
     use crate::ship::control_source::{ControlSource, ControlSourceResolver};
     let mut app = App::new();
+    // `ai_target_selection` emits its decision through the admission seam
+    // (issue #887), which asks `Sessions` about station tenure.
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
     app.add_systems(Update, ai_target_selection);
 
     let config = test_ship_config();
     let mut resolver = ControlSourceResolver::new();
-    // Human across the board: `any_tactical_system_operates_ai` is false, so
-    // selection skips this ship entirely.
+    // Human across the board — including the tactical radar, which is the gate
+    // since issue #887 — so selection skips this ship entirely.
     for system in &config.0.systems {
         resolver.set(system.id.clone(), ControlSource::Human);
     }
@@ -6801,6 +6851,7 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
             ShipSystemControlSources(resolver),
             LastShipAttacker::default(),
             ShipPhysics::default(),
+            crate::messages::AdmittedCommands::default(),
             // The human operator's standing lock, on an entity that does not
             // exist in this bare world — so if the AI ever did run for this
             // ship, its stale-target guard would clear the lock and the
@@ -9208,18 +9259,22 @@ fn fire_torpedo_refused_when_tube_fine_system_offline() {
     );
 }
 
-// ── Ship-level option (c) gate ────────────────────────────────────────
+// ── The lock's own gate is the radar (issue #887) ─────────────────────
+//
+// These replace `set_target_refused_when_all_banks_offline`, which pinned the
+// pre-#887 shape: `handle_set_target` carried an extra
+// `any_bank_accepts_human_input` gate on top of admission's own check on
+// `tactical-radar`. That coupled the ship's lock to the phaser banks' rating,
+// which is wrong on shipped content — `alliance_cruiser`'s `Simplified` Tactical
+// rating automates both banks, and the crewed operator could not lock anything.
 
 #[test]
-fn set_target_refused_when_all_banks_offline() {
+fn set_target_survives_every_phaser_bank_going_offline() {
     let mut app = test_app();
+    set_tactical_radar_range(&mut app, 300.0);
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
-    // The updated `test_ship_config()` declares two fine phaser banks
-    // ("phaser-port", "phaser-starboard"). `any_bank_accepts_human_input`
-    // iterates them and returns true if ANY bank accepts human input.
-    // So to refuse SetTarget, EVERY fine bank must be offline.
-    // Mark both fine banks offline.
+    // Both fine phaser banks dead. The radar is untouched.
     mark_system_offline(&mut app, SystemId("phaser-port".into()));
     mark_system_offline(&mut app, SystemId("phaser-starboard".into()));
 
@@ -9233,14 +9288,43 @@ fn set_target_refused_when_all_banks_offline() {
             },
         },
     );
-    let out = tick(&mut app);
-    let has_lock = out
-        .iter()
-        .any(|m| matches!(&m.msg, ServerMessage::TargetLock { .. }));
-    assert!(
-        !has_lock,
-        "SetTarget must be refused when every phaser bank fine system is offline"
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("target-uuid"),
+        "a working tactical radar must still lock a target when every phaser bank \
+         is dead — the lock belongs to the radar, and torpedoes still need it"
     );
+}
+
+#[test]
+fn set_target_refused_when_the_tactical_radar_is_offline() {
+    let mut app = test_app();
+    set_tactical_radar_range(&mut app, 300.0);
+    setup_weapons_world(&mut app, 30.0, 0.0);
+    start_game_with_weapons(&mut app);
+    mark_system_offline(&mut app, crate::system_registry::tactical_radar_system_id());
+
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        },
+    );
+    let out = tick(&mut app);
+
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TargetLock { .. })),
+        "an offline tactical radar must refuse SetTarget at admission — this is \
+         the ONE gate on the lock"
+    );
+    assert!(get_weapons_target(&mut app).is_none());
 }
 
 // ── Blackboards ───────────────────────────────────────────────────────
@@ -9462,59 +9546,269 @@ ai_only = true
     );
 }
 
-/// Finding 2 regression: the tactical AI used to gate its early skip on the
-/// coarse `tactical` policy. Post-fix, it uses
-/// `any_tactical_system_operates_ai` which iterates the ship config's
-/// phaser_bank / torpedo_tube / torpedo_magazine fine systems. This
-/// test seeds AI on `torpedo-magazine` alone (no coarse tactical) and
-/// asserts the AI's TacticalRadarSelection sync path fires.
-#[test]
-fn ai_target_selection_runs_when_any_tactical_system_operates_ai() {
-    let mut app = test_app();
-
-    // Set the LocalShip's active rating to Assisted so torpedo_auto_fire is enabled.
-    set_tactical_station_rating(&mut app, "Assisted");
-
-    // Set torpedo-magazine to Ai on the LocalShip. Do NOT touch coarse tactical.
-    {
-        let world = app.world_mut();
-        let mut q = world
-            .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
-        for mut cs in q.iter_mut(world) {
-            cs.0.set(
-                crate::system_registry::torpedo_magazine_system_id(),
-                crate::ship::control_source::ControlSource::Ai,
-            );
-            // Confirm coarse tactical is NOT set — this is what makes
-            // the test cover the finding. (#801: "tactical" is a station
-            // id, not a system, so nothing should ever register it.)
-            assert!(
-                !cs.0
-                    .entries()
-                    .any(|(id, _)| { id.0 == crate::system_registry::TACTICAL_STATION_ID }),
-                "test invariant: coarse tactical must NOT be registered"
-            );
-        }
-    }
-
-    // Simulate a Destroy objective so ai_target_selection has something
-    // to lock onto (the AI target-sync leg exercises the early-skip we're
-    // testing).
+/// Seed a live named `Destroy` objective and return the target's UUID, so a
+/// test only has to arrange control sources and read the resulting lock.
+fn seed_destroy_objective_target(app: &mut App) -> String {
     let target_uuid = uuid::Uuid::new_v4().to_string();
-    spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+    spawn_entity_target(app, &target_uuid, 0.0, -30.0);
     app.world_mut()
         .resource_mut::<crate::world::server::WorldContentRuntime>()
         .name_to_uuid
         .insert("wave_1".into(), target_uuid.clone());
-    insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+    insert_destroy_objective_blackboard(app, "wave_1", 80.0);
+    target_uuid
+}
+
+fn set_system_control_source(
+    app: &mut App,
+    system_id: SystemId,
+    source: crate::ship::control_source::ControlSource,
+) {
+    let world = app.world_mut();
+    let mut q =
+        world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+    for mut cs in q.iter_mut(world) {
+        cs.0.set(system_id.clone(), source);
+    }
+}
+
+/// Issue #887, the fairness invariant. The Tactical AI used to run whenever
+/// ANY tactical fine system was AI (`any_tactical_system_operates_ai`) — a gate
+/// strictly wider than the one admission applies to the human, who is checked on
+/// `tactical-radar` alone. On a mixed-rating ship that meant an automated
+/// torpedo magazine licensed the AI to overwrite the crewed radar's lock.
+///
+/// This is not a hypothetical config: `alliance_cruiser`'s shipped `Simplified`
+/// Tactical rating automates the phaser banks and leaves the radar crewed.
+#[test]
+fn an_ai_magazine_alone_does_not_license_the_tactical_ai_to_take_the_lock() {
+    let mut app = test_app();
+    set_tactical_station_rating(&mut app, "Assisted");
+    set_system_control_source(
+        &mut app,
+        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    // The radar stays Human (the resolver's default), i.e. the operator's.
+    let target_uuid = seed_destroy_objective_target(&mut app);
+    set_weapons_target(&mut app, Some("the-humans-lock".into()));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("the-humans-lock"),
+        "an Ai torpedo magazine must NOT license the Tactical AI to re-decide the \
+         lock: the radar is Human, so the operator's lock is the ship's lock \
+         (issue #887). Locking {target_uuid} here means the AI overrode a crewed radar."
+    );
+}
+
+/// The other half of the same gate: an AI tactical radar — and nothing else on
+/// the Tactical surface — is enough on its own. The lock belongs to the radar.
+#[test]
+fn an_ai_tactical_radar_alone_licenses_the_tactical_ai_to_take_the_lock() {
+    let mut app = test_app();
+    set_system_control_source(
+        &mut app,
+        crate::system_registry::tactical_radar_system_id(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    let target_uuid = seed_destroy_objective_target(&mut app);
 
     tick(&mut app);
 
     assert_eq!(
         get_weapons_target(&mut app).as_deref(),
         Some(target_uuid.as_str()),
-        "ai_target_selection must run and lock the objective target when ANY \
-         tactical fine system has operate_ai=true, even without the coarse tactical SystemId"
+        "an AI-operated tactical radar must run the selector and apply its choice, \
+         with no weapon fine system needed to license it"
+    );
+}
+
+// ── One lock per ship: the fairness count (issue #887) ─────────────────
+//
+// A human gunner holds exactly ONE `TacticalRadarSelection`, so a crewed ship
+// engages one target at a time. If an AI weapon bank picked a target of its own
+// instead of the ship's lock, an AI ship could engage two at once — a capability
+// no player has, i.e. an AGENTS.md #6 symmetry violation. The test below is the
+// count that pins it, and it is deliberately arranged so a per-bank picker WOULD
+// hit both: the two phaser arcs do not overlap, and there is one eligible
+// hostile squarely inside each.
+
+/// A hostile ship with a hull, so damage to it is observable.
+fn spawn_hostile_hull(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
+    app.world_mut()
+        .spawn((
+            crate::simulation::Ship,
+            crate::entity_spawner::EntityUuid(uuid.into()),
+            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+                SystemId("captain".into()),
+                200.0,
+            )])),
+            Transform::from_xyz(x, 0.0, z),
+            FactionComponent(federation_faction()),
+        ))
+        .id()
+}
+
+fn hull_current(app: &App, entity: Entity) -> f32 {
+    app.world()
+        .get::<crate::entity_spawner::EntitySystemHull>(entity)
+        .expect("hostile carries EntitySystemHull")
+        .0
+        .total_current()
+}
+
+/// Arrange the shipped-shape two-bank ship (port −90°, starboard +90°, 240°
+/// auto arcs, so the arcs do NOT overlap abeam) plus a 360° blaster bank, all
+/// AI-operated, with the Tactical radar AI too. Returns (port-side hostile,
+/// starboard-side hostile).
+fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
+    use crate::ship::control_source::ControlSource;
+
+    setup_harrow_ship_hostile_to_federation(app);
+    insert_untargeted_destroy_objective(app, 45.0);
+    for sysid in [
+        crate::system_registry::tactical_radar_system_id(),
+        SystemId("phaser-port".into()),
+        SystemId("phaser-starboard".into()),
+    ] {
+        set_system_control_source(app, sysid, ControlSource::Ai);
+    }
+
+    // A third weapon group with an arc that bears on BOTH hostiles, so the
+    // count covers more than a pair of phaser banks.
+    let ship = local_ship_entity(app);
+    set_system_control_source(
+        app,
+        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        ControlSource::Ai,
+    );
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(BlasterSystemResource(vec![
+            crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
+                id: "fore".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 360.0,
+                volley_count: 1,
+                volley_interval_secs: 0.1,
+                cooldown_secs: 3.0,
+                charge_time_secs: 0.0,
+                projectile_speed: 60.0,
+                collision_radius: 1.5,
+                visual_scale: 1.0,
+                damage: 10,
+                shield_pierce: 0.0,
+                recoil_impulse: 0.0,
+                screenshake_magnitude: 0.0,
+                marker: None,
+                barrels: Vec::new(),
+                pattern: Vec::new(),
+                range: 45.0,
+            }),
+        ]));
+    // Re-attach so the new blaster bank picks up the shipped open-fire policy.
+    attach_shipped_weapon_ai(app, ship);
+
+    // Port hostile is the NEARER of the two, so the selector's nearest-hostile
+    // source picks it deterministically. Both are inside 40 units (the default
+    // phaser range) and each sits squarely inside exactly one 240° arc.
+    let port_uuid = uuid::Uuid::new_v4().to_string();
+    let starboard_uuid = uuid::Uuid::new_v4().to_string();
+    let port = spawn_hostile_hull(app, &port_uuid, -20.0, -3.0);
+    let starboard = spawn_hostile_hull(app, &starboard_uuid, 25.0, -3.0);
+    (port, starboard, port_uuid, starboard_uuid)
+}
+
+/// The acceptance count. Two eligible hostiles, three AI weapon groups bearing,
+/// and exactly ONE hostile takes damage.
+#[test]
+fn an_ai_ship_with_several_bearing_weapon_groups_damages_only_one_hostile() {
+    let mut app = test_app();
+    let (port, starboard, port_uuid, _starboard_uuid) = setup_two_arc_ai_shooter(&mut app);
+
+    let port_hull_before = hull_current(&app, port);
+    let starboard_hull_before = hull_current(&app, starboard);
+
+    for _ in 0..6 {
+        tick(&mut app);
+    }
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(port_uuid.as_str()),
+        "precondition: the ship's ONE lock is the nearer hostile"
+    );
+    assert!(
+        hull_current(&app, port) < port_hull_before,
+        "precondition: the ship must actually be shooting the target it locked, \
+         or this test counts nothing"
+    );
+    // Precondition: more than one weapon GROUP is live, so "one target" is a
+    // statement about the ship, not about a ship that only has one gun.
+    assert_eq!(
+        live_beam_banks(&mut app),
+        vec!["port".to_string()],
+        "precondition: exactly the bank whose arc holds the lock is burning"
+    );
+    let ship = local_ship_entity(&mut app);
+    let blaster = app
+        .world()
+        .get::<BlasterSystemResource>(ship)
+        .expect("the shooter carries a blaster bank");
+    assert!(
+        blaster.0[0].volley.on_cooldown || !blaster.0[0].in_flight.is_empty(),
+        "precondition: the 360° blaster group also engaged this tick window — a \
+         second weapon group that could have chosen the other hostile for itself"
+    );
+    assert_eq!(
+        hull_current(&app, starboard),
+        starboard_hull_before,
+        "one lock per ship: the second hostile must take NO damage while the ship \
+         is engaging the first. A weapon group that picked its own target would \
+         engage both at once — a capability no human gunner has, who holds exactly \
+         one TacticalRadarSelection (issue #887, AGENTS.md #6)"
+    );
+}
+
+/// The fixture above only counts something if the second hostile really was
+/// engageable — otherwise "no damage" proves an arc gap, not a shared lock.
+/// Point the same ship's lock at the starboard hostile and it takes damage from
+/// the starboard bank, with the port hostile now untouched.
+#[test]
+fn the_unengaged_hostile_was_engageable_all_along() {
+    let mut app = test_app();
+    let (port, starboard, _port_uuid, starboard_uuid) = setup_two_arc_ai_shooter(&mut app);
+
+    // Take the radar off AI and hand the lock over as a human would, so the
+    // selector's nearest-first ranking does not immediately take it back.
+    set_system_control_source(
+        &mut app,
+        crate::system_registry::tactical_radar_system_id(),
+        crate::ship::control_source::ControlSource::Human,
+    );
+    set_weapons_target(&mut app, Some(starboard_uuid.clone()));
+
+    let port_hull_before = hull_current(&app, port);
+    let starboard_hull_before = hull_current(&app, starboard);
+
+    for _ in 0..6 {
+        tick(&mut app);
+    }
+
+    assert!(
+        hull_current(&app, starboard) < starboard_hull_before,
+        "the starboard hostile is inside the starboard bank's arc and inside \
+         weapons range — it was always engageable, so the count above is a \
+         statement about the shared lock, not about arcs"
+    );
+    assert_eq!(
+        hull_current(&app, port),
+        port_hull_before,
+        "and with the lock moved, the port hostile is the one now spared — still \
+         exactly one engaged target"
     );
 }
 

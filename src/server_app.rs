@@ -4111,6 +4111,36 @@ station = "pilot"
         q.single(app.world()).ok().and_then(|wt| wt.0.clone())
     }
 
+    /// Author a `[weapons_console.radar] range` on the LocalShip.
+    ///
+    /// Since issue #887 `handle_set_target` takes the lock horizon from the
+    /// ship's OWN `WeaponsConsoleSection` (it applies the lock for every ship,
+    /// not just the player's, and `ShipClientConfigResource` is the player's
+    /// radar) — so a fixture that wants a bounded horizon has to author one. A
+    /// hull with no radar block has an unbounded horizon, which is what every
+    /// NPC hull actually declares.
+    fn set_tactical_radar_range(app: &mut App, range: f32) {
+        let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+        let entity = q.single_mut(app.world_mut()).expect("LocalShip");
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(crate::entity_spawner::WeaponsConsoleSection(
+                crate::entity_config::WeaponsConsoleConfig {
+                    torpedo_arc_color: vec![],
+                    power_multipliers: None,
+                    phaser_banks: vec![],
+                    blaster_banks: vec![],
+                    radar: Some(crate::radar_config::RadarConfig {
+                        range,
+                        shows: vec![crate::entity_tags::EntityTag::Ship],
+                        selects: vec![],
+                    }),
+                    selector: None,
+                    selector_idle: false,
+                },
+            ));
+    }
+
     // `ActiveBeam` is per-bank since issue #790; these fixtures all drive a ship
     // firing ONE bank at a time, so "the beam" still means "the one live slot".
 
@@ -5239,6 +5269,7 @@ station = "pilot"
     fn valid_target_within_range_replies_with_target_lock_confirmed() {
         let mut app = test_app();
         // Asteroid at (30, 0) â€" 30 units from ship origin, within 60-unit range.
+        set_tactical_radar_range(&mut app, 300.0);
         setup_weapons_world(&mut app, 30.0, 0.0);
         start_game_with_weapons(&mut app);
 
@@ -5272,6 +5303,7 @@ station = "pilot"
     fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         let mut app = test_app();
         // Asteroid at (400, 0) — 400 units away, outside 300-unit Weapons range.
+        set_tactical_radar_range(&mut app, 300.0);
         setup_weapons_world(&mut app, 400.0, 0.0);
         start_game_with_weapons(&mut app);
 

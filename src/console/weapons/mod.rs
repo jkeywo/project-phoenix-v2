@@ -123,33 +123,32 @@ impl Plugin for WeaponsPlugin {
             .add_systems(
                 Update,
                 (
-                    // `handle_set_target` is the other `SimSet::Input` writer of
-                    // `TacticalRadarSelection`, and is ordered against `ai_target_selection`
-                    // below.
+                    // `handle_set_target` is the SOLE writer of
+                    // `TacticalRadarSelection` (issue #887). Both origins reach it
+                    // as an admitted `SetTarget` on `tactical-radar`: a human's
+                    // console message via `admit_system_commands` (before `Input`),
+                    // and the Tactical AI's own choice via `ai_target_selection`'s
+                    // `emit_ai_command` (in `Input`, below). It therefore runs
+                    // AFTER the decider — an admitted command emitted in `Input`
+                    // has to be consumed later in the SAME tick, because
+                    // admission's `clear_before_input` empties the queue at the
+                    // top of the next one. This is the ordinary
+                    // decide-then-apply shape the other weapons commands already
+                    // use (`ai_phaser_auto_fire` → `handle_fire_phaser`), just
+                    // with both halves in `Input` so the applied lock is still
+                    // pre-physics.
                     //
-                    // `ai_target_selection` reads `TacticalRadarSelection` (as the seed for
-                    // its selection) and writes it back in the same system, so only
-                    // two interleavings exist and both keep a human's lock: either
-                    // the handler runs first and selection seeds from the fresh
-                    // lock, or it runs second and its write lands last.
-                    //
-                    // The edge is kept anyway, and is worth keeping: it pins the
-                    // better of the two, in which admitted human input seeds
-                    // selection in the tick it was admitted rather than a tick
-                    // later, so a human's fresh lock survives the AI's
-                    // read-modify-write. Post-#829 no *other* `Input` system reads
-                    // `TacticalRadarSelection` — cross-system consumers read the
-                    // frozen viewscreen `combat_lock` — so this edge exists purely
-                    // for that human-lock-survives-the-tick atomicity between the
-                    // two writers, not to make any same-tick consumer read fresher.
-                    // Both gates hold at once on any mixed-rating ship
-                    // (`any_bank_accepts_human_input` for a Human phaser bank,
-                    // `any_tactical_system_operates_ai` for, say, an Ai torpedo tube
-                    // or magazine), so this is an ordinary configuration, not a
-                    // contrived one.
+                    // The two origins can never collide, and that is what makes
+                    // one applier safe: `accept_human_input` and `operate_ai` are
+                    // mutually exclusive on a single `SystemId`, and both paths now
+                    // gate on the SAME id — `tactical-radar`. A Human radar refuses
+                    // the AI's emit at admission and skips the decider outright; an
+                    // Ai radar refuses the human's message at admission. There is
+                    // no ordering in which one clobbers the other, because only one
+                    // of them ever produces a command.
                     handle_set_target
                         .in_set(crate::sim_sets::SimSet::Input)
-                        .before(ai_target_selection),
+                        .after(ai_target_selection),
                     // Phaser auto-fire DECIDE (issue #846): emits to
                     // AdmittedCommands through the shared AI seam. Stays in
                     // `Input` so it keeps reading pre-physics `Transform`s.
@@ -162,22 +161,17 @@ impl Plugin for WeaponsPlugin {
                     handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
                     handle_set_torpedo_volley_target.in_set(crate::sim_sets::SimSet::Input),
-                    // Tactical AI target selection (issues #697, #700).
+                    // Tactical AI target selection (issues #697, #700, #887).
                     //
                     // Stays in `SimSet::Input` — where the pre-split
                     // `operate_tactical_ai` lived — rather than moving to the
                     // `Physics` + `AiTickLabel` set that ConsoleAiPlugin's
-                    // decide/integrate pairs use. It must run in `Input` to stay
-                    // ordered against `handle_set_target` (the `.before` edge above
-                    // that keeps a human's lock): both are the only writers of
-                    // `TacticalRadarSelection`, and that atomicity is the reason for
-                    // the shared set. Post-#829 the consumers (`ai_phaser_auto_fire`,
-                    // `handle_fire_phaser`, `tick_npc_auto_match_frequency`) no longer
-                    // read this component at all — they read the frozen viewscreen
-                    // `combat_lock`, which the radar publisher + viewscreen
-                    // aggregator derive from this write one tick later — so the set
-                    // choice is about writer/writer atomicity, not about feeding
-                    // any same-tick reader.
+                    // decide/integrate pairs use. Since #887 it no longer WRITES
+                    // `TacticalRadarSelection`; it emits an admitted `SetTarget` on
+                    // `tactical-radar` that `handle_set_target` applies later in the
+                    // same set (the `.after` edge above). Keeping both halves in
+                    // `Input` is what makes the lock land pre-physics, on the tick
+                    // it was decided, exactly as the direct write used to.
                     ai_target_selection
                         .in_set(crate::sim_sets::SimSet::Input)
                         .run_if(crate::ai::cadence::ai_tick_ready),
@@ -846,26 +840,39 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// than flying at a bearing it cannot confirm. It shoots at the locked ship
 /// without closing on it, which is a coherent outcome, not a split brain.
 ///
-/// The decision is applied to `TacticalRadarSelection` here, in the same system that
-/// makes it. `TacticalRadarSelection` is the single source of truth every consumer reads
-/// (`handle_fire_phaser`, `ai_phaser_auto_fire`, `ai_torpedo_auto_fire`,
-/// `tick_npc_auto_match_frequency`, …), and this is the only path by which the
-/// AI reaches it — a human-operated Tactical's lock is never overwritten,
-/// because the `operate_ai` gate below skips the ship entirely.
+/// ## The decision travels as an admitted command (issue #887)
 ///
-/// Seeding the selection from `TacticalRadarSelection` and writing it back within one
-/// system is deliberate: it makes the AI's read-modify-write atomic with
-/// respect to `handle_set_target`, the only other `SimSet::Input` writer of
-/// `TacticalRadarSelection`. `Input` has no intra-set ordering by default, so a
-/// separate integrator system could be scheduled between the two and write back
-/// a decision made before the human's `SetTarget` landed, silently dropping the
-/// human's lock on any mixed-rating ship. Do not re-split this without
-/// re-establishing that ordering — see `WeaponsPlugin::build` and
-/// `human_set_target_survives_the_tick_on_a_mixed_rating_ship`.
+/// This system does not write `TacticalRadarSelection`. It emits the chosen UUID
+/// as a `SetTarget` on `tactical-radar` through `emit_ai_command`, and
+/// `handle_set_target` — the ship's ONE applier, human or AI — resolves and
+/// applies it later in the same `SimSet::Input`. A cleared selection is emitted
+/// as `SetTarget { uuid: "" }`: an unresolvable UUID drops the lock, which is
+/// already what the applier does for a human who names something that no longer
+/// exists, so no origin-specific "clear" verb is needed.
+///
+/// The gate is the **radar's own** `operate_ai`, not "any tactical fine system
+/// is AI" (`any_tactical_system_operates_ai`, the pre-#887 predicate). That
+/// predicate was strictly wider than the one admission applies to the human,
+/// which is what let an Ai torpedo tube licence the AI to overwrite a Human
+/// radar's lock on a mixed-rating ship — `alliance_cruiser`'s shipped
+/// `Simplified` Tactical rating (AI phaser banks, human radar and tubes) is
+/// exactly that shape. Gating on `tactical-radar` makes the two origins mutually
+/// exclusive (`accept_human_input` and `operate_ai` cannot both hold on one
+/// `SystemId`), which is what makes a single applier safe.
+///
+/// `TacticalRadarSelection` remains the single source of truth every consumer
+/// reads, one lock per ship. Every AI weapon host — `ai_phaser_auto_fire`,
+/// `tick_blaster_auto_fire`, `ai_torpedo_auto_fire` — aims at the frozen
+/// viewscreen `combat_lock` derived from it, so no weapon bank picks a target of
+/// its own and an AI ship can no more engage two hostiles at once than a crewed
+/// one can (AGENTS.md #6).
 fn ai_target_selection(
     // `Option<Res<_>>`, never a bare `Res` — this system runs in bare-`App`
     // weapons fixtures that never insert `LogFilterConfig` (see the macro docs).
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // The shared admission seam this system emits its decision through (#887);
+    // `emit_ai_command` asks `Sessions` about station tenure.
+    sessions: Res<crate::lobby::Sessions>,
     mut ship_query: Query<
         (
             Entity,
@@ -873,7 +880,8 @@ fn ai_target_selection(
             &ShipSystemControlSources,
             &LastShipAttacker,
             &ShipPhysics,
-            &mut TacticalRadarSelection,
+            &TacticalRadarSelection,
+            &mut crate::messages::AdmittedCommands,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entity_spawner::WeaponsConsoleSection>,
@@ -955,7 +963,8 @@ fn ai_target_selection(
         control_sources,
         last_attacker,
         physics,
-        mut weapons_target,
+        weapons_target,
+        mut admitted,
         mut blackboards,
         modifiers,
         weapons_section,
@@ -964,17 +973,22 @@ fn ai_target_selection(
         target_selector,
     ) in ship_query.iter_mut()
     {
-        // Only select for ships whose Tactical surface is AI-controlled.
-        // Post-#512, "tactical is AI-controlled" means "at least one tactical
-        // fine system (phaser bank, torpedo tube, or the torpedo magazine) has
-        // `operate_ai == true` on its own policy". Ships that declare no
-        // tactical fine systems (test / legacy) fall back to the coarse
-        // `tactical.operate_ai` policy.
+        // Only select for ships whose TACTICAL RADAR is AI-controlled (issue
+        // #887). The lock belongs to the radar, so the radar's own policy is
+        // what licenses an AI selection — the same `SystemId` admission checks
+        // for a human's `SetTarget`, and `accept_human_input` / `operate_ai` are
+        // mutually exclusive on one id, so exactly one origin can ever hold it.
         //
-        // The player ship's Tactical fine systems may be human — select nothing
-        // in that case; the human operator drives `TacticalRadarSelection` directly via
-        // `handle_set_target`. Clearing the intent here stops a ship that flips
-        // from AI to human control leaving a stale selection on its blackboard.
+        // This replaced `any_tactical_system_operates_ai` ("ANY phaser bank,
+        // torpedo tube or the magazine is Ai"), which was strictly wider than
+        // the human's gate: an Ai torpedo tube alongside a Human radar let the
+        // AI overwrite the human's lock. `alliance_cruiser`'s shipped
+        // `Simplified` Tactical rating is exactly that ship.
+        //
+        // A human-operated radar therefore selects nothing here; the operator
+        // drives the lock through the same `handle_set_target` applier. Clearing
+        // the intent stops a ship that flips from AI to human control leaving a
+        // stale selection on its blackboard.
         // Explicit AI-or-idle declaration for the Tactical radar (issue #781,
         // AC6). An authored `selector_idle = true` makes the radar take no AI
         // selection even when a tactical fine system is AI-operated — the
@@ -986,7 +1000,11 @@ fn ai_target_selection(
         // `[weapons_console.selector]` means no ranking exists to run, so the
         // radar clears any stale lock and takes no selection.
         let radar_idle = target_selector.is_none_or(|s| s.idle);
-        if radar_idle || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
+        let radar_operates_ai = control_sources
+            .0
+            .policy_for(&crate::system_registry::tactical_radar_system_id())
+            .operate_ai;
+        if radar_idle || !radar_operates_ai {
             clear_locked_target_if_present(&mut blackboards);
             continue;
         }
@@ -1200,12 +1218,12 @@ fn ai_target_selection(
                 .selector
                 .select(&self_ctx, &candidates, current_lock.as_deref(), &[]);
 
-        // Publish the decision as intent (observability), then apply it to the
-        // authoritative lock.
+        // Publish the decision as intent (observability), then send it to the
+        // applier as an admitted command.
         record_locked_target_decision(&mut blackboards, selected.clone());
-        // Compare before writing: an unconditional assignment through `Mut`
-        // would fire change detection every tick even when the lock is
-        // unchanged.
+        // Compare before emitting: a `SetTarget` per AI tick would re-resolve
+        // and re-broadcast an unchanged lock every tick, and fire the
+        // component's change detection with it.
         if weapons_target.0 != selected {
             // Target CHANGED — the single most load-bearing balance line: the
             // headline `info` edge names the from→to. Entity-scoped so
@@ -1234,7 +1252,23 @@ fn ai_target_selection(
                 "acquired {to} via data-driven Tactical selector ({} candidates)",
                 candidates.len()
             );
-            weapons_target.0 = selected;
+            // Emit, don't write (issue #887). The empty string is how the AI
+            // drops a lock: `handle_set_target` clears any target it cannot
+            // resolve, which is the same thing it does for a human naming an
+            // entity that has since died. Admission re-checks `operate_ai` on
+            // `tactical-radar`, so this is refused on exactly the ships the gate
+            // above already skipped — belt and braces, not a second policy.
+            crate::command_admission::ai_emit::emit_ai_command(
+                self_uuid,
+                crate::system_registry::tactical_radar_system_id(),
+                crate::messages::SystemControlPayload::SetTarget {
+                    uuid: selected.unwrap_or_default(),
+                },
+                control_sources,
+                &sessions,
+                Some(ship_config),
+                &mut admitted,
+            );
         }
     }
 }

@@ -449,76 +449,101 @@ pub(crate) fn on_beam_ended(
     ));
 }
 
+/// The ship's ONE `TacticalRadarSelection` applier, for every origin (issue
+/// #887).
+///
+/// Consumes admitted `SetTarget` commands addressed to `tactical-radar` on
+/// **every** ship — player and NPC — resolves the named UUID against live ECS
+/// transforms, and applies or drops the lock. Two origins reach it and neither
+/// is distinguishable here: a human's console message, admitted by
+/// `admit_system_commands` before `SimSet::Input`, and the Tactical AI's own
+/// choice, emitted by `ai_target_selection` earlier in `Input`. Admission
+/// stripped the source; there is no human-vs-AI branch below this line
+/// (AGENTS.md #6).
+///
+/// # Why there is no second gate
+///
+/// The pre-#887 body also required `any_bank_accepts_human_input` — "some phaser
+/// bank on this ship is human-operable" — on top of admission's own check on
+/// `tactical-radar`. That was both wrong and, once the AI shares the applier,
+/// unrepresentable: on `alliance_cruiser`'s shipped `Simplified` Tactical rating
+/// the phaser banks are automated, so the predicate went false and the crewed
+/// radar could not lock anything at all. Admission on `tactical-radar` is the
+/// authorisation; a bank's rating is not a radar concern.
+///
+/// # Range
+///
+/// The horizon is this ship's own `[weapons_console.radar] range` scaled by its
+/// live `RadarRange` modifier, not the `LocalShip`-only
+/// `ShipClientConfigResource` (which is the player's radar, and meaningless on
+/// an NPC). A non-positive or non-finite range means **unbounded** — the hull
+/// declares no radar, so range never culls a lock. That is the same rule
+/// `ai_target_selection` applies to its candidates, which matters because no NPC
+/// hull authors `[weapons_console.radar]` at all.
+///
+/// An unresolvable UUID clears the lock. That is how the AI drops a target
+/// (`SetTarget { uuid: "" }`), and equally what a human gets for naming
+/// something that has since been destroyed.
 pub(crate) fn handle_set_target(
-    ship_query: Query<
+    mut ship_query: Query<
         (
             &AdmittedCommands,
             &ShipPhysics,
-            &ShipSystemControlSources,
-            &crate::ship_plugin::ShipConfigComponent,
+            &mut TacticalRadarSelection,
+            Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::entity_spawner::WeaponsConsoleSection>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
-    mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
-    modifiers_q: Query<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>,
     mut outbox: ResMut<SimOutbox>,
-    ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    let Some((admitted, physics, control_sources, ship_config)) = ship_query.iter().next() else {
-        return;
-    };
-    let Some(mut weapons_target) = weapons_target_q.iter_mut().next() else {
-        return;
-    };
-    // Ship-level authorisation (issue #512, option c): SetTarget is a ship-wide
-    // concern, not per-bank. Accept the message if ANY phaser bank on the ship
-    // is currently human-operable — that mirrors the "fire when at least one
-    // bank is alive" semantic. If no banks are declared in the ship config
-    // (legacy / test ship), fall back to the coarse tactical policy.
-    if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
-        return;
-    }
-    let default_modifiers;
-    let modifiers: &crate::modifiers::ShipModifiers = match modifiers_q.single() {
-        Ok(m) => m,
-        Err(_) => {
-            default_modifiers = crate::modifiers::ShipModifiers::new();
-            &default_modifiers
-        }
-    };
-    for cmd in admitted.for_target(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
-        let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
-            continue;
-        };
-
-        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let base_range = ship_client_config.0.tactical_radar_range;
+    for (admitted, physics, mut weapons_target, modifiers, weapons_section) in ship_query.iter_mut()
+    {
+        let radar_range_mult = modifiers
+            .map(|m| m.get(&ModifierSlot::RadarRange))
+            .unwrap_or(1.0);
+        let base_range = weapons_section
+            .and_then(|s| s.0.radar.as_ref().map(|r| r.range))
+            .unwrap_or(0.0);
         let effective_weapons_range = base_range * radar_range_mult;
-        let live_pos = live_entity_xz(uuid.as_str(), &asteroid_q, &entity_q);
-        let locked = match live_pos {
-            None => false,
-            Some((x, z)) => {
-                let dx = x - physics.x;
-                let dz = z - physics.z;
-                dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
-            }
-        };
-        if locked {
-            weapons_target.0 = Some(uuid.clone());
-        } else {
-            weapons_target.0 = None;
-        }
+        let range_bounds_targets =
+            effective_weapons_range > 0.0 && effective_weapons_range.is_finite();
 
-        if let Some(reply_token) = &cmd.response_token {
-            outbox.0.push((
-                Target::Token(reply_token.clone()),
-                ServerMessage::TargetLock {
-                    uuid: uuid.clone(),
-                    locked,
-                },
-            ));
+        for cmd in admitted.for_target(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
+            let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
+                continue;
+            };
+
+            let live_pos = live_entity_xz(uuid.as_str(), &asteroid_q, &entity_q);
+            let locked = match live_pos {
+                None => false,
+                Some((x, z)) => {
+                    if !range_bounds_targets {
+                        true
+                    } else {
+                        let dx = x - physics.x;
+                        let dz = z - physics.z;
+                        dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
+                    }
+                }
+            };
+            if locked {
+                weapons_target.0 = Some(uuid.clone());
+            } else {
+                weapons_target.0 = None;
+            }
+
+            if let Some(reply_token) = &cmd.response_token {
+                outbox.0.push((
+                    Target::Token(reply_token.clone()),
+                    ServerMessage::TargetLock {
+                        uuid: uuid.clone(),
+                        locked,
+                    },
+                ));
+            }
         }
     }
 }

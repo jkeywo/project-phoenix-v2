@@ -746,18 +746,20 @@ pub(crate) fn build_torpedo_target_snapshot(
 
     // UUIDs of virtual (non-hittable) entities — anchors / regions. Used to
     // exclude them from the detonation target list below.
-    let virtual_uuids: std::collections::HashSet<String> =
-        virtual_entity_q.iter().map(|u| u.0.clone()).collect();
+    // Borrowed, not cloned: these sets are read-only lookups that die at the end
+    // of the system, and both sources outlive them.
+    let virtual_uuids: std::collections::HashSet<&str> =
+        virtual_entity_q.iter().map(|u| u.0.as_str()).collect();
     // World snapshot also carries virtual entities — recognise them by the
     // shape field (`Some("torus" | "sphere" | "box")` marks a region or
     // asteroid-field anchor). The live ECS filter above is the source of
     // truth when the entity is present; this catches snapshot-only entries.
-    let virtual_snapshot_uuids: std::collections::HashSet<String> = world
+    let virtual_snapshot_uuids: std::collections::HashSet<&str> = world
         .0
         .entities
         .iter()
         .filter(|e| e.shape.is_some())
-        .map(|e| e.uuid.clone())
+        .map(|e| e.uuid.as_str())
         .collect();
 
     // Build target positions from *live* ECS transforms, falling back to the
@@ -785,6 +787,28 @@ pub(crate) fn build_torpedo_target_snapshot(
         map
     };
 
+    // Radius by UUID, indexed once up front. This used to be a
+    // `world.0.entities.iter().find(|e| e.uuid == ...)` inside each of the two
+    // loops below — a linear string-compare scan of the whole world entity list
+    // *per live entity*, i.e. O(n²) in world size. At the 256-entity default
+    // world that was ~65k string comparisons every tick, and it grew
+    // quadratically with any world the designers made bigger. Same lookups,
+    // same results, one pass.
+    //
+    // First-wins on duplicate UUIDs, because `find` returned the first match
+    // and `collect` would keep the last. World UUIDs are meant to be unique, so
+    // this should never bite — but the point of the change is to be faster, not
+    // to be different.
+    let radius_by_uuid: std::collections::HashMap<&str, f32> = {
+        let mut map: std::collections::HashMap<&str, f32> =
+            std::collections::HashMap::with_capacity(world.0.entities.len());
+        for e in world.0.entities.iter() {
+            map.entry(e.uuid.as_str())
+                .or_insert_with(|| e.radius_or_zero());
+        }
+        map
+    };
+
     // Proximity detonation target list (uuid, x, y, z, radius). Built once and
     // shared across every ship's `find_detonation_hits` call. Y threaded for 3D
     // collision (issue #768).
@@ -792,44 +816,45 @@ pub(crate) fn build_torpedo_target_snapshot(
         let mut map: std::collections::HashMap<String, (f32, f32, f32, f32)> =
             std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
-            let radius = world
-                .0
-                .entities
-                .iter()
-                .find(|e| e.uuid == u.0)
-                .map(|e| e.radius_or_zero())
-                .unwrap_or(0.0);
+            let radius = radius_by_uuid.get(u.0.as_str()).copied().unwrap_or(0.0);
             map.insert(
                 u.0.clone(),
                 (t.translation.x, t.translation.y, t.translation.z, radius),
             );
         }
         for (u, t) in entity_q.iter() {
-            if virtual_uuids.contains(&u.0) || virtual_snapshot_uuids.contains(&u.0) {
+            if virtual_uuids.contains(u.0.as_str()) || virtual_snapshot_uuids.contains(u.0.as_str())
+            {
                 continue;
             }
-            let radius = world
-                .0
-                .entities
-                .iter()
-                .find(|e| e.uuid == u.0)
-                .map(|e| e.radius_or_zero())
-                .unwrap_or(0.0);
+            let radius = radius_by_uuid.get(u.0.as_str()).copied().unwrap_or(0.0);
             map.insert(
                 u.0.clone(),
                 (t.translation.x, t.translation.y, t.translation.z, radius),
             );
         }
         for e in world.0.entities.iter() {
-            if virtual_uuids.contains(&e.uuid) || virtual_snapshot_uuids.contains(&e.uuid) {
+            if virtual_uuids.contains(e.uuid.as_str())
+                || virtual_snapshot_uuids.contains(e.uuid.as_str())
+            {
                 continue;
             }
             map.entry(e.uuid.clone())
                 .or_insert_with(|| (e.x(), e.y(), e.z(), e.radius_or_zero()));
         }
-        map.into_iter()
+        // Sorted by UUID before it leaves this system. `HashMap` iteration order
+        // is a function of the per-process random seed in `RandomState`, so this
+        // list came out in a different order in every process — and it is the
+        // proximity target list the detonation phase walks to decide what a
+        // torpedo hits. Two `--seed` runs of the same binary therefore diverged
+        // as soon as a torpedo flew, which is why the duel scenario was not
+        // reproducible while the (torpedo-free) default world was.
+        let mut out: Vec<(String, f32, f32, f32, f32)> = map
+            .into_iter()
             .map(|(uuid, (x, y, z, r))| (uuid, x, y, z, r))
-            .collect()
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     };
 
     snapshot.target_positions = target_positions;

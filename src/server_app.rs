@@ -1598,13 +1598,23 @@ fn reset_broadcast_caches_on_start(
 /// rather than broadcast to all: it carries exact per-system hull detail, and
 /// who may see which system is a host-side decision. Every other blackboard
 /// still goes out unprojected at `Target::All`.
-pub fn broadcast_blackboard_updates(world: &mut World) {
+/// The `Local` caches the `QueryState` across ticks. `World::query_filtered`
+/// builds a *fresh* one on every call, and constructing it walks every archetype
+/// in the world to work out which ones match — per tick, for a query that
+/// resolves to a single `LocalShip` entity. Bevy asserts the state's world id on
+/// use, so a cached state cannot silently be applied to the wrong world.
+pub fn broadcast_blackboard_updates(
+    world: &mut World,
+    mut bb_query: Local<Option<QueryState<&'static ShipSystemBlackboards, With<LocalShip>>>>,
+) {
     use crate::console::repair::visibility;
 
     world.init_resource::<visibility::LastVisibleRepairBlackboard>();
 
     let mut updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = {
-        let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let q = bb_query.get_or_insert_with(|| {
+            world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>()
+        });
         let Some(bb) = q.iter(world).next() else {
             return;
         };
@@ -1659,11 +1669,14 @@ pub fn broadcast_blackboard_updates(world: &mut World) {
         }
     }
 
-    for (id, bb) in &updates {
-        world
-            .resource_mut::<LastBroadcastBlackboards>()
-            .0
-            .insert(id.clone(), bb.clone());
+    // One `resource_mut` for the whole batch, not one per entry: each call is a
+    // resource lookup plus a change-tick bump, and this loop runs every tick
+    // that anything changed.
+    {
+        let mut last = world.resource_mut::<LastBroadcastBlackboards>();
+        for (id, bb) in &updates {
+            last.0.insert(id.clone(), bb.clone());
+        }
     }
 
     let vis = visibility::hull_visibility(world);

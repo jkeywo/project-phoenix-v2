@@ -172,7 +172,17 @@ impl<M: BroadcastKind> Plugin for Broadcaster<M> {
 /// Gating is per-phase: `M::phase_allows` may short-circuit inline, and/or the
 /// schedule position chosen by `M::add_dispatch` may carry an external
 /// `run_if` (e.g. the SimSet chain's `in_state(GamePhase::InProgress)`).
-pub fn dispatch<M: BroadcastKind>(world: &mut World) {
+pub fn dispatch<M: BroadcastKind>(
+    world: &mut World,
+    mut config_query: Local<
+        Option<
+            QueryState<
+                &'static crate::ship_plugin::ShipConfigComponent,
+                With<crate::simulation::LocalShip>,
+            >,
+        >,
+    >,
+) {
     if !M::phase_allows(world) {
         return;
     }
@@ -188,12 +198,22 @@ pub fn dispatch<M: BroadcastKind>(world: &mut World) {
         }
     }
 
-    // Collect ship config before borrowing registry/sessions to avoid borrow conflicts.
-    let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = world
-        .query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>()
-        .single(world)
-        .ok()
-        .cloned();
+    // Deliberately *not* gated on "is any registration ready": every phase in
+    // this codebase registers at least one `Cadence::OnEvent` producer (see
+    // `server_app::sim_*_broadcaster`), whose timer is `None` and which is
+    // therefore always ready. A pre-check would scan the registry every tick and
+    // never once short-circuit — measured as a net loss.
+    //
+    // Collect ship config before borrowing registry/sessions to avoid borrow
+    // conflicts. The `QueryState` is cached in a `Local` rather than rebuilt per
+    // tick by `World::query_filtered` — building one walks every archetype in
+    // the world, which this system was paying for on every single tick.
+    let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = {
+        let q = config_query.get_or_insert_with(|| {
+            world.query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>()
+        });
+        q.single(world).ok().cloned()
+    };
 
     // Collect (target, producer) for entries that should fire this tick.
     // We clone Arcs so we can release the borrow on `registry` before calling

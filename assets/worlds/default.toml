@@ -56,8 +56,8 @@ patrol_alpha   = [600.0, 0.0, -600.0]
 patrol_beta    = [500.0, 0.0, -300.0]
 patrol_gamma   = [200.0, 0.0, -600.0]
 # Where a mauled raider runs to. Referenced by the `retreat-when-hurt` doctrine
-# in assets/entities/pirate_raider.toml; set away from the patrol route and the
-# starbase so a retreat visibly breaks off rather than circling the fight.
+# this world authors on `raider_alpha` below; set away from the patrol route and
+# the starbase so a retreat visibly breaks off rather than circling the fight.
 pirate_haven   = [-800.0, 0.0, -1200.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
@@ -121,11 +121,36 @@ transform = { anchor = "starbase_alpha" }
 # The patrol raider is positioned at the `patrol_alpha` anchor;
 # `spawn_world_entities` wires the AI components (BehaviourSection,
 # FactionComponent) via the shared `spawn_entity` helper.
-
+#
+# (#892) The hull was `pirate_raider.toml`, retired as a duplicate of
+# `ship_harrow_destroyer.toml`'s display name. The replacement here is the
+# Ironveil-class patrol cruiser rather than the Harrow Destroyer, because this
+# spawn is an AMBIENT patrol and the Destroyer authors no Patrol doctrine at
+# all — repointing at it would leave a 900-hull interceptor parked on an anchor
+# with nothing to do until the player wandered inside its 400-unit sensor range,
+# and would silently delete this world's three-waypoint route.
+#
+# Two overrides carry across what the retired hull did here and the Ironveil
+# does not, both merged by doctrine id:
+#
+#   patrol-ironveil    — retargeted from the Ironveil's own `ironveil_patrol_*`
+#                        waypoints (a combat_test circuit this world does not
+#                        declare) onto this world's own three.
+#   retreat-when-hurt  — appended. `pirate_haven` and the Retreat directive it
+#                        feeds were this world's, not the hull's, and after #892
+#                        this is the only place in shipped content where a
+#                        Retreat directive resolves at all. Losing it would
+#                        leave issue #702's whole mechanism unexercised.
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "world.entity.raider_alpha.name"
 transform     = { anchor = "patrol_alpha" }
+overrides = { tags = ["ship", "npc", "enemy"], behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"] },
+  { id = "retreat-when-hurt", directive_kind = "Retreat", directive_anchor = "pirate_haven",
+    base_priority = 100.0, target_speed = 1.0,
+    zero_gates = [{ condition = "hull_below", threshold = 0.3 }] },
+] } }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 

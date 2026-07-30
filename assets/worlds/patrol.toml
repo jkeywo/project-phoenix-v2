@@ -16,8 +16,8 @@ patrol_alpha = [600.0, 0.0, -600.0]
 patrol_beta  = [-600.0, 0.0, -400.0]
 patrol_gamma = [0.0, 0.0, -1000.0]
 # Where a mauled raider runs to. Referenced by the `retreat-when-hurt` doctrine
-# in assets/entities/pirate_raider.toml; set well outside the patrol triangle so
-# a retreat visibly breaks off the engagement rather than circling it.
+# this world authors on `raider_alpha` below; set well outside the patrol
+# triangle so a retreat visibly breaks off the engagement rather than circling it.
 pirate_haven = [-1200.0, 0.0, -1400.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
@@ -45,10 +45,29 @@ spawn_on = "game_start"
 # components (BehaviourSection, FactionComponent) via the shared
 # `spawn_entity` helper.
 
+#
+# (#892) The hull was `pirate_raider.toml`, retired as a duplicate of
+# `ship_harrow_destroyer.toml`'s display name. This world is a single-ship
+# combat-practice encounter against a patrolling hull, so the replacement is the
+# Ironveil-class patrol cruiser, not the Harrow Destroyer: the Destroyer authors
+# no Patrol doctrine, so it would sit inert on `patrol_alpha` and this world's
+# stated premise — "a single raider patrols three waypoints" — would be gone
+# along with the two waypoints nothing else names.
+#
+# The two overrides restate what this world (not the hull) supplied: the
+# Ironveil's `ironveil_patrol_*` circuit is retargeted onto the triangle
+# declared above, and the `retreat-when-hurt` Retreat to `pirate_haven` is
+# appended. See the fuller note in `default.toml`.
 [[entity]]
-template_path = "assets/entities/pirate_raider.toml"
+template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "world.entity.raider_alpha.name"
 transform     = { anchor = "patrol_alpha" }
+overrides = { tags = ["ship", "npc", "enemy"], behaviour = { doctrine = [
+  { id = "patrol-ironveil", directive_anchors = ["patrol_alpha", "patrol_beta", "patrol_gamma"] },
+  { id = "retreat-when-hurt", directive_kind = "Retreat", directive_anchor = "pirate_haven",
+    base_priority = 100.0, target_speed = 1.0,
+    zero_gates = [{ condition = "hull_below", threshold = 0.3 }] },
+] } }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 

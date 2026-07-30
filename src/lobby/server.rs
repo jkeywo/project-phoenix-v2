@@ -245,6 +245,17 @@ fn update_session_with_config(
             // the helm progress bar advances at the same rate the server
             // is ticking.
             next.impulse_charge_duration = hc.impulse_charge_duration;
+            // Red-alert hostile weapon-arc overlay colour (issue #874). Same
+            // "exactly four entries or keep the default" shape as
+            // `torpedo_arc_color` below.
+            if hc.hostile_arc_color.len() == 4 {
+                next.hostile_arc_color = [
+                    hc.hostile_arc_color[0],
+                    hc.hostile_arc_color[1],
+                    hc.hostile_arc_color[2],
+                    hc.hostile_arc_color[3],
+                ];
+            }
         }
         // [repair] block — pushes repair-team timings to the client so the
         // Repair panel can derive its progress-bar durations without knowing

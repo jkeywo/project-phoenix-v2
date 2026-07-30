@@ -420,6 +420,15 @@ pub(crate) struct HelmAiShipFrame {
     pub(crate) nav_waypoint: Option<[f32; 2]>,
     /// `ShipPhysics.forward_speed` at frame-build time.
     pub(crate) forward_speed: f32,
+    /// This ship's exposure to hostile weapon arcs (issue #874), reduced ONCE
+    /// per shared AI tick by [`crate::ai::hostile_arc_exposure`] over the
+    /// merged view. Seeded as three facts by [`seed_hostile_arc_facts`].
+    ///
+    /// Folded here rather than in each actuator host for the reason the frame
+    /// exists at all: the seven hosts listed in the SCOPE note below reducing it
+    /// independently is seven chances for the axes to disagree about the same
+    /// tick's geometry.
+    pub(crate) hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure,
 }
 
 /// The per-tick helm decision surface, keyed by ship entity. Rebuilt in
@@ -546,6 +555,9 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             surfaces.waypoint,
         );
         let destroy_target = helm_destroy_target(&scored, &merged_view, &shared_targets, registry);
+        // Issue #874: reduce the hostiles' published arc sectors against this
+        // ship's own position, once, here.
+        let hostile_arc_exposure = crate::ai::hostile_arc_exposure(&merged_view, registry);
 
         // Combat Lock from the frozen viewscreen (issue #829).
         let combat_lock = match blackboards
@@ -567,6 +579,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 weapons_target: helm_weapons_target(combat_lock.as_deref()),
                 nav_waypoint: cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
                 forward_speed: physics.forward_speed,
+                hostile_arc_exposure,
             },
         );
     }
@@ -1334,6 +1347,67 @@ pub(crate) const SPEED_FRACTION_FACT: &str = "speed_fraction";
 /// thrust magnitude is. The policy still owns the decision: it compares this
 /// against its authored `closest_approach_hysteresis`.
 pub(crate) const RANGE_ABOVE_MIN_SEEN_FACT: &str = "range_above_min_seen";
+
+// ── Hostile weapon-arc facts (issue #874) ────────────────────────────────────
+//
+// SCOPE, precisely: `seed_hostile_arc_facts` is the one seeder, and it is
+// reached from ALL SEVEN policy hosts — `ai_policy_state_tick` (via
+// `seed_helm_travel_facts`), the two travel-axis hosts `ai_helm_thrust` and
+// `ai_helm_steering` and the boost host `ai_helm_boost` (likewise), and the
+// three remaining actuator hosts `ai_helm_impulse`, `ai_helm_lateral_thrust`
+// and `ai_helm_vertical_thrust`, which call it directly alongside
+// `seed_helm_actuator_facts`. So unlike the recovery/pressed facts below, these
+// are available to BOTH rule guards and transition guards, on every axis.
+//
+// Lateral is the one that had to be closed by hand: it is the literal dodge
+// axis, so a #877 doctrine reaching for `hostile_arc_exposure` reaches for it
+// there first, and a fact that validated at load and then read absent for ever
+// is exactly the #779 trap.
+//
+// Seeding on every host is safe precisely because these fold no history: each
+// is a stateless reduction of this tick's geometry, taken from the ONE
+// `HelmAiShipFrame` that `build_helm_ai_surfaces_frame` folded before any host
+// ran. A host reading it seven times reads the same number seven times rather
+// than advancing a window seven times — unlike `safe_distance_held` below,
+// which is why that one stays transition-only.
+//
+// The reduction itself is `crate::ai::hostile_arc_exposure` over the merged
+// view, whose input is the sector list `ai::server::entity_weapon_arc_sectors`
+// published on each hostile's snapshot entry. The helm-radar overlay renders
+// that same sector list, so the two cannot diverge (AC4).
+
+/// How many hostile weapon arcs currently bear on this ship — in arc AND within
+/// that bank's reach — summed across every hostile in the merged view.
+///
+/// `0.0` when clear. Always seeded, so a `fact(hostile_arc_exposure) > 0` guard
+/// distinguishes "nothing bears on me" from "no reading" without either being
+/// absent.
+///
+/// NOT scan-gated: arcs are authored hull configuration, so this reads for any
+/// hostile the helm can see at all, with no Sensors sweep in the way.
+pub(crate) const HOSTILE_ARC_EXPOSURE_FACT: &str = "hostile_arc_exposure";
+/// Signed bearing change in DEGREES, about the nearest hostile that is bearing
+/// on this ship, that would clear every one of that hostile's covering arcs by
+/// the shorter way round. Positive means "further round toward the hostile's
+/// starboard side".
+///
+/// `0.0` when nothing bears. A dodging policy needs a direction as well as a
+/// gate — with the count alone it can only thrash — and the magnitude is what
+/// lets a doctrine author "break contact" as a bounded manoeuvre rather than an
+/// unconditional one.
+///
+/// Also `0.0` when [`HOSTILE_ARC_INESCAPABLE_FACT`] reads `1.0`: an all-round
+/// bank has no exit bearing, so there is no honest magnitude to report. Gate on
+/// the flag before acting on this.
+pub(crate) const HOSTILE_ARC_ESCAPE_DEG_FACT: &str = "hostile_arc_escape_deg";
+/// `1.0` when at least one arc bearing on this ship spans a full turn, so no
+/// amount of turning leaves it; `0.0` otherwise.
+///
+/// This is what keeps "nothing bears on me" and "I cannot turn out of this"
+/// apart — both of which read `hostile_arc_escape_deg == 0`. A doctrine that
+/// wants to break contact from an all-round hull has to open the range rather
+/// than come about, and this is the fact that tells it so.
+pub(crate) const HOSTILE_ARC_INESCAPABLE_FACT: &str = "hostile_arc_inescapable";
 
 // ── Shield-recovery facts (issue #788) ───────────────────────────────────────
 //
@@ -2836,6 +2910,47 @@ fn seed_helm_actuator_facts(
 /// [`tick_policy_machine`] scopes its running range minimum to, and returning it
 /// from here is what guarantees the two can never disagree about *which* target
 /// this tick's `range_to_target` belongs to.
+/// Seed the three hostile weapon-arc facts (issue #874) from this tick's helm
+/// frame.
+///
+/// Split out of [`seed_helm_travel_facts`] so the three actuator hosts that do
+/// NOT seed travel geometry — impulse, lateral and vertical — can seed these
+/// anyway. Lateral is the reason: it is the dodge axis, so it is the first place
+/// a #877 movement doctrine will author `fact(hostile_arc_exposure)`, and before
+/// this split the guard would have validated at load and then read absent for
+/// ever (the #779 shape).
+///
+/// Being in someone's guns is not conditional on having picked them as a target,
+/// so this is deliberately independent of target resolution: a dodging policy
+/// that only reacted to its own target would fly happily through a third ship's
+/// broadside.
+///
+/// All three names are ALWAYS seeded once a frame exists, so a guard reads
+/// "clear" rather than "absent" — an absent fact makes every comparison false
+/// and hides the difference between clear and never-wired-up.
+///
+/// Folds no history: every value is a stateless read of the one `ArcExposure`
+/// `build_helm_ai_surfaces_frame` reduced before any host ran this tick, so
+/// calling this from seven hosts reads the same numbers seven times.
+fn seed_hostile_arc_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    frame_ship: Option<&HelmAiShipFrame>,
+) {
+    let Some(sf) = frame_ship else {
+        return;
+    };
+    let exposure = &sf.hostile_arc_exposure;
+    facts.set(HOSTILE_ARC_EXPOSURE_FACT, exposure.covering_count as f64);
+    facts.set(
+        HOSTILE_ARC_ESCAPE_DEG_FACT,
+        exposure.escape_offset_deg as f64,
+    );
+    facts.set(
+        HOSTILE_ARC_INESCAPABLE_FACT,
+        if exposure.inescapable { 1.0 } else { 0.0 },
+    );
+}
+
 fn seed_helm_travel_facts(
     facts: &mut crate::world::flags::AiFacts,
     frame_ship: Option<&HelmAiShipFrame>,
@@ -2853,6 +2968,11 @@ fn seed_helm_travel_facts(
     }
 
     let sf = frame_ship?;
+
+    // Seeded BEFORE the target resolution below and independently of it — see
+    // `seed_hostile_arc_facts`.
+    seed_hostile_arc_facts(facts, Some(sf));
+
     let uuid = sf.destroy_target.or(sf.weapons_target)?;
     let target = sf.merged_view.entities.iter().find(|e| e.uuid == uuid)?;
 
@@ -3696,12 +3816,17 @@ pub(crate) fn ai_helm_impulse(
         // while an authored guard may hold impulse. A "hold" resolution emits
         // nothing.
         let boost_available = boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        let facts = seed_helm_actuator_facts(
+        let mut facts = seed_helm_actuator_facts(
             plan.ships.get(&entity).map(|sp| &sp.hazard),
             true,
             boost_available,
             physics.y,
         );
+        // Issue #874: the arc facts reach this axis too — see
+        // `seed_hostile_arc_facts`. Seeded from the same frame entry the
+        // decision below reads, so the guard and the manoeuvre cannot disagree
+        // about the tick.
+        seed_hostile_arc_facts(&mut facts, frame.ships.get(&entity));
         // No attached `[helm_console.impulse_ai]` ⇒ no AI action on this axis.
         // Since #885b stage 5d there is no synthesised stand-in: strict
         // AI-declaration mode rejects an AI-capable hull that omits the block at
@@ -3891,7 +4016,13 @@ pub(crate) fn ai_helm_lateral_thrust(
         // default (unconditional actuate) reproduces the pre-#780 always-on
         // avoidance; a "hold" resolution emits nothing and lateral coasts.
         if docking_lateral.is_none() {
-            let facts = seed_helm_actuator_facts(ship_plan.map(|sp| &sp.hazard), false, false, 0.0);
+            let mut facts =
+                seed_helm_actuator_facts(ship_plan.map(|sp| &sp.hazard), false, false, 0.0);
+            // Issue #874: lateral is the literal dodge axis, so this is the axis
+            // a movement doctrine reaches for `fact(hostile_arc_exposure)` on
+            // first. `sf` above is this tick's frame entry — see
+            // `seed_hostile_arc_facts`.
+            seed_hostile_arc_facts(&mut facts, Some(sf));
             // No attached `[helm_console.lateral_ai]` ⇒ no AI action on this axis.
             // Since #885b stage 5d there is no synthesised stand-in: strict
             // AI-declaration mode rejects an AI-capable hull that omits the block at
@@ -3971,6 +4102,7 @@ pub(crate) fn ai_helm_lateral_thrust(
 /// #744) weighted by the hull's authored `vertical_hazard_sensitivity` — so a
 /// static obstacle, however close, never drives a vertical dodge.
 pub(crate) fn ai_helm_vertical_thrust(
+    frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
@@ -4018,12 +4150,16 @@ pub(crate) fn ai_helm_vertical_thrust(
         // authored `VerticalMovementMode` still gates the magnitude below, so a
         // Planar hull takes no Y component regardless of the verb. A "hold"
         // resolution emits nothing.
-        let facts = seed_helm_actuator_facts(
+        let mut facts = seed_helm_actuator_facts(
             plan.ships.get(&entity).map(|sp| &sp.hazard),
             false,
             false,
             physics.y,
         );
+        // Issue #874: the vertical axis is a dodge axis too — climbing out of a
+        // plane of fire is as valid a response as turning out of it, and a
+        // doctrine cannot author that against a fact this host never seeds.
+        seed_hostile_arc_facts(&mut facts, frame.ships.get(&entity));
         // No attached `[helm_console.vertical_ai]` ⇒ no AI action on this axis.
         // Since #885b stage 5d there is no synthesised stand-in: strict
         // AI-declaration mode rejects an AI-capable hull that omits the block at
@@ -7435,6 +7571,7 @@ mod tests {
                 dangerous: true,
                 size_rating: radius,
                 direct_fire_range: 0.0,
+                weapon_arcs: Vec::new(),
             }],
         });
     }
@@ -7586,6 +7723,7 @@ mod tests {
                 dangerous: true,
                 size_rating: radius,
                 direct_fire_range: 0.0,
+                weapon_arcs: Vec::new(),
             }],
         });
     }
@@ -8079,6 +8217,410 @@ mod tests {
 
     fn app_empty_snapshot(app: &mut App) {
         app.insert_resource(crate::ai::server::WorldSnapshot { entities: vec![] });
+    }
+
+    /// Re-seed a `lateral_dodge_app`'s snapshot with its obstacle PLUS one armed
+    /// hostile whose published arcs either bear on us or do not, and wire the
+    /// factions so the reduction treats it as an enemy.
+    ///
+    /// The hostile is deliberately not a hazard — zero radius, not `movable`,
+    /// not `dangerous` — so it contributes nothing to the hazard surface the
+    /// dodge magnitude is computed from. The ONLY thing `bearing` changes is the
+    /// arc fact, which is what makes the assertions below attributable.
+    fn snapshot_with_obstacle_and_hostile(app: &mut App, bearing: bool) {
+        let hostile_faction = uuid::Uuid::new_v4();
+        let own_faction = uuid::Uuid::new_v4();
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.insert(crate::faction::FactionConfig {
+            uuid: own_faction,
+            name: "Own".into(),
+            enemies: vec![hostile_faction],
+        });
+        app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            registry,
+        ));
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entities::spawner::FactionComponent(own_faction));
+
+        // The hostile sits 80 units astern of us, so the world bearing from it
+        // to us is 0. A bank centred on 0 covers us; the same bank turned to
+        // 180 points away and covers nothing.
+        let arcs = vec![crate::weapons::arc_geometry::WeaponArcSector {
+            bearing_deg: if bearing { 0.0 } else { 180.0 },
+            half_angle_deg: 30.0,
+            range: 200.0,
+        }];
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::new_v4(),
+                    name: Some("rock".into()),
+                    position: [4.0, 0.0, -40.0],
+                    faction: None,
+                    shields: None,
+                    hull_fraction: None,
+                    yaw: None,
+                    radius: 1.0,
+                    forward_speed: 0.0,
+                    movable: false,
+                    dangerous: true,
+                    size_rating: 1.0,
+                    direct_fire_range: 0.0,
+                    weapon_arcs: Vec::new(),
+                },
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::new_v4(),
+                    name: Some("raider".into()),
+                    position: [0.0, 0.0, 80.0],
+                    faction: Some(hostile_faction),
+                    shields: None,
+                    hull_fraction: None,
+                    yaw: Some(0.0),
+                    radius: 0.0,
+                    forward_speed: 0.0,
+                    movable: false,
+                    dangerous: false,
+                    size_rating: 0.0,
+                    direct_fire_range: 200.0,
+                    weapon_arcs: arcs,
+                },
+            ],
+        });
+    }
+
+    /// A lateral policy whose ONLY guard is the #874 exposure fact.
+    fn arc_gated_lateral_policy() -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_LATERAL_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate("fact(hostile_arc_exposure) > 0")
+                    .unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// The seeding gap the SCOPE note used to paper over: `ai_helm_lateral_thrust`
+    /// seeds `seed_helm_actuator_facts`, NOT `seed_helm_travel_facts`, so before
+    /// `seed_hostile_arc_facts` was split out and called here a
+    /// `[helm_console.lateral_ai]` guard on `hostile_arc_exposure` validated at
+    /// load and then read absent for ever (the #779 shape).
+    ///
+    /// Lateral is the literal dodge axis, so it is the first axis a #877 dodging
+    /// doctrine will author this fact on. Asserted through the axis's own
+    /// observable output — a policy that actuates ONLY when arcs bear.
+    #[test]
+    fn hostile_arc_exposure_is_readable_from_a_lateral_axis_policy_guard() {
+        let mut bearing = lateral_dodge_app();
+        snapshot_with_obstacle_and_hostile(&mut bearing, true);
+        set_lateral_ai_policy(&mut bearing, arc_gated_lateral_policy());
+        tick_twice(&mut bearing);
+        assert!(
+            lateral_intent(&mut bearing).abs() > 0.0,
+            "a lateral policy guarded on fact(hostile_arc_exposure) must actuate \
+             while a hostile's arcs bear; zero means the fact never reached this \
+             host's snapshot and the guard read absent"
+        );
+
+        let mut clear = lateral_dodge_app();
+        snapshot_with_obstacle_and_hostile(&mut clear, false);
+        set_lateral_ai_policy(&mut clear, arc_gated_lateral_policy());
+        tick_twice(&mut clear);
+        assert_eq!(
+            lateral_intent(&mut clear),
+            0.0,
+            "the same policy must hold when the same hostile's arcs point away — \
+             otherwise the first assertion proves only that the axis always \
+             actuates, not that it read the fact"
+        );
+    }
+
+    fn set_impulse_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
+        let ship = find_ship_entity(app);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(HelmImpulseAiPolicy(policy));
+    }
+
+    /// A vertical policy whose ONLY guard is the #874 exposure fact.
+    fn arc_gated_vertical_policy() -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_VERTICAL_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate("fact(hostile_arc_exposure) > 0")
+                    .unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// An impulse policy whose ONLY guard is the #874 exposure fact.
+    fn arc_gated_impulse_policy() -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: crate::entities::config::HELM_IMPULSE_CHANNEL.into(),
+                when: crate::world::flags::parse_predicate("fact(hostile_arc_exposure) > 0")
+                    .unwrap(),
+                verb: crate::ai::policy::AiPolicyVerb::EngageImpulse,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// The lateral sibling above, applied to the vertical axis. `ai_helm_vertical
+    /// _thrust` calls `seed_hostile_arc_facts` directly (it seeds
+    /// `seed_helm_actuator_facts`, not `seed_helm_travel_facts`), so the same
+    /// #779 shape was available here — the SCOPE note claims seven hosts and
+    /// inspection is not what keeps that claim true.
+    ///
+    /// Observed through the axis's own output rather than the fact table.
+    /// Vertical magnitude is driven by the moving-hazard threat, and the rock in
+    /// this snapshot is static, so the readable difference is the Bounded
+    /// return-to-cruise: put the ship off the cruise plane, and a tick on which
+    /// the policy actuates eases it back (negative) while a tick on which the
+    /// guard holds emits nothing at all (zero).
+    #[test]
+    fn hostile_arc_exposure_is_readable_from_a_vertical_axis_policy_guard() {
+        let off_cruise = |app: &mut App| {
+            let ship = find_ship_entity(app);
+            app.world_mut()
+                .entity_mut(ship)
+                .get_mut::<ShipPhysics>()
+                .expect("ship must carry ShipPhysics")
+                .y = 5.0;
+        };
+        let vertical_app = || {
+            vertical_thrust_ai_app(
+                capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+                Some(crate::entity_config::BehaviourConfig {
+                    avoidance_buffer: 60.0,
+                    ..Default::default()
+                }),
+            )
+        };
+
+        let mut bearing = vertical_app();
+        snapshot_with_obstacle_and_hostile(&mut bearing, true);
+        off_cruise(&mut bearing);
+        set_vertical_ai_policy(&mut bearing, arc_gated_vertical_policy());
+        tick_twice(&mut bearing);
+        assert!(
+            vertical_intent(&mut bearing) < 0.0,
+            "a vertical policy guarded on fact(hostile_arc_exposure) must actuate \
+             while a hostile's arcs bear; zero means the fact never reached this \
+             host's snapshot and the guard read absent"
+        );
+
+        let mut clear = vertical_app();
+        snapshot_with_obstacle_and_hostile(&mut clear, false);
+        off_cruise(&mut clear);
+        set_vertical_ai_policy(&mut clear, arc_gated_vertical_policy());
+        tick_twice(&mut clear);
+        assert_eq!(
+            vertical_intent(&mut clear),
+            0.0,
+            "the same policy must hold when the same hostile's arcs point away — \
+             otherwise the first assertion proves only that the axis always \
+             actuates, not that it read the fact"
+        );
+    }
+
+    /// The same guard on the impulse axis, the third host that seeds these facts
+    /// directly. Geometry is
+    /// `ai_helm_impulse_engages_toward_a_distant_target_ahead`'s — an anchor
+    /// dead ahead at 500 units, so the manoeuvre decision is `Engage` and the
+    /// ONLY thing standing between that and a `Charging` command is whether the
+    /// arc guard resolved.
+    #[test]
+    fn hostile_arc_exposure_is_readable_from_an_impulse_axis_policy_guard() {
+        let anchor = "station-alpha";
+
+        let mut bearing = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        bearing.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+        snapshot_with_obstacle_and_hostile(&mut bearing, true);
+        set_impulse_ai_policy(&mut bearing, arc_gated_impulse_policy());
+        tick(&mut bearing);
+        assert_eq!(
+            get_impulse_command(&mut bearing),
+            crate::impulse::ImpulsePhase::Charging,
+            "an impulse policy guarded on fact(hostile_arc_exposure) must permit \
+             the engage while a hostile's arcs bear; Idle means the fact never \
+             reached this host's snapshot and the guard read absent"
+        );
+
+        let mut clear = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        clear.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+        snapshot_with_obstacle_and_hostile(&mut clear, false);
+        set_impulse_ai_policy(&mut clear, arc_gated_impulse_policy());
+        tick(&mut clear);
+        assert_eq!(
+            get_impulse_command(&mut clear),
+            crate::impulse::ImpulsePhase::Idle,
+            "the same policy must hold the drive when the same hostile's arcs \
+             point away — otherwise the first assertion proves only that the \
+             geometry engages, not that the guard read the fact"
+        );
+    }
+
+    // ── Hostile weapon-arc facts (issue #874) ───────────────────────────────
+    //
+    // The reduction itself, and its hostility gate, are covered end-to-end in
+    // `ai::server`'s snapshot tests. What these prove is the SEEDING seam: that
+    // the three names a doctrine may author actually reach the fact snapshot the
+    // per-axis hosts resolve guards against — the #779 hole where a guard
+    // validated at load and then never fired.
+
+    fn arc_facts_from(frame: &HelmAiShipFrame) -> crate::world::flags::AiFacts {
+        let mut facts = crate::world::flags::AiFacts::new();
+        seed_helm_travel_facts(&mut facts, Some(frame), &ShipPhysics::default(), 30.0);
+        facts
+    }
+
+    fn guard_holds(facts: &crate::world::flags::AiFacts, predicate: &str) -> bool {
+        crate::world::flags::parse_predicate(predicate)
+            .expect("guard must parse")
+            .evaluate_with(facts, &crate::world::flags::AiParams::new(), &[])
+    }
+
+    /// The exposure fact FIRES: a frame carrying covering arcs seeds a count a
+    /// `fact(hostile_arc_exposure) > 0` guard reads true.
+    #[test]
+    fn hostile_arc_exposure_fact_fires_when_arcs_bear() {
+        let frame = HelmAiShipFrame {
+            hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure {
+                covering_count: 2,
+                escape_offset_deg: -35.0,
+                inescapable: false,
+            },
+            ..Default::default()
+        };
+        let facts = arc_facts_from(&frame);
+        assert_eq!(facts.get(HOSTILE_ARC_EXPOSURE_FACT), Some(2.0));
+        assert!(guard_holds(&facts, "fact(hostile_arc_exposure) > 0"));
+        assert!(guard_holds(&facts, "fact(hostile_arc_escape_deg) < 0"));
+    }
+
+    /// The never-firing twin: nothing bearing seeds `0.0` — PRESENT and false,
+    /// not absent — so the same guard reads false rather than reading nothing.
+    #[test]
+    fn hostile_arc_exposure_fact_reads_false_when_nothing_bears() {
+        let frame = HelmAiShipFrame::default();
+        let facts = arc_facts_from(&frame);
+        assert_eq!(
+            facts.get(HOSTILE_ARC_EXPOSURE_FACT),
+            Some(0.0),
+            "seeded at zero, not left absent — an absent fact makes every \
+             comparison read false, which hides the difference between 'clear' \
+             and 'never wired up'"
+        );
+        assert_eq!(facts.get(HOSTILE_ARC_ESCAPE_DEG_FACT), Some(0.0));
+        assert!(!guard_holds(&facts, "fact(hostile_arc_exposure) > 0"));
+    }
+
+    /// The arc facts are seeded independently of target resolution: a ship with
+    /// no target at all is still told it is being borne on. A dodging policy
+    /// that only reacted to its own target would fly through a third ship's
+    /// broadside.
+    #[test]
+    fn hostile_arc_facts_are_seeded_without_a_target() {
+        let frame = HelmAiShipFrame {
+            hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure {
+                covering_count: 1,
+                escape_offset_deg: 20.0,
+                inescapable: false,
+            },
+            ..Default::default()
+        };
+        let facts = arc_facts_from(&frame);
+        assert_eq!(
+            facts.get(TARGET_VALID_FACT),
+            Some(0.0),
+            "fixture must have no target, or this proves nothing"
+        );
+        assert_eq!(facts.get(HOSTILE_ARC_EXPOSURE_FACT), Some(1.0));
+        assert_eq!(facts.get(HOSTILE_ARC_ESCAPE_DEG_FACT), Some(20.0));
+    }
+
+    /// The escape offset keeps its SIGN through the seam — it is a direction,
+    /// and a policy that lost the sign could only thrash.
+    #[test]
+    fn hostile_arc_escape_fact_keeps_its_direction() {
+        for offset in [-90.0_f32, -5.0, 5.0, 90.0] {
+            let frame = HelmAiShipFrame {
+                hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure {
+                    covering_count: 1,
+                    escape_offset_deg: offset,
+                    inescapable: false,
+                },
+                ..Default::default()
+            };
+            let facts = arc_facts_from(&frame);
+            assert_eq!(
+                facts.get(HOSTILE_ARC_ESCAPE_DEG_FACT),
+                Some(offset as f64),
+                "offset {offset}"
+            );
+        }
+    }
+
+    /// The THIRD reading reaches the snapshot as its own fact: "I cannot turn
+    /// out of this" and "nothing bears on me" both read
+    /// `hostile_arc_escape_deg == 0`, so without this flag a #877 dodging
+    /// doctrine could not tell them apart — and would come about for ever
+    /// against a hull whose banks cover every bearing.
+    #[test]
+    fn hostile_arc_inescapable_fact_separates_trapped_from_clear() {
+        let trapped = arc_facts_from(&HelmAiShipFrame {
+            hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure {
+                covering_count: 2,
+                escape_offset_deg: 0.0,
+                inescapable: true,
+            },
+            ..Default::default()
+        });
+        let clear = arc_facts_from(&HelmAiShipFrame::default());
+        assert_eq!(
+            trapped.get(HOSTILE_ARC_ESCAPE_DEG_FACT),
+            clear.get(HOSTILE_ARC_ESCAPE_DEG_FACT),
+            "precondition: the escape magnitude alone cannot separate the two"
+        );
+        assert_eq!(trapped.get(HOSTILE_ARC_INESCAPABLE_FACT), Some(1.0));
+        assert_eq!(clear.get(HOSTILE_ARC_INESCAPABLE_FACT), Some(0.0));
+        assert!(guard_holds(&trapped, "fact(hostile_arc_inescapable) > 0"));
+        assert!(!guard_holds(&clear, "fact(hostile_arc_inescapable) > 0"));
+        // And the guard that separates trapped from clear is the pair, which is
+        // the reading a "break contact" doctrine actually branches on.
+        assert!(guard_holds(&trapped, "fact(hostile_arc_exposure) > 0"));
+        assert!(!guard_holds(&clear, "fact(hostile_arc_exposure) > 0"));
+    }
+
+    /// An ESCAPABLE covering arc is the third state again from the other side:
+    /// exposed, with a real magnitude, and the flag down.
+    #[test]
+    fn hostile_arc_inescapable_fact_stays_down_for_an_escapable_arc() {
+        let facts = arc_facts_from(&HelmAiShipFrame {
+            hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure {
+                covering_count: 1,
+                escape_offset_deg: -35.0,
+                inescapable: false,
+            },
+            ..Default::default()
+        });
+        assert_eq!(facts.get(HOSTILE_ARC_INESCAPABLE_FACT), Some(0.0));
+        assert_eq!(facts.get(HOSTILE_ARC_ESCAPE_DEG_FACT), Some(-35.0));
     }
 
     // ── Boost AI operator (issue #780) ───────────────────────────────────────

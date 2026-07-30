@@ -749,6 +749,7 @@ mod tests {
                             boost_enabled: true,
                             radar_range: 0.0,
                             lateral_speed: 0.0,
+                            hostile_weapon_arcs: Vec::new(),
                         }),
                     )],
                 },
@@ -2210,12 +2211,60 @@ mod tests {
             boost_enabled: true,
             radar_range: 0.0,
             lateral_speed: 0.0,
+            hostile_weapon_arcs: Vec::new(),
         });
         let json = serde_json::to_string(&bb).unwrap();
         assert!(json.contains("\"kind\":\"Helm\""), "got: {json}");
         assert!(json.contains("\"yaw\":1.5"), "got: {json}");
         assert!(json.contains("\"forward_speed\":42.0"), "got: {json}");
         assert!(json.contains("\"impulse_charge\":0.3"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    /// The hostile weapon-arc overlay payload (issue #874) round-trips.
+    ///
+    /// Populated deliberately: the empty case is what `#[serde(default)]` plus
+    /// `skip_serializing_if` already cover, and the field only earns its place
+    /// on the wire when it carries sectors.
+    #[test]
+    fn system_blackboard_helm_hostile_weapon_arcs_round_trip() {
+        use crate::messages::{HostileWeaponArc, HostileWeaponArcContact};
+        let bb = SystemBlackboard::Helm(HelmBlackboard {
+            hostile_weapon_arcs: vec![HostileWeaponArcContact {
+                uuid: "1f6b4c8e-0000-4000-8000-000000000001".into(),
+                x: 120.0,
+                z: -45.5,
+                arcs: vec![
+                    HostileWeaponArc {
+                        bearing_deg: -30.0,
+                        half_angle_deg: 45.0,
+                        range: 800.0,
+                    },
+                    HostileWeaponArc {
+                        bearing_deg: 150.0,
+                        half_angle_deg: 60.0,
+                        range: 500.0,
+                    },
+                ],
+            }],
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(json.contains("\"hostile_weapon_arcs\""), "got: {json}");
+        assert!(json.contains("\"bearing_deg\":-30.0"), "got: {json}");
+        assert!(json.contains("\"half_angle_deg\":45.0"), "got: {json}");
+        let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
+        assert_eq!(bb, decoded);
+    }
+
+    /// An empty arc list stays OFF the wire — the red-alert gate must cost
+    /// nothing when it is closed, which is the common case.
+    #[test]
+    fn system_blackboard_helm_omits_empty_hostile_weapon_arcs() {
+        let bb = SystemBlackboard::Helm(HelmBlackboard::default());
+        let json = serde_json::to_string(&bb).unwrap();
+        assert!(!json.contains("hostile_weapon_arcs"), "got: {json}");
         let decoded: SystemBlackboard = serde_json::from_str(&json).unwrap();
         assert_eq!(bb, decoded);
     }

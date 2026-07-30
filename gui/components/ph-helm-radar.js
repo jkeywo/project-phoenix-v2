@@ -21,6 +21,7 @@ export class PhHelmRadar extends HTMLElement {
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
       '.thrust-arc { fill: none; stroke: #6cb6d0; stroke-width: 4; stroke-linecap: round; }',
+      '.hostile-arc { stroke: none; }',
       '.corner-label {',
       '  position: absolute; pointer-events: none; z-index: 10;',
       '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
@@ -44,6 +45,13 @@ export class PhHelmRadar extends HTMLElement {
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
       '  <svg class="svg-overlay" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">',
+      // Hostile weapon arcs sit FIRST in this SVG so they paint under the
+      // thrust arcs — the controls the helm is actually flying by. Note they do
+      // NOT sit under the blips: `.svg-overlay` is a sibling AFTER `<ph-radar>`
+      // with `position: absolute`, so the whole overlay paints over the radar's
+      // contacts. The authored alpha (0.07) is what keeps the blips legible
+      // through it, not the stacking order (issue #874).
+      '    <g id="hostile-arcs"></g>',
       '    <path class="thrust-arc" id="arc-port" />',
       '    <path class="thrust-arc" id="arc-stbd" />',
       '  </svg>',
@@ -90,6 +98,7 @@ export class PhHelmRadar extends HTMLElement {
     }
 
     this.#updateThrustArcs(s);
+    this.#renderHostileArcs(s);
 
     const posLabel = this.shadowRoot.getElementById('label-pos');
     if (posLabel) {
@@ -136,6 +145,141 @@ export class PhHelmRadar extends HTMLElement {
       arcStbd.setAttribute('d', path);
       arcStbd.style.opacity = String(0.2 + 0.8 * stbd);
     }
+  }
+
+  /**
+   * Draw the hostile weapon-arc overlay (issue #874).
+   *
+   * Every sector drawn here is a sector the SERVER produced: `bearing_deg` and
+   * `half_angle_deg` arrive on the wire from
+   * `weapons::arc_geometry::weapon_arc_sectors`, the same producer output the
+   * backfilled helm AI's exposure fact is reduced from. This method does no arc
+   * math — it only projects: world bearing → screen angle (subtract the ship's
+   * heading), and world position/range → the radar's normalised scope space.
+   *
+   * The component deliberately does NOT recompute arcs from the hostile's yaw,
+   * which it could: that would make the human's picture agree with the AI's by
+   * coincidence rather than by construction.
+   *
+   * Red alert is not gated here — the server omits the field entirely when the
+   * ship is not at red alert, and `buildHelmConsoleState` latches the same
+   * condition. This method renders exactly what it is handed.
+   */
+  #renderHostileArcs(s) {
+    const g = this.shadowRoot.getElementById('hostile-arcs');
+    if (!g) return;
+    // The colour is authored in `[helm_console] hostile_arc_color` and arrives
+    // on the payload. This component deliberately carries NO placeholder of its
+    // own: `ClientSimState` already initialises `hostileArcColor` with the
+    // single client-side placeholder (AGENTS.md #11(b)), so a second literal
+    // here would be both unreachable and a third value free to drift from the
+    // other two. Handed no colour at all, paint no overlay — an invented colour
+    // would be a hint the server never authorised.
+    const rgba = s.hostile_arc_color;
+    const contacts = Array.isArray(rgba) ? (s.hostile_arcs || []) : [];
+    const fill = Array.isArray(rgba)
+      ? 'rgb(' + [0, 1, 2].map(i => Math.round((rgba[i] ?? 0) * 255)).join(',') + ')'
+      : 'none';
+    const opacity = Array.isArray(rgba) ? (rgba[3] ?? 0) : 0;
+
+    const range = s.range > 0 ? s.range : 1;
+    const shipX = s.x || 0;
+    const shipZ = s.z || 0;
+    const heading = s.heading || 0;
+    const yaw = heading * Math.PI / 180;
+    const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+
+    const paths = [];
+    for (const c of contacts) {
+      // Project the anchor into the same ship-local scope space `buildBlips`
+      // puts the blips in, so the wedges radiate from the contact's own blip.
+      const dx = (c.x || 0) - shipX;
+      const dz = (c.z || 0) - shipZ;
+      const nx = (dx * cosY + dz * sinY) / range;
+      const ny = (dx * sinY - dz * cosY) / range;
+      const px = 50 + nx * 50;
+      const py = 50 - ny * 50;
+      for (const a of (c.arcs || [])) {
+        // World bearing → ship-relative screen bearing. The only trigonometry
+        // this overlay is allowed: a rotation, never an arc derivation.
+        const facing = (a.bearing_deg || 0) - heading;
+        const half = a.half_angle_deg || 0;
+        const r = ((a.range || 0) / range) * 50;
+        if (half <= 0 || r <= 0) continue;
+        paths.push(this.#wedgePath(px, py, r, facing, half));
+      }
+    }
+
+    while (g.children.length > paths.length) g.removeChild(g.lastChild);
+    paths.forEach((d, i) => {
+      let path = g.children[i];
+      if (!path) {
+        path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'hostile-arc');
+        g.appendChild(path);
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('fill', fill);
+      path.setAttribute('fill-opacity', String(opacity));
+    });
+  }
+
+  /**
+   * A pie wedge centred on `(cx, cy)`, spanning `facingDeg ± halfDeg` where
+   * `facingDeg` is a ship-relative bearing (0 = up/forward, +90 = starboard).
+   * Same construction as the Tactical radar's own arc wedges, but anchored at an
+   * arbitrary point rather than at the scope centre.
+   */
+  #wedgePath(cx, cy, r, facingDeg, halfDeg) {
+    const startDeg = facingDeg - halfDeg - 90;
+    const endDeg = facingDeg + halfDeg - 90;
+    const sr = startDeg * Math.PI / 180;
+    const er = endDeg * Math.PI / 180;
+    const x1 = (cx + r * Math.cos(sr)).toFixed(1);
+    const y1 = (cy + r * Math.sin(sr)).toFixed(1);
+    const x2 = (cx + r * Math.cos(er)).toFixed(1);
+    const y2 = (cy + r * Math.sin(er)).toFixed(1);
+
+    // The SVG spec (implementation notes F.6.2) OMITS an elliptical arc whose
+    // endpoints are identical — such a wedge collapses to a zero-area line and,
+    // with `.hostile-arc { stroke: none }`, paints nothing at all while
+    // `arc_exposure` still reads the bank as covering. That is the human/AI
+    // divergence this branch exists to prevent, so the test is the one the
+    // renderer actually applies: the endpoints AS EMITTED, after `toFixed(1)`.
+    // Testing `halfDeg * 2 >= 360` instead would miss every sweep just under a
+    // full turn whose residual gap rounds away at small screen radii — a
+    // short-ranged bank on a wide scope lands there routinely. A
+    // `fire_arc_deg = 360.0` bank is authored content (the Harrow Lancer
+    // carries two), so the collapsing case is exactly the hull that shoots you.
+    // Emit the full disc as two half-circles, which have distinct endpoints and
+    // so survive the spec's degenerate-arc rule.
+    //
+    // `halfDeg >= 180` is checked as well as the emitted endpoints, because a
+    // bank wider than a full turn wraps PAST its own start: its endpoints stop
+    // coinciding, and the arc renders as a disc with a notch cut out of it —
+    // covering less than the whole circle while `arc_exposure` reads any
+    // `half_angle_deg >= 180` as inescapable from every bearing. Nothing
+    // authors more than 360 today, and `weapon_arc_sectors` does not clamp, so
+    // this is the cheap half of the guard rather than a reachable bug.
+    if (halfDeg >= 180 || (x1 === x2 && y1 === y2)) {
+      const x = cx.toFixed(1);
+      const rr = r.toFixed(1);
+      const top = (cy - r).toFixed(1);
+      const bottom = (cy + r).toFixed(1);
+      return [
+        'M', x, top,
+        'A', rr, rr, 0, 1, 1, x, bottom,
+        'A', rr, rr, 0, 1, 1, x, top,
+        'Z',
+      ].join(' ');
+    }
+    const large = halfDeg * 2 > 180 ? 1 : 0;
+    return [
+      'M', cx.toFixed(1), cy.toFixed(1),
+      'L', x1, y1,
+      'A', r.toFixed(1), r.toFixed(1), 0, large, 1, x2, y2,
+      'Z',
+    ].join(' ');
   }
 
   #arcPath(cx, cy, r, startAngle, endAngle) {

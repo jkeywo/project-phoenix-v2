@@ -56,6 +56,23 @@ impl Plugin for HelmPlugin {
 fn publish_helm_blackboard(
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     queue: Res<InterSystemQueue>,
+    // Issue #874: the hostile weapon-arc overlay. `build_world_snapshot` runs
+    // under `run_if(ai_snapshot_ready)` (the derived ~10 Hz snapshot cadence,
+    // `src/ai/server.rs`) while this system publishes every frame, so the
+    // sectors and anchor positions read here are the MOST RECENT SNAPSHOT
+    // TICK's, not this frame's: they can be up to ~100 ms stale, and the wedges
+    // therefore lag the live blips slightly. Parity is unaffected — these are
+    // the SAME sectors the helm AI's exposure fact is reduced from, off the same
+    // snapshot, never a second computation of them.
+    //
+    // One asymmetry worth recording before #877 leans on "identical
+    // information": the AI fact reduces over the merged `WorldView` (everything
+    // in AI view range), while the overlay below is ADDITIONALLY filtered to
+    // helm radar range. Same producer, so AC4 holds on the sectors themselves,
+    // but a courier policy can react to a hostile whose arcs the human is never
+    // shown. Deliberate for now; it is a #877 design question, not a defect.
+    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut ship_q: Query<
         (
             Option<&ShipPhysics>,
@@ -69,10 +86,18 @@ fn publish_helm_blackboard(
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::simulation::LocalShip>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::ship_state::ShipRedAlert>,
         ),
         With<crate::simulation::Ship>,
     >,
 ) {
+    let default_registry = crate::faction::FactionRegistry::default();
+    let registry = faction_registry
+        .as_deref()
+        .map(|r| &r.0)
+        .unwrap_or(&default_registry);
+
     for (
         physics,
         boost_config,
@@ -85,6 +110,8 @@ fn publish_helm_blackboard(
         sources,
         mut bbs,
         is_local,
+        faction,
+        red_alert,
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824
@@ -116,6 +143,54 @@ fn publish_helm_blackboard(
         };
         let radar_range = base_radar_range * radar_mult;
 
+        // ── Hostile weapon arcs (issue #874) ────────────────────────────────
+        //
+        // Two gates, both here on the server rather than on the client:
+        //
+        // - LOCAL SHIP ONLY, like `TacticalRadarBlackboard::blips`. An NPC
+        //   renders no radar, so it would be pure bandwidth.
+        // - RED ALERT ONLY. Gating client-side would still put the intel on the
+        //   wire; gating here means a helm not at red alert is never sent it.
+        //
+        // The sectors are copied verbatim off the world snapshot — the SAME
+        // producer output `crate::ai::hostile_arc_exposure` reduces into the
+        // helm AI's facts. Nothing here recomputes an arc.
+        let at_red_alert = red_alert.map(|r| r.0).unwrap_or(false);
+        let hostile_weapon_arcs = if is_local && at_red_alert {
+            let self_faction = faction.map(|f| f.0);
+            world_snapshot
+                .as_deref()
+                .map(|snap| {
+                    snap.entities
+                        .iter()
+                        .filter(|e| !e.weapon_arcs.is_empty())
+                        .filter(|e| {
+                            e.faction
+                                .map(|ef| {
+                                    crate::faction::is_enemy(self_faction, Some(ef), registry)
+                                })
+                                .unwrap_or(false)
+                        })
+                        // Only contacts the helm radar is actually showing: an
+                        // overlay anchored off the edge of the scope is noise.
+                        .filter(|e| {
+                            let dx = e.position[0] - physics.x;
+                            let dz = e.position[2] - physics.z;
+                            dx * dx + dz * dz <= radar_range * radar_range
+                        })
+                        .map(|e| crate::messages::HostileWeaponArcContact {
+                            uuid: e.uuid.to_string(),
+                            x: e.position[0],
+                            z: e.position[2],
+                            arcs: e.weapon_arcs.iter().map(Into::into).collect(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         let bb = HelmBlackboard {
             yaw: physics.yaw,
             forward_speed: physics.forward_speed,
@@ -127,6 +202,7 @@ fn publish_helm_blackboard(
             boost_enabled,
             radar_range,
             lateral_speed: physics.lateral_speed,
+            hostile_weapon_arcs,
         };
 
         // Read last helm input for engine thrust fraction.
@@ -282,6 +358,154 @@ mod tests {
             panic!("expected Helm blackboard")
         };
         bb
+    }
+
+    // ── Hostile weapon-arc overlay (issue #874) ───────────────────────────
+
+    const OWN_FACTION: uuid::Uuid = uuid::Uuid::from_u128(0x0874_0001);
+    const ENEMY_FACTION: uuid::Uuid = uuid::Uuid::from_u128(0x0874_0002);
+
+    /// A snapshot carrying one armed hostile 100 units off the bow, plus a
+    /// faction registry that makes it an enemy.
+    fn arc_overlay_app(red_alert: bool, local: bool) -> App {
+        let mut app = App::new();
+        app.add_systems(Update, publish_helm_blackboard);
+        app.init_resource::<InterSystemQueue>();
+        app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
+
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.insert(crate::faction::FactionConfig {
+            uuid: OWN_FACTION,
+            name: "Own".into(),
+            enemies: vec![ENEMY_FACTION],
+        });
+        registry.insert(crate::faction::FactionConfig {
+            uuid: ENEMY_FACTION,
+            name: "Enemy".into(),
+            enemies: vec![OWN_FACTION],
+        });
+        app.insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            registry,
+        ));
+
+        app.insert_resource(crate::ai::server::WorldSnapshot {
+            entities: vec![
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::from_u128(0x0874_1111),
+                    position: [0.0, 0.0, -100.0],
+                    faction: Some(ENEMY_FACTION),
+                    weapon_arcs: crate::weapons::arc_geometry::weapon_arc_sectors(
+                        0.0,
+                        &[crate::weapons::arc_geometry::WeaponArcBank {
+                            facing_deg: 180.0,
+                            fire_arc_deg: 90.0,
+                            range: 400.0,
+                        }],
+                    ),
+                    ..Default::default()
+                },
+                // A friendly ship with arcs of its own — must never appear.
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::from_u128(0x0874_2222),
+                    position: [50.0, 0.0, 0.0],
+                    faction: Some(OWN_FACTION),
+                    weapon_arcs: crate::weapons::arc_geometry::weapon_arc_sectors(
+                        0.0,
+                        &[crate::weapons::arc_geometry::WeaponArcBank {
+                            facing_deg: 0.0,
+                            fire_arc_deg: 60.0,
+                            range: 400.0,
+                        }],
+                    ),
+                    ..Default::default()
+                },
+                // A hostile far outside the helm radar horizon.
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::from_u128(0x0874_3333),
+                    position: [0.0, 0.0, -9000.0],
+                    faction: Some(ENEMY_FACTION),
+                    weapon_arcs: crate::weapons::arc_geometry::weapon_arc_sectors(
+                        0.0,
+                        &[crate::weapons::arc_geometry::WeaponArcBank {
+                            facing_deg: 180.0,
+                            fire_arc_deg: 90.0,
+                            range: 400.0,
+                        }],
+                    ),
+                    ..Default::default()
+                },
+            ],
+        });
+
+        let mut ship = app.world_mut().spawn((
+            crate::simulation::Ship,
+            ShipPhysics::default(),
+            ShipSystemBlackboards::default(),
+            ShipImpulse::default(),
+            ShipBoost::default(),
+            crate::modifiers::ShipModifiers::new(),
+            crate::ship_plugin::LastHelmInput::default(),
+            crate::entities::spawner::FactionComponent(OWN_FACTION),
+            crate::ship_state::ShipRedAlert(red_alert),
+        ));
+        if local {
+            ship.insert(crate::simulation::LocalShip);
+        }
+        app
+    }
+
+    fn helm_bb_only(app: &mut App) -> crate::messages::HelmBlackboard {
+        let key = helm_station_key();
+        let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
+        let bbs = q.single(app.world()).unwrap();
+        let SystemBlackboard::Helm(bb) = bbs.0.get(&key).expect("helm entry").clone() else {
+            panic!("expected Helm blackboard")
+        };
+        bb
+    }
+
+    /// AC3: at red alert the local helm gets the hostile's sectors — and only
+    /// the hostile's, and only the ones on the scope.
+    #[test]
+    fn red_alert_publishes_in_range_hostile_arcs_only() {
+        let mut app = arc_overlay_app(true, true);
+        app.update();
+        let bb = helm_bb_only(&mut app);
+        assert_eq!(
+            bb.hostile_weapon_arcs.len(),
+            1,
+            "the friendly and the over-the-horizon hostile must not appear: {:?}",
+            bb.hostile_weapon_arcs
+        );
+        let contact = &bb.hostile_weapon_arcs[0];
+        assert_eq!(contact.uuid, uuid::Uuid::from_u128(0x0874_1111).to_string());
+        assert!((contact.x - 0.0).abs() < 1e-3);
+        assert!((contact.z + 100.0).abs() < 1e-3);
+        assert_eq!(contact.arcs.len(), 1);
+        assert!((contact.arcs[0].bearing_deg - 180.0).abs() < 1e-3);
+        assert!((contact.arcs[0].half_angle_deg - 45.0).abs() < 1e-3);
+        assert!((contact.arcs[0].range - 400.0).abs() < 1e-3);
+    }
+
+    /// AC3, the other half: no red alert, no arcs — and the gate is server
+    /// side, so the intel never reaches the wire at all.
+    #[test]
+    fn without_red_alert_no_hostile_arcs_are_published() {
+        let mut app = arc_overlay_app(false, true);
+        app.update();
+        assert!(
+            helm_bb_only(&mut app).hostile_weapon_arcs.is_empty(),
+            "arcs must be red-alert gated"
+        );
+    }
+
+    /// An NPC renders no radar, so it pays no bandwidth for one — the same
+    /// posture `TacticalRadarBlackboard::blips` takes.
+    #[test]
+    fn a_non_local_ship_publishes_no_hostile_arcs_even_at_red_alert() {
+        let mut app = arc_overlay_app(true, false);
+        app.update();
+        assert!(helm_bb_only(&mut app).hostile_weapon_arcs.is_empty());
     }
 
     // ── Publish tests ──────────────────────────────────────────────────────

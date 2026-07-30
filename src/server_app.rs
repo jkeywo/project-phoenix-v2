@@ -7637,6 +7637,7 @@ station = "pilot"
             boost_enabled: true,
             radar_range: 0.0,
             lateral_speed: 0.0,
+            hostile_weapon_arcs: Vec::new(),
         });
 
         {

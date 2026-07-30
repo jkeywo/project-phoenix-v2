@@ -408,6 +408,12 @@ fn build_world_snapshot(
                 let forward_speed = physics.map(|p| p.forward_speed).unwrap_or(0.0);
                 let direct_fire_range =
                     entity_direct_fire_range(control_sources, phasers, blasters, modifiers);
+                let yaw = transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0;
+                // Issue #874: the one producer call. Everything downstream —
+                // the helm AI exposure fact and the helm-radar overlay — reads
+                // these sectors rather than deriving arcs of its own.
+                let weapon_arcs =
+                    entity_weapon_arc_sectors(yaw, control_sources, phasers, blasters, modifiers);
                 crate::ai::AiWorldEntity {
                     uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
                     name: name.as_ref().map(|n| n.0.clone()),
@@ -418,7 +424,7 @@ fn build_world_snapshot(
                     ],
                     faction: faction.map(|f| f.0),
                     hull_fraction,
-                    yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                    yaw: Some(yaw),
                     radius,
                     forward_speed,
                     shields: None,
@@ -429,6 +435,7 @@ fn build_world_snapshot(
                     dangerous: true,
                     size_rating: radius,
                     direct_fire_range,
+                    weapon_arcs,
                 }
             },
         )
@@ -464,6 +471,7 @@ fn build_world_snapshot(
                     size_rating: collider.0.radius,
                     // An asteroid shoots at nobody.
                     direct_fire_range: 0.0,
+                    weapon_arcs: Vec::new(),
                 }),
         );
 }
@@ -485,6 +493,62 @@ fn entity_direct_fire_range(
 ) -> f32 {
     use crate::weapons_plugin::{longest_usable_direct_fire_range, DirectFireEmitter};
 
+    let emitters: Vec<DirectFireEmitter> =
+        entity_direct_fire_banks(control_sources, phasers, blasters, modifiers)
+            .into_iter()
+            .map(|(online, bank)| DirectFireEmitter {
+                online,
+                usable: true,
+                range: bank.range,
+            })
+            .collect();
+    longest_usable_direct_fire_range(&emitters)
+}
+
+/// This entity's ONLINE direct-fire arcs as world-bearing sectors (issue #874).
+///
+/// **The single producer call.** Its output is published on
+/// [`crate::ai::AiWorldEntity::weapon_arcs`], and BOTH consumers read it from
+/// there: the helm AI's exposure fact reduction
+/// ([`crate::weapons::arc_geometry::arc_exposure`]) and the local ship's
+/// helm-radar overlay payload (`publish_helm_blackboard`). Neither recomputes
+/// the geometry, so what a human helm sees and what a backfilled helm policy
+/// reasons about cannot diverge.
+///
+/// Torpedo tubes are deliberately absent, for the same reason
+/// [`entity_direct_fire_range`] excludes them: a homing round's threat has no
+/// bounded radius, so a wedge drawn at "the tube's range" would be a lie about
+/// where it is safe to stand.
+fn entity_weapon_arc_sectors(
+    ship_yaw: f32,
+    control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    modifiers: Option<&crate::modifiers::ShipModifiers>,
+) -> Vec<crate::weapons::arc_geometry::WeaponArcSector> {
+    let banks: Vec<crate::weapons::arc_geometry::WeaponArcBank> =
+        entity_direct_fire_banks(control_sources, phasers, blasters, modifiers)
+            .into_iter()
+            .filter(|(online, _)| *online)
+            .map(|(_, bank)| bank)
+            .collect();
+    crate::weapons::arc_geometry::weapon_arc_sectors(ship_yaw, &banks)
+}
+
+/// Read this entity's per-bank direct-fire configuration off its components,
+/// paired with the online flag, in one place (issue #874).
+///
+/// Extracted so the reach fact (#788) and the arc sectors (#874) cannot disagree
+/// about which banks exist, what they reach, or which of them are offline: both
+/// are projections of this one list.
+fn entity_direct_fire_banks(
+    control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
+    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
+    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    modifiers: Option<&crate::modifiers::ShipModifiers>,
+) -> Vec<(bool, crate::weapons::arc_geometry::WeaponArcBank)> {
+    use crate::weapons::arc_geometry::WeaponArcBank;
+
     let default_modifiers = crate::modifiers::ShipModifiers::new();
     let radar_range_mult = modifiers
         .unwrap_or(&default_modifiers)
@@ -498,7 +562,7 @@ fn entity_direct_fire_range(
         }
     };
 
-    let mut emitters: Vec<DirectFireEmitter> = Vec::new();
+    let mut banks: Vec<(bool, WeaponArcBank)> = Vec::new();
     if let Some(cfg) = phasers {
         for b in &cfg.0.banks {
             let base = if b.beam_range > 0.0 {
@@ -506,25 +570,31 @@ fn entity_direct_fire_range(
             } else {
                 crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
             };
-            emitters.push(DirectFireEmitter {
-                online: !is_offline(crate::system_registry::phaser_bank_system_id(&b.id)),
-                usable: true,
-                range: base * radar_range_mult,
-            });
+            banks.push((
+                !is_offline(crate::system_registry::phaser_bank_system_id(&b.id)),
+                WeaponArcBank {
+                    facing_deg: b.facing_deg,
+                    fire_arc_deg: b.fire_arc_deg,
+                    range: base * radar_range_mult,
+                },
+            ));
         }
     }
     if let Some(res) = blasters {
         for bs in &res.0 {
-            emitters.push(DirectFireEmitter {
-                online: !is_offline(crate::system_registry::blaster_bank_system_id(
+            banks.push((
+                !is_offline(crate::system_registry::blaster_bank_system_id(
                     &bs.config.id,
                 )),
-                usable: true,
-                range: bs.config.range,
-            });
+                WeaponArcBank {
+                    facing_deg: bs.config.facing_deg,
+                    fire_arc_deg: bs.config.fire_arc_deg,
+                    range: bs.config.range,
+                },
+            ));
         }
     }
-    longest_usable_direct_fire_range(&emitters)
+    banks
 }
 
 /// Score each entity's doctrine and write `scored_objectives` into its
@@ -1373,6 +1443,200 @@ verb = "fire_blaster"
             0.0,
             "a fully disarmed ship has no reach at all — the ring collapses to the \
              standing-off hull's own authored margin"
+        );
+    }
+
+    // ── build_world_snapshot: hostile weapon-arc sectors (issue #874) ──────
+
+    /// AC2: the arcs are published for every armed entity, with no scan gate
+    /// and no target involved — a hull's arcs are a fact about the hull.
+    #[test]
+    fn world_snapshot_publishes_world_bearing_weapon_arc_sectors() {
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            // Yawed 90 degrees to starboard, so a forward bank bears on +X.
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            phasers,
+            blasters,
+        ));
+
+        app.update();
+
+        let arcs = &app.world().resource::<WorldSnapshot>().entities[0].weapon_arcs;
+        assert_eq!(arcs.len(), 2, "one sector per direct-fire bank: {arcs:?}");
+        for a in arcs {
+            assert!(
+                (a.bearing_deg - 90.0).abs() < 1e-3,
+                "yaw 90 + facing 0 must bear 90: {a:?}"
+            );
+        }
+        assert!((arcs[0].half_angle_deg - 45.0).abs() < 1e-3, "{arcs:?}");
+        assert!((arcs[0].range - 200.0).abs() < 1e-3, "phaser reach");
+        assert!((arcs[1].range - 320.0).abs() < 1e-3, "blaster reach");
+    }
+
+    /// An offline bank is not a threat: it drops out of the sectors exactly as
+    /// it drops out of the reach, because both are projections of one list.
+    #[test]
+    fn an_offline_bank_stops_publishing_its_arc_sector() {
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+        sources.0.set_offline(
+            crate::system_registry::blaster_bank_system_id("lance").unwrap(),
+            true,
+        );
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            phasers,
+            blasters,
+            sources,
+        ));
+
+        app.update();
+
+        let arcs = &app.world().resource::<WorldSnapshot>().entities[0].weapon_arcs;
+        assert_eq!(arcs.len(), 1, "the disabled blaster arc must go: {arcs:?}");
+        assert!((arcs[0].range - 200.0).abs() < 1e-3, "the phaser remains");
+    }
+
+    #[test]
+    fn an_unarmed_entity_and_an_asteroid_publish_no_arc_sectors() {
+        let mut app = snapshot_test_app();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+        app.world_mut().spawn((
+            crate::simulation::Asteroid,
+            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(30.0, 0.0, -12.0),
+            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: 4.0,
+                length: 0.0,
+            }),
+        ));
+        app.update();
+        for e in &app.world().resource::<WorldSnapshot>().entities {
+            assert!(e.weapon_arcs.is_empty(), "{e:?}");
+        }
+    }
+
+    /// AC4, Rust half: the AI fact reduction and the wire payload derive from
+    /// the SAME producer call.
+    ///
+    /// Both consumers are exercised against one `build_world_snapshot` run:
+    /// the wire conversion the helm blackboard performs, and
+    /// `crate::ai::hostile_arc_exposure`, the reduction the helm facts are
+    /// seeded from. The assertion is elementwise identity — not "both look
+    /// plausible" — so a future change that gave either side its own geometry
+    /// would fail here rather than drift silently.
+    #[test]
+    fn the_wire_payload_and_the_ai_fact_reduction_read_the_same_sectors() {
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        let hostile_faction = uuid::Uuid::new_v4();
+        let own_faction = uuid::Uuid::new_v4();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            crate::entity_spawner::FactionComponent(hostile_faction),
+            phasers,
+            blasters,
+        ));
+        app.update();
+
+        let snapshot_entity = app.world().resource::<WorldSnapshot>().entities[0].clone();
+        assert!(!snapshot_entity.weapon_arcs.is_empty());
+
+        // (a) The wire payload the helm blackboard builds.
+        let wire: Vec<crate::messages::HostileWeaponArc> =
+            snapshot_entity.weapon_arcs.iter().map(Into::into).collect();
+
+        // (b) The reduction the helm facts are seeded from, over the same
+        //     snapshot entry. Observer 100 units to +X — inside the yawed
+        //     hull's forward arcs.
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.insert(crate::faction::FactionConfig {
+            uuid: own_faction,
+            name: "Own".into(),
+            enemies: vec![hostile_faction],
+        });
+        let view = crate::ai::WorldView {
+            entity_pos: [100.0, 0.0, 0.0],
+            self_faction: Some(own_faction),
+            entities: vec![snapshot_entity.clone()],
+            ..Default::default()
+        };
+        let exposure = crate::ai::hostile_arc_exposure(&view, &registry);
+
+        // Same sectors, elementwise: the wire is a verbatim copy.
+        assert_eq!(wire.len(), snapshot_entity.weapon_arcs.len());
+        for (w, s) in wire.iter().zip(snapshot_entity.weapon_arcs.iter()) {
+            assert_eq!(w.bearing_deg, s.bearing_deg);
+            assert_eq!(w.half_angle_deg, s.half_angle_deg);
+            assert_eq!(w.range, s.range);
+        }
+        // And the reduction is a reduction of exactly those sectors: rebuilding
+        // it from the WIRE arcs reproduces the fact the policy reads.
+        let from_wire = crate::weapons::arc_geometry::arc_exposure(
+            &wire
+                .iter()
+                .map(|w| crate::weapons::arc_geometry::WeaponArcSector {
+                    bearing_deg: w.bearing_deg,
+                    half_angle_deg: w.half_angle_deg,
+                    range: w.range,
+                })
+                .collect::<Vec<_>>(),
+            snapshot_entity.position[0],
+            snapshot_entity.position[2],
+            100.0,
+            0.0,
+        );
+        assert_eq!(from_wire, exposure);
+        assert_eq!(exposure.covering_count, 2, "both banks bear: {exposure:?}");
+    }
+
+    /// A friendly ship's arcs are published on the snapshot (they are hull
+    /// facts) but must not read as exposure — the reduction is hostility-gated.
+    #[test]
+    fn a_friendly_ships_arcs_are_not_exposure() {
+        let same_faction = uuid::Uuid::new_v4();
+        let mut app = snapshot_test_app();
+        let (phasers, blasters) = armed_hull_components();
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            crate::entity_spawner::FactionComponent(same_faction),
+            phasers,
+            blasters,
+        ));
+        app.update();
+        let entity = app.world().resource::<WorldSnapshot>().entities[0].clone();
+        assert!(!entity.weapon_arcs.is_empty(), "arcs are still published");
+
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.insert(crate::faction::FactionConfig {
+            uuid: same_faction,
+            name: "Own".into(),
+            enemies: vec![],
+        });
+        let view = crate::ai::WorldView {
+            entity_pos: [100.0, 0.0, 0.0],
+            self_faction: Some(same_faction),
+            entities: vec![entity],
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::ai::hostile_arc_exposure(&view, &registry).covering_count,
+            0
         );
     }
 

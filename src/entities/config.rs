@@ -907,6 +907,12 @@ pub struct HelmConsoleConfig {
     /// `[helm_console.radar]`.
     #[serde(default)]
     pub radar: Option<crate::radar_config::RadarConfig>,
+    /// RGBA colour the helm radar uses for the red-alert hostile weapon-arc
+    /// overlay (issue #874). Four floats in 0.0–1.0; the fourth is the fill
+    /// opacity, and "faint" is the whole point of the overlay. When absent (or
+    /// not exactly four entries) the `ShipClientConfig` default applies.
+    #[serde(default)]
+    pub hostile_arc_color: Vec<f32>,
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
     /// Total time in seconds to fully charge the impulse drive.
@@ -4510,6 +4516,63 @@ shows = ["asteroid"]
         assert!(config.engineering_console.is_some());
 
         assert!(config.captain_console.is_some());
+    }
+
+    /// The red-alert hostile weapon-arc overlay colour (issue #874) is authored
+    /// per hull, not inlined in the client — AGENTS.md #11.
+    #[test]
+    fn helm_console_parses_the_hostile_arc_color() {
+        let config = EntityConfig::from_toml(
+            r##"
+[helm_console]
+max_speed = 50.0
+hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
+"##,
+        )
+        .expect("parse must succeed");
+        assert_eq!(
+            config.helm_console.as_ref().unwrap().hostile_arc_color,
+            vec![1.0, 0.3, 0.3, 0.07]
+        );
+    }
+
+    /// A hull that omits it keeps the wire default rather than failing to parse.
+    #[test]
+    fn helm_console_hostile_arc_color_is_optional() {
+        let config = EntityConfig::from_toml("[helm_console]\nmax_speed = 50.0\n")
+            .expect("parse must succeed");
+        assert!(config
+            .helm_console
+            .as_ref()
+            .unwrap()
+            .hostile_arc_color
+            .is_empty());
+    }
+
+    /// Every hull that renders `ph-helm-radar` must author the colour, or the
+    /// overlay silently falls back to a value no designer chose.
+    #[test]
+    fn the_player_hulls_author_a_hostile_arc_color() {
+        for path in [
+            "assets/entities/alliance_battleship.toml",
+            "assets/entities/alliance_cruiser.toml",
+            "assets/entities/alliance_destroyer.toml",
+        ] {
+            let text = std::fs::read_to_string(path).expect("hull TOML must be readable");
+            let config = EntityConfig::from_toml(&text).expect("hull TOML must parse");
+            let color = &config
+                .helm_console
+                .as_ref()
+                .expect("hull declares [helm_console]")
+                .hostile_arc_color;
+            assert_eq!(color.len(), 4, "{path} must author an RGBA quad: {color:?}");
+            assert!(
+                color[3] < 0.25,
+                "{path}: the overlay must stay FAINTER than the Tactical radar's \
+                 own arc fills (0.30 / 0.25); got alpha {}",
+                color[3]
+            );
+        }
     }
 
     #[test]

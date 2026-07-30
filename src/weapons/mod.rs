@@ -1,3 +1,4 @@
+pub mod arc_geometry;
 pub mod beam_render;
 pub mod blaster;
 pub mod pattern;

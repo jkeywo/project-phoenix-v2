@@ -641,6 +641,45 @@ describe('buildHelmConsoleState', () => {
     }
   });
 
+  // ── Hostile weapon-arc overlay (issue #874) ───────────────────────────
+
+  const ARC_BB = {
+    hostile_weapon_arcs: [{
+      uuid: 'hostile-1', x: 10, z: -20,
+      arcs: [{ bearing_deg: 45, half_angle_deg: 30, range: 200 }],
+    }],
+  };
+
+  it('passes the hostile weapon arcs through verbatim at red alert', () => {
+    const s = parse(buildHelmConsoleState({
+      redAlert: true,
+      blackboards: { helm: ARC_BB, captain: { red_alert: true } },
+    }));
+    expect(s.red_alert).toBe(true);
+    // Verbatim: the client must not re-derive, re-order or re-scale a sector.
+    expect(s.hostile_arcs).toEqual(ARC_BB.hostile_weapon_arcs);
+  });
+
+  it('shows no hostile weapon arcs when not at red alert', () => {
+    const s = parse(buildHelmConsoleState({
+      redAlert: false,
+      blackboards: { helm: ARC_BB },
+    }));
+    expect(s.red_alert).toBe(false);
+    expect(s.hostile_arcs).toEqual([]);
+  });
+
+  it('hostile_arcs is empty when the server sent none', () => {
+    expect(parse(buildHelmConsoleState({ redAlert: true })).hostile_arcs).toEqual([]);
+  });
+
+  it('hostile_arc_color comes from ship config, not from JS', () => {
+    expect(parse(buildHelmConsoleState({ hostileArcColor: [0.1, 0.2, 0.3, 0.04] })).hostile_arc_color)
+      .toEqual([0.1, 0.2, 0.3, 0.04]);
+    // Absent config leaves the component to show its own placeholder.
+    expect(parse(buildHelmConsoleState(EMPTY)).hostile_arc_color).toBeNull();
+  });
+
   it('on_screen true when currentView is Radar', () => {
     expect(parse(buildHelmConsoleState({ currentView: 'Radar' })).on_screen).toBe(true);
   });

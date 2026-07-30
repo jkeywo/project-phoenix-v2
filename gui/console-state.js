@@ -733,7 +733,24 @@ export function buildCaptainConsoleState(state) {
  *             engine_stbd_thrust: number, engine_port_auto: boolean,
  *             engine_stbd_auto: boolean, lateral_speed: number,
  *             lateral_input: number, lateral_auto: boolean,
- *             lateral_is_online: boolean }} HelmConsolePayload
+ *             lateral_is_online: boolean, red_alert: boolean,
+ *             hostile_arcs: HostileWeaponArcContact[],
+ *             hostile_arc_color: number[] }} HelmConsolePayload
+ */
+
+/**
+ * One hostile contact's weapon arcs, as published on `HelmBlackboard
+ * ::hostile_weapon_arcs` (issue #874).
+ *
+ * `bearing_deg` is a WORLD bearing in the same convention as ship yaw, produced
+ * once server-side by `weapons::arc_geometry::weapon_arc_sectors` — the same
+ * sectors the backfilled helm AI's exposure fact is reduced from. The client
+ * never recomputes these from the hostile's yaw: doing so would make the human
+ * and the AI agree only by coincidence.
+ *
+ * @typedef {{ uuid: string, x: number, z: number,
+ *             arcs: {bearing_deg: number, half_angle_deg: number,
+ *                    range: number}[] }} HostileWeaponArcContact
  */
 
 /**
@@ -817,6 +834,23 @@ export function buildHelmConsoleState(state) {
     lateral_input:       (state.blackboards?.['helm-lateral-thrust']?.lateral_input) ?? 0,
     lateral_auto:        (state.blackboards?.['helm-lateral-thrust']?.auto) ?? false,
     lateral_is_online:   (state.blackboards?.['helm-lateral-thrust']?.is_online) ?? true,
+    // ── Hostile weapon-arc overlay (issue #874) ───────────────────────────
+    // The server already gates the blackboard field on red alert AND on this
+    // being the local ship, so the list is normally absent entirely. The
+    // `state.redAlert` guard here is a second, client-side latch on the same
+    // condition: a stale blackboard mirror must not outlive the alert that
+    // justified it.
+    //
+    // Pass-through, deliberately: no projection, no re-derivation. Every arc
+    // the helm draws is an arc the server produced.
+    red_alert:           !!state.redAlert,
+    hostile_arcs:        state.redAlert ? (bb.hostile_weapon_arcs || []) : [],
+    // Authored per hull in `[helm_console] hostile_arc_color` (AGENTS.md #11 —
+    // a gameplay-adjacent presentation value, so TOML rather than inline JS).
+    // Passed straight through. `ClientSimState` owns the one client-side
+    // placeholder; the component carries none, and paints no overlay at all
+    // rather than invent a colour if this arrives null.
+    hostile_arc_color:   state.hostileArcColor || null,
   });
 }
 

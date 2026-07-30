@@ -2,8 +2,8 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost]
-sources: [gui/helm-console.html, gui/console-state.js, gui/radar-widget.js, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
-updated: 2026-06-20
+sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/console-state.js, gui/components/ph-helm-radar.js, src/weapons/arc_geometry.rs, src/console/helm/server.rs, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/physics.rs, src/ship/impulse.rs, src/ship/boost.rs, src/modifiers/coordination.rs]
+updated: 2026-07-30
 ---
 
 # Helm Console
@@ -57,6 +57,60 @@ Navigation can set one shared custom waypoint. The server owns it as `SimSnapsho
 `gui/helm-console.html` caches the last radar payload before calling `RadarWidget.update()`, so impulse-only state pushes (`impulse_charge_progress` changing every tick while charging) don't push redundant data into the widget. For that caching to actually stop the canvas redrawing, `RadarWidget` is **render-on-demand**: its `requestAnimationFrame` loop only repaints when a dirty flag is set (by `update()`, resize, pan/zoom gestures, or an async icon load) instead of unconditionally every frame.
 
 The HTML Helm panel also treats the charge countdown (`0 < impulse_charge_progress < 1`) as a stabilized radar phase: it pauses the decorative radar scan, disables the charge bar transition, and skips radar widget updates even if blips drift due to unrelated entity snapshots. Once progress reaches `1.0` (`ENGAGED`), radar updates resume.
+
+### Hostile weapon-arc overlay (issue #874)
+
+At **red alert only**, the helm radar paints a faint wedge for each online
+direct-fire bank of every hostile contact on the scope, anchored at that
+contact's blip.
+
+The geometry has exactly one producer:
+`weapons::arc_geometry::weapon_arc_sectors` turns a hull's authored
+`facing_deg`/`fire_arc_deg` banks plus its world yaw into **world-bearing**
+sectors (`bearing_deg`, `half_angle_deg`, `range`). `ai::server` calls it once
+per world-snapshot rebuild and publishes the result on
+`AiWorldEntity::weapon_arcs`. Two consumers read that one list:
+
+- the helm AI, which reduces it to three scalar facts — `hostile_arc_exposure`
+  (how many hostile arcs bear on this ship), `hostile_arc_escape_deg` (signed
+  degrees to the shorter way out) and `hostile_arc_inescapable` (`1.0` when a
+  bearing arc spans a full turn, so no amount of turning leaves it) — see
+  `ai::hostile_arc_exposure`. All three are seeded by
+  `helm_ai::seed_hostile_arc_facts`, which every helm policy host reaches:
+  `ai_policy_state_tick` and the thrust/steering/boost hosts via
+  `seed_helm_travel_facts`, and the impulse/lateral/vertical hosts directly. So
+  a guard on any of the three is readable from every `[helm_console.*_ai]`
+  block, including the lateral and vertical dodge axes;
+- `publish_helm_blackboard`, which copies the sectors verbatim into
+  `HelmBlackboard::hostile_weapon_arcs` for the **local ship only**, gated on
+  `ShipRedAlert` and on the helm radar range.
+
+`ph-helm-radar` renders those sectors without recomputing them — its only
+maths is world bearing → screen angle and world position/range → scope space.
+A near- or fully-all-round bank is drawn as a full disc built from two
+half-circles. A single SVG elliptical arc whose endpoints coincide is omitted by
+the spec, which would leave the player's scope blank against exactly the hull the
+AI reads as permanently exposed — so the wedge builder switches to the disc
+whenever the endpoints it is about to EMIT (after rounding to one decimal place)
+are equal, not merely when `fire_arc_deg` reaches 360. `ship_harrow_lancer.toml`
+authors a literal `fire_arc_deg = 360.0` twice, but a sweep just under a full
+turn collapses the same way once the screen radius is small enough, which a
+short-ranged bank on a wide scope reaches routinely.
+Arcs are never scan-gated: they are authored hull configuration, so a helm
+knows them for any hostile it can see at all. The overlay colour is authored
+per hull in `[helm_console] hostile_arc_color` and reaches the client through
+`ShipClientConfig::hostile_arc_color`; the parse default there, the
+`ClientSimState` placeholder and every shipped hull's authored value are all the
+same RGBA, so a hull that omits the key looks identical to one that sets it.
+
+Two accuracy notes the code carries in comments and this page should not
+contradict. The overlay paints **over** the radar's blips, not under them —
+`.svg-overlay` is a sibling after `<ph-radar>`, so the authored 0.07 alpha, not
+the stacking order, is what keeps contacts legible through it. And
+`publish_helm_blackboard` runs every frame while `build_world_snapshot` runs on
+the derived ~10 Hz snapshot cadence, so the sectors and anchors it publishes are
+the most recent snapshot tick's and can lag the live blips by up to ~100 ms. The
+AI fact reads the same snapshot, so the two never disagree.
 
 ## Tuning constants
 

@@ -218,6 +218,22 @@ pub struct AiWorldEntity {
     /// "their reach plus a margin" therefore falls back to the margin alone
     /// rather than to an invented distance.
     pub direct_fire_range: f32,
+    /// Threat fact: this entity's ONLINE direct-fire arcs as **world-bearing**
+    /// sectors (issue #874), produced once per snapshot rebuild by
+    /// `ai::server::entity_weapon_arc_sectors`.
+    ///
+    /// Never scan-gated: a weapon bank's arc is a property of the hull's
+    /// authored configuration, so it is known for every hostile whether or not
+    /// anyone has run a sensor sweep on it.
+    ///
+    /// This is the ONE representation both consumers read — the helm AI's
+    /// exposure fact reduction and the local ship's helm-radar overlay payload —
+    /// so what a human helm is shown and what a backfilled helm policy reasons
+    /// about are the same sectors by construction, not by coincidence.
+    ///
+    /// Empty for an unarmed entity, an entity whose banks are all offline, an
+    /// asteroid, or a snapshot source that carries no weapon configuration.
+    pub weapon_arcs: Vec<crate::weapons::arc_geometry::WeaponArcSector>,
 }
 
 /// Hand-written so a bare `AiWorldEntity { ..Default::default() }` is a
@@ -241,6 +257,7 @@ impl Default for AiWorldEntity {
             dangerous: true,
             size_rating: 0.0,
             direct_fire_range: 0.0,
+            weapon_arcs: Vec::new(),
         }
     }
 }
@@ -1369,6 +1386,84 @@ pub fn find_nearest_hostile(
         .map(|e| e.uuid)
 }
 
+/// Reduce every hostile's published weapon-arc sectors against this ship's own
+/// position (issue #874).
+///
+/// Pure and Bevy-free: consumes the same [`WorldView`] the helm already steers
+/// by, so a guard can never fire on a contact the helm cannot see.
+///
+/// **No scan gate.** Arcs come from authored hull configuration, published on
+/// [`AiWorldEntity::weapon_arcs`] by the world-snapshot build, so they are known
+/// for every hostile in view whether or not Sensors has swept it. That is the
+/// point of the fact: dodging a gun should not require identifying it first.
+///
+/// ## The reduction, and why it is this one
+///
+/// `AiFacts` values are `f64` scalars, so the sector list cannot itself be a
+/// fact. Two readings come out:
+///
+/// - `covering_count` — summed across ALL hostiles, because a movement policy
+///   being borne on by two ships is in more trouble than one borne on by one,
+///   and a bare "am I exposed" boolean throws that away for nothing.
+/// - `escape_offset_deg` — taken from the NEAREST hostile that has at least one
+///   arc bearing, because a single number cannot escape two ships at once and
+///   the nearest gun is the urgent one. `0.0` when nothing bears.
+/// - `inescapable` — set when ANY hostile in view is bearing with an all-round
+///   bank, which suppresses the escape magnitude for the same reason the
+///   per-ship reduction does: there is no turn out of it. See the
+///   `arc_geometry` module note.
+pub fn hostile_arc_exposure(
+    world_view: &WorldView,
+    faction_registry: &crate::faction::FactionRegistry,
+) -> crate::weapons::arc_geometry::ArcExposure {
+    let mut total_covering = 0u32;
+    let mut any_inescapable = false;
+    let mut nearest: Option<(f32, f32)> = None; // (dist_sq, escape_offset_deg)
+    let self_faction = world_view.self_faction;
+    let pos = world_view.entity_pos;
+    for e in &world_view.entities {
+        if e.weapon_arcs.is_empty() {
+            continue;
+        }
+        let hostile = e
+            .faction
+            .map(|ef| crate::faction::is_enemy(self_faction, Some(ef), faction_registry))
+            .unwrap_or(false);
+        if !hostile {
+            continue;
+        }
+        let exposure = crate::weapons::arc_geometry::arc_exposure(
+            &e.weapon_arcs,
+            e.position[0],
+            e.position[2],
+            pos[0],
+            pos[2],
+        );
+        if exposure.covering_count == 0 {
+            continue;
+        }
+        total_covering += exposure.covering_count;
+        any_inescapable |= exposure.inescapable;
+        let d = dist_sq(pos, e.position);
+        if nearest.map(|(nd, _)| d < nd).unwrap_or(true) {
+            nearest = Some((d, exposure.escape_offset_deg));
+        }
+    }
+    crate::weapons::arc_geometry::ArcExposure {
+        covering_count: total_covering,
+        // Suppressed when ANY hostile in view has an all-round bank bearing:
+        // a turn that clears the nearest ship's finite arcs does not clear an
+        // all-round one, so reporting the magnitude would be the same lie the
+        // per-ship reduction refuses to tell.
+        escape_offset_deg: if any_inescapable {
+            0.0
+        } else {
+            nearest.map(|(_, o)| o).unwrap_or(0.0)
+        },
+        inescapable: any_inescapable,
+    }
+}
+
 fn dist_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
     let dx = a[0] - b[0];
     let dz = a[2] - b[2];
@@ -1781,6 +1876,63 @@ mod tests {
     /// not about patrol routes. `helm_patrol` treats a missing cursor as index
     /// 0, so this is "the ship is at the start of any route it has".
     const NO_CURSORS: &[crate::ai::patrol_cursor::PatrolCursor] = &[];
+
+    // ── hostile_arc_exposure: the all-round case (issue #874) ─────────────
+
+    /// A hostile carrying an all-round bank (`fire_arc_deg = 360`, which the
+    /// Harrow Lancer authors twice) must reach the fact reduction as
+    /// INESCAPABLE with no escape magnitude — even when a nearer hostile's
+    /// finite arcs offer a real one, because turning out of those does not turn
+    /// out of the all-round one.
+    #[test]
+    fn an_all_round_hostile_suppresses_the_escape_magnitude_across_the_view() {
+        let hostile_faction = uuid::Uuid::new_v4();
+        let own_faction = uuid::Uuid::new_v4();
+        let mut registry = crate::faction::FactionRegistry::new();
+        registry.insert(crate::faction::FactionConfig {
+            uuid: own_faction,
+            name: "Own".into(),
+            enemies: vec![hostile_faction],
+        });
+
+        let armed = |z: f32, half: f32| AiWorldEntity {
+            uuid: uuid::Uuid::new_v4(),
+            position: [0.0, 0.0, z],
+            faction: Some(hostile_faction),
+            // Bearing 0 from either hostile astern of us points straight at us.
+            weapon_arcs: vec![crate::weapons::arc_geometry::WeaponArcSector {
+                bearing_deg: 0.0,
+                half_angle_deg: half,
+                range: 500.0,
+            }],
+            ..Default::default()
+        };
+
+        // Nearest hostile is the narrow one, so it owns `escape_offset_deg` —
+        // and the far all-round hull must still veto it.
+        let view = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            self_faction: Some(own_faction),
+            entities: vec![armed(50.0, 30.0), armed(200.0, 180.0)],
+            ..Default::default()
+        };
+        let e = hostile_arc_exposure(&view, &registry);
+        assert_eq!(e.covering_count, 2, "{e:?}");
+        assert!(e.inescapable, "{e:?}");
+        assert_eq!(e.escape_offset_deg, 0.0, "{e:?}");
+
+        // Drop the all-round hull and the nearest one's real exit comes back.
+        let escapable = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            self_faction: Some(own_faction),
+            entities: vec![armed(50.0, 30.0)],
+            ..Default::default()
+        };
+        let e = hostile_arc_exposure(&escapable, &registry);
+        assert_eq!(e.covering_count, 1, "{e:?}");
+        assert!(!e.inescapable, "{e:?}");
+        assert!(e.escape_offset_deg.abs() > 0.0, "{e:?}");
+    }
 
     // ── steer_toward ──────────────────────────────────────────────────────
 

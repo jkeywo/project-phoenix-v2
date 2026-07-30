@@ -823,6 +823,13 @@ pub struct ShipClientConfig {
     /// RGBA colour the Tactical UI uses for torpedo fire-arc overlays.
     #[serde(default = "default_torpedo_arc_color")]
     pub torpedo_arc_color: [f32; 4],
+    /// RGBA colour the Helm UI uses for the red-alert hostile weapon-arc
+    /// overlay (issue #874). Sourced from `[helm_console] hostile_arc_color`.
+    /// A gameplay-adjacent presentation value, so it is authored in TOML rather
+    /// than inlined in JS (AGENTS.md #11); the default below is the TOML-parse
+    /// fallback only.
+    #[serde(default = "default_hostile_arc_color")]
+    pub hostile_arc_color: [f32; 4],
     /// Tag filter for the Helm radar widget. Sourced from
     /// `[helm_console.radar] shows` in the ship TOML.
     #[serde(default)]
@@ -965,6 +972,26 @@ fn default_torpedo_arc_color() -> [f32; 4] {
     [0.2, 0.7, 1.0, 1.0]
 }
 
+/// TOML-parse fallback for the red-alert hostile weapon-arc overlay colour
+/// (issue #874): a hostile red at 7% fill.
+///
+/// Deliberately far below the Tactical radar's own 0.30 / 0.25 arc opacities —
+/// the overlay paints OVER the blips a helm is actually flying by, so this alpha
+/// is what keeps them legible through it, and the overlay must read as a hint
+/// rather than as a second radar. Authored per hull in
+/// `[helm_console] hostile_arc_color`; this constant only covers a hull whose
+/// TOML omits it.
+///
+/// Kept byte-identical to the value every shipped hull authors and to the
+/// client-side placeholder in `gui/sim-state.js`. AGENTS.md #11 sanctions a
+/// parse default and a client placeholder as separate categories, but a hull
+/// that omits the key must not render a visibly different overlay from one that
+/// authors the house value — three fallbacks that disagree is a drift bug
+/// waiting for the first hull to leave the key out.
+fn default_hostile_arc_color() -> [f32; 4] {
+    [1.0, 0.3, 0.3, 0.07]
+}
+
 impl Default for ShipClientConfig {
     fn default() -> Self {
         Self {
@@ -978,6 +1005,7 @@ impl Default for ShipClientConfig {
             blaster_banks: Vec::new(),
             phaser_beam_color: default_phaser_beam_color(),
             torpedo_arc_color: default_torpedo_arc_color(),
+            hostile_arc_color: default_hostile_arc_color(),
             helm_radar_shows: Vec::new(),
             sensors_radar_range: default_sensors_radar_range(),
             sensors_radar_shows: Vec::new(),
@@ -2182,6 +2210,61 @@ pub struct HelmBlackboard {
     pub radar_range: f32,
     /// Current lateral (sideways) speed. Positive = starboard (+X), negative = port (-X).
     pub lateral_speed: f32,
+    /// Hostile weapon-arc sectors for the helm-radar overlay (issue #874).
+    ///
+    /// **Populated for the LOCAL ship only, and only at red alert.** The same
+    /// posture [`TacticalRadarBlackboard::blips`] takes, for the same reasons:
+    /// no NPC pays the bandwidth, and this is not put on `EntitySnapshot` — that
+    /// broadcasts every entity to every client, which would leak arc intel to
+    /// consoles that have no business with it and to clients not at red alert.
+    ///
+    /// The sectors are copied VERBATIM from
+    /// [`crate::ai::AiWorldEntity::weapon_arcs`] — the same list the helm AI's
+    /// exposure fact is reduced from. The client does no arc math on them
+    /// beyond world-bearing → screen-angle projection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hostile_weapon_arcs: Vec<HostileWeaponArcContact>,
+}
+
+/// One hostile contact's weapon arcs, anchored at that contact's world position
+/// (issue #874).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HostileWeaponArcContact {
+    /// The hostile's entity uuid, so the client can associate the overlay with
+    /// the blip it already renders.
+    pub uuid: String,
+    /// The hostile's world X — the anchor the wedges radiate from.
+    pub x: f32,
+    /// The hostile's world Z.
+    pub z: f32,
+    /// That hostile's arc sectors, in producer order.
+    pub arcs: Vec<HostileWeaponArc>,
+}
+
+/// One weapon arc as a WORLD-bearing sector (issue #874).
+///
+/// World-relative rather than ship-relative on purpose: it means the client
+/// needs no trigonometry to un-rotate the hostile's hull, so it cannot
+/// accidentally compute a different arc from the one the AI reasons about.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HostileWeaponArc {
+    /// World bearing of the sector's centre-line, degrees, `(−180, 180]`.
+    /// Same convention as ship yaw: `0` points along `−Z`.
+    pub bearing_deg: f32,
+    /// HALF the arc width, degrees.
+    pub half_angle_deg: f32,
+    /// The bank's effective reach, world units.
+    pub range: f32,
+}
+
+impl From<&crate::weapons::arc_geometry::WeaponArcSector> for HostileWeaponArc {
+    fn from(s: &crate::weapons::arc_geometry::WeaponArcSector) -> Self {
+        Self {
+            bearing_deg: s.bearing_deg,
+            half_angle_deg: s.half_angle_deg,
+            range: s.range,
+        }
+    }
 }
 
 /// Raw sim truth for the Helm Lateral Thrust fine system,

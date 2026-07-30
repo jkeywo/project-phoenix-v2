@@ -374,6 +374,12 @@ shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
 selects = [ "ship", "station", "planet" ]
 
 [helm_console]
+# Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
+# entry being the fill opacity. Deliberately far fainter than the Tactical
+# radar's own arc fills (0.30 / 0.25): the overlay paints OVER the blips the
+# helm is flying by, so this alpha is the only thing keeping them legible
+# through it. It must read as a hint, not as a second radar.
+hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
 max_speed = 15
 max_reverse_speed = 6
 acceleration = 6

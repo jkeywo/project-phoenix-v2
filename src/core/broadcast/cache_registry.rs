@@ -362,6 +362,7 @@ mod tests {
                 boost_enabled: true,
                 radar_range: 0.0,
                 lateral_speed: 0.0,
+                hostile_weapon_arcs: Vec::new(),
             }),
         );
 
@@ -549,6 +550,7 @@ mod tests {
                         boost_enabled: true,
                         radar_range: 0.0,
                         lateral_speed: 0.0,
+                        hostile_weapon_arcs: Vec::new(),
                     }),
                 );
             }
@@ -602,6 +604,7 @@ mod tests {
                     boost_enabled: true,
                     radar_range: 0.0,
                     lateral_speed: 0.0,
+                    hostile_weapon_arcs: Vec::new(),
                 }),
             );
 
@@ -624,6 +627,7 @@ mod tests {
                 boost_enabled: true,
                 radar_range: 0.0,
                 lateral_speed: 0.0,
+                hostile_weapon_arcs: Vec::new(),
             })),
             "resync_for_token must not mutate the shared LastBroadcastBlackboards cache"
         );

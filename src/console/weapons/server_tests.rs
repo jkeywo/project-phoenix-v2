@@ -409,6 +409,19 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
                 .to_policy()
                 .expect("the shipped torpedo-magazine policy decodes"),
         ),
+        // Red alert, RAISED (issue #872).
+        //
+        // The shipped player-hull fire policies this helper attaches are
+        // authored `fact(red_alert) >= param(min_alert_to_fire)` with a
+        // threshold of 1, so a player hull holds fire until its captain calls
+        // red alert. Every test below this line is about something else —
+        // arcs, leads, cooldowns, admission, per-bank independence — and each
+        // needs the ship WILLING to fire before it can say anything about how
+        // it fires. Raising the alert restores that premise without touching
+        // the gate; the gate itself is proved in both directions by
+        // `backfilled_weapons_hold_fire_until_red_alert` and the
+        // `weapons_fire_guard_truth_table` in `authored_ai_pins`.
+        crate::ship_state::ShipRedAlert(true),
     ));
 }
 
@@ -7830,6 +7843,11 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
                     facing_shields,
                     // SHIP-WIDE "every tube full" is false in every case below.
                     false,
+                    // …and so is red alert (issue #872). The Harrow hulls are
+                    // authored ALWAYS-ARMED, so their launch guard must not
+                    // depend on a captain having raised the alert; leaving this
+                    // false throughout is that statement.
+                    false,
                 ),
             )
         };
@@ -11582,6 +11600,149 @@ fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
         beam.any_bank(),
         Some("aft"),
         "the idle fore bank must not fire and must not disarm the firing aft bank"
+    );
+}
+
+// ── The red-alert fire gate, end to end (issue #872) ────────────────────────
+
+/// The SHIPPED player-hull phaser policy — the one an AI-backfilled bridge
+/// actually flies. Read from content rather than hand-built, so this test
+/// cannot drift away from the hull it stands for.
+fn shipped_player_phaser_policy() -> crate::ai::policy::AiPolicy {
+    crate::entities::authored_ai_pins::shipped_policy_toml("phaser_bank")
+        .to_policy()
+        .expect("the shipped phaser-bank policy decodes")
+}
+
+/// The SHIPPED Harrow phaser policy: the same predicate text, the always-armed
+/// threshold.
+fn shipped_harrow_phaser_policy() -> crate::ai::policy::AiPolicy {
+    let hull = crate::entity_config::EntityConfig::from_toml(include_str!(
+        "../../../assets/entities/ship_harrow_patrol.toml"
+    ))
+    .expect("the shipped Harrow patrol hull must parse");
+    hull.weapons_console
+        .as_ref()
+        .expect("the Harrow patrol carries phasers")
+        .phaser_banks
+        .first()
+        .expect("…at least one bank")
+        .ai
+        .as_ref()
+        .expect("every shipped bank authors a policy")
+        .to_policy()
+        .expect("and it decodes")
+}
+
+/// **AC2 + AC3, behaviourally.** A backfilled player bank holds fire while the
+/// alert is down — including while the ship is being shot at — keeps its target
+/// designated the whole time, and opens fire on the very next tick after the
+/// captain raises red alert.
+///
+/// The three claims are one test on purpose: "holds fire" and "fires" are only
+/// interesting together (either alone is satisfiable by a broken bank or an
+/// ungated one), and "still designating" is what separates *holding fire* from
+/// *not being in a fight*.
+#[test]
+fn backfilled_weapons_hold_fire_until_red_alert() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let target_uuid = "cc000000-0000-0000-0000-000000000042";
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000041",
+        target_uuid,
+        vec![(wide_bank("fore", 0.0), shipped_player_phaser_policy())],
+    );
+    // A ship UNDER ATTACK, with the alert still down. There is no return-fire
+    // leg anywhere in the authored predicate, and this is where that is
+    // asserted rather than assumed: the weapon does not arm itself because the
+    // ship is being hit.
+    app.world_mut().entity_mut(npc).insert((
+        crate::ship_state::ShipRedAlert(false),
+        crate::ship::combat_activity::RecentCombatActivity {
+            last_damage_taken: Some(0.0),
+            last_hostile_fire_taken: Some(0.0),
+            last_weapon_fired: None,
+            prev_hull: 0.0,
+        },
+    ));
+
+    // Several shared AI ticks, not one: "held this frame" would also be
+    // satisfied by a bank that simply had not been offered a decision yet.
+    for _ in 0..6 {
+        app.update();
+        assert!(
+            !app.world()
+                .get::<ActiveBeam>(npc)
+                .expect("the ship has a beam component")
+                .is_firing(),
+            "under fire, alert down: the backfilled bank must HOLD. Every host \
+             readiness gate has passed — the target is designated, in range and \
+             in arc — so the only thing refusing is the hull's authored predicate."
+        );
+    }
+    // AC3, first half: holding fire is not standing down. The tactical radar
+    // owns designation and the fire host only reads it, so a held bank must
+    // leave the lock exactly where it was.
+    assert_eq!(
+        app.world()
+            .get::<TacticalRadarSelection>(npc)
+            .and_then(|s| s.0.clone())
+            .as_deref(),
+        Some(target_uuid),
+        "a bank holding fire must still be TRACKING — designation is the target \
+         selector's decision and the fire gate must not reach it"
+    );
+
+    // The captain calls red alert. Nothing else about the world changes.
+    app.world_mut()
+        .entity_mut(npc)
+        .insert(crate::ship_state::ShipRedAlert(true));
+    // Two frames, because the deciders run on the ONE shared AI cadence
+    // (`ai_tick_ready`, issue #889) rather than per rendered frame — this is
+    // the very next AI tick, not a settling period.
+    app.update();
+    app.update();
+    assert!(
+        app.world()
+            .get::<ActiveBeam>(npc)
+            .expect("the ship has a beam component")
+            .is_firing(),
+        "AC3: the held bank opens fire on the next shared AI tick after red \
+         alert is raised. It was tracking all along, so there is no \
+         re-acquisition delay — only the gate had to open."
+    );
+}
+
+/// **AC5.** A Harrow bank fires with the alert down — same shipped predicate,
+/// always-armed threshold, no captain involved.
+///
+/// Paired deliberately with the test above: identical fixture, identical facts,
+/// identical guard EXPRESSION, opposite outcome. The only difference between
+/// them is a number in a TOML file.
+#[test]
+fn npc_weapons_fire_without_a_captain_raising_the_alert() {
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000051",
+        "cc000000-0000-0000-0000-000000000052",
+        vec![(wide_bank("fore", 0.0), shipped_harrow_phaser_policy())],
+    );
+    app.world_mut()
+        .entity_mut(npc)
+        .insert(crate::ship_state::ShipRedAlert(false));
+
+    app.update();
+    assert!(
+        app.world()
+            .get::<ActiveBeam>(npc)
+            .expect("the ship has a beam component")
+            .is_firing(),
+        "a Harrow has no bridge crew to call red alert; its authored \
+         `min_alert_to_fire = 0` is what lets it open the engagement at all"
     );
 }
 

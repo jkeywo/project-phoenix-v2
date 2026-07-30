@@ -506,11 +506,18 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # Starboard heavy bank.
@@ -532,11 +539,18 @@ beam_color = [1.0, 0.15, 0.05, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # ── The bow artillery piece (issue #792) ──────────────────────────────────────
@@ -611,11 +625,18 @@ range = 200.0
   # channel: unconditional, with the host still enforcing availability,
   # cooldown, range, arc and target validity before the volley starts.
   [weapons_console.blaster_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.blaster_banks.ai.rule]]
   priority = 0
   channel = "blaster_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
 # ── The close-defence launchers (issue #793) ──────────────────────────────────
@@ -693,6 +714,13 @@ ai_target_count = 1
   # so the launcher is kept ready between windows and the reload is the cost of
   # having taken a shot rather than a cost of taking one.
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -750,7 +778,7 @@ ai_target_count = 1
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
   verb = "launch_torpedo"
 
 # The AFT launcher — the player who gets behind a ship that cannot turn.
@@ -767,6 +795,13 @@ volley_max = 1
 ai_target_count = 1
 
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -777,7 +812,7 @@ ai_target_count = 1
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(loaded) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
   verb = "launch_torpedo"
 
 [comms]

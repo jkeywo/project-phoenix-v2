@@ -317,6 +317,14 @@ pub struct PhaserBankAiPolicies(
 /// bank's live readiness (target lock, cooldown, range, arc, frequency) before
 /// calling this, so the policy evaluates over the real per-bank state while
 /// `policy.rs` stays Bevy-free (AGENTS.md #10).
+/// `red_alert` is the SHIP-WIDE reading added by issue #872: this ship's own
+/// [`crate::ship_state::ShipRedAlert`], the same per-entity state the captain's
+/// `SetRedAlert` command writes for human and AI captains alike. It is seeded
+/// unconditionally (a ship with no component reads `0.0`, not absent) so an
+/// authored guard can read it in BOTH directions rather than only failing
+/// closed. Nothing in this file tests it — the fire gate is an authored
+/// predicate on the bank, never a Rust rule.
+#[allow(clippy::too_many_arguments)]
 pub fn seed_phaser_bank_facts(
     target_valid: bool,
     on_cooldown: bool,
@@ -324,6 +332,7 @@ pub fn seed_phaser_bank_facts(
     in_range: bool,
     in_arc: bool,
     frequency: f32,
+    red_alert: bool,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
@@ -332,6 +341,10 @@ pub fn seed_phaser_bank_facts(
     facts.set("in_range", if in_range { 1.0 } else { 0.0 });
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
     facts.set("frequency", frequency as f64);
+    facts.set(
+        crate::entities::config::POWER_RED_ALERT_FACT,
+        if red_alert { 1.0 } else { 0.0 },
+    );
     facts
 }
 
@@ -786,6 +799,11 @@ pub(crate) fn ai_phaser_auto_fire(
             Option<&crate::modifiers::ShipModifiers>,
             Option<&PhaserBankAiPolicies>,
             Option<&crate::ship_state::ShipPhaserFrequency>,
+            // Issue #872: this ship's own red-alert state, seeded as a typed
+            // fact for the bank's authored fire predicate. `Option<&_>` because
+            // bare-`App` weapons fixtures spawn ships without it; a missing
+            // component reads `false`, exactly as `ShipRedAlert::default()`.
+            Option<&crate::ship_state::ShipRedAlert>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -808,8 +826,13 @@ pub(crate) fn ai_phaser_auto_fire(
         modifiers_opt,
         bank_policies_opt,
         phaser_freq_opt,
+        red_alert_opt,
     ) in ship_q.iter_mut()
     {
+        // Read once per ship, seeded into every bank's fact snapshot below.
+        // NOT tested here: whether red alert gates fire is the authored
+        // predicate's business (issue #872).
+        let red_alert = red_alert_opt.is_some_and(|r| r.0);
         // Gate: auto-fire only when at least one phaser bank on this ship is
         // AI-driven (per its own fine-system policy — issue #512), OR the
         // player globally toggled phaser mode to Auto (LocalShip-only signal
@@ -900,6 +923,7 @@ pub(crate) fn ai_phaser_auto_fire(
                 ready,
                 ready,
                 phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+                red_alert,
             );
             (ready
                 && !cooldown.is_bank_active("")
@@ -969,6 +993,7 @@ pub(crate) fn ai_phaser_auto_fire(
                         range_ok,
                         arc_ok,
                         phaser_freq_opt.map(|f| f.0).unwrap_or(0.5),
+                        red_alert,
                     );
                     phaser_bank_policy_fires(policy, &facts).then(|| b.id.clone())
                 })

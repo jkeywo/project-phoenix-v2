@@ -197,11 +197,19 @@ marker = "phasers_omni"
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
+  # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
+  # is the SAME text on every armed hull in the fleet. Only this threshold
+  # differs: 1 means "hold fire until the captain calls red alert", 0 means
+  # "always armed". This hull has a captain's console (human, or an AI backfill
+  # operating the same system) to call it, so it holds. Delete the param and the
+  # guard and the weapon is ungated again — the gate is content, not code.
+  param = { min_alert_to_fire = 1.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # Forward blaster banks (issue #639): 45° forward blasters, port and starboard.
@@ -225,11 +233,19 @@ range = 35
   # channel: unconditional, with the host still enforcing availability,
   # cooldown, range, arc and target validity before the volley starts.
   [weapons_console.blaster_banks.ai]
+  # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
+  # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
+  # is the SAME text on every armed hull in the fleet. Only this threshold
+  # differs: 1 means "hold fire until the captain calls red alert", 0 means
+  # "always armed". This hull has a captain's console (human, or an AI backfill
+  # operating the same system) to call it, so it holds. Delete the param and the
+  # guard and the weapon is ungated again — the gate is content, not code.
+  param = { min_alert_to_fire = 1.0 }
 
   [[weapons_console.blaster_banks.ai.rule]]
   priority = 0
   channel = "blaster_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
 [[weapons_console.blaster_banks]]
@@ -252,11 +268,19 @@ range = 35
   # channel: unconditional, with the host still enforcing availability,
   # cooldown, range, arc and target validity before the volley starts.
   [weapons_console.blaster_banks.ai]
+  # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
+  # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
+  # is the SAME text on every armed hull in the fleet. Only this threshold
+  # differs: 1 means "hold fire until the captain calls red alert", 0 means
+  # "always armed". This hull has a captain's console (human, or an AI backfill
+  # operating the same system) to call it, so it holds. Delete the param and the
+  # guard and the weapon is ungated again — the gate is content, not code.
+  param = { min_alert_to_fire = 1.0 }
 
   [[weapons_console.blaster_banks.ai.rule]]
   priority = 0
   channel = "blaster_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
 [torpedoes]
@@ -285,6 +309,14 @@ marker = "torpedo_fore"
   # stay host-side gates. A tube that should hold fire authors a guard here —
   # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
+  # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
+  # is the SAME text on every armed hull in the fleet. Only this threshold
+  # differs: 1 means "hold fire until the captain calls red alert", 0 means
+  # "always armed". This hull has a captain's console (human, or an AI backfill
+  # operating the same system) to call it, so it holds. Delete the param and the
+  # guard and the weapon is ungated again — the gate is content, not code.
+  param = { min_alert_to_fire = 1.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -295,7 +327,7 @@ marker = "torpedo_fore"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -312,6 +344,14 @@ volley_max = 2
   # stay host-side gates. A tube that should hold fire authors a guard here —
   # `ship_harrow_cruiser.toml` is the worked example — or `idle = true`.
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
+  # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
+  # is the SAME text on every armed hull in the fleet. Only this threshold
+  # differs: 1 means "hold fire until the captain calls red alert", 0 means
+  # "always armed". This hull has a captain's console (human, or an AI backfill
+  # operating the same system) to call it, so it holds. Delete the param and the
+  # guard and the weapon is ungated again — the gate is content, not code.
+  param = { min_alert_to_fire = 1.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -322,7 +362,7 @@ volley_max = 2
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "launch_torpedo"
 
 [sensors_console]

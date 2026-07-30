@@ -584,11 +584,18 @@ beam_color = [1.0, 0.35, 0.08, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 [[weapons_console.phaser_banks]]
@@ -609,11 +616,18 @@ beam_color = [1.0, 0.35, 0.08, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # ── Torpedoes: the shield opportunity (issue #791) ────────────────────────────
@@ -671,6 +685,13 @@ ai_target_count = 2
   # a tube that starts loading when the shield goes down has already missed the
   # window (`load_time` is 9 s; the window is a few).
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -696,7 +717,7 @@ ai_target_count = 2
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -711,6 +732,13 @@ ai_target_count = 2
   # because a tube's policy is a property of the tube — a later refit that gives
   # one of them a different arc would change its answer and not the other's.
   [torpedoes.tubes.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -721,7 +749,7 @@ ai_target_count = 2
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(tubes_full) > 0 and fact(target_facing_shields) <= 0 and fact(in_arc) > 0"
   verb = "launch_torpedo"
 
 [comms]

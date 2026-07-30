@@ -786,6 +786,10 @@ pub(crate) fn ai_torpedo_auto_fire(
             Option<&crate::weapons_plugin::TorpedoSystemResource>,
             Option<&crate::weapons_plugin::TorpedoTubeAiPolicies>,
             &mut crate::messages::AdmittedCommands,
+            // Issue #872: this ship's own red-alert state, seeded as a typed
+            // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
+            // fixtures that spawn a ship without it; absent reads `false`.
+            Option<&crate::ship_state::ShipRedAlert>,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -818,8 +822,12 @@ pub(crate) fn ai_torpedo_auto_fire(
         torpedo_sys_comp,
         tube_policies,
         mut admitted,
+        red_alert_opt,
     ) in ships.iter_mut()
     {
+        // Read once per ship; seeded into every tube's launch snapshot. No Rust
+        // rule consults it — the gate is the tube's authored predicate (#872).
+        let red_alert = red_alert_opt.is_some_and(|r| r.0);
         let policy = control_sources.0.policy_for(&policy_sid);
         if !policy.operate_ai {
             continue;
@@ -981,6 +989,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 target_facing_shields,
                 tubes_full,
+                red_alert,
             );
             if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(launch_policy, &facts) {
                 continue;

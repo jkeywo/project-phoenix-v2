@@ -1272,6 +1272,129 @@ mod tests {
         );
     }
 
+    // ── The red-alert fire gate is DATA (issue #872) ────────────────────────
+
+    /// The shipped cruiser's authored fire gate, exactly as every armed hull in
+    /// the fleet writes it. One predicate text; only `min_alert_to_fire`
+    /// differs between a hull with a captain and a hull without.
+    const FIRE_GATE: &str = r#"when = "fact(red_alert) >= param(min_alert_to_fire)""#;
+
+    /// The cruiser authors the gate on two phaser banks and three torpedo
+    /// tubes. Stated as a number so a refit that adds or removes a weapon
+    /// fails here rather than silently leaving one of them unmutated — which is
+    /// how the mutation below would turn into a vacuous pass.
+    const CRUISER_GATED_WEAPONS: usize = 5;
+
+    /// Resolve every phaser bank on a hull's `phaser_fire` channel over a fact
+    /// snapshot with NO red alert.
+    fn phaser_banks_fire_with_the_alert_down(hull: &str) -> Vec<bool> {
+        let cfg = crate::entities::config::EntityConfig::from_toml(hull)
+            .expect("the hull under test must load");
+        let mut facts = crate::world::flags::AiFacts::new();
+        facts.set(crate::entities::config::POWER_RED_ALERT_FACT, 0.0);
+        cfg.weapons_console
+            .as_ref()
+            .expect("the hull carries phasers")
+            .phaser_banks
+            .iter()
+            .map(|bank| {
+                let policy = bank
+                    .ai
+                    .as_ref()
+                    .expect("every shipped bank authors a policy")
+                    .to_policy()
+                    .expect("and it decodes");
+                policy.resolve_channel(crate::entities::config::PHASER_FIRE_CHANNEL, &facts, &[])
+                    == Some(&crate::ai::policy::AiPolicyVerb::FirePhaser)
+            })
+            .collect()
+    }
+
+    /// **AC4, the data-driven proof.** A hull whose authored fire predicate is
+    /// removed has NO fire gate.
+    ///
+    /// The claim under test is not "red alert gates fire" — it is that the
+    /// gating lives in `assets/entities/*.toml` and nowhere else. So this runs
+    /// the real load path over the real shipped cruiser twice: once as shipped,
+    /// where the alert is down and every bank holds; and once with the guard
+    /// string-substituted back to the unconditional `when = "true"` the hulls
+    /// carried before #872, where every bank fires on the same snapshot. The
+    /// `min_alert_to_fire` param is deliberately LEFT DECLARED in the mutated
+    /// copy: it is the predicate that gates, and an unreferenced param gates
+    /// nothing.
+    ///
+    /// If any Rust host were to test red alert itself, the second half would
+    /// still hold and the behavioural tests would still pass — which is why
+    /// `no_weapons_host_decides_fire_from_red_alert_in_rust` sits beside this
+    /// one.
+    #[test]
+    fn removing_the_authored_fire_gate_removes_the_gate() {
+        let shipped = phaser_banks_fire_with_the_alert_down(CRUISER);
+        assert_eq!(
+            shipped.len(),
+            2,
+            "the cruiser's two phaser banks are the subject of this test"
+        );
+        assert!(
+            shipped.iter().all(|fired| !fired),
+            "as shipped, with the alert down, every cruiser bank holds fire"
+        );
+
+        let ungated = with_guard_everywhere(
+            CRUISER,
+            FIRE_GATE,
+            r#"when = "true""#,
+            CRUISER_GATED_WEAPONS,
+        );
+        let mutated = phaser_banks_fire_with_the_alert_down(&ungated);
+        assert!(
+            mutated.iter().all(|fired| *fired),
+            "with the authored predicate removed the SAME hull, through the SAME \
+             load path, on the SAME fact snapshot, fires with no red alert. The \
+             gate is the authored predicate — nothing in Rust reimposes it."
+        );
+    }
+
+    /// The other half of AC4: no weapons host decides fire from red alert in
+    /// Rust. The hosts may only SEED the fact.
+    ///
+    /// Without this, a Rust-side `if red_alert` could be added beside the
+    /// authored predicate and every other test in the issue would still pass —
+    /// the behaviour would look identical right up until a designer removed the
+    /// predicate and found the gate still there.
+    #[test]
+    fn no_weapons_host_decides_fire_from_red_alert_in_rust() {
+        for file in [
+            "src/console/weapons/beam.rs",
+            "src/console/weapons/blaster.rs",
+            "src/console/weapons/torpedo.rs",
+            "src/console_ai/server.rs",
+        ] {
+            // The ONE permitted branch on the value: turning the bool into the
+            // `1.0`/`0.0` the fact carries. Removed before the scan so the scan
+            // itself can be blunt.
+            let src = read_non_test_source(file).replace("if red_alert { 1.0 } else { 0.0 }", "");
+            // Everything else that branches on it — `if red_alert`,
+            // `&& red_alert`, `!red_alert` — is a Rust rule and belongs in TOML.
+            for forbidden in [
+                "if red_alert",
+                "&& red_alert",
+                "|| red_alert",
+                "!red_alert",
+                "if !red_alert",
+                "red_alert {",
+            ] {
+                assert!(
+                    !src.contains(forbidden),
+                    "{file} contains `{forbidden}`: a weapons host is deciding fire \
+                     from red alert in Rust. The host's only job is to SEED \
+                     `fact(red_alert)`; the decision is the hull's authored \
+                     predicate (issue #872, AC4)."
+                );
+            }
+        }
+    }
+
     /// The premise that makes stage 1 zero-risk: nothing shipped authors one, so
     /// every hull must still load. Rechecked here rather than assumed, because
     /// the rejection is only free while it stays true.

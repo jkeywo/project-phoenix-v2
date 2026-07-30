@@ -85,6 +85,11 @@ pub fn seed_torpedo_tube_load_facts(
 /// gap in one go needs the stronger one. Note `target_facing_shields` beside it
 /// is an HP reading, not a boolean: `<= 0` means the striking arc is not
 /// blocking (down, or absent entirely).
+/// `red_alert` is the other SHIP-WIDE reading, added by issue #872 — this
+/// ship's own [`crate::ship_state::ShipRedAlert`]. Seeded on the LAUNCH
+/// snapshot only: loading a tube and granting a round from the magazine are not
+/// offensive fire and stay ungated.
+#[allow(clippy::too_many_arguments)]
 pub fn seed_torpedo_tube_launch_facts(
     loaded: bool,
     target_valid: bool,
@@ -92,6 +97,7 @@ pub fn seed_torpedo_tube_launch_facts(
     in_arc: bool,
     target_facing_shields: i32,
     tubes_full: bool,
+    red_alert: bool,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("loaded", if loaded { 1.0 } else { 0.0 });
@@ -100,6 +106,10 @@ pub fn seed_torpedo_tube_launch_facts(
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
     facts.set("target_facing_shields", target_facing_shields as f64);
     facts.set("tubes_full", if tubes_full { 1.0 } else { 0.0 });
+    facts.set(
+        crate::entities::config::POWER_RED_ALERT_FACT,
+        if red_alert { 1.0 } else { 0.0 },
+    );
     facts
 }
 

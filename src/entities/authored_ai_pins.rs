@@ -254,8 +254,8 @@ fn authored_selectors(c: &EntityConfig) -> Vec<(&'static str, FineSystemAiSelect
 // 1. The fleet baseline — what replaced the not-equal-to-the-synthesiser pin
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The twelve (hull, slot) pairs where a hull authors a policy that
-/// DELIBERATELY differs from the rest of the fleet.
+/// The (hull, slot) pairs where a hull authors a policy that DELIBERATELY
+/// differs from the rest of the fleet.
 ///
 /// These are the authored manoeuvres (#790–#792, #801) that make three Harrow
 /// hulls fly differently from everything else: the broadside orbit and its
@@ -302,6 +302,40 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("ship_harrow_warhawk", "impulse"),
     ("ship_harrow_warhawk", "torpedo_tube[fore]"),
     ("ship_harrow_warhawk", "torpedo_tube[aft]"),
+    // ── The always-armed Harrow gun line (issue #872) ────────────────────────
+    //
+    // Every offensive weapon in the fleet is gated by ONE authored predicate,
+    // `fact(red_alert) >= param(min_alert_to_fire)`, and the hulls differ only
+    // in the threshold. An Alliance hull authors 1 — it has a captain's console
+    // and holds fire until the alert is called. A Harrow authors 0 — always
+    // armed, because it has no bridge crew to call one and its captain policy
+    // stands the alert down out of combat, so a Harrow that waited would never
+    // open fire at all.
+    //
+    // That single number is a real doctrinal departure and the list has to say
+    // so, in both directions: a Harrow gun that quietly acquires the player
+    // threshold stops shooting (and only this entry notices), and an Alliance
+    // gun that quietly acquires the Harrow one becomes a weapon that fires with
+    // the crew stood down (and the unanimity requirement notices that).
+    //
+    // The four Harrow tubes are NOT repeated here — they are already listed
+    // above for their arc-aware launch doctrine, and they carry the same
+    // threshold.
+    ("ship_harrow_cruiser", "phaser_bank[fore]"),
+    ("ship_harrow_cruiser", "phaser_bank[aft]"),
+    ("ship_harrow_destroyer", "blaster_bank[harrow-lance-port]"),
+    (
+        "ship_harrow_destroyer",
+        "blaster_bank[harrow-lance-starboard]",
+    ),
+    ("ship_harrow_lancer", "phaser_bank[lash]"),
+    ("ship_harrow_lancer", "blaster_bank[spike]"),
+    ("ship_harrow_lancer", "torpedo_tube[lance]"),
+    ("ship_harrow_patrol", "phaser_bank[port]"),
+    ("ship_harrow_patrol", "phaser_bank[starboard]"),
+    ("ship_harrow_warhawk", "phaser_bank[port]"),
+    ("ship_harrow_warhawk", "phaser_bank[starboard]"),
+    ("ship_harrow_warhawk", "blaster_bank[bow_artillery]"),
 ];
 
 fn is_bespoke(hull: &str, slot: &str) -> bool {
@@ -768,6 +802,141 @@ fn power_guard_truth_table() {
     );
 }
 
+/// The offensive-weapon RED-ALERT fire gate, on all three fire channels, in
+/// both directions and on both sides of the fleet (issue #872).
+///
+/// This is the truth table the three fire channels moved into when
+/// [`the_unconditional_baselines_fire_with_no_facts`] stopped being able to
+/// claim them. It is deliberately stronger than the entry it replaced: the old
+/// one could only say "this guard resolves"; this one says the guard resolves
+/// BECAUSE of a fact, by showing the same policy holding when the fact says
+/// otherwise, and it does so over the authored threshold rather than a literal.
+///
+/// The gate is content, not code. Nothing in `beam.rs`, `blaster.rs`,
+/// `torpedo.rs` or `console_ai/server.rs` tests red alert to decide firing —
+/// they only SEED `fact(red_alert)` — so if this predicate were deleted from
+/// the TOML the weapons would fire ungated, which
+/// `ai_flag_hosts::removing_the_authored_fire_gate_removes_the_gate` proves on
+/// a real shipped hull.
+#[test]
+fn weapons_fire_guard_truth_table() {
+    // (policy kind, fire channel, the verb the channel yields)
+    let channels = [
+        ("phaser_bank", "phaser_fire", AiPolicyVerb::FirePhaser),
+        ("blaster_bank", "blaster_fire", AiPolicyVerb::FireBlaster),
+        (
+            "torpedo_tube",
+            "torpedo_launch",
+            AiPolicyVerb::LaunchTorpedo,
+        ),
+    ];
+
+    // ── The fleet baseline: a hull WITH a captain, so it holds ──────────────
+    for (kind, channel, want) in &channels {
+        let p = fleet_baseline_policy(kind);
+        let threshold = param(&p, "min_alert_to_fire");
+        assert_eq!(
+            threshold, 1.0,
+            "{kind}: a hull with a captain's console authors a threshold of 1 — \
+             `fact(red_alert)` is seeded 1/0, so anything else would not be a gate."
+        );
+
+        assert_eq!(
+            resolve(&p, channel, &facts(&[("red_alert", 1.0)])).as_ref(),
+            Some(want),
+            "{kind}/{channel}: red alert raised ⇒ fire. Every readiness gate the \
+             host owns (cooldown, range, arc, target validity) has already passed \
+             by the time the policy is asked."
+        );
+        assert_eq!(
+            resolve(&p, channel, &facts(&[("red_alert", 0.0)])),
+            None,
+            "{kind}/{channel}: red alert DOWN ⇒ hold, and this is the half that \
+             makes the assertion above mean something. The host offered the \
+             decision — the weapon is loaded, bearing and in range — and the \
+             authored guard is the only thing refusing."
+        );
+        // Under fire changes nothing: there is no "return fire" leg anywhere in
+        // the predicate, which is the point of AC2. A ship being shot at is
+        // shot at whether or not its own facts say so, and the only fact that
+        // opens this gate is the captain's.
+        assert_eq!(
+            resolve(
+                &p,
+                channel,
+                &facts(&[
+                    ("red_alert", 0.0),
+                    ("target_valid", 1.0),
+                    ("in_range", 1.0),
+                    ("in_arc", 1.0),
+                    ("loaded", 1.0),
+                    ("tubes_full", 1.0),
+                    ("target_facing_shields", 0.0),
+                ])
+            ),
+            None,
+            "{kind}/{channel}: every OTHER reading favourable and the alert still \
+             down ⇒ hold. Nothing but red alert opens this gate."
+        );
+        // The absent-fact edge (#779). The host seeds `red_alert`
+        // unconditionally, so this case cannot arise at runtime — but a
+        // misspelled fact name would present exactly like it, and the answer
+        // must be "hold" rather than "fire", i.e. the gate must fail CLOSED.
+        assert_eq!(
+            resolve(&p, channel, &facts(&[])),
+            None,
+            "{kind}/{channel}: with no `red_alert` reading at all the comparison \
+             reads false and the weapon holds. A guard that failed open here \
+             would be a gate that a typo removes."
+        );
+    }
+
+    // ── The Harrow gun line: always armed, same predicate text ──────────────
+    let harrow = entity("ship_harrow_patrol");
+    let bank = harrow
+        .weapons_console
+        .as_ref()
+        .expect("the Harrow patrol carries phasers")
+        .phaser_banks
+        .first()
+        .expect("…at least one bank");
+    let p = policy(
+        bank.ai
+            .as_ref()
+            .expect("every shipped bank authors a policy"),
+    );
+    assert_eq!(
+        param(&p, "min_alert_to_fire"),
+        0.0,
+        "the Harrow authors the always-armed threshold"
+    );
+    assert_eq!(
+        p.rules
+            .iter()
+            .find(|r| r.channel == "phaser_fire")
+            .expect("the bank authors a phaser_fire rule")
+            .when,
+        fleet_baseline_policy("phaser_bank")
+            .rules
+            .iter()
+            .find(|r| r.channel == "phaser_fire")
+            .expect("so does the baseline")
+            .when,
+        "ONE predicate, two thresholds: the Harrow's guard EXPRESSION must be \
+         identical to the fleet baseline's. If the two ever diverge into separate \
+         doctrines, the claim that this gate is one authored rule serving both \
+         sides of the fleet is no longer true."
+    );
+    for snapshot in [facts(&[("red_alert", 0.0)]), facts(&[("red_alert", 1.0)])] {
+        assert_eq!(
+            resolve(&p, "phaser_fire", &snapshot),
+            Some(AiPolicyVerb::FirePhaser),
+            "the Harrow fires with the alert up OR down — it has no captain to \
+             raise one, and the threshold of 0 is how the hull says so."
+        );
+    }
+}
+
 /// The unconditional baseline policies fire on an EMPTY fact snapshot.
 ///
 /// This is what "baseline preserving" means for them: the pre-policy hosts
@@ -788,14 +957,20 @@ fn the_unconditional_baselines_fire_with_no_facts() {
         ("lateral", "lateral", AiPolicyVerb::ActuateLateralThrust),
         ("vertical", "vertical", AiPolicyVerb::ActuateVerticalThrust),
         ("impulse", "impulse", AiPolicyVerb::EngageImpulse),
-        ("phaser_bank", "phaser_fire", AiPolicyVerb::FirePhaser),
-        ("blaster_bank", "blaster_fire", AiPolicyVerb::FireBlaster),
+        // The three OFFENSIVE fire channels used to be listed here. Issue #872
+        // gated them on an authored red-alert predicate, so they are no longer
+        // unconditional by construction and asserting they fire on an empty
+        // snapshot would now be asserting the gate away. They moved to
+        // [`weapons_fire_guard_truth_table`], which proves the same #779
+        // property in the stronger form the gate demands: the guard fires when
+        // its fact is seeded, and reads false when it is not.
+        //
+        // LOADING a tube and GRANTING a round from the magazine stay here.
+        // Neither is offensive fire — a tube kept full between engagements is
+        // exactly what makes "fire the instant the alert is called" possible —
+        // so both remain unconditional and both must still resolve with no
+        // facts at all.
         ("torpedo_tube", "torpedo_load", AiPolicyVerb::LoadTorpedo),
-        (
-            "torpedo_tube",
-            "torpedo_launch",
-            AiPolicyVerb::LaunchTorpedo,
-        ),
         (
             "torpedo_magazine",
             "torpedo_magazine_grant",

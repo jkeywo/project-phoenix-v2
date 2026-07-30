@@ -56,12 +56,17 @@ pub struct BlasterBankAiPolicies(
 /// edge for blaster banks: the host resolves the bank's live readiness before
 /// calling this, so a `fact(...)` guard evaluates over real per-bank state while
 /// `policy.rs` stays Bevy-free.
+/// `red_alert` is the SHIP-WIDE reading added by issue #872 — see
+/// [`crate::weapons_plugin::seed_phaser_bank_facts`] for the contract. Seeded
+/// unconditionally so an authored guard reads a real `0.0`, never an absent
+/// fact.
 pub fn seed_blaster_bank_facts(
     target_valid: bool,
     on_cooldown: bool,
     cooldown_remaining: f32,
     in_range: bool,
     in_arc: bool,
+    red_alert: bool,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
@@ -69,6 +74,10 @@ pub fn seed_blaster_bank_facts(
     facts.set("cooldown_remaining", cooldown_remaining as f64);
     facts.set("in_range", if in_range { 1.0 } else { 0.0 });
     facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
+    facts.set(
+        crate::entities::config::POWER_RED_ALERT_FACT,
+        if red_alert { 1.0 } else { 0.0 },
+    );
     facts
 }
 
@@ -244,6 +253,10 @@ pub(crate) fn tick_blaster_auto_fire(
             &BlasterSystemResource,
             Option<&BlasterBankAiPolicies>,
             &mut crate::messages::AdmittedCommands,
+            // Issue #872: this ship's own red-alert state, seeded as a typed
+            // fact for the bank's authored fire predicate. `Option<&_>` for
+            // bare-`App` fixtures; absent reads `false`.
+            Option<&crate::ship_state::ShipRedAlert>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -267,8 +280,12 @@ pub(crate) fn tick_blaster_auto_fire(
         blaster_res,
         bank_policies_opt,
         mut admitted,
+        red_alert_opt,
     ) in ship_q.iter_mut()
     {
+        // Read once per ship; seeded into every bank's snapshot. No Rust rule
+        // consults it — the gate is the bank's authored predicate (#872).
+        let red_alert = red_alert_opt.is_some_and(|r| r.0);
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
             Some(cfg) => any_blaster_bank_operates_ai(control_sources, &cfg.0),
@@ -337,7 +354,7 @@ pub(crate) fn tick_blaster_auto_fire(
             let Some(policy) = bank_policies_opt.and_then(|p| p.0.get(&bank.config.id)) else {
                 continue;
             };
-            let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc);
+            let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, red_alert);
             if blaster_bank_policy_fires(policy, &facts) {
                 banks_to_fire.push(bank.config.id.clone());
             }

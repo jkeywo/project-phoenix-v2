@@ -177,6 +177,8 @@ entities:
       rationale:
         - An NPC can carry alert state today but cannot be operated by Red Alert AI unless its system configuration declares that capability.
         - The capability is mandatory for behaviour-driven ships and must be AI-controlled; authors may still declare it explicitly for clarity.
+        - "Issue #871 (3394578e) left this provisioner in place but made it unexercised by shipped content. Every NPC hull now authors its own stations and its own red-alert provision, so the synthesised ownerless system is no longer reached by any shipped template; three existing tests that used shipped hulls to demonstrate it were re-pointed to inline fixtures rather than weakened, because their fixtures had stopped being examples of what they tested. The synthesis path itself is still live for a bare [behaviour] hull that authors none."
+        - "Issue #871 also makes the ai_only marker on the synthesised system load-bearing in a new place. It is ownerless by construction, so no station rating can reach it; ship::rating::seed_boot_ratings therefore runs a SECOND pass that sets every ai_only system to Ai after the per-station pass. Without it the system would fall to ControlSourceResolver's Human default and silently stop being AI-operated."
     architecture:
       kind: service
       authority: authoritative

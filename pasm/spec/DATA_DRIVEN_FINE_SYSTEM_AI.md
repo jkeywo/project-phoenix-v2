@@ -239,6 +239,46 @@ required window so runtime history remains bounded. These operators support
 existing needs such as failed separation progress, recent shield damage, and
 recent combat activity.
 
+**AS SHIPPED (issue #890, `59ce639f`) — read this in place of the list above.**
+There is ONE history atom, not five, and it counts shared AI **ticks** rather
+than durations:
+
+```
+history(<reducer>, <fact>, <capacity>) CMP <operand>
+```
+
+with `<reducer>` one of `min`, `max`, `net_change` (`HISTORY_REDUCERS`), and
+`<capacity>` a positive whole number of shared AI base ticks, usually authored
+as a `param(...)`. It is one atom compared against one operand — the shape every
+other atom in this grammar already has — so it composes with `and`/`or`/`not`
+and with `param(...)` operands for free. A bespoke `held(...)` predicate would
+have needed a new primitive per comparison direction, whereas `min` over a full
+window compared for at-least IS `BoundedHistory::all_at_least`; a test
+cross-checks the two over four series. Every reducer is gated on a FULL window:
+a partly-filled one measures a shorter span than the designer authored, so it
+reduces to nothing and the comparison reads `false`.
+
+`time_in_state()` is spelled `state_time` and shipped with #882; the remaining
+proposed spellings (`time_since`, `delta`, `sum`, `average`) do not exist and
+nothing authors them. The bounded-window need they were invented for is served
+by the one atom above.
+
+The windows live on the per-fine-system private memory bag (`AiPolicyMemory`),
+keyed by `(fact, capacity)` so two windows over the same reading with
+independent authored lengths are expressible. The set of windows is re-derived
+each fold from what the guards actually ask for, so "the loader calculates the
+largest required window" is realised as a per-tick derivation rather than a
+load-time calculation — bounded twice, by that derivation and by each window's own
+capacity. An absent reading CLEARS its window rather than being skipped, because
+a window closed over a hole would span more real time than its authored length
+while claiming not to.
+
+Everywhere the atom cannot be honoured is a **load error**, not a silent
+`false`: on the sixteen policy hosts that fold no window (only Helm engines,
+steering and boost do), in a stateless policy, in any target selector, and in
+any world trigger, trigger-action or entity `when` guard. So is an undeclared,
+non-integral or zero capacity param.
+
 ### 5.4 Ship power rating
 
 `power_rating(self)`, `power_rating(candidate)`, and `power_rating(target)`
@@ -346,13 +386,24 @@ damage gating.
 ## 9. Scheduling and evaluation
 
 AI uses an authoritative deterministic fixed-rate base tick aligned with
-Helm's control rhythm. The shipped precedent is the shared AI-helm sim tick
-(issue #803): one TOML-authored rate — `[global] ai_helm_tick_hz`, default
-30 Hz — gates every per-axis AI helm system, decoupling AI decisions from the
-host frame rate. Each fine-system policy declares an integer
-`evaluate_every_ticks`; omitted values may use the schema's documented parsing
-default. Systems such as Sensors, Power, Repair, or Comms may therefore run less
-often without introducing frame-dependent timers.
+Helm's control rhythm. Since issue #889 (`3d21957d`) there is exactly ONE such
+tick and every AI decider is on it: `AiTickTimer` / `AiTickReady` in
+`src/ai/cadence.rs`, authored as `[global] ai_tick_hz` (default 30 Hz, with the
+pre-#889 `ai_helm_tick_hz` key kept as a serde alias). The slower cadence that
+Captain, Sensors and the world-snapshot rebuild ride is **derived** from the
+base as a whole number of base ticks rather than kept as a second clock, and a
+non-integer relationship between the two authored rates is rejected at world
+load. No AI decision cadence remains a Rust literal.
+
+Each fine-system policy declares an integer `evaluate_every_ticks`; omitted
+values use the schema's parsing default of 1. **NOT YET HONOURED AT RUNTIME:**
+the field is authorable and validated (`u32`, so a non-integer multiple is a
+TOML type error; `0` is rejected outright, because a policy that never evaluates
+is an `idle = true` declaration rather than a cadence) but no host reads it, and
+nothing shipped authors a value other than the default. Running Sensors, Power,
+Repair or Comms less often as authored data is therefore still outstanding — see
+the `ai-policy-tick-scheduler` entity, which stays `proposed` for exactly this
+reason.
 
 For every eligible fine-system tick, evaluation order is:
 
@@ -377,13 +428,17 @@ same-tick reading is the correct one — the torpedo in-flight count is the
 shipped example — it pins its ordering explicitly against that resource's
 writers rather than silently taking the one-tick-stale blackboard copy.
 
-The **cadence** half of this contract is not yet met, and is tracked by issue
-**#889**. Today the six Helm axes run on the shared `ai_helm_tick_hz` latch,
-Captain and Sensors on a separate hardcoded 10 Hz timer, and the remaining
-hosts on no gate at all — which, because the sim sets are configured in Bevy's
-`Update`, means once per rendered frame. Until #889 unifies them, "every policy
-evaluates from state frozen at the same point in the tick" holds and "every
-policy evaluates on the same deterministic base cadence" does not.
+The **cadence** half of this contract was not met until issue **#889**, and the
+shape of the gap is worth keeping visible because it is the failure mode this
+section exists to prevent. Before it, the six Helm axes ran on the shared
+latch, Captain and Sensors on a separate hardcoded 10 Hz timer gated inside the
+system body by an `Option<Res<_>>` that fell back to every-tick when the
+resource was absent — which is every bare-`App` fixture in the crate, so the
+shipped cadence was exercised by no test at all — and eight further deciders on
+no gate whatsoever, which (because the sim sets are configured in Bevy's
+`Update`) means once per rendered frame. Both halves of the contract now hold at
+the BASE cadence. What remains unmet is only the authored per-system multiple
+described above.
 
 Their outputs are applied as a batch. A Sensors target change made this tick
 becomes visible to Tactical, Helm, or other policies on the next AI tick.

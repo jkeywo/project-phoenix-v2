@@ -335,7 +335,8 @@ entities:
         - Impulse should not force steering fully to zero; the standard steering multiplier is 0.1 so course correction remains possible but severe.
         - Boost is unavailable while impulse is active, regardless of the ship's normal boost capability.
         - The steering multiplier and any ship-specific override belong in authored capability data rather than executable constants.
-        - "Issue #780 made this state the AC6 home for authored impulse/boost MANOEUVRE POLICY: the [helm_console.impulse_ai] and [helm_console.boost_ai] blocks (HelmImpulseAiPolicy / HelmBoostAiPolicy) are authored per-hull and resolved by helm-impulse-ai-operator / helm-boost-ai-operator to decide whether each drive may engage this tick, respecting the ship's authored policy AND capability availability. Defaults preserve baseline (impulse unconditional permit, boost idle)."
+        - "Issue #780 made this state the AC6 home for authored impulse/boost MANOEUVRE POLICY: the [helm_console.impulse_ai] and [helm_console.boost_ai] blocks (HelmImpulseAiPolicy / HelmBoostAiPolicy) are authored per-hull and resolved by helm-impulse-ai-operator / helm-boost-ai-operator to decide whether each drive may engage this tick, respecting the ship's authored policy AND capability availability. At #780 an omitted block was filled by a Rust synthesiser whose defaults preserved the baseline (impulse unconditional permit, boost idle)."
+        - "Issue #885 (8555e336) removed that fallback. The synthesisers default_impulse_ai_config / default_boost_ai_config are DELETED, strict AI-declaration mode is the default in EntityConfig::from_toml, and an AI-capable fine system that declares no block is a LOAD ERROR — so on any hull that loads, both blocks are authored content. There is no longer a Rust-side default to describe."
     architecture:
       classification: authoritative
       owner: ship-capability-model
@@ -352,8 +353,6 @@ entities:
       symbols:
         - HelmImpulseAiPolicy
         - HelmBoostAiPolicy
-        - default_impulse_ai_config
-        - default_boost_ai_config
       tests:
         - cargo test
 
@@ -866,7 +865,8 @@ entities:
         - "Issue #824: like its three siblings it no longer writes the intent component directly — it emits through the shared validate_and_admit seam."
         - "Issue #743: horizontal collision avoidance moved into the shared hazard-assessment surface. This operator no longer re-derives the projected-collision geometry; it reads HazardAssessment.hazard_forces from the planner's HelmMotionPlan and weights the starboard repulsion by the hull's authored lateral_hazard_sensitivity. The docking translation still overrides it (issue #742) and the emit → admit → apply arbiter path is unchanged."
         - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
-        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmLateralAiPolicy (attached at spawn from [helm_console.lateral_ai], else default_lateral_ai_config — unconditional actuate) resolves the lateral channel to the actuate_lateral_thrust mode verb over a fact snapshot seeded from the shared hazard surface (seed_helm_actuator_facts). A hold resolution emits nothing; the docking translation remains an UNCONDITIONAL sanctioned override applied before the gate. The dodge magnitude still comes from HazardAssessment.hazard_forces weighted by lateral_hazard_sensitivity — avoidance BENDS travel without swapping the doctrine (AC3)."
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmLateralAiPolicy (attached at spawn from [helm_console.lateral_ai]) resolves the lateral channel to the actuate_lateral_thrust mode verb over a fact snapshot seeded from the shared hazard surface (seed_helm_actuator_facts). A hold resolution emits nothing; the docking translation remains an UNCONDITIONAL sanctioned override applied before the gate. The dodge magnitude still comes from HazardAssessment.hazard_forces weighted by lateral_hazard_sensitivity — avoidance BENDS travel without swapping the doctrine (AC3)."
+        - "Issue #885 (8555e336) deleted the default_lateral_ai_config synthesiser that used to stand in for an unauthored block with an unconditional actuate. Strict AI-declaration mode is now the default, so an undeclared [helm_console.lateral_ai] fails the entity load instead of being invented; every shipped hull authors the block."
     architecture:
       kind: service
       authority: authoritative
@@ -895,7 +895,6 @@ entities:
         - HelmLateralAiPolicy
         - HELM_LATERAL_CHANNEL
         - HELM_ACTUATE_LATERAL_THRUST_VERB
-        - default_lateral_ai_config
         - seed_helm_actuator_facts
       tests:
         - cargo test
@@ -904,12 +903,19 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: AI Helm Tick Cadence
-      summary: Shared fixed-rate sim tick (one AiHelmTickTimer plus an AiHelmTickReady latch) that gates the helm decision-surface assembly (build_helm_ai_surfaces_frame) and all four per-axis AI helm systems — ai_helm_thrust, ai_helm_steering, ai_helm_impulse, and ai_helm_lateral_thrust — so AI helm decisions run at a TOML-authored rate instead of once per rendered frame.
+      title: AI Decision Cadence
+      summary: The single fixed-rate AI decision cadence (one AiTickTimer plus the AiTickReady latch, with AiSnapshotReady derived from it as an integer multiple) that gates every AI decider — the helm decision-surface assembly, the six per-axis helm systems and the policy state tick on the base latch, together with shield focus, power allocation, torpedo load and launch, frequency hint, phaser and blaster auto-fire and Tactical target selection; Captain, Sensors and the world-snapshot / doctrine-aggregation rebuild ride the derived slower latch. AI decisions therefore run at a TOML-authored rate instead of once per rendered frame.
       rationale:
-        - "Issue #803: AI helm decisions were coupled to host frame rate — a 144 Hz host steered on ~4x fresher data than a 60 Hz one — a determinism blocker for P2P lockstep (PRD #620). One shared timer replaces per-frame execution and the private AiLateralThrustTimer."
-        - "The tick rate is data-driven: [global] ai_helm_tick_hz in the world TOML, serde default 30 Hz (the old lateral timer's period), reconciled from WorldConfig at runtime because the timer resource is built before the config exists."
-        - Existing ordering edges between the gated systems are preserved; the latch follows the AiSnapshotTimer idiom because run_if conditions must use read-only params.
+        - "Issue #803 introduced the first shared latch, for the helm axes only: AI helm decisions were coupled to host frame rate — a 144 Hz host steered on ~4x fresher data than a 60 Hz one — a determinism blocker for P2P lockstep (PRD #620). One shared timer replaced per-frame execution and the private AiLateralThrustTimer."
+        - "Issue #889 (3d21957d) made it the ONE cadence for all AI, and moved the machinery into the new src/ai/cadence.rs. Before it the cadence was fragmented three ways: the six helm axes on the authored latch; Captain and Sensors on a HARDCODED 10 Hz AiSnapshotTimer gated inside the system body by an Option<Res<_>> that fell back to evaluating every tick when the resource was absent (which every bare-App fixture in the crate hit, so the shipped cadence was exercised by no test at all); and eight further deciders on no gate whatsoever. Because SimSet is configured in Bevy's Update, no gate means once per rendered frame — see AGENTS.md rule #7, which now states this."
+        - "The base rate is authored as [global] ai_tick_hz (serde default 30 Hz). The pre-#889 key ai_helm_tick_hz survives as a serde ALIAS and every shipped world deliberately keeps authoring it, so the alias is exercised on every load rather than only by a test. The timer resource is built at plugin registration, before any WorldConfig exists, so tick_ai_cadence reconciles its period against the loaded config each frame."
+        - "The slower cadence is DERIVED, not a second clock. GlobalConfig::checked_snapshot_every_ticks resolves ai_tick_hz / ai_snapshot_hz to a whole number of base ticks, and AiSnapshotPhase counts them; a non-integer relationship (e.g. 25 Hz against 10 Hz) is rejected in world::config::parse_world at load rather than silently rounded, so the two AI clocks can never be commensurate only by luck."
+        - "register_ai_cadence is a plain idempotent function rather than a Plugin because several plugins each register gated systems and duplicate registration of tick_ai_cadence would advance the timer more than once per frame. tick_ai_cadence itself is registered in Bevy's Last schedule: every gated system lives in Update, so the latch is guaranteed consumed before it is re-armed without an .after() edge against each gated system — an edge that would silently degrade to an empty constraint in any fixture that does not register them all."
+        - "Existing ordering edges between the gated systems are preserved; the latch idiom (a boolean resource written by a tick system and read by a run condition) is unchanged, because run_if conditions must take read-only parameters."
+        - "The one decider that needed more than a gate is the Sensors frequency hint: it accumulates Time::delta, so gating it alone would have STRETCHED the authored delay by the frame-to-tick ratio — twice at 60 Hz, nearly five times at 144 — making it more frame-dependent rather than less. It now advances on the authored tick period."
+        - "Behaviour was measured, not assumed: a balance A/B over 192 duel runs (sixteen class matchups by twelve seeds) reports identical win rates, 70W/73L/13D/36T on both sides, with time-to-kill moving at most one reporting quantum and always slower — the expected consequence of a bank that becomes ready mid-tick waiting for the next one."
+        - "Seventeen fixtures broke because they assumed one app.update() was one decision. Each was fixed by ticking the latch (cadence::arm_ai_tick), never by restoring an every-tick fallback or loosening an assertion."
+        - "The authored PER-POLICY multiple is a separate, still-open half — see ai-policy-tick-scheduler, which stays proposed."
     architecture:
       kind: scheduler
       authority: authoritative
@@ -921,15 +927,26 @@ entities:
     implementation:
       status: observed
       paths:
+        - src/ai/cadence.rs
+        - src/ai/server.rs
         - src/ship/helm_ai.rs
         - src/ship_plugin.rs
+        - src/console_ai/server.rs
+        - src/console/weapons/mod.rs
+        - src/entities/config.rs
         - src/world/config.rs
         - assets/worlds/default.toml
       symbols:
-        - AiHelmTickTimer
-        - AiHelmTickReady
-        - tick_ai_helm_timer
-        - ai_helm_tick_ready
+        - AiTickTimer
+        - AiTickReady
+        - AiSnapshotReady
+        - AiSnapshotPhase
+        - tick_ai_cadence
+        - ai_tick_ready
+        - ai_snapshot_ready
+        - register_ai_cadence
+        - checked_snapshot_every_ticks
+        - snapshot_every_ticks
       tests:
         - cargo test
 
@@ -975,7 +992,8 @@ entities:
       title: Helm Engines AI Operator
       summary: Data-authored #775 fine system whose stateless policy resolves a longitudinal-channel mode verb (actuate_desired_travel) to decide whether to actuate this tick; when it fires, the host emits SetThrust with the continuous magnitude decoded from the shared DesiredMotion planner fact, slowing for arrival and collision avoidance according to ship capability.
       rationale:
-        - "Issue #779 (AC1): Engines is the first continuous fine actuator moved onto the authored #775 policy spine. The DECISION to actuate flows through HelmEnginesAiPolicy (attached at spawn from [helm_console.engines_ai], else default_engines_ai_config) resolving the longitudinal channel to the actuate_desired_travel mode verb, replacing the pre-#779 unconditional hardcoded branch in ai_helm_thrust."
+        - "Issue #779 (AC1): Engines is the first continuous fine actuator moved onto the authored #775 policy spine. The DECISION to actuate flows through HelmEnginesAiPolicy (attached at spawn from [helm_console.engines_ai]) resolving the longitudinal channel to the actuate_desired_travel mode verb, replacing the pre-#779 unconditional hardcoded branch in ai_helm_thrust."
+        - "Issue #885 (8555e336) deleted the default_engines_ai_config synthesiser that used to fill an unauthored block (an unconditional actuate rule). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar. The forward/reverse magnitude stays sourced from DesiredMotion.desired_velocity_local, decoded by decode_thrust_from_velocity, so no geometry lives in the Bevy-free policy. A 'hold' resolution (no rule fires / explicit idle) emits nothing and the throttle coasts."
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetThrust a human sets, through emit_helm_ai_command; the per-axis operate_ai gate preserves human-takeover / backfill authority. Policy is stateless, so reacquisition needs no lifecycle reset."
         - "Issue #883 (AC5) CLOSED the #779 empty-facts gap on this axis. ai_helm_thrust constructed AiFacts::new() literally — an EMPTY snapshot — so any fact(...) guard on the longitudinal channel validated at load and was then false for ever. It now seeds the same hazard/availability snapshot #780 gave the secondary axes PLUS the new target-relative travel facts (seed_helm_travel_facts: target_valid, range_to_target, closing_rate, bearing_to_target, speed_fraction), computed host-side from the frame merged view and ShipPhysics so policy.rs stays Bevy-free. Engines may now also declare a #882 STATE MACHINE (HelmEnginesAiPolicyState, resolved through the shared resolve_helm_channel seam); every shipped hull remains stateless and unchanged."
@@ -983,7 +1001,7 @@ entities:
         - "Issue #883 also gave this axis a second travel arm. When the ship publishes an active HelmPassSurface, helm_motion_planner sources desired motion from the pure plan_fly_through_pass instead of plan_helm_travel: a flat authored approach/escape throttle with NO decel ramp. Only the INBOUND leg of that arm is gated on a resolvable target; the ESCAPE leg reads no target at all and runs on the frozen heading even after the target dies or leaves radar. helm_destroy was not reused or mode-flagged for this — it brakes at stop_dist and re-faces, which is a station-keeping orbit, the opposite of a pass."
         - "Issues #788/#790/#791/#792 grew that second arm from one leg set to four, all sourced the same way. The surface now also carries the shield-recovery standoff and its re-engage pivot (#788, plan_recovery_orbit), the shields-independent combat broadside orbit (#790, the same pure orbit arm at an authored radius), the bow-on torpedo bearing (#791) and the predictive artillery station-keep (#792, plan_artillery_position). Each leg supplies its own flat authored throttle — there is still no decel ramp on any of them — and each has #780's hazard contribution summed onto its facing before the shared clamp, so avoidance bends a ring or a hold and never changes a leg."
         - "Issue #790 widened the arm's ENTRY gate, which had been a latent content trap. HelmPassSurface.active used to mean 'the fly-through pass is authored' and the recovery legs rode along on it because the destroyer authors both; a hull that circles and makes no pass authors no approach_speed or escape_speed and would have flown ordinary doctrine travel for ever, silently. active now means 'at least one complete leg set is authored', and the pass's own two throttles gate only the inbound and re-engage legs through the separate pass_legs flag — kept separate because those two are the planner's FALLBACK leg, and a fallback flown on an unauthored throttle is a ship coasting at zero into a fight."
-        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794 (see legacy-ai-doctrine-retirement)."
+        - "Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794 (see legacy-ai-doctrine-retirement)."
     architecture:
       kind: service
       authority: authoritative
@@ -1017,7 +1035,6 @@ entities:
         - resolve_helm_channel
         - HELM_LONGITUDINAL_CHANNEL
         - HELM_ACTUATE_DESIRED_TRAVEL_VERB
-        - default_engines_ai_config
         - decode_thrust_from_velocity
         - integrate_ship_physics
       tests:
@@ -1030,14 +1047,15 @@ entities:
       title: Helm Steering AI Operator
       summary: Data-authored #775 fine system whose policy resolves one of the yaw channel's mode verbs to decide whether — and against which host-flown leg — to actuate this tick; when it fires, the host emits SetSteering with the continuous magnitude decoded from the shared DesiredMotion desired-facing fact, constrained to yaw until a full-3D ship capability enables additional rotational degrees of freedom.
       rationale:
-        - "Issue #779 (AC1): Steering is authored independently of Engines. The DECISION to actuate flows through HelmSteeringAiPolicy (attached at spawn from [helm_console.steering_ai], else default_steering_ai_config) resolving the yaw channel to the actuate_desired_facing mode verb, replacing the pre-#779 unconditional branch in ai_helm_steering. Arc-bearing remains a facing override this axis owns on top."
+        - "Issue #779 (AC1): Steering is authored independently of Engines. The DECISION to actuate flows through HelmSteeringAiPolicy (attached at spawn from [helm_console.steering_ai]) resolving the yaw channel to the actuate_desired_facing mode verb, replacing the pre-#779 unconditional branch in ai_helm_steering. Arc-bearing remains a facing override this axis owns on top."
+        - "Issue #885 (8555e336) deleted the default_steering_ai_config synthesiser that used to fill an unauthored block (an unconditional actuate rule). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar; the yaw magnitude stays sourced from DesiredMotion.desired_facing_local, decoded by decode_steering_from_facing. desired_facing_local stays a distinct public fact from desired_velocity_local (AC5). A 'hold' resolution emits nothing and yaw coasts."
         - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetSteering a human sets; the per-axis operate_ai gate preserves human-takeover / backfill authority with no lifecycle reset (stateless policy)."
         - "Issue #883 (AC5) closed the same empty-facts gap here: ai_helm_steering seeds the hazard/availability snapshot plus the target-relative travel facts before resolving, so a yaw guard actually evaluates."
         - "Issue #883 seeds this host's availability facts (impulse_available / boost_available) from the ship's own config resources rather than the hardcoded false ai_helm_steering used to pass — see the same note on ai_helm_thrust."
         - "Issues #788-#792 took the yaw channel to SEVEN legal verbs, one per host-flown leg, all still value-less MODE verbs and all resolved the same way: hold_recovery_orbit and pivot_to_reengage (#788), hold_combat_orbit (#790), hold_torpedo_bearing (#791), hold_artillery_position (#792). Verify the membership against HELM_STEERING_VERBS in src/entities/config.rs. This axis is where the leg is DECIDED, and build_pass_surface reads the leg off the authored verb the current state resolves — so the planner learns which arm to fly without ever learning a state name. The host still emits the planner-decoded yaw for EVERY verb, exactly as it does for the two below: the difference between them was already resolved upstream in which pure arm the planner ran, and overriding SteeringInput per-verb here would bypass the planner and stop #780 hazard avoidance composing onto any of these legs. Geometrically overlapping verbs are deliberately not merged, because each names the authored parameter set its leg requires — see the fine-system-ai-policy-schema rationale in data-driven-fine-system-ai.yaml."
         - "Issue #883 gave the yaw channel a SECOND mode verb, hold_committed_heading — at the time, the first channel in the schema with more than one legal verb (validated via HELM_STEERING_VERBS, then a pair). actuate_desired_facing means re-solve the facing against the world this tick; hold_committed_heading means the facing solution is CLOSED and the ship flies the heading the host froze in memory(escape_heading_rad) at the last committed transition. This is deliberately NOT the same as a None resolution: a hold holds the last admitted steering COMMAND, so a non-zero yaw at the moment of commitment would keep the ship turning for ever. The host still emits the planner-decoded yaw for BOTH verbs, because the difference was already resolved upstream — the planner solved the facing against the frozen heading rather than the moving target. Overriding SteeringInput here instead would bypass the planner and stop #780 hazard avoidance composing onto the committed heading."
-        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
+        - "Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence); full removal of the hardcoded plan_helm_travel planner branch is the coordinated tail #794."
     architecture:
       kind: service
       authority: authoritative
@@ -1073,7 +1091,6 @@ entities:
         - resolve_helm_channel
         - HELM_YAW_CHANNEL
         - HELM_ACTUATE_DESIRED_FACING_VERB
-        - default_steering_ai_config
         - decode_steering_from_facing
         - integrate_ship_physics
       tests:
@@ -1116,7 +1133,8 @@ entities:
         - Vertical thrust is a separate fine system even though it is not player-facing yet.
         - In bounded mode it should support AI-only above-below avoidance and then return toward the authored cruise plane when urgency falls.
         - This operator should react to moving hazards only, leaving static-obstacle responses to other helm actuators.
-        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmVerticalAiPolicy (attached at spawn from [helm_console.vertical_ai], else default_vertical_ai_config — unconditional actuate) resolves the vertical channel to the actuate_vertical_thrust mode verb over a fact snapshot seeded from the shared moving-hazard threat and the ship's current vertical offset (seed_helm_actuator_facts). The authored VerticalMovementMode still gates the magnitude host-side, so a Planar hull takes no Y component regardless of the verb (planar-facing contract preserved). A hold resolution emits nothing."
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmVerticalAiPolicy (attached at spawn from [helm_console.vertical_ai]) resolves the vertical channel to the actuate_vertical_thrust mode verb over a fact snapshot seeded from the shared moving-hazard threat and the ship's current vertical offset (seed_helm_actuator_facts). The authored VerticalMovementMode still gates the magnitude host-side, so a Planar hull takes no Y component regardless of the verb (planar-facing contract preserved). A hold resolution emits nothing."
+        - "Issue #885 (8555e336) deleted the default_vertical_ai_config synthesiser that used to fill an unauthored block (an unconditional actuate rule). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
     architecture:
       kind: service
       authority: authoritative
@@ -1142,7 +1160,6 @@ entities:
         - HelmVerticalAiPolicy
         - HELM_VERTICAL_CHANNEL
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
-        - default_vertical_ai_config
         - seed_helm_actuator_facts
       tests:
         - cargo test
@@ -1154,10 +1171,11 @@ entities:
       title: Helm Impulse AI Operator
       summary: Per-axis impulse decide system whose stateless policy resolves the impulse-channel engage_impulse mode verb to decide whether the impulse manoeuvre is PERMITTED this tick; the host then applies the authored doctrine use_impulse and decide_impulse geometry, emitting an admitted StartImpulseCharge/CancelImpulse only on a genuine engage/cancel transition.
       rationale:
-        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine while preserving the pre-#780 baseline exactly. HelmImpulseAiPolicy (attached at spawn from [helm_console.impulse_ai], else default_impulse_ai_config — unconditional permit) resolves the impulse channel to the engage_impulse mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts: impulse_available/boost_available). A hold resolution emits nothing."
+        - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine while preserving the pre-#780 baseline exactly. HelmImpulseAiPolicy (attached at spawn from [helm_console.impulse_ai]) resolves the impulse channel to the engage_impulse mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts: impulse_available/boost_available). A hold resolution emits nothing."
+        - "Issue #885 (8555e336) deleted the default_impulse_ai_config synthesiser that used to fill an unauthored block (an unconditional permit rule). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
         - "Availability + manoeuvre policy (AC6): impulse capability is the presence of ImpulseConfigResource — no config, no emit. The engage-vs-cancel decision itself stays host-side (decide_impulse geometry over the radar-gated visible view) and the authored doctrine use_impulse veto is unchanged, so the policy verb is an additional authored gate layered on top."
-        - "Runs on the shared ai_helm_tick cadence (AGENTS.md #7); emits through the shared validate_and_admit seam like its siblings (AGENTS.md #6). Full removal of the residual hardcoded decision is the coordinated tail #794."
-        - "Issue #792 CONTENT CONSTRAINT, discovered on the first hull that holds station inside its own drive's cruise window: the impulse autopilot HARD-OVERRIDES commanded throttle, so a doctrine that commands a dead stop at an authored radius inside impulse_engage_distance is simply flown through its own hold. The Harrow warhawk commanded a stop at 180 units and was carried to 22. The fix is authored, not host-side — [helm_console.impulse_ai] idle = true holds the drive off on the hull's own fine-system policy — which is exactly what the #780 default (unconditional permit) is there to be overridden by. Any future hull whose held radius falls inside impulse_engage_distance needs the same declaration; the symptom is a station-keeping doctrine that appears to work in the pure planner and closes to knife range in the live sim."
+        - "Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence); emits through the shared validate_and_admit seam like its siblings (AGENTS.md #6). Full removal of the residual hardcoded decision is the coordinated tail #794."
+        - "Issue #792 CONTENT CONSTRAINT, discovered on the first hull that holds station inside its own drive's cruise window: the impulse autopilot HARD-OVERRIDES commanded throttle, so a doctrine that commands a dead stop at an authored radius inside impulse_engage_distance is simply flown through its own hold. The Harrow warhawk commanded a stop at 180 units and was carried to 22. The fix is authored, not host-side — [helm_console.impulse_ai] idle = true holds the drive off on the hull's own fine-system policy — which is what the hull's own authored block is for; before #885 the same statement was made by overriding the #780 synthesiser's unconditional permit, and since #885 the block is authored either way. Any future hull whose held radius falls inside impulse_engage_distance needs the same declaration; the symptom is a station-keeping doctrine that appears to work in the pure planner and closes to knife range in the live sim."
     architecture:
       kind: service
       authority: authoritative
@@ -1185,7 +1203,6 @@ entities:
         - HelmImpulseAiPolicy
         - HELM_IMPULSE_CHANNEL
         - HELM_ENGAGE_IMPULSE_VERB
-        - default_impulse_ai_config
         - decide_impulse
         - seed_helm_actuator_facts
       tests:
@@ -1198,11 +1215,12 @@ entities:
       title: Helm Boost AI Operator
       summary: New per-axis boost decide system whose stateless policy resolves the boost-channel engage_boost mode verb to decide whether to engage boost this tick; it emits an admitted SetBoost through the SAME command-admission seam a human uses, on-change only, when the boost feature is available.
       rationale:
-        - "Issue #780 introduced AI boost for the first time. HelmBoostAiPolicy (attached at spawn from [helm_console.boost_ai], else default_boost_ai_config — explicit idle, no AI boost) resolves the boost channel to the engage_boost mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts). Fires ⇒ engage; holds ⇒ release. The idle default preserves the pre-#780 baseline (no AI boost) exactly."
+        - "Issue #780 introduced AI boost for the first time. HelmBoostAiPolicy (attached at spawn from [helm_console.boost_ai]) resolves the boost channel to the engage_boost mode verb over a fact snapshot seeded from the shared hazard surface and availability (seed_helm_actuator_facts). Fires ⇒ engage; holds ⇒ release. At #780 an unauthored block synthesised an explicit idle, preserving the pre-#780 baseline (no AI boost) exactly."
+        - "Issue #885 (8555e336) deleted the default_boost_ai_config synthesiser that used to fill an unauthored block (an explicit idle — no AI boost). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
         - "Issue #882 made Boost the demonstrator for the OPTIONAL stateful path, and issue #883 made it the first axis to use one in shipped content. ai_helm_boost now resolves through the shared resolve_helm_channel seam: stateless policies take the frozen resolve_channel path, a policy declaring a machine resolves the same channel inside the state ai_policy_state_tick committed earlier this tick, and the (machine declared, state component missing) case carries a debug_assert! instead of silently degrading. Its facts also gained the #883 target-relative travel readings, so an escape-leg boost rule can guard on the pass geometry (range/closing rate/speed fraction) and not only on hazard and state time."
         - "Issue #883 content note: [helm_console.boost] is MANDATORY for a hull whose doctrine boosts. The spawner only inserts an ENABLED BoostConfigResource when that block is authored, and this operator returns before doing anything without one — so omitting it produces a ship that runs its manoeuvre and silently loses the boost half of it. assets/entities/ship_harrow_destroyer.toml is the first Harrow hull to author it."
         - "Availability (AC6): boost capability is an ENABLED BoostConfigResource — absent or feature-disabled, the operator stands down and emits nothing (mirrors the shared applier's enabled-guard in process_helm_inputs)."
-        - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Issue #881 retired the LocalShip-only handle_boost_messages into process_helm_inputs, so this operator's emission now applies on EVERY AI ship rather than only the local one; before #881 a non-local NPC's SetBoost was admitted and never applied. Ordering is now identical to the four sibling actuators — ai_helm_boost is .before(process_helm_inputs), which is itself .before(apply_helm_commands) and thus .before(tick_boost) — so the AI-emitted SetBoost is still applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the shared ai_helm_tick cadence (AGENTS.md #7)."
+        - "Human/AI symmetry (AGENTS.md #6): boost is emitted as an admitted SetBoost via emit_ai_command — the SAME seam a human SetBoost/ToggleBoost passes through. Issue #881 retired the LocalShip-only handle_boost_messages into process_helm_inputs, so this operator's emission now applies on EVERY AI ship rather than only the local one; before #881 a non-local NPC's SetBoost was admitted and never applied. Ordering is now identical to the four sibling actuators — ai_helm_boost is .before(process_helm_inputs), which is itself .before(apply_helm_commands) and thus .before(tick_boost) — so the AI-emitted SetBoost is still applied the SAME tick, while a human SetBoost (admitted before Input) is still present and applied unchanged. Emits on-change only, mirroring ai_helm_impulse. Runs on the one shared AI decision cadence (AGENTS.md #7; ai_tick_ready — see ai-helm-tick-cadence)."
     architecture:
       kind: service
       authority: authoritative
@@ -1232,7 +1250,6 @@ entities:
         - seed_helm_travel_facts
         - HELM_BOOST_CHANNEL
         - HELM_ENGAGE_BOOST_VERB
-        - default_boost_ai_config
         - process_helm_inputs
         - seed_helm_actuator_facts
       tests:

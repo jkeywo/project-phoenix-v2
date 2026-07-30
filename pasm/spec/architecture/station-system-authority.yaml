@@ -4,9 +4,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Ship Station and System Topology
-      summary: Ship-authored station, fine-system, power-group, rating, and console topology that defines who may operate each capability.
+      summary: Ship-authored station, fine-system, power-group, rating, and console topology that defines who may operate each capability. Since issue #871 every shipped hull authors it, NPC hulls included.
       rationale:
         - Station ownership is the authority source for player access; console labels alone must not grant control.
+        - "Issue #871 (3394578e) removed the last class of ship that had no topology at all. All eight NPC hulls now carry [[station]] blocks with ratings, and every previously ownerless system is re-parented to a seat. NPC is now simply A STATIONED SHIP WITH NOBODY CONNECTED YET, rather than a second kind of ship with a second seeding rule."
+        - "Issue #871 leaves ai_only for exactly the systems that are ownerless BY CONSTRUCTION — the auto-generated per-arc shield_arc systems synthesised for a hull that declares no shields station, and the red_alert capability provisioned for a [behaviour] hull that authors none. ship::config::validate rejects an ownerless system that is not ai_only, so no station rating can ever reach them; that is why the boot seeding needs a second pass (below). Of shipped NPC hulls, the auto-generated shield arc is the only thing still relying on it — every hull now authors its own red-alert provision, which is why three existing tests were re-pointed to inline fixtures rather than weakened."
+        - "DELIBERATELY NOT DONE by #871: the full nine-seat mirror. The extra seats on the player cruiser and battleship exist because those hulls declare sensors, shields, navigation, repair and comms SYSTEMS; declaring those on NPC hulls would switch on five more backfill behaviours across every Harrow and pirate hull at once. That is authored behaviour rather than structure, it unmistakably moves the balance, and it belongs with the doctrine content. Each NPC hull gets the seats its declared systems support and no more. Related: every NPC hull now declares tactical-radar, which unblocked the data prerequisite #887 needed — but it does NOT make that radar damageable, since damage needs per-system hull entries that NPC hulls author none of and adding them would change hull HP budgets."
     architecture:
       kind: configuration-model
       authority: authoritative
@@ -94,7 +97,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Station Rating Controller
-      summary: Applies a station holder's selected rating and its configured automated systems to the authoritative control-source state, including a valid rating change during an active round.
+      summary: Applies a station holder's selected rating and its configured automated systems to the authoritative control-source state, including a valid rating change during an active round, and seeds every freshly spawned hull's ratings and control sources through one shared boot path.
+      rationale:
+        - "Issue #871 (3394578e) introduced ship::rating::seed_boot_ratings as the ONE boot path for every hull, player or NPC. It takes a per-station rating chooser: the player game-start path passes the lobby-chosen rating for a manned station and Backfill for an unmanned one, while the generic entity spawner passes Backfill for every station. The blanket loop that used to set every declared system to Ai in entities::spawner is deleted — it worked only while NPC hulls declared no stations, and once they do a system's control source has to come from its station's rating exactly as it does on a player hull, or a human taking an NPC seat could never be admitted."
+        - "seed_boot_ratings runs TWO passes and the second is load-bearing: after every station applies its rating, every ai_only system is set to Ai. Those systems are ownerless by construction, so no station rating can reach them, and without the pass they would fall to ControlSourceResolver's Human DEFAULT and silently stop being AI-operated. A hull with no stations at all still comes up fully AI for the same reason."
+        - "Behaviour preservation was the governing criterion for #871 and is pinned two ways: a test parses every shipped hull, runs the shared seed with nobody connected, and asserts every system comes up AI-operated and closed to human input — precisely what the old blanket loop produced — and the balance matrix is byte-identical across 192 duel runs (same win rates, same time-to-kill at every quantile, same damage margins)."
     architecture:
       kind: control-handler
       authority: authoritative
@@ -104,8 +111,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs]
-      symbols: [ActiveStationRatings]
+      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs, src/entities/spawner.rs, src/server_app.rs]
+      symbols: [apply_rating, seed_boot_ratings, ai_only_systems, BACKFILL_RATING]
       messages: [SetStationRating, RatingChanged]
       tests: [cargo test]
 

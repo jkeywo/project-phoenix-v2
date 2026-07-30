@@ -35,7 +35,9 @@ entities:
       status: implemented
       confidence: confirmed
       title: NPC AI Controller Provisioner
-      summary: Registers an AI token and all-AI system control sources for spawned entities that declare authored behavior (keyed off the BehaviourSection predicate).
+      summary: Registers an AI token for spawned entities that declare authored behavior (keyed off the BehaviourSection predicate), and seeds their control sources through the shared station-rating boot path.
+      rationale:
+        - "Issue #871 (3394578e) retired the all-AI loop this component used to run. entities::spawner no longer sets every declared system to ControlSource::Ai by fiat; it calls the shared ship::rating::seed_boot_ratings with Backfill for every station, which is the same function the player game-start path calls. The result is identical for an unmanned hull — every system AI-operated and closed to human input, pinned by a test over every shipped hull — but it now arrives through station ratings rather than around them, so a human who later takes an NPC seat can actually be admitted. See station-rating-controller in architecture/station-system-authority.yaml."
     architecture:
       kind: lifecycle-service
       authority: authoritative
@@ -92,8 +94,9 @@ entities:
       summary: Applies AI control policy separately per declared system — per-axis Helm systems (thrust, steering, impulse, lateral thrust), per-bank Tactical systems, and the Captain, Power, Shields, Sensors, Comms, Repair, and Navigation systems.
       rationale:
         - "There is no coarse helm or tactical policy since #801: helm gates are per-axis and tactical gates are per-fine-system; the dead coarse AI fallbacks were deleted."
-        - "All four per-axis AI helm systems share one fixed-rate sim tick (#803, TOML-authored [global] ai_helm_tick_hz, default 30 Hz), decoupling AI helm decisions from the host frame rate."
-        - "Issue #785 made the Repair operator policy-driven: operate_repair_ai ranks damaged stations through the ship's authored RepairTargetSelector ([repair.selector], else the canonical default) and emits ordinary admitted DispatchRepairTeam inputs, one per free team in ascending slot index. The hardcoded severity comparator is gone; the suite stays partially-implemented because other operators still carry host-side decision kernels."
+        - "Issue #885 (8555e336) completed the AUTHORING half of this suite: every operator now resolves content the hull declares, because the nineteen Rust synthesisers that used to invent a policy for an undeclared fine system are deleted and a missing declaration is a load error. The suite nonetheless stays partially-implemented for the unchanged reason — three operators still carry a host-side decision KERNEL that the authored verb only gates (Helm travel via plan_helm_travel, Helm impulse via decide_impulse plus the doctrine use_impulse veto, and Shields focus via tick_shield_focus_ai). See the exceptions on legacy-ai-doctrine-retirement."
+        - "The per-axis AI helm systems share one fixed-rate sim tick (#803). Issue #889 generalised that latch to EVERY operator in this suite: the six helm axes plus the Tactical, Shields, Power, torpedo, frequency-hint and weapon-bank deciders run on the base cadence ([global] ai_tick_hz, default 30 Hz), and Captain and Sensors on the slower cadence derived from it as a whole number of base ticks. No operator here runs once per rendered frame any more, and no decision rate is a Rust literal."
+        - "Issue #785 made the Repair operator policy-driven: operate_repair_ai ranks damaged stations through the ship's authored RepairTargetSelector ([repair.selector] — since #885 always authored, the canonical default having been deleted) and emits ordinary admitted DispatchRepairTeam inputs, one per free team in ascending slot index. The hardcoded severity comparator is gone; the suite stays partially-implemented because other operators still carry host-side decision kernels."
     architecture:
       kind: ai-controller
       authority: authoritative
@@ -107,18 +110,43 @@ entities:
 
   - component: ai-command-symmetry-migration
     core:
-      status: proposed
+      status: partially-implemented
       confidence: confirmed
       title: AI Command Symmetry Migration
-      summary: Planned migration in which NPC and Backfill AI express the same typed system inputs as a player, after objective and hazard calculation, instead of directly mutating downstream simulation state.
+      summary: Migration in which NPC and Backfill AI express the same typed system inputs as a player, after objective and hazard calculation, instead of directly mutating downstream simulation state.
       rationale:
         - Shared inputs make authority, damage gating, blackboards, and player/AI behavior auditable through one system path.
+        - "Issue #887 (b208d9aa) closed the last AI path that wrote an authoritative TARGET directly. ai_target_selection used to write TacticalRadarSelection itself; it now emits an admitted SetTarget on tactical-radar, and handle_set_target is the ONE applier for both origins. It also re-gated the decider on the RADAR's own operate_ai rather than on any tactical fine system being automated — the old predicate was strictly wider than the one admission applies to the human, which is what let an AI-operated tube or bank licence the AI to overwrite a human radar's lock. Because a system is either accepting human input or operating on AI and never both, gating both origins on the same SystemId makes the two structurally unable to collide rather than relying on ordering."
+        - "STATUS IS partially-implemented, NOT implemented, and the reason is the low-LOD substitute. simulate_low_lod_ships (src/ai/server.rs) writes ShipPhysics.x/z/yaw directly rather than through helm intent — the one AI writer of authoritative state that does not travel through admission. Issue #886 NARROWED the rule to sanction it rather than removing it; the narrowed rule is recorded below. Note also that only the MOVEMENT half of the rule has machine-checked enforcement (the #886 ShipPhysics writer tests); for targeting, system and weapon state the evidence is the per-system conversions plus the #887 host audit, which is weaker."
+        - "THE NARROWED RULE (issue #886, as ruled by the project owner): No AI system may write authoritative movement, targeting, system, or weapon state for a ship that HAS an admitted-command path to that state. A ship running below full simulation fidelity, which by construction carries no intent components, may be moved by its LOD substitute — provided that substitute is query-disjoint from the admitted path and encodes no decision the fidelity path would make differently."
+        - "ENFORCEMENT (78088098, part of #886) is machine-checked, not documentary. Two integration tests at the end of tests/headless_runner.rs walk EVERY schedule of the real headless app, collect every system with mutable ShipPhysics access exactly as the production plugins registered it, and hand the FilteredAccessSet Bevy itself derived to Bevy own disjointness prover (FilteredAccessSet::get_conflicts, the machinery that decides whether two systems may run in parallel) to assert that the low-LOD substitute (With<Ship>, Without<AiHighFidelity>) and the helm integrator (With<AiHighFidelity>) can never be handed the same entity. Nothing in the tests re-types a query, so they cannot drift from production, and the proof holds for every archetype that could exist rather than the ones a fixture happens to spawn. A second test pins the writer INVENTORY against the writer-policy table documented on ShipPhysics (src/ship/state.rs), so a one-shot correction that grows a filter, or an integrator that loses one, fails rather than passing quietly. Bevy observers sit in no schedule and escape the scan, so handle_slow_zone_speed_clamp is covered by the table alone."
+        - "THE BASIS FOR KEEPING LOD, recorded honestly because the measurement did not support the obvious argument. The PERFORMANCE case FAILED: the LOD split was measured at +5.3% of a tick, using roughly 6% of the frame budget — not a saving that buys a second write path on its own. It was kept for two other reasons. (1) Promotion is NOT behaviour-neutral: promoting every ship to full fidelity shifted scenario timing by about 30%, so retiring LOD would be a gameplay change dressed as a simplification. (2) The cost is LINEAR IN POPULATION, so 5.3% is a reading of today ship counts rather than a bound. The project owner ruled on that basis — LOD stays, because it will pay off later and the foundation is being laid now."
+        - "THE COUNTER-ARGUMENT THAT STAYS OPEN. The LOD split has produced SIX separate SILENT bugs (#692, #693, #695, #785, #786, #882/#883), every one of them a component present on one of its two spawn routes and missing on the other, and every one of them silent because a non-optional query simply skips the ship. ai::server::AiHighFidelityComponents / ai_high_fidelity_components exist to name those components ONCE so both routes insert them from one definition, and #885 added a spawn-site reconciliation test in the same family for the AI policy components. Neither retires the objection: the split still has two spawn routes, and that is the cost the performance measurement did not justify."
     architecture:
       kind: migration-target
       authority: authoritative
       reads: [npc-ai-controller-state, system-control-source-state]
       sends: [system-control-command]
       runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/ai/lod.rs
+        - tests/headless_runner.rs
+      symbols: [evaluate_lod, LodState]
+      tests: [cargo test]
+    evidence:
+      - kind: test
+        reference: low_lod_and_helm_ship_physics_writers_can_never_share_an_entity
+        summary: >-
+          Bevy's own access prover, applied to the access sets the real headless app derived from
+          every registered system, says the low-LOD ShipPhysics substitute and the helm integrator
+          can never be handed the same entity — so no ship is moved twice in a tick.
+      - kind: test
+        reference: ship_physics_writer_inventory_matches_the_policy_table
+        summary: >-
+          The set of scheduled systems that mutate ShipPhysics is reconciled against the documented
+          writer-policy table, so a new direct writer fails rather than passing quietly.
 
   - component: ai-combat-memory
     core:

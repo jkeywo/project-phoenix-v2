@@ -1,42 +1,152 @@
 entities:
   - component: phoenix-delivery-sequence
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Phoenix Delivery Sequence
-      summary: "The roadmap is intentionally sequenced: #848 authoritative snapshots; #849 deterministic lockstep foundation; #868 cross-runtime performance workflow; #869 composable entity TOML; #774 data-driven AI plus #850 demo readiness; #851 reusable Falling Skyway foundation; #852 Falling Skyway content; #853 limited demo release; #854 P2P delivery; #855 native/cloud delivery; #856 mod content packs; #858 Borrowed Sun; #859 Narrow Season; #860 The Broken Tithe; #861 The Silent Corridor. Completed #835 remains the balance and optimisation foundation throughout."
+      title: Phoenix Demo and Post-Demo Delivery
+      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), Falling Skyway (#851/#852), and limited release (#853). After public play, finish snapshot adapters (#848), Cloudflare/native delivery (#855), P2P (#854), mod-pack acceptance (#856), and Thin Margin missions 2–5 (#858-#861)."
       rationale:
-        - The snapshot and determinism contracts must shape scenario, native, and P2P work before those product surfaces become expensive to revise.
-        - The demo is a release checkpoint after foundational correctness, not a prerequisite for eventual persistence or P2P architecture.
+        - Completed work already supplies the balance harness (#835), baseline player Backfill doctrine (#842), scenario catalogue and QR flow (#754-#756), legacy save/load tracer bullets (#431-#435), native scenario hosting (#420), and mod-pack export/overlay plumbing (#759-#760).
+        - Determinism, authored composition, and player/NPC Backfill symmetry are foundational game contracts; settling them before Combat Test balance avoids tuning a model that will immediately change.
+        - Snapshot and performance contracts start before the demo so later scenario work does not create incompatible state or unmeasured release risk, but their complete product surfaces do not block the first public release.
     architecture:
       kind: roadmap-sequence
       authority: non-authoritative
       coordinates:
-        - roadmap-authoritative-snapshots
+        - roadmap-completed-demo-baseline
         - roadmap-deterministic-simulation-foundation
-        - roadmap-performance-optimisation-workflow
         - roadmap-composable-entity-templates
-        - roadmap-demo-combat-readiness
+        - roadmap-backfill-combat-symmetry
+        - roadmap-current-combat-doctrine
+        - roadmap-demo-readiness
+        - roadmap-snapshot-contract-tracer
         - roadmap-falling-skyway-foundation
         - roadmap-falling-skyway-content
         - roadmap-demo-release
-        - roadmap-p2p-multiship-delivery
+        - roadmap-authoritative-snapshots
         - roadmap-native-and-cloud-delivery
+        - roadmap-p2p-multiship-delivery
         - roadmap-mod-content-packs
         - roadmap-borrowed-sun-content
         - roadmap-narrow-season-content
         - roadmap-broken-tithe-content
         - roadmap-silent-corridor-content
 
+  - component: roadmap-completed-demo-baseline
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Completed Demo Baseline
+      summary: "Completed work provides seeded headless balance and after-action reports (#835), baseline player-ship Backfill doctrine (#842), scenario catalogue, QR-first selection, and game-over return (#754-#756), legacy save/load tracer bullets (#431-#435), native scenario hosting (#420), and mod-pack export and host overlay resolution (#759-#760)."
+      rationale:
+        - These are assets of the next release, not new gates to rebuild.
+        - The remaining roadmap must close their gaps rather than duplicate their scope.
+    architecture:
+      kind: roadmap-baseline
+      authority: observational
+      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
+
+  - component: roadmap-current-combat-doctrine
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Combat Test Doctrine Completion
+      summary: "Close #774 by completing the in-flight Harrow cruiser and remaining destroyer/battleship doctrine slices (#788-#794), removing legacy doctrine paths, and proving every NPC and Backfill fine system uses the same authored policy runtime."
+      rationale:
+        - The generic fine-system policy runtime and all core system policies (#776-#786) are complete; the demo risk is now combat content and migration closure, not AI architecture discovery.
+        - Combat Test needs all three enemy classes to demonstrate distinct, readable tactical behaviour before it can serve as demo content.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [fine-system-ai-policy-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-demo-readiness
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Measured Demo Combat, Asset, Terrain, and Onboarding Readiness
+      summary: "After #849, #869, #870, and Combat Test doctrine closure, use completed #835 reports to rebalance Combat Test, establish representative performance baselines (#868), replace overlapping asteroid spawners with one weighted deterministic density field, move mesh LOD ownership to model sidecars with a repeatable asset workflow, and add contextual station tutorials (#850)."
+      rationale:
+        - Performance evidence, terrain readability, asset budgets, and onboarding are demo-quality concerns and must be resolved alongside tactical balance.
+        - "#868 begins with non-blocking reproducible baselines; only the agreed demo budgets and regressions become release evidence."
+        - "#868's measurement contract is the fleet's vellum-perf crate, which was written to this PRD's shape; phoenix adopts it and builds only the collectors, baseline files, asset-budget extraction, and reporting that the crate excludes by charter. This roadmap has no separate performance-workflow component: baselines belong to demo readiness."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [asteroid-field-lifecycle, entity-template-schema-validator]
+      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
+
+  - component: roadmap-snapshot-contract-tracer
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Snapshot Contract and Demo Tracer Bullet
+      summary: "Before Falling Skyway content grows persistent state, define the versioned authoritative snapshot boundary and deliver the bounded Combat Test capture/restore tracer (#848/#862). Full consequence, scenario, slot, export, and campaign adapters remain post-demo."
+      rationale:
+        - The snapshot contract now builds on #849's logical tick and command log, informing scenario data and later P2P without making save UX a first-demo release gate.
+        - Stable content IDs and an authoritative-only boundary prevent browser, renderer, and session state leaking into future persistence.
+        - "The envelope, the version gate, and the storage abstraction come from the fleet's vellum-save crate rather than a phoenix format; phoenix owns the snapshot payload and the host wiring. #849 now precedes this tracer, so captured world state can be tied to the established logical tick and command-log boundary."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      produces: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-falling-skyway-foundation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Falling Skyway Scenario Foundation
+      summary: "Add the smallest reusable crisis-world toolkit needed by Falling Skyway: schedules, civilian routes/orders, external operations, infrastructure condition, basic commitments, and player-known Comms dossiers (#851)."
+      rationale:
+        - The scenario must use reusable world capabilities and existing ship systems, not bespoke station minigames.
+        - Falling Skyway deliberately introduces only the campaign's early simulation layers; later evidence, network, authority, and cascade systems stay post-demo.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state, world-snapshot-artifact]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-falling-skyway-content
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Falling Skyway — First Thin Margin Scenario
+      summary: "Author the first 30–60 minute Thin Margin mission: damaged skyhook and fuel depots, worker strike, corporate security, radiation storm, civilian traffic, constrained transfer window, altered-record evidence, and a consequential safe-passage decision (#852)."
+      rationale:
+        - This is the demo narrative scenario. It is not #398, Before the Fire.
+        - Its outcomes are self-contained for the demo while remaining compatible with later campaign continuity.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-content-pack-state, world-configuration-state]
+      coordinates: [roadmap-falling-skyway-foundation, world-content-pack-catalog]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-demo-release
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Limited Browser Demo Release
+      summary: "Publish Combat Test and Falling Skyway only, through the existing browser deployment, with curated selection, production-build and smoke gates, performance evidence, and documented multi-device/multi-role playtests (#853)."
+      rationale:
+        - The demo validates the core bridge experience before Cloudflare, native distribution, P2P, and campaign breadth broaden the support surface.
+    architecture:
+      kind: roadmap-milestone
+      authority: non-authoritative
+      reads: [world-content-pack-state]
+      runs_in: [host-browser-runtime]
+
   - component: roadmap-authoritative-snapshots
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Authoritative Snapshots and Persistence
-      summary: Replaces the browser-local save-slot plan with a versioned portable snapshot of authoritative world state, used first for save/load and later for campaign continuity, native hosting, and multiplayer transfer.
+      title: Full Authoritative Snapshots and Persistence
+      summary: "After the tracer, complete the #848 snapshot adapters: dynamic combat consequences (#863), scripted progression (#864), save-slot UX (#865), portable import/export (#866), and campaign-continuity projection (#867)."
       rationale:
-        - Persistence, multiplayer recovery, and native hosting must not each invent an incompatible representation of a running world.
-        - Scenario runtime state must be portable before Falling Skyway introduces schedules, civilian operations, commitments, and evidence.
+        - One portable snapshot must serve persistence, campaign continuity, native hosting, and P2P transfer rather than each surface serialising its own world.
+        - "Phoenix is the fleet's world-snapshot consumer for vellum-save: slot storage is that crate's Store under its browser backend, portable export (#866) is the same record through its file backend, and compatibility reporting renders its version gate. Only the campaign-continuity projection (#867) is phoenix-owned, because cross-mission facts are game vocabulary."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -47,159 +157,99 @@ entities:
 
   - component: roadmap-deterministic-simulation-foundation
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Deterministic Simulation and Lockstep Foundation
-      summary: Extracts the fixed logical tick, ordered command log, canonical state hash, replay harness, and multi-instance verification required by P2P lockstep, without yet delivering the host mesh.
+      summary: "Build #849's fixed logical tick, future-tick command log, canonical state hash, replay harness, deterministic schedule checks, and multi-instance verification before combat balance and demo content depend on the simulation contract."
       rationale:
-        - The P2P design must constrain simulation work now, while its transport and join UX must not delay the demo.
-        - The completed headless balance telemetry and seeded simulation RNG are adopted as foundations rather than duplicated.
+        - "#835's seeded RNG and headless telemetry are already delivered; this phase hardens the remaining cross-instance guarantees before transport is introduced."
+        - "The command log, the replay driver, the determinism contract tests, and the hash primitives come from the fleet's vellum-replay and vellum-digest crates, with the tick carried inside the logged command rather than scheduled by the driver. The logical tick itself, command ordering, schedule checks, and multi-instance verification stay phoenix's, because vellum excludes schedulers by charter."
+        - "#849 also migrates sim-rng-state onto the fleet's unified Pcg32. Phoenix is re-blessable tier, so its determinism fixtures and recorded balance runs are deliberately re-blessed in the adopting PR; the payoff is that the shared RNG type serialises and can therefore enter the snapshot."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
-      reads: [sim-rng-state, spawned-entity-state, world-configuration-state]
+      reads: [sim-rng-state, spawned-entity-state, world-configuration-state, world-snapshot-artifact]
       produces: [world-snapshot-artifact]
       runs_in: [host-browser-runtime, headless-runtime]
 
-  - component: roadmap-demo-combat-readiness
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Demo Combat Readiness
-      summary: Delivers data-driven fine-system AI for NPCs and Backfill, a player-ship combat pass, measured Combat Test rebalance, a weighted asteroid density field, sidecar-owned mesh LOD generation, and contextual tutorial overlays.
-      rationale:
-        - Combat Test must demonstrate legible doctrine and a well-tuned player experience rather than acting as a technical test scene.
-        - Asset and terrain contracts must settle before public demo content becomes costly to revise.
-    architecture:
-      kind: roadmap-milestone
-      authority: authoritative
-      coordinates: [fine-system-ai-policy-runtime, asteroid-field-lifecycle, entity-template-schema-validator]
-      runs_in: [host-browser-runtime, headless-runtime]
-
-  - component: roadmap-performance-optimisation-workflow
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Cross-Runtime Performance Optimisation Workflow
-      summary: Establishes repeatable scenario benchmarks, build and asset budgets, capture artifacts, baseline comparison, and initially non-blocking regression reports across browser and native Phoenix runtimes.
-      rationale:
-        - Performance work needs shared evidence and reproducibility instead of isolated optimisation efforts and subjective playtest impressions.
-        - Stable measurement precedes any automatic performance gate, Cloudflare rollout, or worker-thread adoption decision.
-    architecture:
-      kind: roadmap-milestone
-      authority: observational
-      reads: [world-content-pack-state, sim-rng-state]
-      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
-
-  - component: roadmap-composable-entity-templates
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Composable Entity TOML Templates
-      summary: Adds deterministic ordered entity-TOML includes that resolve reusable fragments into one validated template before spawning, including generic fine-system behaviour fragments.
-      rationale:
-        - World content already composes through extra_worlds; entity authors need the corresponding data-driven composition boundary for reusable hull and AI behaviour.
-        - Pre-runtime composition avoids duplicating generic behaviour without introducing runtime policy assets or inheritance.
-    architecture:
-      kind: roadmap-milestone
-      authority: authoritative
-      reads: [entity-template-state]
-      runs_in: [host-browser-runtime, headless-runtime]
-
-  - component: roadmap-falling-skyway-foundation
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Falling Skyway Scenario Foundation
-      summary: Adds reusable world-clock, scheduled task, civilian traffic, external-operation, infrastructure-condition, basic commitment, and entity-dossier capabilities needed by the first Thin Margin scenario.
-      rationale:
-        - Scenario content must compose reusable actors, assets, schedules, infrastructure, hazards, objectives, evidence, and commitments rather than introduce bespoke station minigames.
-        - "Falling Skyway introduces only the first three campaign layers: schedules and traffic, rescue operations, and infrastructure condition."
-    architecture:
-      kind: roadmap-milestone
-      authority: authoritative
-      reads: [world-configuration-state, spawned-entity-state]
-      runs_in: [host-browser-runtime]
-
-  - component: roadmap-falling-skyway-content
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Falling Skyway Scenario Content
-      summary: "Authors the first Thin Margin mission: a damaged skyhook, fuel depots, labour strike, corporate security, radiation storm, constrained transfer window, and consequential safe-passage decision."
-      rationale:
-        - The first scenario must prove the reusable crisis toolkit in a standalone 30–60 minute mission before the campaign expands its complexity.
-    architecture:
-      kind: roadmap-milestone
-      authority: authoritative
-      reads: [world-content-pack-state, world-configuration-state]
-      coordinates: [roadmap-falling-skyway-foundation, world-content-pack-catalog]
-      runs_in: [host-browser-runtime]
-
-  - component: roadmap-demo-release
-    core:
-      status: proposed
-      confidence: confirmed
-      title: Demo Release
-      summary: Publishes a limited, fast, reliable demo containing Combat Test and Falling Skyway with production build checks, scenario selection, onboarding, and release playtest gates.
-      rationale:
-        - A small public release validates the core bridge experience before platform expansion adds operational complexity.
-    architecture:
-      kind: roadmap-milestone
-      authority: non-authoritative
-      reads: [world-content-pack-state]
-      runs_in: [host-browser-runtime]
-
-  - component: roadmap-p2p-multiship-delivery
-    core:
-      status: proposed
-      confidence: confirmed
-      title: P2P Multi-Ship Delivery
-      summary: Completes the host-to-host PeerJS mesh, delayed lockstep exchange, snapshot join and recovery, leader handling, and distributed NPC ownership after deterministic foundations and the demo are proven.
-      rationale:
-        - Full P2P is a distinct product surface whose transport, join, and recovery behaviour should build on tested snapshots rather than delay initial public play.
-    architecture:
-      kind: roadmap-milestone
-      authority: authoritative
-      reads: [world-snapshot-artifact]
-      runs_in: [host-browser-runtime]
-
   - component: roadmap-native-and-cloud-delivery
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Native Host and Cloud Delivery
-      summary: Provides a native PC authoritative host that can serve its own client assets or use hosted ones, plus a Cloudflare-cached limited public deployment; worker-thread adoption remains an evidence-led optional optimisation.
+      title: Native Host and Cloud Delivery Expansion
+      summary: "Extend the delivered native scenario host (#420) into #855's compatible native host/client serving and Cloudflare-cached curated deployment. Worker-thread adoption remains a benchmarked option, not an assumed requirement."
       rationale:
-        - Native, hosted, and browser deployment modes must consume the same content and snapshot contracts instead of becoming separate games.
+        - Public demo feedback and #868 measurements should determine caching and worker-thread investment.
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-content-pack-state]
       runs_in: [host-browser-runtime, headless-runtime]
 
+  - component: roadmap-p2p-multiship-delivery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: P2P Multi-Ship Multiplayer Delivery
+      summary: "Complete #854's PeerJS host mesh, delayed lockstep exchange, leader handling, snapshot join/recovery, hash diagnostics, and distributed NPC ownership on top of the completed snapshot and determinism foundations."
+      rationale:
+        - P2P is a new product surface, not a prerequisite for the browser demo.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime]
+
+  - component: roadmap-composable-entity-templates
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Composable Entity TOML Templates
+      summary: "#869 delivers ordered, deterministic pre-runtime entity-template includes so reusable hull and generic fine-system behaviour fragments resolve into one validated configuration before spawning."
+      rationale:
+        - This is the completed authoring and modding foundation for #870's shared doctrine fragments; do not rebuild it while balancing Combat Test.
+        - "Deliberately not adopted onto the fleet's vellum-compose crate: phoenix merges deep over TOML values with by-name and by-id array reconciliation, and that crate is shallow over RON values and refuses deep merge by charter. Phoenix remains the fleet's design source for the composition scheme. The include resolver's source provenance is the piece vellum lacks entirely, so it is built to be extractable later."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [entity-template-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+
+  - component: roadmap-backfill-combat-symmetry
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Backfill Combat Symmetry and Crew-in-the-Loop Comms
+      summary: "Build #870 after completed composable templates and before Combat Test balance: player/NPC station symmetry, shared class-mirror doctrine fragments, red-alert posture and fire gates, crew advisories, and an audited human-visible counterpart for every Backfill fact."
+      rationale:
+        - Basic player-ship Backfill doctrine is already delivered (#842); this is the follow-on that makes mixed human/AI crews transparent, symmetric, and content-reusable.
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [entity-template-state]
+      coordinates: [roadmap-composable-entity-templates, fine-system-ai-policy-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
+
   - component: roadmap-mod-content-packs
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Mod Content Packs
-      summary: Defines validated mod content packs and an editor MOD mode that emits a ZIP patch applied to a host session, after entity TOML and model-sidecar contracts have stabilised.
+      title: Mod Content Packs Baseline
+      summary: "Validated TOML pack export and host overlay resolution are delivered (#759/#760). Close #856 only after confirming its acceptance criteria against the now-stable entity-template, model-sidecar, and snapshot manifest contracts."
       rationale:
-        - Mods must patch declared content through one validation and precedence model rather than mutate arbitrary runtime files.
+        - Mod-pack work should be verified and integrated with post-demo authoring foundations, not reimplemented as a second system.
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [entity-template-state, world-content-pack-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
 
   - component: roadmap-borrowed-sun-content
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Borrowed Sun Scenario Content
-      summary: Second Thin Margin mission, adding evidence confidence and provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors.
-      rationale:
-        - Mission two develops investigation and infrastructure pressure while remaining a standalone scenario.
+      title: Borrowed Sun — Thin Margin Mission 2
+      summary: "Add evidence confidence/provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors (#858)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -208,12 +258,10 @@ entities:
 
   - component: roadmap-narrow-season-content
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: Narrow Season Scenario Content
-      summary: Third Thin Margin mission, adding civilian response profiles, emergency authority, traffic priority orders, and cascading congestion/panic/coercion incidents.
-      rationale:
-        - Mission three turns prior conduct into operational constraints without introducing a scenario-specific traffic minigame.
+      title: Narrow Season — Thin Margin Mission 3
+      summary: "Add civilian response profiles, emergency authority, traffic priority orders, and cascading congestion, panic, and coercion incidents (#859)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -222,12 +270,10 @@ entities:
 
   - component: roadmap-broken-tithe-content
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: The Broken Tithe Scenario Content
-      summary: Fourth Thin Margin mission, adding hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority.
-      rationale:
-        - Mission four makes earlier relationships and commitments materially constrain dangerous operations.
+      title: The Broken Tithe — Thin Margin Mission 4
+      summary: "Add hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority (#860)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -236,12 +282,10 @@ entities:
 
   - component: roadmap-silent-corridor-content
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
-      title: The Silent Corridor Scenario Content
-      summary: Fifth Thin Margin mission, combining schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale.
-      rationale:
-        - The final scenario must demonstrate the accumulated reusable toolkit rather than create a separate finale-only system.
+      title: The Silent Corridor — Thin Margin Mission 5
+      summary: "Combine schedules, traffic, evidence, infrastructure, cascades, commitments, and campaign consequences into the regional-crisis finale (#861)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -250,12 +294,12 @@ entities:
 
   - state: world-snapshot-artifact
     core:
-      status: proposed
+      status: accepted
       confidence: confirmed
       title: Authoritative World Snapshot
-      summary: Versioned portable representation of all authoritative simulation state and its content compatibility manifest, excluding transport sessions, browser UI, renderer state, and other derived presentation state.
+      summary: Versioned portable representation of authoritative simulation state and its content compatibility manifest, excluding transport sessions, browser UI, renderer state, and other derived presentation state.
     architecture:
       classification: authoritative
       owner: roadmap-authoritative-snapshots
-      writers: [roadmap-authoritative-snapshots]
-      readers: [roadmap-deterministic-simulation-foundation, roadmap-p2p-multiship-delivery, roadmap-native-and-cloud-delivery, roadmap-borrowed-sun-content, roadmap-narrow-season-content, roadmap-broken-tithe-content, roadmap-silent-corridor-content]
+      writers: [roadmap-snapshot-contract-tracer, roadmap-authoritative-snapshots]
+      readers: [roadmap-falling-skyway-foundation, roadmap-deterministic-simulation-foundation, roadmap-p2p-multiship-delivery, roadmap-native-and-cloud-delivery, roadmap-borrowed-sun-content, roadmap-narrow-season-content, roadmap-broken-tithe-content, roadmap-silent-corridor-content]

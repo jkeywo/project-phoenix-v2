@@ -1,0 +1,46 @@
+// Asset budgets for the shipped model set (issue #868).
+//
+// Unlike the timing baselines, these numbers are machine-independent: they are
+// bytes on disk and counts in authored TOML, so any checkout of this commit
+// reproduces them exactly. That is why the tolerances here are tight — a drift
+// is a real change to what a player downloads, never runner noise.
+//
+// Recorded at 22 .glb files, 156.8 MB total, largest 17.3 MB, 12 entity
+// templates with a LOD ladder and 12 naming a .glb with none.
+//
+// These are a starting record, not a target. 156 MB of models is a great deal
+// for a browser game to fetch, and the point of committing it is that the
+// number is now visible in every CI run and moves in a diff someone reads.
+//
+// Triangle and texture counts are deliberately absent: both live inside the
+// GLB binary, and reading them means parsing glTF rather than trusting Bevy's
+// own loader. See the module documentation in src/perf/assets.rs.
+(
+    scenario: "assets",
+    expectations: {
+        // The whole download. Warns on any 5% move, because at this size 5%
+        // is 8 MB.
+        "assets.glb.total.bytes": (
+            unit: bytes,
+            statistic: max,
+            expected: 156773032.0,
+            tolerance: (warn: 0.05, fail: 0.25),
+        ),
+        // The single largest model — the one that dominates a cold load.
+        "assets.glb.bytes": (
+            unit: bytes,
+            statistic: max,
+            expected: 17298572.0,
+            tolerance: (warn: 0.1, fail: 0.5),
+        ),
+        // LOD coverage. A rise here is fine and will warn; that is the
+        // intended reading — "someone changed the LOD story, look at it" —
+        // and the warning is cheap because nothing gates on it.
+        "assets.glb.without_lod": (
+            unit: count,
+            statistic: max,
+            expected: 12.0,
+            tolerance: (warn: 0.25, fail: 1.0),
+        ),
+    },
+)

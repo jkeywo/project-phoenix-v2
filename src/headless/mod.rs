@@ -11,11 +11,9 @@
 pub mod app;
 pub mod args;
 pub mod duel;
-pub mod perf;
 pub mod report;
 
 pub use app::{build_headless_app, run, run_sampled, BuildError};
 pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
 pub use duel::{apply_duel_sides, resolve_template, DuelError};
-pub use perf::{baseline_path, load_baseline, TickSampler};
 pub use report::{build_report, RunReport};

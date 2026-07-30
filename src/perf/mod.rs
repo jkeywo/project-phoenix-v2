@@ -1,83 +1,40 @@
-//! Performance measurement for the headless harness (issue #868).
+//! Performance measurement (issue #868).
 //!
 //! The measurement *contract* — series, summaries, provenance, baselines,
 //! comparison, rendering — is `vellum-perf`, and phoenix is its second
-//! consumer. What lives here is the part the crate deliberately excludes:
-//! the collector, and where the baseline file lives.
+//! consumer. What lives here is the part the crate excludes by charter: the
+//! collectors, and where the baseline files live.
 //!
-//! Collection stays out of the simulation. Sampling happens in the harness
-//! loop around `app.update()`, not in a Bevy system, so nothing in this file
-//! can be observed by authoritative state or change a tick's outcome. A run
-//! with measurement on and a run with it off produce the same simulation.
+//! Three collectors, one contract:
 //!
-//! Two metrics, both wall-clock:
+//! - [`tick`] — the headless harness loop, native.
+//! - [`assets`] — the shipped asset inventory, native, no run required.
+//! - [`browser`] — boot, preload and frame timing in the browser host, wasm.
 //!
-//! - `sim.tick` (millis, one sample per tick) — the distribution the p95
-//!   expectation is written against.
-//! - `sim.run` (seconds, one sample) — whole-run cost, which is what a
-//!   scheduled CI job actually spends.
+//! Collection stays out of the simulation. Every collector here samples from
+//! outside authoritative state, so a measured run and an unmeasured run
+//! produce the same simulation.
 //!
-//! Values here are benchmark evidence, not assertions. Nothing in the test
-//! suite asserts on a duration; the tests cover the pure machinery around it.
+//! Values are benchmark evidence, not assertions. Nothing in the test suite
+//! asserts on a duration; the tests cover the pure machinery around them.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assets;
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tick;
+
+use vellum_perf::Profile;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
-use std::time::Instant;
-
-use vellum_perf::{Baseline, Capture, Finding, Profile, Recorder, Unit};
-
-/// Metric name for per-tick wall time.
-pub const TICK_METRIC: &str = "sim.tick";
-/// Metric name for whole-run wall time.
-pub const RUN_METRIC: &str = "sim.run";
+#[cfg(not(target_arch = "wasm32"))]
+use vellum_perf::{Baseline, Capture, Finding};
 
 /// Where committed baselines live. One file per scenario, RON, reviewable in
-/// a diff — the crate owns the types, this repo owns the layout.
+/// a diff — the crate owns the types, this repository owns the layout.
 pub const BASELINE_DIR: &str = "perf/baselines";
-
-/// Samples the harness loop feeds, one tick at a time.
-///
-/// Held by the caller rather than the app: the `App` is the simulation, and
-/// the point of this module is that measurement never enters it.
-pub struct TickSampler {
-    recorder: Recorder,
-    run_started: Instant,
-    tick_started: Instant,
-}
-
-impl TickSampler {
-    pub fn new() -> Self {
-        let now = Instant::now();
-        Self {
-            recorder: Recorder::new(),
-            run_started: now,
-            tick_started: now,
-        }
-    }
-
-    /// Called immediately before `app.update()`.
-    pub fn tick_begin(&mut self) {
-        self.tick_started = Instant::now();
-    }
-
-    /// Called immediately after `app.update()`.
-    pub fn tick_end(&mut self) {
-        let elapsed = self.tick_started.elapsed().as_secs_f64() * 1000.0;
-        self.recorder.sample(TICK_METRIC, Unit::Millis, elapsed);
-    }
-
-    /// Close the run and produce the capture artifact.
-    pub fn finish(mut self, scenario: &str, profile: Profile) -> Capture {
-        let run_secs = self.run_started.elapsed().as_secs_f64();
-        self.recorder.sample(RUN_METRIC, Unit::Seconds, run_secs);
-        self.recorder.finish(scenario, profile)
-    }
-}
-
-impl Default for TickSampler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Build provenance for a capture, so two captures are only compared when
 /// they are comparable.
@@ -86,14 +43,11 @@ impl Default for TickSampler {
 /// knows them: CI sets `GITHUB_SHA` and identifies its runner image, and a
 /// developer's desktop is not a runner. An unset value stays empty rather
 /// than guessing — the contract is that provenance is honest, not complete.
-pub fn profile() -> Profile {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn profile(runtime: &str) -> Profile {
     Profile {
-        runtime: "headless-native".to_string(),
-        build: if cfg!(debug_assertions) {
-            "dev".to_string()
-        } else {
-            "release".to_string()
-        },
+        runtime: runtime.to_string(),
+        build: build_flavour().to_string(),
         device: std::env::var("PHOENIX_PERF_DEVICE")
             .or_else(|_| std::env::var("RUNNER_OS"))
             .unwrap_or_default(),
@@ -101,13 +55,35 @@ pub fn profile() -> Profile {
     }
 }
 
+/// The wasm build has no environment to read, so provenance the host knows
+/// (the page's own build stamp, the runner) is supplied by the caller.
+#[cfg(target_arch = "wasm32")]
+pub fn profile(runtime: &str) -> Profile {
+    Profile {
+        runtime: runtime.to_string(),
+        build: build_flavour().to_string(),
+        device: String::new(),
+        rev: String::new(),
+    }
+}
+
+fn build_flavour() -> &'static str {
+    if cfg!(debug_assertions) {
+        "dev"
+    } else {
+        "release"
+    }
+}
+
 /// The committed baseline path for one scenario.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn baseline_path(scenario: &str) -> String {
     format!("{BASELINE_DIR}/{scenario}.ron")
 }
 
 /// Errors reading a baseline. A missing file is not one of them — see
 /// [`load_baseline`].
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub enum BaselineError {
     Io(String, std::io::Error),
@@ -116,6 +92,7 @@ pub enum BaselineError {
     Parse(String, Box<ron::error::SpannedError>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Display for BaselineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -130,6 +107,7 @@ impl std::fmt::Display for BaselineError {
 /// A scenario measured before anyone has an opinion about its numbers is the
 /// normal first state, not an error — the same reasoning that makes an
 /// unbaselined metric produce no finding.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_baseline(path: &Path) -> Result<Option<Baseline>, BaselineError> {
     let display = path.display().to_string();
     let text = match std::fs::read_to_string(path) {
@@ -144,26 +122,27 @@ pub fn load_baseline(path: &Path) -> Result<Option<Baseline>, BaselineError> {
 
 /// The comparison report, warnings-first.
 ///
-/// Returns the rendered findings and the verdict, and leaves the decision
-/// about exit codes to the caller — #868 is explicit that measurement informs
+/// Returns the findings and their rendering, and leaves the decision about
+/// exit codes to the caller — #868 is explicit that measurement informs
 /// optimisation before it gates correctness.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn report(capture: &Capture, baseline: &Baseline) -> (Vec<Finding>, String) {
     let findings = vellum_perf::compare(capture, baseline);
     let rendered = vellum_perf::render(&findings);
     (findings, rendered)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use vellum_perf::{Expectation, Statistic, Tolerance, Verdict};
+    use vellum_perf::{Expectation, Recorder, Statistic, Tolerance, Unit, Verdict};
 
     fn capture_with(metric: &str, unit: Unit, values: &[f64]) -> Capture {
         let mut recorder = Recorder::new();
         for value in values {
             recorder.sample(metric, unit.clone(), *value);
         }
-        recorder.finish("test-scenario", profile())
+        recorder.finish("test-scenario", profile("test"))
     }
 
     fn baseline_with(metric: &str, unit: Unit, expected: f64) -> Baseline {
@@ -200,20 +179,44 @@ mod tests {
         assert!(matches!(load_baseline(path), Ok(None)));
     }
 
+    /// Every committed baseline parses, and none is filed under a scenario
+    /// name that disagrees with its own filename — a mismatch would compare a
+    /// capture against expectations written for something else.
     #[test]
-    fn the_committed_baseline_parses() {
-        let path = baseline_path("headless-default");
-        let baseline = load_baseline(Path::new(&path))
-            .expect("committed baseline parses")
-            .expect("committed baseline exists");
-        assert_eq!(baseline.scenario, "headless-default");
-        assert!(baseline.expectations.contains_key(TICK_METRIC));
+    fn every_committed_baseline_parses_and_is_self_consistent() {
+        let dir = Path::new(BASELINE_DIR);
+        let mut seen = 0;
+        for entry in std::fs::read_dir(dir).expect("baseline directory exists") {
+            let path = entry.expect("readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("ron") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .expect("baseline filename is utf-8")
+                .to_string();
+            let baseline = load_baseline(&path)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .expect("the file exists, so it parses to Some");
+            assert_eq!(
+                baseline.scenario, stem,
+                "baseline {stem:?} declares scenario {:?}",
+                baseline.scenario
+            );
+            assert!(
+                !baseline.expectations.is_empty(),
+                "baseline {stem:?} expects nothing, so it can never report"
+            );
+            seen += 1;
+        }
+        assert!(seen > 0, "no baselines found under {BASELINE_DIR}");
     }
 
     #[test]
     fn a_metric_within_tolerance_passes() {
-        let capture = capture_with(TICK_METRIC, Unit::Millis, &[10.0, 10.0, 11.0]);
-        let baseline = baseline_with(TICK_METRIC, Unit::Millis, 10.0);
+        let capture = capture_with("m", Unit::Millis, &[10.0, 10.0, 11.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].verdict, Verdict::Pass);
@@ -221,40 +224,28 @@ mod tests {
 
     #[test]
     fn drift_beyond_tolerance_warns_rather_than_failing() {
-        let capture = capture_with(TICK_METRIC, Unit::Millis, &[14.0, 14.0, 14.0]);
-        let baseline = baseline_with(TICK_METRIC, Unit::Millis, 10.0);
+        let capture = capture_with("m", Unit::Millis, &[14.0, 14.0, 14.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings[0].verdict, Verdict::Warn);
     }
 
     #[test]
     fn a_unit_mismatch_is_incomparable_not_a_regression() {
-        let capture = capture_with(TICK_METRIC, Unit::Seconds, &[10.0]);
-        let baseline = baseline_with(TICK_METRIC, Unit::Millis, 10.0);
+        let capture = capture_with("m", Unit::Seconds, &[10.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         assert_eq!(findings[0].verdict, Verdict::Incomparable);
     }
 
     #[test]
     fn an_unbaselined_metric_produces_no_finding() {
-        let capture = capture_with("sim.something.new", Unit::Count, &[1.0]);
-        let baseline = baseline_with(TICK_METRIC, Unit::Millis, 10.0);
+        let capture = capture_with("something.new", Unit::Count, &[1.0]);
+        let baseline = baseline_with("m", Unit::Millis, 10.0);
         let (findings, _) = report(&capture, &baseline);
         // The baselined metric is missing from the capture, so it is
         // incomparable; the new instrument contributes nothing at all.
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].metric, TICK_METRIC);
-    }
-
-    #[test]
-    fn the_sampler_records_one_tick_sample_per_tick() {
-        let mut sampler = TickSampler::new();
-        for _ in 0..3 {
-            sampler.tick_begin();
-            sampler.tick_end();
-        }
-        let capture = sampler.finish("test-scenario", profile());
-        assert_eq!(capture.summaries[TICK_METRIC].summary.count, 3);
-        assert_eq!(capture.summaries[RUN_METRIC].summary.count, 1);
+        assert_eq!(findings[0].metric, "m");
     }
 }

@@ -1,70 +1,14 @@
 entities:
-  - component: perf-tick-collector
+  - component: perf-measurement-contract
     core:
       status: implemented
       confidence: confirmed
-      title: Performance Tick Collector
-      summary: Samples per-tick and whole-run wall time from the headless harness loop, bracketing app.update() from outside the app, and closes the run into a vellum-perf Capture with build and runtime provenance. Only instantiated when --perf-capture asks for it.
+      title: Performance Measurement Contract
+      summary: "Phoenix's adoption of the fleet's vellum-perf crate — metric series, summaries, capture provenance, versioned baselines, comparison and rendering — plus the repository-owned pieces the crate excludes by charter: where baseline files live, and how a capture is compared against one."
       rationale:
-        - "The measurement contract itself is the fleet's vellum-perf crate (issue #868), written to this project's PRD shape: series, summaries, provenance, baselines, comparison and rendering all come from the crate, and phoenix builds only the collector the crate excludes by charter. Phoenix pins it at the rev pyproject.toml already pins for pasm, so the repo carries one vellum rev rather than two."
-        - "Collection sits in the harness loop rather than in a Bevy system, so it cannot be read by authoritative state or change a tick's outcome: a measured run and an unmeasured run step identically. This is the crate's 'collection stays out of the sim' rule, and it is why the sampler is owned by the caller rather than inserted as a resource."
-        - "Performance values are benchmark evidence, not unit-test assertions. The tests around this cover the pure machinery — baseline loading, comparison classification, sample counting — and assert on no duration."
-    architecture:
-      kind: telemetry-collector
-      authority: observational
-      produces: [perf-capture-artifact]
-      runs_in: [headless-runtime]
-    implementation:
-      status: declared
-      paths: [src/headless/perf.rs, src/headless/app.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
-      symbols: [TickSampler, run_sampled, profile]
-      tests: [cargo test]
-
-  - state: perf-capture-artifact
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Performance Capture Artifact
-      summary: One scenario's measured run — the raw metric series, their summaries, and the Profile provenance that says whether two captures are comparable at all. Written as JSON to the path --perf-capture names, and stored by CI so a regression can be diagnosed from the evidence rather than re-measured.
-      rationale:
-        - "Kept separate from the run report artifact on purpose. A --seed run zeroes the report's timing fields so two identical seeded runs stay byte-identical; wall-clock measurement is exactly what that erasure protects, so it lives in its own artifact instead of corrupting a determinism guarantee."
-    architecture:
-      classification: derived
-      owner: perf-tick-collector
-      readers: [perf-baseline-comparison]
-    implementation:
-      status: declared
-      paths: [src/headless/perf.rs, src/bin/phoenix_headless.rs]
-      symbols: [TICK_METRIC, RUN_METRIC]
-      tests: [cargo test]
-
-  - state: perf-baseline-file
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Performance Baseline File
-      summary: The committed, versioned expectations for one scenario — statistic, expected value, and the tolerances that separate noise from a finding — as reviewable RON under perf/baselines/. One file per scenario.
-      rationale:
-        - "The crate owns the types and the comparison; this repository owns where the file lives and what is in it. A baseline moves in a diff a human reads, which is the whole reason it is a file rather than a constant."
-        - "A missing baseline is the normal first state for a new scenario, not an error: the capture is still written. This matches the crate's rule that a captured metric with no expectation produces no finding, so new instruments never fail a build."
-    architecture:
-      classification: authored
-      owner: perf-baseline-comparison
-    implementation:
-      status: declared
-      paths: [perf/baselines/headless-default.ron, src/headless/perf.rs]
-      symbols: [BASELINE_DIR, load_baseline]
-      tests: [cargo test]
-
-  - component: perf-baseline-comparison
-    core:
-      status: implemented
-      confidence: confirmed
-      title: Performance Baseline Comparison
-      summary: Compares a capture against its committed baseline through vellum-perf and renders the findings, warnings-first. Reported to stderr by the headless binary and surfaced by CI as a report; it never changes an exit code.
-      rationale:
-        - "Warnings-only is a deliberate stage, not an oversight. Verdict::Fail is promoted to a merge gate only once CI hardware and methodology are stable enough that a red build means a regression rather than a noisy runner."
-        - "Verdict::Incomparable — a baselined metric missing from the capture, or units that disagree — is a broken measurement contract rather than a performance regression, and is surfaced as such."
+        - "The contract was written to this project's PRD shape (issue #868); its module documentation names the issue. Phoenix is its second consumer after void-and-thunder, so the types and the comparison are adopted rather than rewritten, and only the collectors are built here. Pinned to the rev pyproject.toml already pins for pasm, so the repository carries one vellum rev rather than two."
+        - "Baselines are committed RON under perf/baselines/, one file per scenario, because a baseline that moves should move in a diff a human reads. A missing baseline is the normal first state for a new scenario and is never an error."
+        - "Comparison is warnings-first and reaches no exit code. Verdict::Fail becomes a merge gate only once runner methodology is stable enough that red means regression rather than a noisy neighbour; Verdict::Incomparable is surfaced separately because a broken measurement contract is not a performance result."
     architecture:
       kind: offline-tool
       authority: observational
@@ -72,6 +16,104 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/headless/perf.rs, src/bin/phoenix_headless.rs, .github/workflows/ci.yml]
-      symbols: [report, BaselineError]
+      paths: [src/perf/mod.rs, src/bin/phoenix_perf.rs, .github/workflows/ci.yml]
+      symbols: [profile, baseline_path, load_baseline, report, BaselineError, BASELINE_DIR]
+      tests: [cargo test]
+
+  - component: perf-tick-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Headless Tick Collector
+      summary: Samples per-tick and whole-run wall time from the headless harness loop, bracketing app.update() from outside the app, and closes the run into a capture. Only instantiated when --perf-capture asks for it.
+      rationale:
+        - "Collection sits in the harness loop rather than in a Bevy system, so it cannot be read by authoritative state or change a tick's outcome: a measured run and an unmeasured run step identically. The sampler is owned by the caller rather than inserted as a resource for exactly that reason."
+        - "The capture is a separate artifact from the run report on purpose. A --seed run zeroes the report's timing fields so two identical seeded runs stay byte-identical, and wall-clock measurement is precisely what that erasure protects."
+    architecture:
+      kind: telemetry-collector
+      authority: observational
+      produces: [perf-capture-artifact]
+      runs_in: [headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/perf/tick.rs, src/headless/app.rs, src/headless/args.rs, src/bin/phoenix_headless.rs]
+      symbols: [TickSampler, run_sampled]
+      tests: [cargo test]
+
+  - component: perf-asset-inventory
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Asset Budget Inventory
+      summary: Extracts shipped asset budgets from what is on disk and what entity templates declare — per-model GLB bytes, their total, LOD ladder depth, and templates naming a GLB with no ladder — with no simulation running.
+      rationale:
+        - "Machine-independent by construction: bytes on disk and counts in authored TOML, so any checkout of a commit reproduces the capture exactly. That is why its baseline tolerances are tight where the timing baselines' are loose — a drift here is a real change to what a player downloads, never runner noise."
+        - "Entity templates are parsed as TOML rather than scanned textually, so a commented-out [[mesh.lod]] block cannot be miscounted as coverage."
+        - "Triangle and texture counts are deliberately out of scope: both live inside the GLB binary, and reading them means parsing glTF rather than trusting the engine's own loader. Bytes and LOD coverage are honest today; the mesh interior is separate work."
+        - "A missing assets directory is an error rather than an empty inventory, because a capture that silently measured nothing would read as every asset having shrunk to zero."
+    architecture:
+      kind: offline-tool
+      authority: observational
+      produces: [perf-capture-artifact]
+      runs_in: [node-tooling-runtime]
+    implementation:
+      status: declared
+      paths: [src/perf/assets.rs, src/bin/phoenix_perf.rs]
+      symbols: [Inventory, inventory, capture, GLB_BYTES_METRIC, GLB_TOTAL_METRIC, LOD_LEVELS_METRIC, WITHOUT_LOD_METRIC]
+      tests: [cargo test]
+
+  - component: perf-browser-collector
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Browser Host Collector
+      summary: Times host boot and the JS-driven config preload at the bridge's own entry points, and samples per-animation-frame schedule time, accumulating into a capture the page hands out through wasm_perf_capture.
+      rationale:
+        - "performance.now() is the clock because std::time::Instant panics on wasm32. State is a thread-local rather than a Bevy resource: the boot clock starts before an App exists, and measurement must not become something a system can read."
+        - "The preload has no single entry point — JS loads one config at a time — so the clock starts on the first wasm_load_config and stops the first time the page observes wasm_is_preload_complete. Both are idempotent, because the page polls the second one and re-sampling would measure how often JS asked rather than how long the preload took."
+        - "Under WebDriver, wasm_init skips the render, audio, glTF and gizmo plugins because a headless runner has no GPU for wgpu. The frame metric collected in CI therefore measures the ECS schedule and NOT rendering; the capture records its runtime as wasm-automation rather than wasm-browser so the two can never be silently compared."
+        - "The frame hook is a pair of systems at the First and Last schedule edges that read and write nothing in the world. They observe the frame without participating in it."
+    architecture:
+      kind: telemetry-collector
+      authority: observational
+      produces: [perf-capture-artifact]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/perf/browser.rs, src/server/bridge.rs, server.html, tests/smoke/perf-browser.spec.ts]
+      symbols: [wasm_perf_capture, boot_begin, boot_end, frame_begin, frame_end]
+      tests: [npx playwright test]
+
+  - state: perf-capture-artifact
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Performance Capture Artifact
+      summary: One scenario's measurement — the raw metric series, their summaries, and the provenance that says whether two captures are comparable at all. Written as JSON and stored by CI so a regression is diagnosed from evidence rather than re-measured.
+    architecture:
+      classification: derived
+      owner: perf-tick-collector
+      readers: [perf-measurement-contract]
+    implementation:
+      status: declared
+      paths: [src/perf/tick.rs, src/perf/browser.rs, src/perf/mod.rs, src/bin/phoenix_headless.rs, src/bin/phoenix_perf.rs]
+      symbols: [RUN_METRIC, TICK_METRIC, BOOT_METRIC, FRAME_METRIC]
+      tests: [cargo test]
+
+  - state: perf-baseline-file
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Performance Baseline File
+      summary: The committed, versioned expectations for one scenario — statistic, expected value, and the tolerances separating noise from a finding — as reviewable RON under perf/baselines/. One file per scenario, named for it.
+      rationale:
+        - "The crate owns the types and the comparison; this repository owns where the file lives and what is in it. Every committed baseline is checked to parse and to declare the scenario its own filename claims, because a mismatch would compare a capture against expectations written for something else."
+        - "The headless timing baseline was recorded on a developer desktop rather than on the runner that compares against it, and says so in its own header. It is expected to warn until re-recorded from a CI capture — survivable only because nothing gates on it."
+    architecture:
+      classification: authored
+      owner: perf-measurement-contract
+    implementation:
+      status: declared
+      paths: [perf/baselines/headless-default.ron, perf/baselines/assets.ron, src/perf/mod.rs]
+      symbols: [BASELINE_DIR]
       tests: [cargo test]

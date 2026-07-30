@@ -209,6 +209,17 @@ jobs:
           path: tests/smoke/playwright-report/
           retention-days: 7
 
+      # Handed to the perf job, which has the Rust toolchain that owns the
+      # comparison (issue #868).
+      - name: Upload browser perf capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-browser-capture
+          path: target/perf/browser-capture.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Publish results to job summary
         if: always()
         working-directory: tests/smoke
@@ -271,8 +282,12 @@ jobs:
   # gate. `Verdict::Fail` becomes a merge gate only once the runner methodology
   # is stable enough that a red build means a regression rather than a noisy
   # neighbour. Until then a regression is something a human reads in the summary.
+  # Runs after smoke so the browser capture that job produces can be compared
+  # here, where a Rust toolchain exists. The comparison has exactly one
+  # implementation — `phoenix-perf report` — rather than a second opinion
+  # written in whatever language each job happens to have.
   perf:
-    needs: test
+    needs: [test, smoke]
     runs-on: ubuntu-latest
 
     steps:
@@ -285,20 +300,13 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
-      # The `test` job runs `cargo test` with default features, where the
-      # headless module does not exist — so the collector's own tests only run
-      # if this job runs them. They assert on machinery (baseline parsing,
-      # comparison classification, sample counts), never on a duration.
-      - name: Test the perf machinery
-        run: cargo test --features headless --lib headless::perf
-
       # Release, because a debug-build measurement describes a binary nobody
-      # ships. The committed baseline was recorded the same way.
-      - name: Build headless runner
-        run: cargo build --release --features headless --bin phoenix-headless
+      # ships. The committed timing baseline was recorded the same way.
+      - name: Build headless runner and perf tool
+        run: |
+          cargo build --release --features headless --bin phoenix-headless
+          cargo build --release --bin phoenix-perf
 
-      # The comparison prints to stderr and exits 0 regardless of verdict; the
-      # capture is the artifact a regression is diagnosed from.
       - name: Measure the default headless scenario
         run: |
           mkdir -p target/perf
@@ -306,21 +314,56 @@ jobs:
             --sim-seconds 60 \
             --report target/perf/run-report.json \
             --perf-capture target/perf/capture.json \
-            2> target/perf/perf-report.txt
-          cat target/perf/perf-report.txt
+            2> target/perf/headless-report.txt
+          cat target/perf/headless-report.txt
+
+      # No simulation runs: this reads bytes on disk and counts in authored
+      # TOML, so it is machine-independent and its tolerances are tight.
+      - name: Measure asset budgets
+        run: |
+          ./target/release/phoenix-perf assets --capture target/perf/assets.json
+          ./target/release/phoenix-perf report --capture target/perf/assets.json \
+            > target/perf/assets-report.txt
+          cat target/perf/assets-report.txt
+
+      - name: Download browser capture
+        uses: actions/download-artifact@v4
+        with:
+          name: perf-browser-capture
+          path: target/perf/
+        continue-on-error: true
+
+      # `browser.frame` from CI is the ECS schedule under WebDriver, where the
+      # render stack is skipped — see tests/smoke/perf-browser.spec.ts. The
+      # capture's runtime says so, which is what stops it being read as a
+      # rendering number.
+      - name: Compare the browser capture
+        run: |
+          if [ -f target/perf/browser-capture.json ]; then
+            ./target/release/phoenix-perf report \
+              --capture target/perf/browser-capture.json \
+              > target/perf/browser-report.txt
+            cat target/perf/browser-report.txt
+          else
+            echo 'no browser capture produced by the smoke job' \
+              > target/perf/browser-report.txt
+          fi
 
       - name: Summarise
         if: always()
         run: |
           {
             echo '## Performance'
-            echo
-            echo '```'
-            cat target/perf/perf-report.txt 2>/dev/null || echo 'no report produced'
-            echo '```'
+            for report in headless assets browser; do
+              echo
+              echo "### ${report}"
+              echo '```'
+              cat "target/perf/${report}-report.txt" 2>/dev/null || echo 'no report produced'
+              echo '```'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload capture
+      - name: Upload captures
         if: always()
         uses: actions/upload-artifact@v4
         with:

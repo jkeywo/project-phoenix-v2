@@ -13,6 +13,11 @@ pub mod logging;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub mod headless;
 
+// Performance measurement (issue #868). Not behind the headless feature: the
+// asset inventory needs no simulation, and the browser collector runs in the
+// shipped wasm build.
+pub mod perf;
+
 pub mod ai;
 pub mod core;
 pub use ai::core as ai_core;

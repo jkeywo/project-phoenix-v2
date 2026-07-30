@@ -20,7 +20,6 @@ use bevy::time::{TimePlugin, TimeUpdateStrategy};
 use bevy::transform::TransformPlugin;
 use bevy_rapier3d::plugin::TimestepMode;
 
-use super::perf::TickSampler;
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
 use crate::entities::ai_declaration_manifest;
@@ -30,6 +29,7 @@ use crate::logging::LoggingPlugin;
 use crate::marker_validate::MarkerFinding;
 use crate::messages::{GamePhase, ServerMessage};
 use crate::modifier_coordination::ModifierCoordinationPlugin;
+use crate::perf::tick::TickSampler;
 use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};

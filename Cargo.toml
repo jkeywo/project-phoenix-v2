@@ -14,6 +14,13 @@ name = "phoenix-headless"
 path = "src/bin/phoenix_headless.rs"
 required-features = ["headless"]
 
+# Asset budgets and baseline comparison (issue #868). Native only, and needs no
+# simulation — it reads what is on disk and what a capture recorded, so it is
+# not gated on the headless feature the way the runner is.
+[[bin]]
+name = "phoenix-perf"
+path = "src/bin/phoenix_perf.rs"
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -80,7 +87,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"
-web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console"] }
+web-sys = { version = "0.3.97", features = ["Window", "Location", "Navigator", "NavigatorAutomationInformation", "console", "Performance"] }
 # Routes Rust panics through console.error with a real message + location.
 # Without this, a panic anywhere in the Bevy app (e.g. inside a system) traps
 # the wasm instance and every subsequent JS→WASM call surfaces as a bare

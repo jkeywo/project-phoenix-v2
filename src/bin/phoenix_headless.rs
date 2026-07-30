@@ -16,9 +16,10 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 use project_phoenix::headless::{
-    baseline_path, build_headless_app, build_report, load_baseline, parse_args, perf, run_sampled,
-    ParseOutcome, TickSampler, HELP,
+    build_headless_app, build_report, parse_args, run_sampled, ParseOutcome, HELP,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use project_phoenix::perf::{self, tick::TickSampler};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -55,7 +56,7 @@ fn main() {
     // throwing the evidence away because of the exit path would be the one
     // case where the numbers are most interesting.
     if let (Some(sampler), Some(path)) = (sampler, args.perf_capture_path.as_deref()) {
-        let capture = sampler.finish(&args.perf_scenario, perf::profile());
+        let capture = sampler.finish(&args.perf_scenario, perf::profile(perf::tick::RUNTIME));
         let json = capture.to_json();
         match path {
             "-" => println!("{json}"),
@@ -67,8 +68,8 @@ fn main() {
             }
         }
 
-        let baseline_file = baseline_path(&args.perf_scenario);
-        match load_baseline(std::path::Path::new(&baseline_file)) {
+        let baseline_file = perf::baseline_path(&args.perf_scenario);
+        match perf::load_baseline(std::path::Path::new(&baseline_file)) {
             // No baseline yet is the normal first state for a new scenario.
             Ok(None) => eprintln!("phoenix-headless: no baseline at {baseline_file}; capture only"),
             Ok(Some(baseline)) => {

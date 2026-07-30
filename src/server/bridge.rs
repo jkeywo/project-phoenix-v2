@@ -427,6 +427,13 @@ pub fn wasm_init() {
         })
         .unwrap_or(false);
 
+    // Boot clock starts here, before any plugin is added, and stops when the
+    // app is handed to the frame loop (issue #868). `is_automation` is passed
+    // through because it decides what the capture means: under WebDriver the
+    // render stack below is skipped, so the frame metric measures the ECS
+    // schedule and not rendering.
+    crate::perf::browser::boot_begin(is_automation);
+
     // Read `?log=` / `?log_entity=` before any plugin is added: `LogPlugin`
     // takes its filter at construction, and the resource must be in place
     // before the first system that logs runs.
@@ -586,6 +593,19 @@ pub fn wasm_init() {
         }
     });
 
+    // Frame sampling brackets each animation frame's schedule. These two
+    // systems read and write nothing in the world — they move a thread-local
+    // clock — so they observe the frame without participating in it.
+    fn sample_frame_begin() {
+        crate::perf::browser::frame_begin();
+    }
+    fn sample_frame_end() {
+        crate::perf::browser::frame_end();
+    }
+    app.add_systems(bevy::app::First, sample_frame_begin);
+    app.add_systems(bevy::app::Last, sample_frame_end);
+
+    crate::perf::browser::boot_end();
     app.run();
 }
 
@@ -908,6 +928,10 @@ pub fn set_config_request_callback(callback: js_sys::Function) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    // The preload has no single entry point — JS drives it one config at a
+    // time — so the clock starts on the first one and stops when the page
+    // first observes it complete (issue #868).
+    crate::perf::browser::preload_begin_once();
     crate::config_cache::wasm_load_config(path, toml_str)
 }
 
@@ -915,7 +939,11 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_is_preload_complete() -> bool {
-    crate::config_cache::wasm_is_preload_complete()
+    let complete = crate::config_cache::wasm_is_preload_complete();
+    if complete {
+        crate::perf::browser::preload_end_once();
+    }
+    complete
 }
 
 /// Unified world loader: a single TOML file containing anchors, immediate

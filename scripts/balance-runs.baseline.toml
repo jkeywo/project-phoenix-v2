@@ -1,0 +1,24 @@
+# Standing A/B config for behaviour-changing balance batches.
+#
+#   cargo build --release --features headless --bin phoenix-headless
+#   node scripts/balance-runs.mjs scripts/balance-runs.baseline.toml --out .balance-out
+#
+# Run this before and after any change that alters NPC flight or firing, and
+# compare the two summaries. Change ONE behaviour-affecting thing per batch —
+# two together makes the diff uninterpretable.
+#
+# Do not retune the knobs below to chase a result. They exist so successive
+# batches are comparable; changing them invalidates the recorded baseline.
+# For exploratory sweeps, copy scripts/balance-runs.example.toml instead.
+#
+# Recorded baseline — commit b208d9aa, 192 runs (12 seeds x 16 ordered pairs):
+#   87 wins / 89 losses / 4 draws / 12 timeouts
+# Re-record this line whenever an accepted balance change moves it.
+
+seeds       = 12                         # seeds 1..12
+sim_seconds = 90                         # long enough for a decision in most pairs
+
+world       = "assets/worlds/duel.toml"
+
+# Every ordered pair including mirrors: 4 classes -> 16 matchups.
+class_matrix = ["courier", "destroyer", "cruiser", "battleship"]

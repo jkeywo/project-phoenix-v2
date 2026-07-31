@@ -9,6 +9,7 @@
 /// The old FSM (`AiState`/`TransitionConfig`/`Blackboard`/`tick()`) was
 /// dissolved in issue #572; motor behaviour now lives in the operate functions
 /// that read the scored objective pool from the viewscreen aggregator.
+use crate::simmath;
 use std::f32::consts::PI;
 use uuid::Uuid;
 
@@ -153,13 +154,13 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
     }
 
     // Check if target is directly ahead.
-    let fwd_x = input.yaw.sin();
-    let fwd_z = -input.yaw.cos();
+    let fwd_x = simmath::sin(input.yaw);
+    let fwd_z = -simmath::cos(input.yaw);
     let dir_x = dx / dist;
     let dir_z = dz / dist;
     let cross = fwd_x * dir_z - fwd_z * dir_x;
     let dot = fwd_x * dir_x + fwd_z * dir_z;
-    let angle = cross.atan2(dot);
+    let angle = simmath::atan2(cross, dot);
 
     if angle.abs() <= input.angle_tolerance {
         ImpulseDecision::Engage
@@ -308,12 +309,12 @@ pub struct WorldView {
 ///
 /// Returns a steering value in [-1, 1].
 pub fn steer_toward(yaw: f32, target_dir: [f32; 2], deadband_rad: f32, full_steer_rad: f32) -> f32 {
-    let fwd_x = yaw.sin();
-    let fwd_z = -yaw.cos();
+    let fwd_x = simmath::sin(yaw);
+    let fwd_z = -simmath::cos(yaw);
 
     let cross = fwd_x * target_dir[1] - fwd_z * target_dir[0];
     let dot = fwd_x * target_dir[0] + fwd_z * target_dir[1];
-    let angle = cross.atan2(dot);
+    let angle = simmath::atan2(cross, dot);
 
     if angle.abs() < deadband_rad {
         return 0.0;
@@ -388,8 +389,8 @@ fn avoidance_steering(
         return 0.0;
     }
 
-    let fwd_x = self_yaw.sin();
-    let fwd_z = -self_yaw.cos();
+    let fwd_x = simmath::sin(self_yaw);
+    let fwd_z = -simmath::cos(self_yaw);
     let proj_self_x = self_pos[0] + fwd_x * self_speed * avoidance_look_ahead_secs;
     let proj_self_z = self_pos[2] + fwd_z * self_speed * avoidance_look_ahead_secs;
 
@@ -402,8 +403,8 @@ fn avoidance_steering(
         let avoidance_radius = self_radius + entity.radius + avoidance_buffer;
 
         let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
-            let ent_fwd_x = ent_yaw.sin();
-            let ent_fwd_z = -ent_yaw.cos();
+            let ent_fwd_x = simmath::sin(ent_yaw);
+            let ent_fwd_z = -simmath::cos(ent_yaw);
             (
                 entity.position[0] + ent_fwd_x * entity.forward_speed * avoidance_look_ahead_secs,
                 entity.position[2] + ent_fwd_z * entity.forward_speed * avoidance_look_ahead_secs,
@@ -896,10 +897,13 @@ pub fn target_relative_motion(
     let (ux, uz) = (dx / range, dz / range);
 
     // Velocities reconstructed from (yaw, forward_speed) — see the struct note.
-    let self_vx = self_yaw.sin() * self_speed;
-    let self_vz = -self_yaw.cos() * self_speed;
+    let self_vx = simmath::sin(self_yaw) * self_speed;
+    let self_vz = -simmath::cos(self_yaw) * self_speed;
     let (tgt_vx, tgt_vz) = match target_yaw {
-        Some(y) => (y.sin() * target_speed, -y.cos() * target_speed),
+        Some(y) => (
+            simmath::sin(y) * target_speed,
+            -simmath::cos(y) * target_speed,
+        ),
         None => (0.0, 0.0),
     };
 
@@ -907,15 +911,15 @@ pub fn target_relative_motion(
     // negation so "closing" reads positive.
     let closing_rate = -((tgt_vx - self_vx) * ux + (tgt_vz - self_vz) * uz);
 
-    let fwd_x = self_yaw.sin();
-    let fwd_z = -self_yaw.cos();
+    let fwd_x = simmath::sin(self_yaw);
+    let fwd_z = -simmath::cos(self_yaw);
     let cross = fwd_x * uz - fwd_z * ux;
     let dot = fwd_x * ux + fwd_z * uz;
 
     TargetRelativeMotion {
         range,
         closing_rate,
-        bearing_rad: cross.atan2(dot),
+        bearing_rad: simmath::atan2(cross, dot),
     }
 }
 
@@ -1019,7 +1023,7 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
             } else {
                 // On top of the target: hold the current heading rather than
                 // dividing by ~0. The pass is over in any meaningful sense.
-                [input.self_yaw.sin(), -input.self_yaw.cos()]
+                [simmath::sin(input.self_yaw), -simmath::cos(input.self_yaw)]
             };
             // Three tracking legs, three authored throttles. The geometry above
             // is shared precisely because "point at where the target IS now" is
@@ -1034,8 +1038,8 @@ pub fn plan_fly_through_pass(input: &FlyThroughPassInput) -> (f32, f32) {
         }
         FlyThroughLeg::Escape => (
             [
-                input.escape_heading_rad.sin(),
-                -input.escape_heading_rad.cos(),
+                simmath::sin(input.escape_heading_rad),
+                -simmath::cos(input.escape_heading_rad),
             ],
             input.escape_speed,
         ),
@@ -1154,7 +1158,7 @@ pub fn plan_recovery_orbit(input: &RecoveryOrbitInput) -> (f32, f32) {
     // Sitting exactly on the target (or an un-authored ring) leaves no tangent
     // to fly: hold the current heading rather than dividing by ~0.
     let dir = if range <= f32::EPSILON || input.safe_range <= f32::EPSILON {
-        [input.self_yaw.sin(), -input.self_yaw.cos()]
+        [simmath::sin(input.self_yaw), -simmath::cos(input.self_yaw)]
     } else {
         let inward = [dx / range, dz / range];
         // Tangent of the ring, on the authored side. `sign` is the sense of the
@@ -1172,7 +1176,7 @@ pub fn plan_recovery_orbit(input: &RecoveryOrbitInput) -> (f32, f32) {
         // it when inside. Clamped to a quarter turn — see the doc comment.
         let correction = (error * input.spiral_gain)
             .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
-        let (s, c) = correction.sin_cos();
+        let (s, c) = simmath::sin_cos(correction);
         // Blend tangent toward `inward` by `correction`: at 0 it is the pure
         // tangent, at ±π/2 it is straight at (or straight away from) the target.
         [
@@ -1284,12 +1288,15 @@ pub fn plan_artillery_position(input: &ArtilleryPositionInput) -> (f32, f32) {
     let dir = if dist <= f32::EPSILON {
         // Sitting on the target: hold the current heading rather than solving a
         // bearing from a zero-length vector.
-        [input.self_yaw.sin(), -input.self_yaw.cos()]
+        [simmath::sin(input.self_yaw), -simmath::cos(input.self_yaw)]
     } else {
         // Velocities reconstructed from (yaw, forward_speed) — the snapshot
         // carries no velocity field. Same recipe as `target_relative_motion`.
         let (tvx, tvz) = match input.target_yaw {
-            Some(y) => (y.sin() * input.target_speed, -y.cos() * input.target_speed),
+            Some(y) => (
+                simmath::sin(y) * input.target_speed,
+                -simmath::cos(y) * input.target_speed,
+            ),
             None => (0.0, 0.0),
         };
         // The heading straight at where the target is NOW, in the project's
@@ -1297,7 +1304,7 @@ pub fn plan_artillery_position(input: &ArtilleryPositionInput) -> (f32, f32) {
         // bank facing so that `predict_intercept_heading`'s own fallback — which
         // is `shooter_yaw + facing_deg` — resolves to exactly this, rather than
         // to whichever way the hull happened to be pointing.
-        let live = dx.atan2(-dz);
+        let live = simmath::atan2(dx, -dz);
         let heading = crate::weapons::blaster::predict_intercept_heading(
             input.self_pos[0],
             input.self_pos[2],
@@ -1309,7 +1316,7 @@ pub fn plan_artillery_position(input: &ArtilleryPositionInput) -> (f32, f32) {
             live,
             0.0,
         );
-        [heading.sin(), -heading.cos()]
+        [simmath::sin(heading), -simmath::cos(heading)]
     };
 
     let base_steer = steer_toward(
@@ -1633,14 +1640,14 @@ pub fn decode_thrust_from_velocity(velocity_local: [f32; 3]) -> f32 {
 /// starboard (`+X`).
 pub fn encode_local_facing(steering: f32) -> [f32; 3] {
     let theta = steering.clamp(-1.0, 1.0) * PATROL_FULL_STEER_RAD;
-    [theta.sin(), 0.0, -theta.cos()]
+    [simmath::sin(theta), 0.0, -simmath::cos(theta)]
 }
 
 /// Recover the yaw-steering intent (`[-1, 1]`) from a ship-local desired facing.
 /// Inverse of [`encode_local_facing`]; sign-preserving and exact up to floating
 /// point for the representable `[-1, 1]` range.
 pub fn decode_steering_from_facing(facing_local: [f32; 3]) -> f32 {
-    (facing_local[0].atan2(-facing_local[2]) / PATROL_FULL_STEER_RAD).clamp(-1.0, 1.0)
+    (simmath::atan2(facing_local[0], -facing_local[2]) / PATROL_FULL_STEER_RAD).clamp(-1.0, 1.0)
 }
 
 /// Close-quarters docking manoeuvre (issue #742).
@@ -1678,8 +1685,8 @@ pub fn docking_close_manoeuvre(
     if dist > engage_distance || dist < 1e-3 {
         return None;
     }
-    let cos_y = ship_yaw.cos();
-    let sin_y = ship_yaw.sin();
+    let cos_y = simmath::cos(ship_yaw);
+    let sin_y = simmath::sin(ship_yaw);
     let starboard = dx * cos_y + dz * sin_y;
     let forward = dx * sin_y - dz * cos_y;
     let inv = 1.0 / dist;
@@ -1767,8 +1774,8 @@ pub fn assess_hazards(
     let self_radius = world_view.self_radius;
     let self_size_rating = world_view.self_size_rating;
 
-    let fwd_x = self_yaw.sin();
-    let fwd_z = -self_yaw.cos();
+    let fwd_x = simmath::sin(self_yaw);
+    let fwd_z = -simmath::cos(self_yaw);
     // Starboard (local +X): forward rotated +90° in the XZ plane.
     let stbd_x = -fwd_z;
     let stbd_z = fwd_x;
@@ -1797,9 +1804,9 @@ pub fn assess_hazards(
         let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
             (
                 entity.position[0]
-                    + ent_yaw.sin() * entity.forward_speed * avoidance_look_ahead_secs,
+                    + simmath::sin(ent_yaw) * entity.forward_speed * avoidance_look_ahead_secs,
                 entity.position[2]
-                    + (-ent_yaw.cos()) * entity.forward_speed * avoidance_look_ahead_secs,
+                    + (-simmath::cos(ent_yaw)) * entity.forward_speed * avoidance_look_ahead_secs,
             )
         } else {
             (entity.position[0], entity.position[2])
@@ -3334,8 +3341,8 @@ mod tests {
     fn impulse_decide_engage_at_angle_tolerance_boundary() {
         // Target at the edge of the tolerance cone
         let angle = IMPULSE_ANGLE_TOLERANCE_RAD; // 0.08 rad
-        let target_x = 300.0 * angle.sin();
-        let target_z = -300.0 * angle.cos();
+        let target_x = 300.0 * simmath::sin(angle);
+        let target_z = -300.0 * simmath::cos(angle);
         let input = impulse_input(
             [0.0, 0.0],
             0.0,
@@ -3350,8 +3357,8 @@ mod tests {
     #[test]
     fn impulse_decide_noop_past_angle_tolerance() {
         let angle = IMPULSE_ANGLE_TOLERANCE_RAD + 0.01; // just past boundary
-        let target_x = 300.0 * angle.sin();
-        let target_z = -300.0 * angle.cos();
+        let target_x = 300.0 * simmath::sin(angle);
+        let target_z = -300.0 * simmath::cos(angle);
         let input = impulse_input(
             [0.0, 0.0],
             0.0,

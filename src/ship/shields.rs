@@ -1,3 +1,4 @@
+use crate::simmath;
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
@@ -562,8 +563,8 @@ fn publish_shields_blackboard(
                 })?;
             let dx = live.0 - physics.x;
             let dz = live.1 - physics.z;
-            let bearing_rad =
-                (dz.atan2(dx) - physics.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+            let bearing_rad = (simmath::atan2(dz, dx) - physics.yaw + std::f32::consts::PI)
+                % (2.0 * std::f32::consts::PI);
             Some(bearing_rad.to_degrees())
         });
 

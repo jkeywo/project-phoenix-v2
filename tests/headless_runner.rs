@@ -27,6 +27,7 @@ use project_phoenix::ship::state::ShipPhysics;
 use project_phoenix::ship_plugin::{
     ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources,
 };
+use project_phoenix::simmath;
 
 fn test_args() -> HeadlessArgs {
     HeadlessArgs {
@@ -2252,7 +2253,7 @@ fn sample_doctrine(app: &mut App) -> Option<DoctrineSample> {
 /// World bearing from one planar point to another, in the same frame
 /// `ShipPhysics::yaw` is expressed in (forward is `-Z`, starboard `+X`).
 fn bearing_to(from: [f32; 2], to: [f32; 2]) -> f32 {
-    (to[0] - from[0]).atan2(-(to[1] - from[1]))
+    simmath::atan2(to[0] - from[0], -(to[1] - from[1]))
 }
 
 fn wrap_pi(a: f32) -> f32 {

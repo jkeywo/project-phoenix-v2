@@ -2,6 +2,7 @@
 /// drives per-entity helm/weapons/doctrine AI, and manages NPC hull tracking.
 ///
 /// Compiled only for the `server` feature (same gate as `simulation.rs`).
+use crate::simmath;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -1195,7 +1196,7 @@ fn simulate_low_lod_ships(
                 let dx = target_pos[0] - physics.x;
                 let dz = target_pos[2] - physics.z;
                 if dx * dx + dz * dz > f32::EPSILON {
-                    physics.yaw = dx.atan2(-dz);
+                    physics.yaw = simmath::atan2(dx, -dz);
                 }
                 // Accelerate toward the target speed so a ship that spawned
                 // far from the player (and never had `integrate_ship_physics`
@@ -1206,8 +1207,8 @@ fn simulate_low_lod_ships(
                     physics.forward_speed =
                         (physics.forward_speed + LOW_LOD_ACCEL_PER_SEC * dt).min(target_speed);
                 }
-                physics.x += physics.forward_speed * physics.yaw.sin() * dt;
-                physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
+                physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
+                physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
                 continue;
             }
             // Route flown to its end: the ship is where its objective sent it.
@@ -1217,8 +1218,8 @@ fn simulate_low_lod_ships(
             if crate::ai::patrol_cursor::route_completed(index, &waypoints, loop_path) {
                 physics.forward_speed =
                     (physics.forward_speed - LOW_LOD_ACCEL_PER_SEC * dt).max(0.0);
-                physics.x += physics.forward_speed * physics.yaw.sin() * dt;
-                physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
+                physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
+                physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
                 continue;
             }
 
@@ -1234,8 +1235,8 @@ fn simulate_low_lod_ships(
         // Dumb forward-move fallback: no patrol objective, no cursor component,
         // or a stalled/terminal patrol. Preserves the pre-existing low-LOD
         // drift so non-patrol ships keep moving instead of standing still.
-        physics.x += physics.forward_speed * physics.yaw.sin() * dt;
-        physics.z -= physics.forward_speed * physics.yaw.cos() * dt;
+        physics.x += physics.forward_speed * simmath::sin(physics.yaw) * dt;
+        physics.z -= physics.forward_speed * simmath::cos(physics.yaw) * dt;
     }
 }
 

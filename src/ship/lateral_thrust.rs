@@ -1,6 +1,8 @@
 // Pure Rust module implementing lateral thrust physics.
 // No Bevy or Rapier — pure computation, simulation layer applies results.
 
+use crate::simmath;
+
 /// Lateral thrust tuning constants.
 #[derive(Debug, Clone, Copy)]
 pub struct LateralThrustConfig {
@@ -72,8 +74,8 @@ pub fn compute_lateral_speed(
 pub fn lateral_displacement(yaw: f32, lateral_speed: f32, dt: f32) -> (f32, f32) {
     // Right vector from yaw: perpendicular to forward direction
     // Forward is (sin(yaw), -cos(yaw)), so right is (cos(yaw), sin(yaw))
-    let right_x = yaw.cos();
-    let right_z = yaw.sin();
+    let right_x = simmath::cos(yaw);
+    let right_z = simmath::sin(yaw);
     (right_x * lateral_speed * dt, right_z * lateral_speed * dt)
 }
 

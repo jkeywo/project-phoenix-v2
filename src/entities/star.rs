@@ -121,6 +121,9 @@ pub fn halo_material_from_config(config: &StarConfig) -> StarHaloMaterial {
     }
 }
 
+// Presentation-only render mesh generation: vertex positions never feed
+// simulation state, so std transcendentals are fine (issue #908, simmath.rs).
+#[allow(clippy::disallowed_methods)]
 pub fn uv_sphere_mesh(radius: f32, longitude_segments: u32, latitude_segments: u32) -> Mesh {
     let radius = radius.max(0.1);
     let longitudes = longitude_segments.max(8);

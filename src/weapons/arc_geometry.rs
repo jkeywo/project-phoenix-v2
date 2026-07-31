@@ -57,6 +57,8 @@
 //! coincidence. One server-side producer call feeds the AI fact reduction and
 //! the wire payload, so they agree by construction (issue #874 AC4).
 
+use crate::simmath;
+
 /// One authored weapon bank's arc, ship-relative — the producer's input.
 ///
 /// Deliberately narrower than the per-family bank configs: arc geometry cares
@@ -142,7 +144,7 @@ pub fn weapon_arc_sectors(ship_yaw_rad: f32, banks: &[WeaponArcBank]) -> Vec<Wea
 pub fn world_bearing_deg(from_x: f32, from_z: f32, to_x: f32, to_z: f32) -> f32 {
     let dx = to_x - from_x;
     let dz = to_z - from_z;
-    normalise_deg(dx.atan2(-dz).to_degrees())
+    normalise_deg(simmath::atan2(dx, -dz).to_degrees())
 }
 
 /// Reduce one hostile's sectors against an observer's position.
@@ -356,7 +358,7 @@ mod tests {
 
         // Sitting at +20 degrees: 10 degrees further to starboard gets out,
         // 50 degrees to port would. Shorter way is positive.
-        let stbd_x = 50.0_f32 * (20.0_f32).to_radians().tan();
+        let stbd_x = 50.0_f32 * simmath::tan((20.0_f32).to_radians());
         let stbd = arc_exposure(&sectors, 0.0, 0.0, stbd_x, -50.0);
         assert_eq!(stbd.covering_count, 1);
         assert!(approx(stbd.escape_offset_deg, 10.0), "{stbd:?}");
@@ -413,7 +415,7 @@ mod tests {
         // An aft bank centred on 180 degrees must cover a contact at -179.
         let sectors = weapon_arc_sectors(0.0, &[bank(180.0, 20.0, 200.0)]);
         let z = 100.0_f32;
-        let x = -z * (1.0_f32).to_radians().tan();
+        let x = -z * simmath::tan((1.0_f32).to_radians());
         let e = arc_exposure(&sectors, 0.0, 0.0, x, z);
         assert_eq!(e.covering_count, 1, "{e:?}");
     }

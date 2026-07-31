@@ -6,6 +6,7 @@ use crate::entity_spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target, WorldResource};
 use crate::messages::*;
 use crate::modifiers::ShipModifiers;
+use crate::simmath;
 use crate::simulation::{ShipImpulse, SimOutbox};
 
 #[derive(Resource, Default)]
@@ -11013,7 +11014,7 @@ fn a_target_with_no_blaster_banks_is_still_led() {
     );
 
     let heading = bank.in_flight[0].heading;
-    let led = (20.0_f32 / 40.0).asin(); // 30°, the exact square-on lead.
+    let led = simmath::asin(20.0_f32 / 40.0); // 30°, the exact square-on lead.
     let live_bearing = 0.0_f32; // the target's CURRENT bearing: dead ahead.
 
     assert!(
@@ -11134,7 +11135,7 @@ fn a_blaster_carrying_target_is_led_identically() {
     );
 
     let heading = bank.in_flight[0].heading;
-    let led = (20.0_f32 / 40.0).asin();
+    let led = simmath::asin(20.0_f32 / 40.0);
     assert!(
         (heading - led).abs() < 1e-3,
         "heading {} deg, expected the same {} deg lead the blaster-less target gets",

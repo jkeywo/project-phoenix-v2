@@ -13,6 +13,7 @@
 //! Coordinate system: same as `ship_physics` / `radar` Ã¢â‚¬â€ XZ plane, Y-up.
 //! Ship forward is Ã¢Ë†â€™Z when yaw = 0.
 
+use crate::simmath;
 use crate::weapons::pattern::BarrelPattern;
 use std::f32::consts::PI;
 
@@ -121,7 +122,7 @@ impl Torpedo {
             if let Some((tx, ty, tz)) = target_pos {
                 let dx = tx - self.x;
                 let dz = tz - self.z;
-                let desired = (dx).atan2(-dz);
+                let desired = simmath::atan2(dx, -dz);
                 let delta = angle_diff(desired, self.heading);
                 let max_turn = config.turn_rate * dt;
                 self.heading += delta.clamp(-max_turn, max_turn);
@@ -134,18 +135,18 @@ impl Torpedo {
                 // the movement below then collapses to the 2D case.
                 let dy = ty - self.y;
                 let horizontal = (dx * dx + dz * dz).sqrt();
-                let desired_pitch = dy.atan2(horizontal);
+                let desired_pitch = simmath::atan2(dy, horizontal);
                 let dpitch = (desired_pitch - self.pitch).clamp(-max_turn, max_turn);
                 self.pitch += dpitch;
             }
         }
-        let cos_h = self.heading.cos();
-        let sin_h = self.heading.sin();
+        let cos_h = simmath::cos(self.heading);
+        let sin_h = simmath::sin(self.heading);
         // `cos_p == 1.0` and `sin_p == 0.0` exactly while pitch is 0, so the XZ
         // integration is bit-identical to the pre-#768 planar path and Y stays
         // put (issue #768, AC3).
-        let cos_p = self.pitch.cos();
-        let sin_p = self.pitch.sin();
+        let cos_p = simmath::cos(self.pitch);
+        let sin_p = simmath::sin(self.pitch);
         self.x += sin_h * cos_p * config.speed * dt;
         self.z -= cos_h * cos_p * config.speed * dt;
         self.y += sin_p * config.speed * dt;

@@ -1,3 +1,4 @@
+use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -459,7 +460,7 @@ pub fn tick_sensors_threat_warning(
         let distance = dist_sq.sqrt();
 
         // Compute relative bearing (0 = dead ahead, positive = to starboard).
-        let absolute_bearing = dx.atan2(-dz);
+        let absolute_bearing = simmath::atan2(dx, -dz);
         let mut relative_bearing = absolute_bearing - yaw;
         if relative_bearing > std::f32::consts::PI {
             relative_bearing -= std::f32::consts::TAU;

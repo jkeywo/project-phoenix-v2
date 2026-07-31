@@ -1,3 +1,4 @@
+use crate::simmath;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -24,7 +25,7 @@ impl RegionShape {
             RegionShape::Sphere { radius } => delta.length_squared() <= radius * radius,
             RegionShape::Box { half_extents, yaw } => {
                 // Rotate delta by -yaw around Y axis to get into the box's local frame
-                let (sin_y, cos_y) = yaw.sin_cos();
+                let (sin_y, cos_y) = simmath::sin_cos(*yaw);
                 let local_x = delta.x * cos_y + delta.z * sin_y;
                 let local_z = -delta.x * sin_y + delta.z * cos_y;
                 local_x.abs() <= half_extents[0]

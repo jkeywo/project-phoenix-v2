@@ -4,6 +4,7 @@
 //! `src/weapons/blaster.rs`) is a different module from this file — this one
 //! holds the Bevy systems and the ECS wrapper resource.
 
+use crate::simmath;
 use bevy::prelude::*;
 
 use super::shared::{any_blaster_bank_operates_ai, live_entity_xz, system_is_registered};
@@ -460,8 +461,8 @@ pub(crate) fn tick_blaster_system(
         .p1()
         .iter()
         .map(|(uuid, physics)| {
-            let vx = physics.forward_speed * physics.yaw.sin();
-            let vz = -physics.forward_speed * physics.yaw.cos();
+            let vx = physics.forward_speed * simmath::sin(physics.yaw);
+            let vz = -physics.forward_speed * simmath::cos(physics.yaw);
             (uuid.0.clone(), (vx, vz))
         })
         .collect();
@@ -486,8 +487,8 @@ pub(crate) fn tick_blaster_system(
             pos.map(|(x, z)| (x, z, vx, vz))
                 .unwrap_or((physics.x, physics.z - 100.0, 0.0, 0.0))
         } else {
-            let fwd_x = physics.yaw.sin();
-            let fwd_z = -physics.yaw.cos();
+            let fwd_x = simmath::sin(physics.yaw);
+            let fwd_z = -simmath::cos(physics.yaw);
             (
                 physics.x + fwd_x * 100.0,
                 physics.z + fwd_z * 100.0,
@@ -557,7 +558,7 @@ pub(crate) fn tick_blaster_system(
                     //   = −cos(h − yaw)
                     let heading = ev.heading;
                     let yaw = physics.yaw;
-                    let projection = -(heading - yaw).cos();
+                    let projection = -simmath::cos(heading - yaw);
                     physics.forward_speed += projection * recoil_impulse;
                 }
 

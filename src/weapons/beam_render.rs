@@ -27,6 +27,9 @@ pub const DEFAULT_BEAM_COLOR: [f32; 4] = [1.0, 0.4, 0.1, 1.0];
 /// * `hull_offset` – lateral distance from centre to the emitter.
 ///
 /// Returns `(x, z)`.
+// Presentation-only beam gizmo geometry (drawn by renderer.rs): never feeds
+// simulation state, so std transcendentals are fine (issue #908, simmath.rs).
+#[allow(clippy::disallowed_methods)]
 pub fn bank_origin(
     ship_x: f32,
     ship_z: f32,

@@ -2,6 +2,7 @@
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
 use crate::entity_config::{AsteroidFieldShape, GridConfig};
+use crate::simmath;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -788,7 +789,10 @@ fn compute_jitter(
     let max_jitter = max_push_inward.min(max_push_outward).min(jitter).max(0.0);
     let angle = perlin2d_octaves(cell_center_x * freq, cell_center_z * freq, octaves) * PI;
     let magnitude = rng.random::<f32>() * max_jitter;
-    (angle.cos() * magnitude, angle.sin() * magnitude)
+    (
+        simmath::cos(angle) * magnitude,
+        simmath::sin(angle) * magnitude,
+    )
 }
 
 /// Compute perlin noise with octaves.
@@ -824,8 +828,8 @@ fn generate_single_spawn(
     let radius = inner_radius + (rng.random::<f32>().sqrt() * radius_range);
 
     // Convert polar to cartesian
-    let x = radius * angle.cos();
-    let z = radius * angle.sin();
+    let x = radius * simmath::cos(angle);
+    let z = radius * simmath::sin(angle);
 
     // Select a random type path
     let config_path = if type_paths.is_empty() {

@@ -4,6 +4,10 @@
 //! subject once from its rig extents, so a 12 m courier and a 400 m starbase
 //! both arrive on screen at a usable size without per-model fiddling.
 
+// Dev-tool camera, never part of the shipped simulation: platform-varying std
+// transcendentals are fine here (issue #908, simmath.rs).
+#![allow(clippy::disallowed_methods)]
+
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 

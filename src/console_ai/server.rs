@@ -34,6 +34,7 @@
 //! entirely, and target selection now lives wholly in
 //! `console::weapons::ai_target_selection`.
 
+use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -923,7 +924,7 @@ pub(crate) fn ai_torpedo_auto_fire(
 
         let dx = tx - physics.x;
         let dz = tz - physics.z;
-        let world_bearing = dx.atan2(-dz);
+        let world_bearing = simmath::atan2(dx, -dz);
         let bearing = world_bearing - physics.yaw;
 
         // Per-entity component only (issue #738). This used to fall back to

@@ -32,6 +32,7 @@
 /// Regen is capped at `max_hp`. A facing that is hit while still ramping is
 /// knocked back to 0 and collapses again for a fresh `offline_duration`, so
 /// sustained fire keeps a shield down rather than letting it flicker back.
+use crate::simmath;
 use std::f32::consts::TAU;
 
 /// A snapshot of a single shield facing, suitable for serialisation and UI.
@@ -787,7 +788,7 @@ pub fn attacker_bearing_relative(
 
     // World-space bearing of the attacker (atan2 in XZ plane).
     // We use atan2(dx, -dz) so that "forward" (dx=0, dz<0) gives 0.
-    let world_bearing = dx.atan2(-dz);
+    let world_bearing = simmath::atan2(dx, -dz);
 
     // Subtract ship yaw to get bearing relative to the ship's own frame.
     // Then normalise to (-π, π].

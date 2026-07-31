@@ -21,6 +21,7 @@
 //! A target is "in arc" for a bank with `facing_deg` and `arc_deg` when
 //! `angle_diff(bearing, facing_rad).abs() <= arc_deg.to_radians() / 2`.
 
+use crate::simmath;
 use std::f32::consts::PI;
 
 /// String identifier for a phaser bank (matches the `id` field in TOML).
@@ -244,8 +245,8 @@ pub(crate) fn ship_local(
 ) -> (f32, f32) {
     let dx = target_x - ship_x;
     let dz = target_z - ship_z;
-    let cos_y = ship_yaw.cos();
-    let sin_y = ship_yaw.sin();
+    let cos_y = simmath::cos(ship_yaw);
+    let sin_y = simmath::sin(ship_yaw);
     let radar_x = dx * cos_y + dz * sin_y;
     let radar_y = dx * sin_y - dz * cos_y;
     (radar_x, radar_y)
@@ -253,7 +254,7 @@ pub(crate) fn ship_local(
 
 /// True if `(radar_x, radar_y)` is within `arc_deg/2` of the bank's facing.
 pub fn in_arc(radar_x: f32, radar_y: f32, facing_deg: f32, arc_deg: f32) -> bool {
-    let bearing = radar_x.atan2(radar_y);
+    let bearing = simmath::atan2(radar_x, radar_y);
     let facing = facing_deg.to_radians();
     let half = arc_deg.to_radians() * 0.5;
     angle_diff(bearing, facing).abs() <= half
@@ -282,7 +283,7 @@ pub fn target_geometry(
     let dz = target_z - ship_z;
     let range = (dx * dx + dz * dz).sqrt();
     let in_range = dx * dx + dz * dz <= effective_range * effective_range;
-    let bearing = rx.atan2(ry);
+    let bearing = simmath::atan2(rx, ry);
     let facing = facing_deg.to_radians();
     let arc_offset = angle_diff(bearing, facing).abs();
     let in_arc = arc_offset <= fire_arc_deg.to_radians() * 0.5;
@@ -536,7 +537,7 @@ mod tests {
 
     fn fwd_xz(yaw: f32) -> (f32, f32) {
         // Matches `src/ship/physics.rs`: forward = (sin yaw, -cos yaw).
-        (yaw.sin(), -yaw.cos())
+        (simmath::sin(yaw), -simmath::cos(yaw))
     }
 
     #[test]
@@ -600,8 +601,8 @@ mod tests {
             -2.5,
         ] {
             // Right (starboard) vector: (cos yaw, sin yaw) per beam_render.rs.
-            let right_x = yaw.cos();
-            let right_z = yaw.sin();
+            let right_x = simmath::cos(yaw);
+            let right_z = simmath::sin(yaw);
             // Place target 20 units directly to starboard.
             let tx = right_x * 20.0;
             let tz = right_z * 20.0;

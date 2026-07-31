@@ -6,6 +6,8 @@
 // server viewscreen radar projects via `gui::radar::project_radar_entity`,
 // so only the weapons-server fire check remains here.
 
+use crate::simmath;
+
 /// Returns `true` if a world-space target is within phaser firing parameters:
 /// - distance from ship ≤ `phaser_range`, and
 /// - inside the ship's 180° forward arc (forward hemisphere in ship-local
@@ -32,8 +34,8 @@ pub fn is_fire_ready_with_range(
     }
 
     // Arc gate: must be in the forward 180° hemisphere (radar_y >= 0).
-    let sin_y = ship_yaw.sin();
-    let cos_y = ship_yaw.cos();
+    let sin_y = simmath::sin(ship_yaw);
+    let cos_y = simmath::cos(ship_yaw);
     let radar_y = dx * sin_y - dz * cos_y;
     radar_y >= 0.0
 }

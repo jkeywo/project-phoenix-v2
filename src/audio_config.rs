@@ -293,6 +293,9 @@ pub fn forcefield_volume(intensity: f32, base: f32, spike: f32) -> f32 {
 /// right, hence the negated forward component in the returned vector.
 ///
 /// Returns `[right, 0.0, -forward]` — ready for `PannerNode.positionX/Y/Z`.
+// Presentation-only audio panning (JS-side playback): never feeds simulation
+// state, so std transcendentals are fine (issue #908, simmath.rs).
+#[allow(clippy::disallowed_methods)]
 pub fn listener_relative(
     listener_x: f32,
     listener_z: f32,

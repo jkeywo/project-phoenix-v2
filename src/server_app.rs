@@ -1,3 +1,4 @@
+use crate::simmath;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
@@ -1477,7 +1478,7 @@ fn separate_ship_from_collision(
         (dx / dist, dz / dist, dist)
     } else {
         // Degenerate overlap: step back opposite the ship's current forward.
-        (-physics.yaw.sin(), physics.yaw.cos(), 0.0)
+        (-simmath::sin(physics.yaw), simmath::cos(physics.yaw), 0.0)
     };
 
     if dist < min_dist {

@@ -1,3 +1,4 @@
+use crate::simmath;
 use bevy::prelude::*;
 
 use super::beam::{
@@ -1282,8 +1283,8 @@ fn project_blip(
     if dx * dx + dz * dz > effective_range * effective_range {
         return None;
     }
-    let cos_y = ship_yaw.cos();
-    let sin_y = ship_yaw.sin();
+    let cos_y = simmath::cos(ship_yaw);
+    let sin_y = simmath::sin(ship_yaw);
     // Ship-aligned projection: forward = -Z at yaw=0, right = +X.
     // radar_x = dot((dx,dz), right)   = dx*cos(yaw) + dz*sin(yaw)
     // radar_y = dot((dx,dz), forward) = dx*sin(yaw) - dz*cos(yaw)

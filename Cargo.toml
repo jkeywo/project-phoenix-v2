@@ -75,6 +75,13 @@ rand = "0.9"
 noise = "0.9"
 toml = "1.0"
 strum = { version = "0.28.0", features = ["derive"] }
+# Pure-Rust libm backing `crate::simmath` (issue #908). Simulation code must
+# not call std's float transcendentals (`sin`, `cos`, `atan2`, …): std routes
+# them to the platform's libm (native links the system one, wasm gets Rust's),
+# and IEEE-754 guarantees nothing about their last bit, so a lockstep sim
+# desyncs across targets. Already in Cargo.lock transitively — no new
+# supply-chain surface.
+libm = "0.2"
 # The fleet's cross-runtime measurement contract (issue #868). Phoenix's first
 # vellum crate — pinned to the rev pyproject.toml already pins for pasm, so the
 # repo carries one vellum rev rather than two. The `json` feature is on because

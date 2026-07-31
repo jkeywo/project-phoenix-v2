@@ -1,3 +1,7 @@
+// Presentation-only camera/starfield rendering: never feeds simulation state,
+// so platform-varying std transcendentals are fine here (issue #908, simmath.rs).
+#![allow(clippy::disallowed_methods)]
+
 use bevy::camera::ClearColorConfig;
 use bevy::core_pipeline::core_2d::graph::Core2d;
 use bevy::core_pipeline::core_3d::graph::Core3d;

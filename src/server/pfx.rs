@@ -1,3 +1,7 @@
+// Presentation-only particle/render effects: never feeds simulation state, so
+// platform-varying std transcendentals are fine here (issue #908, simmath.rs).
+#![allow(clippy::disallowed_methods)]
+
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;

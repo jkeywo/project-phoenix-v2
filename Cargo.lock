@@ -4353,6 +4353,7 @@ dependencies = [
  "getrandom 0.3.4",
  "glam 0.30.10",
  "js-sys",
+ "libm",
  "noise",
  "rand 0.9.4",
  "ron",

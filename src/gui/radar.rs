@@ -7,6 +7,10 @@
 //! they render *over* the radar background (gizmos draw under UI and would be
 //! occluded by the opaque radar dial image).
 
+// Presentation-only viewscreen widget: never feeds simulation state, so
+// platform-varying std transcendentals are fine here (issue #908, simmath.rs).
+#![allow(clippy::disallowed_methods)]
+
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;

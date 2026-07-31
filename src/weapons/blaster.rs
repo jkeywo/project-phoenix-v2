@@ -40,6 +40,7 @@
 //! crossing), and the error grows with both range and crossing speed. It
 //! survives only as the degenerate fallback below.
 
+use crate::simmath;
 use std::f32::consts::PI;
 
 // ── Configuration ──────────────────────────────────────────────────────────
@@ -185,8 +186,8 @@ pub struct BlasterProjectile {
 impl BlasterProjectile {
     /// Advance position by `dt` seconds and decrement lifespan.
     pub fn tick(&mut self, dt: f32) {
-        self.x += self.heading.sin() * self.speed * dt;
-        self.z -= self.heading.cos() * self.speed * dt;
+        self.x += simmath::sin(self.heading) * self.speed * dt;
+        self.z -= simmath::cos(self.heading) * self.speed * dt;
         self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
     }
 
@@ -815,7 +816,7 @@ pub fn predict_intercept_heading(
     if dx * dx + dz * dz < COINCIDENT_EPS_SQ {
         return fallback;
     }
-    dx.atan2(-dz)
+    simmath::atan2(dx, -dz)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -1093,8 +1094,8 @@ mod tests {
 
         // One second of travel.
         let dt = 1.0;
-        let expected_x = x0 + heading.sin() * proj.speed * dt;
-        let expected_z = z0 - heading.cos() * proj.speed * dt;
+        let expected_x = x0 + simmath::sin(heading) * proj.speed * dt;
+        let expected_z = z0 - simmath::cos(heading) * proj.speed * dt;
 
         let mut p = proj.clone();
         p.tick(dt);
@@ -1181,7 +1182,7 @@ mod tests {
         // Predicted X = 20 + 5 * 0.707 ≈ 23.54
         // The heading should point slightly ahead of the target's current
         // position — i.e. a heading angle larger than straight-at.
-        let straight_at = (20.0_f32).atan2(-(-20.0_f32)); // atan2(dx, -dz)
+        let straight_at = simmath::atan2(20.0_f32, -(-20.0_f32)); // atan2(dx, -dz)
         let h = predict_intercept_heading(0.0, 0.0, 20.0, -20.0, 5.0, 0.0, 40.0, 0.0, 0.0);
         assert!(
             (h - straight_at).abs() > 0.01,
@@ -1231,7 +1232,7 @@ mod tests {
 
         // The launch heading agrees with the point.
         let h = predict_intercept_heading(0.0, 0.0, 0.0, -100.0, 30.0, 0.0, 50.0, 0.0, 0.0);
-        let expected = px.atan2(-pz);
+        let expected = simmath::atan2(px, -pz);
         assert!(
             (h - expected).abs() < 1e-4,
             "heading {h}, expected {expected}"
@@ -1257,7 +1258,7 @@ mod tests {
 
         // Off-axis and off-origin, so this is not passing on a lucky zero.
         let h = predict_intercept_heading(10.0, 10.0, 40.0, -20.0, 0.0, 0.0, 40.0, 0.0, 0.0);
-        let straight_at = (40.0_f32 - 10.0).atan2(-(-20.0_f32 - 10.0));
+        let straight_at = simmath::atan2(40.0_f32 - 10.0, -(-20.0_f32 - 10.0));
         assert!(
             (h - straight_at).abs() < 1e-5,
             "heading {h} must be the bearing to a stationary target ({straight_at})"
@@ -1317,7 +1318,7 @@ mod tests {
         // The documented degradation, asserted so it cannot silently become
         // something else: the first-order estimate, t = |rel| / speed.
         let t_est = 100.0_f32 / 30.0;
-        let expected = (60.0 * t_est).atan2(100.0);
+        let expected = simmath::atan2(60.0 * t_est, 100.0);
         assert!(
             (h - expected).abs() < 1e-4,
             "heading {h} must fall back to the first-order estimate ({expected})"

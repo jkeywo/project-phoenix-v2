@@ -4564,6 +4564,7 @@ mod tests {
     use crate::ship::components::HELM_AI_MAX_DT_SECS;
     use crate::ship::test_support::*;
     use crate::ship_physics::ShipPhysicsConfig;
+    use crate::simmath;
     use crate::simulation::Ship;
 
     /// Lock this ship's Tactical surface onto `uuid` (issue #702).
@@ -12685,7 +12686,7 @@ verb = "engage_boost"
     /// observably.
     fn bearing_around_bogey(app: &mut App) -> f32 {
         let p = ship_pose(app);
-        p.x.atan2(p.z)
+        simmath::atan2(p.x, p.z)
     }
 
     /// Put the cruiser into its orbit state, flying, at `start_range` from the
@@ -13007,9 +13008,9 @@ verb = "engage_boost"
                     uuid: hazard,
                     name: Some("rock".into()),
                     position: [
-                        pose.x + pose.yaw.sin() * 12.0,
+                        pose.x + simmath::sin(pose.yaw) * 12.0,
                         0.0,
-                        pose.z - pose.yaw.cos() * 12.0,
+                        pose.z - simmath::cos(pose.yaw) * 12.0,
                     ],
                     yaw: None,
                     forward_speed: 0.0,
@@ -14091,9 +14092,9 @@ verb = "engage_boost"
         let pose = ship_pose(&mut app);
         for side in [1.0_f32, -1.0] {
             let offset = [
-                pose.x + side * 60.0 + pose.yaw.sin() * 60.0,
+                pose.x + side * 60.0 + simmath::sin(pose.yaw) * 60.0,
                 0.0,
-                pose.z - pose.yaw.cos() * 60.0,
+                pose.z - simmath::cos(pose.yaw) * 60.0,
             ];
             set_bogey(&mut app, uuid, offset, 0.0, 0.0);
             app.world_mut()
@@ -14807,8 +14808,8 @@ verb = "engage_boost"
             pose.z,
             ORBIT_BOGEY[0],
             ORBIT_BOGEY[2],
-            crossing_yaw.sin() * crossing_speed,
-            -crossing_yaw.cos() * crossing_speed,
+            simmath::sin(crossing_yaw) * crossing_speed,
+            -simmath::cos(crossing_yaw) * crossing_speed,
             bank.projectile_speed,
             pose.yaw,
             0.0,
@@ -14818,9 +14819,9 @@ verb = "engage_boost"
             pose.yaw,
             0.0,
             [
-                pose.x + expected.sin() * 100.0,
+                pose.x + simmath::sin(expected) * 100.0,
                 0.0,
-                pose.z - expected.cos() * 100.0,
+                pose.z - simmath::cos(expected) * 100.0,
             ],
             Some(0.0),
             0.0,

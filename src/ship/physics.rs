@@ -2,6 +2,8 @@
 // No Bevy or Rapier — pure computation, simulation layer applies results.
 // Designed for isolated unit testing.
 
+use crate::simmath;
+
 /// Ship state for physics computation.
 #[derive(Debug, Clone, Copy)]
 pub struct ShipPhysicsState {
@@ -161,8 +163,8 @@ pub fn compute_physics(
     );
 
     // Compute displacement based on new yaw, signed speed, and lateral speed
-    let fwd_x = new_yaw.sin();
-    let fwd_z = -new_yaw.cos();
+    let fwd_x = simmath::sin(new_yaw);
+    let fwd_z = -simmath::cos(new_yaw);
 
     let (lat_dx, lat_dz) =
         crate::ship::lateral_thrust::lateral_displacement(new_yaw, new_lateral_speed, dt);

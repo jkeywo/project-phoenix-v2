@@ -4473,6 +4473,7 @@ mod tests {
 
     use super::*;
     use crate::entity_tags::EntityTag;
+    use crate::simmath;
 
     #[test]
     fn all_sections_present_deserializes_to_some() {
@@ -6649,7 +6650,7 @@ hull_max_hp = 6
             "precondition: a reference speed must resolve"
         );
         let half_arc = bolt.fire_arc_deg * 0.5;
-        let lead_angle = |v: f32| (v / bolt.projectile_speed).asin().to_degrees();
+        let lead_angle = |v: f32| simmath::asin(v / bolt.projectile_speed).to_degrees();
 
         // Inverted, the cone's own admission limit: the fastest square-on crosser
         // whose lead still fits inside the half-arc.
@@ -6669,7 +6670,7 @@ hull_max_hp = 6
              than letting `sin` fold back and pass the finding below for free.",
             bolt.fire_arc_deg
         );
-        let admits_crossing = bolt.projectile_speed * half_arc.to_radians().sin();
+        let admits_crossing = bolt.projectile_speed * simmath::sin(half_arc.to_radians());
 
         // Every shipped hull EXCEPT the fastest is admitted at square-on cruise.
         // This is the property that actually has to hold, and a content change
@@ -7020,8 +7021,8 @@ hull_max_hp = 6
                 .iter()
                 .filter(|b| {
                     crate::weapons::phaser::in_arc(
-                        bearing.sin(),
-                        bearing.cos(),
+                        simmath::sin(bearing),
+                        simmath::cos(bearing),
                         b.facing_deg,
                         b.auto_arc_deg,
                     )
@@ -10188,8 +10189,8 @@ when = "state_time >= param(surge_dwell_secs)"
             let half = tube.fire_arc_deg * 0.5;
             for edge in [-half, half] {
                 let (x, y) = (
-                    edge.to_radians().sin() * 10.0,
-                    edge.to_radians().cos() * 10.0,
+                    simmath::sin(edge.to_radians()) * 10.0,
+                    simmath::cos(edge.to_radians()) * 10.0,
                 );
                 assert!(
                     crate::weapons::phaser::in_arc(x, y, fore.facing_deg, fore.auto_arc_deg),

@@ -854,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-648d7296dd971b14.js" crossorigin="anonymous" integrity="sha384-UiVHsFP3WZA35di0yFdTwoJBCiFKXulQHNdqQGSbENDHk1vPknk412k0CPjo8+Cm"><link rel="preload" href="./project-phoenix-648d7296dd971b14_bg.wasm" crossorigin="anonymous" integrity="sha384-R45P4NRANa/Fhgqu7qa+ALjcqLODwWfHeSa+ys2bAi9roD+wv3Ts+cjaLj40336Y" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-951e876af9cd3daa.js" crossorigin="anonymous" integrity="sha384-UduqDfKSpndm4eGaeacp6Ma/EAvMdwxcKiuGY1NkcLljw7PR9yQ7OklMscs+puXj"><link rel="preload" href="./project-phoenix-951e876af9cd3daa_bg.wasm" crossorigin="anonymous" integrity="sha384-rrb4AZdSZ6fnC4kA+lS3kerETxBvkGqBvmZKNnmY3kVTeAKjHLTpRKIURf3YlqxI" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1147,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-648d7296dd971b14.js';
-const wasm = await init({ module_or_path: './project-phoenix-648d7296dd971b14_bg.wasm' });
+import init, * as bindings from './project-phoenix-951e876af9cd3daa.js';
+const wasm = await init({ module_or_path: './project-phoenix-951e876af9cd3daa_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2610,6 +2610,9 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
+  // Performance capture (issue #868). Read-only: it returns what the wasm
+  // collector has sampled so far and changes nothing in the running page.
+  window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
   window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
   window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;

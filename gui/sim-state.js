@@ -144,6 +144,13 @@ export class ClientSimState {
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
     this.torpedoArcConfigs = [];
+    /** RGBA 0-1 fill for the helm radar's red-alert hostile weapon-arc overlay
+     *  (issue #874). Authored per hull in `[helm_console] hostile_arc_color`;
+     *  the array below is THE client placeholder until Welcome arrives — the
+     *  only one on the client (`ph-helm-radar` deliberately carries none), and
+     *  kept equal to `default_hostile_arc_color()` in `src/core/messages.rs` so
+     *  a hull that omits the key looks the same as one that authors it. */
+    this.hostileArcColor = [1, 0.3, 0.3, 0.07];
     // ── Mirror-only UI fields formerly hand-maintained by client.html (#819) ──
     /** Sensors console target uuid. Set locally by set_sensors_target (the
      *  action-map mutate patch lands here), cleared when the entity despawns. */
@@ -224,6 +231,7 @@ export class ClientSimState {
         this.navChartSelects      = sc.nav_chart_selects      || [];
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
+        this.hostileArcColor   = sc.hostile_arc_color   ?? this.hostileArcColor;
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
         if (world) {

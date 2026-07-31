@@ -83,11 +83,18 @@ beam_color = [1.0, 0.2, 0.05, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 # Starboard bank: facing +90° (right side).
@@ -109,11 +116,18 @@ beam_color = [1.0, 0.2, 0.05, 1.0]
   # arc, target validity — is the host's and is unchanged; the policy is the
   # authored DECISION layered on top, and `idle = true` is how a bank opts out.
   [weapons_console.phaser_banks.ai]
+  # The RED-ALERT fire gate (issue #872), the same guard text every armed hull
+  # authors. A Harrow is ALWAYS ARMED — threshold 0, which `fact(red_alert)`
+  # clears whether the alert is up or not. It has no bridge crew to call red
+  # alert, and its captain policy stands the alert down out of combat, so a hull
+  # that waited for one would never open fire and never start the fight it
+  # exists to start.
+  param = { min_alert_to_fire = 0.0 }
 
   [[weapons_console.phaser_banks.ai.rule]]
   priority = 0
   channel = "phaser_fire"
-  when = "true"
+  when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
 [comms]

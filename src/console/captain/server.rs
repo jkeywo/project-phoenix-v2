@@ -227,7 +227,16 @@ fn operate_captain_ai(
     // is the safe reading (see `nearest_hostile_range`).
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation; absent, the chain is
+    // empty and flag-guards read false.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ship_query: Query<(
+        Entity,
         &mut AdmittedCommands,
         &ShipSystemControlSources,
         &RecentCombatActivity,
@@ -243,6 +252,7 @@ fn operate_captain_ai(
     let registry = faction_registry.as_deref().map(|r| &r.0);
 
     for (
+        ship_entity,
         mut admitted,
         control_sources,
         activity,
@@ -302,13 +312,20 @@ fn operate_captain_ai(
             hostile_range.unwrap_or(0.0) as f64,
         );
 
-        // Resolve the `red_alert` output channel over the snapshot.
+        // Resolve the `red_alert` output channel over the snapshot, with the
+        // scenario flag chain anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
         let active_policy = &ship_policy.0;
         let should_be_red_alert = active_policy
             .resolve_channel(
                 crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
                 &facts,
-                &[],
+                &flag_chain,
             )
             .and_then(|verb| match verb {
                 crate::ai::policy::AiPolicyVerb::SetRedAlert(b) => Some(*b),
@@ -1658,6 +1675,62 @@ mod tests {
         assert!(
             get_red_alert(&mut app),
             "authored always-on policy must raise Red Alert through the admitted path"
+        );
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Captain
+    /// host: a `flag()` guard holds the alert down while the scenario flag is
+    /// clear and raises it once the flag is set — through the full admitted
+    /// pipeline, in one app, so the only difference between the ticks is the
+    /// world flag.
+    #[test]
+    fn captain_flag_guard_reads_the_world_in_both_directions() {
+        let flag_gated = crate::entities::config::FineSystemAiConfigToml {
+            evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
+            idle: false,
+            param: Default::default(),
+            rule: vec![crate::entities::config::FineSystemAiRuleToml {
+                priority: 10,
+                channel: "red_alert".into(),
+                when: "flag(battle_stations)".into(),
+                verb: "set_red_alert".into(),
+                value: true,
+                level: 0,
+                response_index: 0,
+            }],
+            initial_state: None,
+            state: Vec::new(),
+            memory: std::collections::HashMap::new(),
+        }
+        .to_policy()
+        .unwrap();
+
+        let mut app = test_app();
+        start_game(&mut app);
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+        set_control_source(
+            &mut app,
+            crate::system_registry::red_alert_system_id(),
+            ControlSource::Ai,
+        );
+        set_captain_policy(&mut app, flag_gated);
+
+        // Flag CLEAR → the guard reads false and the alert stays down.
+        tick(&mut app);
+        assert!(
+            !get_red_alert(&mut app),
+            "with the world flag clear the guard must read false and hold"
+        );
+
+        // Flag SET → the SAME guard fires and the alert goes up next tick.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("battle_stations");
+        tick(&mut app);
+        assert!(
+            get_red_alert(&mut app),
+            "with the world flag set the same guard must raise Red Alert"
         );
     }
 

@@ -1184,6 +1184,12 @@ pub fn operate_comms_ai(
     // fixtures that never insert it still pass parameter validation; absent, the
     // flag chain is empty and flag guards read false.
     runtime: Option<Res<WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2): the chain is anchored at
+    // the layer that spawned each ship, `parent:`-walkable to the base store.
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     // `ResMut` for ONE reason: retiring the `open_hails` latch for targets that
     // stopped being candidates (the AC5 re-arm). Every other comms read here is
     // a plain read.
@@ -1206,13 +1212,6 @@ pub fn operate_comms_ai(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    // The read-only scenario flag chain (AC4), same for every ship this tick.
-    // Comms is the FIRST selector host to pass one — #776–#785 all passed `&[]`.
-    let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
-        Some(rt) => vec![&rt.flags],
-        None => Vec::new(),
-    };
-
     /// One resolved `hail-objectives` candidacy for this tick: the contact UUID
     /// an active `Hail` directive names, plus the readings the latch retirement
     /// and the fact seed both need.
@@ -1238,6 +1237,15 @@ pub fn operate_comms_ai(
         let Some(selector_comp) = selector_comp else {
             continue;
         };
+
+        // The read-only scenario flag chain (AC4), anchored at the layer that
+        // spawned THIS ship (issue #891 stage 2) — correctly layered, so
+        // `parent:` prefixes climb toward the base store.
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
 
         // Score the objective pool against the same conditions
         // `publish_comms_blackboard` uses (red alert + hull fraction).
@@ -1508,6 +1516,11 @@ pub fn operate_comms_response_ai(
     inbox: Option<Res<CommsInboxRes>>,
     // Read-only scenario flag/counter store (AC4).
     runtime: Option<Res<WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2).
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     sessions: Res<crate::lobby::Sessions>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
     mut ships: Query<
@@ -1533,10 +1546,6 @@ pub fn operate_comms_response_ai(
 ) {
     let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
         return;
-    };
-    let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
-        Some(rt) => vec![&rt.flags],
-        None => Vec::new(),
     };
 
     for (
@@ -1565,6 +1574,13 @@ pub fn operate_comms_response_ai(
             continue;
         };
         let policy = &policy_comp.0;
+        // The read-only scenario flag chain (AC4), anchored at the layer that
+        // spawned THIS ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
         let comms_available = comms_system_available(hull);
         let power_rating = selector_comp.and_then(|s| s.power_rating);

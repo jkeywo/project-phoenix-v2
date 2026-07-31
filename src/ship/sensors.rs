@@ -722,6 +722,7 @@ pub fn operate_sensors_ai(
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
@@ -743,6 +744,12 @@ pub fn operate_sensors_ai(
     // `effective_sensor_range` — the legitimate local-player/profile-less arm.
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
+    // is anchored at the layer that spawned each ship.
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     entity_q: Query<(
         &crate::entity_spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
@@ -791,6 +798,7 @@ pub fn operate_sensors_ai(
         }))
         .collect();
     for (
+        ship_entity,
         entity_uuid,
         sources,
         blackboards,
@@ -932,11 +940,19 @@ pub fn operate_sensors_ai(
 
         // Retain the current selection through the authored switch margin (AC3);
         // an invalid current target fails eligibility and is replaced this same
-        // tick (AC4).
-        let decided =
-            selector_comp
-                .selector
-                .select(&self_ctx, &candidates, sensors_target.0.as_deref(), &[]);
+        // tick (AC4). The scenario flag chain is anchored at the layer that
+        // spawned this ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+        let decided = selector_comp.selector.select(
+            &self_ctx,
+            &candidates,
+            sensors_target.0.as_deref(),
+            &flag_chain,
+        );
 
         // ── Emit on change only ────────────────────────────────────────────
         if decided == sensors_target.0 {
@@ -1751,6 +1767,70 @@ mod tests {
         bbs.0.insert(
             crate::system_registry::viewscreen_system_id(),
             crate::messages::SystemBlackboard::Viewscreen(viewscreen),
+        );
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Sensors
+    /// target selector: an authored eligibility gated on a world flag selects
+    /// nothing while the flag is clear and mirrors the combat lock once it is
+    /// set.
+    #[test]
+    fn operate_sensors_ai_flag_guard_reads_the_world_in_both_directions() {
+        let mut app = sensors_ai_test_app();
+        let target = "cc000000-0000-0000-0000-0000000891aa";
+        spawn_target_at(&mut app, target, 0.0, -30.0);
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+            q.single_mut(app.world_mut()).unwrap().0 = Some(target.to_string());
+        }
+
+        // Swap in a selector whose eligibility ALSO requires the world flag.
+        let cfg = crate::entities::config::FineSystemAiSelectorToml {
+            param: Default::default(),
+            sources: vec!["combat-lock".into()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(detectable) > 0 and flag(sensors_cleared)".into(),
+            score: vec![crate::entities::config::ScoreTermToml {
+                when: "candidate_fact(source_combat_lock) > 0".into(),
+                weight: 1.0,
+            }],
+        };
+        let ship = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<crate::server_app::Ship>>();
+            q.single(app.world()).unwrap()
+        };
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(SensorsTargetSelector {
+                selector: cfg
+                    .to_selector()
+                    .expect("flag-gated sensors selector decodes"),
+                power_rating: None,
+            });
+
+        // Flag CLEAR → nothing is eligible, no science target.
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app),
+            None,
+            "with the world flag clear the eligibility must admit no candidate"
+        );
+
+        // Flag SET → the SAME eligibility admits the combat-lock mirror.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("sensors_cleared");
+        tick_sensors_ai(&mut app);
+        assert_eq!(
+            get_sensors_target(&mut app).as_deref(),
+            Some(target),
+            "with the world flag set the same eligibility must select the target"
         );
     }
 

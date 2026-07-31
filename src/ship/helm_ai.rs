@@ -2267,6 +2267,13 @@ pub(crate) struct HelmPolicyRuntime {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_policy_state_tick(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     // The run's master seed — the WORLD field of the orbit-direction composite
@@ -2377,6 +2384,14 @@ pub(crate) fn ai_policy_state_tick(
         };
         let (engines_policy, steering_policy) = (&engines_policy.0, &steering_policy.0);
 
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2), shared by all three machines this tick.
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
+
         // One fact snapshot per ship per tick, shared by all three machines —
         // they must reason about the SAME world or they would reach different
         // legs. Private memory is what stays per-system (AC3): the derived
@@ -2439,6 +2454,7 @@ pub(crate) fn ai_policy_state_tick(
             travel_target,
             now,
             physics.yaw,
+            &flag_chain,
             |_| {},
         );
 
@@ -2476,6 +2492,7 @@ pub(crate) fn ai_policy_state_tick(
             travel_target,
             now,
             physics.yaw,
+            &flag_chain,
             |_| {},
         );
         if let Some(entered) = steering_entered {
@@ -2497,6 +2514,7 @@ pub(crate) fn ai_policy_state_tick(
                     crate::entities::config::HELM_YAW_CHANNEL,
                     &facts,
                     now,
+                    &flag_chain,
                 ),
                 Some(
                     &crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit
@@ -2558,6 +2576,7 @@ pub(crate) fn ai_policy_state_tick(
                 travel_target,
                 now,
                 physics.yaw,
+                &flag_chain,
                 // Boost's own extra host-written slot (issue #882): a running
                 // maximum of the hazard faced since the last reset.
                 |memory| {
@@ -2584,6 +2603,7 @@ pub(crate) fn ai_policy_state_tick(
                 crate::entities::config::HELM_BOOST_CHANNEL,
                 &facts,
                 now,
+                &flag_chain,
             ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
             if engages {
                 let n = runtime
@@ -2608,6 +2628,7 @@ pub(crate) fn ai_policy_state_tick(
             // longest-reaching bolt, resolved here so the pure planner never has
             // to know what a blaster bank is.
             blasters.map(|b| artillery_lead_speed(&b.0)).unwrap_or(0.0),
+            &flag_chain,
         );
         *runtime.pass = surface;
     }
@@ -2647,6 +2668,9 @@ fn tick_policy_machine<F>(
     target: Option<uuid::Uuid>,
     now: f64,
     yaw: f32,
+    // The scenario world-flag chain (issue #891 stage 2), read by transition
+    // guards exactly as by channel guards.
+    flags: &[&crate::world::flags::FlagStore],
     fold_extra_memory: F,
 ) -> Option<String>
 where
@@ -2732,7 +2756,7 @@ where
     seed_memory_derived_facts(&mut facts_with_memory, &state.memory);
     let memory = state.memory_at(now);
     let to = policy
-        .resolve_transition(&state.current, &facts_with_memory, &memory, &[])?
+        .resolve_transition(&state.current, &facts_with_memory, &memory, flags)?
         .to
         .clone();
     state.enter(&to, now);
@@ -2785,6 +2809,8 @@ fn build_pass_surface(
     // hull's own armament (issue #792). Not an authored param, so it is handed
     // in rather than looked up here — see [`HelmPassSurface::artillery_lead_speed`].
     artillery_lead_speed: f32,
+    // The scenario world-flag chain (issue #891 stage 2).
+    flags: &[&crate::world::flags::FlagStore],
 ) -> HelmPassSurface {
     let travel_axes_ai = sources
         .0
@@ -2813,6 +2839,7 @@ fn build_pass_surface(
         crate::entities::config::HELM_YAW_CHANNEL,
         facts,
         now,
+        flags,
     );
 
     // ── The fly-through pass legs (issue #883) ───────────────────────────────
@@ -2992,8 +3019,9 @@ fn helm_policy_actuates(
     channel: &str,
     facts: &crate::world::flags::AiFacts,
     expected: &crate::ai::policy::AiPolicyVerb,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> bool {
-    policy.resolve_channel(channel, facts, &[]) == Some(expected)
+    policy.resolve_channel(channel, facts, flags) == Some(expected)
 }
 
 /// Seed the per-tick policy fact snapshot for a helm actuator host (issue
@@ -3566,6 +3594,7 @@ fn resolve_helm_channel<'a>(
     channel: &str,
     facts: &crate::world::flags::AiFacts,
     now_secs: f64,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> Option<&'a crate::ai::policy::AiPolicyVerb> {
     match (policy.machine(), state) {
         (Some(_), Some(st)) => {
@@ -3576,7 +3605,7 @@ fn resolve_helm_channel<'a>(
                 channel,
                 &facts,
                 &st.memory_at(now_secs),
-                &[],
+                flags,
             )
         }
         (Some(_), None) => {
@@ -3588,9 +3617,9 @@ fn resolve_helm_channel<'a>(
                  declared in ai_high_fidelity_components() (src/ai/server.rs), never inserted \
                  by hand on one spawn path"
             );
-            policy.resolve_channel(channel, facts, &[])
+            policy.resolve_channel(channel, facts, flags)
         }
-        (None, _) => policy.resolve_channel(channel, facts, &[]),
+        (None, _) => policy.resolve_channel(channel, facts, flags),
     }
 }
 
@@ -3608,6 +3637,13 @@ fn resolve_helm_channel<'a>(
 /// module note).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_thrust(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -3702,12 +3738,20 @@ pub(crate) fn ai_helm_thrust(
             physics,
             physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
         );
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
         if resolve_helm_channel(
             policy,
             engines_state.map(|s| &s.0),
             crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
             &facts,
             clock.0,
+            &flag_chain,
         ) != Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel)
         {
             continue;
@@ -3742,6 +3786,13 @@ pub(crate) fn ai_helm_thrust(
 /// pins the other side of it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_steering(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -3834,6 +3885,13 @@ pub(crate) fn ai_helm_steering(
             physics,
             physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
         );
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
         let actuates = matches!(
             resolve_helm_channel(
                 policy,
@@ -3841,6 +3899,7 @@ pub(crate) fn ai_helm_steering(
                 crate::entities::config::HELM_YAW_CHANNEL,
                 &facts,
                 clock.0,
+                &flag_chain,
             ),
             Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing)
                 | Some(&crate::ai::policy::AiPolicyVerb::HoldCommittedHeading)
@@ -3922,6 +3981,13 @@ pub(crate) fn ai_helm_steering(
 /// every tick.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_impulse(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -4003,11 +4069,19 @@ pub(crate) fn ai_helm_impulse(
             continue;
         };
         let policy = &impulse_policy.0;
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
         if !helm_policy_actuates(
             policy,
             crate::entities::config::HELM_IMPULSE_CHANNEL,
             &facts,
             &crate::ai::policy::AiPolicyVerb::EngageImpulse,
+            &flag_chain,
         ) {
             continue;
         }
@@ -4118,6 +4192,13 @@ pub(crate) fn ai_helm_impulse(
 /// `lateral_hazard_sensitivity`. Docking translation still overrides it (issue
 /// #742), and the emit → admit → apply arbiter path is unchanged.
 pub(crate) fn ai_helm_lateral_thrust(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -4204,11 +4285,19 @@ pub(crate) fn ai_helm_lateral_thrust(
                 continue;
             };
             let policy = &lateral_policy.0;
+            // The scenario flag chain, anchored at the layer that spawned
+            // this ship (issue #891 stage 2).
+            let flag_chain = crate::world::server::entity_flag_chain(
+                origin_q.get(entity).ok(),
+                world_runtime.as_deref(),
+                layers.as_deref(),
+            );
             if !helm_policy_actuates(
                 policy,
                 crate::entities::config::HELM_LATERAL_CHANNEL,
                 &facts,
                 &crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+                &flag_chain,
             ) {
                 continue;
             }
@@ -4274,6 +4363,13 @@ pub(crate) fn ai_helm_lateral_thrust(
 /// #744) weighted by the hull's authored `vertical_hazard_sensitivity` — so a
 /// static obstacle, however close, never drives a vertical dodge.
 pub(crate) fn ai_helm_vertical_thrust(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -4342,11 +4438,19 @@ pub(crate) fn ai_helm_vertical_thrust(
             continue;
         };
         let policy = &vertical_policy.0;
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
         if !helm_policy_actuates(
             policy,
             crate::entities::config::HELM_VERTICAL_CHANNEL,
             &facts,
             &crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+            &flag_chain,
         ) {
             continue;
         }
@@ -4434,6 +4538,13 @@ pub(crate) fn ai_helm_vertical_thrust(
 /// current `ShipBoost`, so it does not re-issue `SetBoost` every tick.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_boost(
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -4526,12 +4637,20 @@ pub(crate) fn ai_helm_boost(
         // immediately (AC2). The shared helper also carries the #883
         // silent-degradation guard for the "machine declared, state component
         // missing" case that used to fall through unnoticed.
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(entity).ok(),
+            world_runtime.as_deref(),
+            layers.as_deref(),
+        );
         let desired_active = resolve_helm_channel(
             policy,
             boost_state.map(|s| &s.0),
             crate::entities::config::HELM_BOOST_CHANNEL,
             &facts,
             clock.0,
+            &flag_chain,
         ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
 
         // On-change only: `SetBoost` sets the desired active state, and the
@@ -9018,6 +9137,264 @@ mod tests {
             !boost_command(&mut app),
             "the default idle boost policy must never engage boost (the pre-#780 \
              baseline: no AI boost)"
+        );
+    }
+
+    // ── World-flag chains on the six helm hosts (issue #891 stage 2) ─────────
+
+    /// A stateless policy whose ONLY guard is the world flag `scenario_go`, on
+    /// `channel` resolving `verb`.
+    fn flag_gated_helm_policy(
+        channel: &str,
+        verb: crate::ai::policy::AiPolicyVerb,
+    ) -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 10,
+                channel: channel.into(),
+                when: crate::world::flags::parse_predicate("flag(scenario_go)").unwrap(),
+                verb,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// Ensure the world runtime exists and set the `scenario_go` flag.
+    fn raise_scenario_go(app: &mut App) {
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("scenario_go");
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm ENGINES host: a
+    /// `flag()` guard on the longitudinal channel holds thrust while the
+    /// scenario flag is clear and actuates once it is set.
+    #[test]
+    fn helm_engines_flag_guard_reads_the_world_in_both_directions() {
+        let build = || {
+            let mut app = test_app();
+            let anchor = "station-alpha";
+            set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+            app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+            set_per_axis_helm_ai(&mut app);
+            app.init_resource::<crate::world::server::WorldContentRuntime>();
+            let ship = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(HelmEnginesAiPolicy(flag_gated_helm_policy(
+                    crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
+                    crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
+                )));
+            app
+        };
+
+        let mut held = build();
+        tick(&mut held);
+        assert_eq!(
+            get_thrust_input(&mut held),
+            0.0,
+            "with the world flag clear the engines guard must read false and hold"
+        );
+
+        let mut fired = build();
+        raise_scenario_go(&mut fired);
+        tick(&mut fired);
+        assert!(
+            get_thrust_input(&mut fired) > 0.0,
+            "with the world flag set the same engines guard must actuate thrust"
+        );
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm STEERING host.
+    #[test]
+    fn helm_steering_flag_guard_reads_the_world_in_both_directions() {
+        let build = || {
+            let mut app = test_app();
+            let anchor = "station-alpha";
+            set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
+            app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
+            set_per_axis_helm_ai(&mut app);
+            app.init_resource::<crate::world::server::WorldContentRuntime>();
+            let ship = find_ship_entity(&mut app);
+            app.world_mut()
+                .entity_mut(ship)
+                .insert(HelmSteeringAiPolicy(flag_gated_helm_policy(
+                    crate::entities::config::HELM_YAW_CHANNEL,
+                    crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
+                )));
+            app
+        };
+
+        let mut held = build();
+        tick(&mut held);
+        assert_eq!(
+            get_steering_input(&mut held),
+            0.0,
+            "with the world flag clear the steering guard must read false and hold"
+        );
+
+        let mut fired = build();
+        raise_scenario_go(&mut fired);
+        tick(&mut fired);
+        assert!(
+            get_steering_input(&mut fired) > 0.0,
+            "with the world flag set the same steering guard must actuate the turn"
+        );
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm LATERAL host: the
+    /// dodge a moving hazard would drive is gated on the world flag.
+    #[test]
+    fn helm_lateral_flag_guard_reads_the_world_in_both_directions() {
+        let mut held = lateral_dodge_app();
+        held.init_resource::<crate::world::server::WorldContentRuntime>();
+        set_lateral_ai_policy(
+            &mut held,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_LATERAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+            ),
+        );
+        tick_twice(&mut held);
+        assert_eq!(
+            lateral_intent(&mut held),
+            0.0,
+            "with the world flag clear the lateral guard must read false and hold"
+        );
+
+        let mut fired = lateral_dodge_app();
+        raise_scenario_go(&mut fired);
+        set_lateral_ai_policy(
+            &mut fired,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_LATERAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
+            ),
+        );
+        tick_twice(&mut fired);
+        assert!(
+            lateral_intent(&mut fired) != 0.0,
+            "with the world flag set the same lateral guard must actuate the dodge"
+        );
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm VERTICAL host:
+    /// the climb a moving hazard would drive is gated on the world flag.
+    #[test]
+    fn helm_vertical_flag_guard_reads_the_world_in_both_directions() {
+        let vertical_app = || {
+            vertical_thrust_ai_app(
+                capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+                Some(crate::entity_config::BehaviourConfig {
+                    avoidance_buffer: 60.0,
+                    ..Default::default()
+                }),
+            )
+        };
+
+        let mut held = vertical_app();
+        held.init_resource::<crate::world::server::WorldContentRuntime>();
+        set_vertical_ai_policy(
+            &mut held,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_VERTICAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+            ),
+        );
+        snapshot_with_moving_obstacle(&mut held, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
+        tick_twice(&mut held);
+        assert_eq!(
+            vertical_intent(&mut held),
+            0.0,
+            "with the world flag clear the vertical guard must read false and hold"
+        );
+
+        let mut fired = vertical_app();
+        raise_scenario_go(&mut fired);
+        set_vertical_ai_policy(
+            &mut fired,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_VERTICAL_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust,
+            ),
+        );
+        snapshot_with_moving_obstacle(&mut fired, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
+        tick_twice(&mut fired);
+        assert!(
+            vertical_intent(&mut fired) > 0.0,
+            "with the world flag set the same vertical guard must climb"
+        );
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm IMPULSE host:
+    /// the charge toward a distant anchor is gated on the world flag.
+    #[test]
+    fn helm_impulse_flag_guard_reads_the_world_in_both_directions() {
+        let anchor = "station-alpha";
+
+        let mut held = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        held.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+        held.init_resource::<crate::world::server::WorldContentRuntime>();
+        set_impulse_ai_policy(
+            &mut held,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_IMPULSE_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::EngageImpulse,
+            ),
+        );
+        tick(&mut held);
+        assert_eq!(
+            get_impulse_command(&mut held),
+            crate::impulse::ImpulsePhase::Idle,
+            "with the world flag clear the impulse guard must read false and hold"
+        );
+
+        let mut fired = impulse_ai_app(reach_scored_objective(anchor, 10.0));
+        fired.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
+        raise_scenario_go(&mut fired);
+        set_impulse_ai_policy(
+            &mut fired,
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_IMPULSE_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::EngageImpulse,
+            ),
+        );
+        tick(&mut fired);
+        assert_eq!(
+            get_impulse_command(&mut fired),
+            crate::impulse::ImpulsePhase::Charging,
+            "with the world flag set the same impulse guard must command the charge"
+        );
+    }
+
+    /// Issue #891 stage 2, both-directions proof for the Helm BOOST host.
+    #[test]
+    fn helm_boost_flag_guard_reads_the_world_in_both_directions() {
+        let flag_policy = || {
+            flag_gated_helm_policy(
+                crate::entities::config::HELM_BOOST_CHANNEL,
+                crate::ai::policy::AiPolicyVerb::EngageBoost,
+            )
+        };
+
+        let mut held = boost_ai_app(Some(flag_policy()));
+        held.init_resource::<crate::world::server::WorldContentRuntime>();
+        tick_twice(&mut held);
+        assert!(
+            !boost_command(&mut held),
+            "with the world flag clear the boost guard must read false and hold"
+        );
+
+        let mut fired = boost_ai_app(Some(flag_policy()));
+        raise_scenario_go(&mut fired);
+        tick_twice(&mut fired);
+        assert!(
+            boost_command(&mut fired),
+            "with the world flag set the same boost guard must engage boost"
         );
     }
 

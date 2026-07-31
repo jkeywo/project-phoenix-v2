@@ -1,39 +1,56 @@
 //! Which fine-system AI hosts can actually evaluate `flag(...)` and
-//! `counter(...)` guards — and the load-time rejection for the ones that
-//! cannot (issue #891, stage 1). Issue #890 adds a second question of exactly
-//! the same shape: which hosts fold a bounded history window, and therefore
-//! where a `history(...)` guard can ever read anything but absent.
+//! `counter(...)` guards — and the load-time rejection for any that cannot
+//! (issue #891). Issue #890 adds a second question of exactly the same shape:
+//! which hosts fold a bounded history window, and therefore where a
+//! `history(...)` guard can ever read anything but absent.
 //!
-//! # The trap this closes
+//! # The trap this closed
 //!
 //! `flag(name)` and `counter(name) CMP n` are full citizens of the shared
 //! `world::flags` predicate grammar, and every fine-system policy/selector API
 //! (`AiPolicy::resolve_channel`, `resolve_channel_in_state`,
 //! `resolve_transition`, `TargetSelector::select`) takes a
 //! `flags: &[&FlagStore]` chain. But a chain is only as real as what the HOST
-//! passes: three of the nineteen hosts build one from
-//! `WorldContentRuntime.flags`, and the other sixteen pass a literal `&[]`.
+//! passes — and until #891 stage 2, sixteen of the nineteen hosts passed a
+//! literal `&[]`, on which a `flag(...)` guard parsed, validated, and then
+//! read `false` for ever: the same silent-nothing failure mode as an unseeded
+//! `fact(...)` name, except here the grammar advertised the feature as
+//! available.
 //!
-//! On those sixteen a `flag(...)` guard parses, validates, and then reads
-//! `false` for ever — the same silent-nothing failure mode as an unseeded
-//! `fact(...)` name, except here the grammar advertises the feature as
-//! available. Stage 1 (this module) converts that silent trap into a load
-//! error. Stage 2 threads the real chain into every host and lifts the
-//! rejection; when it does, the [`FlagChain`] on each host below flips to
-//! [`FlagChain::Plumbed`] and the check stops firing for it — no rewrite of the
-//! rejection itself is needed, one host at a time.
+//! Stage 1 converted that silent trap into a load error. Stage 2 threaded the
+//! real chain into every host — each builds it per ship through
+//! [`crate::world::server::entity_flag_chain`], anchored at the layer that
+//! spawned the ship and climbing `loader_path` to the base
+//! `WorldContentRuntime` store, the SAME layered walk world triggers read
+//! through — and lifted the rejection: every host below is
+//! [`FlagChain::Plumbed`] today. The rejection machinery stays, so a future
+//! host added with an empty chain (declared [`FlagChain::Empty`]) rejects
+//! authored world-state guards at load instead of reviving the trap.
 //!
-//! No shipped hull authors a `flag()` or `counter()` guard on any AI policy or
-//! selector today (the only `flag(`/`counter(` atoms under `assets/` are in
-//! `assets/worlds/*.toml` world TRIGGERS, which evaluate through
-//! `WorldContentRuntime` and are unaffected), so the rejection changes nothing
-//! that runs.
+//! # Migration note: three hosts changed which store an unprefixed guard reads
+//!
+//! Three of the nineteen hosts — Power reactor, Comms dialogue response, and
+//! Comms hail selector — were already reading world flags BEFORE stage 2, but
+//! through a flat `vec![&rt.flags]`: base-store-only, no layering. Stage 2
+//! moved all three onto the same entity-anchored [`crate::world::server::
+//! entity_flag_chain`] every other host uses. For a ship spawned by a loaded
+//! layer, this is a real behaviour change, not just a plumbing detail: an
+//! UNPREFIXED `flag(...)`/`counter(...)` guard on one of these three hosts
+//! used to read the BASE store (the only store the old flat vec ever held)
+//! and now reads the LAYER store first (`resolve_chain` indexes by depth, and
+//! chain[0] is the spawning layer). Content authored against the old
+//! base-only reading needs a `parent:` prefix to keep reaching the base store
+//! from a layer-spawned ship; content that already used `parent:` for these
+//! three hosts was reading nothing before (no outer entry existed) and reads
+//! the base store correctly now. See `console_ai::server::tests::
+//! scenario_flag_chain_is_anchored_at_the_ships_spawning_layer` for the
+//! layering behaviour driven through a real host end to end.
 //!
 //! # Why the table is not simply hand-maintained
 //!
 //! A hardcoded "these hosts can, those cannot" list is drift-bait: the moment
-//! stage 2 plumbs one host, the list is wrong and wrong SILENTLY — back to the
-//! failure mode being fixed. So every host below records `eval_sites`: the
+//! a host gains or loses its chain, the list is wrong and wrong SILENTLY —
+//! back to the failure mode being fixed. So every host below records `eval_sites`: the
 //! exact function(s) whose flag argument decides the answer. `flag_chain` is
 //! declared, but it is not the source of truth — `tests::flag_chain_matches_the_hosts_source`
 //! RE-DERIVES it by reading each of those functions out of the crate's own
@@ -50,9 +67,14 @@ use crate::world::flags::Predicate;
 /// can ever read true.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FlagChain {
-    /// The host builds its chain from `WorldContentRuntime.flags`.
+    /// The host builds its chain per ship through
+    /// `crate::world::server::entity_flag_chain` (anchored at the spawning
+    /// layer, terminating at `WorldContentRuntime.flags`).
     Plumbed,
-    /// The host passes a literal `&[]`.
+    /// The host passes a literal `&[]`. No shipped host does since #891
+    /// stage 2; the variant stays so a future host that cannot evaluate world
+    /// state rejects authored `flag()`/`counter()` guards at load rather than
+    /// reading them false for ever.
     Empty,
 }
 
@@ -138,7 +160,7 @@ const HELM_HISTORY_FOLD: Option<EvalSite> =
 pub const CAPTAIN_RED_ALERT: AiHost = AiHost {
     system: "Captain",
     block: "[captain_console.ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console/captain/server.rs", "operate_captain_ai")],
     history_fold: None,
 };
@@ -146,7 +168,7 @@ pub const CAPTAIN_RED_ALERT: AiHost = AiHost {
 pub const HELM_ENGINES: AiHost = AiHost {
     system: "Helm engines",
     block: "[helm_console.engines_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
 };
@@ -154,7 +176,7 @@ pub const HELM_ENGINES: AiHost = AiHost {
 pub const HELM_STEERING: AiHost = AiHost {
     system: "Helm steering",
     block: "[helm_console.steering_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
 };
@@ -162,7 +184,7 @@ pub const HELM_STEERING: AiHost = AiHost {
 pub const HELM_LATERAL: AiHost = AiHost {
     system: "Helm lateral thrust",
     block: "[helm_console.lateral_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_ACTUATOR_SITES,
     history_fold: None,
 };
@@ -170,7 +192,7 @@ pub const HELM_LATERAL: AiHost = AiHost {
 pub const HELM_VERTICAL: AiHost = AiHost {
     system: "Helm vertical thrust",
     block: "[helm_console.vertical_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_ACTUATOR_SITES,
     history_fold: None,
 };
@@ -178,7 +200,7 @@ pub const HELM_VERTICAL: AiHost = AiHost {
 pub const HELM_IMPULSE: AiHost = AiHost {
     system: "Helm impulse",
     block: "[helm_console.impulse_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_ACTUATOR_SITES,
     history_fold: None,
 };
@@ -186,7 +208,7 @@ pub const HELM_IMPULSE: AiHost = AiHost {
 pub const HELM_BOOST: AiHost = AiHost {
     system: "Helm boost",
     block: "[helm_console.boost_ai]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
 };
@@ -194,7 +216,7 @@ pub const HELM_BOOST: AiHost = AiHost {
 pub const PHASER_BANK: AiHost = AiHost {
     system: "Phaser bank",
     block: "[[weapons_console.phaser_banks]].ai",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site(
         "src/console/weapons/beam.rs",
         "phaser_bank_policy_fires",
@@ -205,7 +227,7 @@ pub const PHASER_BANK: AiHost = AiHost {
 pub const BLASTER_BANK: AiHost = AiHost {
     system: "Blaster bank",
     block: "[[weapons_console.blaster_banks]].ai",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site(
         "src/console/weapons/blaster.rs",
         "blaster_bank_policy_fires",
@@ -216,7 +238,7 @@ pub const BLASTER_BANK: AiHost = AiHost {
 pub const TORPEDO_TUBE: AiHost = AiHost {
     system: "Torpedo tube",
     block: "[[torpedoes.tubes]].ai",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[
         site(
             "src/console/weapons/torpedo.rs",
@@ -233,7 +255,7 @@ pub const TORPEDO_TUBE: AiHost = AiHost {
 pub const TORPEDO_MAGAZINE: AiHost = AiHost {
     system: "Torpedo magazine",
     block: "[torpedoes].ai",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site(
         "src/console/weapons/torpedo.rs",
         "torpedo_magazine_grant_policy_fires",
@@ -244,7 +266,7 @@ pub const TORPEDO_MAGAZINE: AiHost = AiHost {
 pub const SHIELDS_FOCUS: AiHost = AiHost {
     system: "Shields focus",
     block: "[shields_console.ai_policy]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console_ai/server.rs", "ai_shield_focus")],
     history_fold: None,
 };
@@ -271,7 +293,7 @@ pub const COMMS_RESPONSE: AiHost = AiHost {
 pub const SENSORS_SELECTOR: AiHost = AiHost {
     system: "Sensors target selector",
     block: "[sensors_console.selector]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/ship/sensors.rs", "operate_sensors_ai")],
     history_fold: None,
 };
@@ -279,7 +301,7 @@ pub const SENSORS_SELECTOR: AiHost = AiHost {
 pub const TACTICAL_SELECTOR: AiHost = AiHost {
     system: "Tactical target selector",
     block: "[weapons_console.selector]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console/weapons/mod.rs", "ai_target_selection")],
     history_fold: None,
 };
@@ -287,7 +309,7 @@ pub const TACTICAL_SELECTOR: AiHost = AiHost {
 pub const NAVIGATION_SELECTOR: AiHost = AiHost {
     system: "Navigation target selector",
     block: "[navigation_console.selector]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site(
         "src/console/navigation/mod.rs",
         "operate_navigation_ai",
@@ -298,7 +320,7 @@ pub const NAVIGATION_SELECTOR: AiHost = AiHost {
 pub const REPAIR_SELECTOR: AiHost = AiHost {
     system: "Repair target selector",
     block: "[repair.selector]",
-    flag_chain: FlagChain::Empty,
+    flag_chain: FlagChain::Plumbed,
     eval_sites: &[site("src/console/repair/server.rs", "operate_repair_ai")],
     history_fold: None,
 };
@@ -491,6 +513,38 @@ mod tests {
         panic!("`{needle}` body is unbalanced");
     }
 
+    /// The parameter-list text of `fn <name>` — from the signature's opening
+    /// `(` through the matching `)`, by paren counting (the same shape as
+    /// [`function_body`], one token earlier; a `Query<(A, B), C>` tuple's own
+    /// parens balance correctly the same way nested braces do there). Lets
+    /// [`chains_in`] check which resources a chain-building host actually
+    /// DECLARES, independent of what its eval call PASSES — see `chains_in`
+    /// for the drift this closes (issue #891 review finding 3).
+    fn fn_signature<'a>(src: &'a str, func: &str) -> &'a str {
+        let needle = format!("fn {func}");
+        let start = src
+            .find(&needle)
+            .unwrap_or_else(|| panic!("no `{needle}` in the scanned source"));
+        let open = start
+            + src[start..]
+                .find('(')
+                .unwrap_or_else(|| panic!("`{needle}` has no parameter list"));
+        let mut depth = 0usize;
+        for (offset, ch) in src[open..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &src[open..open + offset + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("`{needle}` parameter list is unbalanced");
+    }
+
     /// The last top-level argument of the call starting at `open` (the index of
     /// its `(`), with all whitespace squeezed out so a one-line call and a
     /// rustfmt-exploded one compare equal.
@@ -528,15 +582,46 @@ mod tests {
     }
 
     /// Every evaluation call in `body`, as the flag chain each one passes.
-    fn chains_in(body: &str) -> Vec<FlagChain> {
+    ///
+    /// A non-`&[]` last argument used to be sufficient to call a site
+    /// [`FlagChain::Plumbed`] (issue #891 review finding 3: the drift guard
+    /// this closes). That text-only rule has a hole: if the eval site BUILDS
+    /// its own chain — its body calls `entity_flag_chain` directly, the shape
+    /// every direct-system host uses (Captain, Shields, Power, the two Comms
+    /// hosts, Sensors, Tactical, Navigation, Repair) — a non-`&[]` argument
+    /// only means the source TEXT looks right. The site could still be a host
+    /// that dropped its `Option<Res<WorldContentRuntime>>` /
+    /// `Option<Res<WorldLayerMap>>` params and now calls
+    /// `entity_flag_chain(None, None, None)`, which reads empty for ever at
+    /// runtime while remaining textually non-empty. So a chain-BUILDING site
+    /// is only Plumbed when `sig` — its own signature, from [`fn_signature`]
+    /// — still declares both resources.
+    ///
+    /// Sites that instead RECEIVE an already-built chain as a `flags: &[&
+    /// FlagStore]` parameter (the three helm machine axes' `resolve_helm_channel`
+    /// / `tick_policy_machine`, the three helm actuator axes' `helm_policy_actuates`,
+    /// and the per-bank/tube/magazine `*_policy_fires` helpers) have no
+    /// resources of their own to declare — building the chain is the
+    /// CALLER's job, not theirs — so those keep the original text-only rule.
+    fn chains_in(body: &str, sig: &str) -> Vec<FlagChain> {
+        let builds_own_chain = body.contains("entity_flag_chain(");
+        let declares_chain_resources = (sig
+            .contains("Option<Res<crate::world::server::WorldContentRuntime>>")
+            || sig.contains("Option<Res<WorldContentRuntime>>"))
+            && (sig.contains("Option<Res<crate::world::server::WorldLayerMap>>")
+                || sig.contains("Option<Res<WorldLayerMap>>"));
+        let can_be_plumbed = !builds_own_chain || declares_chain_resources;
+
         let mut out = Vec::new();
         for call in EVAL_CALLS {
             let mut from = 0usize;
             while let Some(hit) = body[from..].find(call) {
                 let open = from + hit + call.len() - 1;
-                out.push(match last_argument(body, open).as_str() {
-                    "&[]" => FlagChain::Empty,
-                    _ => FlagChain::Plumbed,
+                let looks_non_empty = last_argument(body, open).as_str() != "&[]";
+                out.push(if looks_non_empty && can_be_plumbed {
+                    FlagChain::Plumbed
+                } else {
+                    FlagChain::Empty
                 });
                 from = open + 1;
             }
@@ -553,7 +638,8 @@ mod tests {
             for site in host.eval_sites {
                 let src = read_non_test_source(site.file);
                 let body = function_body(&src, site.func);
-                let chains = chains_in(body);
+                let sig = fn_signature(&src, site.func);
+                let chains = chains_in(body, sig);
                 assert!(
                     !chains.is_empty(),
                     "{} ({}): {}::{} declares itself this host's evaluation site \
@@ -837,25 +923,24 @@ mod tests {
         }
     }
 
-    /// The three hosts that CAN read world flags today, pinned by name. Reading
-    /// this test tells a stage-2 author exactly how far the plumbing has got.
+    /// EVERY host reads world flags since #891 stage 2 — pinned as a property
+    /// rather than a name list, so adding a twentieth plumbed host needs no
+    /// edit here while a host silently losing its chain still fails (both here
+    /// and in `flag_chain_matches_the_hosts_source`, which re-derives the
+    /// classification from the host's own source).
     #[test]
-    fn exactly_three_hosts_can_read_world_flags_today() {
-        let plumbed: Vec<&str> = AI_HOSTS
+    fn every_host_reads_world_flags_today() {
+        let unplumbed: Vec<&str> = AI_HOSTS
             .iter()
-            .filter(|h| h.flag_chain == FlagChain::Plumbed)
+            .filter(|h| h.flag_chain != FlagChain::Plumbed)
             .map(|h| h.system)
             .collect();
         assert_eq!(
-            plumbed,
-            vec![
-                "Power reactor",
-                "Comms dialogue response",
-                "Comms hail selector"
-            ],
-            "the set of flag-capable hosts changed. Stage 2 widening it is the \
-             POINT — update this list. Anything else means a host silently lost \
-             its chain."
+            unplumbed,
+            Vec::<&str>::new(),
+            "a host lost its world-flag chain: authored flag()/counter() \
+             guards on it now reject at load, and #891 stage 2 promised the \
+             feature works everywhere the grammar says it does."
         );
     }
 
@@ -872,14 +957,23 @@ mod tests {
         );
     }
 
+    /// The rejection machinery outlives stage 2 — a FUTURE host added with an
+    /// empty chain must still reject authored world-state guards at load. No
+    /// shipped host is `Empty` any more, so the surface is pinned through a
+    /// synthetic one.
+    const UNPLUMBED_PROBE: AiHost = AiHost {
+        system: "Probe",
+        block: "[probe.ai]",
+        flag_chain: FlagChain::Empty,
+        eval_sites: &[site("src/nowhere.rs", "probe_resolve")],
+        history_fold: None,
+    };
+
     #[test]
-    fn unplumbed_host_rejects_flag_and_counter_and_nothing_else() {
+    fn an_unplumbed_host_rejects_flag_and_counter_and_nothing_else() {
         let flag = crate::world::flags::parse_predicate("flag(aphelion_armed)").unwrap();
-        let err = CAPTAIN_RED_ALERT.check_guard("rule 0", &flag).unwrap_err();
-        assert!(
-            err.contains("Captain"),
-            "message must name the system: {err}"
-        );
+        let err = UNPLUMBED_PROBE.check_guard("rule 0", &flag).unwrap_err();
+        assert!(err.contains("Probe"), "message must name the system: {err}");
         assert!(
             err.contains("flag(aphelion_armed)"),
             "message must quote the atom: {err}"
@@ -891,19 +985,17 @@ mod tests {
 
         let counter =
             crate::world::flags::parse_predicate("counter(evacuation_rounds) >= 3").unwrap();
-        let err = CAPTAIN_RED_ALERT
-            .check_guard("rule 0", &counter)
-            .unwrap_err();
+        let err = UNPLUMBED_PROBE.check_guard("rule 0", &counter).unwrap_err();
         assert!(err.contains("counter(evacuation_rounds)"), "{err}");
 
         // Nested under `not`/`and` is still a reference.
         let nested = crate::world::flags::parse_predicate("fact(a) > 0 and not flag(b)").unwrap();
-        assert!(CAPTAIN_RED_ALERT.check_guard("rule 0", &nested).is_err());
+        assert!(UNPLUMBED_PROBE.check_guard("rule 0", &nested).is_err());
 
         // Facts, params, memory and literals are untouched by this check.
         let facts =
             crate::world::flags::parse_predicate("fact(a) > param(b) and memory(c) < 1").unwrap();
-        assert!(CAPTAIN_RED_ALERT.check_guard("rule 0", &facts).is_ok());
+        assert!(UNPLUMBED_PROBE.check_guard("rule 0", &facts).is_ok());
     }
 
     #[test]
@@ -912,10 +1004,11 @@ mod tests {
             "flag(containment_started) and counter(evacuation_rounds) >= 1",
         )
         .unwrap();
-        for host in [POWER_ALLOCATION, COMMS_RESPONSE, COMMS_SELECTOR] {
+        for host in AI_HOSTS {
             assert!(
                 host.check_guard("rule 0", &flag).is_ok(),
-                "{} passes a real flag chain, so its guards must be accepted",
+                "{} passes a real flag chain (#891 stage 2), so its guards must \
+                 be accepted",
                 host.system
             );
         }
@@ -953,13 +1046,23 @@ mod tests {
             "#,
         );
         let err = crate::entities::config::validate_fine_system_ai_policy_for(
-            &CAPTAIN_RED_ALERT,
+            &UNPLUMBED_PROBE,
             &stateless,
             RED_ALERT,
             SET_RED_ALERT,
         )
         .expect_err("a top-level rule guard must be walked");
-        assert!(err.contains("rule 0") && err.contains("Captain"), "{err}");
+        assert!(err.contains("rule 0") && err.contains("Probe"), "{err}");
+
+        // The same policy on a PLUMBED host — every shipped host today — is
+        // valid content: the stage-1 rejection is lifted (#891 stage 2).
+        crate::entities::config::validate_fine_system_ai_policy_for(
+            &CAPTAIN_RED_ALERT,
+            &stateless,
+            RED_ALERT,
+            SET_RED_ALERT,
+        )
+        .expect("a flag() guard on a plumbed host validates");
 
         let machine = policy(
             r#"
@@ -983,7 +1086,7 @@ mod tests {
             "#,
         );
         let err = crate::entities::config::validate_fine_system_ai_policy_for(
-            &CAPTAIN_RED_ALERT,
+            &UNPLUMBED_PROBE,
             &machine,
             RED_ALERT,
             SET_RED_ALERT,
@@ -1013,7 +1116,7 @@ mod tests {
             "#,
         );
         let err = crate::entities::config::validate_fine_system_ai_policy_for(
-            &CAPTAIN_RED_ALERT,
+            &UNPLUMBED_PROBE,
             &transition,
             RED_ALERT,
             SET_RED_ALERT,
@@ -1039,15 +1142,24 @@ mod tests {
             "#,
         );
         let err = crate::entities::config::validate_fine_system_ai_selector_for(
-            &SENSORS_SELECTOR,
+            &UNPLUMBED_PROBE,
             &eligibility,
             sources,
         )
         .expect_err("the eligibility expression must be walked");
         assert!(
-            err.contains("Sensors target selector") && err.contains("flag(sensors_online)"),
+            err.contains("Probe") && err.contains("flag(sensors_online)"),
             "{err}"
         );
+
+        // The same selector on the (now plumbed, #891 stage 2) Sensors host is
+        // valid content.
+        crate::entities::config::validate_fine_system_ai_selector_for(
+            &SENSORS_SELECTOR,
+            &eligibility,
+            sources,
+        )
+        .expect("a flag() eligibility on the plumbed Sensors selector validates");
 
         let scored = selector(
             r#"
@@ -1061,7 +1173,7 @@ mod tests {
             "#,
         );
         let err = crate::entities::config::validate_fine_system_ai_selector_for(
-            &SENSORS_SELECTOR,
+            &UNPLUMBED_PROBE,
             &scored,
             sources,
         )
@@ -1122,11 +1234,14 @@ mod tests {
         hull.replace(from, to)
     }
 
-    /// AC: a `flag()` guard authored on an unplumbed host of a REAL hull fails
-    /// the entity load, naming the system.
+    /// AC (#891 stage 2, replacing the stage-1 rejection test): a `flag()`
+    /// guard authored on the Captain host of a REAL hull loads — and WORKS,
+    /// in both directions, through the loaded policy. Fires with the flag set
+    /// and reads false with it clear: a guard that only ever read false would
+    /// pass the load half and fail the fired half.
     #[test]
-    fn a_flag_guard_on_a_shipped_hull_fails_to_load() {
-        // Sanity: the unmutated hull loads, so the failure below is the guard.
+    fn a_flag_guard_on_a_shipped_hull_loads_and_reads_the_world() {
+        // Sanity: the unmutated hull loads, so any difference below is the guard.
         let cruiser = cruiser();
         crate::entities::config::EntityConfig::from_toml(&cruiser)
             .expect("alliance_cruiser loads as shipped");
@@ -1136,16 +1251,45 @@ mod tests {
             r#"when = "fact(secs_since_combat) < param(combat_window_secs)""#,
             r#"when = "fact(secs_since_combat) < param(combat_window_secs) and flag(battle_stations)""#,
         );
-        let err = crate::entities::config::EntityConfig::from_toml(&mutated)
-            .expect_err("a flag() guard on the Captain host must fail the load")
-            .to_string();
-        assert!(
-            err.contains("Captain") && err.contains("[captain_console.ai]"),
-            "the load error must name the system and its block: {err}"
+        let cfg = crate::entities::config::EntityConfig::from_toml(&mutated)
+            .expect("a flag() guard on the Captain host is valid content since #891 stage 2");
+        let policy = cfg
+            .captain_console
+            .as_ref()
+            .and_then(|c| c.ai.as_ref())
+            .expect("the mutated hull still authors [captain_console.ai]")
+            .to_policy()
+            .expect("and it decodes");
+
+        // Freshly in combat, so the mutated rule's fact half is TRUE and the
+        // outcome is decided by the flag alone.
+        let mut facts = crate::world::flags::AiFacts::new();
+        facts.set("secs_since_combat", 1.0);
+        facts.set(crate::entities::config::CAPTAIN_HOSTILE_CONTACT_FACT, 0.0);
+        facts.set(crate::entities::config::CAPTAIN_HOSTILE_RANGE_FACT, 0.0);
+
+        let mut world = crate::world::flags::FlagStore::default();
+        world.set_flag("battle_stations");
+        assert_eq!(
+            policy.resolve_channel(
+                crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
+                &facts,
+                &[&world],
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::SetRedAlert(true)),
+            "with the world flag SET the guard fires and the alert goes up"
         );
-        assert!(
-            err.contains("flag(battle_stations)") && err.contains("NO world-flag chain plumbed"),
-            "the load error must say plainly why: {err}"
+
+        let clear = crate::world::flags::FlagStore::default();
+        assert_eq!(
+            policy.resolve_channel(
+                crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
+                &facts,
+                &[&clear],
+            ),
+            Some(&crate::ai::policy::AiPolicyVerb::SetRedAlert(false)),
+            "with the world flag CLEAR the guard reads false and the stand-down \
+             rule wins instead"
         );
     }
 

@@ -88,8 +88,9 @@ pub fn seed_blaster_bank_facts(
 fn blaster_bank_policy_fires(
     policy: &crate::ai::policy::AiPolicy,
     facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> bool {
-    policy.resolve_channel(crate::entities::config::BLASTER_FIRE_CHANNEL, facts, &[])
+    policy.resolve_channel(crate::entities::config::BLASTER_FIRE_CHANNEL, facts, flags)
         == Some(&crate::ai::policy::AiPolicyVerb::FireBlaster)
 }
 
@@ -244,8 +245,16 @@ pub(crate) fn handle_fire_blaster(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_blaster_auto_fire(
     sessions: Res<Sessions>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ship_q: Query<
         (
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
@@ -273,6 +282,7 @@ pub(crate) fn tick_blaster_auto_fire(
     );
 
     for (
+        ship_entity,
         entity_uuid,
         control_sources,
         ship_config_opt,
@@ -287,6 +297,13 @@ pub(crate) fn tick_blaster_auto_fire(
         // Read once per ship; seeded into every bank's snapshot. No Rust rule
         // consults it — the gate is the bank's authored predicate (#872).
         let red_alert = red_alert_opt.is_some_and(|r| r.0);
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
             Some(cfg) => any_blaster_bank_operates_ai(control_sources, &cfg.0),
@@ -356,7 +373,7 @@ pub(crate) fn tick_blaster_auto_fire(
                 continue;
             };
             let facts = seed_blaster_bank_facts(true, false, 0.0, in_range, in_arc, red_alert);
-            if blaster_bank_policy_fires(policy, &facts) {
+            if blaster_bank_policy_fires(policy, &facts, &flag_chain) {
                 banks_to_fire.push(bank.config.id.clone());
             }
         }

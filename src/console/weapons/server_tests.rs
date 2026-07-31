@@ -6619,6 +6619,65 @@ fn ai_target_selection_publishes_locked_target_and_applies_it() {
     );
 }
 
+/// Issue #891 stage 2, per-host both-directions proof for the Tactical target
+/// selector: an authored eligibility gated on a world flag admits no candidate
+/// while the flag is clear, and locks the objective target once it is set.
+#[test]
+fn ai_target_selection_flag_guard_reads_the_world_in_both_directions() {
+    let flag_gated_selector = || crate::weapons_plugin::TacticalTargetSelector {
+        selector: crate::entities::config::FineSystemAiSelectorToml {
+            param: Default::default(),
+            sources: vec!["objective-destroy".into()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(detectable) > 0 and flag(tactical_cleared)".into(),
+            score: vec![crate::entities::config::ScoreTermToml {
+                when: "candidate_fact(source_objective) > 0".into(),
+                weight: 1.0,
+            }],
+        }
+        .to_selector()
+        .expect("flag-gated tactical selector decodes"),
+        power_rating: None,
+        idle: false,
+    };
+
+    // Flag CLEAR → nothing is eligible, no lock.
+    let mut app = test_app();
+    let target_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target(&mut app, &target_uuid, 0.0, -30.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("wave_1".into(), target_uuid.clone());
+    insert_destroy_objective_blackboard(&mut app, "wave_1", 80.0);
+    let ship = local_ship_entity(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(flag_gated_selector());
+    tick(&mut app);
+    tick(&mut app);
+    assert_eq!(
+        get_weapons_target(&mut app),
+        None,
+        "with the world flag clear the eligibility must admit no candidate"
+    );
+
+    // Flag SET → the SAME eligibility admits the objective target.
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("tactical_cleared");
+    tick(&mut app);
+    tick(&mut app);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(target_uuid.as_str()),
+        "with the world flag set the same eligibility must lock the objective target"
+    );
+}
+
 /// Pins that `WeaponsBlackboard.target_uuid` follows the viewscreen's frozen
 /// Combat Lock and *only* that — mirroring the #829 consumer tests. Writing a
 /// combat lock that disagrees with the live `TacticalRadarSelection` component
@@ -7409,6 +7468,46 @@ fn ai_torpedo_auto_fire_launch_fact_guard_fires_over_seeded_facts() {
     );
 }
 
+/// Issue #891 stage 2, per-host both-directions proof for the Torpedo tube
+/// LAUNCH host: a `flag()` guard fires when the scenario sets the flag and
+/// reads false when it does not.
+#[test]
+fn ai_torpedo_auto_fire_launch_flag_guard_reads_the_world_in_both_directions() {
+    // Flag SET → launch.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "flag(weapons_free)");
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("weapons_free");
+    let out = tick(&mut app);
+    assert!(
+        out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "with the world flag set the launch guard must fire"
+    );
+
+    // Flag CLEAR → the SAME guard reads false and holds.
+    let mut app = torpedo_ai_test_app();
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    set_weapons_target(&mut app, Some("target-uuid".into()));
+    load_tube_now(&mut app, "fore_port");
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    attach_launch_policy(&mut app, "flag(weapons_free)");
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    let out = tick(&mut app);
+    assert!(
+        !out.iter()
+            .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+        "with the world flag clear the same launch guard must hold"
+    );
+}
+
 /// Issue #791, AC2: the new ship-wide `tubes_full` launch fact.
 ///
 /// "All tubes full" did not exist before #791 — `TorpedoTube::is_loaded()` is
@@ -7855,6 +7954,7 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
                     // false throughout is that statement.
                     false,
                 ),
+                &[],
             )
         };
 
@@ -9218,6 +9318,83 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
         ts.0.tube("fore_port").map(|t| &t.load_state),
         Some(&crate::torpedo::TubeLoadState::Unloaded),
         "a refused claim must not begin loading the tube"
+    );
+}
+
+/// Issue #891 stage 2, per-host both-directions proof for the Torpedo
+/// magazine host: a `flag()`-gated GRANT policy refuses the claim while the
+/// scenario flag is clear and grants it once set.
+#[test]
+fn magazine_flag_guard_reads_the_world_in_both_directions() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    let ship = local_ship(&mut app);
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+
+    let before = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .torpedoes_remaining;
+    assert!(before > 0, "precondition: magazine has stock");
+
+    // A grant policy whose ONLY rule is guarded on the world flag.
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+            crate::ai::policy::AiPolicy {
+                params: crate::world::flags::AiParams::new(),
+                rules: vec![crate::ai::policy::AiPolicyRule {
+                    priority: 10,
+                    channel: crate::entities::config::TORPEDO_MAGAZINE_CHANNEL.into(),
+                    when: crate::world::flags::parse_predicate("flag(resupply_authorised)")
+                        .unwrap(),
+                    verb: crate::ai::policy::AiPolicyVerb::GrantTorpedoRound,
+                }],
+                idle: false,
+                machine: None,
+            },
+        ));
+
+    let push_claim = |app: &mut App| {
+        let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
+        q.0.push(InterSystemMsg {
+            target: crate::system_registry::torpedo_magazine_system_id(),
+            payload: InterSystemPayload::ClaimTorpedoRound {
+                tube: "fore_port".into(),
+            },
+            source_entity: Some(ship),
+        });
+    };
+
+    // Flag CLEAR → the guard reads false and the claim is refused.
+    push_claim(&mut app);
+    app.world_mut()
+        .run_system_once(crate::console::weapons::handle_torpedo_magazine_inter_system)
+        .expect("magazine consumer runs");
+    let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
+    assert_eq!(
+        ts.0.torpedoes_remaining, before,
+        "with the world flag clear the grant guard must refuse the claim"
+    );
+
+    // Flag SET → the SAME guard fires and the round is granted.
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("resupply_authorised");
+    push_claim(&mut app);
+    app.world_mut()
+        .run_system_once(crate::console::weapons::handle_torpedo_magazine_inter_system)
+        .expect("magazine consumer runs");
+    let ts = app.world().get::<TorpedoSystemResource>(ship).unwrap();
+    assert_eq!(
+        ts.0.torpedoes_remaining,
+        before - 1,
+        "with the world flag set the same grant guard must grant the claim"
     );
 }
 
@@ -11609,6 +11786,55 @@ fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
     );
 }
 
+/// Issue #891 stage 2, per-host both-directions proof for the Phaser bank
+/// host: a `flag()` fire guard reads false (holds) while the scenario flag is
+/// clear and fires once it is set.
+#[test]
+fn phaser_bank_flag_guard_reads_the_world_in_both_directions() {
+    // Flag CLEAR → hold.
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000021",
+        "cc000000-0000-0000-0000-000000000022",
+        vec![(
+            wide_bank("fore", 0.0),
+            phaser_bank_fire_policy("flag(weapons_free)"),
+        )],
+    );
+    app.update();
+    assert!(
+        !app.world().get::<ActiveBeam>(npc).unwrap().is_firing(),
+        "with the world flag clear the fire guard must read false and hold"
+    );
+
+    // Flag SET → the SAME guard fires and the beam starts. A fresh app, so
+    // the only difference between the two runs is the world flag.
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("weapons_free");
+    let npc = spawn_policy_phaser_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000023",
+        "cc000000-0000-0000-0000-000000000024",
+        vec![(
+            wide_bank("fore", 0.0),
+            phaser_bank_fire_policy("flag(weapons_free)"),
+        )],
+    );
+    app.update();
+    assert!(
+        app.world().get::<ActiveBeam>(npc).unwrap().is_firing(),
+        "with the world flag set the same fire guard must open fire"
+    );
+}
+
 // ── The red-alert fire gate, end to end (issue #872) ────────────────────────
 
 /// The SHIPPED player-hull phaser policy — the one an AI-backfilled bridge
@@ -11883,6 +12109,140 @@ fn blaster_bank_idle_policy_holds_fire() {
     assert!(
         !blaster_res.0[0].volley.on_cooldown && blaster_res.0[0].in_flight.is_empty(),
         "an idle blaster bank policy must hold its volley — no fire, no cooldown"
+    );
+}
+
+/// Spawn an AI blaster NPC with one wide-arc bank driven by `policy`, and a
+/// target in range dead ahead. The blaster twin of `spawn_policy_phaser_npc`.
+fn spawn_policy_blaster_npc(
+    app: &mut App,
+    npc_uuid: &str,
+    target_uuid: &str,
+    policy: crate::ai::policy::AiPolicy,
+) -> Entity {
+    use crate::entity_spawner::EntityUuid;
+    let mut sources = crate::ship::control_source::ControlSourceResolver::new();
+    sources.set(
+        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    let mut policies = std::collections::HashMap::new();
+    policies.insert("fore".to_string(), policy);
+    let npc = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid(npc_uuid.to_string()),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::server_app::ShipSystemBlackboards::default(),
+            TacticalRadarSelection(Some(target_uuid.to_string())),
+            crate::messages::AdmittedCommands::default(),
+            ShipPhysics::default(),
+            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
+                crate::blaster::BlasterBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 360.0,
+                    volley_count: 1,
+                    volley_interval_secs: 0.1,
+                    cooldown_secs: 3.0,
+                    charge_time_secs: 0.0,
+                    projectile_speed: 40.0,
+                    collision_radius: 1.5,
+                    visual_scale: 1.0,
+                    damage: 10,
+                    shield_pierce: 0.0,
+                    recoil_impulse: 0.0,
+                    screenshake_magnitude: 0.0,
+                    marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
+                    range: 35.0,
+                },
+            )]),
+            crate::weapons_plugin::BlasterBankAiPolicies(policies),
+            Transform::default(),
+        ))
+        .id();
+    app.world_mut().spawn((
+        EntityUuid(target_uuid.to_string()),
+        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            SystemId("captain".into()),
+            50.0,
+        )])),
+        Transform::from_xyz(0.0, 0.0, -10.0),
+    ));
+    npc
+}
+
+/// Build a blaster-bank fire policy from a single guard expression — the
+/// blaster twin of `phaser_bank_fire_policy`.
+fn blaster_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
+    crate::entities::config::FineSystemAiConfigToml {
+        evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
+        idle: false,
+        param: Default::default(),
+        rule: vec![crate::entities::config::FineSystemAiRuleToml {
+            priority: 0,
+            channel: crate::entities::config::BLASTER_FIRE_CHANNEL.to_string(),
+            when: when.to_string(),
+            verb: crate::entities::config::BLASTER_FIRE_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }],
+        initial_state: None,
+        state: Vec::new(),
+        memory: std::collections::HashMap::new(),
+    }
+    .to_policy()
+    .expect("valid blaster bank policy")
+}
+
+/// Issue #891 stage 2, per-host both-directions proof for the Blaster bank
+/// host: a `flag()` fire guard holds while the scenario flag is clear and
+/// fires once it is set.
+#[test]
+fn blaster_bank_flag_guard_reads_the_world_in_both_directions() {
+    // Flag CLEAR → hold.
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    let npc = spawn_policy_blaster_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000033",
+        "cc000000-0000-0000-0000-000000000034",
+        blaster_bank_fire_policy("flag(weapons_free)"),
+    );
+    app.update();
+    {
+        let blaster_res = app.world().get::<BlasterSystemResource>(npc).unwrap();
+        assert!(
+            !blaster_res.0[0].volley.on_cooldown && blaster_res.0[0].in_flight.is_empty(),
+            "with the world flag clear the fire guard must read false and hold"
+        );
+    }
+
+    // Flag SET → the SAME guard fires the volley. A fresh app, so the only
+    // difference between the two runs is the world flag.
+    let mut app = test_app();
+    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("weapons_free");
+    let npc = spawn_policy_blaster_npc(
+        &mut app,
+        "cc000000-0000-0000-0000-000000000035",
+        "cc000000-0000-0000-0000-000000000036",
+        blaster_bank_fire_policy("flag(weapons_free)"),
+    );
+    app.update();
+    let blaster_res = app.world().get::<BlasterSystemResource>(npc).unwrap();
+    assert!(
+        blaster_res.0[0].volley.on_cooldown || !blaster_res.0[0].in_flight.is_empty(),
+        "with the world flag set the same fire guard must fire the volley"
     );
 }
 

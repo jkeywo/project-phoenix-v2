@@ -514,6 +514,12 @@ pub fn operate_navigation_ai(
         Option<&crate::entities::spawner::EntityName>,
     )>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
+    // is anchored at the layer that spawned each ship.
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
     let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
@@ -532,7 +538,7 @@ pub fn operate_navigation_ai(
         .collect();
 
     for (
-        _entity,
+        ship_entity,
         sources,
         blackboards,
         waypoint,
@@ -708,9 +714,16 @@ pub fn operate_navigation_ai(
 
         // Rank through the reusable selector, then map the winning UUID back to
         // the waypoint variant via the side-table. No eligible winner ⇒ clear.
+        // The scenario flag chain is anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
         let desired: Option<WaypointMode> = selector_comp
             .selector
-            .select(&self_ctx, &candidates, current_key.as_deref(), &[])
+            .select(&self_ctx, &candidates, current_key.as_deref(), &flag_chain)
             .and_then(|uuid| modes.get(&uuid).cloned());
 
         // ── Emit on change only (issue #828 shape) ───────────────────────────
@@ -2291,6 +2304,69 @@ mod tests {
                 last_z: -120.0,
             }),
             "a widened selector must select a chart contact as an anchored destination"
+        );
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Navigation
+    /// target selector: an authored eligibility gated on a world flag selects
+    /// no destination while the flag is clear and anchors the chart contact
+    /// once it is set.
+    #[test]
+    fn operate_navigation_ai_flag_guard_reads_the_world_in_both_directions() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+
+        let cfg = crate::entities::config::FineSystemAiSelectorToml {
+            param: Default::default(),
+            sources: vec!["chart-contacts".into()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(source_chart_contact) > 0 and flag(survey_authorised)"
+                .into(),
+            score: vec![crate::entities::config::ScoreTermToml {
+                when: "candidate_fact(source_chart_contact) > 0".into(),
+                weight: 1.0,
+            }],
+        };
+        let selector = cfg.to_selector().expect("flag-gated selector resolves");
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+            .single(app.world())
+            .expect("LocalShip");
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(NavigationTargetSelector {
+                selector,
+                power_rating: None,
+            });
+        inject_viewscreen_objective(&mut app, vec![]);
+        spawn_test_entity(&mut app, "contact-891", 300.0, -120.0);
+
+        // Flag CLEAR → nothing is eligible, no waypoint.
+        tick(&mut app);
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            None,
+            "with the world flag clear the eligibility must admit no destination"
+        );
+
+        // Flag SET → the SAME eligibility anchors the chart contact.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("survey_authorised");
+        tick(&mut app);
+        assert_eq!(
+            get_nav_waypoint(&mut app),
+            Some(WaypointMode::Anchored {
+                source_uuid: "contact-891".into(),
+                last_x: 300.0,
+                last_z: -120.0,
+            }),
+            "with the world flag set the same eligibility must select the contact"
         );
     }
 

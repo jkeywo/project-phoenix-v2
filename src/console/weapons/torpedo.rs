@@ -130,8 +130,9 @@ pub fn seed_torpedo_magazine_facts(magazine: u32, in_flight: u32) -> crate::worl
 pub fn torpedo_tube_load_policy_fires(
     policy: &crate::ai::policy::AiPolicy,
     facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> bool {
-    policy.resolve_channel(crate::entities::config::TORPEDO_LOAD_CHANNEL, facts, &[])
+    policy.resolve_channel(crate::entities::config::TORPEDO_LOAD_CHANNEL, facts, flags)
         == Some(&crate::ai::policy::AiPolicyVerb::LoadTorpedo)
 }
 
@@ -141,9 +142,13 @@ pub fn torpedo_tube_load_policy_fires(
 pub fn torpedo_tube_launch_policy_fires(
     policy: &crate::ai::policy::AiPolicy,
     facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> bool {
-    policy.resolve_channel(crate::entities::config::TORPEDO_LAUNCH_CHANNEL, facts, &[])
-        == Some(&crate::ai::policy::AiPolicyVerb::LaunchTorpedo)
+    policy.resolve_channel(
+        crate::entities::config::TORPEDO_LAUNCH_CHANNEL,
+        facts,
+        flags,
+    ) == Some(&crate::ai::policy::AiPolicyVerb::LaunchTorpedo)
 }
 
 /// Resolve the shared magazine's policy to a bare "grant this claim?" boolean
@@ -153,11 +158,12 @@ pub fn torpedo_tube_launch_policy_fires(
 pub fn torpedo_magazine_grant_policy_fires(
     policy: &crate::ai::policy::AiPolicy,
     facts: &crate::world::flags::AiFacts,
+    flags: &[&crate::world::flags::FlagStore],
 ) -> bool {
     policy.resolve_channel(
         crate::entities::config::TORPEDO_MAGAZINE_CHANNEL,
         facts,
-        &[],
+        flags,
     ) == Some(&crate::ai::policy::AiPolicyVerb::GrantTorpedoRound)
 }
 
@@ -617,6 +623,14 @@ pub(crate) fn handle_fire_torpedo(
 /// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
 pub fn handle_torpedo_magazine_inter_system(
     queue: Res<InterSystemQueue>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`
+    // — this call site is per-claim (worst case in the crate).
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ship_q: Query<
         (
             Entity,
@@ -695,7 +709,14 @@ pub fn handle_torpedo_magazine_inter_system(
                     torpedo_sys.0.torpedoes_remaining,
                     torpedo_sys.0.in_flight.len() as u32,
                 );
-                if !torpedo_magazine_grant_policy_fires(mag_policy, &facts) {
+                // The scenario flag chain, anchored at the layer that spawned
+                // this ship (issue #891 stage 2).
+                let flag_chain = crate::world::server::entity_flag_chain(
+                    origin_q.get(target).ok(),
+                    runtime.as_deref(),
+                    layers.as_deref(),
+                );
+                if !torpedo_magazine_grant_policy_fires(mag_policy, &facts, &flag_chain) {
                     continue; // authored policy refuses this claim.
                 }
                 if !torpedo_sys.0.claim_magazine_round() {

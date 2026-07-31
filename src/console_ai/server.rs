@@ -214,8 +214,17 @@ pub(crate) fn ai_shield_focus(
     time: Res<Time>,
     world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
     sessions: Res<crate::lobby::Sessions>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation; absent, the chain is
+    // empty and flag-guards read false.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::shields::ShipShields,
@@ -234,6 +243,7 @@ pub(crate) fn ai_shield_focus(
     let current_time = time.elapsed_secs();
 
     for (
+        ship_entity,
         entity_uuid,
         control_sources,
         shields,
@@ -409,9 +419,18 @@ pub(crate) fn ai_shield_focus(
             min_damage_window_secs,
             current_time,
         );
-        let acts =
-            policy.resolve_channel(crate::entities::config::SHIELD_FOCUS_CHANNEL, &facts, &[])
-                == Some(&crate::ai::policy::AiPolicyVerb::FocusShieldArc);
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+        let acts = policy.resolve_channel(
+            crate::entities::config::SHIELD_FOCUS_CHANNEL,
+            &facts,
+            &flag_chain,
+        ) == Some(&crate::ai::policy::AiPolicyVerb::FocusShieldArc);
         if !acts {
             continue;
         }
@@ -501,10 +520,11 @@ pub(crate) fn ai_shield_focus(
 /// # Facts + scenario flags (AC3)
 /// `seed_power_facts` builds the immutable SHIP/THREAT/OBJECTIVE/SYSTEM fact
 /// snapshot host-side (the #779 empty-facts lesson: a guard never fires unless
-/// the host seeds the fact). The read-only scenario `flags` chain
-/// (`WorldContentRuntime.flags`) is passed to `resolve_channel` so authored
-/// guards can gate on world flags/counters — the new read surface #784 adds over
-/// the prior hosts.
+/// the host seeds the fact). The read-only scenario `flags` chain — anchored at
+/// the layer that spawned the ship and terminating at
+/// `WorldContentRuntime.flags` (issue #891 stage 2) — is passed to
+/// `resolve_channel` so authored guards can gate on world flags/counters: the
+/// read surface #784 introduced and #891 spread to every host.
 ///
 /// # Brownout avoidance (AC5), no global emergency exception
 /// Each rule's reserve is an authored `param` referenced by its `when` guard
@@ -527,9 +547,15 @@ fn ai_power_allocation(
     // fixtures that never insert `WorldContentRuntime` still pass parameter
     // validation; absent, the flag chain is empty and flag-guards read false.
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2): the chain is anchored at
+    // the layer that spawned each ship, `parent:`-walkable to the base store.
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
     // Global objective pool for the OBJECTIVE fact. `Option<Res<_>>` for the same
     // bare-`App` reason. Scored once per tick, outside the per-ship loop.
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
             Entity,
@@ -551,12 +577,6 @@ fn ai_power_allocation(
     >,
 ) {
     let now = time.elapsed_secs();
-
-    // The read-only scenario flag chain (AC3), same for every ship this tick.
-    let flag_chain: Vec<&crate::world::flags::FlagStore> = match runtime.as_ref() {
-        Some(rt) => vec![&rt.flags],
-        None => Vec::new(),
-    };
 
     // OBJECTIVE fact, scored once per tick: does the active pool carry a Destroy
     // directive? A broad "the ship has something to kill" signal an authored rule
@@ -611,6 +631,16 @@ fn ai_power_allocation(
             continue;
         };
         let policy: &crate::ai::policy::AiPolicy = &policy_comp.0;
+
+        // The read-only scenario flag chain (AC3), anchored at the layer that
+        // spawned THIS ship (issue #891 stage 2) — correctly layered, so
+        // `parent:` prefixes climb toward the base store exactly as a trigger
+        // authored in that layer would.
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = last_helm_comp.map(|l| l.thrust).unwrap_or(0.0);
@@ -784,8 +814,16 @@ fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) ->
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
@@ -822,6 +860,7 @@ pub(crate) fn ai_torpedo_auto_fire(
     let policy_sid = crate::system_registry::torpedo_magazine_system_id();
 
     for (
+        ship_entity,
         entity_uuid,
         ship_config,
         control_sources,
@@ -837,6 +876,13 @@ pub(crate) fn ai_torpedo_auto_fire(
         // Read once per ship; seeded into every tube's launch snapshot. No Rust
         // rule consults it — the gate is the tube's authored predicate (#872).
         let red_alert = red_alert_opt.is_some_and(|r| r.0);
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
         let policy = control_sources.0.policy_for(&policy_sid);
         if !policy.operate_ai {
             continue;
@@ -1000,7 +1046,11 @@ pub(crate) fn ai_torpedo_auto_fire(
                 tubes_full,
                 red_alert,
             );
-            if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(launch_policy, &facts) {
+            if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(
+                launch_policy,
+                &facts,
+                &flag_chain,
+            ) {
                 continue;
             }
             // Emit as an admitted command through the shared AI seam (issue
@@ -1069,6 +1119,12 @@ pub(crate) fn ai_torpedo_load(
     sessions: Res<crate::lobby::Sessions>,
     // `Option<Res<_>>`, never bare — bare-`App` fixtures never insert it.
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2).
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
             Entity,
@@ -1097,6 +1153,14 @@ pub(crate) fn ai_torpedo_load(
         if !control_sources.0.policy_for(&magazine_id).operate_ai {
             continue;
         }
+
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
 
         let tubes: Vec<crate::console_ai::TubeLoadSummary> = torpedo_sys
             .0
@@ -1147,7 +1211,7 @@ pub(crate) fn ai_torpedo_load(
                 torpedo_sys.0.torpedoes_remaining,
                 true,
             );
-            if !crate::weapons_plugin::torpedo_tube_load_policy_fires(policy, &facts) {
+            if !crate::weapons_plugin::torpedo_tube_load_policy_fires(policy, &facts, &flag_chain) {
                 continue;
             }
             let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
@@ -1486,6 +1550,61 @@ mod tests {
             response_index: 0,
         }];
         ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
+    }
+
+    /// A Shields focus policy whose ONLY rule is guarded on a world flag — the
+    /// #891 stage 2 read surface — with no unconditional fallback.
+    fn flag_only_focus_policy() -> ShieldsFocusAiPolicy {
+        let mut cfg = crate::entities::authored_ai_pins::shipped_policy_toml("shields_focus");
+        cfg.rule = vec![crate::entities::config::FineSystemAiRuleToml {
+            priority: 10,
+            channel: crate::entities::config::SHIELD_FOCUS_CHANNEL.to_string(),
+            when: "flag(brace_for_impact)".to_string(),
+            verb: crate::entities::config::SHIELD_FOCUS_VERB.to_string(),
+            value: false,
+            level: 0,
+            response_index: 0,
+        }];
+        ShieldsFocusAiPolicy(cfg.to_policy().unwrap())
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Shields
+    /// focus host: with heavy damage on facing 0 (the kernel's pick), a
+    /// `flag()`-gated policy holds while the scenario flag is clear and
+    /// focuses once it is set.
+    #[test]
+    fn ai_shield_focus_flag_guard_reads_the_world_in_both_directions() {
+        let mut app = shield_test_app();
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+        let e = ship_entity(&mut app);
+        app.world_mut()
+            .entity_mut(e)
+            .insert(flag_only_focus_policy());
+        {
+            let mut entity_mut = app.world_mut().entity_mut(e);
+            let mut shields = entity_mut.get_mut::<ShipShields>().unwrap();
+            shields.0.facings[0].hp = 20; // heavy damage to facing 0 only
+        }
+
+        // Flag CLEAR -> the gate reads false, the kernel never runs, no focus.
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            None,
+            "with the world flag clear the focus gate must read false and hold"
+        );
+
+        // Flag SET -> the SAME gate fires and the kernel focuses the weak facing.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("brace_for_impact");
+        app.update();
+        assert_eq!(
+            focused_facing(&app, e),
+            Some(0),
+            "with the world flag set the same gate must fire and focus facing 0"
+        );
     }
 
     fn focused_facing(app: &App, e: Entity) -> Option<usize> {
@@ -3039,6 +3158,113 @@ station = "sensors"
         );
     }
 
+    /// Issue #891 stage 2, the LAYERING half: the chain a host passes is
+    /// anchored at the layer that spawned the ship — not flattened onto the
+    /// base store. A flag set only in the spawning LAYER's store fires the
+    /// ship's guard, and a `parent:`-prefixed guard reads the base store from
+    /// there, exactly as a trigger authored in that layer would.
+    #[test]
+    fn scenario_flag_chain_is_anchored_at_the_ships_spawning_layer() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .init_resource::<crate::ship::power::PowerConfigResource>()
+            .init_resource::<crate::world::server::WorldContentRuntime>()
+            .init_resource::<crate::world::server::WorldLayerMap>()
+            .insert_resource(crate::lobby::Sessions(
+                crate::lobby::session::SessionManager::new(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    ai_power_allocation.before(crate::ship::power::handle_power_messages),
+                    crate::ship::power::handle_power_messages,
+                ),
+            );
+        let mut cs = ShipSystemControlSources::default();
+        cs.0.set(
+            crate::system_registry::power_reactor_system_id(),
+            ControlSource::Ai,
+        );
+        let e = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                cs,
+                crate::ship::power::ShipPowerSystem(
+                    crate::modifiers::power_system::PowerSystem::default(),
+                ),
+                crate::ship_state::ShipRedAlert::default(),
+                crate::ship_plugin::LastHelmInput::default(),
+                power_policy(
+                    &[],
+                    vec![
+                        alloc_rule(10, "weapons", "flag(layer_flag)", 4),
+                        // A DROP, so the ship-wide total cap cannot mask the
+                        // read: two simultaneous elevations would fight the
+                        // total-allocation clamp.
+                        alloc_rule(10, "sensors", "flag(parent:base_flag)", 1),
+                        // The mirror-image case, driven through the real host
+                        // rather than asserted against a hand-built chain
+                        // (issue #891 review finding 4): an UNPREFIXED guard
+                        // on `base_flag` must NOT fire for this layer-spawned
+                        // ship. `resolve_chain` indexes by depth, so an
+                        // unprefixed name reads chain[0] — the spawning
+                        // layer's own store — and `base_flag` lives only in
+                        // the base store two hops further out.
+                        alloc_rule(10, "helm", "flag(base_flag)", 3),
+                    ],
+                ),
+                crate::messages::AdmittedCommands::default(),
+                AiHighFidelity,
+            ))
+            .id();
+
+        // The ship was spawned by a loaded sub-world layer; the layer's OWN
+        // store carries `layer_flag`, the BASE store carries `base_flag`.
+        // Stamping `EntityOriginLayer` mirrors what the two real spawn sites
+        // do (issue #891 review finding 1) — `entity_flag_chain` now reads
+        // the origin off this component, not off `spawned_entities`.
+        {
+            let mut layer = crate::world::server::WorldRuntime::default();
+            layer.flags.set_flag("layer_flag");
+            layer.spawned_entities.push(e);
+            app.world_mut()
+                .resource_mut::<crate::world::server::WorldLayerMap>()
+                .0
+                .insert("assets/worlds/sub.toml".to_string(), layer);
+            app.world_mut()
+                .resource_mut::<crate::world::server::WorldContentRuntime>()
+                .flags
+                .set_flag("base_flag");
+            app.world_mut()
+                .entity_mut(e)
+                .insert(crate::world::server::EntityOriginLayer(
+                    "assets/worlds/sub.toml".to_string(),
+                ));
+        }
+
+        power_tick_with_dt(&mut app, 0.1);
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::WEAPONS_POWER_GROUP),
+            4,
+            "a flag set in the SPAWNING LAYER's store fires the layer-spawned \
+             ship's guard — the chain is anchored at the layer, not the base"
+        );
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::SENSORS_POWER_GROUP),
+            1,
+            "a `parent:`-prefixed guard climbs from the layer to the BASE store \
+             — the chain is layered, not flattened"
+        );
+        assert_eq!(
+            power_level(&app, e, crate::modifiers::power_system::HELM_POWER_GROUP),
+            2,
+            "an UNPREFIXED guard on a layer-spawned ship reads the layer store, \
+             not the base store — base_flag never reaches it, so the rule does \
+             not fire and helm holds its default level"
+        );
+    }
+
     #[test]
     fn idle_policy_holds_every_group() {
         // A ship whose policy is an explicit idle takes no power action.
@@ -3321,6 +3547,36 @@ station = "sensors"
             tube_target_count(&app, e),
             2,
             "a load guard satisfied by the seeded magazine fact must fire the order"
+        );
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Torpedo tube
+    /// LOAD host: a `flag()` guard fires when the scenario sets the flag and
+    /// reads false when it does not — through the full decide → admit → apply
+    /// pipeline, not the policy evaluator alone.
+    #[test]
+    fn ai_torpedo_load_flag_guard_reads_the_world_in_both_directions() {
+        // Flag CLEAR → the guard reads false and the load holds.
+        let (mut app, e) = torpedo_load_app(ControlSource::Ai);
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+        attach_load_policy(&mut app, e, "flag(resupply_authorised)");
+        app.update();
+        assert_eq!(
+            tube_target_count(&app, e),
+            0,
+            "with the world flag clear the load guard must read false and hold"
+        );
+
+        // Flag SET → the SAME guard fires and the volley order lands.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("resupply_authorised");
+        app.update();
+        assert_eq!(
+            tube_target_count(&app, e),
+            2,
+            "with the world flag set the same guard must fire the load order"
         );
     }
 }

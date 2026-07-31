@@ -122,6 +122,117 @@ pub struct WorldRuntime {
 #[derive(Resource, Default)]
 pub struct WorldLayerMap(pub HashMap<String, WorldRuntime>);
 
+/// Marker component recording which loaded world layer spawned this entity
+/// (perf fix, issue #891 review finding 1). Stamped exactly once, at the two
+/// sites that add an entity to a `WorldRuntime::spawned_entities` list — the
+/// `SpawnEntity` trigger action and the bulk layer-load spawn in
+/// `apply_world_layer_changes` — so [`entity_flag_chain`] can read a ship's
+/// origin layer in O(1) (a `Query::get`) instead of the O(layers) scan
+/// `entity_origin_layer` used to run on every call, including per-claim
+/// inside `handle_torpedo_magazine_inter_system`.
+///
+/// Absent on a base-world (or otherwise unrecorded) entity — exactly the
+/// entities the old scan resolved to `None` — so a missing component keeps
+/// meaning "anchored at the base world", not "not spawned yet".
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct EntityOriginLayer(pub String);
+
+/// The flag-store-only half of the layered walk (PRD #397 fix 1, split out by
+/// the issue #891 review finding 2): `chain[0]` is the origin layer's own
+/// store, each `loader_path` hop appends the next-outer layer, and the base
+/// `WorldContentRuntime` store (`base_flags`) terminates the chain. A `parent:`
+/// prefix on a flag name steps one entry outward
+/// (`crate::world::flags::resolve_chain`). An origin naming a layer missing
+/// from the map degrades to the base store alone (shouldn't happen in normal
+/// flow).
+///
+/// Shared by [`entity_flag_chain`] (every AI policy/selector host) and by
+/// [`layered_flag_chain_with_paths`] (`tick_trigger_pipeline`). It used to
+/// also build a parallel `Vec<Option<String>>` layer-path chain with a
+/// `String` clone per hop — but only the trigger pipeline ever read that
+/// half; every AI host discarded it on every call, so pairing the two meant a
+/// throwaway allocation on every AI decision this crate makes. That half now
+/// lives only in `layered_flag_chain_with_paths`, the one reader that wants it.
+pub fn layered_flag_chain<'a>(
+    origin: Option<&str>,
+    base_flags: &'a crate::world::flags::FlagStore,
+    layer_map: Option<&'a WorldLayerMap>,
+) -> Vec<&'a crate::world::flags::FlagStore> {
+    let mut flag_chain: Vec<&crate::world::flags::FlagStore> = Vec::new();
+    let mut cur = origin;
+    loop {
+        match cur {
+            Some(p) => {
+                if let Some(wr) = layer_map.and_then(|lm| lm.0.get(p)) {
+                    flag_chain.push(&wr.flags);
+                    cur = wr.loader_path.as_deref();
+                } else {
+                    // Layer missing from the map — treat as empty.
+                    // (Shouldn't happen in normal flow.)
+                    flag_chain.push(base_flags);
+                    break;
+                }
+            }
+            None => {
+                flag_chain.push(base_flags);
+                break;
+            }
+        }
+    }
+    flag_chain
+}
+
+/// `tick_trigger_pipeline`'s own wrapper around [`layered_flag_chain`] (issue
+/// #891 review finding 2): the SAME store walk, plus the layer-PATH chain
+/// `evaluate_single_trigger` / `DispatchContext` need to resolve `parent:`
+/// against the right outer layer and to stamp `origin_layer` on dispatched
+/// actions. No other reader wants the path chain, so it is derived here
+/// rather than threaded through the shared walk every caller pays for.
+pub fn layered_flag_chain_with_paths<'a>(
+    origin: Option<&str>,
+    base_flags: &'a crate::world::flags::FlagStore,
+    layer_map: Option<&'a WorldLayerMap>,
+) -> (Vec<&'a crate::world::flags::FlagStore>, Vec<Option<String>>) {
+    let flag_chain = layered_flag_chain(origin, base_flags, layer_map);
+    let mut layer_chain: Vec<Option<String>> = Vec::new();
+    let mut cur = origin.map(str::to_string);
+    loop {
+        layer_chain.push(cur.clone());
+        match &cur {
+            Some(p) => match layer_map.and_then(|lm| lm.0.get(p)) {
+                Some(wr) => cur = wr.loader_path.clone(),
+                None => break,
+            },
+            None => break,
+        }
+    }
+    (flag_chain, layer_chain)
+}
+
+/// The world-flag chain one entity's AI policy/selector guards evaluate against
+/// (issue #891 stage 2): anchored at the layer that spawned the entity and
+/// climbing `loader_path` to the base store, exactly as a trigger authored in
+/// that layer reads. A base-world (or unrecorded) entity reads the base store
+/// alone; `parent:` prefixes climb outward from wherever the entity is
+/// anchored.
+///
+/// `origin` is the entity's own [`EntityOriginLayer`] component (read by the
+/// caller via a `Query`; `None` for a base-world entity — an O(1) read since
+/// the issue #891 review perf fix, replacing a `WorldLayerMap` scan).
+/// `runtime` is `Option` because every AI host takes `Option<Res<_>>` for
+/// bare-`App` fixtures: absent, the chain is empty and `flag()`/`counter()`
+/// guards read false.
+pub fn entity_flag_chain<'a>(
+    origin: Option<&EntityOriginLayer>,
+    runtime: Option<&'a WorldContentRuntime>,
+    layer_map: Option<&'a WorldLayerMap>,
+) -> Vec<&'a crate::world::flags::FlagStore> {
+    match runtime {
+        Some(rt) => layered_flag_chain(origin.map(|o| o.0.as_str()), &rt.flags, layer_map),
+        None => Vec::new(),
+    }
+}
+
 /// Queue of `LoadWorld` / `UnloadWorld` actions to execute on the next frame.
 ///
 /// `tick_trigger_pipeline` pushes path-keyed commands here; `apply_world_layer_changes`
@@ -942,32 +1053,16 @@ pub(crate) fn tick_trigger_pipeline(
         let dispatch_names = runtime.name_to_uuid.clone();
         for (idx, origin) in trigger_origins.iter().enumerate() {
             // Build the flag-store and layer-path chains for this trigger.
-            let mut flag_chain: Vec<&crate::world::flags::FlagStore> = Vec::new();
-            let mut layer_chain: Vec<Option<String>> = Vec::new();
-            let mut cur = origin.clone();
-            loop {
-                layer_chain.push(cur.clone());
-                match &cur {
-                    Some(p) => {
-                        if let Some(wr) = world_layers.layer_map.as_ref().and_then(|lm| lm.0.get(p))
-                        {
-                            flag_chain.push(&wr.flags);
-                            cur = wr.loader_path.clone();
-                        } else {
-                            // Layer missing from the map Ã¢â‚¬â€ treat as empty.
-                            // (Shouldn't happen in normal flow.)
-                            flag_chain.push(&runtime.flags);
-                            break;
-                        }
-                    }
-                    None => {
-                        flag_chain.push(&runtime.flags);
-                        break;
-                    }
-                }
-            }
-            // The base entry was already pushed above when cur went to None.
-            // If we exited via the layer-missing branch we also pushed base.
+            // The store half is the ONE shared layered walk
+            // (`layered_flag_chain`), also read through by every AI
+            // policy/selector host (issue #891 stage 2) via
+            // `entity_flag_chain`; the path half is this pipeline's own
+            // wrapper (issue #891 review finding 2) since nothing else needs it.
+            let (flag_chain, layer_chain) = layered_flag_chain_with_paths(
+                origin.as_deref(),
+                &runtime.flags,
+                world_layers.layer_map.as_deref(),
+            );
             let result = crate::world::content::evaluate_single_trigger(
                 &mut runtime.trigger_states[idx],
                 &current_events,
@@ -1447,10 +1542,16 @@ pub(crate) fn apply_dispatch_result(
 
                 // Attach to the authoring layer's spawned_entities so
                 // `UnloadWorld` despawns the entity (base-world origin: the
-                // entity just persists for the session).
+                // entity just persists for the session), and stamp its
+                // origin layer (issue #891 review finding 1) so
+                // `entity_flag_chain` can read it in O(1) instead of scanning
+                // `WorldLayerMap` for it later.
                 if let (Some(path), Some(lm)) = (&layer_path, layer_map.as_deref_mut()) {
                     if let Some(layer) = lm.0.get_mut(path) {
                         layer.spawned_entities.push(spawned);
+                        commands
+                            .entity(spawned)
+                            .insert(EntityOriginLayer(path.clone()));
                     }
                 }
             }
@@ -2010,6 +2111,15 @@ fn apply_world_layer_changes(
                             Some(&runtime.flags),
                             sim_rng.as_deref(),
                         );
+                        // Stamp each entity's origin layer (issue #891 review
+                        // finding 1) so `entity_flag_chain` can read it in
+                        // O(1) instead of scanning `WorldLayerMap` for it
+                        // later — the second of the two spawn sites.
+                        for &spawned in &spawned_entities {
+                            commands
+                                .entity(spawned)
+                                .insert(EntityOriginLayer(path.clone()));
+                        }
 
                         // Merge comms template states + contacts
                         // into the live comms runtime (skips
@@ -2140,6 +2250,122 @@ pub(crate) mod tests {
     use crate::lobby::LobbyPlugin;
     use crate::messages::*;
     use crate::world::content::TriggerCondition;
+
+    // ── The shared layered flag chain (issue #891 stage 2) ───────────────────
+
+    /// A layer map with one loaded sub-world whose `loader_path` is the base
+    /// world, carrying one flag of its own.
+    fn one_layer_map(path: &str, flag: &str) -> WorldLayerMap {
+        let mut layer = WorldRuntime::default();
+        layer.flags.set_flag(flag);
+        let mut map = WorldLayerMap::default();
+        map.0.insert(path.to_string(), layer);
+        map
+    }
+
+    #[test]
+    fn layered_flag_chain_walks_loader_path_innermost_first() {
+        let mut base = crate::world::flags::FlagStore::default();
+        base.set_flag("base_flag");
+        let mut inner = WorldRuntime {
+            loader_path: Some("assets/worlds/outer.toml".into()),
+            ..Default::default()
+        };
+        inner.flags.set_flag("inner_flag");
+        let mut outer = WorldRuntime::default();
+        outer.flags.set_flag("outer_flag");
+        let mut map = WorldLayerMap::default();
+        map.0.insert("assets/worlds/inner.toml".into(), inner);
+        map.0.insert("assets/worlds/outer.toml".into(), outer);
+
+        // The store-only walk (`layered_flag_chain`) — the shape every AI
+        // host reads through `entity_flag_chain`.
+        let flags = layered_flag_chain(Some("assets/worlds/inner.toml"), &base, Some(&map));
+        // Innermost-first: an unprefixed name reads the origin layer; each
+        // `parent:` steps one entry outward — the reader's own scope first,
+        // never a flattened union.
+        assert!(crate::world::flags::flag_in_chain(&flags, "inner_flag"));
+        assert!(!crate::world::flags::flag_in_chain(&flags, "outer_flag"));
+        assert!(crate::world::flags::flag_in_chain(
+            &flags,
+            "parent:outer_flag"
+        ));
+        assert!(crate::world::flags::flag_in_chain(
+            &flags,
+            "parent:parent:base_flag"
+        ));
+
+        // The with-paths wrapper (`layered_flag_chain_with_paths`) —
+        // `tick_trigger_pipeline`'s own shape — carries the identical store
+        // chain plus the layer-path chain climbing to the base world.
+        let (flags2, layers) =
+            layered_flag_chain_with_paths(Some("assets/worlds/inner.toml"), &base, Some(&map));
+        assert_eq!(
+            layers,
+            vec![
+                Some("assets/worlds/inner.toml".to_string()),
+                Some("assets/worlds/outer.toml".to_string()),
+                None
+            ],
+            "the layer-path chain climbs loader_path to the base world"
+        );
+        assert!(crate::world::flags::flag_in_chain(&flags2, "inner_flag"));
+    }
+
+    #[test]
+    fn layered_flag_chain_from_the_base_world_is_the_base_store_alone() {
+        let mut base = crate::world::flags::FlagStore::default();
+        base.set_flag("base_flag");
+        let flags = layered_flag_chain(None, &base, None);
+        assert_eq!(flags.len(), 1);
+        assert!(crate::world::flags::flag_in_chain(&flags, "base_flag"));
+
+        let (flags2, layers) = layered_flag_chain_with_paths(None, &base, None);
+        assert_eq!(layers, vec![None]);
+        assert_eq!(flags2.len(), 1);
+        assert!(crate::world::flags::flag_in_chain(&flags2, "base_flag"));
+    }
+
+    /// The AI-host entry point: a ship carrying an `EntityOriginLayer`
+    /// component is anchored at that layer, exactly as a trigger authored
+    /// there; a ship with no component is anchored at the base.
+    #[test]
+    fn entity_flag_chain_anchors_at_the_spawning_layer() {
+        let mut app = App::new();
+        let layer_ship = app
+            .world_mut()
+            .spawn(EntityOriginLayer("assets/worlds/sub.toml".to_string()))
+            .id();
+        let base_ship = app.world_mut().spawn_empty().id();
+
+        let mut runtime = WorldContentRuntime::default();
+        runtime.flags.set_flag("base_flag");
+        let map = one_layer_map("assets/worlds/sub.toml", "layer_flag");
+
+        let origin = app.world().get::<EntityOriginLayer>(layer_ship);
+        let chain = entity_flag_chain(origin, Some(&runtime), Some(&map));
+        assert!(
+            crate::world::flags::flag_in_chain(&chain, "layer_flag"),
+            "a layer-spawned ship reads its own layer's store first"
+        );
+        assert!(
+            crate::world::flags::flag_in_chain(&chain, "parent:base_flag"),
+            "and climbs to the base store through `parent:`"
+        );
+
+        let origin = app.world().get::<EntityOriginLayer>(base_ship);
+        let chain = entity_flag_chain(origin, Some(&runtime), Some(&map));
+        assert!(
+            crate::world::flags::flag_in_chain(&chain, "base_flag"),
+            "an unrecorded ship is anchored at the base world"
+        );
+        assert!(!crate::world::flags::flag_in_chain(&chain, "layer_flag"));
+
+        // No runtime (bare-`App` fixtures): the chain is empty and every read
+        // is false.
+        let chain = entity_flag_chain(origin, None, Some(&map));
+        assert!(chain.is_empty());
+    }
 
     // -- AI-event trigger tests -----------------------------------------------
 

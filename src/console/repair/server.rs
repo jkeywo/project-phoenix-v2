@@ -637,8 +637,16 @@ fn station_damage_readings(
 /// seam), not a regression.
 pub fn operate_repair_ai(
     sessions: Res<crate::lobby::Sessions>,
+    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
+    // bare-`App` fixtures still pass parameter validation.
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
+            Entity,
             Option<&crate::entity_spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&ShipRepairTeams>,
@@ -653,6 +661,7 @@ pub fn operate_repair_ai(
     >,
 ) {
     for (
+        ship_entity,
         entity_uuid,
         sources,
         teams_comp,
@@ -831,6 +840,14 @@ pub fn operate_repair_ai(
             ),
         };
 
+        // The scenario flag chain, anchored at the layer that spawned this
+        // ship (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+
         // ── Greedy sequential selection, one authored `select` per free team ──
         for team_idx in free_teams {
             let candidates: Vec<crate::ai::selector::SelectorCandidate> = readings
@@ -856,11 +873,12 @@ pub fn operate_repair_ai(
                 .get(team_idx)
                 .and_then(|slot| committed_station_for_slot(slot, config));
 
-            let Some(winner) =
-                selector_comp
-                    .selector
-                    .select(&self_ctx, &candidates, current.as_deref(), &[])
-            else {
+            let Some(winner) = selector_comp.selector.select(
+                &self_ctx,
+                &candidates,
+                current.as_deref(),
+                &flag_chain,
+            ) else {
                 // Nothing eligible left this tick; later teams cannot do better
                 // over the same candidate set, so stop.
                 break;
@@ -2065,6 +2083,60 @@ mod tests {
             .iter()
             .map(slot_system)
             .collect()
+    }
+
+    /// Issue #891 stage 2, per-host both-directions proof for the Repair
+    /// target selector: an authored eligibility gated on a world flag
+    /// dispatches nothing while the flag is clear and dispatches the damaged
+    /// station once it is set.
+    #[test]
+    fn operate_repair_ai_flag_guard_reads_the_world_in_both_directions() {
+        use crate::entities::config::{FineSystemAiSelectorToml, ScoreTermToml};
+        let flag_gated = FineSystemAiSelectorToml {
+            param: std::collections::HashMap::new(),
+            sources: vec![crate::entities::config::SELECTOR_SOURCE_DAMAGED_STATIONS.to_string()],
+            horizon: 1.0e9,
+            switch_margin: 0.0,
+            eligibility: "candidate_fact(source_repair_request) > 0 \
+                          and flag(damage_control_released)"
+                .to_string(),
+            score: vec![ScoreTermToml {
+                when: "candidate_fact(source_repair_request) > 0".to_string(),
+                weight: 1.0,
+            }],
+        };
+
+        let mut app = npc_repair_app();
+        app.init_resource::<crate::world::server::WorldContentRuntime>();
+        // alpha 50/100 → Damaged, one team free.
+        let npc = spawn_two_station_npc(
+            &mut app,
+            crate::ship::control_source::ControlSource::Ai,
+            50.0,
+            100.0,
+            1,
+            Some(flag_gated),
+        );
+
+        // Flag CLEAR → nothing is eligible, the team stays idle.
+        app.update();
+        assert_eq!(
+            team_systems(&app, npc)[0],
+            None,
+            "with the world flag clear the eligibility must dispatch nothing"
+        );
+
+        // Flag SET → the SAME eligibility dispatches to the damaged station.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag("damage_control_released");
+        app.update();
+        assert_eq!(
+            team_systems(&app, npc)[0].as_deref(),
+            Some("alpha-sys"),
+            "with the world flag set the same eligibility must dispatch the team"
+        );
     }
 
     /// AC2 baseline: with the canonical default selector the worst-tier station

@@ -909,6 +909,12 @@ fn ai_target_selection(
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
+    // is anchored at the layer that spawned each ship.
+    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
+    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
+    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     // `Option` so test apps without the entity-config cache still run; an
     // absent registry behaves as an empty one, i.e. nobody is hostile.
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
@@ -1221,11 +1227,20 @@ fn ai_target_selection(
 
         // Rank. Passing the current lock lets the selector apply switch-margin
         // retention (AC5); an invalid current lock fails eligibility / is absent
-        // from the candidates and is replaced this same tick (AC5).
-        let selected =
-            selector_comp
-                .selector
-                .select(&self_ctx, &candidates, current_lock.as_deref(), &[]);
+        // from the candidates and is replaced this same tick (AC5). The
+        // scenario flag chain is anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
+        let flag_chain = crate::world::server::entity_flag_chain(
+            origin_q.get(ship_entity).ok(),
+            runtime.as_deref(),
+            layers.as_deref(),
+        );
+        let selected = selector_comp.selector.select(
+            &self_ctx,
+            &candidates,
+            current_lock.as_deref(),
+            &flag_chain,
+        );
 
         // Publish the decision as intent (observability), then send it to the
         // applier as an admitted command.

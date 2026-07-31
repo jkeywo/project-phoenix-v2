@@ -2539,3 +2539,90 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         );
     }
 }
+
+/// Issue #891 stage 2, end to end in the REAL app: the production schedule
+/// hands every AI host a live world-flag chain. A flag-gated Captain doctrine
+/// on the fully-backfilled player ship holds Red Alert down while the
+/// scenario's flag store is clear, and raises it on the ticks after the flag
+/// appears — the same base `WorldContentRuntime` store a world trigger's
+/// `set_flag` action writes, so this is the "scenarios influence doctrine
+/// without surrendering progression authority" arc (#774 US11) with only the
+/// trigger's own firing elided.
+///
+/// Unit fixtures register the host systems by hand; what this adds is the
+/// wiring proof that the SHIPPED schedule passes the chain — a host whose
+/// `runtime`/`layers` params were dropped would go green everywhere except
+/// here.
+#[test]
+fn a_world_flag_drives_a_backfilled_doctrine_in_a_real_run() {
+    use project_phoenix::console::captain::server::CaptainAiPolicy;
+    use project_phoenix::ship::state::ShipRedAlert;
+
+    let args = test_args();
+    let mut app = build_headless_app(&args).expect("app should build");
+    // Boot to InProgress with the crew backfilled.
+    run(&mut app, 30);
+
+    // Swap the shipped Captain doctrine for one whose ONLY question is the
+    // world flag: raise on `flag(battle_stations)`, stand down otherwise.
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .expect("exactly one LocalShip");
+    app.world_mut().entity_mut(ship).insert(CaptainAiPolicy(
+        project_phoenix::ai::policy::AiPolicy {
+            params: project_phoenix::world::flags::AiParams::new(),
+            rules: vec![
+                project_phoenix::ai::policy::AiPolicyRule {
+                    priority: 10,
+                    channel: project_phoenix::entities::config::CAPTAIN_RED_ALERT_CHANNEL.into(),
+                    when: project_phoenix::world::flags::parse_predicate("flag(battle_stations)")
+                        .expect("guard parses"),
+                    verb: project_phoenix::ai::policy::AiPolicyVerb::SetRedAlert(true),
+                },
+                project_phoenix::ai::policy::AiPolicyRule {
+                    priority: 0,
+                    channel: project_phoenix::entities::config::CAPTAIN_RED_ALERT_CHANNEL.into(),
+                    when: project_phoenix::world::flags::parse_predicate("true")
+                        .expect("guard parses"),
+                    verb: project_phoenix::ai::policy::AiPolicyVerb::SetRedAlert(false),
+                },
+            ],
+            idle: false,
+            machine: None,
+        },
+    ));
+
+    let red_alert = |app: &mut App| -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Option<&ShipRedAlert>, With<LocalShip>>();
+        q.single(app.world())
+            .expect("exactly one LocalShip")
+            .map(|r| r.0)
+            .unwrap_or(false)
+    };
+
+    // Flag CLEAR → the guard reads false every tick and the alert stays (or
+    // goes) down, whatever the shipped doctrine did during boot.
+    run(&mut app, 60);
+    assert!(
+        !red_alert(&mut app),
+        "with the scenario flag clear the flag-gated doctrine must hold the \
+         alert down"
+    );
+
+    // Set the flag on the LIVE base store — exactly what a world trigger's
+    // `set_flag` action does — and the SAME guard raises the alert.
+    app.world_mut()
+        .resource_mut::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .set_flag("battle_stations");
+    run(&mut app, 60);
+    assert!(
+        red_alert(&mut app),
+        "once the scenario sets the flag the same doctrine must raise Red Alert \
+         through the production schedule's flag chain"
+    );
+}

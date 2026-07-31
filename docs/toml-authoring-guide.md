@@ -762,6 +762,20 @@ colour = [0.3, 0.8, 0.6]
 An asteroid-field entity has an `[asteroid_field]` block. Spawning is
 delegated to the streaming grid system (`src/asteroids/`).
 
+All of a world's asteroid-field entities feed **one composed density
+evaluator** (#913): a single streaming window evaluates each world cell
+exactly once, blending every covering field's density and fill threshold by
+`weight`. Overlapping fields therefore combine instead of each spawning its
+own rocks (no double-spawn); one covering field — picked by the same weights
+— supplies the spawned rock's tuning (type lists, jitter, rotation, shield
+pierce). When several fields exist, the shared lattice uses the **finest**
+authored `grid.resolution` and the **largest** authored `spawn_cells` /
+`despawn_cells`; a single-field world keeps exactly its own authored values.
+Mixed-resolution composition uses the finest authored resolution for the
+whole lattice, so a coarse field composed with a fine one gets
+`(res_coarse/res_fine)²` more cells per area everywhere it covers; keep
+authored resolutions equal unless that is intended.
+
 #### `[asteroid_field]`
 
 | Field | Type | Default | Notes |
@@ -769,6 +783,8 @@ delegated to the streaming grid system (`src/asteroids/`).
 | `inner_radius` | f32 | **required** | Inner radius of donut. |
 | `outer_radius` | f32 | **required** | Outer radius. Must be > `inner_radius`. |
 | `density` | f32 | **required** | Asteroids per unit area (legacy field; grid takes precedence). |
+| `weight` | f32 | `1.0` | Relative contribution to the composed density evaluator where fields overlap. `0.0` mutes a field wherever a positively-weighted field also covers the cell. |
+| `shape` | string | none | `"torus"` selects explicit annulus eligibility (cells whose bounding box overlaps the ring). Omitted = legacy cell-centre distance test. |
 | `spawn_distance` | f32 | `150.0` | Distance from ship at which asteroids start spawning. |
 | `despawn_distance` | f32 | `250.0` | Must be ≥ `spawn_distance`. |
 | `asteroid_type_paths` | array of strings | `[]` | Template TOMLs picked for gameplay asteroids. |

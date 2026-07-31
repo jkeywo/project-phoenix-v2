@@ -125,6 +125,349 @@ pub fn generate_donut_field(
     }
 }
 
+// ── Composed density evaluation (#913) ──────────────────────────────────
+
+/// One authored asteroid-field entity's contribution to the world's composed
+/// density field.
+///
+/// Every field entity in a world feeds a single evaluator; the streaming
+/// lifecycle runs one window pass over a shared world lattice and calls
+/// [`eval_cell_composed`] per cell, so overlapping fields blend by `weight`
+/// instead of each spawning independently (the pre-#913 double-spawn).
+/// All values come from the field's `[asteroid_field]` TOML — nothing here
+/// is a Rust-side tunable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldContribution {
+    /// Relative blend weight (`[asteroid_field] weight`, default 1.0).
+    pub weight: f32,
+    pub inner_radius: f32,
+    pub outer_radius: f32,
+    pub shape: Option<AsteroidFieldShape>,
+    /// Resolved world anchor. The contribution's eligibility annulus and
+    /// noise space are translated by this offset; the lattice itself stays
+    /// world-anchored.
+    pub anchor_offset: [f32; 3],
+    pub grid: GridConfig,
+    pub gameplay_type_paths: Vec<String>,
+    pub cosmetic_type_paths: Vec<String>,
+    /// Carried through so the Bevy spawn site can apply the selected
+    /// contribution's collision tuning without a second config lookup.
+    pub shield_pierce: f32,
+    pub random_rotation: Option<[f32; 3]>,
+}
+
+impl FieldContribution {
+    /// Build a contribution from an authored `[asteroid_field]` config.
+    /// Returns `None` for fields without a `[asteroid_field.grid]` block —
+    /// legacy donut-only fields never streamed and still do not.
+    pub fn from_config(cfg: &crate::entity_config::AsteroidFieldConfig) -> Option<Self> {
+        let grid = cfg.grid.clone()?;
+        Some(Self {
+            weight: cfg.weight,
+            inner_radius: cfg.inner_radius,
+            outer_radius: cfg.outer_radius,
+            shape: cfg.shape,
+            anchor_offset: cfg.anchor_offset,
+            grid,
+            gameplay_type_paths: cfg.asteroid_type_paths.clone(),
+            cosmetic_type_paths: cfg.cosmetic_type_paths.clone(),
+            shield_pierce: cfg.shield_pierce,
+            random_rotation: cfg.random_rotation,
+        })
+    }
+
+    fn layer_paths(&self, layer: ComposedLayer) -> &[String] {
+        match layer {
+            ComposedLayer::Gameplay => &self.gameplay_type_paths,
+            ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => {
+                &self.cosmetic_type_paths
+            }
+        }
+    }
+}
+
+/// Which of the three asteroid layers a composed evaluation targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComposedLayer {
+    Gameplay,
+    CosmeticUpper,
+    CosmeticLower,
+}
+
+impl ComposedLayer {
+    /// Per-layer seed salt. These are the pre-existing per-layer seed offsets
+    /// the streaming spawner already used (field 0's gameplay seed and the
+    /// two cosmetic offsets), kept bit-for-bit for resolutions where
+    /// gx*res/res is exact in f32 (all shipped content) so single-field
+    /// origin-anchored worlds keep their exact pre-#913 layouts.
+    fn seed_salt(self) -> u64 {
+        match self {
+            ComposedLayer::Gameplay => 0,
+            ComposedLayer::CosmeticUpper => 0x0001_0000_0000,
+            ComposedLayer::CosmeticLower => 0x0002_0000_0000,
+        }
+    }
+
+    fn fill(self, grid: &GridConfig) -> f32 {
+        match self {
+            ComposedLayer::Gameplay => grid.fill_gameplay,
+            ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => grid.fill_cosmetic,
+        }
+    }
+}
+
+/// Shared lattice parameters for the composed field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ComposedLattice {
+    pub resolution: f32,
+    pub spawn_cells: u32,
+    pub despawn_cells: u32,
+}
+
+/// Derive the shared world lattice from the authored contributions:
+/// the finest authored `resolution` wins (so no field is sampled coarser
+/// than its author intended) and the largest authored `spawn_cells` /
+/// `despawn_cells` win (so the window always covers the widest authored
+/// streaming radius). A single-field world therefore keeps exactly its own
+/// authored lattice. Returns `None` when no contributions exist.
+pub fn composed_lattice(fields: &[FieldContribution]) -> Option<ComposedLattice> {
+    let first = fields.first()?;
+    let mut lattice = ComposedLattice {
+        resolution: first.grid.resolution,
+        spawn_cells: first.grid.spawn_cells,
+        despawn_cells: first.grid.despawn_cells,
+    };
+    for f in &fields[1..] {
+        if f.grid.resolution > 0.0 && f.grid.resolution < lattice.resolution {
+            lattice.resolution = f.grid.resolution;
+        }
+        lattice.spawn_cells = lattice.spawn_cells.max(f.grid.spawn_cells);
+        lattice.despawn_cells = lattice.despawn_cells.max(f.grid.despawn_cells);
+    }
+    Some(lattice)
+}
+
+/// One field found to cover a lattice cell, with the cell's placement point
+/// pre-translated into that field's local (anchor-relative) space.
+struct CoveringField {
+    idx: usize,
+    local_x: f32,
+    local_z: f32,
+}
+
+fn covering_for_cell(
+    fields: &[FieldContribution],
+    lattice_resolution: f32,
+    cell_gx: i32,
+    cell_gz: i32,
+    layer: ComposedLayer,
+) -> Vec<CoveringField> {
+    let wx = cell_gx as f32 * lattice_resolution;
+    let wz = cell_gz as f32 * lattice_resolution;
+    fields
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, f)| {
+            if f.layer_paths(layer).is_empty() {
+                return None;
+            }
+            let local_x = wx - f.anchor_offset[0];
+            let local_z = wz - f.anchor_offset[2];
+            if !region_admits_cell(
+                local_x,
+                local_z,
+                lattice_resolution,
+                f.inner_radius,
+                f.outer_radius,
+                f.shape,
+            ) {
+                return None;
+            }
+            Some(CoveringField {
+                idx,
+                local_x,
+                local_z,
+            })
+        })
+        .collect()
+}
+
+/// Evaluate one lattice cell of the composed density field.
+///
+/// A pure function of (authored field configs, cell position, layer): the
+/// per-cell seed is `(layer salt, cell_gx, cell_gz)` and every draw comes
+/// from the `StdRng` it opens — the deliberate local-seeding policy of
+/// AGENTS.md Key Constraint 8. Asteroid terrain intentionally does NOT
+/// consume the gated `SimRng` master seed (see the rationale in
+/// `asteroids/lifecycle.rs` and `sim_rng.rs`): a rock's existence, position
+/// and identity are a function of its cell alone, so two runs agree without
+/// threading the RNG resource through the streaming spawner and no ungated
+/// entropy source is involved.
+///
+/// Composition: every covering field contributes its density and fill
+/// threshold, blended by weight; a cell spawns at most one rock per layer,
+/// so overlapping fields can never double-spawn. On a pass, one covering
+/// field is picked by the same weights and supplies the spawn tuning
+/// (jitter, type list, Y placement). Returns the spawn in **world space**
+/// plus the index of the selected contribution.
+pub fn eval_cell_composed(
+    fields: &[FieldContribution],
+    lattice_resolution: f32,
+    cell_gx: i32,
+    cell_gz: i32,
+    layer: ComposedLayer,
+) -> Option<(AsteroidSpawn, usize)> {
+    let covering = covering_for_cell(fields, lattice_resolution, cell_gx, cell_gz, layer);
+    eval_covered_cell(
+        layer.seed_salt(),
+        fields,
+        &covering,
+        cell_gx,
+        cell_gz,
+        lattice_resolution,
+        layer,
+    )
+}
+
+/// Shared core of [`eval_cell_composed`] and the legacy [`eval_cell`]:
+/// the seed, draw order and position math live here exactly once. The
+/// caller supplies the covering set (already coverage-tested, or forced for
+/// the legacy path which never coverage-tested inside `eval_cell`).
+fn eval_covered_cell(
+    seed_salt: u64,
+    fields: &[FieldContribution],
+    covering: &[CoveringField],
+    cell_gx: i32,
+    cell_gz: i32,
+    lattice_resolution: f32,
+    layer: ComposedLayer,
+) -> Option<(AsteroidSpawn, usize)> {
+    if covering.is_empty() {
+        return None;
+    }
+
+    let seed = {
+        let mut s = seed_salt;
+        s = s.wrapping_mul(2654435761);
+        s = s.wrapping_add(cell_gx as u64);
+        s = s.wrapping_mul(2654435761);
+        s = s.wrapping_add(cell_gz as u64);
+        s
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let raw_rand = rng.random::<f32>();
+
+    // Weighted blend of density and fill across the covering fields.
+    // Negative weights clamp to zero; an all-zero covering set falls back to
+    // uniform weights so degenerate authoring can never divide by zero.
+    let mut total: f32 = covering.iter().map(|c| fields[c.idx].weight.max(0.0)).sum();
+    let uniform = total <= 0.0;
+    if uniform {
+        total = covering.len() as f32;
+    }
+    let weight_of = |c: &CoveringField| {
+        if uniform {
+            1.0
+        } else {
+            fields[c.idx].weight.max(0.0)
+        }
+    };
+
+    let mut density_acc = 0.0;
+    let mut fill_acc = 0.0;
+    for c in covering {
+        let w = weight_of(c);
+        let g = &fields[c.idx].grid;
+        // Noise coordinates are the field-local position in *cell units*
+        // (local / resolution), matching the legacy per-cell-index sampling
+        // bit-for-bit for resolutions where gx*res/res is exact in f32 (all
+        // shipped resolutions, e.g. 25.0); not guaranteed for arbitrary
+        // resolutions such as 0.1.
+        let noise = perlin2d_octaves(
+            (c.local_x / lattice_resolution) * g.density_noise_freq,
+            (c.local_z / lattice_resolution) * g.density_noise_freq,
+            g.density_noise_octaves,
+        );
+        let normalized_noise = (noise + 1.0) / 2.0;
+        let d = raw_rand * g.uniformity + normalized_noise * (1.0 - g.uniformity);
+        density_acc += w * d;
+        fill_acc += w * layer.fill(g);
+    }
+    if density_acc / total < fill_acc / total {
+        return None;
+    }
+
+    // Pick the contributing field by weight. A single covering field is
+    // selected without a draw, keeping the single-field draw sequence
+    // identical to the pre-composition evaluator.
+    let sel = if covering.len() == 1 {
+        0
+    } else {
+        let mut pick = rng.random::<f32>() * total;
+        let mut chosen = covering.len() - 1;
+        for (i, c) in covering.iter().enumerate() {
+            let w = weight_of(c);
+            if pick < w {
+                chosen = i;
+                break;
+            }
+            pick -= w;
+        }
+        chosen
+    };
+    let c = &covering[sel];
+    let f = &fields[c.idx];
+    let g = &f.grid;
+
+    let jitter = compute_jitter(
+        c.local_x,
+        c.local_z,
+        f.inner_radius,
+        f.outer_radius,
+        g.jitter,
+        g.noise_freq,
+        g.noise_octaves,
+        &mut rng,
+    );
+    // The anchor cancels out of the position: world = local + anchor =
+    // lattice cell centre. Only eligibility and noise are anchor-relative.
+    let x = cell_gx as f32 * lattice_resolution + jitter.0;
+    let z = cell_gz as f32 * lattice_resolution + jitter.1;
+
+    let paths = f.layer_paths(layer);
+    match layer {
+        ComposedLayer::Gameplay => {
+            let config_path = paths[rng.random_range(0..paths.len())].clone();
+            let y = (rng.random::<f32>() * 2.0 - 1.0) * g.gameplay_y_variance;
+            Some((
+                AsteroidSpawn {
+                    x,
+                    z,
+                    y,
+                    config_path,
+                },
+                c.idx,
+            ))
+        }
+        // Draw order (Y before type) matches the legacy cosmetic arm.
+        // Both cosmetic layers return a positive Y; the caller negates for
+        // the lower layer, as the legacy callers did.
+        ComposedLayer::CosmeticUpper | ComposedLayer::CosmeticLower => {
+            let y = g.cosmetic_y_offset * (0.5 + rng.random::<f32>() * 0.5);
+            let config_path = paths[rng.random_range(0..paths.len())].clone();
+            Some((
+                AsteroidSpawn {
+                    x,
+                    z,
+                    y,
+                    config_path,
+                },
+                c.idx,
+            ))
+        }
+    }
+}
+
 /// Evaluate a single world cell for asteroid content.
 /// Returns `Some(AsteroidSpawn)` if this cell passes the density check,
 /// or `None` if no asteroid should spawn.
@@ -132,6 +475,11 @@ pub fn generate_donut_field(
 /// The density check is deterministic: seeded from `(field_idx, cell_gx, cell_gz)`.
 /// When `gameplay_type_paths` is non-empty, checks against `fill_gameplay`.
 /// When only `cosmetic_type_paths` is non-empty, checks against `fill_cosmetic`.
+///
+/// Since #913 this is a thin wrapper over the composed evaluator with a
+/// single forced-coverage contribution, so the two paths cannot drift:
+/// `field_idx` becomes the seed salt and the annulus is used only for the
+/// jitter clamp (eligibility was always the caller's job here).
 pub fn eval_cell(
     field_idx: u64,
     cell_gx: i32,
@@ -142,90 +490,40 @@ pub fn eval_cell(
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
 ) -> Option<AsteroidSpawn> {
-    let seed = {
-        let mut s = field_idx;
-        s = s.wrapping_mul(2654435761);
-        s = s.wrapping_add(cell_gx as u64);
-        s = s.wrapping_mul(2654435761);
-        s = s.wrapping_add(cell_gz as u64);
-        s
+    let layer = if !gameplay_type_paths.is_empty() {
+        ComposedLayer::Gameplay
+    } else if !cosmetic_type_paths.is_empty() {
+        ComposedLayer::CosmeticUpper
+    } else {
+        return None;
     };
-    let mut rng = StdRng::seed_from_u64(seed);
-
-    let cell_center_x = (cell_gx as f32) * grid.resolution;
-    let cell_center_z = (cell_gz as f32) * grid.resolution;
-
-    if !gameplay_type_paths.is_empty() {
-        let density = compute_density(
-            cell_gx,
-            cell_gz,
-            grid.density_noise_freq,
-            grid.density_noise_octaves,
-            grid.uniformity,
-            &mut rng,
-        );
-        if density >= grid.fill_gameplay {
-            let jitter = compute_jitter(
-                cell_center_x,
-                cell_center_z,
-                inner_radius,
-                outer_radius,
-                grid.jitter,
-                grid.noise_freq,
-                grid.noise_octaves,
-                &mut rng,
-            );
-            let x = cell_center_x + jitter.0;
-            let z = cell_center_z + jitter.1;
-            let config_path =
-                gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
-            let y = (rng.random::<f32>() * 2.0 - 1.0) * grid.gameplay_y_variance;
-            return Some(AsteroidSpawn {
-                x,
-                z,
-                y,
-                config_path,
-            });
-        }
-        return None;
-    }
-
-    if !cosmetic_type_paths.is_empty() {
-        let density = compute_density(
-            cell_gx,
-            cell_gz,
-            grid.density_noise_freq,
-            grid.density_noise_octaves,
-            grid.uniformity,
-            &mut rng,
-        );
-        if density >= grid.fill_cosmetic {
-            let jitter = compute_jitter(
-                cell_center_x,
-                cell_center_z,
-                inner_radius,
-                outer_radius,
-                grid.jitter,
-                grid.noise_freq,
-                grid.noise_octaves,
-                &mut rng,
-            );
-            let x = cell_center_x + jitter.0;
-            let z = cell_center_z + jitter.1;
-            let y_offset = grid.cosmetic_y_offset * (0.5 + rng.random::<f32>() * 0.5);
-            let config_path =
-                cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
-            return Some(AsteroidSpawn {
-                x,
-                z,
-                y: y_offset,
-                config_path,
-            });
-        }
-        return None;
-    }
-
-    None
+    let contribution = FieldContribution {
+        weight: 1.0,
+        inner_radius,
+        outer_radius,
+        shape: None,
+        anchor_offset: [0.0, 0.0, 0.0],
+        grid: grid.clone(),
+        gameplay_type_paths: gameplay_type_paths.to_vec(),
+        cosmetic_type_paths: cosmetic_type_paths.to_vec(),
+        shield_pierce: 0.0,
+        random_rotation: None,
+    };
+    let covering = [CoveringField {
+        idx: 0,
+        local_x: cell_gx as f32 * grid.resolution,
+        local_z: cell_gz as f32 * grid.resolution,
+    }];
+    eval_covered_cell(
+        field_idx,
+        std::slice::from_ref(&contribution),
+        &covering,
+        cell_gx,
+        cell_gz,
+        grid.resolution,
+        layer,
+    )
+    .map(|(spawn, _)| spawn)
 }
 
 /// Cell-eligibility test for an asteroid field.
@@ -262,17 +560,36 @@ pub fn cell_in_field(
     outer_radius: f32,
     shape: Option<AsteroidFieldShape>,
 ) -> bool {
+    region_admits_cell(
+        cell_gx as f32 * resolution,
+        cell_gz as f32 * resolution,
+        resolution,
+        inner_radius,
+        outer_radius,
+        shape,
+    )
+}
+
+/// Position-form twin of [`cell_in_field`]: the same eligibility test, taking
+/// the cell's placement point in *field-local* coordinates rather than integer
+/// lattice indices. The composed evaluator needs this form because a shared
+/// world lattice cell lands at non-integer field-local coordinates whenever a
+/// field is anchored away from the origin.
+fn region_admits_cell(
+    centre_x: f32,
+    centre_z: f32,
+    resolution: f32,
+    inner_radius: f32,
+    outer_radius: f32,
+    shape: Option<AsteroidFieldShape>,
+) -> bool {
     match shape {
         None => {
-            let cx = cell_gx as f32 * resolution;
-            let cz = cell_gz as f32 * resolution;
-            let dist = (cx * cx + cz * cz).sqrt();
+            let dist = (centre_x * centre_x + centre_z * centre_z).sqrt();
             dist >= inner_radius && dist <= outer_radius
         }
         Some(AsteroidFieldShape::Torus) => {
             let half = resolution * 0.5;
-            let centre_x = cell_gx as f32 * resolution;
-            let centre_z = cell_gz as f32 * resolution;
             let min_x = centre_x - half;
             let max_x = centre_x + half;
             let min_z = centre_z - half;
@@ -447,21 +764,6 @@ pub fn generate_grid_field_with_shape(
     }
 }
 
-/// Compute the density value for a grid cell using rand + normalized perlin noise.
-fn compute_density(
-    cell_x: i32,
-    cell_z: i32,
-    freq: f32,
-    octaves: u32,
-    uniformity: f32,
-    rng: &mut StdRng,
-) -> f32 {
-    let raw_rand = rng.random::<f32>();
-    let noise_sample = perlin2d_octaves(cell_x as f32 * freq, cell_z as f32 * freq, octaves);
-    let normalized_noise = (noise_sample + 1.0) / 2.0;
-    raw_rand * uniformity + normalized_noise * (1.0 - uniformity)
-}
-
 /// Compute jitter offset using spatial perlin noise, clamped so the final
 /// position cannot go outside the [r_min, r_max] torus.
 fn compute_jitter(
@@ -477,7 +779,13 @@ fn compute_jitter(
     let dist = (cell_center_x * cell_center_x + cell_center_z * cell_center_z).sqrt();
     let max_push_inward = if dist > r_min { dist - r_min } else { 0.0 };
     let max_push_outward = r_max - dist;
-    let max_jitter = max_push_inward.min(max_push_outward).min(jitter);
+    // Clamped at zero: a torus-admitted straddling cell can have its centre
+    // OUTSIDE the annulus, making `max_push_outward` negative. An unclamped
+    // negative budget flipped the jitter direction and moved rocks even when
+    // the authored `jitter` was 0 — two rocks could land in one lattice cell.
+    // For legacy (shape-omitted) fields the centre is always inside the
+    // annulus, so the clamp never engages there.
+    let max_jitter = max_push_inward.min(max_push_outward).min(jitter).max(0.0);
     let angle = perlin2d_octaves(cell_center_x * freq, cell_center_z * freq, octaves) * PI;
     let magnitude = rng.random::<f32>() * max_jitter;
     (angle.cos() * magnitude, angle.sin() * magnitude)
@@ -1391,10 +1699,12 @@ mod tests {
     #[test]
     fn eval_cell_is_anchor_independent_anchor_is_pure_translation() {
         // PRD #397 fix 5 / AGENTS.md rule 6: the per-cell density seed is
-        // `(field_idx, gx, gz)` and MUST NOT include the anchor. The anchor
-        // is applied as a pure post-seed translation at the call site (see
-        // `try_spawn_cell` / `check_destroyed_asteroids` in
-        // `asteroids/lifecycle.rs`).
+        // `(seed salt, gx, gz)` and MUST NOT include the anchor. The anchor
+        // is a pure post-seed translation — since #913 it is applied inside
+        // the composed evaluator (`covering_for_cell` translates the lattice
+        // cell into field-local space; the returned position is the lattice
+        // cell's world centre plus jitter), and `eval_cell` itself remains
+        // anchor-free.
         //
         // This test pins three invariants:
         //   1. `eval_cell` takes no anchor parameter (compiles as-is).
@@ -1403,7 +1713,7 @@ mod tests {
         //      might add later.
         //   3. Translating the returned position by an anchor offset
         //      produces the expected world-space position — modelling the
-        //      contract `try_spawn_cell` honours.
+        //      contract the composed evaluator honours.
         let grid = GridConfig {
             resolution: 15.0,
             fill_gameplay: 0.0,
@@ -1460,8 +1770,11 @@ mod tests {
         );
 
         // Invariant 3: post-seed translation by anchor_offset gives the
-        // expected world-space position — model of the contract that
-        // `try_spawn_cell` applies via `spawn.x + anchor_offset[0]` etc.
+        // expected world-space position — model of the contract the
+        // composed evaluator honours internally: `covering_for_cell`
+        // translates the lattice cell into field-local space, and the
+        // returned position is the lattice cell's world centre (anchor-
+        // independent) plus jitter.
         let anchor_offset = [100.0_f32, 0.0, 100.0];
         let world_x = anchor_relative.x + anchor_offset[0];
         let world_z = anchor_relative.z + anchor_offset[2];
@@ -1619,5 +1932,348 @@ mod tests {
             legacy.gameplay.len(),
             torus.gameplay.len(),
         );
+    }
+
+    // ── Composed density evaluation (#913) ─────────────────────────────────
+
+    fn cgrid(resolution: f32, fill_gameplay: f32, jitter: f32) -> GridConfig {
+        GridConfig {
+            resolution,
+            fill_gameplay,
+            fill_cosmetic: fill_gameplay,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        }
+    }
+
+    fn contribution(
+        weight: f32,
+        inner: f32,
+        outer: f32,
+        anchor: [f32; 3],
+        grid: GridConfig,
+        gameplay: &[&str],
+        cosmetic: &[&str],
+    ) -> FieldContribution {
+        FieldContribution {
+            weight,
+            inner_radius: inner,
+            outer_radius: outer,
+            shape: None,
+            anchor_offset: anchor,
+            grid,
+            gameplay_type_paths: gameplay.iter().map(|s| s.to_string()).collect(),
+            cosmetic_type_paths: cosmetic.iter().map(|s| s.to_string()).collect(),
+            shield_pierce: 0.0,
+            random_rotation: None,
+        }
+    }
+
+    /// Bit-compat proof: a composition of ONE origin-anchored field is the
+    /// legacy evaluator. For every cell the streaming path would have
+    /// admitted (`cell_in_field`), the composed result must equal
+    /// `eval_cell` with the same seed salt — gameplay layer salt 0 and
+    /// cosmetic-upper salt 0x0001_0000_0000 are exactly the seeds the
+    /// per-field windows used for field 0, so single-field worlds keep
+    /// their pre-#913 layouts bit for bit at this test's resolution (15.0,
+    /// where gx*res/res round-trips exactly in f32; not guaranteed for
+    /// arbitrary resolutions like 0.1).
+    #[test]
+    fn composed_single_field_matches_legacy_eval_cell() {
+        let grid = cgrid(15.0, 0.4, 10.0);
+        let fields = [contribution(
+            1.0,
+            100.0,
+            200.0,
+            [0.0, 0.0, 0.0],
+            grid.clone(),
+            &["gameplay.toml"],
+            &["cosmetic.toml"],
+        )];
+        for gx in -15..=15 {
+            for gz in -15..=15 {
+                let eligible = cell_in_field(gx, gz, 15.0, 100.0, 200.0, None);
+
+                let composed_gameplay =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::Gameplay);
+                let legacy_gameplay = if eligible {
+                    eval_cell(
+                        0,
+                        gx,
+                        gz,
+                        &grid,
+                        100.0,
+                        200.0,
+                        &["gameplay.toml".to_string()],
+                        &[],
+                    )
+                } else {
+                    None
+                };
+                assert_eq!(
+                    composed_gameplay.clone().map(|(s, _)| s),
+                    legacy_gameplay,
+                    "gameplay parity broken at cell ({gx}, {gz})"
+                );
+                if let Some((_, idx)) = composed_gameplay {
+                    assert_eq!(idx, 0);
+                }
+
+                let composed_cosmetic =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::CosmeticUpper);
+                let legacy_cosmetic = if eligible {
+                    eval_cell(
+                        0x0001_0000_0000,
+                        gx,
+                        gz,
+                        &grid,
+                        100.0,
+                        200.0,
+                        &[],
+                        &["cosmetic.toml".to_string()],
+                    )
+                } else {
+                    None
+                };
+                assert_eq!(
+                    composed_cosmetic.map(|(s, _)| s),
+                    legacy_cosmetic,
+                    "cosmetic parity broken at cell ({gx}, {gz})"
+                );
+            }
+        }
+    }
+
+    /// The regression the composition exists to fix: in a cell covered by
+    /// two fields, the pre-#913 per-field evaluators BOTH spawned (double
+    /// spawn); the composed evaluator returns exactly one spawn.
+    #[test]
+    fn composed_overlap_spawns_exactly_once_where_legacy_doubled() {
+        let grid = cgrid(15.0, 0.0, 0.0); // fill 0 → every covered cell spawns
+        let a = contribution(
+            1.0,
+            0.0,
+            150.0,
+            [0.0, 0.0, 0.0],
+            grid.clone(),
+            &["a.toml"],
+            &[],
+        );
+        let b = contribution(
+            1.0,
+            100.0,
+            250.0,
+            [0.0, 0.0, 0.0],
+            grid.clone(),
+            &["b.toml"],
+            &[],
+        );
+
+        // Cell (8, 0) sits at distance 120 — inside both annuli.
+        let (gx, gz) = (8, 0);
+        assert!(cell_in_field(gx, gz, 15.0, 0.0, 150.0, None));
+        assert!(cell_in_field(gx, gz, 15.0, 100.0, 250.0, None));
+
+        // Old world: each field ran its own window and its own eval — two
+        // rocks in one cell.
+        let legacy_a = eval_cell(0, gx, gz, &grid, 0.0, 150.0, &["a.toml".to_string()], &[]);
+        let legacy_b = eval_cell(1, gx, gz, &grid, 100.0, 250.0, &["b.toml".to_string()], &[]);
+        assert!(
+            legacy_a.is_some() && legacy_b.is_some(),
+            "per-field evaluation double-spawns this cell — precondition for the regression"
+        );
+
+        // New world: one composed evaluation, one rock.
+        let composed = eval_cell_composed(&[a, b], 15.0, gx, gz, ComposedLayer::Gameplay);
+        assert!(
+            composed.is_some(),
+            "the overlap cell must still spawn (fill is 0)"
+        );
+    }
+
+    /// Same contributions → identical composed field across a full sweep.
+    #[test]
+    fn composed_evaluator_is_deterministic() {
+        let make = || {
+            vec![
+                contribution(
+                    2.0,
+                    0.0,
+                    150.0,
+                    [0.0, 0.0, 0.0],
+                    cgrid(15.0, 0.3, 10.0),
+                    &["a.toml"],
+                    &["ca.toml"],
+                ),
+                contribution(
+                    1.0,
+                    100.0,
+                    250.0,
+                    [50.0, 0.0, -25.0],
+                    cgrid(15.0, 0.5, 5.0),
+                    &["b.toml"],
+                    &["cb.toml"],
+                ),
+            ]
+        };
+        let fields_a = make();
+        let fields_b = make();
+        for layer in [
+            ComposedLayer::Gameplay,
+            ComposedLayer::CosmeticUpper,
+            ComposedLayer::CosmeticLower,
+        ] {
+            for gx in -18..=18 {
+                for gz in -18..=18 {
+                    assert_eq!(
+                        eval_cell_composed(&fields_a, 15.0, gx, gz, layer),
+                        eval_cell_composed(&fields_b, 15.0, gx, gz, layer),
+                        "composed evaluation must be deterministic at ({gx}, {gz}, {layer:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Weight picks the contributing field: a weight-3 field should supply
+    /// roughly three times as many rocks as a weight-1 field across a full
+    /// overlap, and both must contribute.
+    #[test]
+    fn composed_weight_biases_field_selection() {
+        let grid = cgrid(15.0, 0.0, 0.0);
+        let fields = [
+            contribution(
+                3.0,
+                0.0,
+                300.0,
+                [0.0, 0.0, 0.0],
+                grid.clone(),
+                &["a.toml"],
+                &[],
+            ),
+            contribution(
+                1.0,
+                0.0,
+                300.0,
+                [0.0, 0.0, 0.0],
+                grid.clone(),
+                &["b.toml"],
+                &[],
+            ),
+        ];
+        let mut a_count = 0;
+        let mut b_count = 0;
+        for gx in -20..=20 {
+            for gz in -20..=20 {
+                if let Some((spawn, _)) =
+                    eval_cell_composed(&fields, 15.0, gx, gz, ComposedLayer::Gameplay)
+                {
+                    match spawn.config_path.as_str() {
+                        "a.toml" => a_count += 1,
+                        "b.toml" => b_count += 1,
+                        other => panic!("unexpected config path {other}"),
+                    }
+                }
+            }
+        }
+        assert!(b_count > 0, "the weight-1 field must still contribute");
+        assert!(
+            a_count > b_count * 2,
+            "weight 3 vs 1 should skew selection heavily: a={a_count} b={b_count}"
+        );
+    }
+
+    /// Degenerate authoring guard: if every covering field is zero-weighted
+    /// the blend falls back to uniform instead of dividing by zero.
+    #[test]
+    fn composed_zero_weights_fall_back_to_uniform() {
+        let grid = cgrid(15.0, 0.0, 0.0);
+        let fields = [
+            contribution(
+                0.0,
+                0.0,
+                300.0,
+                [0.0, 0.0, 0.0],
+                grid.clone(),
+                &["a.toml"],
+                &[],
+            ),
+            contribution(
+                0.0,
+                0.0,
+                300.0,
+                [0.0, 0.0, 0.0],
+                grid.clone(),
+                &["b.toml"],
+                &[],
+            ),
+        ];
+        let spawn = eval_cell_composed(&fields, 15.0, 3, 4, ComposedLayer::Gameplay);
+        assert!(
+            spawn.is_some(),
+            "all-zero weights must not erase the field (uniform fallback)"
+        );
+    }
+
+    /// A contribution anchored away from the origin covers the translated
+    /// region and nothing else; positions come back in world space.
+    #[test]
+    fn composed_anchor_translates_field_coverage() {
+        let grid = cgrid(25.0, 0.0, 0.0);
+        let fields = [contribution(
+            1.0,
+            0.0,
+            100.0,
+            [600.0, 0.0, 0.0],
+            grid,
+            &["a.toml"],
+            &[],
+        )];
+
+        // Cell (24, 0) → world (600, 0) → field-local (0, 0): covered.
+        let hit = eval_cell_composed(&fields, 25.0, 24, 0, ComposedLayer::Gameplay)
+            .expect("cell at the anchor must be covered");
+        assert_eq!(
+            hit.0.x, 600.0,
+            "jitter 0 → spawn at the cell's world-space centre"
+        );
+        assert_eq!(hit.0.z, 0.0);
+
+        // Cell (0, 0) → field-local (-600, 0): far outside the disc.
+        assert!(
+            eval_cell_composed(&fields, 25.0, 0, 0, ComposedLayer::Gameplay).is_none(),
+            "the world origin is not covered by a field anchored at x=600"
+        );
+    }
+
+    /// The shared lattice: finest authored resolution, largest authored
+    /// spawn/despawn windows; empty composition has no lattice.
+    #[test]
+    fn composed_lattice_takes_finest_resolution_and_largest_windows() {
+        let mut coarse = cgrid(25.0, 0.4, 0.0);
+        coarse.spawn_cells = 10;
+        coarse.despawn_cells = 12;
+        let mut fine = cgrid(10.0, 0.4, 0.0);
+        fine.spawn_cells = 30;
+        fine.despawn_cells = 32;
+
+        let fields = [
+            contribution(1.0, 0.0, 100.0, [0.0; 3], coarse, &["a.toml"], &[]),
+            contribution(1.0, 0.0, 100.0, [0.0; 3], fine, &["b.toml"], &[]),
+        ];
+        let lattice = composed_lattice(&fields).expect("non-empty composition has a lattice");
+        assert_eq!(lattice.resolution, 10.0);
+        assert_eq!(lattice.spawn_cells, 30);
+        assert_eq!(lattice.despawn_cells, 32);
+
+        assert!(composed_lattice(&[]).is_none());
     }
 }

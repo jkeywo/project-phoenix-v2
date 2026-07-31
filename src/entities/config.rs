@@ -12987,6 +12987,19 @@ pub struct AsteroidFieldConfig {
     pub inner_radius: f32,
     pub outer_radius: f32,
     pub density: f32,
+    /// Relative weight of this field's contribution to the world's composed
+    /// density evaluator (#913). Every authored asteroid-field entity feeds
+    /// one shared evaluator; where several fields cover the same lattice
+    /// cell their densities and fill thresholds blend proportionally to
+    /// weight, and the spawned rock's tuning (type lists, jitter, rotation,
+    /// shield pierce) comes from one contributing field picked by the same
+    /// weights. `1.0` (the default) makes all fields equal partners. `0.0`
+    /// removes a field's influence wherever a positively-weighted field
+    /// also covers the cell; if every covering field is zero-weighted the
+    /// blend falls back to uniform so a field can never author itself into
+    /// a divide-by-zero.
+    #[serde(default = "default_field_weight")]
+    pub weight: f32,
     #[serde(default = "default_spawn_distance")]
     pub spawn_distance: f32,
     #[serde(default = "default_despawn_distance")]
@@ -13034,6 +13047,10 @@ pub struct AsteroidFieldConfig {
     /// tilt with full spin freedom.
     #[serde(default)]
     pub random_rotation: Option<[f32; 3]>,
+}
+
+fn default_field_weight() -> f32 {
+    1.0
 }
 
 fn default_spawn_distance() -> f32 {

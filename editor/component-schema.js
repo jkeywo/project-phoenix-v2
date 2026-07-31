@@ -358,6 +358,8 @@ export const COMPONENT_SCHEMA = {
       { key: 'inner_radius', type: 'number' },
       { key: 'outer_radius', type: 'number' },
       { key: 'density', type: 'number' },
+      { key: 'weight', type: 'number', default: 1.0, optional: true },
+      { key: 'shape', type: 'string', enum: ['torus'], optional: true },
       { key: 'spawn_distance', type: 'number', default: 150.0 },
       { key: 'despawn_distance', type: 'number', default: 250.0 },
       { key: 'asteroid_type_paths', type: 'array', items: 'string', default: [] },

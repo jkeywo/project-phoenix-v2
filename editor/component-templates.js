@@ -217,6 +217,7 @@ export const COMBO_TEMPLATES = {
           inner_radius: 100.0,
           outer_radius: 200.0,
           density: 0.005,
+          weight: 1.0,
           spawn_distance: 150.0,
           despawn_distance: 250.0,
           asteroid_type_paths: [],

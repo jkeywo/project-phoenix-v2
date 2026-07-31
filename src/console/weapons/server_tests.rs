@@ -2119,6 +2119,7 @@ fn torpedo_does_not_detonate_on_asteroid_field_anchor_entity() {
             inner_radius: 300.0,
             outer_radius: 350.0,
             density: 0.005,
+            weight: 1.0,
             spawn_distance: 250.0,
             despawn_distance: 300.0,
             asteroid_type_paths: vec![],

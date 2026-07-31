@@ -202,13 +202,20 @@ id = "ice-moon"
 name = "world.entity.ice_moon.name"
 transform = { relative_to = "gas-giant", offset = [125.0, 0.0, 40.0] }
 
+# The two belts are authored as separate field entities but spawn through
+# ONE composed density evaluator (#913): every field contributes its density
+# weighted by `weight`, a single streaming window evaluates each world cell
+# exactly once, and wherever fields overlap the blend spawns each rock once
+# instead of once per field. `shape = "torus"` selects the explicit annulus
+# eligibility (cells whose bounding box overlaps the ring).
+
 # Inner asteroid belt around the star, r=200..300. Forms cover near the
 # centre of the playspace; the player can hide in or peek out of it.
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "inner-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0 } }
+overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0, weight = 1.0, shape = "torus" } }
 
 # Outer asteroid belt, r=800..1000. Sits between the starbase and the
 # enemy spawn anchors (all at r >= 1000), so attackers must fly through
@@ -217,7 +224,7 @@ overrides = { asteroid_field = { inner_radius = 200.0, outer_radius = 300.0 } }
 template_path = "assets/entities/asteroid_field_main.toml"
 id = "outer-belt"
 transform = { position = [0.0, 0.0, 0.0] }
-overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0 } }
+overrides = { asteroid_field = { inner_radius = 800.0, outer_radius = 1000.0, weight = 1.0, shape = "torus" } }
 
 # Player ship — selected from the lobby ship picker. The [[available_ships]]
 # entries drive the lobby UI; [player_spawn] sets the spawn position once

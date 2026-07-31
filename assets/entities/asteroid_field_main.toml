@@ -8,6 +8,9 @@ random_rotation = [30, 30, 180]
 inner_radius = 300.0
 outer_radius = 350.0
 density = 0.005
+# Relative contribution to the world's composed density evaluator (#913).
+# Fields covering the same cell blend by weight; 1.0 = equal partner.
+weight = 1.0
 spawn_distance = 250.0
 despawn_distance = 300.0
 asteroid_type_paths = [

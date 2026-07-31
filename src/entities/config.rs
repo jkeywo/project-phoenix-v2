@@ -5352,24 +5352,27 @@ radius = 100.0
     /// `EntityConfig` is `deny_unknown_fields`, so an `[audio]` block in a
     /// shipped template would break *every* load of that template — not just
     /// audio — if the field were ever removed. These parse the real files.
+    /// One shipped hull, through the REAL load path (issue #875).
+    ///
+    /// `include_str!` bakes a template's bytes at compile time, so a baked site
+    /// can never see include resolution — and since the player destroyer became
+    /// a COMPOSED hull, its baked bytes are no longer the document the game
+    /// loads. `include_str_baked_hulls_are_all_uncomposed` is the tripwire that
+    /// names such sites; this helper is what they move to.
+    fn shipped_hull(stem: &str) -> EntityConfig {
+        let path = format!("assets/entities/{stem}.toml");
+        crate::entity_includes::load_entity_config(&path)
+            .unwrap_or_else(|e| panic!("{stem}.toml must compose and parse: {e}"))
+    }
+
     #[test]
     fn player_ship_templates_parse_audio_block() {
-        for (name, toml_str) in [
-            (
-                "alliance_cruiser",
-                include_str!("../../assets/entities/alliance_cruiser.toml"),
-            ),
-            (
-                "alliance_destroyer",
-                include_str!("../../assets/entities/alliance_destroyer.toml"),
-            ),
-            (
-                "alliance_battleship",
-                include_str!("../../assets/entities/alliance_battleship.toml"),
-            ),
+        for name in [
+            "alliance_cruiser",
+            "alliance_destroyer",
+            "alliance_battleship",
         ] {
-            let config =
-                EntityConfig::from_toml(toml_str).unwrap_or_else(|e| panic!("{name}.toml: {e}"));
+            let config = shipped_hull(name);
             let audio = config
                 .audio
                 .as_ref()
@@ -6587,21 +6590,12 @@ hull_max_hp = 6
         // SLOW: slower than every other blaster the game ships, and slow enough
         // that crossing the hull's own envelope takes real seconds — which is the
         // window a course change after launch has to work in.
-        for (name, other) in [
-            (
-                "ship_harrow_lancer",
-                include_str!("../../assets/entities/ship_harrow_lancer.toml"),
-            ),
-            (
-                "ship_harrow_destroyer",
-                include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
-            ),
-            (
-                "alliance_destroyer",
-                include_str!("../../assets/entities/alliance_destroyer.toml"),
-            ),
+        for name in [
+            "ship_harrow_lancer",
+            "ship_harrow_destroyer",
+            "alliance_destroyer",
         ] {
-            let other = EntityConfig::from_toml(other).expect("hull must parse");
+            let other = shipped_hull(name);
             for bank in &other.weapons_console.as_ref().unwrap().blaster_banks {
                 assert!(
                     bolt.projectile_speed < bank.projectile_speed,
@@ -6641,14 +6635,14 @@ hull_max_hp = 6
         // the approximation ever did — the arc has not moved, the honest number
         // for what it must admit has.
         let hulls = [
-            include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
-            include_str!("../../assets/entities/ship_harrow_cruiser.toml"),
-            include_str!("../../assets/entities/ship_harrow_patrol.toml"),
-            include_str!("../../assets/entities/alliance_courier.toml"),
-            include_str!("../../assets/entities/alliance_destroyer.toml"),
+            "ship_harrow_destroyer",
+            "ship_harrow_cruiser",
+            "ship_harrow_patrol",
+            "alliance_courier",
+            "alliance_destroyer",
         ]
-        .iter()
-        .filter_map(|t| EntityConfig::from_toml(t).ok())
+        .into_iter()
+        .map(shipped_hull)
         .filter_map(|c| c.helm_console)
         .collect::<Vec<_>>();
         let mut cruises = hulls.iter().map(|hc| hc.max_speed).collect::<Vec<_>>();
@@ -12756,8 +12750,11 @@ ai_only = true
         // The Alliance Destroyer authors an explicit red_alert system owned by
         // the captain station. Provisioning must be idempotent: no second
         // system, and the authored ownership survives (AC4).
-        let toml_str = include_str!("../../assets/entities/alliance_destroyer.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance destroyer must parse");
+        // Through the resolver, not `include_str!`: this hull is COMPOSED since
+        // #875, so its baked bytes are no longer the document that spawns. The
+        // assertion below is unchanged — provisioning idempotence is the claim,
+        // and it is now made against the real resolved hull.
+        let config = shipped_hull("alliance_destroyer");
         let reds = red_alert_systems(&config);
         assert_eq!(
             reds.len(),

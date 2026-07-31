@@ -1,0 +1,662 @@
+# The ATTACK-PASS class movement doctrine, as a reusable library fragment
+# (issue #875).
+#
+# A FRAGMENT, not a hull — see the header of
+# `fragments/ai/captain_red_alert_aggressive.toml`. It is never parsed alone;
+# `include_resolve` merges it into a declaring template and only the resolved
+# document is validated and spawned.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What a hull writes to use this
+# ═════════════════════════════════════════════════════════════════════════════
+#
+#     includes = [
+#       "fragments/ai/fleet_baseline.toml",
+#       "fragments/ai/captain_alliance.toml",
+#       "fragments/ai/movement_attack_pass.toml",
+#     ]
+#
+#     [helm_console.engines_ai.param]
+#     commit_range = 150.0
+#
+# …and nothing else. Order matters: this fragment REPLACES the fleet baseline's
+# three travel axes, so it must be listed after it (a template's includes merge
+# in declared order, and the declaring template itself merges last).
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What this owns, and why it is one file rather than three
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The WHOLE of `[helm_console.engines_ai]`, `[helm_console.steering_ai]` and
+# `[helm_console.boost_ai]` — three independent copies of ONE machine, which
+# agree by reading the same host-seeded facts rather than by sharing state. They
+# ship together because a copy that disagreed with the other two about a
+# threshold would reach a different leg on the same tick, which is a silent
+# failure with no test that could name it.
+#
+# One fragment owns entire policy blocks because since #911 an array with no
+# stable identity — and `*.ai.rule` and `*_ai.state[].transition` are both — still
+# REPLACES wholesale on compose. Two fragments cannot each contribute a rule to
+# the same policy; the second would wipe the first. Specialisation therefore runs
+# entirely through `param`, an ordinary table that deep-merges.
+#
+# ── The two overrides this fragment has to make explicit ─────────────────────
+#
+# `rule = []` on Engines and Steering, and `idle = false` on Boost, clear what
+# `fleet_baseline.toml` authors for those axes. Both are load-bearing, not
+# tidiness:
+#
+#   * a policy that carries BOTH top-level rules and states is rejected at load
+#     (`validate_fine_system_ai_policy`) — a machine resolves only inside its
+#     current state, so the inherited rules would be dead code;
+#   * `idle = true` is mutually exclusive with `state`, so an inherited idle
+#     Boost would reject this machine outright.
+#
+# Any future class movement fragment owes the same two lines. That is the stated
+# contract of a movement fragment: it replaces the baseline's travel axes whole.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The doctrine
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# A fly-through attack pass with a posture gate over it.
+#
+#   shadow  → the DEFENSIVE resting leg. Holds a standoff ring around the target
+#             at `target_direct_fire_range + safe_range_margin` — outside the
+#             other ship's guns by an authored margin — and never closes. This is
+#             where a hull sits whenever its captain has not called red alert.
+#   acquire → lining up. Tracks the target continuously.
+#   inbound → closing at `approach_speed`.
+#   escape  → the commitment. Steering switches to `hold_committed_heading`: fly
+#             the frozen heading and stop looking at the target. NOTHING about
+#             the target may cut this dwell short — that is what "commits to the
+#             outward heading" means — and the posture check is deliberately at
+#             the END of the dwell for the same reason.
+#   recover → the pass cost too much; hold the standoff ring until the shields
+#             come back.
+#   reenter → cut-thrust pivot back onto the target.
+#
+# `escape` is entered by a CLOSEST-APPROACH detector, three conjuncts each doing
+# distinct work: the target is visible; the gap has started opening
+# (`closing_rate` below a slightly-negative epsilon, so sensor jitter at the
+# merge cannot flip the test); and it has opened FAR ENOUGH to be real, measured
+# against the running minimum the host keeps in private memory.
+#
+# ── The posture gate (AC2) ───────────────────────────────────────────────────
+#
+# `posture` is host-seeded on every helm policy host from this ship's own red
+# alert: 0 DEFENSIVE, 1 PRESSED. Every leg of the aggressive half carries a
+# transition back to `shadow` on `fact(posture) < param(press_posture)`, so a
+# captain standing the alert down breaks the ship off at the next tick the
+# doctrine's own commitment allows.
+#
+# It is compared against an authored `press_posture` rather than a literal so a
+# future intermediate rung on the posture ladder does not have to touch a guard.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The parameter surface (AC1)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# AGGRESSION  `commit_range` — how close before the hull commits to a run;
+#             `approach_speed` / `escape_speed` — the two throttles;
+#             `escape_duration_secs` — how long it flies out before turning back.
+# SAFE RANGE  `safe_range_margin` — world units of daylight wanted BEYOND the
+#             target's own longest direct-fire reach. The ring is a property of
+#             the fight, not of the hull, so this is all a hull authors;
+#             `safe_ring_tolerance`, `safe_distance_window_ticks`, `orbit_speed`,
+#             `orbit_spiral_gain` shape how it is held.
+# POSTURE     `press_posture` — the rung at which the aggressive half unlocks.
+# FIRE GATE   NOT here: it is `min_alert_to_fire` on each `*.ai` block inside the
+#             hull's own `[[weapons_console.*_banks]]` / `[[torpedoes.tubes]]`
+#             entries. Those arrays merge by `id`, so a shared fragment could
+#             only name bank ids it cannot know, and an unmatched id APPENDS a
+#             bank with no geometry. The fire gate is one authored predicate
+#             repeated per weapon, by design (issue #872).
+#
+# Every value below is a DEFAULT for the class, and every one is authored: there
+# is no Rust fallback for any of them. Omit one of the six recovery scalars the
+# host reads off the Steering axis by name — `safe_range_margin`, `orbit_speed`,
+# `orbit_spiral_gain`, `safe_ring_tolerance`, `safe_distance_window_ticks`,
+# `reengage_speed` — and the host DECLINES the standoff arm outright rather than
+# orbiting at an invented radius.
+#
+# The shared thresholds are restated on each axis because content validation
+# rejects an undeclared `param(...)`, and because these are three independent
+# machines rather than one machine with three readers. A hull retuning a shared
+# threshold retunes it on every axis that guards on it — which is exactly what
+# `ship_harrow_destroyer.toml`, the hand-authored ancestor of this fragment,
+# does.
+
+# ── Engines (longitudinal) ───────────────────────────────────────────────────
+#
+# The throttle axis. Every state authors the same unconditional "actuate the
+# planner's desired travel": which THROTTLE that resolves to is the Steering
+# axis's verb's business (`approach_speed` inbound, `escape_speed` outbound,
+# `orbit_speed` on the ring, `reengage_speed` on the pivot), so this axis needs no
+# knowledge of which leg it is flying. A pass never coasts.
+[helm_console.engines_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.engines_ai.param]
+# Throttle fraction flown while closing. "Normal speed" — not flat out, so the
+# escape reads as a distinct change of pace.
+approach_speed = 0.85
+# Throttle fraction flown outbound.
+escape_speed = 1.0
+# The hull only commits to a run once the target is this close; further out it is
+# still lining up. THE aggression knob.
+commit_range = 150.0
+# Closing rate (world units/s) below which the range counts as OPENING. Slightly
+# negative rather than zero so sensor jitter at the merge cannot flip the test.
+closing_rate_epsilon = -0.5
+# How far (world units) the range must re-open above the minimum seen this state
+# before closest approach is called. The confirmation half of the detector: it
+# rejects a momentary negative blip that has not actually opened any distance.
+closest_approach_hysteresis = 6.0
+# How long (seconds) the escape leg runs before the hull turns back for another
+# pass — or, if the posture has dropped, back to the standoff ring.
+escape_duration_secs = 6.0
+# Own-shield fraction at or below which the pass has cost too much to repeat: the
+# escape hands off to the standoff ring instead of turning back in.
+recover_shield_fraction = 0.35
+# Own-shield fraction the ring must restore before re-entry is even considered.
+# The other half of that gate is `fact(safe_distance_held)`; both are required.
+reentry_shield_fraction = 0.85
+# How long (seconds) the cut-thrust pivot runs before the next pass begins.
+reenter_pivot_secs = 1.5
+# The posture rung at which the aggressive half of the doctrine unlocks.
+press_posture = 1.0
+
+# Host-written private memory (issue #882: the host writes, the policy reads —
+# there is no authored write verb). `min_range_seen` starts effectively infinite
+# so the first folded range always wins the minimum.
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "shadow"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.engines_ai.state]]
+id = "inbound"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # The alert going down mid-run outranks the merge: an unmanned ship whose
+  # captain has stood down must not press home a run it is no longer licensed to
+  # make. This is the ONE leg of the pass that a posture drop interrupts
+  # mid-flight, and it is safe to interrupt precisely because the hull is still
+  # tracking rather than committed.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # CLOSEST APPROACH. Three conjuncts, each doing distinct work:
+  #   target_valid          — never call a merge against a target we cannot see
+  #   closing_rate < eps    — the gap has started opening (the + to − crossing)
+  #   range_above_min_seen  — and it has opened far enough to be real, measured
+  #                           against the running minimum in private memory
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  # Target lost mid-run: abandon the pass rather than merging on a ghost.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.engines_ai.state]]
+id = "escape"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  # Only the authored dwell ends the escape. Nothing about the target may cut it
+  # short — that is what "commits to the outward heading" means. What the dwell
+  # ends INTO is a decision, and all three branches share the `state_time`
+  # conjunct so none of them can shorten the commitment:
+  #   posture dropped  → back to the defensive ring
+  #   shields spent    → the recovery ring
+  #   otherwise        → line up for another pass
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "state_time >= param(escape_duration_secs) and fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+# The standoff ring, entered because the pass cost too much. Engines simply
+# actuate the planner's desired travel here as everywhere else — the ring
+# throttle (`orbit_speed`) is one of the authored scalars the host publishes on
+# the pass surface.
+[[helm_console.engines_ai.state]]
+id = "recover"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # BOTH halves, and neither alone. `safe_distance_held` is the bounded history
+  # window's verdict — every sample across the whole window at or beyond the safe
+  # ring — not a single-tick range reading.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+# The cut-thrust pivot. `reengage_speed = 0` on the Steering axis is what makes
+# "actuate the planner's desired travel" mean zero throttle here.
+[[helm_console.engines_ai.state]]
+id = "reenter"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"
+
+# ── Steering (yaw) ───────────────────────────────────────────────────────────
+#
+# The axis that carries the actual difference between the legs, because the host
+# reads WHICH leg is being flown off this axis's verb — never off a state's name,
+# so these states could be called anything.
+#
+#   actuate_desired_facing → re-solve against the moving target every tick
+#   hold_committed_heading → fly the heading frozen at the merge instant, and
+#                            stop looking at the target at all. NOT the same as
+#                            letting the yaw channel resolve to "hold": a hold
+#                            holds the last steering COMMAND, and a non-zero yaw
+#                            at the merge would curl the hull straight back into
+#                            the target it just passed.
+#   hold_recovery_orbit    → hold a ring around the target
+#   pivot_to_reengage      → track the target, but paired host-side with the
+#                            authored `reengage_speed` instead of the approach
+#                            throttle. That pairing is the whole difference.
+[helm_console.steering_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.steering_ai.param]
+commit_range = 150.0
+closing_rate_epsilon = -0.5
+closest_approach_hysteresis = 6.0
+escape_duration_secs = 6.0
+press_posture = 1.0
+# Steering response. The deadband stops the hull hunting around a solved bearing
+# at the merge; the saturation angle is what makes it turn hard onto a tracking
+# solution rather than easing onto it. Both are read unconditionally by the host
+# — omit either and no leg is flown at all.
+tracking_deadband_rad = 0.02
+tracking_full_steer_rad = 0.5
+# Restated because this axis's own guards reference them; content validation
+# rejects an undeclared `param(...)`.
+recover_shield_fraction = 0.35
+reentry_shield_fraction = 0.85
+reenter_pivot_secs = 1.5
+# ── The six scalars the HOST reads off this axis BY NAME to fly a ring ────────
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown; omit any one and the host declines the arm outright rather than
+# orbiting at an invented radius.
+#
+# World units added to the TARGET's own longest usable direct-fire range to get
+# the ring. The ring is therefore a property of the fight, not of this file: all a
+# hull authors is how much daylight it wants beyond the other ship's guns. THE
+# safe-range knob.
+safe_range_margin = 60.0
+# Throttle fraction flown on the ring. Not zero: a hull parked inside a hostile's
+# reach is not shadowing it, it is a target.
+orbit_speed = 0.6
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so the
+# same gain behaves identically on an 80-unit ring and an 800-unit one.
+orbit_spiral_gain = 1.2
+# World units inside the ring that still count as "at safe distance" when the
+# distance history is folded. Absorbs the spiral's own overshoot, so a converging
+# orbit is not read as a breach.
+safe_ring_tolerance = 20.0
+# Length of the bounded distance history, in shared AI ticks. At the default 30 Hz
+# helm cadence this is two seconds of held standoff — the "maintained" in
+# "maintained safe distance".
+safe_distance_window_ticks = 60.0
+# Throttle flown on the re-entry pivot. ZERO: the hull cuts thrust and turns cold
+# before it commits to the next run.
+reengage_speed = 0.0
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+# Host-written on the tick a ring is entered, from the seeded composite key.
+# Declared here so its pre-ring value is authored rather than implicit; no guard
+# reads it — the host does, when it publishes the pass surface.
+orbit_direction = 1.0
+
+[[helm_console.steering_ai.state]]
+id = "shadow"
+
+  # The defensive ring — but only against something to hold a ring AROUND. With
+  # no target the standoff has no centre and the host has no reach to derive one
+  # from, so the fallback hands the axis back to ordinary doctrine travel and the
+  # hull flies its `[behaviour]` doctrine (patrol, hold station, a Navigation
+  # waypoint) exactly as an unbackfilled one would. Without this second rule the
+  # channel would resolve to "hold" and a targetless hull would coast on its last
+  # steering input for ever.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 10
+  channel = "yaw"
+  when = "fact(target_valid) > 0"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.steering_ai.state]]
+id = "inbound"
+
+  # Continuous tracking of a MOVING target: the facing is re-solved from the
+  # target's current position on every gated tick.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.steering_ai.state]]
+id = "escape"
+
+  # THE commitment. The heading was frozen by the host at the instant this
+  # transition committed; hazard avoidance may still bend it, the target may not.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_committed_heading"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "state_time >= param(escape_duration_secs) and fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+[[helm_console.steering_ai.state]]
+id = "recover"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+[[helm_console.steering_ai.state]]
+id = "reenter"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "pivot_to_reengage"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"
+
+# ── Boost ────────────────────────────────────────────────────────────────────
+#
+# A third independent copy of the same machine. It transitions on the same
+# host-seeded facts as the other two, so it reaches `escape` on the same tick —
+# by agreeing about the world, not by reading a shared pass state. Only `escape`
+# authors a boost rule at all, so the channel holds and the drive stays cold
+# through the shadow, approach and ring legs.
+#
+# `idle = false` is what clears the fleet baseline's explicit idle Boost — see
+# the header. A hull that includes this fragment and wants no AI boost after all
+# authors `[helm_console.boost_ai] idle = true`, which is rejected against these
+# states, so it must drop the fragment instead: the doctrine is a package.
+[helm_console.boost_ai]
+initial_state = "shadow"
+idle = false
+rule = []
+
+[helm_console.boost_ai.param]
+commit_range = 150.0
+closing_rate_epsilon = -0.5
+closest_approach_hysteresis = 6.0
+escape_duration_secs = 6.0
+press_posture = 1.0
+recover_shield_fraction = 0.35
+reentry_shield_fraction = 0.85
+reenter_pivot_secs = 1.5
+# How long into the escape leg the drive burns. Shorter than the escape itself,
+# so the hull coasts the last stretch and the drive is recharging before it turns
+# back in.
+escape_boost_secs = 3.5
+# Do not light the drive from near-standstill (e.g. straight after a collision
+# scrub); boost is an escape accelerant, not a launch assist.
+boost_min_speed_fraction = 0.3
+
+[helm_console.boost_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.boost_ai.state]]
+id = "shadow"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.boost_ai.state]]
+id = "acquire"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "inbound"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(commit_range)"
+
+[[helm_console.boost_ai.state]]
+id = "inbound"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 30
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "escape"
+  when = "fact(target_valid) > 0 and fact(closing_rate) < param(closing_rate_epsilon) and fact(range_above_min_seen) > param(closest_approach_hysteresis) and memory(min_range_seen) < param(commit_range)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+[[helm_console.boost_ai.state]]
+id = "escape"
+
+  # The one rule on this axis. `boost_available` is the host's own capability
+  # reading (the drive exists, is enabled and is charged); `speed_fraction` is the
+  # anti-launch-assist gate; `state_time` is the burn budget.
+  [[helm_console.boost_ai.state.rule]]
+  priority = 0
+  channel = "boost"
+  when = "state_time < param(escape_boost_secs) and fact(boost_available) > 0 and fact(speed_fraction) >= param(boost_min_speed_fraction)"
+  verb = "engage_boost"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "state_time >= param(escape_duration_secs) and fact(posture) < param(press_posture)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "recover"
+  when = "state_time >= param(escape_duration_secs) and fact(shield_fraction) <= param(recover_shield_fraction)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(escape_duration_secs)"
+
+[[helm_console.boost_ai.state]]
+id = "recover"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "reenter"
+  when = "fact(shield_fraction) >= param(reentry_shield_fraction) and fact(safe_distance_held) > 0"
+
+[[helm_console.boost_ai.state]]
+id = "reenter"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 10
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.boost_ai.state.transition]]
+  priority = 0
+  to = "acquire"
+  when = "state_time >= param(reenter_pivot_secs)"

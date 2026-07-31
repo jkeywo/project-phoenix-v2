@@ -2466,12 +2466,108 @@ directive_kind = "Destroy"
             out
         }
 
-        /// A directory walk asserting every shipped template resolves
-        /// byte-identically to its own file contents, while no hull declares
-        /// `includes`.
+        /// Dotted provenance prefixes a HULL must author for itself, whatever
+        /// it composes. Matched on segment boundaries, so `power.capacity` does
+        /// not also claim `power.ai_policy`.
         ///
-        /// No snapshot files: the file IS the expectation. This test failing is
-        /// not a regression — see the message it prints.
+        /// This is the hazard list: every authoring surface the spawner gates a
+        /// real capability on, where composition bringing a parent table into
+        /// existence merely by authoring a child of it would hand an includer
+        /// equipment it never authored. See
+        /// [`the_composed_destroyer_takes_only_ai_policy_from_its_fragments`]
+        /// for what each entry does when a fragment supplies it.
+        ///
+        /// Module-level rather than inline in that test (issue #875 review) so
+        /// the shipped-tree walk can apply it to EVERY composed hull. The
+        /// destroyer's own test keeps the parts that only make sense for one
+        /// hull — the reactor values, the coverage floor, player-flyability.
+        const HULL_OWNED: [&str; 17] = [
+            "tags",
+            "faction",
+            "system",
+            "station",
+            "shield_arc",
+            "hull",
+            "mesh",
+            "collider",
+            "comms",
+            "torpedoes",
+            "weapons_console.phaser_banks",
+            "weapons_console.blaster_banks",
+            "shields_console.base",
+            "repair.repair_team_count",
+            // The reactor scalars, per prefix rather than as a bare `power`:
+            // `fleet_baseline.toml` really does carry `capacity = 90`,
+            // `rates` and `emergency_threshold = 22` so that its
+            // `[power.ai_policy]` has a table to sit in, and none of the three
+            // has a parse-time default. A future hull that includes that
+            // fragment and authors no `[power]` of its own would silently
+            // inherit a 90-capacity reactor — the exact silent-equipment class
+            // this list exists to catch. Bare `power` cannot be used:
+            // `power.ai_policy` is precisely what a hull is MEANT to take from
+            // the fragment library.
+            "power.capacity",
+            "power.rates",
+            "power.emergency_threshold",
+        ];
+
+        /// Whether a provenance path falls under `prefix`, on segment
+        /// boundaries: `system[id=helm-thrust].ai_only` starts with `system`
+        /// and then a delimiter; `systems_foo` must not match `system`.
+        fn owned(path: &str, prefix: &str) -> bool {
+            path == prefix
+                || path
+                    .strip_prefix(prefix)
+                    .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
+        }
+
+        /// Assert that no fragment authored any hazard-list surface of
+        /// `resolved`, whose root template is `path`.
+        ///
+        /// Returns how many fields it checked, so a caller can pin that the
+        /// provenance addressing has not changed shape underneath it.
+        fn assert_no_fragment_supplied_equipment(path: &str, resolved: &ResolvedTemplate) -> usize {
+            let mut checked = 0usize;
+            for (field, origin) in resolved.provenance.fields() {
+                if !HULL_OWNED.iter().any(|p| owned(field, p)) {
+                    continue;
+                }
+                checked += 1;
+                assert_eq!(
+                    origin.source, path,
+                    "`{field}` in the resolved {path} was authored by {}, not by \
+                     the hull. A shared AI-policy fragment must never contribute \
+                     an authoring surface the spawner gates a capability on — \
+                     see `the_composed_destroyer_takes_only_ai_policy_from_its_fragments` \
+                     for what each one does. Include chain: {:?}",
+                    origin.source, origin.chain
+                );
+            }
+            checked
+        }
+
+        /// A directory walk over every shipped template, asserting the property
+        /// that actually holds of each: an UNCOMPOSED hull resolves
+        /// byte-identically to its own file contents, and a COMPOSED one
+        /// resolves to a document that loads.
+        ///
+        /// No snapshot files: for the uncomposed majority the file IS the
+        /// expectation, and for a composed hull the expectation is that the
+        /// resolved document — not the file — is what the game can spawn.
+        ///
+        /// # Why this is now a partition (issue #875)
+        ///
+        /// Until the player destroyer composed the fragment library, no shipped
+        /// hull declared `includes` and byte-identity held over the whole tree.
+        /// This test's own failure message said what to do the day one did:
+        /// drop it from the byte walk and assert on the resolved document
+        /// instead. That is what the two arms below are.
+        ///
+        /// Neither arm is weaker than what it replaced. The uncomposed arm is
+        /// the same assertion over the same files. The composed arm is
+        /// STRONGER than byte-identity would have been, because byte-identity
+        /// never said the document parses — and a composed hull is exactly
+        /// where a merge can produce a document that no author ever read.
         #[test]
         fn every_shipped_template_resolves_to_its_own_bytes() {
             let templates = shipped_templates();
@@ -2481,28 +2577,196 @@ directive_kind = "Destroy"
                  content it is supposed to be guarding",
                 templates.len()
             );
+            let mut uncomposed = 0usize;
+            let mut composed: Vec<&String> = Vec::new();
             for path in &templates {
                 let on_disk = std::fs::read_to_string(path)
                     .unwrap_or_else(|e| panic!("{path} must be readable: {e}"));
                 let resolved =
                     resolve_from_disk(path).unwrap_or_else(|e| panic!("{path} must resolve: {e}"));
+                if resolved.is_composed() {
+                    composed.push(path);
+                    // The resolved document, not the file, is what spawns — so
+                    // that is what has to be a valid entity. `EntityConfig` is
+                    // `deny_unknown_fields`, so this also proves the `includes`
+                    // key never survives resolution.
+                    EntityConfig::from_toml(&resolved.toml).unwrap_or_else(|e| {
+                        panic!(
+                            "{path} is composed, and its RESOLVED document must load: {e}\n\
+                             The file on disk is only half the hull; read the merge, \
+                             not the file."
+                        )
+                    });
+                    assert_ne!(
+                        resolved.toml, on_disk,
+                        "{path} declares `includes` but resolved to its own bytes \
+                         unchanged, so the fragments it names contributed nothing. \
+                         Either the include list is dead or the merge stopped working."
+                    );
+                    // And the hazard list (issue #875 review): "parses and
+                    // differs" is a weak thing to say about a composed hull
+                    // next to the strong provenance pin the destroyer gets from
+                    // its own test. Applying that pin here means the NEXT hull
+                    // to compose inherits it on the day it declares `includes`,
+                    // rather than the day someone remembers to write it a test.
+                    let checked = assert_no_fragment_supplied_equipment(path, &resolved);
+                    // The pin has to have addressed SOMETHING. A composed hull
+                    // whose provenance keys changed shape would iterate nothing
+                    // and pass vacuously — the guard would report success on the
+                    // day it stopped guarding. Every hull authors systems, a
+                    // hull and a faction, so a real one clears this by two
+                    // orders of magnitude; the floor is deliberately low enough
+                    // that a small composed hull does not have to be exempted.
+                    assert!(
+                        checked > 10,
+                        "only {checked} hull-owned fields were checked in {path}, \
+                         so the provenance addressing has changed shape and this \
+                         guard is matching (almost) nothing"
+                    );
+                    continue;
+                }
+                uncomposed += 1;
                 assert_eq!(
                     resolved.toml, on_disk,
-                    "{path} no longer resolves to its own bytes. This hull is now \
-                     composed; that is EXPECTED and correct — it is not a bug to \
-                     undo. Drop it from this walk and assert on the RESOLVED \
-                     document instead (`resolve_from_disk(path).toml`).\n\
-                     Then fix every test that reads this hull's RAW text, of which \
-                     there are two kinds and this is the tripwire for BOTH: (1) \
-                     `include_str!` sites, which \
-                     `include_str_baked_hulls_are_all_uncomposed` names for you; and \
-                     (2) runtime disk reads — `fs::read_to_string(path)` followed by \
-                     `EntityConfig::from_toml`, which no scan can enumerate, so grep \
-                     for `read_to_string` under `src/` and route each through \
-                     `entity_includes::load_entity_config` (or `resolve_from_disk` \
-                     where the raw text itself is needed)."
+                    "{path} no longer resolves to its own bytes but does not declare \
+                     `includes` either, so the resolver is rewriting a template it \
+                     was asked only to pass through. That is a resolver bug, not a \
+                     composition: `resolve_with` hands back the root text untouched \
+                     when nothing was composed, and this is the assertion that says so."
                 );
             }
+            // The byte-identity arm must still be doing real work. If the whole
+            // tree ever became composed this test would be asserting nothing
+            // about pass-through, which is the property the resolver is most
+            // likely to break silently.
+            //
+            // A RATIO, not a floor. An absolute `uncomposed > 20` is satisfied
+            // by 21 pass-through files however large the tree grows, so a fleet
+            // that went two-thirds composed would keep this arm nominally alive
+            // while it had stopped describing the tree at all. Requiring the
+            // pass-through arm to cover the MAJORITY ties the guard to the
+            // shape of the content rather than to today's file count — and the
+            // day the majority genuinely composes (issue #878), this failing is
+            // the prompt to retire the arm rather than to raise a number.
+            assert!(
+                uncomposed * 2 > templates.len(),
+                "only {uncomposed} of {} shipped templates are uncomposed, so the \
+                 pass-through arm of this walk no longer covers most of the tree \
+                 and has stopped meaningfully guarding it. Composed: {composed:?}",
+                templates.len()
+            );
+        }
+
+        /// **Issue #875 AC4, as provenance: fragments apply only to the systems
+        /// a hull actually owns.**
+        ///
+        /// The player destroyer takes AI POLICY from the fragment library and
+        /// nothing else. Every authoring surface the spawner gates a real
+        /// capability on must still be authored by the hull itself.
+        ///
+        /// # Why provenance rather than a shape assertion
+        ///
+        /// The failure this guards is not "the hull came out wrong" — it is "a
+        /// fragment quietly supplied something", which a shape assertion cannot
+        /// tell from the hull supplying it. Composition brings a parent table
+        /// into existence merely by authoring a child of it, and Rust gates on
+        /// the parent, so a shared AI fragment is one careless line away from
+        /// handing every hull that includes it equipment it never authored:
+        ///
+        /// * `tags` UNIONS at compose (unlike at the instance-override layer),
+        ///   so a fragment carrying `"npc"` would flip a player hull out of
+        ///   `marker_validate::is_player_flyable` — silently, since nothing
+        ///   about the resolved document would look wrong;
+        /// * a bare `[torpedoes.ai]` creates `[torpedoes]`, i.e. a torpedo
+        ///   system with zero tubes;
+        /// * `[shields_console.base]` or a `[[shield_arc]]` gives a hull
+        ///   shields;
+        /// * `repair_team_count` hands teams to a hull that must not have them;
+        /// * `[[hull.system_hull]]` is NOT a keyed array, so a fragment touching
+        ///   it REPLACES all fourteen of this hull's entries.
+        ///
+        /// [`HULL_OWNED`] is that hazard list, turned into an assertion. A
+        /// future fragment that starts contributing one of these fails with the
+        /// field named — here for this hull, and in
+        /// [`every_shipped_template_resolves_to_its_own_bytes`] for every hull
+        /// that composes later. What stays here is what only makes sense for
+        /// one hull: the reactor VALUES, the coverage floor, player-flyability.
+        #[test]
+        fn the_composed_destroyer_takes_only_ai_policy_from_its_fragments() {
+            const HULL: &str = "assets/entities/alliance_destroyer.toml";
+            // The reactor scalars have no parse-time defaults, and
+            // `fleet_baseline.toml` also carries them (at other values) so that
+            // its `[power.ai_policy]` has a table to sit in. The hull's own must
+            // win, or this ship silently gains the fragment's reactor.
+            const HULL_REACTOR: [(&str, f64); 2] = [
+                ("power.capacity", 70.0),
+                ("power.emergency_threshold", 20.0),
+            ];
+
+            let resolved = resolve_from_disk(HULL).expect("the player destroyer must resolve");
+            assert!(
+                resolved.is_composed(),
+                "this test is about what COMPOSITION contributed; if the hull \
+                 stopped declaring `includes` it proves nothing"
+            );
+
+            let checked = assert_no_fragment_supplied_equipment(HULL, &resolved);
+            assert!(
+                checked > 100,
+                "only {checked} hull-owned fields were checked, so the provenance \
+                 addressing has changed shape and this guard is matching nothing"
+            );
+
+            for (path, want) in HULL_REACTOR {
+                let origin = resolved
+                    .provenance
+                    .origin(path)
+                    .unwrap_or_else(|| panic!("`{path}` must be authored somewhere"));
+                assert_eq!(
+                    origin.source, HULL,
+                    "`{path}` came from {} — the hull's own reactor must win over \
+                     any a fragment carries",
+                    origin.source
+                );
+                let config = resolved.parse().expect("the resolved hull must parse");
+                let power = config.power.as_ref().expect("the hull authors [power]");
+                let got = match path {
+                    "power.capacity" => power.capacity as f64,
+                    _ => power.emergency_threshold as f64,
+                };
+                assert_eq!(got, want, "`{path}` resolved to the wrong value");
+            }
+
+            // The shape the provenance check exists to protect, stated once so a
+            // reader can see what "the systems a hull actually owns" means here.
+            let config = resolved.parse().expect("the resolved hull must parse");
+            assert!(
+                crate::entities::marker_validate::is_player_flyable(&config),
+                "the player destroyer must still be player-flyable — this is what \
+                 a fragment carrying `tags = [\"npc\"]` would silently break"
+            );
+            assert_eq!(config.tags, vec!["ship".to_string()]);
+            let ship = config
+                .ship_config
+                .as_ref()
+                .expect("the hull declares [[system]] blocks");
+            let stations: Vec<&str> = ship.stations.iter().map(|s| s.id.0.as_str()).collect();
+            assert_eq!(
+                stations,
+                vec!["captain", "helm", "tactical", "engineering"],
+                "four seats, exactly as authored — no fragment adds or removes one"
+            );
+            let arcs: Vec<&str> = config
+                .shield_arcs
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                arcs,
+                vec!["fore", "aft"],
+                "TWO arcs, not four. A shared shields fragment that assumed the \
+                 four-arc layout would add two this hull never authored."
+            );
         }
 
         /// Where a baked asset path sits in the tree.

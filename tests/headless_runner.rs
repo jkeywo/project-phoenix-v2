@@ -1985,3 +1985,206 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
         );
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #875 — the first COMPOSED shipped hull, end to end
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// **The composed player destroyer boots, backfills, and flies.**
+///
+/// `alliance_destroyer.toml` is the first shipped hull assembled from the
+/// fragment library — its Captain doctrine, its five target selectors, its
+/// ship-level policies and all three of its travel axes arrive through
+/// `includes`. Nothing else in this file spawns one, and unit tests over the
+/// resolved document cannot say that the RESOLVED hull survives the real boot
+/// path: template cache → include resolution → spawn → station ratings →
+/// backfill → the shared AI tick → the planner → physics.
+///
+/// The movement assertion is the sharp end. A composed hull whose three travel
+/// axes failed to compose would still load, still validate, still backfill and
+/// still report every station crewed — and would sit motionless, because a
+/// policy that resolves no verb emits nothing and the throttle coasts. That is
+/// the #779 failure shape at hull scale, and only ticking the real app catches
+/// it.
+#[test]
+fn the_composed_player_destroyer_boots_backfilled_and_flies() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(8.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the composed destroyer must build an app");
+    run(&mut app, args.max_ticks);
+
+    {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&ShipSystemControlSources, &ActiveStationRatings), With<LocalShip>>(
+            );
+        let (sources, ratings) = q.single(app.world()).expect("exactly one LocalShip");
+        assert_eq!(
+            ratings.0.len(),
+            4,
+            "the destroyer's four authored seats must survive composition: {:?}",
+            ratings.0
+        );
+        for (station, rating) in &ratings.0 {
+            assert_eq!(
+                rating,
+                project_phoenix::ship::rating::BACKFILL_RATING,
+                "station {station:?} is not backfilled"
+            );
+        }
+        assert!(
+            sources.0.entries().any(|(_, s)| *s == ControlSource::Ai),
+            "no system ended up under AI control"
+        );
+    }
+
+    let start = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>();
+        let p = q.single(app.world()).expect("one LocalShip");
+        (p.x, p.z)
+    };
+    run(&mut app, ticks_for_sim_seconds(12.0, dt));
+    let end = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, With<LocalShip>>();
+        let p = q.single(app.world()).expect("one LocalShip");
+        (p.x, p.z)
+    };
+    let travelled = ((end.0 - start.0).powi(2) + (end.1 - start.1).powi(2)).sqrt();
+    assert!(
+        travelled > 20.0,
+        "the composed destroyer moved {travelled:.1} units in 12 s of a live          engagement. Its authored max_speed is 15, so a hull whose travel axes          actually composed covers far more — a motionless ship is what a policy          that resolves no verb looks like."
+    );
+}
+
+/// **A hull's own backfilled Navigation must not cancel its own doctrine.**
+///
+/// The regression this pins is the one `probe_duel.toml` structurally cannot
+/// see. `pass_under_navigation_orders` stands the authored manoeuvre down under
+/// a cleared Navigation waypoint, which is right for a captain's redirection
+/// (PRD #774 stories 10/11) — but `NavigationWaypoint` has TWO writers, and the
+/// second is the ship's own `operate_navigation_ai`. On a hull that declares a
+/// navigation system (every Alliance hull) with a mission `Destroy` objective
+/// that NAMES its target, that operator waypoints the ship onto the very entity
+/// the pass is attacking, once, anchored — and `NavigationWaypoint::set` is
+/// idempotent for an anchored target that merely moves, so the clearance latches
+/// for the whole engagement. Keyed on presence alone, the stand-down therefore
+/// fired on every tick of every such mission and the class doctrine never flew.
+///
+/// `probe_duel.toml` authors an UNTARGETED Destroy, and the nav operator's
+/// objective arm guards on `!target.is_empty()`, so no waypoint is ever set
+/// there and the whole hazard is invisible. Hence a world of its own.
+///
+/// The two unit tests over `pass_under_navigation_orders` are pure-function
+/// tests: they can say what the precedence decides given inputs, and cannot say
+/// which inputs a real composed hull actually presents. Only a live tick can.
+#[test]
+fn a_targeted_destroy_objective_does_not_cancel_the_hulls_own_attack_pass() {
+    use project_phoenix::navigation_plugin::NavigationWaypoint;
+    use project_phoenix::ship::helm_ai::HelmPassSurface;
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_targeted_pass.toml".into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(40.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the composed destroyer must build an app");
+
+    // The measurement is the hull's HEADING against its own frozen escape
+    // heading, sampled per tick across the escape dwell.
+    //
+    // A range trace was tried first and does not discriminate: a stood-down hull
+    // still carries 15 units/s of momentum out of the merge and still opens
+    // plenty of daylight before it can turn, so both behaviours look alike for
+    // several seconds. What ONLY the pass arm does is fly `escape_heading_rad`
+    // — the heading the host froze at the merge — and deliberately stop looking
+    // at the target for the authored dwell. A hull whose own Navigation stood
+    // the doctrine down flies ordinary travel toward the anchored waypoint
+    // instead, i.e. curls straight back onto the ship it just passed, and its
+    // heading walks away from the frozen one until it is flying the reciprocal.
+    let mut waypoint_onto_target_ticks = 0usize;
+    let mut escape_ticks = 0usize;
+    let mut min_range = f32::MAX;
+    let mut worst_escape_heading_error = 0.0f32;
+
+    for _ in 0..args.max_ticks {
+        run(&mut app, 1);
+        let mut q = app.world_mut().query_filtered::<(
+            &ShipPhysics,
+            &NavigationWaypoint,
+            Option<&HelmPassSurface>,
+        ), With<LocalShip>>();
+        let Ok((physics, waypoint, pass)) = q.single(app.world()) else {
+            continue;
+        };
+        // The waypoint's own snapshot is both the hazard's proof and the range
+        // reference: an ANCHORED waypoint mirrors its parent entity's transform,
+        // so if this is present the ship's Navigation really did waypoint the
+        // objective's named target, and its position is that target's.
+        let Some(snapshot) = waypoint.snapshot() else {
+            continue;
+        };
+        if snapshot.source_uuid.is_none() {
+            continue;
+        }
+        waypoint_onto_target_ticks += 1;
+        min_range = min_range
+            .min(((physics.x - snapshot.x).powi(2) + (physics.z - snapshot.z).powi(2)).sqrt());
+
+        // `escape` and `escape_heading_rad` are both published by the ship's own
+        // Steering POLICY, which the planner never writes — so they say the
+        // doctrine reached its commitment and what it committed to, and the
+        // hull's actual yaw says whether the planner let it fly.
+        let Some(pass) = pass.filter(|p| p.escape) else {
+            continue;
+        };
+        escape_ticks += 1;
+        let error = (physics.yaw - pass.escape_heading_rad + std::f32::consts::PI)
+            .rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        worst_escape_heading_error = worst_escape_heading_error.max(error.abs());
+    }
+
+    // 1. The hazard is live: the ship's own Navigation DID clear its helm to an
+    //    anchored waypoint on the objective's target. Without this the rest of
+    //    the assertions would pass vacuously on a world that never reproduced
+    //    the state at all — which is exactly how `probe_duel` passes.
+    assert!(
+        waypoint_onto_target_ticks > 0,
+        "no anchored Navigation waypoint was ever cleared, so this world is not          reproducing the two-writer state the regression lives in"
+    );
+
+    // 2. The doctrine actually flew: the hull committed to a run and merged, and
+    //    its own policy reached the commitment leg.
+    assert!(
+        min_range < 40.0,
+        "closest approach was {min_range:.1} units — the hull never committed to          a run at all"
+    );
+    assert!(
+        escape_ticks > 0,
+        "the hull's own Steering policy never reached the escape leg"
+    );
+
+    // 3. THE regression assertion. One radian is far outside the authored
+    //    steering deadband and far inside the reciprocal a redirected hull ends
+    //    up flying, so it separates the two behaviours without pinning the
+    //    doctrine's exact tracking response.
+    assert!(
+        worst_escape_heading_error < 1.0,
+        "the hull drifted {worst_escape_heading_error:.2} rad off the escape          heading it froze at the merge, over {escape_ticks} escape-leg ticks          (closest approach {min_range:.1}). Holding that heading IS the          commitment; a hull whose own backfilled Navigation stood its doctrine          down turns back onto its waypoint and ends up flying the reciprocal."
+    );
+}

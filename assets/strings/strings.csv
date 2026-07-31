@@ -853,3 +853,4 @@ entity.alliance_cruiser.behaviour.doctrine.destroy_hostiles.text,assets/entities
 entity.alliance_cruiser.behaviour.doctrine.hold_station.text,assets/entities/alliance_cruiser.toml → [behaviour.doctrine] text,[Hold station]
 entity.alliance_battleship.behaviour.doctrine.destroy_hostiles.text,assets/entities/alliance_battleship.toml → [behaviour.doctrine] text,[Engage and destroy hostile ships]
 entity.alliance_battleship.behaviour.doctrine.hold_station.text,assets/entities/alliance_battleship.toml → [behaviour.doctrine] text,[Hold station]
+world.probe_targeted_pass.trigger.action.obj_destroy_target.text,assets/worlds/probe_targeted_pass.toml → [trigger.action] text,[Destroy the Harrow warship.]

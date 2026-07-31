@@ -5,8 +5,11 @@
 # (PRD #774 US7), and since stage 5d strict AI-declaration mode makes omitting
 # one a LOAD ERROR — there is no Rust-side synthesiser left to fill the gap.
 # This fragment carries the fourteen ship-level declarations a small NPC hull
-# owes but has no reason to specialise, transcribed verbatim from
-# `alliance_battleship.toml`.
+# owes but has no reason to specialise — NINE AI policies (the six helm axes,
+# Shields, Power, Comms) and the FIVE target selectors — transcribed verbatim
+# from `alliance_battleship.toml`. That is the count every other comment in the
+# tree quotes; it is the number of `[…_ai]` / `[….ai_policy]` / `[….selector]`
+# blocks in this file and nothing else.
 #
 # Deliberately does NOT carry `[captain_console.ai]`: the composition fixture
 # gets that from `ai/captain_red_alert_aggressive.toml`, whose whole point is
@@ -14,8 +17,39 @@
 # another. Nor the per-weapon ones — a hull without weapons owes none, and a
 # hull with them owes one per bank and tube.
 #
-# This is a fixture fragment. Shipped hulls author their blocks inline; issue
-# #878 is where they move to shared fragments like this one.
+# ── Promoted from fixture to SHIPPED library spine (issue #875) ──────────────
+#
+# This was a #869/#885b mechanism fixture. It is now the ship-level spine of the
+# backfill fragment library, and `assets/entities/alliance_destroyer.toml` — the
+# first composed shipped hull — takes ELEVEN of those fourteen from here: all
+# but the three travel axes, which `ai/movement_attack_pass.toml` replaces
+# wholesale (see the contract below).
+# Nothing about the file changed; what changed is that a shipped hull now
+# depends on it, so a retune here retunes that hull. #878 moves the rest of the
+# fleet onto it.
+#
+# ── The three travel axes below are REPLACEABLE, and the contract for it ─────
+#
+# `engines_ai`, `steering_ai` and `boost_ai` are the fleet's stateless defaults:
+# actuate on every axis, and take no AI boost action at all. A hull with a class
+# movement doctrine — see `ai/movement_attack_pass.toml` — includes this file
+# and then a movement fragment that REPLACES all three whole, which it must do
+# explicitly:
+#
+#   * `rule = []` on Engines and Steering, because a policy carrying both
+#     top-level rules and states is rejected at load;
+#   * `idle = false` on Boost, because `idle` is mutually exclusive with
+#     `state`, and it deep-merges as a plain scalar — a movement fragment that
+#     forgot this line would compose into a hull that validates, spawns, and
+#     never boosts.
+#
+# The rest of this file — the selectors, Shields, Power, Comms and the three
+# secondary helm axes — is not specialised by any class doctrine, which is why
+# they sit here rather than in the movement fragments.
+#
+# Still deliberately no `[power]`-less split: the reactor block below exists so
+# `[power.ai_policy]` has a table to sit in, and a hull that authors its own
+# reactor overrides it whole (the includer wins).
 
 [helm_console.engines_ai]
 

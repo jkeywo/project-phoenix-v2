@@ -191,10 +191,46 @@ pub(crate) fn helm_motion_planner(
         // the rest of the escape dwell. Neither escape state has a
         // `target_valid < 1` transition, precisely because the authored doctrine
         // says the target may "turn, run, or die — the escape does not care".
-        let pass = pass.copied().unwrap_or_default();
+        // ## A CONFLICTING NAVIGATION DESTINATION outranks the whole pass (#875)
+        //
+        // PRD #774 stories 10/11: a captain's waypoint must redirect a
+        // backfilled ship AT ANY TIME. That held for free while every hull flew
+        // ordinary doctrine travel, because `helm_ai_decision` reads
+        // `sf.nav_waypoint` — but the pass arms below are a SUBSTITUTION for
+        // that call, so a hull flying an authored manoeuvre would take none of
+        // its ship's navigation orders. The fallback `pass_legs` arm is the
+        // sharp one: it fires in any state that resolved no other leg verb, so
+        // even a hull resting in a defensive leg would keep closing.
+        //
+        // Standing the surface down here, in one place, is what keeps the
+        // override true for every authored doctrine rather than only for the one
+        // that remembered to author a guard — and it is deliberately upstream of
+        // every leg, so "at any time" means at any time, including mid-escape.
+        //
+        // `sf.nav_waypoint` is already `cleared_nav_waypoint`'s output: the
+        // waypoint AND a Channel-3 clearance whose generation matches it. So
+        // this reads "Navigation has cleared this helm to a destination", not
+        // "someone has a waypoint open". It is also the ONE shared waypoint
+        // component both the human console and `operate_navigation_ai` write, so
+        // this branches on the ORDER, never on who gave it (AGENTS.md #6).
+        //
+        // Which is exactly why the DESTINATION has to be read and not just the
+        // presence of one. `operate_navigation_ai` is the second writer, and on
+        // any hull that declares a navigation system it waypoints the ship's own
+        // top Helm-relevant `Destroy` target — the very ship the pass is flying
+        // at. A stand-down on presence alone therefore had the ship's own
+        // backfilled Navigation cancel its own backfilled Helm's doctrine, on
+        // every mission that names a Destroy target, for ever. So the
+        // prospective pass target is resolved FIRST and handed in.
+        let prospective_pass_target = sf.destroy_target.or(sf.weapons_target);
+        let pass = pass_under_navigation_orders(
+            pass.copied().unwrap_or_default(),
+            sf.nav_waypoint,
+            sf.nav_waypoint_anchor,
+            prospective_pass_target,
+        );
         let pass_target = if pass.active {
-            sf.destroy_target
-                .or(sf.weapons_target)
+            prospective_pass_target
                 .and_then(|uuid| sf.merged_view.entities.iter().find(|e| e.uuid == uuid))
         } else {
             None
@@ -518,6 +554,54 @@ pub(crate) fn helm_motion_planner(
     }
 }
 
+/// A cleared Navigation waypoint to somewhere OTHER than the pass's own target
+/// stands the authored pass surface down (issue #875).
+///
+/// Pure, named and separate so the precedence is one testable decision rather
+/// than a condition buried in a match arm — see the long note at the call site
+/// in [`helm_motion_planner`] for why the precedence exists at all.
+///
+/// `cleared` is [`crate::ship::helm_ai`]'s `cleared_nav_waypoint` output: the
+/// ship's waypoint AND a Channel-3 clearance whose generation matches it;
+/// `cleared_anchor` is what that same waypoint is anchored to, if anything. Both
+/// the human console and `operate_navigation_ai` write that one component, so
+/// this reads the ORDER — its destination — and never its origin (AGENTS.md #6).
+///
+/// ## Why the destination has to be read
+///
+/// Navigation is itself a backfillable system, and `operate_navigation_ai`
+/// waypoints the ship's own top Helm-relevant `Destroy` target. On a hull that
+/// declares a navigation system — every Alliance hull does — "there is a cleared
+/// waypoint" is therefore the NORMAL state of a ship prosecuting a named target,
+/// not evidence that anyone redirected it. Standing down on presence alone made
+/// a ship's own Navigation cancel its own Helm's class doctrine.
+///
+/// A waypoint anchored to the pass's own target is not a conflicting order: it
+/// names the same destination the manoeuvre is already flying at, and the
+/// manoeuvre is the more specific way of getting there. Anything else — a
+/// different entity, or a `Free` waypoint naming a place (`cleared_anchor` is
+/// `None`, and a place is never the target) — is a redirection and wins.
+fn pass_under_navigation_orders(
+    pass: crate::ship::helm_ai::HelmPassSurface,
+    cleared: Option<[f32; 2]>,
+    cleared_anchor: Option<uuid::Uuid>,
+    pass_target: Option<uuid::Uuid>,
+) -> crate::ship::helm_ai::HelmPassSurface {
+    if cleared.is_none() {
+        return pass;
+    }
+    // `is_some()` first, deliberately: two `None`s are not a match. A hull with
+    // no pass target and a `Free` waypoint must stand down, and bare `==` would
+    // have called that agreement.
+    if cleared_anchor.is_some() && cleared_anchor == pass_target {
+        return pass;
+    }
+    // Every leg at once, not `active = false` alone: the leg booleans are read
+    // independently downstream, and a surface that claimed a leg while saying it
+    // was inactive would be a shape no author could reason about.
+    crate::ship::helm_ai::HelmPassSurface::default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +629,115 @@ mod tests {
         assert_ne!(
             motion.desired_facing_local, motion.desired_velocity_local,
             "facing must be represented separately from travel"
+        );
+    }
+
+    // ── A captain's navigation order outranks the pass (issue #875 AC5) ──────
+
+    fn active_pass() -> crate::ship::helm_ai::HelmPassSurface {
+        crate::ship::helm_ai::HelmPassSurface {
+            active: true,
+            pass_legs: true,
+            escape: true,
+            approach_speed: 0.85,
+            escape_speed: 1.0,
+            recover: true,
+            reengage: true,
+            combat_orbit: true,
+            torpedo_bearing: true,
+            artillery_hold: true,
+            ..Default::default()
+        }
+    }
+
+    fn some_uuid(byte: u8) -> Option<uuid::Uuid> {
+        Some(uuid::Uuid::from_bytes([byte; 16]))
+    }
+
+    /// **PRD #774 stories 10/11 on a hull flying an authored manoeuvre.** A
+    /// cleared waypoint to somewhere ELSE stands the WHOLE surface down, so the
+    /// planner falls to ordinary doctrine travel — the only arm that reads the
+    /// waypoint.
+    ///
+    /// Every leg is asserted, not just `active`. The fallback `pass_legs` arm is
+    /// the one that actually traps a redirected ship: it fires in any state that
+    /// resolved no other leg verb, so a hull resting in its defensive leg would
+    /// keep closing on a target while its captain's order went unflown.
+    #[test]
+    fn a_cleared_waypoint_stands_the_whole_pass_surface_down() {
+        let stood_down = pass_under_navigation_orders(
+            active_pass(),
+            Some([120.0, -45.0]),
+            some_uuid(0x11),
+            some_uuid(0x22),
+        );
+        assert!(!stood_down.active, "the surface is inactive under orders");
+        assert!(
+            !stood_down.pass_legs,
+            "the FALLBACK leg above all: it fires in any state that resolved no              other verb, so leaving it set would keep a redirected hull closing"
+        );
+        for (leg, set) in [
+            ("escape", stood_down.escape),
+            ("recover", stood_down.recover),
+            ("reengage", stood_down.reengage),
+            ("combat_orbit", stood_down.combat_orbit),
+            ("torpedo_bearing", stood_down.torpedo_bearing),
+            ("artillery_hold", stood_down.artillery_hold),
+        ] {
+            assert!(!set, "{leg} must not survive a navigation order");
+        }
+    }
+
+    /// The other half, and the one that makes the assertion above mean
+    /// something: with NO cleared waypoint the surface is passed through
+    /// untouched, so an unredirected hull flies its doctrine exactly as before.
+    #[test]
+    fn an_uncleared_helm_flies_its_authored_pass_untouched() {
+        let pass = active_pass();
+        assert_eq!(
+            pass_under_navigation_orders(pass, None, None, some_uuid(0x22)),
+            pass,
+            "no navigation order ⇒ the authored manoeuvre is untouched. A              precedence that stood the doctrine down unconditionally would pass              the test above and delete every class doctrine in the fleet."
+        );
+    }
+
+    /// **The ship's own Navigation is not a redirection.** A waypoint anchored
+    /// to the very entity the pass is attacking names the same destination the
+    /// manoeuvre is already flying at, so the doctrine survives.
+    ///
+    /// This is not a hypothetical: `operate_navigation_ai` waypoints the top
+    /// Helm-relevant `Destroy` target, so on any hull that declares a navigation
+    /// system — every Alliance hull — this is the STEADY state of a ship
+    /// prosecuting a named target. A stand-down on the mere presence of a
+    /// clearance had a ship's own backfilled Navigation delete its own
+    /// backfilled Helm's class doctrine on every such mission, permanently:
+    /// `NavigationWaypoint::set` is idempotent for an anchored target that
+    /// merely moves, so the clearance latches once and never lifts.
+    #[test]
+    fn a_waypoint_onto_the_passs_own_target_leaves_the_doctrine_flying() {
+        let pass = active_pass();
+        assert_eq!(
+            pass_under_navigation_orders(
+                pass,
+                Some([120.0, -45.0]),
+                some_uuid(0x33),
+                some_uuid(0x33),
+            ),
+            pass,
+            "a destination that IS the pass target is not a conflicting order"
+        );
+    }
+
+    /// Two `None`s are not a match. A `Free` waypoint names a place and anchors
+    /// to nobody, and a hull with no resolved target has nothing to compare — so
+    /// a bare `cleared_anchor == pass_target` would read those two absences as
+    /// agreement and hand a tap-to-place order straight back to the doctrine.
+    #[test]
+    fn a_free_waypoint_still_redirects_a_hull_with_no_target() {
+        assert_eq!(
+            pass_under_navigation_orders(active_pass(), Some([120.0, -45.0]), None, None),
+            crate::ship::helm_ai::HelmPassSurface::default(),
+            "an anchorless destination is always a redirection"
         );
     }
 }

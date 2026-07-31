@@ -359,6 +359,32 @@ fn cleared_nav_waypoint(
     Some([snapshot.x, snapshot.z])
 }
 
+/// *What* the cleared waypoint names, when it names an entity rather than a
+/// place: the `Anchored` waypoint's `source_uuid` (issue #875).
+///
+/// The clearance gate is [`cleared_nav_waypoint`]'s, called for exactly that
+/// rather than restated — a second copy of the generation comparison could drift
+/// and would then answer "the helm is cleared to X" on a tick the position half
+/// said the helm was cleared to nothing.
+///
+/// `None` for a `Free` waypoint: a tap-to-place destination is a position and
+/// names no entity at all, so there is nothing for a consumer to compare a
+/// target against. That is the conservative answer — see
+/// `pass_under_navigation_orders`, whose only use of this is to recognise a
+/// waypoint that names the ship it is already attacking.
+fn cleared_nav_waypoint_anchor(
+    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+    clearance: Option<&HelmWaypointClearance>,
+) -> Option<uuid::Uuid> {
+    cleared_nav_waypoint(waypoint, clearance)?;
+    match waypoint?.mode()? {
+        crate::navigation_plugin::WaypointMode::Anchored { source_uuid, .. } => {
+            uuid::Uuid::parse_str(source_uuid).ok()
+        }
+        crate::navigation_plugin::WaypointMode::Free { .. } => None,
+    }
+}
+
 /// This ship's Combat Lock as a UUID, for the Helm to pursue (issue #702/#829).
 ///
 /// The lock is a `String` because it may name an asteroid as well as an entity;
@@ -418,6 +444,16 @@ pub(crate) struct HelmAiShipFrame {
     /// The Navigation waypoint this ship is cleared to fly
     /// (`cleared_nav_waypoint`), if any.
     pub(crate) nav_waypoint: Option<[f32; 2]>,
+    /// The entity that cleared waypoint is ANCHORED to, when it is anchored to
+    /// one (`cleared_nav_waypoint_anchor`) — i.e. *what* the destination is,
+    /// not merely where it currently sits. `None` for a `Free` waypoint, which
+    /// names a position and nothing else.
+    ///
+    /// Carried alongside the position because the planner has to tell a
+    /// destination order that CONFLICTS with an authored manoeuvre from one
+    /// that names the very ship that manoeuvre is attacking — see
+    /// `pass_under_navigation_orders` in [`crate::ship::helm_planner`].
+    pub(crate) nav_waypoint_anchor: Option<uuid::Uuid>,
     /// `ShipPhysics.forward_speed` at frame-build time.
     pub(crate) forward_speed: f32,
     /// This ship's exposure to hostile weapon arcs (issue #874), reduced ONCE
@@ -429,6 +465,18 @@ pub(crate) struct HelmAiShipFrame {
     /// independently is seven chances for the axes to disagree about the same
     /// tick's geometry.
     pub(crate) hostile_arc_exposure: crate::weapons::arc_geometry::ArcExposure,
+    /// This ship's own red-alert state (issue #875), read once per shared tick
+    /// off `ShipRedAlert` and seeded by [`seed_helm_actuator_facts`] as
+    /// [`POSTURE_FACT`].
+    ///
+    /// Folded here for the reason [`Self::hostile_arc_exposure`] is: the seven
+    /// policy hosts must agree about the same tick's posture, and a component
+    /// read repeated in each of them is seven chances not to.
+    ///
+    /// `false` for a ship with no `ShipRedAlert` component at all, which is the
+    /// same reading as "stood down" — a hull that cannot raise an alert is never
+    /// at one.
+    pub(crate) red_alert: bool,
 }
 
 /// The per-tick helm decision surface, keyed by ship entity. Rebuilt in
@@ -468,6 +516,9 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Has<crate::server_app::LocalShip>,
             HelmAiSurfaces,
+            // Issue #875: the ship's own alert state, folded onto the frame so
+            // every helm policy host seeds the same `posture` this tick.
+            Option<&crate::ship_state::ShipRedAlert>,
         ),
         With<crate::ai_plugin::AiHighFidelity>,
     >,
@@ -501,8 +552,10 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         helm_section,
         is_local,
         surfaces,
+        ship_red_alert,
     ) in ships.iter()
     {
+        let red_alert = ship_red_alert.is_some_and(|r| r.0);
         // Build only for ships some helm axis is actually flying: the frame
         // is a decision surface, and a fully human-held helm makes none.
         let any_axis_ai = [
@@ -530,6 +583,11 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                     scored,
                     has_objective,
                     forward_speed: physics.forward_speed,
+                    // Seeded on the objective-less path too: posture is a
+                    // reading of the ship's own bridge, not of what it has been
+                    // ordered to do, and a doctrine that holds a defensive line
+                    // with no objective at all still has to know which line.
+                    red_alert,
                     ..Default::default()
                 },
             );
@@ -578,8 +636,13 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 destroy_target,
                 weapons_target: helm_weapons_target(combat_lock.as_deref()),
                 nav_waypoint: cleared_nav_waypoint(surfaces.waypoint, surfaces.clearance),
+                nav_waypoint_anchor: cleared_nav_waypoint_anchor(
+                    surfaces.waypoint,
+                    surfaces.clearance,
+                ),
                 forward_speed: physics.forward_speed,
                 hostile_arc_exposure,
+                red_alert,
             },
         );
     }
@@ -1315,6 +1378,50 @@ pub struct HelmPassSurface {
 /// The fact name the shared hazard surface is seeded under by
 /// [`seed_helm_actuator_facts`].
 pub(crate) const HAZARD_URGENCY_FACT: &str = "hazard_urgency";
+
+// ── The movement POSTURE fact (issue #875) ───────────────────────────────────
+//
+// SCOPE: seeded by [`seed_helm_actuator_facts`], which is the ONE seeder every
+// helm policy host calls — `ai_policy_state_tick` and all six per-axis actuator
+// hosts. So unlike the recovery facts below, `posture` is available to both
+// transition guards and a state's continuous rule guards, on every axis. A class
+// movement doctrine has to be able to read it in both places: the transition is
+// what changes leg, and the rule is what the leg does while it is held.
+//
+// Derived HELM-SIDE from `ShipRedAlert`, folded once per shared tick onto
+// [`HelmAiShipFrame::red_alert`] rather than re-read by each host, for the same
+// reason `hostile_arc_exposure` is: seven hosts reading the ship's alert
+// independently is seven chances for the axes to disagree about the same tick.
+//
+// It is deliberately NOT the same name as `red_alert`. The weapons' fire gate
+// (#872) reads `fact(red_alert)` on the WEAPON hosts and means "the captain has
+// authorised fire"; this means "which movement doctrine is licensed", and the
+// two are only coincidentally driven by the same switch today. A hull that later
+// wants to press without being weapons-free, or to hold a defensive line while
+// the guns are hot, retunes one without disturbing the other.
+
+/// Which movement posture the ship's own alert state licenses this tick.
+///
+/// An ORDINAL, not a boolean, so the ladder has room to grow: `0.0` is
+/// DEFENSIVE — the captain has not called red alert, and the class doctrine's
+/// aggressive half is not licensed — and `1.0` is PRESSED, at red alert. A
+/// doctrine compares it against its own authored threshold
+/// (`fact(posture) >= param(press_posture)`), never against a literal, so a
+/// future intermediate rung does not have to touch any guard that already reads
+/// it.
+///
+/// ALWAYS seeded, on every one of the seven hosts, and never conditionally: an
+/// absent fact makes every comparison against it false, which reads exactly like
+/// "defensive" and would hide the difference between a stood-down ship and a
+/// posture that was never wired up. That is the same rule
+/// [`seed_hostile_arc_facts`] states, and it is the reason the seeding lives in
+/// [`seed_helm_actuator_facts`] — the one call every host already makes — rather
+/// than beside the frame lookups, which several hosts make conditionally.
+pub(crate) const POSTURE_FACT: &str = "posture";
+/// [`POSTURE_FACT`]'s defensive rung: the captain has not called red alert.
+pub(crate) const POSTURE_DEFENSIVE: f64 = 0.0;
+/// [`POSTURE_FACT`]'s pressed rung: this ship is at red alert.
+pub(crate) const POSTURE_PRESSED: f64 = 1.0;
 
 // ── Target-relative travel facts (issue #883, AC5) ───────────────────────────
 //
@@ -2270,6 +2377,7 @@ pub(crate) fn ai_policy_state_tick(
             impulse_cfg.is_some(),
             boost_cfg.map(|c| c.enabled).unwrap_or(false),
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         // The identity of the target the geometry above was seeded from. The
         // running range minimum is scoped to it, so a mid-state target switch
@@ -2867,17 +2975,31 @@ fn helm_policy_actuates(
 /// snapshot. Facts are read from the shared `HazardAssessment` the planner
 /// already published — no re-scan (AC2) — and from host-side capability, keeping
 /// `policy.rs` Bevy-free (AGENTS.md #10).
+///
+/// `red_alert` seeds [`POSTURE_FACT`] (issue #875). It is threaded through THIS
+/// function rather than seeded beside each host's frame lookup precisely because
+/// every host calls this one unconditionally, which is what makes the fact
+/// unconditional too — see the constant.
 fn seed_helm_actuator_facts(
     hazard: Option<&crate::ship::helm_planner::HazardAssessment>,
     impulse_available: bool,
     boost_available: bool,
     vertical_offset: f32,
+    red_alert: bool,
 ) -> crate::world::flags::AiFacts {
     let mut facts = crate::world::flags::AiFacts::new();
     let (urgency, moving_threat) = hazard
         .map(|h| (h.urgency, h.moving_hazard_threat))
         .unwrap_or((0.0, 0.0));
     facts.set(HAZARD_URGENCY_FACT, urgency as f64);
+    facts.set(
+        POSTURE_FACT,
+        if red_alert {
+            POSTURE_PRESSED
+        } else {
+            POSTURE_DEFENSIVE
+        },
+    );
     facts.set("moving_hazard_threat", moving_threat as f64);
     facts.set("hazard_present", if urgency > 0.0 { 1.0 } else { 0.0 });
     facts.set(
@@ -2932,6 +3054,17 @@ fn seed_helm_actuator_facts(
 /// Folds no history: every value is a stateless read of the one `ArcExposure`
 /// `build_helm_ai_surfaces_frame` reduced before any host ran this tick, so
 /// calling this from seven hosts reads the same numbers seven times.
+/// This tick's posture reading for one ship (issue #875), as
+/// [`seed_helm_actuator_facts`] wants it.
+///
+/// A ship with no frame entry has no AI-operated helm axis at all, so nothing
+/// resolves a movement policy for it this tick; `false` — defensive — is the
+/// honest reading rather than a guess, and the fact is still SET, which is the
+/// property the constant insists on.
+fn frame_red_alert(frame_ship: Option<&HelmAiShipFrame>) -> bool {
+    frame_ship.is_some_and(|sf| sf.red_alert)
+}
+
 fn seed_hostile_arc_facts(
     facts: &mut crate::world::flags::AiFacts,
     frame_ship: Option<&HelmAiShipFrame>,
@@ -3530,6 +3663,7 @@ pub(crate) fn ai_helm_thrust(
             impulse_cfg.is_some(),
             boost_cfg.map(|c| c.enabled).unwrap_or(false),
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         seed_helm_travel_facts(
             &mut facts,
@@ -3661,6 +3795,7 @@ pub(crate) fn ai_helm_steering(
             impulse_cfg.is_some(),
             boost_cfg.map(|c| c.enabled).unwrap_or(false),
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         seed_helm_travel_facts(
             &mut facts,
@@ -3821,6 +3956,7 @@ pub(crate) fn ai_helm_impulse(
             true,
             boost_available,
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         // Issue #874: the arc facts reach this axis too — see
         // `seed_hostile_arc_facts`. Seeded from the same frame entry the
@@ -4016,8 +4152,13 @@ pub(crate) fn ai_helm_lateral_thrust(
         // default (unconditional actuate) reproduces the pre-#780 always-on
         // avoidance; a "hold" resolution emits nothing and lateral coasts.
         if docking_lateral.is_none() {
-            let mut facts =
-                seed_helm_actuator_facts(ship_plan.map(|sp| &sp.hazard), false, false, 0.0);
+            let mut facts = seed_helm_actuator_facts(
+                ship_plan.map(|sp| &sp.hazard),
+                false,
+                false,
+                0.0,
+                sf.red_alert,
+            );
             // Issue #874: lateral is the literal dodge axis, so this is the axis
             // a movement doctrine reaches for `fact(hostile_arc_exposure)` on
             // first. `sf` above is this tick's frame entry — see
@@ -4155,6 +4296,7 @@ pub(crate) fn ai_helm_vertical_thrust(
             false,
             false,
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         // Issue #874: the vertical axis is a dodge axis too — climbing out of a
         // plane of fire is as valid a response as turning out of it, and a
@@ -4329,6 +4471,7 @@ pub(crate) fn ai_helm_boost(
             impulse_cfg.is_some(),
             true,
             physics.y,
+            frame_red_alert(frame.ships.get(&entity)),
         );
         seed_helm_travel_facts(
             &mut facts,
@@ -4510,9 +4653,17 @@ mod tests {
     ///
     /// Nothing is hand-set, so the resolver reflects exactly what the hull
     /// declares — which is the point of the tests that use it.
-    fn resolver_from_shipped_hull(toml_str: &str) -> ControlSourceResolver {
-        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("shipped hull TOML must parse");
+    /// Takes a hull STEM rather than baked text (issue #875). `include_str!`
+    /// bakes bytes at compile time, so a baked site can never see include
+    /// resolution — and `alliance_destroyer` is a COMPOSED hull since #875, so
+    /// its baked bytes are no longer the document the game loads. Going through
+    /// `load_entity_config` keeps the claim "reads the shipped TOMLs through the
+    /// same resolver the game builds" literally true for composed and
+    /// uncomposed hulls alike.
+    fn resolver_from_shipped_hull(stem: &str) -> ControlSourceResolver {
+        let path = format!("assets/entities/{stem}.toml");
+        let config = crate::entity_includes::load_entity_config(&path)
+            .unwrap_or_else(|e| panic!("shipped hull {stem} must compose and parse: {e}"));
         let ship_config = config
             .ship_config
             .expect("shipped hull must declare [[system]] blocks");
@@ -4553,39 +4704,15 @@ mod tests {
         // (#892) `pirate_raider` + `pirate_raider_reinforcement` were retired as
         // duplicates of `ship_harrow_destroyer`'s display name; the surviving
         // hull takes their two rows.
-        let hulls: [(&str, &str); 8] = [
-            (
-                "alliance_battleship",
-                include_str!("../../assets/entities/alliance_battleship.toml"),
-            ),
-            (
-                "alliance_courier",
-                include_str!("../../assets/entities/alliance_courier.toml"),
-            ),
-            (
-                "alliance_cruiser",
-                include_str!("../../assets/entities/alliance_cruiser.toml"),
-            ),
-            (
-                "alliance_destroyer",
-                include_str!("../../assets/entities/alliance_destroyer.toml"),
-            ),
-            (
-                "ship_harrow_destroyer",
-                include_str!("../../assets/entities/ship_harrow_destroyer.toml"),
-            ),
-            (
-                "ship_harrow_patrol",
-                include_str!("../../assets/entities/ship_harrow_patrol.toml"),
-            ),
-            (
-                "ship_harrow_warhawk",
-                include_str!("../../assets/entities/ship_harrow_warhawk.toml"),
-            ),
-            (
-                "ship_requiem_courier",
-                include_str!("../../assets/entities/ship_requiem_courier.toml"),
-            ),
+        let hulls: [&str; 8] = [
+            "alliance_battleship",
+            "alliance_courier",
+            "alliance_cruiser",
+            "alliance_destroyer",
+            "ship_harrow_destroyer",
+            "ship_harrow_patrol",
+            "ship_harrow_warhawk",
+            "ship_requiem_courier",
         ];
 
         let axes: [(&str, crate::messages::SystemId); 5] = [
@@ -4608,8 +4735,8 @@ mod tests {
             ("helm-boost", crate::system_registry::helm_boost_system_id()),
         ];
 
-        for (hull, toml_str) in hulls {
-            let resolver = resolver_from_shipped_hull(toml_str);
+        for hull in hulls {
+            let resolver = resolver_from_shipped_hull(hull);
 
             // Sanity (#801): the coarse `helm` system is deleted from every
             // shipped hull — a TOML that still declared it would fail parse
@@ -4664,9 +4791,7 @@ mod tests {
     /// simply structural — a non-zero intent has no other possible writer.
     #[test]
     fn shipped_hull_config_drives_the_per_axis_helm_systems() {
-        let resolver = resolver_from_shipped_hull(include_str!(
-            "../../assets/entities/ship_harrow_destroyer.toml"
-        ));
+        let resolver = resolver_from_shipped_hull("ship_harrow_destroyer");
 
         // The declaration itself — what #800 adds, and what was missing.
         assert!(
@@ -4736,9 +4861,7 @@ mod tests {
             (get_thrust_input(&mut app), get_steering_input(&mut app))
         };
 
-        let shipped = resolver_from_shipped_hull(include_str!(
-            "../../assets/entities/ship_harrow_destroyer.toml"
-        ));
+        let shipped = resolver_from_shipped_hull("ship_harrow_destroyer");
 
         // The same hull as it behaved before #800: coarse helm on AI, the two
         // axes undeclared and therefore Human by default.
@@ -4823,9 +4946,7 @@ mod tests {
             });
 
         // Shipped-hull sources: coarse + both axes on AI.
-        let resolver = resolver_from_shipped_hull(include_str!(
-            "../../assets/entities/ship_harrow_destroyer.toml"
-        ));
+        let resolver = resolver_from_shipped_hull("ship_harrow_destroyer");
         install_control_sources(&mut app, &resolver);
 
         tick(&mut app);
@@ -5579,8 +5700,7 @@ mod tests {
     /// and a `Charging` command has nowhere else to come from.
     #[test]
     fn shipped_hull_config_drives_ai_helm_impulse() {
-        let resolver =
-            resolver_from_shipped_hull(include_str!("../../assets/entities/alliance_cruiser.toml"));
+        let resolver = resolver_from_shipped_hull("alliance_cruiser");
         assert!(
             resolver
                 .policy_for(&crate::system_registry::helm_impulse_system_id())
@@ -5902,8 +6022,7 @@ mod tests {
     /// unreachable, and the one every hand-built test above misses.
     #[test]
     fn shipped_hull_config_drives_ai_helm_lateral_thrust() {
-        let resolver =
-            resolver_from_shipped_hull(include_str!("../../assets/entities/alliance_cruiser.toml"));
+        let resolver = resolver_from_shipped_hull("alliance_cruiser");
         assert!(
             resolver
                 .policy_for(&crate::system_registry::lateral_thrust_system_id())
@@ -8493,6 +8612,143 @@ mod tests {
         crate::world::flags::parse_predicate(predicate)
             .expect("guard must parse")
             .evaluate_with(facts, &crate::world::flags::AiParams::new(), &[])
+    }
+
+    // ── The movement POSTURE fact (issue #875) ───────────────────────────────
+
+    /// `seed_helm_actuator_facts` with nothing but the alert reading, which is
+    /// the only input the posture derivation has.
+    fn actuator_facts_at_alert(red_alert: bool) -> crate::world::flags::AiFacts {
+        seed_helm_actuator_facts(None, false, false, 0.0, red_alert)
+    }
+
+    /// **The host-side half of AC2.** `posture` is really seeded from the ship's
+    /// own red alert, in BOTH directions, and it is PRESENT when the alert is
+    /// clear rather than absent.
+    ///
+    /// The absent case is the whole point. An absent fact makes every comparison
+    /// against it false, so a misspelled name — here or in the authored guard —
+    /// presents exactly like a permanently defensive hull, with nothing else
+    /// going red. `authored_ai_pins::posture_guard_truth_table` is the content
+    /// half; this is the seam.
+    #[test]
+    fn posture_is_seeded_unconditionally_from_red_alert() {
+        let pressed = actuator_facts_at_alert(true);
+        assert_eq!(
+            pressed.get(POSTURE_FACT),
+            Some(POSTURE_PRESSED),
+            "at red alert the ship's movement posture is PRESSED"
+        );
+        assert!(guard_holds(&pressed, "fact(posture) >= 1"));
+
+        let clear = actuator_facts_at_alert(false);
+        assert_eq!(
+            clear.get(POSTURE_FACT),
+            Some(POSTURE_DEFENSIVE),
+            "alert clear ⇒ seeded at the DEFENSIVE rung, not left absent — an \
+             absent fact makes every comparison read false, which hides the \
+             difference between 'stood down' and 'never wired up'"
+        );
+        assert!(!guard_holds(&clear, "fact(posture) >= 1"));
+        assert!(
+            guard_holds(&clear, "fact(posture) < 1"),
+            "and the break-off guard, which is a `<` and therefore the one an \
+             ABSENT fact would silently disable, must read true"
+        );
+    }
+
+    /// The posture reading a host uses comes off the shared frame, so all seven
+    /// hosts see the same one — and a ship with no frame entry reads defensive
+    /// rather than panicking or inventing.
+    #[test]
+    fn posture_is_read_off_the_shared_frame() {
+        assert!(frame_red_alert(Some(&HelmAiShipFrame {
+            red_alert: true,
+            ..Default::default()
+        })));
+        assert!(!frame_red_alert(Some(&HelmAiShipFrame::default())));
+        assert!(
+            !frame_red_alert(None),
+            "no frame entry ⇒ no AI-operated helm axis ⇒ defensive is the honest \
+             reading; the fact is still SET, which is what matters"
+        );
+    }
+
+    /// **Every one of the seven policy hosts seeds a REAL posture reading.**
+    ///
+    /// The compiler already forces all seven to pass something —
+    /// `seed_helm_actuator_facts` takes `red_alert` by value, and it is the one
+    /// seeder every host calls. What it cannot catch is a site that passes a
+    /// hardcoded `false`, which is the #779 failure in its most plausible form:
+    /// a new host added later, wired up mechanically, that compiles and runs and
+    /// leaves exactly one axis permanently defensive while the other six press.
+    ///
+    /// So this scans this module's own source for the call sites and requires
+    /// each to pass one of the two honest readings. Deliberately a source scan
+    /// rather than a per-host integration test: a scan covers hosts added after
+    /// it was written, which is the case that matters.
+    #[test]
+    fn every_helm_policy_host_seeds_a_real_posture_reading() {
+        const CALL: &str = "seed_helm_actuator_facts(";
+        // The two honest readings: off the shared frame, or off a frame entry
+        // the host already holds.
+        const HONEST: [&str; 2] = ["frame_red_alert(", "sf.red_alert"];
+
+        let whole = std::fs::read_to_string("src/ship/helm_ai.rs")
+            .expect("this module's own source must be readable");
+        // Only the PRODUCTION half: the test module below contains the literal
+        // in this test's own `CALL` constant and in a fixture helper, neither of
+        // which is a policy host.
+        let cut = whole
+            .find("\nmod tests {")
+            .expect("this module's test barrier must be findable");
+        let src = &whole[..cut];
+        let mut sites = 0usize;
+        let mut cursor = 0usize;
+        while let Some(i) = src[cursor..].find(CALL) {
+            let at = cursor + i;
+            cursor = at + CALL.len();
+            // The DEFINITION matches the literal too, and its parameter list
+            // names `red_alert` without reading one.
+            if src[..at].ends_with("fn ") {
+                continue;
+            }
+            // Balanced-paren scan for the argument list: several sites pass a
+            // closure (`.map(|sp| &sp.hazard)`), so the first `)` is not the
+            // end of the call.
+            let mut depth = 1usize;
+            let mut end = cursor;
+            for (off, ch) in src[cursor..].char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = cursor + off;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(end > cursor, "unbalanced call at byte {at}");
+            let args = &src[cursor..end];
+            sites += 1;
+            assert!(
+                HONEST.iter().any(|h| args.contains(h)),
+                "a `seed_helm_actuator_facts` call site passes no honest posture \
+                 reading. Every helm policy host must seed `posture` from the \
+                 ship's real alert state — a hardcoded `false` compiles, runs, and \
+                 leaves that one axis permanently defensive while the others \
+                 press. Args were:\n{args}"
+            );
+        }
+        assert_eq!(
+            sites, 7,
+            "the scan found {sites} helm policy hosts, not the seven this module \
+             declares (`ai_policy_state_tick` plus the six per-axis actuators). \
+             Either a host was added or removed, or the scan has stopped parsing."
+        );
     }
 
     /// The exposure fact FIRES: a frame carrying covering arcs seeds a count a

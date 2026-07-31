@@ -288,6 +288,27 @@ fn authored_selectors(c: &EntityConfig) -> Vec<(&'static str, FineSystemAiSelect
 /// drifting apart together, and this one can, because the baseline has to be
 /// unanimous among the hulls that are not listed.
 const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
+    // ── The composed class doctrine (issue #875) ─────────────────────────────
+    //
+    // The player destroyer is the first hull to take its movement from the
+    // shared fragment library rather than authoring it inline: it includes
+    // `fragments/ai/movement_attack_pass.toml`, which replaces all three travel
+    // axes with the posture-gated attack pass, and tunes it by `param` alone.
+    //
+    // Boost in particular is a real departure and not a side effect. The fleet
+    // baseline authors `idle = true` — no AI on an ordinary hull engages the
+    // drive — and this hull's escape leg burns it, which is why
+    // `boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it` now names
+    // two hulls rather than one.
+    //
+    // The rest of this hull's ship-level declarations come from
+    // `fleet_baseline.toml` and `captain_alliance.toml` and are therefore NOT
+    // listed here: composing a policy that was already the fleet baseline leaves
+    // it the fleet baseline, which is precisely the property that makes the
+    // library safe to adopt.
+    ("alliance_destroyer", "engines"),
+    ("alliance_destroyer", "steering"),
+    ("alliance_destroyer", "boost"),
     // The broadside orbit: a stateful engines/steering pair, plus two tubes
     // that hold fire until the target's striking arc is actually down.
     ("ship_harrow_cruiser", "engines"),
@@ -904,6 +925,295 @@ fn shields_focus_guard_truth_table() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The movement POSTURE gate (issue #875)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The three copies of the composed attack-pass machine, keyed by the axis they
+/// fly. Read off the SHIPPED hull, so a retune in TOML retunes this pin with it.
+fn attack_pass_policies() -> Vec<(&'static str, AiPolicy)> {
+    let hull = entity("alliance_destroyer");
+    let helm = hull
+        .helm_console
+        .as_ref()
+        .expect("the player destroyer authors `[helm_console]`");
+    vec![
+        (
+            "engines",
+            policy(
+                helm.engines_ai
+                    .as_ref()
+                    .expect("composed from movement_attack_pass.toml"),
+            ),
+        ),
+        (
+            "steering",
+            policy(
+                helm.steering_ai
+                    .as_ref()
+                    .expect("composed from movement_attack_pass.toml"),
+            ),
+        ),
+        (
+            "boost",
+            policy(
+                helm.boost_ai
+                    .as_ref()
+                    .expect("composed from movement_attack_pass.toml"),
+            ),
+        ),
+    ]
+}
+
+/// A memory bag with the machine's authored initial values and a state clock
+/// reading, for resolving a transition the way the host does.
+fn machine_memory(p: &AiPolicy, state_time_secs: f64) -> crate::world::flags::AiPolicyMemory {
+    let mut m = p
+        .machine()
+        .expect("a stateful policy")
+        .initial_memory
+        .clone();
+    m.set_state_time_secs(state_time_secs);
+    m
+}
+
+/// **The posture truth table (AC2).** The gate fires at red alert AND reads
+/// FALSE — not absent — when the alert is clear, on all three axes of the
+/// composed class doctrine.
+///
+/// This is the assertion the whole feature rests on, and it is the #779 shape:
+/// `posture` is a fact name, so a misspelling here or in
+/// `helm_ai::seed_helm_actuator_facts` parses, validates, and reads false for
+/// ever — which presents as a destroyer that shadows politely and never once
+/// attacks, with every other test still green. Proving the guard reads BOTH ways
+/// against a really-seeded name is the only thing that catches it.
+///
+/// The threshold comes out of the authored `param` rather than a literal, so a
+/// designer who adds an intermediate rung to the posture ladder and retunes
+/// `press_posture` retunes this test with it (AGENTS.md rule #11).
+///
+/// The host-side half — that the fact is really seeded, on every one of the
+/// seven policy hosts, and unconditionally — is
+/// `helm_ai::tests::posture_is_seeded_unconditionally_from_red_alert`.
+#[test]
+fn posture_guard_truth_table() {
+    for (axis, p) in attack_pass_policies() {
+        let press = param(&p, "press_posture");
+        assert!(
+            press > 0.0,
+            "{axis}: `press_posture` must be a live threshold, not zero — at zero \
+             the defensive rung (0.0) would satisfy `>=` and the gate would be open \
+             for ever."
+        );
+        let machine = p.machine().expect("{axis} is a state machine");
+        assert_eq!(
+            machine.initial, "shadow",
+            "{axis}: the doctrine RESTS defensive. A machine that booted into an \
+             aggressive leg would press once before the first posture reading \
+             arrived."
+        );
+
+        let pressed = facts(&[("posture", press)]);
+        let clear = facts(&[("posture", press - 1.0)]);
+        let unseeded = facts(&[]);
+        let memory = machine_memory(&p, 0.0);
+
+        // ── shadow: the alert opens the gate, and nothing else does ──────────
+        assert_eq!(
+            p.resolve_transition("shadow", &pressed, &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("acquire"),
+            "{axis}/shadow: red alert ⇒ the class doctrine is licensed and the hull \
+             leaves the standoff ring."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &clear, &memory, &[]),
+            None,
+            "{axis}/shadow: alert DOWN ⇒ hold the ring. This is the half that makes \
+             the assertion above mean something — without it `shadow` could be a \
+             state the hull leaves unconditionally."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &unseeded, &memory, &[]),
+            None,
+            "{axis}/shadow: with NO posture reading at all the comparison reads false \
+             and the hull stays defensive. The gate fails CLOSED, so a typo in the \
+             fact name cannot make a hull aggressive."
+        );
+
+        // ── acquire / inbound: the alert going down breaks the hull off ──────
+        for state in ["acquire", "inbound"] {
+            assert_eq!(
+                p.resolve_transition(state, &clear, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{state}: the alert going down outranks everything else in \
+                 this leg — a hull whose captain has stood down must not press home \
+                 a run it is no longer licensed to make."
+            );
+            assert_ne!(
+                p.resolve_transition(state, &pressed, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{state}: at red alert the break-off guard must NOT fire, or \
+                 the doctrine could never reach the merge at all."
+            );
+        }
+
+        // ── escape: the commitment is not cut short, by posture or anything ──
+        //
+        // The one leg where a posture drop is deliberately DEFERRED. The escape
+        // flies a frozen heading and the doctrine's own invariant is that only
+        // the authored dwell ends it; the posture branch shares the `state_time`
+        // conjunct with the other two so it cannot shorten the commitment.
+        let dwell = param(&p, "escape_duration_secs");
+        let mid_escape = machine_memory(&p, dwell * 0.5);
+        let dwell_done = machine_memory(&p, dwell);
+        assert_eq!(
+            p.resolve_transition("escape", &clear, &mid_escape, &[]),
+            None,
+            "{axis}/escape: the alert going down MID-escape changes nothing. \
+             Committing to the outward heading means the dwell runs; a hull that \
+             turned here would curl back through the target it just passed."
+        );
+        assert_eq!(
+            p.resolve_transition("escape", &clear, &dwell_done, &[])
+                .map(|t| t.to.as_str()),
+            Some("shadow"),
+            "{axis}/escape: at the END of the dwell a dropped alert wins — and it \
+             outranks both the recovery branch and the next-pass branch, which are \
+             the other two things the dwell can end into."
+        );
+        assert_eq!(
+            p.resolve_transition("escape", &pressed, &dwell_done, &[])
+                .map(|t| t.to.as_str()),
+            Some("acquire"),
+            "{axis}/escape: still at red alert with the shields up ⇒ line up for \
+             another pass."
+        );
+    }
+}
+
+/// **The targeting half of issue #875 AC5, on the COMPOSED hull.** A Sensors
+/// designation still redirects the backfilled destroyer's guns, and still loses
+/// to a named mission objective.
+///
+/// PRD #774 stories 10/11 are inherited rather than new — the designation
+/// reaches Tactical as an advisory channel-3 candidate carrying
+/// `source_sensors_designation`, weighted 500 against a radar contact's 1 — and
+/// the point of asserting it here is that this hull's Tactical selector is now
+/// COMPOSED. Its whole ranking arrives through `includes`, so an override that
+/// used to be authored in the file is now a property of a merge, and a merge
+/// that dropped the selector would leave a hull that still validates, still
+/// spawns, and quietly ignores its own crew.
+///
+/// Run through the real `TargetSelector::select` against the shipped block, and
+/// both directions are asserted: the designation must WIN over the radar
+/// contact, and must LOSE to a mission objective, or "advisory" would be the
+/// wrong word for it.
+#[test]
+fn a_sensors_designation_still_redirects_the_composed_destroyers_guns() {
+    let hull = entity("alliance_destroyer");
+    let sel = selector(
+        hull.weapons_console
+            .as_ref()
+            .expect("the destroyer carries weapons")
+            .selector
+            .as_ref()
+            .expect("its Tactical selector is composed from the library"),
+    );
+    let ctx = self_ctx(&[]);
+
+    // The designation carries the LARGER uuid, so the smallest-uuid tie-break
+    // cannot be what makes it win.
+    let radar_contact = candidate(
+        "aaa-nearest-hostile",
+        &[("detectable", 1.0), ("hostile", 1.0), ("source_radar", 1.0)],
+    );
+    let designated = candidate(
+        "zzz-designated-by-sensors",
+        &[
+            ("detectable", 1.0),
+            ("hostile", 1.0),
+            ("source_sensors_designation", 1.0),
+        ],
+    );
+    assert_eq!(
+        pick(
+            &sel,
+            &ctx,
+            &[radar_contact.clone(), designated.clone()],
+            None
+        )
+        .as_deref(),
+        Some("zzz-designated-by-sensors"),
+        "the crew's designation must beat the AI's own nearest-hostile pick, or a \
+         backfilled destroyer cannot be told what to shoot at."
+    );
+    // …and it must still overcome hysteresis retention of the AI's own pick,
+    // which is the half a reweight is most likely to break: the switch margin
+    // is applied against the CURRENT lock.
+    assert_eq!(
+        pick(
+            &sel,
+            &ctx,
+            &[radar_contact.clone(), designated.clone()],
+            Some("aaa-nearest-hostile")
+        )
+        .as_deref(),
+        Some("zzz-designated-by-sensors"),
+        "a designation issued while the ship is already locked on must still \
+         redirect it — 'at any time' means mid-engagement."
+    );
+    // The advisory half: a named mission objective outranks it.
+    let objective = candidate(
+        "mmm-mission-objective",
+        &[("detectable", 1.0), ("source_objective", 1.0)],
+    );
+    assert_eq!(
+        pick(&sel, &ctx, &[designated, objective], None).as_deref(),
+        Some("mmm-mission-objective"),
+        "the designation is ADVISORY: it redirects the ship's own choice, not a \
+         mission order."
+    );
+}
+
+/// The composed doctrine is genuinely POSTURE-gated: every aggressive leg
+/// carries a way back to the defensive one.
+///
+/// A separate pin from the truth table because it is a structural claim about
+/// the graph rather than about one guard. A leg that gained an aggressive
+/// transition but no break-off — easy to do when adding a state — would trap an
+/// unmanned hull in a fight its captain has called off, and no per-guard table
+/// would notice.
+#[test]
+fn every_aggressive_leg_of_the_class_doctrine_can_return_to_the_defensive_one() {
+    for (axis, p) in attack_pass_policies() {
+        let machine = p.machine().expect("a state machine");
+        for state in &machine.states {
+            if state.id == "shadow" {
+                continue;
+            }
+            assert!(
+                state.transitions.iter().any(|t| t.to == "shadow"),
+                "{axis}/{}: an aggressive leg with no transition back to `shadow`. \
+                 A captain standing the alert down would leave the hull pressing an \
+                 attack it is no longer licensed to make, for ever.",
+                state.id
+            );
+        }
+        // …and the reverse: the defensive leg's ONLY way out is the posture gate.
+        let shadow = machine.state("shadow").expect("the defensive leg");
+        assert_eq!(
+            shadow.transitions.len(),
+            1,
+            "{axis}/shadow: the standoff leg must have exactly one exit, and it must \
+             be the posture gate. A second exit is a way to start a fight without \
+             the captain."
+        );
+    }
+}
+
 /// Power: the elevate rules need BOTH their trigger and their battery reserve;
 /// the baseline rules hold the line whenever a battery reading exists at all.
 ///
@@ -1198,14 +1508,27 @@ fn the_unconditional_baselines_fire_with_no_facts() {
     }
 }
 
-/// Boost is the only baseline that is an explicit IDLE, and the fleet's one
-/// bespoke boost doctrine is not.
+/// Boost is the only baseline that is an explicit IDLE, and the two hulls whose
+/// doctrine engages the drive are not.
 ///
 /// "Explicit policy or explicit idle" (#794 AC1) has a different authored shape
 /// for each, and getting it backwards is not a validation error — an idle system
 /// simply never acts.
+///
+/// # Why this says TWO hulls now (issue #875)
+///
+/// It said one until the player destroyer composed
+/// `fragments/ai/movement_attack_pass.toml`. That fragment's escape leg burns
+/// the drive, so the hull's Boost policy is a state machine rather than the
+/// baseline's `idle = true` — and a fragment REPLACING an inherited idle
+/// declaration is the exact case where getting it backwards is silent: `idle`
+/// deep-merges as a scalar, so a movement fragment that forgot to clear it would
+/// compose into a hull that validates, spawns, and never boosts.
+///
+/// The premise did not weaken; it widened. Both hulls are still asserted
+/// individually, and the baseline is still asserted idle.
 #[test]
-fn boost_is_the_only_idle_baseline_and_one_hull_departs_from_it() {
+fn boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it() {
     for kind in [
         "captain",
         "comms_response",
@@ -1231,17 +1554,36 @@ fn boost_is_the_only_idle_baseline_and_one_hull_departs_from_it() {
         fleet_baseline_policy("boost").idle,
         "the Boost baseline is `idle = true` — no AI engages boost by default."
     );
-    let destroyer = entity("ship_harrow_destroyer");
-    let boost = destroyer
-        .helm_console
-        .as_ref()
-        .and_then(|h| h.boost_ai.as_ref())
-        .expect("the Harrow Destroyer authors `[helm_console.boost_ai]`");
-    assert!(
-        !policy(boost).idle,
-        "the Harrow Destroyer is the ONE hull whose AI engages boost — its entry on \
-         BESPOKE_DOCTRINES means nothing if the policy is idle."
-    );
+    for (hull, why) in [
+        (
+            "ship_harrow_destroyer",
+            "authors its lance run inline, and was the first",
+        ),
+        (
+            "alliance_destroyer",
+            "COMPOSES `fragments/ai/movement_attack_pass.toml`, whose `idle = false` \
+             is what clears the fleet baseline's inherited idle Boost. If that line \
+             is ever dropped from the fragment this is the assertion that notices",
+        ),
+    ] {
+        let cfg = entity(hull);
+        let boost = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.boost_ai.as_ref())
+            .unwrap_or_else(|| panic!("{hull} must resolve a `[helm_console.boost_ai]`"));
+        let decoded = policy(boost);
+        assert!(
+            !decoded.idle,
+            "{hull} is a hull whose AI engages boost — it {why} — and its entry on \
+             BESPOKE_DOCTRINES means nothing if the policy is idle."
+        );
+        assert!(
+            decoded.machine.is_some(),
+            "{hull}'s boost doctrine is a state machine: the drive burns on the \
+             escape leg and nowhere else, which cannot be said with a stateless rule."
+        );
+    }
 }
 
 /// An unknown channel resolves to `None` on every authored policy in the fleet.

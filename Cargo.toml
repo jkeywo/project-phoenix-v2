@@ -66,12 +66,92 @@ perf = []
 
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }
-glam = "0.30"
+# `libm` feature: glam's own `f32`/`f64` math module (see `math.rs` in the
+# glam source) cfg's its libm-backed block on bare `feature = "libm"`, with
+# no `not(feature = "std")` guard — so this alone genuinely swaps glam's
+# `sin`/`cos`/`atan2`/… for the pure-Rust libm crate on a std (native) target,
+# not only on no_std/wasm. Verified by reading glam 0.30.10's
+# `src/f32/math.rs` cfg attributes directly (issue #909 AC-2), not assumed.
+glam = { version = "0.30", features = ["libm"] }
+# nalgebra/parry3d/rapier3d/simba (issue #909): put the physics solver's own
+# transcendentals on the same shared libm as `crate::simmath` (issue #908),
+# rather than leaving `glam` fixed while the collision/dynamics stack still
+# drifts across targets.
+#
+# The naive fix — just turning on each crate's `libm` cargo feature — is a
+# **verified no-op** here, not a hypothetical one. `simba` (which supplies
+# `nalgebra`'s and `parry3d`'s scalar `ComplexField`/`RealField` impls for
+# `f32`/`f64`, the actual `sin`/`cos`/`atan2`/`powf` call sites) picks its
+# implementation by macro-gated cfg in `simba-0.9.1/src/scalar/complex.rs`:
+#   `cfg(all(not(std), not(libm_force), libm))`  → routes through libm
+#   `cfg(all(std, not(libm_force)))`              → routes through std  (wins
+#                                                     whenever `std` is on,
+#                                                     `libm` or not)
+#   `cfg(libm_force)`                             → routes through libm
+#                                                     unconditionally
+# Because this workspace's dependency graph unifies `simba`'s features across
+# every consumer, `simba/std` is always on here (nalgebra's own `default`
+# feature pulls it in, and nothing in the graph opts every edge out of it) —
+# so plain `nalgebra/libm` / `simba/libm` is silently ignored on native, and
+# only the wasm side would ever have differed. `libm_force` is the escape
+# hatch that bypasses the `std` check entirely; `parry3d` and `rapier3d` each
+# expose it pre-wired under their own `enhanced-determinism` feature
+# (`enhanced-determinism = ["simba/libm_force", ...]` in their manifests) —
+# the crates' own answer to exactly this cross-platform determinism problem.
+# `nalgebra/libm` is still listed below per the issue's AC wording and
+# because it is harmless and forward-looking, but `rapier3d`'s
+# `enhanced-determinism` (cascading into `parry3d/enhanced-determinism` and
+# `simba/libm_force`) is what actually forces the switch.
+#
+# NOTE: this does not by itself make the physics solver bit-exact — Rapier's
+# `parallel` feature (enabled below on native) still lets the solver reorder
+# float accumulation order-of-operations across threads, which is a second,
+# independent divergence source. That is issue #896's serial-solve fix; #909
+# is scoped to the shared-libm plumbing only. See the cross-target vector
+# battery in src/simmath_vectors.rs — which folds nalgebra's and glam's own
+# outputs into the same digest, not just `crate::simmath`'s — for what this
+# Cargo.toml change actually proves.
+#
+# COST: `enhanced-determinism` hard-conflicts with rapier3d's and parry3d's
+# SIMD features — both crates carry
+# `#[cfg(all(feature = "simd-is-enabled", feature = "enhanced-determinism"))]
+# std::compile_error!("SIMD cannot be enabled when the `enhanced-determinism`
+# feature is also enabled.")` (rapier3d-0.31.0/src/lib.rs:46,
+# parry3d-0.25.3/src/lib.rs:31). So `simd-stable`/`simd-nightly` are
+# permanently off the table for as long as this is on: it is a determinism-for-
+# throughput trade, not a free win, and "just turn on SIMD for the physics" is
+# a build break rather than a tuning knob.
+#
+# Not covered by any of this: the `noise` crate below (0.9.0, which exposes no
+# `libm` feature at all). Verified exact by reading its source rather than
+# assumed: the Perlin path this repo uses — `core/perlin.rs::perlin_2d` via
+# `noise_fns/generators/perlin.rs`, reached from
+# `src/asteroids/spawner.rs::perlin2d_octaves` — computes with nothing but
+# `floor`-to-integer, integer permutation-table hashing (`permutationtable.rs`,
+# an XorShift-seeded `[u8; 256]`), gradient dot-products that are plain ± of
+# two components, `math/s_curve/quintic.rs` (`x*x*x*(x*(x*6−15)+10)`),
+# `math/interpolate.rs::linear` (`b*α + a*(1−α)`), one const `SCALE_FACTOR`
+# multiply, and a `clamp`. No transcendental anywhere in it, so IEEE-754
+# already pins every operation bit-for-bit on both targets and there is
+# nothing for libm routing to fix.
+#
+# One honest caveat, and it is not a libm one: `floor_to_isize` casts through
+# `isize`, which is 32-bit on wasm32 and 64-bit here. Inside i32 range the two
+# agree exactly (the hash masks to `& 0xff` regardless); beyond it wasm would
+# panic on the `NumCast::from(...).unwrap()` while native keeps going. Lattice
+# coordinates are nowhere near that, so it is a bound to respect, not a live
+# divergence.
+nalgebra = { version = "0.34.2", features = ["libm"] }
+parry3d = { version = "0.25.3", features = ["enhanced-determinism"] }
+rapier3d = { version = "0.31.0", features = ["enhanced-determinism"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 wasm-bindgen = "0.2.120"
 rand = "0.9"
+# No `libm` feature exists on this crate, and none is needed — its Perlin path
+# is transcendental-free, so it is already bit-exact cross-target. Reasoning
+# recorded in the nalgebra/parry3d/rapier3d determinism block above (#909 AC-5).
 noise = "0.9"
 toml = "1.0"
 strum = { version = "0.28.0", features = ["derive"] }

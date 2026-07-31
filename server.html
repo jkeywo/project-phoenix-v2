@@ -2602,6 +2602,10 @@ function finishInit() {
   // Performance capture (issue #868). Read-only: it returns what the wasm
   // collector has sampled so far and changes nothing in the running page.
   window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
+  // Cross-target libm vector battery (issue #909). Pure computation over
+  // fixed inputs — touches no simulation state; tests/smoke/simmath-vectors.spec.ts
+  // calls it and compares the digest against the pinned native one.
+  window.wasm_simmath_battery = wasmBindings.wasm_simmath_battery;
   window.wasm_set_log_spec = wasmBindings.wasm_set_log_spec;
   window.wasm_set_log_entity = wasmBindings.wasm_set_log_entity;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;

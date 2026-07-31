@@ -4142,6 +4142,7 @@ dependencies = [
  "ena",
  "foldhash 0.2.0",
  "hashbrown 0.16.1",
+ "indexmap",
  "log",
  "nalgebra",
  "num-derive",
@@ -4354,8 +4355,11 @@ dependencies = [
  "glam 0.30.10",
  "js-sys",
  "libm",
+ "nalgebra",
  "noise",
+ "parry3d",
  "rand 0.9.4",
+ "rapier3d",
  "ron",
  "serde",
  "serde_json",
@@ -4881,6 +4885,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c99284beb21666094ba2b75bbceda012e610f5479dfcc2d6e2426f53197ffd95"
 dependencies = [
  "approx",
+ "libm",
  "num-complex",
  "num-traits",
  "paste",

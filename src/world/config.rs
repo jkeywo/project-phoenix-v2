@@ -2155,6 +2155,28 @@ mod tests {
         );
     }
 
+    /// `[global] intent_break_off_hull_fraction` (issue #879): the hull
+    /// fraction at which a seat's intent narration announces that the ship is
+    /// breaking off. Authored data, not a Rust literal (AGENTS.md #11) — the
+    /// serde default is the only sanctioned hardcoded copy of it.
+    #[test]
+    fn parse_world_reads_the_intent_break_off_hull_fraction() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.intent_break_off_hull_fraction, 0.5,
+            "an omitted intent_break_off_hull_fraction falls back to half hull"
+        );
+
+        let authored = parse_world("[global]\nintent_break_off_hull_fraction = 0.25\n")
+            .expect("TOML should parse");
+        assert_eq!(
+            authored.global.intent_break_off_hull_fraction, 0.25,
+            "an authored break-off fraction must be read verbatim — a designer \
+             retunes when the crew is told the ship is pulling out without \
+             touching Rust"
+        );
+    }
+
     /// Every shipped world TOML authors the pre-#889 key. Promoting the field
     /// to `ai_tick_hz` must not silently drop those authored rates back to the
     /// serde default — the old key stays a serde alias.

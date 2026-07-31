@@ -1281,6 +1281,37 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
     }
 
+    /// `CoordinationPayload::IntentAdvisory` round-trip (issue #879 — a
+    /// backfilled seat's coarsened intent advisory, broadcast to every human
+    /// seat on the source ship).
+    #[test]
+    fn intent_advisory_coordination_payload_round_trips() {
+        let popup_msg = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::tactical_station_key(),
+            payload: CoordinationPayload::IntentAdvisory {
+                kind: crate::messages::IntentKind::TargetSwitched,
+                subject: Some("Harrow Raider".into()),
+                generation: 4,
+            },
+            sender_label: "Tactical".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, popup_msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
+
+        // The subject-less kinds, which serialise without the optional field.
+        let bare = ServerMessage::CoordinationPopup {
+            target: crate::system_registry::helm_station_key(),
+            payload: CoordinationPayload::IntentAdvisory {
+                kind: crate::messages::IntentKind::BreakingOff,
+                subject: None,
+                generation: 5,
+            },
+            sender_label: "Helm".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, bare.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, bare);
+    }
+
     /// BlasterFired server message round-trip (issue #631, extended #638).
     #[test]
     fn blaster_fired_server_message_round_trips() {

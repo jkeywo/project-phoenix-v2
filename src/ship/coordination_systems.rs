@@ -143,6 +143,16 @@ fn format_coordination_chatter(payload: &CoordinationPayload) -> String {
             let bearing_deg = (bearing_rad.to_degrees() + 360.0) % 360.0;
             format!("Sensors: threat bearing {bearing_deg:.0}° - {label}")
         }
+        CoordinationPayload::IntentAdvisory { kind, subject, .. } => {
+            // Server-side viewscreen flavour text only, like the arc-bearing
+            // arm above: the player-facing sentence is built in
+            // `gui/coordination-popup.js`. The generation is an ordering
+            // handle, not something a bridge officer says out loud.
+            match subject {
+                Some(s) => format!("{kind:?}: {s}"),
+                None => format!("{kind:?}"),
+            }
+        }
     }
 }
 
@@ -188,6 +198,41 @@ fn coarsen_repair_request(
         tier: *tier,
         deficit: if entitled { *deficit } else { None },
     }
+}
+
+/// Build the seat list the pure ship-broadcast router works from (issue #879).
+///
+/// One entry per authored station, **in authored order** — the deterministic
+/// ordering the router's contract depends on; iterating a map here would make
+/// the popup sequence depend on hash seeding, which two lockstep peers cannot
+/// agree on. Each station's fine systems are resolved through `policy_for`
+/// (which honours damage-offline) and reduced by
+/// [`coordination::seat_control_source`].
+fn ship_seats(
+    config: &crate::ship::config::ShipConfig,
+    control_sources: &ShipSystemControlSources,
+    sessions: &Sessions,
+) -> Vec<coordination::ShipSeat> {
+    config
+        .stations
+        .iter()
+        .map(|station| {
+            let policies: Vec<crate::ship::control_source::ControlTickPolicy> = config
+                .systems
+                .iter()
+                .filter(|s| s.station.as_ref() == Some(&station.id))
+                .map(|s| control_sources.0.policy_for(&s.id))
+                .collect();
+            coordination::ShipSeat {
+                station: station.id.clone(),
+                control: coordination::seat_control_source(&policies),
+                holder: sessions
+                    .0
+                    .holder_for_station(&station.id)
+                    .map(|t| t.to_string()),
+            }
+        })
+        .collect()
 }
 
 pub fn process_coordination_lag(
@@ -253,6 +298,57 @@ pub fn process_coordination_lag(
         });
         let due = queue.0.due_messages(now);
         for msg in due {
+            // ── Ship-wide broadcast (issue #879) ─────────────────────────
+            //
+            // An intent advisory is not addressed to one console: it goes to
+            // every human seat on the SOURCE ship, so a partly-backfilled
+            // bridge shares one picture of what the automation is doing. The
+            // decision of who receives it is the pure
+            // `coordination::broadcast_to_ship`, which is `route_coordination`
+            // applied per seat — so a backfilled sender pops up at every human
+            // seat, an AI or offline seat gets nothing, and a human sender is
+            // suppressed at every seat exactly as human→human always has been.
+            // The addressed path below is untouched for every other payload.
+            if matches!(msg.payload, CoordinationPayload::IntentAdvisory { .. }) {
+                // Popups require a browser-connected console holder; only the
+                // LocalShip has one, so NPC bridges narrate to nobody.
+                if !is_local {
+                    continue;
+                }
+                let label = if msg.sender_label.is_empty() {
+                    "AI".to_string()
+                } else {
+                    msg.sender_label.clone()
+                };
+                let seats = ship_seats(&ship_config.0, control_sources, &sessions);
+                for seat in coordination::broadcast_to_ship(msg.sender_origin, &seats) {
+                    let Some(token) = seat.holder.clone() else {
+                        continue;
+                    };
+                    outbox.0.push((
+                        crate::lobby_handler::Target::Token(token),
+                        crate::messages::ServerMessage::CoordinationPopup {
+                            target: msg.target.clone(),
+                            // The #737 gate, re-applied PER RECIPIENT. An
+                            // intent advisory carries no figures of its own,
+                            // but a broadcast fans one payload out to seats
+                            // with different entitlements, so the coarsening
+                            // has to be resolved against each seat rather than
+                            // once for the message — otherwise a ship-wide
+                            // send would be a way around the boundary the
+                            // addressed path enforces.
+                            payload: coarsen_repair_request(
+                                &msg.payload,
+                                repair_vis.as_ref(),
+                                Some(&seat.station),
+                            ),
+                            sender_label: label.clone(),
+                        },
+                    ));
+                }
+                continue;
+            }
+
             // Coordination targets are console-level station-id keys (issue
             // #801), so a helm-directed message cannot gate on a `helm`
             // system that no longer exists. The Helm console's effective
@@ -1673,6 +1769,155 @@ mod tests {
         assert!(
             deficits.iter().any(|d| d.is_some()),
             "a team on site is the information gate opening; got {deficits:?}"
+        );
+    }
+
+    // ── Issue #879: the ship-wide intent-advisory broadcast ──────────────────
+    //
+    // Every payload above is addressed to ONE console. An intent advisory is
+    // addressed to the ship: it goes to every human seat, so a crew that has
+    // lost seats to Backfill still shares one picture of what the automation is
+    // doing. These cover the delivery half; the routing rule itself is the pure
+    // `coordination::broadcast_to_ship`, and the "when does anything get
+    // emitted at all" half is `ship::intent_narration*`.
+
+    /// Put every system the named station owns on `source` — what claiming or
+    /// vacating that seat does to the ship's control sources.
+    fn set_station_systems_source(app: &mut App, station: &str, source: ControlSource) {
+        let ids: Vec<SystemId> = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&ShipConfigComponent, With<Ship>>();
+            let cfg = q.single(app.world()).expect("ship config").0.clone();
+            cfg.systems
+                .iter()
+                .filter(|s| s.station.as_ref().map(|st| st.0.as_str()) == Some(station))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        assert!(
+            !ids.is_empty(),
+            "the shipped hull must give `{station}` systems for this fixture to mean anything"
+        );
+        for id in ids {
+            set_fine_control_source(app, id, source);
+        }
+    }
+
+    /// The session tokens that received an intent-advisory popup, in order.
+    fn intent_popup_tokens(app: &App) -> Vec<String> {
+        app.world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .filter_map(|(target, msg)| match (target, msg) {
+                (
+                    crate::lobby_handler::Target::Token(token),
+                    crate::messages::ServerMessage::CoordinationPopup {
+                        payload: CoordinationPayload::IntentAdvisory { .. },
+                        ..
+                    },
+                ) => Some(token.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn enqueue_intent_advisory(app: &mut App, sender_origin: ControlSource) {
+        enqueue_coordination(
+            app,
+            sender_origin,
+            crate::system_registry::tactical_station_key(),
+            CoordinationPayload::IntentAdvisory {
+                kind: crate::messages::IntentKind::TargetSwitched,
+                subject: Some("Harrow Raider".into()),
+                generation: 7,
+            },
+        );
+    }
+
+    /// AC: a backfilled seat's advisory reaches every human seat on the source
+    /// ship, and no AI seat — even one that still carries a session token.
+    ///
+    /// Three humans are seated (Captain, Helm, Repair) and the Repair station's
+    /// systems are then put on AI, which is the shape a seat has while it is
+    /// backfilled. The advisory must reach the two human seats and stop at the
+    /// AI one; the addressed path could not express this at all, because it
+    /// delivers to exactly one console.
+    #[test]
+    fn an_intent_advisory_reaches_every_human_seat_and_no_ai_seat() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+        set_station_systems_source(&mut app, "repair", ControlSource::Ai);
+        backfill_tactical_to_ai(&mut app);
+
+        enqueue_intent_advisory(&mut app, ControlSource::Ai);
+        tick(&mut app);
+        tick(&mut app);
+
+        assert_eq!(
+            intent_popup_tokens(&app),
+            vec!["captain".to_string(), "helm".to_string()],
+            "every HUMAN seat on the ship, in authored station order — and not \
+             the backfilled Repair seat, whose holder token is still there"
+        );
+    }
+
+    /// The broadcast inherits the delivery matrix rather than replacing it: a
+    /// human-held seat's advisory is suppressed at every human seat, exactly as
+    /// human→human channel-3 traffic always has been.
+    #[test]
+    fn a_human_seats_intent_advisory_is_suppressed_across_the_ship() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+
+        enqueue_intent_advisory(&mut app, ControlSource::Human);
+        tick(&mut app);
+        tick(&mut app);
+
+        assert!(
+            intent_popup_tokens(&app).is_empty(),
+            "two officers on the same bridge talk to each other; the matrix has \
+             said so since #494 and the broadcast does not get to disagree"
+        );
+    }
+
+    /// Delivery is the existing transient popup surface and nothing else — no
+    /// durable log is written anywhere on the way.
+    #[test]
+    fn an_intent_advisory_is_delivered_verbatim_through_the_popup_surface() {
+        let mut app = routing_test_app();
+        start_game_with_engineer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+
+        enqueue_intent_advisory(&mut app, ControlSource::Ai);
+        tick(&mut app);
+        tick(&mut app);
+
+        let payloads: Vec<CoordinationPayload> = app
+            .world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .filter_map(|(_, msg)| match msg {
+                crate::messages::ServerMessage::CoordinationPopup { payload, .. } => {
+                    Some(payload.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            payloads.iter().all(|p| *p
+                == CoordinationPayload::IntentAdvisory {
+                    kind: crate::messages::IntentKind::TargetSwitched,
+                    subject: Some("Harrow Raider".into()),
+                    generation: 7,
+                }),
+            "the advisory rides the CoordinationPopup surface unchanged; got {payloads:?}"
+        );
+        assert!(
+            !payloads.is_empty(),
+            "precondition: something was delivered"
         );
     }
 }

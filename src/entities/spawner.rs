@@ -354,6 +354,11 @@ pub fn spawn_entity(
         // Sensors→Tactical frequency advisory a backfilled Tactical consumes
         // off the channel-3 bus (issue #873).
         entity_commands.insert(crate::ship_plugin::PendingTacticalFrequencyHint::default());
+        // Per-ship intent-narration memory (issue #879): the previous decision
+        // snapshot of each narrating seat plus this ship's advisory counter.
+        // Belongs to the ship rather than to its LOD tier — a demoted hull
+        // still has seats to narrate for if a human ever takes one.
+        entity_commands.insert(crate::ship_plugin::ShipIntentNarration::default());
         entity_commands.insert(crate::ship_plugin::LastSystemTiers::default());
         entity_commands.insert(crate::ship_plugin::RepairHumanAlerted::default());
         entity_commands.insert(crate::console::repair::server::RepairRequestQueue::default());

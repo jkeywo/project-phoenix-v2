@@ -15,6 +15,8 @@ pub mod helm_lateral_emit;
 pub mod helm_planner;
 pub mod impulse;
 pub mod impulse_boost_systems;
+pub mod intent_narration;
+pub mod intent_narration_systems;
 pub mod lateral_thrust;
 pub mod manual;
 pub mod physics;

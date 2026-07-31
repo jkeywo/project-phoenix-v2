@@ -21,16 +21,93 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # last, so the includer always wins.
 #
 # NOTE what is deliberately ABSENT: a class MOVEMENT fragment. Issue #876 set out
-# to give this hull the broadside-orbit doctrine and could not: measured against
-# `assets/worlds/probe_aggressor.toml`, `hold_combat_orbit` does not converge on
-# this hull's `max_speed = 10` / `max_yaw_rate = 0.4` — the ring spirals inward
-# through the enemy's guns at every radius, throttle and spiral gain tried — and
-# a ring is the wrong geometry for this armament anyway: both phaser banks author
-# `auto_arc_deg = 180`, so their AI arcs ABUT on exactly the beam line an orbit
-# parks its target on, and all three torpedo tubes are 90-degree fore/aft, so
-# nothing bears from the beam at all. This hull therefore keeps the fleet
-# baseline's stateless travel axes, which is what it authored inline before it
-# was composed — the merge is behaviour-preserving here by construction.
+# to give this hull the broadside-orbit doctrine and has not; the hull therefore
+# keeps the fleet baseline's stateless travel axes, which is what it authored
+# inline before it was composed — the merge is behaviour-preserving here by
+# construction. TWO reasons were recorded here at the first attempt and only ONE
+# of them survives measurement. Both are restated below at the strength the
+# evidence actually supports, because the weaker of them was blocking a retry.
+#
+# ── The CONTROL claim is WITHDRAWN: the orbit converges ──────────────────────
+#
+# The earlier note asserted that `hold_combat_orbit` "does not converge on this
+# hull's max_speed = 10 / max_yaw_rate = 0.4 — the ring spirals inward at every
+# radius, throttle and spiral gain tried". That is not true, and the repo's own
+# control law says so. The correction is proportional with no integral term, so
+# the ring settles a little OUTSIDE the authored radius, at
+#
+#     r * (r - R) = v * R * tracking_full_steer_rad / (max_yaw_rate * gain)
+#
+# With R = 32, v = 10 * 0.6 = 6, full_steer = 0.3, max_yaw_rate = 0.4 and
+# gain = 4.0 that predicts r = 33.09. Flown on this hull's own physics envelope
+# against a stationary bogey it settles at 33.1 from INSIDE the ring, from ON it
+# and from OUTSIDE it (starts of 12.8 / 32.0 / 80.0 units, all three flat at 33.1
+# within 20 s and held for the following 40 s). It sustains 6 / 33.1 = 0.18 rad/s
+# against the 0.4 this hull has, and 33.1 is eight units inside the 40-unit beam
+# range. There is no controller bug and no convergence problem.
+#
+# What the earlier sweep most likely reproduced is the documented failure of a
+# HALF-AUTHORED arm — `COMBAT_ORBIT_PARAMS` in `src/ship/helm_ai.rs` gates on all
+# three of `combat_orbit_range` / `combat_orbit_speed` / `combat_orbit_spiral_gain`
+# being present on the STEERING axis, and "one authoring the throttle but not the
+# range would fly a tangent of a ring of radius zero, which is a spiral straight
+# into the target".
+#
+# ── The GEOMETRY claim SURVIVES, and is stronger than it was ─────────────────
+#
+# A settled ring holds the target at EXACTLY the beam — a circular path means the
+# hull's heading is the tangent, so the bearing to the target is 90 degrees by
+# construction, not merely near it. On this hull's armament that bearing is the
+# worst one available:
+#
+#   * both phaser banks author `auto_arc_deg = 180` fore and aft, so their AI arcs
+#     ABUT on that exact line instead of overlapping across it. One bank bears at
+#     any bearing off the seam, so the orbit does not silence the beams — it costs
+#     the double broadside a 270-degree pair would give. Widening these arcs is a
+#     player-facing balance change, pinned as deliberate by
+#     `the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line`,
+#     and is NOT an implementer's call.
+#   * all three torpedo tubes are 90 degrees fore/aft, so nothing bears from the
+#     beam at all. This is the measured cost, in `assets/worlds/probe_aggressor.toml`
+#     over 30 s: the uncomposed hull's fore tube reports `Ready` on 688 of 901
+#     ticks; with the orbit composed it reports `OutOfArc` on 807 and `Ready` on 3.
+#     The doctrine takes the torpedo battery from 76 per cent bearing to 0.3.
+#
+# And that second point is not merely a damage cost — it is what STOPS THE HULL
+# FLYING THE RING AT ALL, through a Channel-3 path rather than through the
+# controller. Weapons emits an `ArcBearingRequest` for the first family that is in
+# reach and cannot bear (`src/console/weapons/mod.rs`); the phasers' 270-degree
+# FIRE arcs always bear, so the request is always the TORPEDO family's, whose
+# reach is `speed * lifespan` = 300 units and so is never out of reach. On the
+# receiving side `apply_arc_bearing_request` (`src/ship/helm_ai.rs`) does not bias
+# the doctrine's facing, it OVERWRITES `steering` with a full bow-on tracking
+# solution, after the planner has already solved the ring tangent, for every yaw
+# verb including `hold_combat_orbit`. Measured: the ring holds at 32.9 until the
+# request lands, then steering steps from the orbit's own +0.45 to +1.00 and the
+# hull turns bow-on at its full 0.4 rad/s until a tube bears; the request clears,
+# the orbit pulls the bearing back to 90, and it fires again. The result is a
+# sawtooth that walks the hull from 33 units down to 13 and back, i.e. straight
+# through the 35-unit blaster envelope of the ship it is fighting.
+#
+# In `probe_aggressor` that inverts the engagement:
+#   uncomposed  player 64 damage dealt,  0 taken
+#   composed    player 50 damage dealt, 136 taken
+# and it inverts across the parameter space, not at one point: twelve settings of
+# (ring 30-36) x (throttle 0.35-0.6) x (gain 1.2-4.0) leave the passive hostile
+# ahead in eleven. The window is closed by construction rather than by bad luck —
+# the sawtooth is about 8 units deep, the hull's beams reach 40 and the hostile's
+# blasters reach 35, so no ring both keeps the target under the beams and keeps
+# the hull outside the blasters. `backfilled_player_hull_proactively_engages_on_template_doctrine`
+# fails on exactly that inversion (50 against 136); it was NOT weakened, and the
+# doctrine is not composed. The other 34 headless tests pass with it composed.
+#
+# So AC1 needs a decision that is not parameter-only authoring: either the tubes'
+# arcs (balance, owner's call), or a torpedo-opportunity leg like the Harrow
+# cruiser's so the bow-on phase is the doctrine's own rather than Channel 3's, or
+# a precedence rule saying a class movement doctrine's facing outranks an
+# arc-bearing request. That last one is a live question for the destroyer too:
+# nothing stops an `ArcBearingRequest` overwriting `hold_committed_heading`, which
+# is the one leg #875 says nothing about the target may cut short.
 #
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
@@ -884,7 +961,8 @@ source             = "shield"
 # `fragments/ai/fleet_baseline.toml`. The Captain's red-alert doctrine comes from
 # `fragments/ai/captain_alliance.toml`. Engines and Steering come from the
 # baseline too — see the note on `includes` for why this hull takes no class
-# movement doctrine, and what would have to change for it to take one.
+# movement doctrine, what a retry would have to decide first, and the numbers
+# behind both halves of that.
 #
 # Three things deliberately stay inline, and each for a reason about PRESENCE
 # rather than about taste — authoring a sub-table brings its parent into

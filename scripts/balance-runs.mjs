@@ -42,9 +42,31 @@
 //     the player side out-damaged the enemy.
 //
 // The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
-// / resolveSeeds) are unit-tested in tests/client/balance-runs.test.js with
+// / resolveSeeds / evaluateThresholds / formatThresholds / formatPhases /
+// runFileName) are unit-tested in tests/client/balance-runs.test.js with
 // fabricated report objects — no simulation required. Everything that spawns a
 // process lives in main() and its helpers.
+//
+// ── Recorded thresholds (issue #915 — non-gating) ────────────────────────────
+//
+// A config may declare regression thresholds, globally and/or per-[[matchup]]:
+//
+//   [thresholds]                 # applies to every matchup
+//   max_failures = 0
+//
+//   [[matchup]]
+//   name = "destroyer_vs_harrow_patrol"
+//   side_a = ["destroyer"]
+//   side_b = ["ship_harrow_patrol"]
+//     [matchup.thresholds]       # overrides the global table per key
+//     min_win_rate = 0.5
+//
+// Known metrics: min_win_rate / max_win_rate (over completed runs),
+// min_ttk_median / max_ttk_median (seconds), min_damage_margin /
+// max_damage_margin (mean player-minus-enemy damage), max_failures.
+// Threshold results are RECORDED — written into merged.json and summary.md —
+// and never change the exit code. Gating comes later, once the numbers have
+// been observed stable across enough runs to mean regression rather than noise.
 
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -131,6 +153,9 @@ export function expandMatchups(config) {
         sideA,
         sideB,
         world: m.world ?? matchupWorld,
+        // Per-matchup threshold overrides, carried through so
+        // evaluateThresholds can merge them over the global [thresholds].
+        thresholds: m.thresholds,
       });
     }
   }
@@ -174,6 +199,15 @@ export function buildRunTasks(config, matchups) {
     }
   }
   return tasks;
+}
+
+/**
+ * Filename for one run's persisted AAR report: `<matchup>-seed<seed>.json`
+ * with anything filesystem-hostile in the label replaced. PURE.
+ */
+export function runFileName(matchup, seed) {
+  const safe = String(matchup).replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${safe}-seed${seed}.json`;
 }
 
 // ── Pure merge + formatting ─────────────────────────────────────────────────
@@ -227,6 +261,7 @@ export function mergeReports(runs) {
         ttkSamples: [],
         marginSamples: [],
         failuresDetail: [],
+        phaseSeconds: {},
       };
       byMatchup.set(run.matchup, m);
     }
@@ -263,6 +298,17 @@ export function mergeReports(runs) {
     if (typeof player === 'number' && typeof enemy === 'number') {
       m.marginSamples.push(player - enemy);
     }
+
+    // Doctrine phase occupancy (issue #915): sum every ship's per-phase
+    // sim-seconds over the matchup's runs. Both sides are folded together —
+    // the per-run reports persisted under runs/ keep the per-ship split.
+    for (const ledger of Object.values(run.report.damage_by_ship ?? {})) {
+      for (const [phase, secs] of Object.entries(ledger?.phase_seconds ?? {})) {
+        if (typeof secs === 'number') {
+          m.phaseSeconds[phase] = (m.phaseSeconds[phase] ?? 0) + secs;
+        }
+      }
+    }
   }
 
   const matchups = {};
@@ -287,6 +333,13 @@ export function mergeReports(runs) {
         count: m.ttkSamples.length,
       },
       damageMargin: { mean: mean(m.marginSamples), count: m.marginSamples.length },
+      // Phase → summed sim-seconds, keys sorted and values rounded to ms so
+      // merged.json is stable and diffably free of float-sum noise.
+      phases: Object.fromEntries(
+        Object.entries(m.phaseSeconds)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([phase, secs]) => [phase, Math.round(secs * 1000) / 1000]),
+      ),
       failuresDetail: m.failuresDetail,
     };
   }
@@ -349,6 +402,95 @@ export function formatMatrix(summary, classes, metric = 'winRate') {
   const lines = [header, sep];
   for (const a of classes) {
     lines.push(`| **${a}** | ${classes.map((b) => cell(a, b)).join(' | ')} |`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Render each matchup's doctrine-phase occupancy as a markdown list, phases
+ * ordered by share descending. Matchups with no phase data are skipped; returns
+ * '' when nothing has any. PURE.
+ */
+export function formatPhases(summary) {
+  const lines = [];
+  for (const s of Object.values(summary.matchups)) {
+    const entries = Object.entries(s.phases ?? {});
+    const total = entries.reduce((a, [, secs]) => a + secs, 0);
+    if (total <= 0) continue;
+    const parts = entries
+      .sort(([, a], [, b]) => b - a)
+      .map(([phase, secs]) => `${phase} ${((secs / total) * 100).toFixed(0)}%`);
+    lines.push(`- **${s.label}**: ${parts.join(', ')} (${total.toFixed(0)} phase-seconds)`);
+  }
+  if (lines.length === 0) return '';
+  return ['### Doctrine phase occupancy', '', ...lines].join('\n');
+}
+
+// The recordable threshold metrics: how to read the actual off a matchup
+// summary, and which way the limit points.
+const THRESHOLD_METRICS = {
+  min_win_rate: { actual: (s) => s.winRate, ok: (a, limit) => a >= limit },
+  max_win_rate: { actual: (s) => s.winRate, ok: (a, limit) => a <= limit },
+  min_ttk_median: { actual: (s) => s.ttk.median, ok: (a, limit) => a >= limit },
+  max_ttk_median: { actual: (s) => s.ttk.median, ok: (a, limit) => a <= limit },
+  min_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a >= limit },
+  max_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a <= limit },
+  max_failures: { actual: (s) => s.failures, ok: (a, limit) => a <= limit },
+};
+
+/**
+ * Evaluate the config's recorded thresholds against a merged summary. PURE.
+ *
+ * For each matchup the effective spec is the global `[thresholds]` table with
+ * that matchup's own `thresholds` (carried on the descriptor by
+ * expandMatchups) merged over it per key. Returns one record per (matchup ×
+ * metric): `{matchup, metric, limit, actual, pass}` where `pass` is null when
+ * the metric has no data (e.g. no TTK sample). Unknown metric names throw — a
+ * typo must fail loudly, not silently record nothing. NON-GATING by design:
+ * callers record the result; nothing here exits or throws on a failed check.
+ */
+export function evaluateThresholds(summary, matchups, globalThresholds = {}) {
+  const checks = [];
+  for (const s of Object.values(summary.matchups)) {
+    const own = matchups.find((m) => m.label === s.label)?.thresholds ?? {};
+    const spec = { ...globalThresholds, ...own };
+    for (const [metric, limit] of Object.entries(spec)) {
+      const def = THRESHOLD_METRICS[metric];
+      if (!def) {
+        throw new Error(
+          `unknown threshold metric ${JSON.stringify(metric)}; known: ${Object.keys(THRESHOLD_METRICS).join(', ')}`,
+        );
+      }
+      if (typeof limit !== 'number') {
+        throw new Error(`threshold ${metric} must be a number, got ${JSON.stringify(limit)}`);
+      }
+      const actual = def.actual(s);
+      checks.push({
+        matchup: s.label,
+        metric,
+        limit,
+        actual: actual ?? null,
+        pass: actual == null ? null : def.ok(actual, limit),
+      });
+    }
+  }
+  return checks;
+}
+
+/**
+ * Render threshold records as a markdown table. PURE. Returns '' for none.
+ */
+export function formatThresholds(checks) {
+  if (!checks.length) return '';
+  const lines = [];
+  lines.push('### Thresholds (recorded, non-gating)');
+  lines.push('');
+  lines.push('| Matchup | Metric | Limit | Actual | Status |');
+  lines.push('|---|---|---:|---:|:---:|');
+  for (const c of checks) {
+    const status = c.pass === null ? 'no data' : c.pass ? 'PASS' : 'FAIL';
+    const actual = c.actual === null ? '—' : Number(c.actual).toFixed(2);
+    lines.push(`| ${c.matchup} | ${c.metric} | ${c.limit} | ${actual} | ${status} |`);
   }
   return lines.join('\n');
 }
@@ -427,7 +569,11 @@ function runOne(bin, task) {
         finish({ ...taskId(task), error: `unparseable report: ${e.message}`, exitCode: code, stderrTail });
         return;
       }
-      finish({ ...taskId(task), report });
+      // `stdoutRaw` keeps the binary's own bytes so a persisted per-run report
+      // is byte-identical with what the run printed — same-seed reruns diff
+      // empty (the binary zeroes wall timings under --seed). Not merged into
+      // merged.json.
+      finish({ ...taskId(task), report, stdoutRaw: stdout });
     });
   });
 }
@@ -471,7 +617,10 @@ USAGE:
 
 Reads <config.toml>, fans out phoenix-headless across every (matchup × seed),
 and merges the per-run reports. Markdown summary → stdout; with --out <dir>,
-merged.json + summary.md are also written there (keep that dir out of git).
+merged.json + summary.md + the per-run AAR reports (runs/<matchup>-seed<N>.json)
+are also written there (keep that dir out of git). A config [thresholds] table
+(and per-[[matchup]] overrides) is evaluated and RECORDED in both outputs but
+never gates the exit code.
 
 Requires: npm install, and a release binary at target/release/phoenix-headless
 (build with: cargo build --release --features headless --bin phoenix-headless).`;
@@ -517,18 +666,39 @@ async function main() {
   if (Array.isArray(config.class_matrix)) {
     out = `${formatMatrix(summary, config.class_matrix)}\n\n${markdown}`;
   }
+  const phases = formatPhases(summary);
+  if (phases) out = `${out}\n\n${phases}`;
+  // Recorded thresholds (issue #915): evaluated and WRITTEN, never enforced —
+  // the exit code does not depend on them.
+  const thresholds = evaluateThresholds(summary, matchups, config.thresholds ?? {});
+  if (thresholds.length) out = `${out}\n\n${formatThresholds(thresholds)}`;
   console.log(out);
 
   if (cli.out) {
     await mkdir(cli.out, { recursive: true });
-    await writeFile(path.join(cli.out, 'merged.json'), `${JSON.stringify(summary, null, 2)}\n`);
+    const merged = thresholds.length ? { ...summary, thresholds } : summary;
+    await writeFile(path.join(cli.out, 'merged.json'), `${JSON.stringify(merged, null, 2)}\n`);
     await writeFile(path.join(cli.out, 'summary.md'), `${out}\n`);
-    console.error(`[balance-runs] wrote ${path.join(cli.out, 'merged.json')} and summary.md`);
+    // Persist each run's own AAR report verbatim — the seeded evidence the
+    // merged numbers are derived from, and the artifact a tuning pass diffs.
+    const runsDir = path.join(cli.out, 'runs');
+    await mkdir(runsDir, { recursive: true });
+    let persisted = 0;
+    for (const run of runs) {
+      if (typeof run.stdoutRaw === 'string') {
+        await writeFile(path.join(runsDir, runFileName(run.matchup, run.seed)), run.stdoutRaw);
+        persisted += 1;
+      }
+    }
+    console.error(
+      `[balance-runs] wrote ${path.join(cli.out, 'merged.json')}, summary.md, and ${persisted} per-run reports under runs/`,
+    );
   }
 }
 
-// Guard the CLI entry so importing this module (for tests) never spawns.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Guard the CLI entry so importing this module (for tests, or from `node -e`
+// where argv[1] is undefined) never spawns.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

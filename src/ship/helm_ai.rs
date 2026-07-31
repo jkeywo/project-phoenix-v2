@@ -2325,6 +2325,15 @@ pub(crate) fn ai_policy_state_tick(
         Option<&crate::ship::shields::ShipShields>,
         Option<&ShipPhysics>,
     )>,
+    // Balance tracer sink (issue #915). `Option<ResMut<Messages<_>>>` rather
+    // than `MessageWriter` for the same reason the objective tracer above uses
+    // it: a bare-`App` fixture that never registered the message must not fail
+    // parameter validation.
+    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // The last doctrine phase reported per ship, so the tracer emits once per
+    // observed change (including the initial phase on the first gated tick)
+    // rather than once per tick.
+    mut last_reported_phase: Local<std::collections::HashMap<Entity, String>>,
 ) {
     // One authored tick period per run — the shared cadence, never Time::delta.
     let hz = world_config
@@ -2432,6 +2441,28 @@ pub(crate) fn ai_policy_state_tick(
             physics.yaw,
             |_| {},
         );
+
+        // Doctrine-phase tracer (issue #915): the Engines machine's committed
+        // state IS the ship's doctrine movement phase, so report every observed
+        // change of it — including the initial phase on the first gated tick —
+        // as a balance event. Emitted unconditionally (all ships, every build),
+        // like every other balance chokepoint; the headless report folds these
+        // into per-ship time-in-phase. Stateless policies have no phases and
+        // emit nothing.
+        if engines_policy.machine().is_some() {
+            let phase = &runtime.engines.0.current;
+            if !phase.is_empty()
+                && last_reported_phase.get(&entity).map(String::as_str) != Some(phase.as_str())
+            {
+                if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), entity_uuid) {
+                    msgs.write(crate::balance::BalanceEvent::DoctrinePhaseChanged {
+                        ship: uuid.0.clone(),
+                        phase: phase.clone(),
+                    });
+                    last_reported_phase.insert(entity, phase.clone());
+                }
+            }
+        }
 
         // ── Steering ─────────────────────────────────────────────────────────
         let steering_entered = tick_policy_machine(
@@ -10609,6 +10640,74 @@ verb = "engage_boost"
             "inbound",
             "Engines runs its OWN copy of the machine and must reach the same leg \
              from the same facts, not by reading Steering's state"
+        );
+    }
+
+    /// The doctrine-phase balance tracer (issue #915): one event on the first
+    /// gated tick carrying the committed initial phase, silence while the phase
+    /// holds, and exactly one event per committed change — so the headless
+    /// report can fold per-ship time-in-phase without a per-tick stream.
+    #[test]
+    fn doctrine_phase_tracer_emits_initial_phase_and_each_change_once() {
+        use bevy::ecs::message::Messages;
+
+        let (mut app, bogey) = fly_through_app([0.0, 0.0, -900.0]);
+        // Register the balance sink the tracer writes to. `init_resource` (not
+        // `add_message`) so no per-frame double-buffer swap drops events
+        // between cursor reads — same trick as the objective-tracer test.
+        app.init_resource::<Messages<crate::balance::BalanceEvent>>();
+        // The tracer names ships by uuid; the bare fixture ship has none.
+        let ship = find_ship_entity(&mut app);
+        let ship_uuid = uuid::Uuid::new_v4().to_string();
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(crate::entity_spawner::EntityUuid(ship_uuid.clone()));
+
+        let mut cursor = app
+            .world()
+            .resource::<Messages<crate::balance::BalanceEvent>>()
+            .get_cursor();
+        // Reads every DoctrinePhaseChanged since the last call, as (ship, phase).
+        let mut drain_phases = |app: &mut App| -> Vec<(String, String)> {
+            let messages = app
+                .world()
+                .resource::<Messages<crate::balance::BalanceEvent>>();
+            cursor
+                .read(messages)
+                .filter_map(|e| match e {
+                    crate::balance::BalanceEvent::DoctrinePhaseChanged { ship, phase } => {
+                        Some((ship.clone(), phase.clone()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // Beyond commit_range the machine holds at `acquire`: the FIRST gated
+        // tick reports the initial phase, later held ticks report nothing.
+        tick_twice(&mut app);
+        assert_eq!(engines_state(&mut app), "acquire");
+        let first = drain_phases(&mut app);
+        assert_eq!(
+            first,
+            vec![(ship_uuid.clone(), "acquire".to_string())],
+            "the initial phase must be reported exactly once"
+        );
+        tick(&mut app);
+        assert!(
+            drain_phases(&mut app).is_empty(),
+            "a held phase must not re-emit"
+        );
+
+        // Inside commit_range the machine commits to the run — one event with
+        // the new phase.
+        set_bogey(&mut app, bogey, [0.0, 0.0, -150.0], 0.0, 0.0);
+        tick(&mut app);
+        assert_eq!(engines_state(&mut app), "inbound");
+        assert_eq!(
+            drain_phases(&mut app),
+            vec![(ship_uuid, "inbound".to_string())],
+            "a committed change must be reported exactly once"
         );
     }
 

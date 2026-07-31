@@ -206,6 +206,17 @@ pub enum BalanceEvent {
         /// Hull HP restored this tick (always > 0 when emitted).
         hp: f32,
     },
+    /// A ship's committed doctrine movement phase changed (issue #915) — the
+    /// Engines policy machine's current state, which is the authored
+    /// `engines_ai.state` id (`"acquire"`, `"attack_run"`, `"escape"`, …).
+    /// Emitted once per observed change, including the initial phase on the
+    /// first AI tick, so the report can fold per-ship time-in-phase.
+    DoctrinePhaseChanged {
+        /// UUID of the ship.
+        ship: String,
+        /// The authored state id just committed.
+        phase: String,
+    },
 }
 
 impl BalanceEvent {
@@ -215,7 +226,7 @@ impl BalanceEvent {
     /// timeline-coverage test when a variant is added, forcing whoever adds one
     /// to say whether it is a story beat or per-tick bookkeeping. A derived
     /// count would track the enum silently and guard nothing.
-    pub const VARIANT_COUNT: usize = 10;
+    pub const VARIANT_COUNT: usize = 11;
 
     /// Whether this event belongs in the ndjson *timeline stream*.
     ///
@@ -309,6 +320,9 @@ impl BalanceEvent {
             BalanceEvent::RepairApplied { ship, hp } => {
                 format!("{{\"event\":\"RepairApplied\",\"ship\":{ship:?},\"hp\":{hp:.3}}}")
             }
+            BalanceEvent::DoctrinePhaseChanged { ship, phase } => format!(
+                "{{\"event\":\"DoctrinePhaseChanged\",\"ship\":{ship:?},\"phase\":{phase:?}}}"
+            ),
         }
     }
 }
@@ -381,6 +395,12 @@ pub struct DamageLedger {
     pub system_knockouts: Vec<SystemKnockout>,
     /// Total hull HP this ship's repair teams restored over the run.
     pub repair_hp: f32,
+    /// Sim-seconds this ship spent in each committed doctrine movement phase
+    /// (the Engines machine's authored state ids), folded from
+    /// [`BalanceEvent::DoctrinePhaseChanged`] (issue #915). The open interval at
+    /// run end is closed at the ship's death time when it died, otherwise at
+    /// the run's final sim time. Empty for a hull with a stateless policy.
+    pub phase_seconds: BTreeMap<String, f64>,
 }
 
 fn add_f32(map: &mut BTreeMap<String, f32>, key: &str, amount: f32) {
@@ -451,14 +471,15 @@ pub fn aggregate_damage<'a>(
                 ledgers.entry(ship.clone()).or_default().repair_hp += hp;
             }
             // Timeline-only or timestamp-dependent variants: no bare-fold
-            // contribution. Deaths and knockouts are folded in
+            // contribution. Deaths, knockouts and phase occupancy are folded in
             // `aggregate_ledgers` where the stamp is available.
             BalanceEvent::ShieldArcCollapsed { .. }
             | BalanceEvent::SystemTierCrossed { .. }
             | BalanceEvent::Disarmed { .. }
             | BalanceEvent::RedAlertChanged { .. }
             | BalanceEvent::ObjectiveCompleted { .. }
-            | BalanceEvent::PhaseChanged { .. } => {}
+            | BalanceEvent::PhaseChanged { .. }
+            | BalanceEvent::DoctrinePhaseChanged { .. } => {}
         }
     }
     for (uuid, ledger) in ledgers.iter_mut() {
@@ -470,14 +491,21 @@ pub fn aggregate_damage<'a>(
 /// Fold a *stamped* balance-event log into per-ship ledgers.
 ///
 /// The full aggregation: [`aggregate_damage`] over the bare events for the
-/// untimed facts, then a stamped pass for the two facts that need a clock — a
-/// ship's death timestamp and each system knockout. Pure by design: no ECS, no
-/// resources, no time beyond what the stamps carry.
+/// untimed facts, then a stamped pass for the facts that need a clock — a
+/// ship's death timestamp, each system knockout, and doctrine phase occupancy.
+/// Pure by design: no ECS, no resources, no time beyond what the stamps carry.
+///
+/// `final_sim_t` is the run's final sim time, used to close each ship's open
+/// phase interval: a ship that died has its last phase closed at its death
+/// stamp instead, so a corpse never accrues occupancy.
 pub fn aggregate_ledgers(
     events: &[StampedBalanceEvent],
     names: &BTreeMap<String, String>,
+    final_sim_t: f64,
 ) -> BTreeMap<String, DamageLedger> {
     let mut ledgers = aggregate_damage(events.iter().map(|s| &s.event), names);
+    // Per-ship open phase interval: (phase, entered-at sim_t).
+    let mut open_phase: BTreeMap<String, (String, f64)> = BTreeMap::new();
     for stamped in events {
         match &stamped.event {
             BalanceEvent::EntityDestroyed { victim, .. } => {
@@ -505,8 +533,23 @@ pub fn aggregate_ledgers(
                         sim_t: stamped.sim_t,
                     });
             }
+            BalanceEvent::DoctrinePhaseChanged { ship, phase } => {
+                let ledger = ledgers.entry(ship.clone()).or_default();
+                if let Some((prev, since)) = open_phase.remove(ship) {
+                    *ledger.phase_seconds.entry(prev).or_default() +=
+                        (stamped.sim_t - since).max(0.0);
+                }
+                open_phase.insert(ship.clone(), (phase.clone(), stamped.sim_t));
+            }
             _ => {}
         }
+    }
+    // Close every still-open phase interval: at the ship's death when it died
+    // (the machine stops with the ship), otherwise at the end of the run.
+    for (uuid, (phase, since)) in open_phase {
+        let ledger = ledgers.entry(uuid).or_default();
+        let end = ledger.death.map(|(_, t)| t).unwrap_or(final_sim_t);
+        *ledger.phase_seconds.entry(phase).or_default() += (end - since).max(0.0);
     }
     // Names may have arrived only via a stamped-only variant (a ship that only
     // ever died or was knocked out), so re-attach after the stamped pass.
@@ -520,6 +563,14 @@ pub fn aggregate_ledgers(
 
 /// Render a `BTreeMap<String, f32>` as a JSON object body. Stable order.
 fn f32_map_to_json(map: &BTreeMap<String, f32>) -> String {
+    map.iter()
+        .map(|(k, v)| format!("{k:?}: {v:.3}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Render a `BTreeMap<String, f64>` as a JSON object body. Stable order.
+fn f64_map_to_json(map: &BTreeMap<String, f64>) -> String {
     map.iter()
         .map(|(k, v)| format!("{k:?}: {v:.3}"))
         .collect::<Vec<_>>()
@@ -563,7 +614,7 @@ pub fn ledgers_to_json(ledgers: &BTreeMap<String, DamageLedger>) -> String {
                 "{:?}: {{\"name_id\": {}, \"damage_dealt\": {:.3}, \"damage_taken\": {:.3}, \
                  \"by_weapon\": {{{}}}, \"by_pair\": {{{}}}, \"shield_absorbed\": {:.3}, \
                  \"hull_taken\": {:.3}, \"shots_fired\": {{{}}}, \"kills\": {}, \"death\": {}, \
-                 \"system_knockouts\": [{}], \"repair_hp\": {:.3}}}",
+                 \"system_knockouts\": [{}], \"repair_hp\": {:.3}, \"phase_seconds\": {{{}}}}}",
                 uuid,
                 opt_string(&l.name_id),
                 l.damage_dealt,
@@ -577,6 +628,7 @@ pub fn ledgers_to_json(ledgers: &BTreeMap<String, DamageLedger>) -> String {
                 death,
                 knockouts_to_json(&l.system_knockouts),
                 l.repair_hp,
+                f64_map_to_json(&l.phase_seconds),
             )
         })
         .collect::<Vec<_>>()
@@ -1008,7 +1060,7 @@ mod tests {
                 },
             ),
         ];
-        let ledgers = aggregate_ledgers(&events, &BTreeMap::new());
+        let ledgers = aggregate_ledgers(&events, &BTreeMap::new(), 2.0);
         assert_eq!(ledgers["player"].kills, 2);
         assert_eq!(ledgers["raider"].death, Some((9, 0.9)));
     }
@@ -1048,7 +1100,7 @@ mod tests {
                 },
             ),
         ];
-        let l = &aggregate_ledgers(&events, &BTreeMap::new())["raider"];
+        let l = &aggregate_ledgers(&events, &BTreeMap::new(), 1.0)["raider"];
         assert_eq!(
             l.system_knockouts.len(),
             2,
@@ -1059,6 +1111,74 @@ mod tests {
         assert_eq!(l.system_knockouts[0].tick, 7);
         assert_eq!(l.system_knockouts[1].system_id, "helm");
         assert_eq!(l.system_knockouts[1].sim_t, 0.8);
+    }
+
+    fn phase(ship: &str, phase: &str) -> BalanceEvent {
+        BalanceEvent::DoctrinePhaseChanged {
+            ship: ship.to_string(),
+            phase: phase.to_string(),
+        }
+    }
+
+    /// Occupancy is the time between consecutive phase changes, per ship, with
+    /// the open interval at the end closed at the run's final sim time.
+    #[test]
+    fn phase_occupancy_attributes_time_between_changes_and_closes_at_run_end() {
+        let events = vec![
+            stamp(1, 0.0, phase("player", "acquire")),
+            stamp(50, 5.0, phase("player", "attack_run")),
+            // Re-entering a phase accumulates onto the same key.
+            stamp(120, 12.0, phase("player", "acquire")),
+            // A second ship's machine is folded independently.
+            stamp(2, 1.0, phase("raider", "acquire")),
+        ];
+        let ledgers = aggregate_ledgers(&events, &BTreeMap::new(), 20.0);
+        let p = &ledgers["player"].phase_seconds;
+        assert!((p["acquire"] - (5.0 + 8.0)).abs() < 1e-9, "got {p:?}");
+        assert!((p["attack_run"] - 7.0).abs() < 1e-9, "got {p:?}");
+        assert!((ledgers["raider"].phase_seconds["acquire"] - 19.0).abs() < 1e-9);
+    }
+
+    /// A dead ship's machine stops with the ship: its open phase closes at the
+    /// death stamp, never at the end of the run.
+    #[test]
+    fn phase_occupancy_closes_at_the_ships_death_not_run_end() {
+        let events = vec![
+            stamp(1, 0.0, phase("raider", "acquire")),
+            stamp(30, 3.0, phase("raider", "escape")),
+            stamp(
+                90,
+                9.0,
+                BalanceEvent::EntityDestroyed {
+                    victim: "raider".into(),
+                    killer: Some("player".into()),
+                },
+            ),
+        ];
+        let l = &aggregate_ledgers(&events, &BTreeMap::new(), 60.0)["raider"];
+        assert!((l.phase_seconds["acquire"] - 3.0).abs() < 1e-9);
+        assert!(
+            (l.phase_seconds["escape"] - 6.0).abs() < 1e-9,
+            "the corpse must not accrue occupancy: got {:?}",
+            l.phase_seconds
+        );
+    }
+
+    /// The ledger JSON carries `phase_seconds` as a parseable object.
+    #[test]
+    fn ledger_json_carries_phase_seconds() {
+        let events = vec![
+            stamp(1, 0.0, phase("player", "acquire")),
+            stamp(60, 6.0, phase("player", "attack_run")),
+        ];
+        let json = format!(
+            "{{{}}}",
+            ledgers_to_json(&aggregate_ledgers(&events, &BTreeMap::new(), 10.0))
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .unwrap_or_else(|e| panic!("ledgers are not valid JSON: {e}\n{json}"));
+        assert_eq!(parsed["player"]["phase_seconds"]["acquire"], 6.0);
+        assert_eq!(parsed["player"]["phase_seconds"]["attack_run"], 4.0);
     }
 
     #[test]
@@ -1139,6 +1259,10 @@ mod tests {
                 from: "Lobby".into(),
                 to: "InProgress".into(),
             },
+            BalanceEvent::DoctrinePhaseChanged {
+                ship: "a".into(),
+                phase: "attack_run".into(),
+            },
         ];
         // Anti-vacuity: the list above is one per variant *except*
         // `RepairApplied`, which is the only intentional exclusion. Pinning the
@@ -1183,7 +1307,7 @@ mod tests {
             .collect();
         let json = format!(
             "{{{}}}",
-            ledgers_to_json(&aggregate_ledgers(&events, &names))
+            ledgers_to_json(&aggregate_ledgers(&events, &names, 0.4))
         );
         let parsed: serde_json::Value = serde_json::from_str(&json)
             .unwrap_or_else(|e| panic!("ledgers are not valid JSON: {e}\n{json}"));
@@ -1265,6 +1389,10 @@ mod tests {
             BalanceEvent::RepairApplied {
                 ship: "player".into(),
                 hp: 3.5,
+            },
+            BalanceEvent::DoctrinePhaseChanged {
+                ship: "player".into(),
+                phase: "acquire".into(),
             },
         ];
         for event in cases {

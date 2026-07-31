@@ -103,7 +103,8 @@ fn referenced_ship_uuids(event: &BalanceEvent) -> Vec<&String> {
         | BalanceEvent::SystemTierCrossed { ship, .. }
         | BalanceEvent::Disarmed { ship }
         | BalanceEvent::RedAlertChanged { ship, .. }
-        | BalanceEvent::RepairApplied { ship, .. } => ids.push(ship),
+        | BalanceEvent::RepairApplied { ship, .. }
+        | BalanceEvent::DoctrinePhaseChanged { ship, .. } => ids.push(ship),
         BalanceEvent::EntityDestroyed { victim, killer } => {
             ids.push(victim);
             ids.extend(killer.iter());
@@ -329,10 +330,16 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
     let telemetry = app.world().resource::<RunTelemetry>();
     let ticks = telemetry.ticks;
     let message_counts = telemetry.message_counts.clone();
+    let final_sim_t = app.world().resource::<Time>().elapsed_secs_f64();
     // Pure fold: the ledgers come from the stamped event log and the names
     // captured alongside it, never from the world. Stamped so the fold can
-    // name each death's tick and each knockout's sim-time.
-    let damage_by_ship = aggregate_ledgers(&telemetry.balance_events, &telemetry.entity_names);
+    // name each death's tick, each knockout's sim-time, and close each ship's
+    // open doctrine-phase interval at the end of the run.
+    let damage_by_ship = aggregate_ledgers(
+        &telemetry.balance_events,
+        &telemetry.entity_names,
+        final_sim_t,
+    );
 
     // Read off the resource rather than off `args`: `args.seed` is only the
     // CLI tier of the precedence chain, and the report has to name the seed
@@ -345,7 +352,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
 
     let wall_seconds = reported_wall_seconds(&seed_source, wall_seconds);
 
-    let sim_seconds = app.world().resource::<Time>().elapsed_secs_f64();
+    let sim_seconds = final_sim_t;
     let final_phase = format!("{:?}", app.world().resource::<State<GamePhase>>().get());
     let is_game_over = final_phase == format!("{:?}", GamePhase::GameOver);
     let game_over_res = app.world().resource::<GameOverReason>();

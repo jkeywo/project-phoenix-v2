@@ -1,0 +1,76 @@
+# Demo balance regression harness (issue #915): the Alliance Destroyer
+# (Backfill-crewed, side-A slot 1 of the duel harness) versus each combat_test
+# enemy class, on fixed seeds. Composes the #835 machinery — duel transform,
+# batch runner, AAR reports — into the standing report the tuning pass consumes.
+#
+#   npm run balance:demo
+#     = cargo build --release --features headless --bin phoenix-headless
+#       && node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out .balance-out
+#
+# Outputs (keep .balance-out/ out of git): merged.json (per-matchup win/loss,
+# TTK, damage margins, doctrine-phase occupancy, recorded threshold results),
+# summary.md (the same as markdown), and runs/<matchup>-seed<N>.json — each
+# run's full AAR report, byte-identical across reruns of the same seed.
+#
+# CI runs exactly this config in the non-gating `balance` job and uploads the
+# output directory as the `balance-report` artifact.
+#
+# Do not retune seeds/sim_seconds to chase a result — successive reports are
+# only comparable while they agree. For exploratory sweeps copy
+# scripts/balance-runs.example.toml instead.
+
+seeds       = [1, 2, 3, 4, 5]            # fixed, so every report is replayable run-for-run
+sim_seconds = 120                        # long enough for a decision in every pair
+
+world       = "assets/worlds/duel.toml"
+
+# ── Recorded thresholds (non-gating) ─────────────────────────────────────────
+# Evaluated against the merged summary and RECORDED in merged.json/summary.md;
+# they never fail the run. Promote to a gate only once the numbers have been
+# stable across enough reports to mean regression rather than noise.
+# Global: a run that crashes or hangs is always worth a look.
+[thresholds]
+max_failures = 0
+
+# ── The demo matchups: destroyer vs each combat_test enemy class ─────────────
+# Side A resolves `destroyer` → assets/entities/alliance_destroyer.toml; the
+# LocalShip is Backfill-crewed by the headless runner. Side B names resolve to
+# the ship_harrow_* hulls combat_test fields. The per-matchup thresholds record
+# the FIRST observed batch (seeds 1-5, sim_seconds 120) with headroom for seed
+# noise — re-record them alongside any accepted balance change that moves them.
+
+# Mirror-weight duel: five draws, destroyer out-damaging +167 on average.
+[[matchup]]
+name   = "destroyer_vs_harrow_destroyer"
+side_a = ["destroyer"]
+side_b = ["ship_harrow_destroyer"]
+  [matchup.thresholds]
+  min_damage_margin = 100.0
+
+# The destroyer sweeps the cruiser: 5/5 wins, TTK median 16.9 s.
+[[matchup]]
+name   = "destroyer_vs_harrow_cruiser"
+side_a = ["destroyer"]
+side_b = ["ship_harrow_cruiser"]
+  [matchup.thresholds]
+  min_win_rate   = 1.0
+  max_ttk_median = 30.0
+
+# The stateless patrol escort folds fast: 5/5 wins, TTK median 6.7 s.
+[[matchup]]
+name   = "destroyer_vs_harrow_patrol"
+side_a = ["destroyer"]
+side_b = ["ship_harrow_patrol"]
+  [matchup.thresholds]
+  min_win_rate   = 1.0
+  max_ttk_median = 15.0
+
+# The warhawk battleship wins on weight of fire: 0/5, margin -121. A destroyer
+# that starts BEATING it — or getting crushed far harder — is worth a look.
+[[matchup]]
+name   = "destroyer_vs_harrow_warhawk"
+side_a = ["destroyer"]
+side_b = ["ship_harrow_warhawk"]
+  [matchup.thresholds]
+  max_win_rate      = 0.0
+  min_damage_margin = -200.0

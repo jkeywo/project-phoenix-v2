@@ -96,7 +96,7 @@ have widened it for every world override too.
 | `[[system]]`, `[[station]]`, `[[shield_arc]]`, `[[weapons_console.phaser_banks]]`, `[[weapons_console.blaster_banks]]`, `[[torpedoes.tubes]]` | by `id` | replaces wholesale |
 | `[[station.rating]]` | by `name` | replaces wholesale |
 | `tags` | **unions** | **replaces** |
-| `*.ai.rule`, `*_ai.state`, `*.selector.score`, `mesh.lod`, `hull.system_hull` | replaces wholesale | replaces wholesale |
+| `*.ai.rule`, `*_ai.state`, `*.selector.score`, `hull.system_hull` | replaces wholesale | replaces wholesale |
 | `{ id = "…", _remove = true }` | removes that entry | not honoured — **the merge rejects the whole override** |
 | authored `[]` | clears the list | clears the list |
 | omitted key | leaves it alone | leaves it alone |

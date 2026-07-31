@@ -48,7 +48,7 @@ entities:
       summary: Extracts shipped asset budgets from what is on disk and what entity templates declare — per-model GLB bytes, their total, LOD ladder depth, and templates naming a GLB with no ladder — with no simulation running.
       rationale:
         - "Machine-independent by construction: bytes on disk and counts in authored TOML, so any checkout of a commit reproduces the capture exactly. That is why its baseline tolerances are tight where the timing baselines' are loose — a drift here is a real change to what a player downloads, never runner noise."
-        - "Entity templates are parsed as TOML rather than scanned textually, so a commented-out [[mesh.lod]] block cannot be miscounted as coverage."
+        - "Coverage is a JOIN since issue #914 moved the ladder out of entity TOML and into the model rig sidecar: the template names a model, and that model's sidecar says how many [[lod]] levels it has. Both sides are parsed as TOML rather than scanned textually, so a commented-out [[lod]] block cannot be miscounted as coverage, and a sidecar that is absent or unreadable counts as no ladder — the same conclusion the renderer draws from it."
         - "Triangle and texture counts are deliberately out of scope: both live inside the GLB binary, and reading them means parsing glTF rather than trusting the engine's own loader. Bytes and LOD coverage are honest today; the mesh interior is separate work."
         - "A missing assets directory is an error rather than an empty inventory, because a capture that silently measured nothing would read as every asset having shrunk to zero."
     architecture:

@@ -5,6 +5,13 @@
 //! to discover every renderable asset (GLB models, radar icons, model rig
 //! sidecars). It calls `asset_server.load()` for each and tracks readiness.
 //!
+//! Discovery is two-phase. An entity template names one model; since #914 the
+//! rest of that model's LOD ladder is declared in the model's own rig sidecar,
+//! which is fetched asynchronously. So `poll_asset_preload` expands each
+//! sidecar's `[[lod]]` chain the frame it is delivered
+//! (`discover_sidecar_lod_assets`), adding the far GLBs and their sidecars to
+//! the same gate — the way sub-worlds already extend the manifest incrementally.
+//!
 //! If the captain presses Engage before preload completes, the phase
 //! transitions to `GamePhase::Loading` instead of `InProgress`. During
 //! `Loading` the system broadcasts `LoadingProgress { fraction }` to clients
@@ -119,19 +126,11 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
             if !manifest.sidecars.contains(&sc) {
                 manifest.sidecars.push(sc);
             }
-        }
-        // Also discover GLB models referenced by LOD levels
-        for lod in &mesh.lod {
-            if let Some(ref lod_model) = lod.model {
-                let rel = lod_model.strip_prefix("assets/").unwrap_or(lod_model);
-                if !manifest.glb_models.contains(&rel.to_string()) {
-                    manifest.glb_models.push(rel.to_string());
-                }
-                let sc = sidecar_path(lod_model, lod.variant.as_deref());
-                if !manifest.sidecars.contains(&sc) {
-                    manifest.sidecars.push(sc);
-                }
-            }
+            // The far LOD levels are NOT discoverable here any more: the ladder
+            // lives in that sidecar (issue #914), which has not been fetched
+            // yet. `poll_asset_preload` expands it via
+            // `discover_sidecar_lod_assets` the frame the sidecar lands, which
+            // is what keeps the whole ladder inside the loading gate.
         }
     }
     // Planet textures
@@ -158,6 +157,59 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
                 // Tracked via entity_paths concept; stored separately
                 // since they'll be looked up in the config cache.
             }
+        }
+    }
+}
+
+/// Extract the GLB models — and their own rig sidecars — named by a model rig
+/// sidecar's `[[lod]]` chain (issue #914).
+///
+/// This is the second half of discovery. An entity template names one model;
+/// that model's sidecar names the rest of its ladder. The chain is therefore
+/// only visible once the sidecar itself has been delivered, so this runs from
+/// the poll loop rather than the initial walk — the same incremental shape
+/// sub-worlds already use.
+///
+/// `path` is the sidecar's own path: a level that omits `variant` inherits the
+/// variant of the sidecar it was declared in, which is by construction the
+/// variant the entity used to reach it, and therefore agrees with the
+/// renderer's `MeshConfig::variant` fallback in `update_mesh_lod`.
+///
+/// A sidecar that fails to parse contributes nothing to the ladder. It is not
+/// fatal — `resolve_sidecar_rig` degrades the same file to an identity rig,
+/// so the entity still renders its flat `[mesh]` — but it is the same
+/// present-but-malformed case `resolve_sidecar_rig` logs at ERROR (a typo
+/// silently losing a whole LOD chain is not a warning), so this logs at the
+/// same level rather than a quieter one for the same file.
+pub fn discover_sidecar_lod_assets(sidecar_toml: &str, path: &str, manifest: &mut AssetManifest) {
+    if sidecar_toml.trim().is_empty() {
+        return;
+    }
+    let rig = match crate::model_rig::ModelRig::from_toml(sidecar_toml) {
+        Ok(rig) => rig,
+        Err(e) => {
+            bevy::log::error!(
+                "asset_preload: rig sidecar {path} failed to parse: {e}; any [[lod]] chain it \
+                 declares will not preload"
+            );
+            return;
+        }
+    };
+    let own_variant = crate::model_rig::sidecar_variant(path);
+    for level in &rig.lod {
+        let Some(ref lod_model) = level.model else {
+            continue;
+        };
+        let rel = lod_model
+            .strip_prefix("assets/")
+            .unwrap_or(lod_model)
+            .to_string();
+        if !manifest.glb_models.contains(&rel) {
+            manifest.glb_models.push(rel);
+        }
+        let sc = sidecar_path(lod_model, level.variant.as_deref().or(own_variant));
+        if !manifest.sidecars.contains(&sc) {
+            manifest.sidecars.push(sc);
         }
     }
 }
@@ -597,24 +649,54 @@ pub fn poll_asset_preload(
         return;
     }
 
-    // Poll sidecar delivery. Use a non-destructive check
-    // (`is_pending_sidecar_delivered`) so we don't drain the TOML out from
-    // under the renderer — `render_spawned_entities` is the sole consumer
-    // and reads the contents via `take_pending_sidecar_toml`. Calling the
-    // destructive `take_*` here would race the renderer and silently leave
-    // models unattached to their entities (the prefetch wins, then discards
-    // the TOML, so the renderer's later `take` returns `None` forever).
+    // Poll sidecar delivery. The inbox is a PERSISTENT cache — both
+    // `is_pending_sidecar_delivered` and `take_pending_sidecar_toml` leave the
+    // entry in place — which is what lets the poller and the renderer read the
+    // same body, and what lets many rocks of one type share one sidecar. Do not
+    // "optimise" either into a real take: the prefetch would win the race,
+    // discard the TOML, and `render_spawned_entities` would then wait forever
+    // for a body that already arrived.
     //
     // On native this is a no-op observation (the inbox is always empty —
     // native `load_sidecar_toml` reads from `std::fs` directly), but the
     // call is cheap and keeps the code path identical across targets.
     let mut still_pending = Vec::new();
+    let mut newly_delivered = Vec::new();
     for path in &preload.pending_sidecars {
-        if !crate::config_cache::is_pending_sidecar_delivered(path) {
+        if crate::config_cache::is_pending_sidecar_delivered(path) {
+            newly_delivered.push(path.clone());
+        } else {
             still_pending.push(path.clone());
         }
     }
     preload.pending_sidecars = still_pending;
+
+    // A delivered sidecar can name the rest of its own LOD ladder (issue #914),
+    // so expand it now: those GLBs and their sidecars join the gate exactly as
+    // the entity-declared ones used to. A path leaves `pending_sidecars` once,
+    // so each sidecar is expanded exactly once. `take_pending_sidecar_toml` is
+    // non-destructive, so this never steals the TOML from the renderer.
+    for path in newly_delivered {
+        let Some(toml_str) = crate::config_cache::take_pending_sidecar_toml(&path) else {
+            continue;
+        };
+        let mut ladder = AssetManifest::default();
+        discover_sidecar_lod_assets(&toml_str, &path, &mut ladder);
+        for glb_path in &ladder.glb_models {
+            if preload.glb_handles.iter().any(|(p, _)| p == glb_path) {
+                continue;
+            }
+            let handle: Handle<bevy::scene::Scene> =
+                asset_server.load(format!("{glb_path}#Scene0"));
+            preload.glb_handles.push((glb_path.clone(), handle));
+        }
+        for sc_path in &ladder.sidecars {
+            if preload.registered_sidecars.insert(sc_path.clone()) {
+                crate::config_cache::request_sidecar_fetch(sc_path.clone());
+                preload.pending_sidecars.push(sc_path.clone());
+            }
+        }
+    }
 
     // Poll sub-world TOML delivery and process incrementally. On native,
     // sub-worlds are read synchronously in `begin_asset_preload` so there
@@ -889,7 +971,6 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
-                lod: Vec::new(),
             }),
             radar_appearance: Some(RadarAppearanceConfig {
                 icon: Some("testShip".into()),
@@ -1000,7 +1081,6 @@ mod tests {
                 emissive: None,
                 scale: 1.0,
                 rotation: [0.0, 0.0, 0.0],
-                lod: Vec::new(),
             }),
             ..Default::default()
         };
@@ -1073,6 +1153,106 @@ mod tests {
         assert!(manifest.glb_models.is_empty());
         assert!(manifest.sidecars.is_empty());
         assert!(manifest.radar_icons.is_empty());
+    }
+
+    // ── Sidecar-owned LOD ladders (issue #914) ────────────────────────────
+
+    /// The entity walk sees ONE model now. The far levels are behind the
+    /// sidecar, so claiming to have found them here would be a lie that
+    /// silently shrinks the loading gate.
+    #[test]
+    fn the_entity_walk_discovers_only_the_model_it_names() {
+        let config = EntityConfig {
+            mesh: Some(MeshConfig {
+                model: Some("assets/models/rock.glb".into()),
+                variant: Some("large".into()),
+                shape: MeshShape::Sphere,
+                colour: vec![0.5, 0.5, 0.5],
+                radius: 4.0,
+                size: None,
+                minor_radius: 0.0,
+                emissive: None,
+                scale: 1.0,
+                rotation: [0.0, 0.0, 0.0],
+            }),
+            ..Default::default()
+        };
+        let mut manifest = AssetManifest::default();
+        discover_entity_config_assets(&config, &mut manifest);
+        assert_eq!(manifest.glb_models, vec!["models/rock.glb"]);
+        assert_eq!(manifest.sidecars, vec!["assets/models/rock.large.toml"]);
+    }
+
+    /// The second phase: the delivered sidecar contributes the rest of the
+    /// ladder — every far GLB and the sidecar each of those needs in turn.
+    #[test]
+    fn a_delivered_sidecar_contributes_its_whole_ladder() {
+        let sidecar = r#"
+[base]
+scale = [1.0, 1.0, 1.0]
+
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod2.glb"
+
+[[lod]]
+shape = "sphere"
+"#;
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", &mut manifest);
+
+        assert_eq!(
+            manifest.glb_models,
+            vec!["models/rock.glb", "models/rock_lod2.glb"],
+            "the procedural fallback level names no GLB"
+        );
+        // A level that omits `variant` inherits the sidecar's own — which is
+        // the same fallback `update_mesh_lod` applies from `[mesh] variant`.
+        assert_eq!(
+            manifest.sidecars,
+            vec![
+                "assets/models/rock.large.toml",
+                "assets/models/rock_lod2.large.toml"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_level_may_override_the_variant_it_inherits() {
+        let sidecar = "[[lod]]\nmodel = \"assets/models/rock_lod1.glb\"\nvariant = \"weathered\"\n";
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(sidecar, "assets/models/rock.large.toml", &mut manifest);
+        assert_eq!(
+            manifest.sidecars,
+            vec!["assets/models/rock_lod1.weathered.toml"]
+        );
+    }
+
+    /// Absent (404 → empty push) and malformed sidecars contribute nothing and
+    /// must not panic: the entity still renders its flat `[mesh]`.
+    #[test]
+    fn an_absent_or_malformed_sidecar_contributes_no_ladder() {
+        for body in ["", "   \n", "[[lod]\nbroken", "lods = 3\n"] {
+            let mut manifest = AssetManifest::default();
+            discover_sidecar_lod_assets(body, "assets/models/rock.large.toml", &mut manifest);
+            assert!(manifest.glb_models.is_empty(), "body: {body:?}");
+            assert!(manifest.sidecars.is_empty(), "body: {body:?}");
+        }
+    }
+
+    /// A ship hull's sidecar declares no ladder at all — the common case, and
+    /// it must stay a no-op rather than registering phantom assets.
+    #[test]
+    fn a_sidecar_with_markers_but_no_ladder_contributes_nothing() {
+        let sidecar = "[markers.fore]\nposition = [0.0, 0.0, -1.0]\ndirection = [0.0, 0.0, -1.0]\n";
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(sidecar, "assets/models/ship.model.toml", &mut manifest);
+        assert!(manifest.glb_models.is_empty());
+        assert!(manifest.sidecars.is_empty());
     }
 
     /// Regression: two triggers referencing the same load_world path (e.g.

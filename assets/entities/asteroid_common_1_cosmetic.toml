@@ -7,29 +7,9 @@ radius = 1
 length = 0.0
 
 [mesh]
+# The LOD ladder for this model lives in its rig sidecar (issue #914).
 model = "assets/models/asteroid_common_1.glb"
 variant = "cosmetic"
-shape = "sphere"
-radius = 1
-colour = [0.5, 0.45, 0.38]
-
-# Distance-based LOD: full GLB up close, decimated steps, shared sphere far away.
-[[mesh.lod]]
-max_distance = 50.0
-model = "assets/models/asteroid_common_1.glb"
-variant = "cosmetic"
-
-[[mesh.lod]]
-max_distance = 100.0
-model = "assets/models/asteroid_common_1_lod1.glb"
-variant = "cosmetic"
-
-[[mesh.lod]]
-max_distance = 150.0
-model = "assets/models/asteroid_common_1_lod2.glb"
-variant = "cosmetic"
-
-[[mesh.lod]]
 shape = "sphere"
 radius = 1
 colour = [0.5, 0.45, 0.38]

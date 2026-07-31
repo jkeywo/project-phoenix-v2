@@ -144,7 +144,7 @@ pub enum MergePolicy {
 ///   had. **A fragment contributing an AI policy contributes it WHOLE**; that
 ///   is the intended granularity, not a gap.
 /// * `*.selector.score` — the entries carry no identity at all.
-/// * `mesh.lod`, `hull.system_hull` — positional/derived lists with no key.
+/// * `hull.system_hull` — a positional/derived list with no key.
 ///
 /// # Nested arrays inside a reconciled entry
 ///
@@ -1064,7 +1064,6 @@ kind = "patrolling"
             ("captain_console.ai.rule", Replace, Replace),
             ("helm_console.steering_ai.state", Replace, Replace),
             ("repair.selector.score", Replace, Replace),
-            ("mesh.lod", Replace, Replace),
             ("hull.system_hull", Replace, Replace),
             // Nested inside a reconciled doctrine entry: the `directive_anchors
             // = []` idiom `world/dispatch.rs` documents relies on this.

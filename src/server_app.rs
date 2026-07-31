@@ -3446,13 +3446,14 @@ fn procedural_mesh_material(
     (mesh_handle, mat_handle)
 }
 
-/// Distance-based mesh LOD state, attached to entities whose `[mesh]` config
-/// declares one or more `lod` levels. [`update_mesh_lod`] selects and swaps the
-/// active level each frame based on camera distance; [`render_spawned_entities`]
-/// skips rendering these entities directly.
+/// Distance-based mesh LOD state, attached to entities whose model rig sidecar
+/// declares one or more `[[lod]]` levels. [`update_mesh_lod`] selects and swaps
+/// the active level each frame based on camera distance;
+/// [`render_spawned_entities`] skips rendering these entities directly.
 #[derive(Component)]
 struct MeshLods {
-    /// Ordered near→far LOD levels copied from the entity's `MeshConfig`.
+    /// Ordered near→far LOD levels copied from the model's rig sidecar
+    /// ([`crate::model_rig::ModelRig::lod`], issue #914).
     levels: Vec<crate::entity_config::LodLevel>,
     /// Flat mesh config supplying fallback fields (colour/radius/emissive/size/
     /// minor_radius) and the shared `variant` for levels that omit them.
@@ -3501,8 +3502,9 @@ fn teardown_lod_visual(commands: &mut Commands, entity: Entity, lods: &mut MeshL
 /// `PointLight`/`DirectionalLight` components (single light → inline, multiple
 /// → spawned as child entities).
 ///
-/// Entities whose `MeshConfig.lod` is non-empty are NOT rendered here: they
-/// receive a [`MeshLods`] component and are driven by [`update_mesh_lod`].
+/// Entities whose model rig sidecar declares a `[[lod]]` chain are NOT rendered
+/// here: they receive a [`MeshLods`] component and are driven by
+/// [`update_mesh_lod`].
 fn render_spawned_entities(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -3559,40 +3561,57 @@ fn render_spawned_entities(
         } else if let Some(mesh_sec) = mesh_sec {
             let cfg = &mesh_sec.0;
 
-            if !cfg.lod.is_empty() {
-                // LOD entity: defer the visual to `update_mesh_lod`, which
-                // selects a level by camera distance each frame. Attach the LOD
-                // state; the flat paths below are skipped for this entity.
-                commands.entity(entity).insert(MeshLods {
-                    levels: cfg.lod.clone(),
-                    base: cfg.clone(),
-                    current: None,
-                    scene_child: None,
-                    procedural_on_parent: false,
-                    is_local_ship: local_ship.is_some(),
-                });
-            } else if let Some(model_path) = &cfg.model {
-                // PATH A: GLB model (shared helper preserves the async logic).
-                match spawn_glb_visual(
-                    &mut commands,
-                    &asset_server,
-                    &scenes,
-                    entity,
-                    model_path,
-                    cfg.variant.as_deref(),
-                    pending,
-                ) {
-                    GlbSpawnOutcome::Spawned(child) => {
-                        if local_ship.is_some() {
-                            decorate_local_ship_model(&mut commands, child);
+            if let Some(model_path) = &cfg.model {
+                // The LOD ladder is owned by the model, not the entity (issue
+                // #914), so whether this is a LOD entity at all is a question
+                // only the rig sidecar can answer — resolve it first. On wasm a
+                // sidecar still in flight yields `None`; retry next frame, which
+                // is the same wait the flat GLB path already takes. On native
+                // the read is synchronous.
+                let Some(rig) = resolve_sidecar_rig(model_path, cfg.variant.as_deref()) else {
+                    continue;
+                };
+                if !rig.lod.is_empty() {
+                    // LOD entity: defer the visual to `update_mesh_lod`, which
+                    // selects a level by camera distance each frame. Attach the
+                    // LOD state; the flat paths below are skipped for this
+                    // entity. `base` stays the entity's own `[mesh]` so a shared
+                    // ladder still renders each rock's authored colour/radius.
+                    commands.entity(entity).insert(MeshLods {
+                        levels: rig.lod.clone(),
+                        base: cfg.clone(),
+                        current: None,
+                        scene_child: None,
+                        procedural_on_parent: false,
+                        is_local_ship: local_ship.is_some(),
+                    });
+                } else {
+                    // PATH A: GLB model (shared helper preserves the async logic).
+                    // `rig` was already resolved above to answer "does this model
+                    // have a [[lod]] chain" — hand it straight through instead of
+                    // making spawn_glb_visual read/parse the same sidecar again.
+                    match spawn_glb_visual(
+                        &mut commands,
+                        &asset_server,
+                        &scenes,
+                        entity,
+                        model_path,
+                        cfg.variant.as_deref(),
+                        pending,
+                        Some(&rig),
+                    ) {
+                        GlbSpawnOutcome::Spawned(child) => {
+                            if local_ship.is_some() {
+                                decorate_local_ship_model(&mut commands, child);
+                            }
                         }
-                    }
-                    // GLB / rig not loaded yet — try again next frame.
-                    GlbSpawnOutcome::Pending => continue,
-                    GlbSpawnOutcome::Failed => {
-                        // Stop retrying an entity whose GLB will never load.
-                        commands.entity(entity).insert(RenderProcessed);
-                        continue;
+                        // GLB / rig not loaded yet — try again next frame.
+                        GlbSpawnOutcome::Pending => continue,
+                        GlbSpawnOutcome::Failed => {
+                            // Stop retrying an entity whose GLB will never load.
+                            commands.entity(entity).insert(RenderProcessed);
+                            continue;
+                        }
                     }
                 }
             } else {
@@ -3714,6 +3733,8 @@ fn update_mesh_lod(
 
         if let Some(model_path) = level.model.as_deref() {
             let variant = level.variant.clone().or_else(|| lods.base.variant.clone());
+            // This level's own sidecar hasn't been resolved yet this frame —
+            // let spawn_glb_visual resolve it.
             match spawn_glb_visual(
                 &mut commands,
                 &asset_server,
@@ -3722,6 +3743,7 @@ fn update_mesh_lod(
                 model_path,
                 variant.as_deref(),
                 pending,
+                None,
             ) {
                 // Keep the current visual until the new GLB resolves — avoids a
                 // visible gap. `current` is left unchanged so we retry next frame.

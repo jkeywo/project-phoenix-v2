@@ -22,7 +22,22 @@
 //!
 //! [[target_points]]       # anonymous phaser hit points enemies can aim at
 //! position = [0.5,-0.1,0.0]
+//!
+//! [[lod]]                 # distance-based LOD chain, ordered near→far
+//! max_distance = 50.0       # exclusive upper bound; omit on the last level
+//! model = "assets/models/rock.glb"
+//! variant = "large"         # omitted → this sidecar's own variant
+//!
+//! [[lod]]                 # procedural fallback level (no `model`)
+//! shape = "sphere"
 //! ```
+//!
+//! # Level of detail (issue #914)
+//! The LOD ladder belongs to the **model**, not to the entity: a rock is a rock
+//! whichever template spawns it. `[[lod]]` therefore lives here, beside the
+//! `.glb` it decimates, and the entity's `[mesh]` only names the model. Entity
+//! TOML that still authors `[[mesh.lod]]` is rejected at parse with a message
+//! pointing at this file — see [`crate::entity_config::EntityConfig::from_toml`].
 //!
 //! # Composition
 //! The base rig is applied *inner* to the per-entity transform. The renderer
@@ -50,6 +65,7 @@ fn ones() -> [f32; 3] {
 /// The `[base]` rig: corrects a raw GLB into game space. All fields default so
 /// a sparse or empty sidecar parses to an identity rig.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BaseTransform {
     /// Non-uniform translation applied to the model, in model-local units.
     #[serde(default = "zeros")]
@@ -75,6 +91,7 @@ impl Default for BaseTransform {
 /// Cached bounds of the model in post-base-rig space. Advisory: the engine may
 /// store these but need not act on them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Extents {
     pub min: [f32; 3],
     pub max: [f32; 3],
@@ -84,6 +101,7 @@ pub struct Extents {
 /// A single named mount point in post-base-rig (model-local, base-applied)
 /// space. `direction` is a unit vector with forward basis `(0,0,-1)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Marker {
     pub position: [f32; 3],
     pub direction: [f32; 3],
@@ -94,12 +112,18 @@ pub struct Marker {
 /// Phaser PFX can resolve one of these points on the target model so beams hit
 /// plausible hull positions instead of always converging on the entity centre.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TargetPoint {
     pub position: [f32; 3],
 }
 
 /// A parsed model-rig sidecar.
+///
+/// `deny_unknown_fields` throughout (issue #914): a sidecar is authored by hand
+/// and by the editor, and a mistyped key must fail loudly rather than resolve to
+/// an identity rig with a silently missing marker or LOD ladder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ModelRig {
     /// The base rig. Defaults to identity when the `[base]` section is absent.
     #[serde(default)]
@@ -114,6 +138,19 @@ pub struct ModelRig {
     /// Anonymous target points that incoming phaser beams can choose from.
     #[serde(default)]
     pub target_points: Vec<TargetPoint>,
+    /// Distance-based level-of-detail bands for this model, ordered near→far
+    /// (issue #914). Authored as `[[lod]]` blocks.
+    ///
+    /// When non-empty, an entity whose `[mesh]` names this model is NOT
+    /// rendered from its flat `[mesh]` fields; the renderer picks a level each
+    /// frame from the camera distance (see
+    /// [`crate::entity_config::select_lod`]) and builds that level instead.
+    /// Fields a level omits fall back to the *entity's* flat `[mesh]` fields
+    /// (`colour`/`radius`/`emissive`/`size`/`minor_radius`/`variant`), so one
+    /// shared ladder still renders differently-tinted rocks correctly.
+    /// Empty (the default) means "no ladder" — the flat `[mesh]` renders as-is.
+    #[serde(default)]
+    pub lod: Vec<crate::entity_config::LodLevel>,
 }
 
 impl ModelRig {
@@ -247,6 +284,27 @@ pub fn sidecar_path(model_path: &str, variant: Option<&str>) -> String {
         None => model_path,
     };
     format!("{stem}.{variant}.toml")
+}
+
+/// Pure path helper: the inverse of [`sidecar_path`] — which variant a sidecar
+/// path names.
+///
+/// `assets/models/asteroid_common_1.large.toml` → `Some("large")`;
+/// `assets/models/dynasty_destroyer.model.toml` → `Some("model")`. `None` when
+/// the path is not a `<stem>.<variant>.toml` sidecar at all.
+///
+/// Used when a sidecar's own `[[lod]]` level omits `variant`: the level then
+/// inherits the variant of the sidecar it was declared in, which is exactly the
+/// variant the entity's `[mesh]` used to reach that sidecar — so the preload
+/// walk and the renderer's `MeshConfig::variant` fallback agree by construction.
+pub fn sidecar_variant(sidecar: &str) -> Option<&str> {
+    let file = sidecar.rsplit(['/', '\\']).next()?;
+    let stem = file.strip_suffix(".toml")?;
+    let (base, variant) = stem.rsplit_once('.')?;
+    if base.is_empty() || variant.is_empty() {
+        return None;
+    }
+    Some(variant)
 }
 
 #[cfg(test)]
@@ -478,6 +536,251 @@ position = [-0.25, -0.1, -0.25]
 
         // Missing marker → None (caller falls back to origin).
         assert!(rig.marker("does_not_exist").is_none());
+    }
+
+    // ── Sidecar-owned LOD chains (issue #914) ────────────────────────────
+
+    #[test]
+    fn lod_chain_parses_from_sidecar_toml() {
+        let toml = r##"
+[base]
+scale = [2.0, 2.0, 2.0]
+
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+variant = "small"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod2.glb"
+
+[[lod]]
+shape = "sphere"
+"##;
+        let rig = ModelRig::from_toml(toml).expect("a sidecar ladder must parse");
+        assert_eq!(rig.lod.len(), 3);
+        assert_eq!(rig.lod[0].max_distance, Some(50.0));
+        assert_eq!(rig.lod[0].model.as_deref(), Some("assets/models/rock.glb"));
+        assert_eq!(rig.lod[0].variant.as_deref(), Some("small"));
+        // A level may omit `variant`: it inherits the entity's `[mesh] variant`.
+        assert_eq!(rig.lod[1].variant, None);
+        // The last level is the procedural fallback and has no upper bound.
+        assert_eq!(rig.lod[2].max_distance, None);
+        assert_eq!(
+            rig.lod[2].shape,
+            Some(crate::entity_config::MeshShape::Sphere)
+        );
+    }
+
+    #[test]
+    fn a_sidecar_without_a_ladder_has_an_empty_chain() {
+        let rig = ModelRig::from_toml("[base]\nscale = [1.0, 1.0, 1.0]\n").expect("parses");
+        assert!(
+            rig.lod.is_empty(),
+            "no `[[lod]]` means no ladder — the entity renders its flat [mesh]"
+        );
+    }
+
+    /// The schema is strict, so a mistyped key fails loudly instead of
+    /// resolving to a rig that quietly lost a marker or a whole ladder.
+    #[test]
+    fn an_unknown_sidecar_field_is_rejected() {
+        assert!(ModelRig::from_toml("[base]\noffest = [1.0, 0.0, 0.0]\n").is_err());
+        assert!(ModelRig::from_toml("lods = []\n").is_err());
+        assert!(ModelRig::from_toml("[[lod]]\nmax_distance = 50.0\nmodell = \"a.glb\"\n").is_err());
+        assert!(ModelRig::from_toml(
+            "[markers.fore]\nposition = [0.0, 0.0, 0.0]\ndirection = [0.0, 0.0, -1.0]\nfacing = 1.0\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sidecar_variant_reads_the_variant_back_out_of_a_path() {
+        assert_eq!(
+            sidecar_variant("assets/models/asteroid_common_1.large.toml"),
+            Some("large")
+        );
+        assert_eq!(
+            sidecar_variant("assets/models/dynasty_destroyer.model.toml"),
+            Some(DEFAULT_VARIANT)
+        );
+        // Round-trips with `sidecar_path` for both the default and a named variant.
+        for variant in [None, Some("weathered")] {
+            let path = sidecar_path("assets/models/ship.glb", variant);
+            assert_eq!(
+                sidecar_variant(&path),
+                Some(variant.unwrap_or(DEFAULT_VARIANT))
+            );
+        }
+        assert_eq!(sidecar_variant("assets/models/ship.glb"), None);
+        assert_eq!(sidecar_variant("noextension"), None);
+    }
+
+    // ── Shipped-asset conformance ────────────────────────────────────────
+
+    /// Every sidecar in `assets/models` parses under the strict schema.
+    ///
+    /// The engine degrades a malformed sidecar to an identity rig so a model
+    /// always renders, which is exactly why nothing else would fail: a typo
+    /// costs the ship its weapon markers, or the rock its whole LOD ladder,
+    /// and the only symptom is that the game looks slightly wrong. This is the
+    /// test that turns that into a red build. (Mirrors
+    /// `all_shipped_entity_templates_parse_strictly` in `entity_config`.)
+    #[test]
+    fn every_shipped_sidecar_parses_strictly() {
+        let mut checked = 0usize;
+        let mut problems: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir("assets/models")
+            .expect("assets/models must exist")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let file = path.to_string_lossy().replace('\\', "/");
+            let toml = std::fs::read_to_string(&path).expect("sidecar readable");
+            checked += 1;
+            if let Err(e) = ModelRig::from_toml(&toml) {
+                problems.push(format!("{file}: {e}"));
+            }
+        }
+        assert!(checked > 0, "assets/models should ship sidecars");
+        assert!(
+            problems.is_empty(),
+            "every shipped model sidecar must parse strictly:\n{}",
+            problems.join("\n")
+        );
+    }
+
+    /// The migration itself (issue #914), asserted on a real shipped pair: the
+    /// asteroid entity no longer carries a ladder, and the sidecar its `[mesh]`
+    /// resolves to does — with every level's GLB present on disk.
+    #[test]
+    fn a_shipped_asteroid_reads_its_ladder_from_its_sidecar() {
+        let cfg = crate::entity_includes::load_entity_config(
+            "assets/entities/asteroid_common_1_large.toml",
+        )
+        .expect("asteroid template must parse");
+        let mesh = cfg.mesh.as_ref().expect("mesh present");
+        let path = sidecar_path(
+            mesh.model.as_deref().expect("model path"),
+            mesh.variant.as_deref(),
+        );
+        assert_eq!(path, "assets/models/asteroid_common_1.large.toml");
+
+        let rig = ModelRig::from_toml(&std::fs::read_to_string(&path).expect("sidecar exists"))
+            .expect("sidecar parses");
+        assert_eq!(
+            rig.lod.len(),
+            4,
+            "three GLB steps plus a procedural fallback"
+        );
+
+        // Ascending, exclusive bounds; only the final level is unbounded.
+        let bounds: Vec<Option<f32>> = rig.lod.iter().map(|l| l.max_distance).collect();
+        assert_eq!(
+            bounds,
+            vec![Some(50.0), Some(100.0), Some(150.0), None],
+            "switch distances must survive the move verbatim"
+        );
+
+        // Switching behaviour is unchanged by the move: the same pure selector
+        // the renderer calls, over the migrated chain, at the authored
+        // distances. These are the numbers the pre-#914 `[[mesh.lod]]` blocks
+        // produced, asserted rather than eyeballed.
+        use crate::entity_config::select_lod;
+        for (distance, expected) in [
+            (0.0, 0),
+            (49.9, 0),
+            (50.0, 1),
+            (99.9, 1),
+            (100.0, 2),
+            (149.9, 2),
+            (150.0, 3),
+            (10_000.0, 3),
+        ] {
+            assert_eq!(
+                select_lod(&rig.lod, distance, None),
+                expected,
+                "distance {distance} must select level {expected}"
+            );
+        }
+        // …and hysteresis still holds each band across its boundary.
+        assert_eq!(select_lod(&rig.lod, 52.0, Some(0)), 0);
+        assert_eq!(select_lod(&rig.lod, 48.0, Some(1)), 1);
+
+        // Every GLB level names a file that exists, at the entity's variant.
+        for level in rig.lod.iter().filter(|l| l.model.is_some()) {
+            let model = level.model.as_deref().unwrap();
+            assert!(
+                std::path::Path::new(model).exists(),
+                "LOD level model {model} must exist"
+            );
+            let level_sidecar =
+                sidecar_path(model, level.variant.as_deref().or(mesh.variant.as_deref()));
+            assert!(
+                std::path::Path::new(&level_sidecar).exists(),
+                "LOD level sidecar {level_sidecar} must exist"
+            );
+        }
+        // The last level is the shared procedural sphere, inheriting the
+        // entity's radius/colour rather than restating them.
+        let last = rig.lod.last().unwrap();
+        assert_eq!(last.shape, Some(crate::entity_config::MeshShape::Sphere));
+        assert_eq!(last.radius, None);
+        assert_eq!(last.colour, None);
+    }
+
+    /// Recursively collect every `.toml` file under `dir`, INCLUDING
+    /// `assets/entities/fragments/`. Unlike a spawnable-template inventory,
+    /// this check has no reason to stop at the top level: a fragment
+    /// authoring `[[mesh.lod]]` would reintroduce the banned location into
+    /// every hull that includes it, just as silently as a shipped hull
+    /// authoring it directly.
+    fn collect_toml_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_toml_files_recursive(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// No entity template — nor any fragment it might compose in — may
+    /// reintroduce the old location.
+    #[test]
+    fn no_shipped_entity_template_still_authors_mesh_lod() {
+        let mut paths = Vec::new();
+        collect_toml_files_recursive(std::path::Path::new("assets/entities"), &mut paths);
+        assert!(
+            !paths.is_empty(),
+            "assets/entities must exist and contain templates"
+        );
+
+        let mut offenders: Vec<String> = Vec::new();
+        for path in paths {
+            let text = std::fs::read_to_string(&path).expect("template readable");
+            let has_lod = toml::from_str::<toml::Value>(&text)
+                .ok()
+                .as_ref()
+                .and_then(|v| v.get("mesh").and_then(|m| m.get("lod")))
+                .is_some();
+            if has_lod {
+                offenders.push(path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "[[mesh.lod]] moved to the model sidecar (#914); still authored in:\n{}",
+            offenders.join("\n")
+        );
     }
 
     #[test]

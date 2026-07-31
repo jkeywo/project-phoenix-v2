@@ -11,10 +11,16 @@
 //!   point: `max` finds the one model that dominates a download.
 //! - `assets.glb.total.bytes` — one sample. What a cold visitor pays if
 //!   everything loads.
-//! - `assets.lod.levels` — one sample per entity template that declares
-//!   `[[mesh.lod]]`, so a drop in LOD coverage is visible.
+//! - `assets.lod.levels` — one sample per entity template whose model's rig
+//!   sidecar declares a `[[lod]]` chain, so a drop in LOD coverage is visible.
 //! - `assets.glb.without_lod` — one sample: entity templates naming a `.glb`
 //!   with no LOD ladder at all.
+//!
+//! The ladder moved from the entity's `[[mesh.lod]]` into the model's rig
+//! sidecar (issue #914), so coverage is now a *join*: the entity names a model,
+//! the model's sidecar says how many levels it has. Both metrics stay keyed by
+//! entity template, because "which of my templates has no ladder" is the
+//! question the budget is asked.
 //!
 //! **Triangle and texture counts are deliberately absent.** Both live inside
 //! the GLB binary, and reading them means parsing glTF — a real dependency and
@@ -91,13 +97,19 @@ pub fn inventory(root: &Path) -> Result<Inventory, InventoryError> {
         }
         let text = std::fs::read_to_string(&path)
             .map_err(|e| InventoryError::Io(path.display().to_string(), e))?;
-        let Some((has_model, levels)) = mesh_shape(&text) else {
+        let Some(sidecar) = mesh_sidecar(&text) else {
             continue;
         };
+        // A sidecar that is absent or unreadable counts as "no ladder", the
+        // same thing the renderer concludes from it.
+        let levels = std::fs::read_to_string(root.join(&sidecar))
+            .ok()
+            .map(|s| sidecar_lod_levels(&s))
+            .unwrap_or(0);
         let key = file_key(&path);
         if levels > 0 {
             found.lod_levels.insert(key, levels);
-        } else if has_model {
+        } else {
             found.without_lod.push(key);
         }
     }
@@ -105,24 +117,37 @@ pub fn inventory(root: &Path) -> Result<Inventory, InventoryError> {
     Ok(found)
 }
 
-/// `(names a .glb, declared LOD levels)` for one entity template, or `None`
-/// when it declares no mesh at all.
+/// The rig-sidecar path for one entity template's `[mesh]`, or `None` when the
+/// template declares no mesh or no `.glb` model (a purely procedural entity has
+/// no ladder to be missing).
 ///
-/// Parsed as TOML rather than grepped so a commented-out `[[mesh.lod]]` or a
-/// `model` key in an unrelated table cannot be miscounted.
-fn mesh_shape(text: &str) -> Option<(bool, u64)> {
+/// Parsed as TOML rather than grepped so a `model` key in an unrelated table
+/// cannot be miscounted.
+fn mesh_sidecar(text: &str) -> Option<String> {
     let value: toml::Value = toml::from_str(text).ok()?;
     let mesh = value.get("mesh")?;
-    let has_model = mesh
+    let model = mesh
         .get("model")
         .and_then(|m| m.as_str())
-        .is_some_and(|m| m.ends_with(".glb"));
-    let levels = mesh
-        .get("lod")
+        .filter(|m| m.ends_with(".glb"))?;
+    Some(crate::model_rig::sidecar_path(
+        model,
+        mesh.get("variant").and_then(|v| v.as_str()),
+    ))
+}
+
+/// How many `[[lod]]` levels a model rig sidecar declares.
+///
+/// Parsed as TOML rather than grepped so a commented-out `[[lod]]` cannot be
+/// miscounted as coverage.
+fn sidecar_lod_levels(text: &str) -> u64 {
+    toml::from_str::<toml::Value>(text)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("lod"))
         .and_then(|l| l.as_array())
         .map(|l| l.len() as u64)
-        .unwrap_or(0);
-    Some((has_model, levels))
+        .unwrap_or(0)
 }
 
 fn read_dir_sorted(dir: &Path) -> Result<Vec<PathBuf>, InventoryError> {
@@ -168,44 +193,63 @@ mod tests {
     use super::*;
     use crate::perf::profile;
 
+    /// The join the budget now makes: a template points at a sidecar, and the
+    /// sidecar is what carries the ladder (issue #914).
     #[test]
-    fn a_template_with_a_lod_ladder_reports_its_level_count() {
-        let text = r#"
-[mesh]
-model = "assets/models/rock.glb"
-shape = "sphere"
-
-[[mesh.lod]]
-max_distance = 50.0
-
-[[mesh.lod]]
-max_distance = 100.0
-"#;
-        assert_eq!(mesh_shape(text), Some((true, 2)));
+    fn a_template_resolves_the_sidecar_that_carries_its_ladder() {
+        let text = "[mesh]\nmodel = \"assets/models/rock.glb\"\nvariant = \"large\"\n";
+        assert_eq!(
+            mesh_sidecar(text).as_deref(),
+            Some("assets/models/rock.large.toml")
+        );
     }
 
     #[test]
-    fn a_glb_template_with_no_ladder_reports_zero_levels() {
+    fn a_template_without_a_variant_resolves_the_default_sidecar() {
         let text = "[mesh]\nmodel = \"assets/models/ship.glb\"\nshape = \"sphere\"\n";
-        assert_eq!(mesh_shape(text), Some((true, 0)));
+        assert_eq!(
+            mesh_sidecar(text).as_deref(),
+            Some("assets/models/ship.model.toml")
+        );
     }
 
     #[test]
     fn a_procedural_template_names_no_glb() {
-        let text = "[mesh]\nshape = \"sphere\"\nradius = 4\n";
-        assert_eq!(mesh_shape(text), Some((false, 0)));
+        assert_eq!(
+            mesh_sidecar("[mesh]\nshape = \"sphere\"\nradius = 4\n"),
+            None
+        );
     }
 
     #[test]
     fn a_template_with_no_mesh_is_skipped_entirely() {
-        assert_eq!(mesh_shape("name = \"thing\"\n"), None);
+        assert_eq!(mesh_sidecar("name = \"thing\"\n"), None);
+    }
+
+    #[test]
+    fn a_sidecar_with_a_ladder_reports_its_level_count() {
+        let text = r#"
+[base]
+offset = [0.0, 0.0, 0.0]
+
+[[lod]]
+max_distance = 50.0
+
+[[lod]]
+max_distance = 100.0
+"#;
+        assert_eq!(sidecar_lod_levels(text), 2);
+    }
+
+    #[test]
+    fn a_sidecar_with_no_ladder_reports_zero_levels() {
+        assert_eq!(sidecar_lod_levels("[base]\nscale = [1.0, 1.0, 1.0]\n"), 0);
     }
 
     /// A commented-out ladder is the case grepping would get wrong.
     #[test]
     fn commented_out_lod_is_not_counted() {
-        let text = "[mesh]\nmodel = \"a.glb\"\n# [[mesh.lod]]\n# max_distance = 50.0\n";
-        assert_eq!(mesh_shape(text), Some((true, 0)));
+        assert_eq!(sidecar_lod_levels("# [[lod]]\n# max_distance = 50.0\n"), 0);
     }
 
     #[test]

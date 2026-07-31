@@ -89,7 +89,7 @@
 // `tags` has no key (bare strings), so it UNIONS here and REPLACES at the
 // instance layer; that asymmetry is deliberate and is what the policy seam is
 // for. Arrays with no stable identity — `*.ai.rule`, `*_ai.state[].transition`,
-// `*.selector.score`, `mesh.lod`, `hull.system_hull` — keep replacing
+// `*.selector.score`, `hull.system_hull` — keep replacing
 // wholesale. **A fragment contributing an AI policy contributes it WHOLE**;
 // that is the intended granularity.
 //
@@ -2023,6 +2023,48 @@ directive_kind = "Destroy"
             err.chain,
             vec!["e/base.toml", "e/hull.toml"],
             "the error names every template that contributed"
+        );
+    }
+
+    /// The `[[mesh.lod]]` relocation guard (issue #914) runs on the RESOLVED
+    /// document, so a fragment library entry that still authors the banned
+    /// location is caught exactly like a shipped hull would be — it cannot
+    /// hide behind composition and slip an old-style ladder into every hull
+    /// that includes it.
+    #[test]
+    fn a_fragment_carrying_relocated_mesh_lod_is_rejected_with_the_targeted_message() {
+        const FRAGMENT: &str = r#"
+[mesh]
+model = "assets/models/rock.glb"
+variant = "small"
+shape = "sphere"
+colour = [0.5, 0.5, 0.5]
+radius = 2.0
+
+[[mesh.lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+"#;
+        let resolved = resolve(
+            "e/hull.toml",
+            &[
+                ("e/frag.toml", FRAGMENT),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\n"),
+            ],
+        );
+        let err = resolved
+            .parse()
+            .expect_err("[[mesh.lod]] authored by a fragment must still be rejected");
+        assert_eq!(err.category(), "include-invalid-template");
+        assert!(
+            err.message().contains("assets/models/rock.small.toml"),
+            "the error must name the sidecar the chain moved to; got: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("[[lod]]"),
+            "the error must name the new block; got: {}",
+            err.message()
         );
     }
 

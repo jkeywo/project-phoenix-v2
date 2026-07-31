@@ -21,11 +21,11 @@ pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
 ///   returns `None` until the fetch resolves. An empty pushed string (404)
 ///   resolves to `Some(String::new())`, which parses to an identity rig.
 ///
-/// **Important**: this call is destructive — the entry is removed from the
-/// queue once read. The renderer is the sole intended consumer; callers that
-/// only need readiness (e.g. preload progress) must use
-/// [`crate::config_cache::is_pending_sidecar_delivered`] instead, or the
-/// renderer will lose the race and the model will never appear.
+/// **Non-destructive**: the entry stays in the queue, so every entity sharing a
+/// model reads the same body and the preload poller can read it too (that is
+/// what lets `asset_preload` expand a sidecar's `[[lod]]` chain without stealing
+/// it from the renderer). Callers that only need readiness should still prefer
+/// [`crate::config_cache::is_pending_sidecar_delivered`].
 fn load_sidecar_toml(path: &str) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -48,6 +48,21 @@ fn load_sidecar_toml(path: &str) -> Option<String> {
 ///   pushed an empty string for a 404) or fails to parse.
 /// - `None` while a wasm fetch is still in flight (caller retries next frame).
 ///   On native this never returns `None` (the filesystem read is synchronous).
+///
+/// # Failure modes now that the sidecar owns the LOD chain (issue #914)
+///
+/// The identity fallback is deliberately *degrade, never black-hole*: a model
+/// with no readable sidecar still appears on screen. But an identity rig also
+/// carries an EMPTY `lod`, so the two absence cases mean different things and
+/// are reported differently:
+///
+/// * **Genuinely absent sidecar** — no ladder was ever authored. That is the
+///   normal case for every ship hull, so it is silent, and the entity renders
+///   its flat `[mesh]` exactly as a model with no ladder always has.
+/// * **Present but malformed sidecar** — the author *did* write something and
+///   we cannot tell how much of it was a ladder. Falling back silently would
+///   drop the whole chain and quietly render one level forever, so this logs at
+///   ERROR (not warn) and says so explicitly.
 pub fn resolve_sidecar_rig(
     model_path: &str,
     variant: Option<&str>,
@@ -63,10 +78,14 @@ pub fn resolve_sidecar_rig(
                     Ok(rig) => Some(rig),
                     Err(e) => {
                         // A present-but-malformed sidecar degrades to an identity
-                        // rig so the model still renders, but we surface the parse
-                        // error so an authoring typo isn't silently invisible.
-                        bevy::log::warn!(
-                            "rig sidecar {path} failed to parse: {e}; using identity rig"
+                        // rig so the model still renders — but that identity rig
+                        // has no markers AND no LOD chain, so say both out loud
+                        // rather than let a typo pass as "this model has no ladder".
+                        bevy::log::error!(
+                            target: crate::logging::LogCat::Assets.target(),
+                            "rig sidecar {path} failed to parse: {e}; falling back to an \
+                             identity rig — this model loses its markers AND any [[lod]] \
+                             chain, and will render only its flat [mesh] level"
                         );
                         Some(crate::model_rig::ModelRig::default())
                     }
@@ -106,6 +125,12 @@ pub enum GlbSpawnOutcome {
 /// so callers can tear it down on an LOD switch, or decorate it — the local
 /// ship, for instance, adds `Visibility::Hidden` and `NoFrustumCulling` to the
 /// returned entity.
+///
+/// `resolved_rig` lets a caller that has ALREADY resolved this exact sidecar
+/// this frame (to answer some prior question, e.g. `render_spawned_entities`
+/// checking whether the model has a `[[lod]]` chain at all) hand the rig
+/// straight through instead of making this function read/parse the same
+/// sidecar a second time. Pass `None` to resolve it here as before.
 pub fn spawn_glb_visual(
     commands: &mut Commands,
     asset_server: &AssetServer,
@@ -114,6 +139,7 @@ pub fn spawn_glb_visual(
     model_path: &str,
     variant: Option<&str>,
     pending: Option<&PendingSceneHandle>,
+    resolved_rig: Option<&crate::model_rig::ModelRig>,
 ) -> GlbSpawnOutcome {
     let scene: Handle<bevy::scene::Scene> = match pending {
         Some(p) => p.0.clone(),
@@ -150,10 +176,18 @@ pub fn spawn_glb_visual(
     if scenes.get(&scene).is_none() {
         return GlbSpawnOutcome::Pending;
     }
-    let rig = match resolve_sidecar_rig(model_path, variant) {
+    // Only re-read the sidecar when the caller hasn't already resolved it.
+    let rig_owned;
+    let rig: &crate::model_rig::ModelRig = match resolved_rig {
         Some(rig) => rig,
-        // Sidecar fetch still in flight (wasm) — retry next frame.
-        None => return GlbSpawnOutcome::Pending,
+        None => {
+            rig_owned = match resolve_sidecar_rig(model_path, variant) {
+                Some(rig) => rig,
+                // Sidecar fetch still in flight (wasm) — retry next frame.
+                None => return GlbSpawnOutcome::Pending,
+            };
+            &rig_owned
+        }
     };
     commands.entity(entity).remove::<PendingSceneHandle>();
 
@@ -169,6 +203,6 @@ pub fn spawn_glb_visual(
     // can resolve mount points by name.
     commands
         .entity(entity)
-        .insert(crate::model_rig::ModelMarkers::from_rig(&rig));
+        .insert(crate::model_rig::ModelMarkers::from_rig(rig));
     GlbSpawnOutcome::Spawned(child)
 }

@@ -228,6 +228,84 @@ describe('TOML round-trip', () => {
     expect(parsed.markers.m.position).toEqual([1, 2, 3]);
     expect(parsed.markers.m.direction).toEqual([0, 0, -1]);
   });
+
+  // The editor round-trip was dropping [[lod]] and [[target_points]]
+  // entirely, because parseRigToml never read them and buildRigToml never
+  // wrote them back out. Editing a marker (the normal Models Mode workflow)
+  // and saving must not destroy either section.
+  it('carries [[lod]] and [[target_points]] through a load -> edit -> save round-trip', () => {
+    const sidecar = `[base]
+offset = [ 0, -2.44, 0 ]
+rotation = [ 0, 0, 0 ]
+scale = [ 4.2, 4.2, 4.2 ]
+
+[extents]
+min = [ -4, -2.44, -3.5 ]
+max = [ 4, 2.44, 3.5 ]
+size = [ 8, 4.88, 7 ]
+
+[[target_points]]
+position = [ 0.5, -0.1, 0 ]
+
+[[target_points]]
+position = [ -0.25, -0.1, 0.25 ]
+
+[markers.fore_emitter]
+position = [ 0, 0, -6 ]
+direction = [ 0, 0, -1 ]
+
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/rock_lod1.glb"
+
+[[lod]]
+shape = "sphere"
+`;
+
+    const rig = parseRigToml(sidecar);
+    expect(rig.target_points).toEqual([
+      { position: [0.5, -0.1, 0] },
+      { position: [-0.25, -0.1, 0.25] },
+    ]);
+    expect(rig.lod).toEqual([
+      { max_distance: 50.0, model: 'assets/models/rock.glb' },
+      { max_distance: 100.0, model: 'assets/models/rock_lod1.glb' },
+      { shape: 'sphere' },
+    ]);
+
+    // The normal Models Mode edit: move an existing marker.
+    updateMarker(rig, 'fore_emitter', { position: [0, 0, -7] });
+
+    const rebuilt = buildRigToml(rig);
+    const reparsed = parseRigToml(rebuilt);
+
+    expect(reparsed.markers.fore_emitter.position).toEqual([0, 0, -7]);
+    expect(reparsed.target_points).toEqual(rig.target_points);
+    expect(reparsed.lod).toEqual(rig.lod);
+
+    // And the raw TOML text actually contains both sections — not just the
+    // parsed shape (a build that silently produced markers-only text but
+    // happened to leave `rig.lod` populated in memory would still fail the
+    // NEXT save; assert on the bytes that hit disk).
+    const parsedRaw = parse(rebuilt);
+    expect(parsedRaw.lod).toHaveLength(3);
+    expect(parsedRaw.target_points).toHaveLength(2);
+  });
+
+  it('a rig with no [[lod]] / [[target_points]] serializes without those sections', () => {
+    const rig = defaultRig();
+    addMarker(rig, 'm', { position: [1, 2, 3] });
+    const toml = buildRigToml(rig);
+    expect(toml).not.toMatch(/\[\[lod\]\]/);
+    expect(toml).not.toMatch(/\[\[target_points\]\]/);
+    const parsed = parse(toml);
+    expect(parsed.lod).toBeUndefined();
+    expect(parsed.target_points).toBeUndefined();
+  });
 });
 
 describe('variant filename helpers', () => {

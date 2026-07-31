@@ -37,6 +37,12 @@ feature in `src/server_app.rs:239-257`.
    actions). Builds an `AssetManifest` of unique GLB / icon / PFX-texture /
    sidecar / sub-world paths.
 
+   Discovery is **two-phase for LOD**. An entity template names one model; since
+   issue #914 the rest of that model's LOD ladder is declared in the model's own
+   rig sidecar (`[[lod]]`), which has not been fetched yet at this point. The
+   far GLBs and *their* sidecars therefore join the manifest in step 3, when
+   `discover_sidecar_lod_assets` expands each sidecar the frame it lands.
+
    Dust textures are the one entry that is *not* read straight off the world
    TOML: `server::pfx::dust_texture_paths` resolves the `[dust]` block through
    the renderer's own defaults, because a world that declares no
@@ -50,9 +56,13 @@ feature in `src/server_app.rs:239-257`.
    resulting handles in `AssetPreloadResource.glb_handles` / `.icon_handles`
    so the asset server keeps them alive.
 3. **Poll** (`asset_preload.rs:494` `poll_asset_preload`) — runs every
-   `Update`. Peeks the sidecar inbox, checks GLB `LoadState`s, ingests any
-   sub-world TOMLs JS has delivered, and recomputes `total_count` /
-   `ready_count` / `complete`.
+   `Update`. Peeks the sidecar inbox, expands each newly-delivered sidecar's
+   `[[lod]]` chain into further GLB + sidecar work (`discover_sidecar_lod_assets`),
+   checks GLB `LoadState`s, ingests any sub-world TOMLs JS has delivered, and
+   recomputes `total_count` / `ready_count` / `complete`. Both the sidecar and
+   the sub-world flows can therefore grow the manifest after step 2, which is
+   why the totals are recomputed from `registered_sidecars` / `seen_worlds`
+   rather than frozen at start.
 4. **Gate** (`lobby/server.rs:283-296` `process_lobby`) — `preload_complete`
    is forwarded into the lobby handler; `StartGame` only transitions to
    `InProgress` once preload reports done. While preload is still running

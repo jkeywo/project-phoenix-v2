@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Asset Manifest Discovery
-      summary: Recursively discovers renderable models, radar icons, model-rig sidecars, nested entity templates, and loadable sub-world assets from selected world content.
+      summary: Discovers renderable models, radar icons, model-rig sidecars, nested entity templates, and loadable sub-world assets from selected world content, in two phases — an initial recursive walk from entity templates, then an incremental expansion of each sidecar's own [[lod]] chain as it lands.
     architecture:
       kind: asset-discovery-service
       authority: authoritative
@@ -22,7 +22,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Asset Manifest State
-      summary: Host-local discovered GLB model, radar-icon, sidecar, and sub-world paths needed before a selected scenario starts.
+      summary: Host-local discovered GLB model, radar-icon, sidecar, and sub-world paths needed before a selected scenario starts, grown incrementally as each delivered sidecar's own [[lod]] chain is discovered and folded in.
     architecture:
       classification: local
       owner: asset-manifest-discovery
@@ -70,7 +70,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Model Rig and Marker Loader
-      summary: Resolves model sidecars into base transforms, extents, marker points, target points, and camera markers used by entity rendering and system effects.
+      summary: Resolves model sidecars into base transforms, extents, marker points, target points, the [[lod]] distance chain, and camera markers used by entity rendering and system effects.
     architecture:
       kind: model-loader
       authority: authoritative

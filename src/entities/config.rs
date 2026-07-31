@@ -398,6 +398,13 @@ pub enum MeshShape {
 /// procedural shape (the `shape`/`colour`/`radius`/etc. fields are ignored for
 /// rendering but kept as fallback). `scale` and `rotation` are applied to both
 /// paths.
+///
+/// **Level of detail is not authored here** (issue #914). The LOD ladder
+/// belongs to the model, so it lives in the model's rig sidecar as
+/// [`crate::model_rig::ModelRig::lod`]; this section only names the model. The
+/// flat fields above remain the fallback every level falls back to. A leftover
+/// `[[mesh.lod]]` block is rejected by [`EntityConfig::from_toml`] with a
+/// message naming the sidecar it belongs in.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshConfig {
@@ -436,18 +443,6 @@ pub struct MeshConfig {
     /// Affects both GLB models and procedural shapes.
     #[serde(default)]
     pub rotation: [f32; 3],
-    /// Optional distance-based level-of-detail bands, ordered near→far.
-    ///
-    /// When non-empty, the renderer does **not** render the flat fields above
-    /// directly; instead it selects a [`LodLevel`] each frame based on the
-    /// entity's distance to the camera (see [`select_lod`]) and renders that
-    /// level. Fields the chosen level omits fall back to the flat `MeshConfig`
-    /// fields (`colour`/`radius`/`emissive`/`size`/`minor_radius`/`variant`).
-    /// The flat fields therefore stay meaningful as shared defaults even when
-    /// `lod` is present. Empty (the default) preserves today's single-level
-    /// behaviour.
-    #[serde(default)]
-    pub lod: Vec<LodLevel>,
 }
 
 fn default_mesh_scale() -> f32 {
@@ -460,14 +455,19 @@ fn default_mesh_scale() -> f32 {
 /// flip-flopping when the camera hovers exactly on a boundary.
 pub const LOD_HYSTERESIS_MARGIN: f32 = 5.0;
 
-/// One distance band in a [`MeshConfig::lod`] list.
+/// One distance band in a model rig sidecar's `[[lod]]` chain
+/// ([`crate::model_rig::ModelRig::lod`]).
 ///
 /// Levels are declared near→far in ascending `max_distance` order. Each level
 /// self-describes as either a GLB level (`model` set) or a procedural level
 /// (`shape` set); a level with neither is invalid and is skipped by the
 /// renderer. Every visual field is optional — when omitted, the renderer falls
-/// back to the corresponding flat [`MeshConfig`] field, so a level only needs
-/// to declare what differs from the shared defaults.
+/// back to the corresponding flat [`MeshConfig`] field of the *entity* that
+/// named the model, so a level only needs to declare what differs from the
+/// shared defaults.
+///
+/// The type stays here, next to [`select_lod`], because selection is entity
+/// rendering logic; only the *authoring location* moved to the sidecar (#914).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct LodLevel {
@@ -570,6 +570,37 @@ pub fn select_lod(levels: &[LodLevel], distance: f32, current: Option<usize>) ->
             cur
         }
     }
+}
+
+/// Reject an entity TOML that still authors `[[mesh.lod]]` (issue #914).
+///
+/// The ladder now lives in the model's rig sidecar. Silently ignoring the old
+/// location would leave an author convinced they had a ladder while the entity
+/// rendered a single level forever, and letting `deny_unknown_fields` handle it
+/// yields "unknown field `lod`" — true, but it does not say where the field
+/// went. So the check runs first and names the exact sidecar file whenever the
+/// `[mesh]` section identifies a model, because "move it to the sidecar" is
+/// only actionable if you know *which* sidecar.
+fn reject_relocated_mesh_lod(value: &toml::Value) -> Result<(), toml::de::Error> {
+    let Some(mesh) = value.get("mesh") else {
+        return Ok(());
+    };
+    if mesh.get("lod").is_none() {
+        return Ok(());
+    }
+    let sidecar = mesh
+        .get("model")
+        .and_then(|m| m.as_str())
+        .map(|model| {
+            crate::model_rig::sidecar_path(model, mesh.get("variant").and_then(|v| v.as_str()))
+        })
+        .unwrap_or_else(|| "assets/models/<model>.<variant>.toml".to_string());
+    Err(SerdeError::custom(format!(
+        "[[mesh.lod]] has moved to the model rig sidecar (issue #914): author the \
+         chain as [[lod]] blocks in {sidecar} and delete it from the entity TOML. \
+         The entity's [mesh] keeps the model reference and the flat fallback fields \
+         that sidecar levels fall back to."
+    )))
 }
 
 fn default_star_radius() -> f32 {
@@ -3798,6 +3829,13 @@ impl EntityConfig {
         ai_declarations: AiDeclarationMode,
     ) -> Result<Self, toml::de::Error> {
         let mut value: toml::Value = toml::from_str(s)?;
+        // The LOD ladder moved to the model rig sidecar (issue #914). Reject a
+        // leftover `[[mesh.lod]]` here, BEFORE `deny_unknown_fields` turns it
+        // into a generic "unknown field `lod`" — an author who reads that
+        // learns only that the key is gone, not where it went. Checked on the
+        // composed document, so a fragment that still carries one is caught
+        // too.
+        reject_relocated_mesh_lod(&value)?;
         // Extract [[shield_arc]] blocks BEFORE stripping so we can populate
         // `EntityConfig.shield_arcs` and synthesise matching `[[system]]`
         // entries during ship-config parsing.
@@ -12570,10 +12608,17 @@ range = 8000.0
         assert_eq!(select_lod(&levels, 500.0, Some(99)), 2);
     }
 
+    // ── `[[mesh.lod]]` has moved to the model sidecar (issue #914) ─────────
+
+    /// The old location cannot come back silently: rejected at parse, with a
+    /// message that names the sidecar the chain belongs in — not the generic
+    /// "unknown field `lod`" that `deny_unknown_fields` would emit.
     #[test]
-    fn lod_level_parses_from_mesh_toml() {
+    fn mesh_lod_in_entity_toml_is_rejected_with_a_targeted_message() {
         let toml_str = r##"
 [mesh]
+model = "assets/models/rock.glb"
+variant = "small"
 shape = "sphere"
 colour = [0.5, 0.5, 0.5]
 radius = 2.0
@@ -12581,21 +12626,43 @@ radius = 2.0
 [[mesh.lod]]
 max_distance = 50.0
 model = "assets/models/rock.glb"
-variant = "small"
-
-[[mesh.lod]]
-shape = "sphere"
-radius = 2.0
-colour = [0.5, 0.5, 0.5]
 "##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let err = EntityConfig::from_toml(toml_str)
+            .expect_err("[[mesh.lod]] must not parse from an entity TOML");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("assets/models/rock.small.toml"),
+            "the error must name the sidecar the chain moved to; got: {msg}"
+        );
+        assert!(
+            msg.contains("[[lod]]"),
+            "the error must name the new block; got: {msg}"
+        );
+        assert!(
+            !msg.contains("unknown field"),
+            "the targeted check must run before deny_unknown_fields; got: {msg}"
+        );
+    }
+
+    /// A template with no `model` still gets a pointer, just a generic one —
+    /// the check must not depend on the mesh naming a GLB.
+    #[test]
+    fn mesh_lod_is_rejected_even_without_a_model_reference() {
+        let toml_str = "[mesh]\nshape = \"sphere\"\ncolour = [0.5, 0.5, 0.5]\n\n[[mesh.lod]]\nshape = \"sphere\"\n";
+        let err = EntityConfig::from_toml(toml_str).expect_err("must not parse");
+        assert!(err.to_string().contains("model rig sidecar"));
+    }
+
+    /// The guard is scoped: a mesh without a ladder is untouched, and `lod`
+    /// elsewhere in the document is not this field.
+    #[test]
+    fn a_mesh_without_a_ladder_still_parses() {
+        let config = EntityConfig::from_toml(
+            "[mesh]\nmodel = \"assets/models/rock.glb\"\nshape = \"sphere\"\ncolour = [0.5, 0.5, 0.5]\n",
+        )
+        .expect("a plain [mesh] must still parse");
         let mesh = config.mesh.expect("mesh section present");
-        assert_eq!(mesh.lod.len(), 2);
-        assert_eq!(mesh.lod[0].max_distance, Some(50.0));
-        assert_eq!(mesh.lod[0].model.as_deref(), Some("assets/models/rock.glb"));
-        assert_eq!(mesh.lod[0].variant.as_deref(), Some("small"));
-        assert_eq!(mesh.lod[1].max_distance, None);
-        assert_eq!(mesh.lod[1].shape, Some(MeshShape::Sphere));
+        assert_eq!(mesh.model.as_deref(), Some("assets/models/rock.glb"));
     }
 
     // ── NPC red-alert provisioning (issue #749) ─────────────────────────────────

@@ -9,3 +9,21 @@ max = [ 1.9337502855439783, 1.2980990091882614, 2 ]
 size = [ 3.8708046354972723, 2.5961980183765228, 3.9927354727482722 ]
 
 [markers]
+
+# Distance-based LOD (issue #914): full GLB up close, two decimated steps, then
+# a shared procedural sphere far away. Levels omit `variant`, `radius` and
+# `colour` so each rock inherits them from the entity's own flat `[mesh]`.
+[[lod]]
+max_distance = 50.0
+model = "assets/models/asteroid_common_4.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/asteroid_common_4_lod1.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/asteroid_common_4_lod2.glb"
+
+[[lod]]
+shape = "sphere"

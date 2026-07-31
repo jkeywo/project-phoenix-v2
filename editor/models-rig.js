@@ -29,9 +29,22 @@
  *   position  = [0.0, 0.0, -6.0]
  *   direction = [0.0, 0.0, -1.0]
  *
+ *   [[target_points]]            # anonymous phaser hit points (issue #914)
+ *   position = [0.5, -0.1, 0.0]
+ *
+ *   [[lod]]                      # distance-based LOD chain (issue #914)
+ *   max_distance = 50.0
+ *   model = "assets/models/rock.glb"
+ *
  * A marker's `direction` is a unit vector in post-base-rig space. The
  * forward basis is (0,0,-1) (game -Z forward). Roll is intentionally
  * dropped: only the resulting forward direction is serialized.
+ *
+ * The editor has no UI for `[[target_points]]` or `[[lod]]` yet — they are
+ * authored by hand or by other tooling. `parseRigToml`/`buildRigToml` still
+ * carry both through VERBATIM: a sidecar loaded, edited, and saved in Models
+ * Mode must not silently drop a phaser target-point list or an LOD chain it
+ * doesn't understand. See `defaultRig`.
  */
 import { parse, stringify } from 'smol-toml';
 import { validateRigMarkerNames, validateRigSidecarToml } from './marker-validate.js';
@@ -79,7 +92,14 @@ export function normalizeDirection(v) {
 
 // ── default rig ─────────────────────────────────────────────────────────
 
-/** A fresh, identity rig with no markers and zero extents. */
+/**
+ * A fresh, identity rig with no markers and zero extents.
+ *
+ * `target_points` and `lod` are opaque passthrough arrays: the editor has no
+ * UI for either, so it never inspects or rewrites their contents — it only
+ * carries whatever `parseRigToml` read back out through `buildRigToml`,
+ * verbatim.
+ */
 export function defaultRig() {
   return {
     base: {
@@ -93,6 +113,8 @@ export function defaultRig() {
       size: [0, 0, 0],
     },
     markers: {},
+    target_points: [],
+    lod: [],
   };
 }
 
@@ -177,6 +199,12 @@ function normalizeMarkerName(name) {
  * Parse a sidecar TOML string into a normalized rig object. Missing
  * sections fall back to defaults; markers are coerced and their directions
  * re-normalized so callers always get a well-formed rig.
+ *
+ * `[[target_points]]` and `[[lod]]` (issue #914) are sections the editor
+ * does not model — it has no UI to add, edit, or remove either. They are
+ * carried through as opaque arrays, unmodified, so `buildRigToml` can
+ * re-emit them verbatim instead of silently dropping both on every Models
+ * Mode save.
  */
 export function parseRigToml(text) {
   const parsed = parse(text);
@@ -199,6 +227,9 @@ export function parseRigToml(text) {
     };
   }
 
+  rig.target_points = Array.isArray(parsed.target_points) ? parsed.target_points : [];
+  rig.lod = Array.isArray(parsed.lod) ? parsed.lod : [];
+
   return rig;
 }
 
@@ -212,9 +243,16 @@ function computeExtentsFromStored(extents) {
 
 /**
  * Serialize a rig object to a TOML sidecar string. The emitted order is
- * [base] → [extents] → [markers]; smol-toml emits each marker as a
- * `[markers.<name>]` sub-table (NOT an inline table), which round-trips
- * cleanly back through parseRigToml.
+ * [base] → [extents] → [[target_points]] → [markers] → [[lod]], matching the
+ * shipped sidecars (ship rigs author `[[target_points]]` before `[markers]`;
+ * asteroid rigs author `[[lod]]` after `[markers]`). smol-toml emits each
+ * marker as a `[markers.<name>]` sub-table (NOT an inline table), which
+ * round-trips cleanly back through parseRigToml.
+ *
+ * `target_points` and `lod` are re-emitted VERBATIM from whatever
+ * `parseRigToml` carried in — the editor does not understand either section,
+ * so it must not reshape or drop them. Both are omitted entirely when empty
+ * so a rig that never had one still serializes exactly as before.
  */
 export function buildRigToml(rig) {
   const safe = rig || defaultRig();
@@ -233,14 +271,22 @@ export function buildRigToml(rig) {
       max: toVec3(extents.max, [0, 0, 0]),
       size: toVec3(extents.size, [0, 0, 0]),
     },
-    markers: {},
   };
 
+  if (Array.isArray(safe.target_points) && safe.target_points.length > 0) {
+    doc.target_points = safe.target_points;
+  }
+
+  doc.markers = {};
   for (const [name, m] of Object.entries(markers)) {
     doc.markers[name] = {
       position: toVec3(m.position, [0, 0, 0]),
       direction: normalizeDirection(m.direction),
     };
+  }
+
+  if (Array.isArray(safe.lod) && safe.lod.length > 0) {
+    doc.lod = safe.lod;
   }
 
   return stringify(doc);

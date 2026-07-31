@@ -89,6 +89,7 @@ pub fn poll_pending_model(
             model_path,
             args.variant.as_deref(),
             pending,
+            None,
         ) {
             GlbSpawnOutcome::Pending => {}
             GlbSpawnOutcome::Failed => {

@@ -28,11 +28,17 @@ The wiki is not a replacement for code, `README.md`, `CONTEXT.md`, this file, PA
 ## Common Commands
 
 ```bash
-# ── CI gates you can run locally — run ALL of these before calling work done ─
+# ── CI gates you can run locally — ALL green before each COMMIT, run ONCE ────
 # These are the three fast CI jobs (test, editor-test, pasm) in full. Anything
 # red here fails the build. `cargo test` alone is NOT sufficient: clippy denies
 # warnings, and the PASM suite gates on the spec model. The remaining two jobs
 # (build, smoke) need a WASM build — see the trunk/playwright commands below.
+#
+# Do NOT run this list after every edit, implementation pass, or review pass —
+# clippy alone is a near-full rebuild. While iterating, use `cargo check` plus
+# the targeted tests for the area you touched. Run the full list exactly once,
+# as a final gate pass when the change is otherwise sound, before committing.
+# Review passes are read-only and run no gates at all.
 cargo fmt -- --check                           # CI: test job, step 1
 cargo clippy --all-targets --all-features -- -D warnings   # CI: test job, step 2
 cargo test                                     # CI: test job, step 3

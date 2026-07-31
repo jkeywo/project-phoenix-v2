@@ -854,7 +854,7 @@
       .debug-action { width: 32px; height: 24px; line-height: 24px; }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-adcd224e990ad66c.js" crossorigin="anonymous" integrity="sha384-xD405gd7X4i+oHCgZ3FOpcHnlvVKH1PqSF7+NeWJkbbiBgzH8l9A3JMGSkwIV/uv"><link rel="preload" href="./project-phoenix-adcd224e990ad66c_bg.wasm" crossorigin="anonymous" integrity="sha384-JUIpv3aQd4rLxCEM2156Jz/ujReui1gTE/XPeViDCVsEKw6zT88QjH0bUiuCmH95" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-33b795aa543c870b.js" crossorigin="anonymous" integrity="sha384-0uaRdowq/ZjANfbXoGbOSvzU5L+iTxzc2PymZMydVlkiPUuXXBUoSSSVaGI93wHS"><link rel="preload" href="./project-phoenix-33b795aa543c870b_bg.wasm" crossorigin="anonymous" integrity="sha384-HX5Tii8hh9zxyyb+RyZBeOvIEf8B3w931gCmCZwQBlAHbxs+evqS9mZHyawD1VFd" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1147,8 +1147,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-adcd224e990ad66c.js';
-const wasm = await init({ module_or_path: './project-phoenix-adcd224e990ad66c_bg.wasm' });
+import init, * as bindings from './project-phoenix-33b795aa543c870b.js';
+const wasm = await init({ module_or_path: './project-phoenix-33b795aa543c870b_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2743,7 +2743,12 @@ function finishInit() {
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        try { wasm_validate_stations(toml); } catch (err) {
+        // The PATH is passed alongside the text because a hull may declare
+        // `includes` (issue #875): the gate resolves the include closure out
+        // of the preloaded raw templates, and relative include references are
+        // resolved against this path. Passing text alone would reject every
+        // composed hull.
+        try { wasm_validate_stations(templatePath, toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2761,7 +2766,7 @@ function finishInit() {
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
         wasm_select_ship('assets/entities/alliance_cruiser.toml');
-        try { wasm_validate_stations(toml); } catch (err) {
+        try { wasm_validate_stations('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2775,7 +2780,7 @@ function finishInit() {
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        try { wasm_validate_stations(toml); } catch (err) {
+        try { wasm_validate_stations(templatePath, toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2802,7 +2807,7 @@ function finishInit() {
         fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
-            try { wasm_validate_stations(toml); } catch (err) {
+            try { wasm_validate_stations(template_path, toml); } catch (err) {
               showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
               return;
             }

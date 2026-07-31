@@ -48,6 +48,25 @@ export function normalizeCoordinationPayload(payload, senderLabel) {
       : 'phasers';
     title = 'Tactical: come about, bring ' + weapon + ' to bear';
     body = payload.data?.label || payload.label || '';
+  } else if (payload.type === 'IntentAdvisory') {
+    // Issue #879: a backfilled seat telling the rest of the crew what it just
+    // decided. The host sends a typed kind plus at most one label — it never
+    // sends the sentence, and never a figure — so the sentence is built here,
+    // following this file's existing inline-English chatter pattern.
+    const kind = payload.data?.kind || payload.kind;
+    const subject = payload.data?.subject ?? payload.subject ?? '';
+    const INTENT_TITLES = {
+      TargetAcquired: 'Target acquired',
+      TargetSwitched: 'Switching target',
+      CombatPostureEntered: 'Combat posture',
+      CombatPostureLeft: 'Standing down',
+      BreakingOff: 'Breaking off',
+      ShieldArcFocused: 'Focusing shields',
+      PowerBrownout: 'Power brownout',
+      ManoeuvreBegun: 'Manoeuvring',
+    };
+    title = INTENT_TITLES[kind] || kind || 'Advisory';
+    body = subject;
   } else if (payload.type === 'PowerBrownout') {
     const sysLabel = payload.data?.label || payload.label || 'System';
     const level = payload.data?.allocated_level ?? payload.allocated_level ?? '?';

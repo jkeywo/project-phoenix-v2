@@ -1,0 +1,99 @@
+# Probe world for issue #875 — a TARGETED Destroy objective over a backfilled
+# attack-pass hull.
+#
+# The sibling probe (`probe_duel.toml`) authors an UNTARGETED Destroy, which is
+# what every shipped hostile TOML authors. This world authors the other kind, and
+# the difference is not cosmetic: a *named* Destroy target is the only shape that
+# reaches `operate_navigation_ai`'s objective arm, which guards on
+# `!target.is_empty()`. That arm sets the ship's own `NavigationWaypoint`,
+# ANCHORED to the named target, and `issue_navigate_to_clearance` latches the
+# clearance for the whole engagement (re-setting an anchored waypoint that merely
+# moves is idempotent, so the generation never bumps again).
+#
+# So on any hull that declares a navigation system — every Alliance hull does,
+# and backfill automates every station-owned system — a mission that names a
+# Destroy target puts a permanently-cleared waypoint on the ship's own Helm. That
+# is the exact state in which the planner's "a navigation order outranks the
+# authored manoeuvre" precedence must NOT fire, because the order and the
+# manoeuvre name the same destination. Every mission in the campaign that names a
+# Destroy target sits in this state; `probe_duel` sits in none of it.
+#
+# The target is a second copy of the SAME hull, re-factioned. It is therefore
+# not inert: it ships `destroy-hostiles` at `base_priority = 45`, the attack-pass
+# class doctrine, and the Alliance captain's first-contact red-alert rule, so it
+# manoeuvres and returns fire and the engagement is real. Using the player hull
+# for both sides is deliberate — the state under test is the interaction between
+# a hull's OWN backfilled Navigation and its OWN authored manoeuvre, and the
+# quickest way to be sure the target reproduces every part of that is to make it
+# the same hull.
+#
+# Because the target manoeuvres, the metric cannot be a range trace. A range
+# trace was tried first and rejected: both a hull that flew its pass and one
+# whose Navigation stood the doctrine down carry ~15 units/s of momentum out of
+# the merge and open comparable daylight before either can turn, and a target
+# closing under its own doctrine moves the range further still. So the range
+# assertion in the test (`min_range < 40.0`) is only the weak claim that the two
+# hulls met at all — it can be satisfied by the TARGET doing the closing.
+#
+# The load-bearing assertion is the escape-heading one: per-tick, the hull's own
+# yaw against the `escape_heading_rad` its Steering policy froze at the merge.
+# Only the pass arm flies that frozen heading and deliberately stops looking at
+# the target for the authored dwell; a hull whose Navigation redirected it curls
+# back onto the anchored waypoint and ends up flying the reciprocal.
+
+[global]
+seed = 875
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship — the headless runner's `--ship` supersedes this template; the
+# entry exists so `spawn_game_start_entities` has a player to spawn.
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# Make Harrow and Federation mutually hostile before the target spawns, so the
+# Alliance captain doctrine's first-contact rule raises Red Alert on sight and the
+# movement `posture` fact presses the class doctrine.
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Harrow"
+  enemy   = "Federation"
+
+  [[trigger.action]]
+  type    = "add_faction_enemy"
+  faction = "Federation"
+  enemy   = "Harrow"
+
+# The named target, and the mission objective that names it.
+[[trigger]]
+condition = "on_timer"
+after_secs = 0.0
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/alliance_destroyer.toml"
+  name          = "probe_target"
+  position      = [0.0, 0.0, -70.0]
+  overrides     = { faction = "cccccccc-3333-4333-8333-cccccccccccc" }
+
+  # A mission `Destroy` carrying a target NAME. `objectives.rs` gives every
+  # Destroy objective `SystemAffinity::Helm`, which is what makes it the top
+  # Helm-relevant objective both `helm_destroy_target` and
+  # `operate_navigation_ai` read.
+  [[trigger.action]]
+  type           = "add_objective"
+  id             = "obj-destroy-target"
+  text           = "world.probe_targeted_pass.trigger.action.obj_destroy_target.text"
+  mandatory      = true
+  targets        = ["probe_target"]
+  target         = "probe_target"
+  directive_kind = "Destroy"
+  base_priority  = 80.0

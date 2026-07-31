@@ -6,6 +6,7 @@ import {
   worldPathFor,
   findScenario,
   normalizeSelection,
+  curatedShipsFor,
 } from '../../gui/scenario-arbiter.js';
 
 // Mirrors the #754 pre-load catalog shape delivered by wasm_get_scenario_catalog.
@@ -105,6 +106,31 @@ describe('scenario-arbiter — completion + world resolution', () => {
 
   it('worldPathFor returns null for an unresolved selection', () => {
     expect(worldPathFor(CATALOG, EMPTY)).toBeNull();
+  });
+});
+
+describe('scenario-arbiter — curatedShipsFor (issue #917 preload allowlist)', () => {
+  it('returns the locked scenario entry\'s ship template paths', () => {
+    const locked = { scenario_id: 'combat_test', template_path: null };
+    expect(curatedShipsFor(CATALOG, locked)).toEqual([
+      'assets/entities/alliance_battleship.toml',
+    ]);
+  });
+
+  it('returns every ship the entry lists when the scenario is uncurated', () => {
+    const locked = { scenario_id: 'default', template_path: null };
+    expect(curatedShipsFor(CATALOG, locked)).toEqual([
+      'assets/entities/alliance_cruiser.toml',
+      'assets/entities/alliance_destroyer.toml',
+    ]);
+  });
+
+  it('returns an empty array (unrestricted) for an unresolved selection', () => {
+    expect(curatedShipsFor(CATALOG, EMPTY)).toEqual([]);
+  });
+
+  it('returns an empty array for an unknown scenario id', () => {
+    expect(curatedShipsFor(CATALOG, { scenario_id: 'nope', template_path: null })).toEqual([]);
   });
 });
 

@@ -1017,10 +1017,22 @@ pub fn wasm_is_preload_complete() -> bool {
 /// Delegates to `config_cache::wasm_load_world`, which performs the unified
 /// `parse_world` pass into the `WORLD_CONFIG` thread-local. After PRD #341
 /// this is the only world loader — the legacy two-loader split is gone.
+///
+/// `curated_ships` (issue #917) is the locked scenario's playable-hull
+/// allowlist — the same `template_path` values as the catalog entry's
+/// `ships` (`wasm_get_scenario_catalog`) — restricting which
+/// `[[available_ships]]` hulls get preloaded. `server.html` passes `[]` when
+/// no scenario was resolved through the catalog (e.g. the `?scenario=<path>`
+/// dev bypass), which preloads every hull the world offers, unchanged from
+/// pre-#917 behaviour.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_world(path, toml_str)
+pub fn wasm_load_world(
+    path: String,
+    toml_str: String,
+    curated_ships: Vec<String>,
+) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_world(path, toml_str, curated_ships)
 }
 
 /// Register the JS callback used by Rust to request a runtime world TOML fetch.
@@ -1244,10 +1256,19 @@ pub fn wasm_clear_mod_pack() {
 /// Only scenarios whose world TOML has been delivered are catalogued; a
 /// scenario whose world is still in flight is omitted until its TOML arrives.
 /// Returns an empty array when no manifest has been pushed.
+///
+/// Also runs `validate_manifest` over the base/demo manifest (issue #917) and
+/// logs any findings as browser-console warnings under `LogCat::Config` — a
+/// typo'd `ships` curation entry or similar is otherwise silently invisible,
+/// since (unlike the mod-pack upload flow, which validates atomically at
+/// `wasm_validate_mod_pack`) nothing else ever calls `validate_manifest` on
+/// this manifest. Findings are never fatal here, matching the
+/// `missing-scenario-world` precedent below, where `build_merged_catalog`
+/// simply skips an unresolvable entry rather than failing the whole catalog.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_scenario_catalog() -> Array {
-    use crate::world::manifest::{build_merged_catalog, parse_manifest};
+    use crate::world::manifest::{build_merged_catalog, parse_manifest, validate_manifest};
     let arr = Array::new();
     let Some(manifest_toml) = crate::config_cache::get_scenario_manifest_toml() else {
         return arr;
@@ -1260,10 +1281,20 @@ pub fn wasm_get_scenario_catalog() -> Array {
     // content first, then base). Only manifest-listed scenarios appear.
     let mod_manifest =
         crate::config_cache::get_mod_manifest_toml().and_then(|t| parse_manifest(&t).ok());
-    let catalog = build_merged_catalog(&manifest, mod_manifest.as_ref(), |path| {
+    let resolve_world = |path: &str| {
         crate::config_cache::mod_pack_overlay_get(path)
             .or_else(|| crate::config_cache::peek_pending_world_toml(path))
-    });
+    };
+    for f in validate_manifest(&manifest, &manifest_toml, &resolve_world) {
+        bevy::log::warn!(
+            target: crate::logging::LogCat::Config.target(),
+            "scenario manifest [{}] {}: {}",
+            f.category,
+            f.source.reference,
+            f.message
+        );
+    }
+    let catalog = build_merged_catalog(&manifest, mod_manifest.as_ref(), &resolve_world);
     for scenario in &catalog.scenarios {
         let obj = Object::new();
         Reflect::set(

@@ -1889,16 +1889,24 @@ where
 /// callback (PRD #338). Returned in stable iteration order so the queue
 /// sequence is deterministic across runs.
 ///
+/// `curated_ships` is the locked scenario's playable-hull allowlist (issue
+/// #917's `world::manifest::ScenarioEntry::ships`), threaded through from the
+/// host's preload seam so a curated demo/mod-pack build never fetches hulls
+/// the player can't choose. Empty means unrestricted — every ship the world
+/// offers is queued, exactly as before #917. Only reference surface 2 below is
+/// filtered; NPC/scenery templates (surfaces 1, 3, 4) always preload in full.
+///
 /// Walks four reference surfaces:
 /// 1. Static `[[entity]]` declarations.
-/// 2. `available_ships[*].template_path` entries (issue #623).
+/// 2. `available_ships[*].template_path` entries (issue #623), filtered to
+///    `curated_ships` when non-empty.
 /// 3. `[[trigger.action]] type = "spawn_entity"` references (needed for
 ///    timer-driven wave spawns and similar — discovered too late by the
 ///    asset-preload pipeline otherwise, since trigger actions don't run
 ///    until after preload completes). (#475)
 /// 4. `[[comms.response.action]] type = "spawn_entity"` references nested
 ///    arbitrarily deep in dialogue follow-ups. (#475)
-pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
+pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> Vec<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
 
@@ -1909,8 +1917,12 @@ pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
         }
     }
 
-    // 2. `available_ships[*].template_path` entries (issue #623).
+    // 2. `available_ships[*].template_path` entries (issue #623), restricted
+    //    to the curated allowlist when the host resolved one (issue #917).
     for ship in &world.available_ships {
+        if !curated_ships.is_empty() && !curated_ships.iter().any(|p| p == &ship.template_path) {
+            continue;
+        }
         if seen.insert(ship.template_path.clone()) {
             out.push(ship.template_path.clone());
         }
@@ -2687,7 +2699,7 @@ template_path = "assets/entities/star_sun.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         assert!(paths.contains(&"assets/entities/ship_scout.toml".to_string()));
         assert!(paths.contains(&"assets/entities/ship_cruiser.toml".to_string()));
         assert!(paths.contains(&"assets/entities/star_sun.toml".to_string()));
@@ -2706,7 +2718,7 @@ spawn_on = "game_start"
 transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         let count = paths
             .iter()
             .filter(|p| *p == "assets/entities/alliance_cruiser.toml")
@@ -2715,6 +2727,77 @@ transform = { position = [0.0, 0.0, 0.0] }
             count, 1,
             "duplicate ship path must be collapsed to one entry"
         );
+    }
+
+    #[test]
+    fn entity_template_paths_filters_available_ships_to_curated_allowlist() {
+        // Issue #917: a non-empty curated allowlist restricts which
+        // [[available_ships]] hulls get queued for preload — the BLOCKER this
+        // fixes is that world preload used to ignore curation entirely and
+        // fetch every hull regardless.
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+label = "Cruiser"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let curated = vec!["assets/entities/ship_cruiser.toml".to_string()];
+        let paths = entity_template_paths(&cfg, &curated);
+        assert_eq!(paths, vec!["assets/entities/ship_cruiser.toml".to_string()]);
+    }
+
+    #[test]
+    fn entity_template_paths_empty_curated_list_is_unrestricted() {
+        // Empty curation (the default, and what the `?scenario=<path>` dev
+        // bypass always passes since it never resolves a catalog entry) must
+        // preload every hull the world offers — byte-identical to the
+        // pre-#917 caller with no allowlist parameter at all.
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+label = "Scout"
+
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+label = "Cruiser"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let paths = entity_template_paths(&cfg, &[]);
+        assert_eq!(
+            paths,
+            vec![
+                "assets/entities/ship_scout.toml".to_string(),
+                "assets/entities/ship_cruiser.toml".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn entity_template_paths_curation_only_restricts_available_ships() {
+        // A curated allowlist scopes [[available_ships]] only — static
+        // [[entity]] instances (scenery, NPCs) are unaffected and always
+        // preload, regardless of which hull the player may fly.
+        let toml = r#"
+[[available_ships]]
+template_path = "assets/entities/ship_scout.toml"
+
+[[available_ships]]
+template_path = "assets/entities/ship_cruiser.toml"
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let curated = vec!["assets/entities/ship_scout.toml".to_string()];
+        let paths = entity_template_paths(&cfg, &curated);
+        assert!(paths.contains(&"assets/entities/ship_scout.toml".to_string()));
+        assert!(!paths.contains(&"assets/entities/ship_cruiser.toml".to_string()));
+        assert!(paths.contains(&"assets/entities/star_sun.toml".to_string()));
     }
 
     // -- resolve_entity_position (PRD #337 slice 3) ------------------------
@@ -4396,7 +4479,7 @@ entity    = "raider"
     #[test]
     fn entity_template_paths_returns_empty_for_no_entities() {
         let world = WorldConfig::default();
-        assert!(entity_template_paths(&world).is_empty());
+        assert!(entity_template_paths(&world, &[]).is_empty());
     }
 
     #[test]
@@ -4415,7 +4498,7 @@ template_path = "assets/entities/star_sun.toml"
 transform = { position = [100.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         assert_eq!(paths.len(), 2, "duplicates must be collapsed");
         assert!(paths.contains(&"assets/entities/asteroid_large.toml".to_string()));
         assert!(paths.contains(&"assets/entities/star_sun.toml".to_string()));
@@ -4441,7 +4524,7 @@ template_path = "third.toml"
 transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         assert_eq!(
             paths,
             vec![
@@ -4474,7 +4557,7 @@ after_secs = 0.0
   position      = [0.0, 0.0, 0.0]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         assert!(
             paths.contains(&"assets/entities/wave_destroyer.toml".to_string()),
             "trigger spawn_entity template must be discovered for preload, got {paths:?}"
@@ -4500,7 +4583,7 @@ message = "Greetings."
     position      = [0.0, 0.0, 0.0]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         assert!(
             paths.contains(&"assets/entities/escape_pod.toml".to_string()),
             "comms response spawn_entity template must be discovered for preload, got {paths:?}"
@@ -4541,7 +4624,7 @@ message = "."
     position      = [20.0, 0.0, 0.0]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         let ship_count = paths
             .iter()
             .filter(|p| p.as_str() == "assets/entities/ship.toml")
@@ -4566,7 +4649,7 @@ message = "."
         // broadside if the hull is on station when its wave fires.
         let toml = include_str!("../../assets/worlds/combat_test.toml");
         let cfg = parse_world(toml).expect("combat_test.toml must parse");
-        let paths = entity_template_paths(&cfg);
+        let paths = entity_template_paths(&cfg, &[]);
         for required in &[
             // (#892) `pirate_raider.toml` was retired; the Harrow Destroyer
             // below now fills the waves it used to.

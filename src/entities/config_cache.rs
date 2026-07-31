@@ -7,9 +7,12 @@
 // Preload sequence:
 // 1. JS calls set_config_request_callback(cb)
 // 2. JS fetches the chosen world TOML
-// 3. JS calls wasm_load_world(path, toml_str) which parses it via the unified
-//    `world::config::parse_world` pass and stores the resulting `WorldConfig`
-// 4. wasm_load_world fires the callback for each referenced entity template path
+// 3. JS calls wasm_load_world(path, toml_str, curated_ships) which parses it
+//    via the unified `world::config::parse_world` pass and stores the
+//    resulting `WorldConfig`. `curated_ships` is the locked scenario's
+//    playable-hull allowlist (issue #917) — empty when unrestricted.
+// 4. wasm_load_world fires the callback for each referenced entity template
+//    path, restricted to `curated_ships` for available_ships (issue #917)
 // 5. For each entity path, JS fetches the TOML and calls wasm_load_config(path, toml_str)
 // 6. When all pending configs are loaded, returns Ok(true) and JS calls wasm_init()
 
@@ -449,7 +452,11 @@ pub fn wasm_is_preload_complete() -> bool {
 /// split (one per half of the world TOML) was retired together with the
 /// map/scenario config types.
 #[cfg(target_arch = "wasm32")]
-pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+pub fn wasm_load_world(
+    path: String,
+    toml_str: String,
+    curated_ships: Vec<String>,
+) -> Result<JsValue, JsValue> {
     let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Failed to parse world TOML at {}: {}",
@@ -458,8 +465,11 @@ pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValu
         JsValue::from_str(&format!("World parse error at {}: {}", path, e))
     })?;
 
-    // Queue every entity template path discovered by the unified pipeline.
-    let entity_paths = crate::world::config::entity_template_paths(&world_config);
+    // Queue every entity template path discovered by the unified pipeline,
+    // restricted to the locked scenario's curated playable-hull allowlist
+    // when the host resolved one (issue #917) — empty means unrestricted,
+    // matching `world::manifest::ScenarioEntry::ships`'s own semantics.
+    let entity_paths = crate::world::config::entity_template_paths(&world_config, &curated_ships);
 
     WORLD_CONFIG.with(|slot| {
         *slot.borrow_mut() = Some(world_config);
@@ -868,7 +878,11 @@ pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::Enti
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_load_world(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
+pub fn wasm_load_world(
+    _path: String,
+    _toml_str: String,
+    _curated_ships: Vec<String>,
+) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(true))
 }
 

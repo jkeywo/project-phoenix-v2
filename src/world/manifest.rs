@@ -32,6 +32,14 @@ pub struct ScenarioEntry {
     /// the referenced world's `[global] title`.
     #[serde(default)]
     pub label: Option<String>,
+    /// Optional playable-hull curation (issue #917): `template_path` values
+    /// this entry restricts the world's `[[available_ships]]` to. Empty (the
+    /// default) means "every ship the world offers" — pre-#917 behaviour, and
+    /// what every mod-pack manifest exported by #759 still produces. A
+    /// non-empty list NEVER edits the referenced world TOML; it filters the
+    /// catalog built from it, in the world's own authored order.
+    #[serde(default)]
+    pub ships: Vec<String>,
 }
 
 /// The parsed base scenario manifest: the ordered list of selectable roots.
@@ -127,8 +135,8 @@ pub fn validate_manifest(
                     entry.id, entry.world
                 ),
             )),
-            Some(world_toml) => {
-                if let Err(e) = parse_world(&world_toml) {
+            Some(world_toml) => match parse_world(&world_toml) {
+                Err(e) => {
                     findings.push(finding(
                         "unparseable-scenario-world",
                         manifest_toml,
@@ -139,7 +147,29 @@ pub fn validate_manifest(
                         ),
                     ));
                 }
-            }
+                Ok(parsed) => {
+                    // Curated hull list (issue #917): every listed template_path
+                    // must be one the world actually offers, or the manifest is
+                    // curating a ship that can never appear.
+                    for ship_path in &entry.ships {
+                        let offered = parsed
+                            .available_ships
+                            .iter()
+                            .any(|s| &s.template_path == ship_path);
+                        if !offered {
+                            findings.push(finding(
+                                "unknown-scenario-ship",
+                                manifest_toml,
+                                ship_path,
+                                format!(
+                                    "scenario {:?} curates ship {:?} which world {:?} does not offer",
+                                    entry.id, ship_path, entry.world
+                                ),
+                            ));
+                        }
+                    }
+                }
+            },
         }
     }
 
@@ -199,12 +229,27 @@ pub fn build_catalog(
             continue;
         };
         let label = entry.label.clone().or_else(|| world.global.title.clone());
+        // Curated hull list (issue #917): a non-empty `entry.ships` restricts
+        // the catalog to those template paths, in the WORLD's authored order
+        // — the manifest curates, it never reorders. An empty list (the
+        // default) keeps every ship the world offers, unchanged from
+        // pre-#917 behaviour.
+        let ships = if entry.ships.is_empty() {
+            world.available_ships.clone()
+        } else {
+            world
+                .available_ships
+                .iter()
+                .filter(|s| entry.ships.iter().any(|p| p == &s.template_path))
+                .cloned()
+                .collect()
+        };
         scenarios.push(ScenarioCatalogEntry {
             id: entry.id.clone(),
             world: entry.world.clone(),
             label,
             description: world.global.description.clone(),
-            ships: world.available_ships.clone(),
+            ships,
         });
     }
     ScenarioCatalog { scenarios }
@@ -336,6 +381,27 @@ label = "Custom"
     }
 
     #[test]
+    fn parse_manifest_ships_defaults_to_empty() {
+        let m = parse_manifest(MANIFEST).expect("must parse");
+        assert!(m.scenarios[0].ships.is_empty());
+    }
+
+    #[test]
+    fn parse_manifest_reads_optional_ships() {
+        let toml = r#"
+[[scenario]]
+id = "x"
+world = "assets/worlds/x.toml"
+ships = ["assets/entities/alliance_destroyer.toml"]
+"#;
+        let m = parse_manifest(toml).expect("must parse");
+        assert_eq!(
+            m.scenarios[0].ships,
+            vec!["assets/entities/alliance_destroyer.toml".to_string()]
+        );
+    }
+
+    #[test]
     fn parse_manifest_empty_is_empty_manifest() {
         let m = parse_manifest("").expect("empty parses");
         assert!(m.scenarios.is_empty());
@@ -395,6 +461,40 @@ label = "Custom"
     }
 
     #[test]
+    fn curated_ship_offered_by_world_produces_no_finding() {
+        let toml = r#"
+[[scenario]]
+id = "combat_test"
+world = "assets/worlds/combat_test.toml"
+ships = ["assets/entities/alliance_battleship.toml"]
+"#;
+        let m = parse_manifest(toml).unwrap();
+        let findings = validate_manifest(&m, toml, resolver(full_map()));
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn curated_ship_not_offered_by_world_is_a_finding() {
+        let toml = r#"
+[[scenario]]
+id = "combat_test"
+world = "assets/worlds/combat_test.toml"
+ships = ["assets/entities/alliance_destroyer.toml"]
+"#;
+        // combat_world() only offers the battleship — the destroyer is not one
+        // of its [[available_ships]], so curating it is a source-located error.
+        let m = parse_manifest(toml).unwrap();
+        let findings = validate_manifest(&m, toml, resolver(full_map()));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, "unknown-scenario-ship");
+        assert_eq!(
+            findings[0].source.reference,
+            "assets/entities/alliance_destroyer.toml"
+        );
+        assert!(findings[0].is_error());
+    }
+
+    #[test]
     fn duplicate_scenario_id_is_a_finding() {
         let toml = r#"
 [[scenario]]
@@ -435,6 +535,50 @@ world = ""
     }
 
     // -- catalog -------------------------------------------------------------
+
+    #[test]
+    fn catalog_curates_ships_to_the_manifest_allowlist() {
+        // world_with_ships() offers cruiser then destroyer; curate down to just
+        // the destroyer without touching the world file at all (issue #917).
+        let toml = r#"
+[[scenario]]
+id = "default"
+world = "assets/worlds/default.toml"
+ships = ["assets/entities/alliance_destroyer.toml"]
+"#;
+        let m = parse_manifest(toml).unwrap();
+        let catalog = build_catalog(&m, resolver(full_map()));
+        assert_eq!(catalog.scenarios.len(), 1);
+        assert_eq!(catalog.scenarios[0].ships.len(), 1);
+        assert_eq!(
+            catalog.scenarios[0].ships[0].template_path,
+            "assets/entities/alliance_destroyer.toml"
+        );
+    }
+
+    #[test]
+    fn catalog_ship_curation_preserves_world_authored_order() {
+        // Curation lists the ships out of order; the catalog keeps the WORLD's
+        // order, not the manifest's — the manifest only filters membership.
+        let toml = r#"
+[[scenario]]
+id = "default"
+world = "assets/worlds/default.toml"
+ships = ["assets/entities/alliance_destroyer.toml", "assets/entities/alliance_cruiser.toml"]
+"#;
+        let m = parse_manifest(toml).unwrap();
+        let catalog = build_catalog(&m, resolver(full_map()));
+        assert_eq!(catalog.scenarios[0].ships.len(), 2);
+        // world_with_ships() authors cruiser first, then destroyer.
+        assert_eq!(
+            catalog.scenarios[0].ships[0].template_path,
+            "assets/entities/alliance_cruiser.toml"
+        );
+        assert_eq!(
+            catalog.scenarios[0].ships[1].template_path,
+            "assets/entities/alliance_destroyer.toml"
+        );
+    }
 
     #[test]
     fn catalog_exposes_only_scenario_ships() {
@@ -624,6 +768,45 @@ label = "Modded Default"
             .find(|s| s.id == "default")
             .unwrap();
         assert_eq!(default.ships.len(), 2);
+    }
+
+    /// The demo curation manifest (issue #917): must parse, curate the
+    /// catalogue down to exactly `combat_test`, and — without editing
+    /// `combat_test.toml`, which still authors four `[[available_ships]]` —
+    /// resolve the ship list down to exactly the Alliance Destroyer.
+    #[test]
+    fn demo_manifest_curates_to_combat_test_and_the_destroyer() {
+        let manifest_toml = include_str!("../../assets/scenarios.demo.toml");
+        let m = parse_manifest(manifest_toml).expect("scenarios.demo.toml must parse");
+        let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["combat_test"]);
+
+        let mut map = HashMap::new();
+        map.insert(
+            "assets/worlds/combat_test.toml".to_string(),
+            include_str!("../../assets/worlds/combat_test.toml").to_string(),
+        );
+
+        let findings = validate_manifest(&m, manifest_toml, resolver(map.clone()));
+        assert!(
+            findings.is_empty(),
+            "demo manifest must validate cleanly: {findings:?}"
+        );
+
+        let catalog = build_catalog(&m, resolver(map));
+        assert_eq!(catalog.scenarios.len(), 1);
+        assert_eq!(catalog.scenarios[0].id, "combat_test");
+        assert_eq!(catalog.scenarios[0].ships.len(), 1);
+        assert_eq!(
+            catalog.scenarios[0].ships[0].template_path,
+            "assets/entities/alliance_destroyer.toml"
+        );
+
+        // combat_test.toml itself is untouched: it still authors all four
+        // hulls. Curation happens only in the manifest's ships allowlist.
+        let combat_toml = include_str!("../../assets/worlds/combat_test.toml");
+        let world = parse_world(combat_toml).expect("combat_test.toml must parse");
+        assert_eq!(world.available_ships.len(), 4);
     }
 
     // -- exported mod-pack manifest ------------------------------------------

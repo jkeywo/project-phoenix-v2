@@ -1942,6 +1942,12 @@
     /** Player-ship template locked pre-load by the arbiter — finishInit uses it
      *  directly instead of showing the post-load ship picker (issue #755). */
     let _lockedShipTemplate = null;
+    /** The locked scenario's playable-hull allowlist (issue #917), threaded
+     *  into wasm_load_world so world preload only fetches curated hulls.
+     *  Empty (the default, and what the ?scenario=<path> dev bypass leaves
+     *  it) means unrestricted — every hull the world offers gets preloaded,
+     *  matching pre-#917 behaviour. */
+    let _lockedCuratedShips = [];
     /** Pre-load catalog: [{ id, world, label, description, ships:[...] }]. */
     let _scenarioCatalog = [];
     /** Authoritative first-valid-wins selection. */
@@ -2054,6 +2060,10 @@
       _worldLoadStarted = true;
       selectedScenario = worldPath;
       _lockedShipTemplate = _preSelection.template_path;
+      // Curated allowlist for the locked scenario (issue #917) — threaded
+      // into wasm_load_world below so world preload only fetches hulls the
+      // catalog actually offers, not every hull the world authors.
+      _lockedCuratedShips = window.scenarioArbiter.curatedShipsFor(_scenarioCatalog, _preSelection);
       document.getElementById('scenario-panel').style.display = 'none';
       resetJoinQrLayer(); // panel gone — drop the QR back to its normal layer
       showLobbyPanel();
@@ -2106,10 +2116,18 @@
         });
       } else if (_preSelection.template_path == null) {
         // Ship stage — the locked scenario's offered ships via ph-ship-picker.
-        if (label) label.textContent = t('server.select_ship');
-        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
         const entry = window.scenarioArbiter.findScenario(_scenarioCatalog, _preSelection.scenario_id);
         const ships = (entry && entry.ships) || [];
+        // A scenario curated (or authored) down to exactly one playable hull
+        // resolves straight to it — no picker click needed (issue #917). This
+        // is count-based, not keyed on any hull name: it fires for any
+        // single-ship catalog entry, curated or not.
+        if (ships.length === 1) {
+          arbiterSelectShip(ships[0].template_path);
+          return;
+        }
+        if (label) label.textContent = t('server.select_ship');
+        worldList.querySelectorAll('.world-btn, ph-ship-picker, #scenario-loading').forEach(function (el) { el.remove(); });
         import('./gui/components/ph-ship-picker.js').then(function () {
           if (_preSelection.template_path != null) return; // won meanwhile
           const picker = document.createElement('ph-ship-picker');
@@ -2125,13 +2143,24 @@
       }
     }
 
+    // Which scenario manifest to load: the base catalog (assets/scenarios.toml)
+    // by default, or an alternate manifest named by `?manifest=<path>` — e.g.
+    // `?manifest=assets/scenarios.demo.toml` to curate the host down to a demo
+    // build's scenarios and per-scenario hulls (issue #917). A dev/default
+    // launch carries no `manifest` param, so it is byte-for-byte the pre-#917
+    // fetch. Same shared `[[scenario]]` schema either way — this only chooses
+    // which manifest FILE gets fetched, never how it's parsed.
+    function resolveManifestPath() {
+      return new URLSearchParams(location.search).get('manifest') || 'assets/scenarios.toml';
+    }
+
     // Build the pre-load catalog once WASM is ready: push the base manifest and
     // each referenced world TOML into Rust so wasm_get_scenario_catalog() (the
     // #754 authoritative catalog) can resolve titles + per-scenario ships.
     async function buildScenarioCatalog() {
       if (_catalogBuilt) return;
       try {
-        const manifestResp = await fetch('assets/scenarios.toml');
+        const manifestResp = await fetch(resolveManifestPath());
         if (!manifestResp.ok) throw new Error('manifest HTTP ' + manifestResp.status);
         const manifestToml = await manifestResp.text();
         wasmBindings.wasm_push_scenario_manifest(manifestToml);
@@ -2500,7 +2529,13 @@
 const fetchedPaths = new Set();
 
 // Preload sequence: fetch map -> load map -> fetch entities -> load entities -> init
-async function preloadAndStart(scenarioPath) {
+//
+// `curatedShips` (issue #917) is the locked scenario's playable-hull
+// allowlist, forwarded to wasm_load_world so world preload only fetches
+// curated hulls instead of every hull the world's [[available_ships]]
+// authors. Callers that never resolved a catalog entry (the ?scenario=<path>
+// dev bypass) pass nothing, which defaults to [] (unrestricted).
+async function preloadAndStart(scenarioPath, curatedShips = []) {
   const spinner = document.getElementById('wasm-spinner');
 
   try {
@@ -2524,7 +2559,7 @@ async function preloadAndStart(scenarioPath) {
     window.wasm_load_complexity = wasmBindings.wasm_load_complexity;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
 
-    wasm_load_world(scenarioPath, worldToml);
+    wasm_load_world(scenarioPath, worldToml, curatedShips);
 
   } catch (e) {
     console.error('Preload failed:', e);
@@ -2900,7 +2935,7 @@ function startServer() {
 // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
 function startPhoenix() {
-  preloadAndStart(selectedScenario).catch(err => {
+  preloadAndStart(selectedScenario, _lockedCuratedShips).catch(err => {
     console.error('Failed to start preload:', err);
   });
 }

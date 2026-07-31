@@ -2584,3 +2584,151 @@ describe('withTutorialOverlay', () => {
     expect(withTutorialOverlay('helm', helmState(), 'not-json')).toBe('not-json');
   });
 });
+
+// ── Destroyer remaining-station tutorial merges (issue #921) ────────────────
+//
+// Tactical, Captain and Engineering are all system-composed consoles (issue
+// #825 — families span more than one console), so their payload is the
+// generic `{ systems: { <system-id>: <view> } }` shape (buildSystemStation-
+// ConsoleState), not a flat *ConsolePayload. Each block below mirrors the
+// `[[station.tutorial]]` defs authored in assets/entities/alliance_destroyer.toml
+// for that station and pushes them through the SAME merge path a real client
+// build uses (buildSystemStationConsoleState -> withTutorialOverlay), so a
+// broken anchor/control/path typo here is exactly what would break in the
+// shipped console.
+
+describe('withTutorialOverlay (destroyer tactical station, issue #921)', () => {
+  const TACTICAL_SYSTEMS = {
+    tactical: ['tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard', 'navigation', 'comms'],
+  };
+  const tacticalDefs = [
+    { id: 'tactical-welcome', trigger: { kind: 'first_visit' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.welcome.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.welcome.text', anchor: 'tactical-radar' },
+    { id: 'tactical-lock-target', trigger: { kind: 'control_unused', control: 'set_target' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.lock_target.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.lock_target.text', anchor: 'tactical-radar' },
+    { id: 'tactical-phaser', trigger: { kind: 'control_unused', control: 'fire_phaser' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.phaser.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.phaser.text', anchor: 'phasers-controls' },
+    { id: 'tactical-blaster', trigger: { kind: 'control_unused', control: 'fire_blaster' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.blaster.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.blaster.text', anchor: 'blasters-controls' },
+    { id: 'tactical-torpedo', trigger: { kind: 'control_unused', control: 'fire_torpedo' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.torpedo.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.torpedo.text', anchor: 'torpedo-controls' },
+    { id: 'tactical-comms', trigger: { kind: 'control_unused', control: 'hail' },
+      title: 'entity.alliance_destroyer.station.tactical.tutorial.comms.title',
+      text: 'entity.alliance_destroyer.station.tactical.tutorial.comms.text', anchor: 'comms-toggle' },
+  ];
+
+  it('parses and evaluates through buildSystemStationConsoleState: welcome first, then progresses as controls are used', () => {
+    const fresh = { stationTutorials: { tactical: tacticalDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: TACTICAL_SYSTEMS };
+    const s1 = parse(withTutorialOverlay('tactical', fresh, buildSystemStationConsoleState('tactical', fresh)));
+    expect(s1.tutorial.active.id).toBe('tactical-welcome');
+    expect(s1.tutorial.remaining).toBe(6);
+    expect(getTable().has(s1.tutorial.active.title)).toBe(true);
+    expect(getTable().has(s1.tutorial.active.text)).toBe(true);
+    // The rest of the composed weapons/comms payload is untouched.
+    expect(s1.systems['tactical-radar']).toHaveProperty('banks');
+    expect(s1.systems['comms']).toHaveProperty('messages');
+
+    // Welcome dismissed, target locked and the phaser fired at least once —
+    // the next tip in authored order is the still-untouched blaster tip.
+    const progressed = {
+      ...fresh,
+      tutorialProgress: {
+        dismissed: { 'tactical/tactical-welcome': true },
+        used: { 'tactical/set_target': true, 'tactical/fire_phaser': true },
+      },
+    };
+    const s2 = parse(withTutorialOverlay('tactical', progressed, buildSystemStationConsoleState('tactical', progressed)));
+    expect(s2.tutorial.active.id).toBe('tactical-blaster');
+    expect(s2.tutorial.remaining).toBe(3); // blaster, torpedo, comms
+  });
+});
+
+describe('withTutorialOverlay (destroyer captain station, issue #921)', () => {
+  const CAPTAIN_SYSTEMS = { captain: ['captain', 'red-alert', 'viewscreen', 'sensors', 'sensor-radar'] };
+  const captainDefs = [
+    { id: 'captain-welcome', trigger: { kind: 'first_visit' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.welcome.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.welcome.text', anchor: 'sensor-radar' },
+    { id: 'captain-camera', trigger: { kind: 'control_unused', control: 'set_view' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.camera.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.camera.text', anchor: 'camera-select' },
+    { id: 'captain-sensors-target', trigger: { kind: 'control_unused', control: 'set_sensors_target' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.sensors_target.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.sensors_target.text', anchor: 'sensor-radar' },
+    { id: 'captain-objectives', trigger: { kind: 'control_unused', control: 'set_objective_priority' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.objectives.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.objectives.text', anchor: 'objective-list' },
+    { id: 'captain-red-alert', trigger: { kind: 'control_unused', control: 'set_red_alert' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.red_alert.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.red_alert.text', anchor: 'red-alert' },
+    { id: 'captain-red-alert-active', priority: 5,
+      trigger: { kind: 'state', path: 'systems.captain.red_alert', op: 'truthy' },
+      title: 'entity.alliance_destroyer.station.captain.tutorial.red_alert_active.title',
+      text: 'entity.alliance_destroyer.station.captain.tutorial.red_alert_active.text', anchor: 'sensor-radar' },
+  ];
+
+  it('parses and evaluates through buildSystemStationConsoleState: welcome calm, red-alert state trigger preempts once live', () => {
+    const calm = { stationTutorials: { captain: captainDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: CAPTAIN_SYSTEMS };
+    const s1 = parse(withTutorialOverlay('captain', calm, buildSystemStationConsoleState('captain', calm)));
+    expect(s1.systems['captain'].red_alert).toBe(false);
+    expect(s1.tutorial.active.id).toBe('captain-welcome');
+    expect(s1.tutorial.remaining).toBe(5); // red-alert-active not yet eligible
+    expect(getTable().has(s1.tutorial.active.title)).toBe(true);
+    expect(getTable().has(s1.tutorial.active.text)).toBe(true);
+
+    // Same state trigger mechanism as helm-red-alert: reads this station's OWN
+    // composed payload (systems.captain.red_alert), which the captain and
+    // sensors families alike derive from `state.redAlert` server truth.
+    const hot = { ...calm, redAlert: true };
+    const s2 = parse(withTutorialOverlay('captain', hot, buildSystemStationConsoleState('captain', hot)));
+    expect(s2.systems['captain'].red_alert).toBe(true);
+    expect(s2.tutorial.active.id).toBe('captain-red-alert-active'); // priority 5 preempts
+    expect(s2.tutorial.remaining).toBe(6);
+  });
+});
+
+describe('withTutorialOverlay (destroyer engineering station, issue #921)', () => {
+  const ENG_SYSTEMS = { engineering: ['shields-system', 'power-reactor', 'power-battery', 'repair'] };
+  const engineeringDefs = [
+    { id: 'engineering-welcome', trigger: { kind: 'first_visit' },
+      title: 'entity.alliance_destroyer.station.engineering.tutorial.welcome.title',
+      text: 'entity.alliance_destroyer.station.engineering.tutorial.welcome.text', anchor: 'hull-integrity' },
+    { id: 'engineering-power', trigger: { kind: 'control_unused', control: 'set_power' },
+      title: 'entity.alliance_destroyer.station.engineering.tutorial.power.title',
+      text: 'entity.alliance_destroyer.station.engineering.tutorial.power.text', anchor: 'power-controls' },
+    { id: 'engineering-shields', trigger: { kind: 'control_unused', control: 'set_shield_focus' },
+      title: 'entity.alliance_destroyer.station.engineering.tutorial.shields.title',
+      text: 'entity.alliance_destroyer.station.engineering.tutorial.shields.text', anchor: 'shield-facings' },
+    { id: 'engineering-repair', trigger: { kind: 'control_unused', control: 'dispatch_repair_team' },
+      title: 'entity.alliance_destroyer.station.engineering.tutorial.repair.title',
+      text: 'entity.alliance_destroyer.station.engineering.tutorial.repair.text', anchor: 'repair-teams' },
+    { id: 'engineering-damage', priority: 5,
+      trigger: { kind: 'state', path: 'systems.repair.overall_hull.pct', op: 'lt', value: 0.9 },
+      title: 'entity.alliance_destroyer.station.engineering.tutorial.damage.title',
+      text: 'entity.alliance_destroyer.station.engineering.tutorial.damage.text', anchor: 'hull-integrity' },
+  ];
+
+  it('parses and evaluates through buildSystemStationConsoleState: welcome at full hull, damage state trigger preempts once hurt', () => {
+    const healthy = { stationTutorials: { engineering: engineeringDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: ENG_SYSTEMS };
+    const s1 = parse(withTutorialOverlay('engineering', healthy, buildSystemStationConsoleState('engineering', healthy)));
+    expect(s1.systems['repair'].overall_hull.pct).toBe(1);
+    expect(s1.tutorial.active.id).toBe('engineering-welcome');
+    expect(s1.tutorial.remaining).toBe(4); // damage tip not yet eligible
+    expect(getTable().has(s1.tutorial.active.title)).toBe(true);
+    expect(getTable().has(s1.tutorial.active.text)).toBe(true);
+
+    // Ship-wide hull aggregate drops below the 0.9 threshold — reads straight
+    // off the repair view's own `overall_hull.pct` (the same figure the
+    // ph-hull-integrity bar renders), not a re-derived local sum.
+    const hurt = { ...healthy, blackboards: { repair: { aggregate_hull_fraction: 0.5 } } };
+    const s2 = parse(withTutorialOverlay('engineering', hurt, buildSystemStationConsoleState('engineering', hurt)));
+    expect(s2.systems['repair'].overall_hull.pct).toBe(0.5);
+    expect(s2.tutorial.active.id).toBe('engineering-damage'); // priority 5 preempts
+    expect(s2.tutorial.remaining).toBe(5);
+  });
+});

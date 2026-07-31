@@ -1,4 +1,4 @@
-use crate::messages::{PowerGroupId, StationId, SystemId};
+use crate::messages::{PowerGroupId, StationId, SystemId, TutorialOverlayWire};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -56,6 +56,13 @@ pub struct StationConfig {
     /// `crate::ship::manual` for how it is combined with generated sections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manual_overview: Option<String>,
+    /// Contextual tutorial overlays authored on this station (issue #916),
+    /// from `[[station.tutorial]]` blocks. Pure carriage: Rust never
+    /// interprets the trigger vocabulary — the client's tutorial
+    /// state-builder (`gui/tutorial-state.js`) evaluates it. `title`/`text`
+    /// hold `strings.csv` ids, enforced by `scripts/check-strings.mjs`.
+    #[serde(default, rename = "tutorial", skip_serializing_if = "Vec::is_empty")]
+    pub tutorials: Vec<TutorialOverlayWire>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -592,6 +599,105 @@ power_group = "ops"
                 .and_then(|s| s.manual_overview.clone()),
             Some("You command the bridge and set the ship's posture.".to_string()),
         );
+    }
+
+    // ── Contextual tutorial overlays (issue #916) ─────────────────────────
+
+    /// A ship config authoring `[[station.tutorial]]` blocks on one station:
+    /// one per shipped trigger kind, exercising every optional field.
+    fn tutorial_toml() -> &'static str {
+        r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Fly the ship."
+rank = "Ltn."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.tutorial]]
+id = "helm-welcome"
+title = "entity.test.station.helm.tutorial.welcome.title"
+text = "entity.test.station.helm.tutorial.welcome.text"
+anchor = "helm-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-joystick"
+title = "entity.test.station.helm.tutorial.joystick.title"
+text = "entity.test.station.helm.tutorial.joystick.text"
+trigger = { kind = "control_unused", control = "set_helm" }
+
+[[station.tutorial]]
+id = "helm-boost"
+priority = 10
+title = "entity.test.station.helm.tutorial.boost.title"
+text = "entity.test.station.helm.tutorial.boost.text"
+trigger = { kind = "state", path = "boost_enabled", op = "truthy", control = "set_boost" }
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command."
+rank = "Cpt."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "helm"
+kind = "helm"
+station = "helm"
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+"#
+    }
+
+    #[test]
+    fn station_config_parses_tutorial_overlay_blocks() {
+        let config = parse_ok(tutorial_toml());
+        let helm = config.station(&StationId("helm".into())).unwrap();
+        assert_eq!(helm.tutorials.len(), 3);
+
+        let welcome = &helm.tutorials[0];
+        assert_eq!(welcome.id, "helm-welcome");
+        assert_eq!(welcome.trigger.kind, "first_visit");
+        assert_eq!(welcome.anchor.as_deref(), Some("helm-radar"));
+        assert_eq!(welcome.priority, 0, "priority defaults to 0");
+        assert_eq!(
+            welcome.title,
+            "entity.test.station.helm.tutorial.welcome.title"
+        );
+
+        let joystick = &helm.tutorials[1];
+        assert_eq!(joystick.trigger.kind, "control_unused");
+        assert_eq!(joystick.trigger.control.as_deref(), Some("set_helm"));
+        assert_eq!(joystick.anchor, None);
+
+        let boost = &helm.tutorials[2];
+        assert_eq!(boost.priority, 10);
+        assert_eq!(boost.trigger.kind, "state");
+        assert_eq!(boost.trigger.path.as_deref(), Some("boost_enabled"));
+        assert_eq!(boost.trigger.op.as_deref(), Some("truthy"));
+        assert_eq!(boost.trigger.control.as_deref(), Some("set_boost"));
+
+        // A station that authors none keeps an empty list (serde default).
+        let captain = config.station(&StationId("captain".into())).unwrap();
+        assert!(captain.tutorials.is_empty());
+    }
+
+    #[test]
+    fn station_config_tutorials_survive_round_trip() {
+        let config = parse_ok(tutorial_toml());
+        let encoded = toml::to_string(&config).expect("ship config should serialize");
+        let decoded = parse_ok(&encoded);
+        assert_eq!(decoded, config);
     }
 
     #[test]

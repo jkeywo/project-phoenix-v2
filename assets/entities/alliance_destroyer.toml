@@ -544,6 +544,64 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["helm-lateral-thrust"]
 
+# Contextual tutorial overlays (issue #916). Trigger vocabulary is DATA,
+# evaluated by gui/tutorial-state.js: `first_visit` shows until dismissed,
+# `control_unused` completes when the named console action is first used,
+# `state` gates on a field of this console's own payload (HelmConsolePayload —
+# see gui/console-state.js). `title`/`text` are strings.csv ids; `anchor`
+# names a DOM element id in gui/destroyer/helm.html; higher `priority`
+# preempts the intro queue (contextual event tips jump ahead). `id` only
+# needs to be unique within THIS station's [[station.tutorial]] list — the
+# client scopes all dismissal/used bookkeeping per station (`<station>/<id>`
+# keys), so two stations may author the same id without sharing state.
+[[station.tutorial]]
+id = "helm-welcome"
+title = "entity.alliance_destroyer.station.helm.tutorial.welcome.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.welcome.text"
+anchor = "helm-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-joystick"
+title = "entity.alliance_destroyer.station.helm.tutorial.joystick.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.joystick.text"
+anchor = "helm-joystick"
+trigger = { kind = "control_unused", control = "set_helm" }
+
+[[station.tutorial]]
+id = "helm-lateral"
+title = "entity.alliance_destroyer.station.helm.tutorial.lateral.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.lateral.text"
+anchor = "lateral-thrust-joystick"
+trigger = { kind = "control_unused", control = "set_lateral_thrust" }
+
+[[station.tutorial]]
+id = "helm-impulse"
+title = "entity.alliance_destroyer.station.helm.tutorial.impulse.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.impulse.text"
+anchor = "impulse-btn"
+trigger = { kind = "control_unused", control = "start_impulse_charge" }
+
+# Contextual: shows only while boost is actually available, retires the first
+# time the player boosts (the shared `control` completion gate).
+[[station.tutorial]]
+id = "helm-boost"
+priority = 5
+title = "entity.alliance_destroyer.station.helm.tutorial.boost.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.boost.text"
+anchor = "boost-btn"
+trigger = { kind = "state", path = "boost_enabled", op = "truthy", control = "set_boost" }
+
+# Contextual: fires with the red-alert hostile-arc overlay (#874) so a
+# first-time helm learns what the shaded wedges mean the moment they appear.
+[[station.tutorial]]
+id = "helm-red-alert"
+priority = 10
+title = "entity.alliance_destroyer.station.helm.tutorial.red_alert.title"
+text = "entity.alliance_destroyer.station.helm.tutorial.red_alert.text"
+anchor = "helm-radar"
+trigger = { kind = "state", path = "red_alert", op = "truthy" }
+
 [[station]]
 id = "tactical"
 name = "Tactical"

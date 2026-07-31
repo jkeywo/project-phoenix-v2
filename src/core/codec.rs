@@ -2875,4 +2875,90 @@ mod tests {
             panic!("expected Welcome");
         }
     }
+
+    // ── station_tutorials round-trip (issue #916) ─────────────────────────
+
+    #[test]
+    fn ship_client_config_station_tutorials_round_trip() {
+        // One overlay per shipped trigger kind, exercising every optional
+        // field of the trigger vocabulary. Content fields are strings.csv ids
+        // (structured codes on the wire — never composed English).
+        let mut station_tutorials = HashMap::new();
+        station_tutorials.insert(
+            "helm".to_string(),
+            vec![
+                TutorialOverlayWire {
+                    id: "helm-welcome".into(),
+                    trigger: TutorialTriggerWire {
+                        kind: "first_visit".into(),
+                        control: None,
+                        path: None,
+                        op: None,
+                        value: None,
+                    },
+                    title: "entity.test.station.helm.tutorial.welcome.title".into(),
+                    text: "entity.test.station.helm.tutorial.welcome.text".into(),
+                    anchor: Some("helm-radar".into()),
+                    priority: 0,
+                },
+                TutorialOverlayWire {
+                    id: "helm-boost".into(),
+                    trigger: TutorialTriggerWire {
+                        kind: "state".into(),
+                        control: Some("set_boost".into()),
+                        path: Some("boost_battery".into()),
+                        op: Some("gte".into()),
+                        value: Some(1.0),
+                    },
+                    title: "entity.test.station.helm.tutorial.boost.title".into(),
+                    text: "entity.test.station.helm.tutorial.boost.text".into(),
+                    anchor: None,
+                    priority: 10,
+                },
+            ],
+        );
+        let config = ShipClientConfig {
+            station_tutorials,
+            ..ShipClientConfig::default()
+        };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: config.clone(),
+            station_ratings: HashMap::new(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        let json = JsonCodec.encode_server(&msg).unwrap();
+        let decoded = JsonCodec.decode_server(&json).unwrap();
+        if let ServerMessage::Welcome { ship_config, .. } = decoded {
+            assert_eq!(ship_config.station_tutorials, config.station_tutorials);
+        } else {
+            panic!("expected Welcome");
+        }
+    }
+
+    #[test]
+    fn ship_client_config_station_tutorials_default_empty_when_missing() {
+        // A Welcome from a build predating #916 carries no station_tutorials
+        // key at all (skip_serializing_if on the sender side too) — the field
+        // must decode as an empty map, not fail.
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
+            station_ratings: HashMap::new(),
+        };
+        let json = JsonCodec.encode_server(&msg).unwrap();
+        assert!(
+            !json.contains("station_tutorials"),
+            "empty map must be skipped on encode"
+        );
+        let decoded = JsonCodec.decode_server(&json).unwrap();
+        if let ServerMessage::Welcome { ship_config, .. } = decoded {
+            assert!(ship_config.station_tutorials.is_empty());
+        } else {
+            panic!("expected Welcome");
+        }
+    }
 }

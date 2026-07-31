@@ -107,6 +107,18 @@ entity.alliance_destroyer.station.captain.description,assets/entities/alliance_d
 entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,[Pilot the ship.]
 entity.alliance_destroyer.station.tactical.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage weapons, navigation and comms.]"
 entity.alliance_destroyer.station.engineering.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage shields, power and repairs.]"
+entity.alliance_destroyer.station.helm.tutorial.welcome.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — first-visit helm tip heading,[WELCOME TO HELM]
+entity.alliance_destroyer.station.helm.tutorial.welcome.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — first-visit helm tip body,"[You fly the destroyer. The radar shows space around you — up is always your heading. Your flight controls are on the right.]"
+entity.alliance_destroyer.station.helm.tutorial.joystick.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — flight-stick tip heading,[FLIGHT STICK]
+entity.alliance_destroyer.station.helm.tutorial.joystick.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — flight-stick tip body,"[Drag the flight stick: push up to thrust, pull sideways to steer. The ship holds your last input until you move it again.]"
+entity.alliance_destroyer.station.helm.tutorial.lateral.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — lateral-thrust tip heading,[LATERAL THRUST]
+entity.alliance_destroyer.station.helm.tutorial.lateral.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — lateral-thrust tip body,[The lower stick slides the ship sideways without turning — dodge incoming fire or drift across an enemy's aim.]
+entity.alliance_destroyer.station.helm.tutorial.impulse.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — impulse-drive tip heading,[IMPULSE DRIVE]
+entity.alliance_destroyer.station.helm.tutorial.impulse.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — impulse-drive tip body,[Impulse charges up and then hurls the ship forward in a burst. Press to start charging; press again to cancel.]
+entity.alliance_destroyer.station.helm.tutorial.boost.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — boost-ready contextual tip heading,[BOOST READY]
+entity.alliance_destroyer.station.helm.tutorial.boost.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — boost-ready contextual tip body,[Boost is charged. Hold the boost button for a burst of speed — the battery drains while it runs and recharges after.]
+entity.alliance_destroyer.station.helm.tutorial.red_alert.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — red-alert contextual tip heading,[RED ALERT]
+entity.alliance_destroyer.station.helm.tutorial.red_alert.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — red-alert contextual tip body,[Hostile weapon arcs now paint onto your radar. Keep the ship out of the shaded wedges while Tactical returns fire.]
 entity.asteroid_common_1_cosmetic.name,assets/entities/asteroid_common_1_cosmetic.toml → name (top level),[Cosmetic Asteroid 1]
 entity.asteroid_common_1_large.name,assets/entities/asteroid_common_1_large.toml → name (top level),[Large Asteroid 1]
 entity.asteroid_common_1_small.name,assets/entities/asteroid_common_1_small.toml → name (top level),[Small Asteroid 1]
@@ -428,6 +440,9 @@ component.impulse.ready,"Impulse button in its ready state","[IMPULSE]"
 component.impulse.cancel,"Impulse button while charging. {pct} is charge percent; pressing cancels","[CANCEL {pct}%]"
 component.lateral.title,"Lateral thruster joystick heading","[LATERAL]"
 component.objectives.empty,"Objective list when the mission has no objectives yet","[NO OBJECTIVES]"
+component.tutorial.heading,"Contextual tutorial overlay card (issue #916): eyebrow label above the tip title","[TUTORIAL]"
+component.tutorial.dismiss,"Contextual tutorial overlay card: dismiss button — marks the tip as read forever","[GOT IT]"
+component.tutorial.more,"Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count","[+{n} MORE]"
 component.phasers.title,"Phaser controls panel heading","[PHASERS]"
 component.phasers.manual,"Phaser mode toggle: manual fire mode","[MANUAL]"
 component.phasers.empty,"Phaser controls when the ship has no phaser banks","[NO PHASER BANKS]"

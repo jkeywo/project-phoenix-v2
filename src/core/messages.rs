@@ -774,6 +774,69 @@ pub struct GameState {
     pub world: Option<WorldData>,
 }
 
+/// One contextual tutorial overlay's trigger condition (issue #916).
+///
+/// Pure DATA carriage: the trigger vocabulary (`kind` and its parameters) is
+/// authored in the ship TOML and evaluated by the client's tutorial
+/// state-builder (`gui/tutorial-state.js`). Rust never interprets any of these
+/// fields — `kind` is a plain string, not an enum, precisely so a new trigger
+/// kind is a TOML + JS change with no Rust branch (AGENTS.md #11 / the
+/// pure-JS-client direction). Shipped kinds: `first_visit` (shows until
+/// dismissed), `control_unused` (completes when the named console action is
+/// first used), `state` (gates on a field of the console's own payload).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TutorialTriggerWire {
+    /// Trigger kind code (e.g. `"first_visit"`). Vocabulary owned by
+    /// `gui/tutorial-state.js`; unknown kinds fail closed there.
+    pub kind: String,
+    /// Console action name that completes this overlay when first used
+    /// (e.g. `"set_helm"`). Applies to every kind, not only `control_unused`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<String>,
+    /// `state` kind: dot-path into the console payload (e.g. `"boost_enabled"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// `state` kind: comparison operator (`truthy`/`falsy`/`eq`/`ne`/`gt`/
+    /// `gte`/`lt`/`lte`); the JS evaluator defaults to `truthy` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// `state` kind: numeric comparison operand for the binary operators.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+}
+
+/// One contextual tutorial overlay authored on a station (issue #916), from a
+/// `[[station.tutorial]]` block in the ship TOML.
+///
+/// `title` and `text` are `strings.csv` ids (never composed English — the
+/// same structured-codes-over-the-wire policy as `crate::ship::manual`), and
+/// the strings gate enforces both keys because `title`/`text` are in
+/// `scripts/strings-rules.mjs` LOCALISABLE. The client component resolves them
+/// through `t()` at render time.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TutorialOverlayWire {
+    /// Stable overlay id, unique within the station only — the client scopes
+    /// its persisted dismissal key per station (`<station>/<id>`, see
+    /// `gui/tutorial-state.js`), so two stations may author the same id
+    /// without sharing dismissal state.
+    pub id: String,
+    /// When this overlay is eligible to show (see [`TutorialTriggerWire`]).
+    pub trigger: TutorialTriggerWire,
+    /// `strings.csv` id for the overlay heading.
+    pub title: String,
+    /// `strings.csv` id for the overlay body text.
+    pub text: String,
+    /// Optional DOM element id in the console HTML the overlay points at; the
+    /// client highlights that control while the overlay is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
+    /// Display priority: higher shows first; equal priorities keep authored
+    /// order. Lets contextual event tips (red alert, boost ready) preempt the
+    /// intro queue without a hardcoded ordering rule.
+    #[serde(default)]
+    pub priority: i32,
+}
+
 /// Static, per-ship configuration sent to clients in `Welcome`.
 ///
 /// Carries the bits of the ship entity TOML that the client UI
@@ -922,6 +985,14 @@ pub struct ShipClientConfig {
     /// Sourced from `[helm_capability.impulse] steering_multiplier` in the ship TOML.
     #[serde(default = "default_impulse_steering_multiplier")]
     pub impulse_steering_multiplier: f32,
+    /// Contextual tutorial overlay definitions per station (issue #916),
+    /// keyed by station id. Authored as `[[station.tutorial]]` blocks in the
+    /// ship TOML and delivered on `Welcome`; the client's tutorial
+    /// state-builder (`gui/tutorial-state.js`) evaluates the trigger
+    /// vocabulary — the server carries the data and never interprets it, so
+    /// there are no station-specific Rust branches.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub station_tutorials: HashMap<String, Vec<TutorialOverlayWire>>,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -1029,6 +1100,7 @@ impl Default for ShipClientConfig {
             helm_systems: Vec::new(),
             vertical_movement_mode: default_vertical_movement_mode(),
             impulse_steering_multiplier: default_impulse_steering_multiplier(),
+            station_tutorials: HashMap::new(),
         }
     }
 }

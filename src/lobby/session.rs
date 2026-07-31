@@ -338,6 +338,7 @@ mod tests {
                     ratings: vec![],
                     console: None,
                     manual_overview: None,
+                    tutorials: vec![],
                 })
                 .collect(),
             systems: vec![SystemInstanceConfig {

@@ -717,6 +717,22 @@ html, body {
 /* Legacy hidden utility; station ratings replaced complexity-preset hiding. */
 .cpx-hidden { display: none !important; }
 
+/* ── Contextual tutorial overlays (issue #916) ─────────────────────────
+   The overlay card itself is <ph-tutorial-overlay> shadow DOM (mounted into
+   every console by gui/console-core.js). This class is stamped onto the
+   light-DOM control named by the active overlay's `anchor` so the player can
+   see which control the tip is about; the component adds and removes it. */
+.tutorial-highlight {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 2px;
+  animation: tutorial-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tutorial-pulse {
+  0%, 100% { outline-color: var(--cyan); }
+  50% { outline-color: rgba(102, 224, 255, 0.25); }
+}
+
 /* ── Help system (issue #462) ─────────────────────────
    Per-console "?" trigger + shared click-to-dismiss modal.
    Mirrors the old Bevy help overlay: dark ~90% alpha backdrop,

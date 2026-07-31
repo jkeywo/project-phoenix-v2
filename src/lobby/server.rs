@@ -412,6 +412,16 @@ fn update_session_with_config(
                     (station.id.0.clone(), system_ids)
                 })
                 .collect();
+            // Contextual tutorial overlays (issue #916): carry every station's
+            // authored `[[station.tutorial]]` blocks to the client verbatim.
+            // Generic iteration — no station-specific branches; the client's
+            // tutorial state-builder owns the trigger vocabulary.
+            next.station_tutorials = sc
+                .stations
+                .iter()
+                .filter(|station| !station.tutorials.is_empty())
+                .map(|station| (station.id.0.clone(), station.tutorials.clone()))
+                .collect();
         }
         // Helm capability fields — sourced from [helm_capability] if present.
         // helm_systems: all system ids owned by the helm station.
@@ -1504,6 +1514,7 @@ mod tests {
                     }],
                     console: None,
                     manual_overview: None,
+                    tutorials: vec![],
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -1518,6 +1529,7 @@ mod tests {
                     }],
                     console: None,
                     manual_overview: None,
+                    tutorials: vec![],
                 },
             ],
             systems: vec![],
@@ -1638,6 +1650,7 @@ mod tests {
                 }],
                 console: None,
                 manual_overview: None,
+                tutorials: vec![],
             }],
             systems: vec![],
             power_groups: HashMap::new(),
@@ -1727,6 +1740,7 @@ mod tests {
                     }],
                     console: None,
                     manual_overview: None,
+                    tutorials: vec![],
                 },
                 StationConfig {
                     id: StationId("tactical".into()),
@@ -1741,6 +1755,7 @@ mod tests {
                     }],
                     console: None,
                     manual_overview: None,
+                    tutorials: vec![],
                 },
             ],
             systems: vec![],

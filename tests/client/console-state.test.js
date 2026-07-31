@@ -20,6 +20,7 @@ import {
   buildCommsConsoleState,
   buildNavigationConsoleState,
   buildSystemStationConsoleState,
+  withTutorialOverlay,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { t, getTable } from '../../gui/strings.js';
@@ -2489,5 +2490,97 @@ describe('repairCoreAndTargets', () => {
     const { targets } = repairCoreAndTargets(hull, stationSystems);
     expect(targets.map(t => t.id).sort()).toEqual(['engineering', 'helm', 'tactical']);
     expect(targets.every(t => t.damage_pct === 0)).toBe(true);
+  });
+});
+
+// ── Contextual tutorial merge (issue #916) ──────────────────────────────────
+
+describe('withTutorialOverlay', () => {
+  const helmDefs = [
+    {
+      id: 'helm-welcome',
+      trigger: { kind: 'first_visit' },
+      title: 'entity.alliance_destroyer.station.helm.tutorial.welcome.title',
+      text: 'entity.alliance_destroyer.station.helm.tutorial.welcome.text',
+      anchor: 'helm-radar',
+    },
+    {
+      id: 'helm-boost',
+      priority: 5,
+      trigger: { kind: 'state', path: 'boost_enabled', op: 'truthy', control: 'set_boost' },
+      title: 'entity.alliance_destroyer.station.helm.tutorial.boost.title',
+      text: 'entity.alliance_destroyer.station.helm.tutorial.boost.text',
+      anchor: 'boost-btn',
+    },
+  ];
+
+  function helmState(extra = {}) {
+    return {
+      stationTutorials: { helm: helmDefs },
+      tutorialProgress: { dismissed: {}, used: {} },
+      blackboards: {},
+      ...extra,
+    };
+  }
+
+  it('merges a tutorial block into the built helm payload', () => {
+    const state = helmState();
+    const json = withTutorialOverlay('helm', state, buildHelmConsoleState(state));
+    const s = JSON.parse(json);
+    expect(s.tutorial).toBeTruthy();
+    expect(s.tutorial.active.id).toBe('helm-welcome');
+    // Content stays a strings.csv id on the payload — the component resolves
+    // it; the id must exist in the shipped table.
+    expect(getTable().has(s.tutorial.active.title)).toBe(true);
+    expect(getTable().has(s.tutorial.active.text)).toBe(true);
+    // The rest of the payload is untouched.
+    expect(s.range).toBe(HELM_RADAR_RANGE);
+  });
+
+  it('state triggers read the very payload the console renders (boost tip needs boost_enabled)', () => {
+    const calm = helmState();
+    const calmPayload = JSON.parse(withTutorialOverlay('helm', calm, buildHelmConsoleState(calm)));
+    expect(calmPayload.boost_enabled).toBe(false);
+    expect(calmPayload.tutorial.active.id).toBe('helm-welcome');
+    expect(calmPayload.tutorial.remaining).toBe(1);
+
+    const boosted = helmState({ blackboards: { helm: { boost_enabled: true } } });
+    const hotPayload = JSON.parse(withTutorialOverlay('helm', boosted, buildHelmConsoleState(boosted)));
+    expect(hotPayload.boost_enabled).toBe(true);
+    // priority 5 preempts the intro tip.
+    expect(hotPayload.tutorial.active.id).toBe('helm-boost');
+    expect(hotPayload.tutorial.remaining).toBe(2);
+  });
+
+  it('dismissals and control use recorded in progress retire overlays (station-scoped keys)', () => {
+    const state = helmState({
+      tutorialProgress: { dismissed: { 'helm/helm-welcome': true }, used: { 'helm/set_boost': true } },
+      blackboards: { helm: { boost_enabled: true } },
+    });
+    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    expect(s.tutorial).toBeNull();
+  });
+
+  it('progress recorded for another station never retires helm overlays', () => {
+    const state = helmState({
+      tutorialProgress: {
+        dismissed: { 'tactical/helm-welcome': true },
+        used: { 'tactical/set_boost': true },
+      },
+      blackboards: { helm: { boost_enabled: true } },
+    });
+    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    expect(s.tutorial.active.id).toBe('helm-boost');
+    expect(s.tutorial.remaining).toBe(2);
+  });
+
+  it('a station with no authored overlays gets tutorial: null', () => {
+    const state = helmState({ stationTutorials: {} });
+    const s = JSON.parse(withTutorialOverlay('helm', state, buildHelmConsoleState(state)));
+    expect(s.tutorial).toBeNull();
+  });
+
+  it('returns the input unchanged when the payload is not JSON', () => {
+    expect(withTutorialOverlay('helm', helmState(), 'not-json')).toBe('not-json');
   });
 });

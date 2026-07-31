@@ -57,6 +57,13 @@
        replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
+  <!-- Contextual tutorials (issue #916): trigger evaluation + client-local
+       progress. Script-tag order does NOT matter: the module imports the
+       sim-state singleton directly and hydrates simState.tutorialProgress
+       from localStorage in the module graph (it is in fact already evaluated
+       by the console-state.js tag above; this tag documents the dependency
+       and defines window.applyTutorialAction for the inline script). -->
+  <script type="module" src="gui/tutorial-state.js"></script>
   <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <!-- Connection manager: PeerJS lifecycle extracted into a tested module (issue #603) -->
@@ -1737,6 +1744,19 @@
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
+      // Contextual tutorial progress (issue #916): every console action feeds
+      // the client-local progress store — using a control completes its
+      // `control_unused` overlays — and `tutorial_dismiss` is handled
+      // entirely client-side (presentation state, never forwarded to the
+      // host). On change, re-push the acting console so the overlay advances
+      // immediately rather than waiting for the next server message.
+      if (window.simState && typeof window.applyTutorialAction === 'function') {
+        let tutStorage = null;
+        try { tutStorage = window.localStorage; } catch (_) { /* privacy mode */ }
+        const tut = window.applyTutorialAction(window.simState, action, tutStorage);
+        if (tut.changed) pushConsoleStateFor(action.console || activeConsole);
+        if (tut.handled) return;
+      }
       if (typeof window.dispatchConsoleAction === 'function') {
         // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
         // one sim store; simState.weaponsTarget has a setter for this path.

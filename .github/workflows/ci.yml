@@ -69,6 +69,24 @@ jobs:
       - name: Run unit tests (server)
         run: cargo test
 
+      # The headless scenario suite (issue #912). `tests/headless_runner.rs` is
+      # `#![cfg(all(feature = "headless", ...))]`, so the bare `cargo test`
+      # above compiles it to NOTHING — the whole file is empty without the
+      # feature. `--features headless` appeared exactly once in this workflow
+      # and only as a `cargo build --bin`, never a test target, so these tests
+      # had never run in CI and did not gate #872: two backfilled Alliance
+      # hulls stopped shooting at each other entirely and every job stayed
+      # green.
+      #
+      # It belongs in `test` rather than a job of its own: `test` is the
+      # fail-fast gate `build`, `smoke` and `perf` all `needs:`, and it already
+      # has the toolchain, the rust-cache and this exact apt set. Debug is
+      # correct — the runner is deterministic and asserts on end state, not on
+      # wall-clock timing — and release would triple the build for nothing.
+      # Roughly 110 s on a warm cache.
+      - name: Run headless scenario tests
+        run: cargo test --features headless --test headless_runner
+
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:
     needs: test

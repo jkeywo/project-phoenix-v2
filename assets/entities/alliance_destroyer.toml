@@ -1054,12 +1054,35 @@ weight = 100.0
 # `combat_window_secs`, otherwise stand down. The window is a named parameter so
 # a designer retunes the ship's nerve without recompiling.
 [captain_console.ai]
-param = { combat_window_secs = 10.0 }
+param = { combat_window_secs = 10.0, alert_on_hostile_within = 150.0 }
 
 [[captain_console.ai.rule]]
 priority = 10
 channel = "red_alert"
 when = "fact(secs_since_combat) < param(combat_window_secs)"
+verb = "set_red_alert"
+value = true
+
+# First contact (issue #912). `secs_since_combat` starts only on damage taken,
+# hostile fire taken, or own weapon fired — and since #872 this hull's guns hold
+# until Red Alert — so the rule above ALONE can only ever return fire: a fully
+# backfilled Alliance hull could not open an engagement at all. This rule is the
+# other half. A faction-hostile inside `alert_on_hostile_within` is enough to
+# call the alert, and that range is a named parameter, so a designer authors a
+# nervous hull or a patient one without recompiling.
+#
+# `hostile_range` reads 0.0 when there is NO contact — both readings are ALWAYS
+# seeded, so a guard reads "clear" rather than "absent" — which is why this
+# guard pairs it with `hostile_contact`. The presence clause is load-bearing,
+# not decoration.
+#
+# A Harrow authors no rule like this. It is always armed
+# (`min_alert_to_fire = 0`) and stands its alert down out of combat on purpose,
+# so first contact is not its captain's decision to make.
+[[captain_console.ai.rule]]
+priority = 5
+channel = "red_alert"
+when = "fact(hostile_contact) > 0 and fact(hostile_range) < param(alert_on_hostile_within)"
 verb = "set_red_alert"
 value = true
 

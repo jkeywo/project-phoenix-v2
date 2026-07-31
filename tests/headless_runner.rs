@@ -1081,10 +1081,17 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
         .unwrap_or(0);
     assert!(
         launched > 0,
-        "no torpedo ever left a tube in a duel between two torpedo-armed AI hulls — \
-         `ai_torpedo_auto_fire`'s admitted FireTorpedo is being cleared before \
-         `handle_fire_torpedo` sees it (missing production ordering edge). \
-         message_counts: {:?}",
+        "no torpedo ever left a tube in a duel between two torpedo-armed AI hulls. \
+         TWO causes now produce this identically, so check both. (1) The original: \
+         `ai_torpedo_auto_fire`'s admitted FireTorpedo is cleared before \
+         `handle_fire_torpedo` sees it — a missing production ordering edge. \
+         (2) Since #872 the tubes hold until Red Alert, and since #912 a \
+         backfilled Alliance captain raises it on first contact from the authored \
+         `fact(hostile_contact)` / `fact(hostile_range)` rule; if that rule is \
+         gone from the hull TOML, or `operate_captain_ai` stopped seeding either \
+         reading, neither hull ever calls the alert and neither ever launches. \
+         `RedAlertChanged` in the balance ledger separates the two: absent means \
+         (2), present means (1). message_counts: {:?}",
         report.message_counts
     );
 }

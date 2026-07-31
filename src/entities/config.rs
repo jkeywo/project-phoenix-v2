@@ -1710,6 +1710,29 @@ pub const CAPTAIN_RED_ALERT_CHANNEL: &str = "red_alert";
 /// The `set_red_alert` verb: the one typed verb the Captain policy emits.
 pub const CAPTAIN_SET_RED_ALERT_VERB: &str = "set_red_alert";
 
+// ── Captain first-contact facts (issue #912) ─────────────────────────────────
+//
+// Before #912 the Captain host seeded exactly ONE fact, `secs_since_combat`,
+// and that timer starts only on damage taken, hostile fire taken, or own weapon
+// fired. Since #872 a backfilled Alliance hull's own weapons hold fire until Red
+// Alert, so the loop closed: such a hull could only ever RETURN fire, and the
+// authoring surface could not express first contact at all. These two readings
+// are what an authored guard needs to open an engagement, and they are seeded by
+// `operate_captain_ai` — no Rust branch decides the alert.
+//
+// BOTH are seeded UNCONDITIONALLY, every evaluation. An absent fact makes every
+// comparison against it read false, which is indistinguishable from "clear" and
+// hides a guard that was never wired up (the #779 shape).
+
+/// `1.0` when this ship has a faction-hostile contact in the shared
+/// `WorldSnapshot`, `0.0` when it has none. Always seeded.
+pub const CAPTAIN_HOSTILE_CONTACT_FACT: &str = "hostile_contact";
+/// Planar distance to that nearest hostile contact, world units. Always seeded,
+/// and reads `0.0` when there is no contact at all — which is precisely why an
+/// authored guard must pair it with [`CAPTAIN_HOSTILE_CONTACT_FACT`] rather than
+/// comparing it against a threshold on its own.
+pub const CAPTAIN_HOSTILE_RANGE_FACT: &str = "hostile_range";
+
 // ── Helm fine-system AI policy channels/verbs (issue #779) ────────────────────
 //
 // Engines and Steering are the first *continuous* fine actuators to move onto

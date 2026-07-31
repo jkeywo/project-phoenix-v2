@@ -339,6 +339,33 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("ship_harrow_warhawk", "phaser_bank[port]"),
     ("ship_harrow_warhawk", "phaser_bank[starboard]"),
     ("ship_harrow_warhawk", "blaster_bank[bow_artillery]"),
+    // ── The captains that do NOT open engagements (issue #912) ───────────────
+    //
+    // The fleet-baseline Captain policy raises Red Alert on two independent
+    // readings: recent combat (`secs_since_combat`, the returning-fire half) and
+    // a hostile inside the authored `alert_on_hostile_within` (the first-contact
+    // half #912 added, without which a backfilled Alliance hull whose guns are
+    // gated on the alert could only ever return fire).
+    //
+    // These six author the first rule and NOT the second, and it is the same
+    // doctrine as the always-armed gun line above rather than an oversight. A
+    // Harrow needs no captain's permission to shoot — its banks author
+    // `min_alert_to_fire = 0` — so giving its captain a first-contact rule would
+    // change the hull's red-alert STATE (and with it every fact, comms and
+    // repair reading keyed on it, and #874's arc overlay) while changing nothing
+    // about when it fires: a real behavioural change dressed up as a no-op. The
+    // Requiem courier is unarmed and merely carries the same stand-down doctrine.
+    //
+    // Listed here in the direction that keeps the entry meaningful: if one of
+    // these six quietly acquires the first-contact rule it collapses onto the
+    // baseline and this list notices, and if an Alliance hull quietly loses it
+    // the unanimity requirement notices instead.
+    ("ship_harrow_cruiser", "captain"),
+    ("ship_harrow_destroyer", "captain"),
+    ("ship_harrow_lancer", "captain"),
+    ("ship_harrow_patrol", "captain"),
+    ("ship_harrow_warhawk", "captain"),
+    ("ship_requiem_courier", "captain"),
 ];
 
 fn is_bespoke(hull: &str, slot: &str) -> bool {
@@ -607,6 +634,188 @@ fn captain_guard_truth_table() {
         Some(AiPolicyVerb::SetRedAlert(false)),
         "never been in combat ⇒ the fact is ABSENT ⇒ the guard reads false ⇒ the \
          unconditional fallback stands the alert down."
+    );
+
+    // ── First contact (issue #912) ──────────────────────────────────────────
+    //
+    // The half that does not depend on having been shot at yet. `operate_captain_ai`
+    // seeds BOTH readings unconditionally, so every row below is a snapshot the
+    // host really produces rather than a synthetic one.
+    let reach = param(&p, "alert_on_hostile_within");
+    assert!(reach > 0.0, "the engagement reach must be a live threshold");
+
+    assert_eq!(
+        resolve(
+            &p,
+            "red_alert",
+            &facts(&[("hostile_contact", 1.0), ("hostile_range", reach / 2.0)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(true)),
+        "a hostile inside the authored reach ⇒ Red Alert raised, with NO combat \
+         history at all. This is the row #912 exists for: `secs_since_combat` is \
+         absent — nobody has fired yet, and since #872 this hull's guns cannot \
+         fire until the alert is up — so if this read false the hull could only \
+         ever return fire and the aggressive half of every class doctrine would \
+         be unreachable without a human captain."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "red_alert",
+            &facts(&[("hostile_contact", 1.0), ("hostile_range", reach)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(false)),
+        "the comparison is STRICTLY less-than, so a contact exactly at the \
+         authored reach is still outside it ⇒ stand down."
+    );
+    assert_eq!(
+        resolve(
+            &p,
+            "red_alert",
+            &facts(&[("hostile_contact", 1.0), ("hostile_range", reach * 3.0)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(false)),
+        "a hostile well beyond the reach ⇒ stand down. Presence alone never \
+         raises the alert — the range clause is what makes the reach a designer's \
+         lever rather than decoration."
+    );
+    // The genuine no-contact snapshot: the host seeds `hostile_range` as 0.0
+    // when it found nobody, so WITHOUT the presence clause this row would read
+    // "a hostile at range zero" and every ship in the fleet would sit at
+    // permanent Red Alert. This is the row that makes `hostile_contact`
+    // load-bearing.
+    assert_eq!(
+        resolve(
+            &p,
+            "red_alert",
+            &facts(&[("hostile_contact", 0.0), ("hostile_range", 0.0)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(false)),
+        "no contact ⇒ stand down, even though the always-seeded range reads 0.0 \
+         and would otherwise satisfy the threshold on its own."
+    );
+
+    // ── The captains that deliberately do NOT open engagements ──────────────
+    //
+    // The other direction, on a real Harrow: same first-contact snapshot, and it
+    // still stands down, because the hull authors no such rule. Its guns are
+    // ungated (`min_alert_to_fire = 0`), so an alert would buy it nothing and
+    // would move every other reading keyed on red alert for free.
+    let harrow = entity("ship_harrow_patrol");
+    let hp = policy(
+        harrow
+            .captain_console
+            .as_ref()
+            .and_then(|c| c.ai.as_ref())
+            .expect("the Harrow patrol authors `[captain_console.ai]`"),
+    );
+    assert!(
+        hp.params.get("alert_on_hostile_within").is_none(),
+        "a Harrow must not carry the first-contact reach at all — its entry on \
+         BESPOKE_DOCTRINES says the rule is absent, not merely retuned."
+    );
+    assert_eq!(
+        resolve(
+            &hp,
+            "red_alert",
+            &facts(&[("hostile_contact", 1.0), ("hostile_range", reach / 2.0)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(false)),
+        "the Harrow sees the same hostile at the same range and stands down. It \
+         is always armed, so first contact is not its captain's decision."
+    );
+    assert_eq!(
+        resolve(
+            &hp,
+            "red_alert",
+            &facts(&[("secs_since_combat", window / 2.0)])
+        ),
+        Some(AiPolicyVerb::SetRedAlert(true)),
+        "…and its returning-fire half is untouched, so this is an ABSENT rule \
+         rather than a broken policy."
+    );
+}
+
+/// The shipped cruiser as TEXT, for the mutation proof below.
+///
+/// `include_str!` rather than the include-resolving loader on purpose: the
+/// mutation being modelled is an edit a designer would make to this file, so it
+/// has to be applied to the bytes they would edit.
+const CRUISER_TOML: &str = include_str!("../../assets/entities/alliance_cruiser.toml");
+
+/// The whole first-contact rule (issue #912), exactly as all four Alliance hulls
+/// author it — rule header included, because deleting a rule is what a designer
+/// choosing a passive hull actually does.
+const FIRST_CONTACT_RULE: &str = "\n[[captain_console.ai.rule]]\npriority = 5\nchannel = \"red_alert\"\nwhen = \"fact(hostile_contact) > 0 and fact(hostile_range) < param(alert_on_hostile_within)\"\nverb = \"set_red_alert\"\nvalue = true\n";
+
+/// Delete one authored block from a shipped hull, asserting it was actually
+/// there — a silently-missed removal would turn the mutation below into a
+/// vacuous pass (the same reason `ai_flag_hosts::with_guard` asserts its count).
+fn without_block(hull: &str, block: &str) -> String {
+    assert_eq!(
+        hull.matches(block).count(),
+        1,
+        "the block being removed must appear exactly once in the hull"
+    );
+    hull.replace(block, "\n")
+}
+
+/// The Captain policy a hull's TOML text decodes to, through the real load path.
+fn captain_policy_of(toml: &str) -> AiPolicy {
+    let config = EntityConfig::from_toml(toml).expect("the hull loads");
+    policy(
+        config
+            .captain_console
+            .as_ref()
+            .and_then(|c| c.ai.as_ref())
+            .expect("the hull authors `[captain_console.ai]`"),
+    )
+}
+
+/// **AC4, the data-driven proof.** Delete the first-contact rule from a real
+/// shipped hull's TOML and the hull goes back to return-fire-only — so the
+/// aggression is data, not code.
+///
+/// This is a *resolution* assertion rather than a load assertion, which is why
+/// it lives beside the truth table rather than in `ai_flag_hosts`: the mutated
+/// hull still loads perfectly well (a captain with only the returning-fire rule
+/// is valid content — five Harrows and the Requiem courier ship exactly that),
+/// and the whole claim is about what it then DECIDES.
+///
+/// Nothing in `src/console/captain/server.rs` tests hostility, range or alert
+/// state to decide anything: it seeds `hostile_contact` and `hostile_range` and
+/// hands both to `resolve_channel`. So if this predicate is removed from the
+/// TOML there is no Rust path left that could raise the alert on first contact —
+/// which is what the two halves below show.
+#[test]
+fn removing_the_authored_first_contact_rule_restores_return_fire_only() {
+    let shipped = captain_policy_of(CRUISER_TOML);
+    let reach = param(&shipped, "alert_on_hostile_within");
+    let window = param(&shipped, "combat_window_secs");
+    let first_contact = facts(&[("hostile_contact", 1.0), ("hostile_range", reach / 2.0)]);
+    let recent_combat = facts(&[("secs_since_combat", window / 2.0)]);
+
+    assert_eq!(
+        resolve(&shipped, "red_alert", &first_contact),
+        Some(AiPolicyVerb::SetRedAlert(true)),
+        "as shipped, the cruiser opens an engagement on a hostile inside its \
+         authored reach."
+    );
+
+    let passive = captain_policy_of(&without_block(CRUISER_TOML, FIRST_CONTACT_RULE));
+    assert_eq!(
+        resolve(&passive, "red_alert", &first_contact),
+        Some(AiPolicyVerb::SetRedAlert(false)),
+        "with the rule deleted the SAME hostile at the SAME range no longer \
+         raises the alert — and since #872 the hull's guns are gated on that \
+         alert, so it is back to return-fire-only. If this still read true, the \
+         aggression would be coming from Rust rather than from the TOML."
+    );
+    assert_eq!(
+        resolve(&passive, "red_alert", &recent_combat),
+        Some(AiPolicyVerb::SetRedAlert(true)),
+        "…and the returning-fire half survives the deletion untouched, so what \
+         was removed is the first-contact decision and nothing else."
     );
 }
 

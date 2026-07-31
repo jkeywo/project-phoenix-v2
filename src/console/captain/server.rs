@@ -221,6 +221,12 @@ fn handle_set_objective_priority(
 fn operate_captain_ai(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
+    // Issue #912: the SHARED per-tick world frame, not a scan of the captain's
+    // own. `Option<Res<_>>` because bare-`App` fixtures never register
+    // `AiPlugin`/the config cache; an absent resource seeds "no contact", which
+    // is the safe reading (see `nearest_hostile_range`).
+    world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
+    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut ship_query: Query<(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
@@ -229,9 +235,12 @@ fn operate_captain_ai(
         Option<&crate::entity_spawner::EntityUuid>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&CaptainAiPolicy>,
+        Option<&crate::ship_state::ShipPhysics>,
+        Option<&crate::entities::spawner::FactionComponent>,
     )>,
 ) {
     let now = time.elapsed_secs();
+    let registry = faction_registry.as_deref().map(|r| &r.0);
 
     for (
         mut admitted,
@@ -241,6 +250,8 @@ fn operate_captain_ai(
         entity_uuid,
         ship_config,
         ship_policy,
+        physics,
+        faction,
     ) in ship_query.iter_mut()
     {
         let policy = control_sources
@@ -270,6 +281,26 @@ fn operate_captain_ai(
         if let Some(s) = last_combat {
             facts.set("secs_since_combat", (now - s) as f64);
         }
+
+        // First-contact readings (issue #912). ALWAYS seeded, both of them, so
+        // an authored guard reads "clear" rather than "absent" — an absent fact
+        // makes every comparison false, so a conditionally-seeded presence fact
+        // is a dead guard with no error anywhere.
+        let hostile_range = nearest_hostile_range(
+            world_snapshot.as_deref(),
+            registry,
+            physics,
+            faction,
+            entity_uuid,
+        );
+        facts.set(
+            crate::entities::config::CAPTAIN_HOSTILE_CONTACT_FACT,
+            if hostile_range.is_some() { 1.0 } else { 0.0 },
+        );
+        facts.set(
+            crate::entities::config::CAPTAIN_HOSTILE_RANGE_FACT,
+            hostile_range.unwrap_or(0.0) as f64,
+        );
 
         // Resolve the `red_alert` output channel over the snapshot.
         let active_policy = &ship_policy.0;
@@ -370,6 +401,82 @@ fn emit_captain_ai_command(
         sessions,
         ship_config,
         admitted,
+    )
+}
+
+/// Planar range to this ship's nearest faction-hostile contact, or `None` when
+/// it has no hostile contact at all (issue #912).
+///
+/// # It reads the shared frame — it does not scan
+///
+/// The contacts come from the one per-tick [`crate::ai::server::WorldSnapshot`]
+/// that `build_world_snapshot` publishes, the same producer the Helm's world
+/// view and Tactical's nearest-hostile tier already read, and the hostile
+/// verdict and the geometry are delegated to the same pure helpers those two
+/// use ([`crate::ai::find_nearest_hostile`], [`crate::ai::target_relative_motion`]).
+/// So the captain's answer to "is there an enemy out there, and how far" agrees
+/// with the two consoles that act on it by construction, rather than by two
+/// scans being kept in step by hand.
+///
+/// # Ordering: this is LAST tick's snapshot, deliberately
+///
+/// `operate_captain_ai` runs in `SimSet::Input`; `build_world_snapshot` runs in
+/// `SimSet::Physics`. The captain therefore reads the PREVIOUS tick's frame.
+/// That is the project's frozen-snapshot doctrine (`src/sim_sets.rs`) working as
+/// intended — every AI consumer decides against one immutable frame instead of
+/// racing the producer — and costs a one-tick lag on a decision whose authored
+/// threshold is measured in tens of world units. It is not a missing ordering
+/// edge, and adding one would put the captain inside the frame it reads.
+///
+/// # No radar gate here, on purpose
+///
+/// The Captain console owns no radar, and inventing a reach for it in Rust would
+/// pin a gameplay distance in code (AGENTS.md rule #11). The horizon is the
+/// authored `param(...)` the hull's guard compares this range against, so a
+/// designer decides at what range a contact becomes an alert — and can author a
+/// cautious hull as easily as an aggressive one.
+///
+/// `None` for a ship with no position, no faction, or no readable snapshot: all
+/// three mean "this host cannot see anything", which seeds the safe reading.
+fn nearest_hostile_range(
+    snapshot: Option<&crate::ai::server::WorldSnapshot>,
+    registry: Option<&crate::faction::FactionRegistry>,
+    physics: Option<&crate::ship_state::ShipPhysics>,
+    faction: Option<&crate::entities::spawner::FactionComponent>,
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+) -> Option<f32> {
+    let snapshot = snapshot?;
+    let registry = registry?;
+    let physics = physics?;
+    let faction = faction?;
+
+    let self_uuid = entity_uuid.map(|u| u.0.as_str()).unwrap_or("");
+    let entities: Vec<crate::ai::AiWorldEntity> = snapshot
+        .entities
+        .iter()
+        .filter(|e| e.uuid.to_string() != self_uuid)
+        .cloned()
+        .collect();
+    let world_view = crate::ai::WorldView {
+        entity_pos: [physics.x, 0.0, physics.z],
+        entity_yaw: physics.yaw,
+        entities,
+        self_faction: Some(faction.0),
+        ..crate::ai::WorldView::default()
+    };
+
+    let nearest = crate::ai::find_nearest_hostile(&world_view, registry)?;
+    let target = world_view.entities.iter().find(|e| e.uuid == nearest)?;
+    Some(
+        crate::ai::target_relative_motion(
+            world_view.entity_pos,
+            physics.yaw,
+            physics.forward_speed,
+            target.position,
+            target.yaw,
+            target.forward_speed,
+        )
+        .range,
     )
 }
 

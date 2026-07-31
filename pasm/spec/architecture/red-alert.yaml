@@ -111,9 +111,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: Red Alert AI Operator
-      summary: Per-ship AI operator that derives a desired alert state from recent combat activity and submits the same explicit set command used by the captain interface.
+      summary: Per-ship AI operator that seeds a typed fact snapshot about recent combat activity and the nearest hostile contact, resolves the hull's authored red-alert policy over it, and submits the same explicit set command used by the captain interface.
       rationale:
-        - AI should activate alert for recent damage, hostile fire, or weapon use, then stand down after the configured combat window ends.
+        - The operator decides nothing itself. It seeds facts and resolves the hull's authored policy, so which readings become an alert is content rather than code.
+        - Recent damage, hostile fire, or own weapon use within the authored combat window is one authored reading; standing down outside it is the unconditional fallback.
+        - "Issue #912 added the first-contact half. The combat timer starts only once someone has fired, and issue #872 gates a crewed hull's own weapons on the alert, so a fully backfilled Alliance hull could previously only ever return fire. The operator now also seeds a hostile-contact flag and the planar range to the nearest faction-hostile, both unconditionally, so an authored guard can open an engagement. An absent fact makes every comparison read false, which is why neither reading is seeded conditionally."
+        - "The two contact readings come from the shared per-tick world snapshot rather than a scan of the operator's own, and reuse the same nearest-hostile and relative-motion helpers the Helm and Tactical consoles read, so the captain's verdict cannot disagree with the consoles that act on it. The operator runs in the input phase and the snapshot is built in the physics phase, so it reads the previous tick's frame by the project's frozen-snapshot doctrine."
+        - The hulls that author no first-contact rule are the always-armed Harrow gun line and the unarmed Requiem courier; their weapons need no alert, so raising one would move every other reading keyed on alert state for no change in fire behaviour.
         - The operator is enabled by the Red Alert system's own control source, not by the umbrella Captain system.
     architecture:
       kind: service

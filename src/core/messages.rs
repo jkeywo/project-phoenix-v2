@@ -1569,6 +1569,59 @@ pub enum CoordinationPayload {
     },
     /// Sensors warns Shields of an incoming threat (hostile closing or torpedo).
     ThreatBearing { bearing_rad: f32, label: String },
+    /// A seat's coarsened intent / state-change advisory (issue #879).
+    ///
+    /// Unlike every payload above it, this one is not addressed to a single
+    /// console: it is broadcast to every human seat on the SOURCE ship, so the
+    /// remaining crew of a partly-backfilled bridge shares one picture of what
+    /// the automation is doing. Delivery is transient — the existing popup
+    /// surface and nothing else. There is deliberately no durable log.
+    ///
+    /// Produced only by [`crate::ship::intent_narration::coalesce_intent`], on
+    /// a decision *change*, never per shot or per thrust tick. It carries the
+    /// coarse fact and the one label naming it and no figures at all — the same
+    /// information boundary #737 drew for [`Self::RepairRequest`].
+    IntentAdvisory {
+        /// Which coarse decision changed.
+        kind: IntentKind,
+        /// The label naming it: a target, a shield facing, a power group, or
+        /// an authored manoeuvre state. `None` for the kinds that name nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        /// Per-ship monotonic ordering handle.
+        ///
+        /// A COUNTER, never a timestamp: two lockstep peers advancing the same
+        /// simulation must stamp the same advisory with the same value, and a
+        /// wall-clock reading would differ on every host. The same rule
+        /// [`Self::NavigateTo`]'s generation follows.
+        generation: u64,
+    },
+}
+
+/// Which coarse decision a seat has just changed (issue #879).
+///
+/// Deliberately a closed typed set rather than prose: the host emits the fact,
+/// the client renders the sentence. A `String` here would put player-visible
+/// English in Rust for a payload that has a client-side renderer already.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IntentKind {
+    /// Took a target where it had none.
+    TargetAcquired,
+    /// Moved from one target to another.
+    TargetSwitched,
+    /// The ship's alert state now licenses the aggressive half of its class
+    /// doctrine.
+    CombatPostureEntered,
+    /// …and stood back down from it.
+    CombatPostureLeft,
+    /// Hull damage crossed the authored break-off threshold.
+    BreakingOff,
+    /// Concentrated the shield grid on one facing.
+    ShieldArcFocused,
+    /// A power group is drawing more than the reactor can supply.
+    PowerBrownout,
+    /// Began a new authored manoeuvre leg.
+    ManoeuvreBegun,
 }
 
 /// One selectable scenario in the pre-load catalog as delivered to phones

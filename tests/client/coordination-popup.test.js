@@ -73,6 +73,35 @@ describe('normalizeCoordinationPayload — variants', () => {
       .toMatchObject({ title: 'Phasers Power Brownout', body: 'Allocation: 1' });
   });
 
+  it('IntentAdvisory names the decision and its subject (issue #879)', () => {
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', data: { kind: 'TargetSwitched', subject: 'Raider-2', generation: 3 } }, 'Tactical'))
+      .toMatchObject({ title: 'Switching target', body: 'Raider-2' });
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', kind: 'ShieldArcFocused', subject: 'FORE' }, 'Shields'))
+      .toMatchObject({ title: 'Focusing shields', body: 'FORE' });
+  });
+
+  it('IntentAdvisory kinds that name nothing carry an empty body', () => {
+    // The host omits `subject` entirely for these — and never sends the hull
+    // figure the break-off decision was made from (the #737 boundary).
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', data: { kind: 'BreakingOff', generation: 9 } }, 'Helm'))
+      .toMatchObject({ title: 'Breaking off', body: '' });
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', data: { kind: 'CombatPostureEntered', generation: 1 } }, 'Helm'))
+      .toMatchObject({ title: 'Combat posture', body: '' });
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', data: { kind: 'CombatPostureLeft', generation: 2 } }, 'Helm'))
+      .toMatchObject({ title: 'Standing down', body: '' });
+  });
+
+  it('an IntentAdvisory kind the client does not know still renders', () => {
+    expect(normalizeCoordinationPayload(
+      { type: 'IntentAdvisory', data: { kind: 'SomethingNew', generation: 1 } }, 'Helm'))
+      .toMatchObject({ title: 'SomethingNew', body: '' });
+  });
+
   it('unknown variants fall back to the type name with an empty body', () => {
     expect(normalizeCoordinationPayload({ type: 'FutureThing' }, 'x'))
       .toMatchObject({ title: 'FutureThing', body: '' });

@@ -1,8 +1,8 @@
 pub use crate::messages::CoordinationPayload;
-use crate::messages::SystemId;
-use crate::ship::control_source::ControlSource;
+use crate::messages::{StationId, SystemId};
 #[cfg(test)]
 use crate::ship::control_source::ControlSourceResolver;
+use crate::ship::control_source::{ControlSource, ControlTickPolicy};
 
 /// What to do with a delivered coordination message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +32,77 @@ pub fn route_coordination(
         (ControlSource::Human, ControlSource::Human)
         | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
     }
+}
+
+// ── Ship-wide broadcast (issue #879) ──────────────────────────────────────────
+
+/// One crew seat on the source ship, as the ship-broadcast router sees it.
+///
+/// A *seat* is a station, not a system: a coordination popup lands on a
+/// console, and a console belongs to whoever is holding the station. The
+/// adapter reduces the station's fine systems to one [`ControlSource`] with
+/// [`seat_control_source`] before building this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShipSeat {
+    /// The station this seat is.
+    pub station: StationId,
+    /// Who is operating it, reduced from its fine systems.
+    pub control: ControlSource,
+    /// The session token of the connected holder, or `None` when nobody is
+    /// browser-connected to it.
+    pub holder: Option<String>,
+}
+
+/// Reduce a station's fine-system tick policies to the seat's control source.
+///
+/// A station owns several systems and a coordination popup is addressed to the
+/// station, so the router needs one answer for the seat as a whole:
+///
+/// * any system still accepting human input → the seat is **Human**; someone is
+///   sitting there and can read a popup.
+/// * otherwise, any system operating AI → the seat is **Ai**; it is backfilled,
+///   and there is nobody to show anything to.
+/// * otherwise → **Offline**: damage-disabled, explicitly offline, or a station
+///   with no systems at all.
+///
+/// The precedence is human-first for the same reason `process_coordination_lag`
+/// treats a damage-disabled console as `Consume`: the question the router is
+/// asking is "can a person read this", and one live console on the station is
+/// enough for the answer to be yes.
+pub fn seat_control_source(policies: &[ControlTickPolicy]) -> ControlSource {
+    if policies.iter().any(|p| p.accept_human_input) {
+        ControlSource::Human
+    } else if policies.iter().any(|p| p.operate_ai) {
+        ControlSource::Ai
+    } else {
+        ControlSource::Offline
+    }
+}
+
+/// Fan one ship-wide advisory out to every seat on the SOURCE ship that the
+/// existing delivery matrix resolves to a popup.
+///
+/// This is [`route_coordination`] applied per seat rather than to one addressed
+/// target — the extension issue #879 needed and the reason it is not a second,
+/// parallel rule. A backfilled seat's advisory therefore reaches every human
+/// seat on the ship (target Human + sender Ai → `Popup`) and no AI or offline
+/// seat (either → `Consume`), and an advisory whose sender is itself human is
+/// suppressed at every seat, exactly as a human-to-human channel-3 message
+/// already is: two people on the same bridge talk to each other.
+///
+/// Seats with no connected holder are dropped last, not first, so the
+/// `Consume`/`Suppress` reasoning above is about the seat's control source and
+/// not about whether anyone happens to be logged in.
+///
+/// Returns the recipients in the order `seats` was given, which the adapter
+/// derives from the authored station list — a deterministic order, not a hash
+/// order, so two lockstep peers emit the same popups in the same sequence.
+pub fn broadcast_to_ship(sender_origin: ControlSource, seats: &[ShipSeat]) -> Vec<&ShipSeat> {
+    seats
+        .iter()
+        .filter(|seat| route_coordination(sender_origin, seat.control) == DeliverAction::Popup)
+        .filter(|seat| seat.holder.is_some())
+        .collect()
 }
 
 /// A coordination message queued for lagged delivery.
@@ -151,6 +222,120 @@ mod tests {
             route_coordination(ControlSource::Ai, resolver.source_for(&helm))
         };
         assert_eq!(action, DeliverAction::Consume);
+    }
+
+    // ── Ship-wide broadcast (issue #879) ──────────────────────────────────
+
+    fn seat(station: &str, control: ControlSource, holder: Option<&str>) -> ShipSeat {
+        ShipSeat {
+            station: StationId(station.into()),
+            control,
+            holder: holder.map(|h| h.to_string()),
+        }
+    }
+
+    fn human_policy() -> ControlTickPolicy {
+        crate::ship::control_source::control_tick_policy(ControlSource::Human)
+    }
+
+    fn ai_policy() -> ControlTickPolicy {
+        crate::ship::control_source::control_tick_policy(ControlSource::Ai)
+    }
+
+    fn offline_policy() -> ControlTickPolicy {
+        crate::ship::control_source::control_tick_policy(ControlSource::Offline)
+    }
+
+    #[test]
+    fn a_station_with_no_systems_is_an_offline_seat() {
+        assert_eq!(seat_control_source(&[]), ControlSource::Offline);
+    }
+
+    #[test]
+    fn a_fully_backfilled_station_is_an_ai_seat() {
+        assert_eq!(
+            seat_control_source(&[ai_policy(), ai_policy(), ai_policy()]),
+            ControlSource::Ai
+        );
+    }
+
+    /// One live human console on the station is enough: the question the router
+    /// asks is "can a person read this".
+    #[test]
+    fn one_human_system_makes_the_whole_seat_human() {
+        assert_eq!(
+            seat_control_source(&[ai_policy(), human_policy(), offline_policy()]),
+            ControlSource::Human
+        );
+    }
+
+    #[test]
+    fn a_damage_disabled_station_is_an_offline_seat() {
+        assert_eq!(
+            seat_control_source(&[offline_policy(), offline_policy()]),
+            ControlSource::Offline
+        );
+    }
+
+    /// AC: a backfilled seat's advisory reaches EVERY human seat on the source
+    /// ship, and no AI or offline seat.
+    #[test]
+    fn a_backfilled_senders_advisory_reaches_every_human_seat_and_no_other() {
+        let seats = vec![
+            seat("captain", ControlSource::Human, Some("alice")),
+            seat("helm", ControlSource::Human, Some("hikaru")),
+            seat("tactical", ControlSource::Ai, None),
+            seat("shields", ControlSource::Ai, Some("stale-token")),
+            seat("power", ControlSource::Offline, Some("scotty")),
+        ];
+
+        let recipients = broadcast_to_ship(ControlSource::Ai, &seats);
+
+        let stations: Vec<&str> = recipients.iter().map(|s| s.station.0.as_str()).collect();
+        assert_eq!(
+            stations,
+            vec!["captain", "helm"],
+            "every human seat, in authored order — and neither the backfilled \
+             Tactical/Shields nor the offline Power, whatever token they carry"
+        );
+        let tokens: Vec<&str> = recipients
+            .iter()
+            .map(|s| s.holder.as_deref().unwrap())
+            .collect();
+        assert_eq!(tokens, vec!["alice", "hikaru"]);
+    }
+
+    /// The seat semantics are about the CONTROL SOURCE, not about who happens
+    /// to be logged in: a human-held station whose holder has dropped is still
+    /// a human seat, it simply has nobody to deliver to.
+    #[test]
+    fn a_human_seat_with_no_connected_holder_receives_nothing() {
+        let seats = vec![seat("helm", ControlSource::Human, None)];
+        assert!(broadcast_to_ship(ControlSource::Ai, &seats).is_empty());
+    }
+
+    /// The broadcast is `route_coordination` applied per seat, so it inherits
+    /// the human→human `Suppress`: two officers on the same bridge do not need
+    /// popups about each other.
+    #[test]
+    fn a_human_senders_broadcast_is_suppressed_at_every_seat() {
+        let seats = vec![
+            seat("captain", ControlSource::Human, Some("alice")),
+            seat("helm", ControlSource::Human, Some("hikaru")),
+        ];
+        assert!(
+            broadcast_to_ship(ControlSource::Human, &seats).is_empty(),
+            "human sender + human seats is Suppress, as it has always been"
+        );
+    }
+
+    #[test]
+    fn a_ship_with_no_human_seats_broadcasts_to_nobody() {
+        let seats = vec![
+            seat("captain", ControlSource::Ai, None),
+            seat("helm", ControlSource::Ai, None),
+        ];
+        assert!(broadcast_to_ship(ControlSource::Ai, &seats).is_empty());
     }
 
     // ── Lag queue ─────────────────────────────────────────────────────────

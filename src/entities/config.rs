@@ -12827,6 +12827,23 @@ pub struct GlobalConfig {
     /// the two is rejected by `world::config::parse_world`.
     #[serde(default = "default_ai_snapshot_hz")]
     pub ai_snapshot_hz: f32,
+    /// Hull fraction at or below which a seat's intent narration announces
+    /// that the ship is breaking off (issue #879).
+    ///
+    /// Authored so the "we are pulling out" advisory fires where a designer
+    /// says it should rather than at a Rust literal. This is the NARRATION
+    /// threshold — what the crew is told — and is deliberately independent of
+    /// the authored helm doctrine that decides whether the ship actually
+    /// disengages; that lives in the movement fragments as a policy guard.
+    #[serde(default = "default_intent_break_off_hull_fraction")]
+    pub intent_break_off_hull_fraction: f32,
+}
+
+/// Serde default for [`GlobalConfig::intent_break_off_hull_fraction`]: half
+/// hull. The only sanctioned hardcoded gameplay value is a TOML-parse fallback
+/// (AGENTS.md #11).
+fn default_intent_break_off_hull_fraction() -> f32 {
+    0.5
 }
 
 impl Default for GlobalConfig {
@@ -12837,6 +12854,7 @@ impl Default for GlobalConfig {
             description: None,
             ai_tick_hz: default_ai_tick_hz(),
             ai_snapshot_hz: default_ai_snapshot_hz(),
+            intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
         }
     }
 }

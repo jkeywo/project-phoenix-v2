@@ -112,6 +112,7 @@ entities:
         - Coordination latency should affect the message path consistently without freezing stale ownership decisions at send time.
         - "Coordination targets live in the station-id namespace since #801: a channel-3 message is addressed to a crew station (e.g. helm_station_key / tactical_station_key), not to a declared system. The wire strings are unchanged."
         - "A station key has no registered [[system]] behind it, so policy_for resolves it to the Human default. #801 already special-cased the Helm key through helm_axes_operate_ai; issue #873 added the Tactical analogue, any_tactical_system_operates_ai (the predicate the gunnery AI itself uses), so a BACKFILLED Tactical is visible to the router. Before that a hint aimed at an AI-run Tactical could only Suppress (human sender) or raise an ownerless broadcast popup (AI sender), never Consume. When the predicate is false the key falls through to policy_for unchanged, so a human-held Tactical routes exactly as before."
+        - "Issue #879 adds ONE payload that is not addressed to a single console: CoordinationPayload::IntentAdvisory is broadcast to every human seat on the source ship. The decision of who receives it is the pure coordination::broadcast_to_ship, which is route_coordination applied per SEAT rather than to one target — so a backfilled sender pops up at every human seat, an AI or offline seat gets nothing, and a human sender is suppressed everywhere exactly as human-to-human traffic already was. Seats are built in authored station order (never map order, which would diverge between lockstep peers) and each station's fine systems are reduced to one control source by coordination::seat_control_source: any system still accepting human input makes the seat Human, otherwise any system operating AI makes it Ai, otherwise Offline. The addressed path is untouched for every other payload, and the #737 coarsening is re-applied PER RECIPIENT so a ship-wide send is not a way around the visibility boundary."
         - "Issue #873 also gave the consumed FrequencyHint somewhere to land: PendingTacticalFrequencyHint, a per-ship slot written in SimSet::Modifiers and read by apply_tactical_frequency_hint in the FOLLOWING tick's SimSet::Input. Because a human can claim Tactical inside that one-tick window, the applier re-asks any_tactical_system_operates_ai and DROPS the pending value when the answer has changed, rather than overwriting a frequency the new human holder just set. Nothing on either side reads sender_origin — it is stamped by the emitter and used only to pick Consume/Popup/Suppress at delivery."
     architecture:
       kind: coordination-service
@@ -123,9 +124,9 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/ship_plugin.rs, src/core/messages.rs, src/console/weapons/mod.rs]
-      symbols: [CoordinationLagQueue, CoordinationPayload, PendingTacticalFrequencyHint, apply_tactical_frequency_hint]
+      symbols: [CoordinationLagQueue, CoordinationPayload, PendingTacticalFrequencyHint, apply_tactical_frequency_hint, broadcast_to_ship, seat_control_source, ShipSeat]
       messages: [SendCoordination, CoordinationPopup]
-      tests: [cargo test, tests/client/sim-state.test.js]
+      tests: [cargo test, tests/client/sim-state.test.js, tests/client/coordination-popup.test.js]
 
   - state: coordination-lag-queue-state
     core:
@@ -147,7 +148,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Coordination Delivery State
-      summary: Ephemeral delivered advisories including target designation, arc-bearing request, repair request, navigation request, power warning, and shield warning.
+      summary: Ephemeral delivered advisories including target designation, arc-bearing request, repair request, navigation request, power warning, shield warning, and the ship-wide intent advisory.
     architecture:
       classification: ephemeral
       owner: coordination-lag-router
@@ -156,3 +157,48 @@ entities:
       status: declared
       paths: [src/core/messages.rs, src/ship_plugin.rs]
       messages: [CoordinationPopup]
+
+  - component: intent-narration-coalescer
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Intent-Narration Coalescer
+      summary: Maps one seat's previous and new decision snapshots to zero or one coarsened intent advisory, so a backfilled seat announces decision changes and never routine repeated action.
+      rationale:
+        - "Issue #879. The crew of a partly-backfilled bridge needs to know what the automation is doing without an advisory per shot or per thrust tick, so state-change detection is taken out of the emitters entirely: the adapter reads authoritative state (tactical selection, red alert, hull, shield focus, power brownout, the helm policy's own state-machine leg) into an IntentSnapshot and the pure coalesce_intent decides whether anything changed. Steady state produces nothing."
+        - "The contract is zero-or-one per seat per decision tick. When several axes move on the same tick a FIXED priority ladder (break-off, brownout, posture, target, shield focus, manoeuvre) picks exactly one, so two lockstep peers resolving the same tick pick the same advisory. Unreported axes are still recorded in the stored snapshot, so they cannot resurface later as changes that never happened."
+        - "Advisories carry a typed kind plus at most one label and NO figures — the same information boundary #737 drew for RepairRequest, where the tier crossing reaches Engineering and the exact HP deficit does not. The client renders the sentence from the typed kind."
+        - "The break-off hull fraction is authored as [global] intent_break_off_hull_fraction; the serde default is the only hardcoded copy of it."
+        - "Nothing on the emit side branches on who holds the seat. The fact is derived from authoritative system state whoever is operating the console, and the seat's control source is stamped onto sender_origin afterwards as a routing tag — the shape issue #873 had to restore after an emit-side operate_ai conjunct made a coordination fact depend on the operator."
+        - "The emitter is gated by run_if(ai_tick_ready) on the one shared AI cadence. SimSet is configured in Bevy's Update, so an ungated narrator would sample decision state once per rendered frame and could narrate a flicker inside a single AI tick twice."
+    architecture:
+      kind: coordination-producer
+      authority: authoritative
+      owns: [intent-narration-state]
+      reads: [system-control-source-state, ship-system-blackboards-state]
+      produces: [coordination-lag-queue-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/intent_narration.rs, src/ship/intent_narration_systems.rs, src/core/messages.rs, src/ship_plugin.rs, gui/coordination-popup.js]
+      symbols: [coalesce_intent, IntentSnapshot, IntentChange, IntentNarrationConfig, IntentKind, tick_intent_narration, ShipIntentNarration]
+      messages: [CoordinationPopup]
+      tests: [cargo test, tests/client/coordination-popup.test.js]
+
+  - state: intent-narration-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Intent Narration State
+      summary: Per-ship memory of each narrating seat's last decision snapshot, plus that ship's monotonic advisory counter.
+      rationale:
+        - "The counter is a COUNTER, never a clock reading: two lockstep peers advancing the same simulation must stamp the same advisory with the same generation, and elapsed time differs on every host. Same rule NavigationWaypoint::generation follows."
+        - "Attached at BOTH ship spawn sites (entities::spawner::spawn_entity and server_app::spawn_game_start_entities); a source scan re-derives the attachment, because a ship without it narrates nothing and nothing warns. The player ship is the one bridge with human seats to narrate to."
+    architecture:
+      classification: authoritative
+      owner: intent-narration-coalescer
+      writers: [intent-narration-coalescer]
+    implementation:
+      status: declared
+      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app.rs]
+      symbols: [ShipIntentNarration, INTENT_NARRATION_SPAWN_SITES]

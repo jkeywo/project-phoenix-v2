@@ -2467,6 +2467,12 @@ fn spawn_game_start_entities(
                 // Sensors→Tactical frequency advisory a backfilled Tactical
                 // consumes off the channel-3 bus (issue #873).
                 .insert(crate::ship_plugin::PendingTacticalFrequencyHint::default())
+                // Per-ship intent-narration memory (issue #879). The player
+                // ship is the one bridge with human seats to narrate TO, so
+                // omitting it here — the failure mode #785/#786/#882/#885 each
+                // shipped — would leave the whole feature dead on the only
+                // hull it exists for.
+                .insert(crate::ship_plugin::ShipIntentNarration::default())
                 .insert(crate::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
                     x: pos.x,

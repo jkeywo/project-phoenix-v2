@@ -27,6 +27,7 @@ pub(crate) use crate::ship::helm_ai::{
 pub(crate) use crate::ship::helm_planner::{helm_motion_planner, HelmMotionPlan};
 pub use crate::ship::impulse_boost_systems::handle_impulse_messages;
 pub(crate) use crate::ship::impulse_boost_systems::{tick_boost, tick_impulse};
+pub use crate::ship::intent_narration_systems::{tick_intent_narration, ShipIntentNarration};
 pub(crate) use crate::ship::physics_systems::{
     apply_helm_commands, integrate_ship_physics, sync_ship_position,
 };
@@ -231,6 +232,23 @@ impl Plugin for ShipPlugin {
                 )
                     .after(crate::lobby::LobbySystemSet),
             );
+
+        // Intent narration (issue #879). Registered separately from the tuple
+        // above because that tuple is at Bevy's 20-element limit.
+        //
+        // `SimSet::Publish` so every decision the snapshot reads has settled:
+        // helm policy state committed in `Physics`, hull in `Damage`, power and
+        // the coordination bus in `Modifiers`. `run_if(ai_tick_ready)` because
+        // `SimSet` lives in `Update` — an ungated narrator would sample
+        // decision state once per rendered frame (AGENTS.md #7) and could
+        // narrate a flicker inside a single AI tick twice.
+        app.add_systems(
+            Update,
+            tick_intent_narration
+                .in_set(crate::sim_sets::SimSet::Publish)
+                .after(crate::lobby::LobbySystemSet)
+                .run_if(ai_tick_ready),
+        );
 
         // Per-axis helm AI (issues #701, #824). Registered separately from the
         // tuple above purely because that tuple is at Bevy's 20-element limit.

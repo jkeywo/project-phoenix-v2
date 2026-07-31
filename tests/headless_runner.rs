@@ -691,7 +691,8 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
 ///
 /// That assertion holds whether or not the world's `doctrine = []` override
 /// actually strips the destroyer's doctrine: the player engages either way, and
-/// for a long time the override was a silent no-op (`merge_id_array` merged an
+/// for a long time the override was a silent no-op (the by-`id` doctrine merge
+/// treated an
 /// empty array as "merge nothing in"), so the "passive" hostile carried its
 /// template `destroy-hostiles` Destroy directive, out-shot the player 318 damage
 /// to 29 and killed it. The test passed the whole time it was measuring nothing.

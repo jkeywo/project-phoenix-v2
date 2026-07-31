@@ -996,11 +996,18 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 let Ok(template_value) = config.to_toml_value() else {
                     return out;
                 };
+                // The merge is fallible for exactly one reason (issue #911): an
+                // override carrying the `_remove` tombstone. That marker is a
+                // FRAGMENT-composition feature, and the merge rejects it here
+                // rather than letting it through — see the note below. It is
+                // reported on the same channel as a failed reparse, because the
+                // consequence is the same (the template spawns unchanged) and
+                // because the one thing that must not happen to a subtractive
+                // marker is silence.
                 let merged = crate::entity_override::merge_entity_config_toml(
                     &template_value,
                     overrides_val,
                 );
-                let merged_str = toml::to_string(&merged).unwrap_or_default();
                 // Do not silently swallow a failed merge (issue #838). If the
                 // merged config no longer parses, the *entire* override —
                 // faction, behaviour, everything — would otherwise be discarded
@@ -1012,18 +1019,40 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 //
                 // One rejection is reachable from an override that looks
                 // perfectly well-formed on its own. Doctrine entries merge
-                // per-field by id (`merge_id_array`), so an override that flips
-                // an existing entry's `directive_kind` keeps the template's
-                // directive fields beside its own: a Patrol entry overridden to
-                // `directive_kind = "Reach"` arrives carrying both
+                // per-field by id (`merge_keyed_array`), so an override that
+                // flips an existing entry's `directive_kind` keeps the
+                // template's directive fields beside its own: a Patrol entry
+                // overridden to `directive_kind = "Reach"` arrives carrying both
                 // `directive_anchors` and `directive_anchor`, and
                 // `validate_doctrine_directives` rejects the pair. Clearing the
                 // stale field in the same override entry — `directive_anchors =
-                // []`, which `merge_toml` replaces wholesale — is the way
-                // through. Because this path warns rather than failing, the hull
+                // []` — is the way through: `behaviour.doctrine.directive_anchors`
+                // is absent from BOTH identity tables (issue #911), so it still
+                // replaces wholesale at this layer and at the compose layer
+                // alike. Because this path warns rather than failing, the hull
                 // otherwise flies the doctrine the author meant to replace, so
                 // the warning below is the only signal there is.
-                match crate::entity_config::EntityConfig::from_toml(&merged_str) {
+                //
+                // This call is `merge_entity_config_toml`, i.e.
+                // `MergePolicy::InstanceOverride` — unchanged by #911. An
+                // override here replaces `tags`, `[[system]]`, `[[station]]`,
+                // `[[shield_arc]]` and every weapon bank WHOLESALE, and does
+                // NOT honour the `_remove` tombstone. A tombstone written here
+                // is rejected BY THE MERGE, which is why the merge is fallible:
+                // it cannot be left to `from_toml` below, because the one array
+                // that reconciles at this layer is `behaviour.doctrine`, and
+                // `DoctrineObjective` is not `deny_unknown_fields` — the marker
+                // would deep-merge into the matching template entry, be ignored
+                // by serde, and the doctrine would be silently unchanged.
+                // Element-wise array extension is a FRAGMENT-composition
+                // feature (`MergePolicy::ComposeFragments`), because widening it
+                // here would change what every shipped world already means.
+                let outcome = merged.and_then(|merged| {
+                    let merged_str = toml::to_string(&merged).unwrap_or_default();
+                    crate::entity_config::EntityConfig::from_toml(&merged_str)
+                        .map_err(|e| e.to_string())
+                });
+                match outcome {
                     Ok(merged_config) => config = merged_config,
                     Err(e) => out.warnings.push(format!(
                         "SpawnEntity '{name}' overrides did not apply (kept template): {e}"
@@ -3354,6 +3383,82 @@ mod tests {
                 ],
                 ..Default::default()
             }
+        );
+    }
+
+    /// **A `_remove` tombstone in a `spawn_entity` override WARNS** (issue
+    /// #911), and the spawn still happens on the unmodified template.
+    ///
+    /// This is the other instance-layer entry point — `entity_loader::
+    /// apply_overrides` is the first — and it is the one that cannot fail the
+    /// load, so the warning is the only signal an author gets. It must exist:
+    /// a tombstone is subtractive, the author asked for something to be GONE,
+    /// and before #911's fix it was accepted in silence (`DoctrineObjective`
+    /// is not `deny_unknown_fields`, so the marker vanished into serde and the
+    /// doctrine survived). Nothing exercised this path's override arm at all
+    /// before this test.
+    #[test]
+    fn spawn_entity_override_carrying_a_tombstone_warns_and_keeps_the_template() {
+        let fx = Fixture::new().with_destroyer();
+        let action = TriggerAction::SpawnEntity {
+            template_path: DESTROYER_TEMPLATE.to_string(),
+            name: "wave_1".to_string(),
+            anchor: None,
+            position: Some([0.0, 0.0, 0.0]),
+            rotation: None,
+            scale: None,
+            groups: vec![],
+            overrides: Some(
+                toml::from_str(
+                    "[[behaviour.doctrine]]\nid = \"destroy-hostiles\"\n_remove = true\n",
+                )
+                .unwrap(),
+            ),
+        };
+        let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+        assert_eq!(
+            out.warnings.len(),
+            1,
+            "the tombstone must be reported, got {:?}",
+            out.warnings
+        );
+        assert!(
+            out.warnings[0].contains(crate::entity_override::REMOVE_KEY),
+            "the warning must name the marker so the author can find it, got {:?}",
+            out.warnings[0]
+        );
+        // The spawn still happens, on the template as authored — a partial
+        // spawn is better than none, exactly as for a failed reparse.
+        assert_eq!(out.commands.len(), 1, "the template still spawns");
+    }
+
+    /// The control: an override WITHOUT a tombstone still applies here. Pinned
+    /// alongside the test above so "warns" cannot be achieved by rejecting
+    /// every override.
+    #[test]
+    fn spawn_entity_override_without_a_tombstone_still_applies() {
+        let fx = Fixture::new().with_destroyer();
+        let action = TriggerAction::SpawnEntity {
+            template_path: DESTROYER_TEMPLATE.to_string(),
+            name: "wave_1".to_string(),
+            anchor: None,
+            position: Some([0.0, 0.0, 0.0]),
+            rotation: None,
+            scale: None,
+            groups: vec![],
+            overrides: Some(toml::from_str(r#"tags = ["npc", "enemy"]"#).unwrap()),
+        };
+        let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+        assert!(out.warnings.is_empty(), "got {:?}", out.warnings);
+        let ActionCmd::SpawnEntity { config, .. } = &out.commands[0] else {
+            panic!("expected a SpawnEntity command, got {:?}", out.commands[0])
+        };
+        assert_eq!(
+            config.tags,
+            vec!["npc".to_string(), "enemy".to_string()],
+            "an instance override REPLACES tags — the pre-#911 rule, unchanged"
         );
     }
 

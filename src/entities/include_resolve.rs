@@ -39,8 +39,10 @@
 //    of `resolve_entity` so that the instance merge could be reused on its own.
 //    Pushing a second, per-template concern back in would re-fuse them.
 //
-// Both layers share the SAME merge (`entity_override::merge_entity_config_toml`);
-// only the cardinality and the input form differ.
+// Both layers share the same merge FUNCTION
+// (`entity_override::merge_entity_config_toml_with`) and differ only in the
+// `MergePolicy` they pass it — see "Array semantics" below. Cardinality and
+// input form differ too.
 //
 // ## Merge order
 //
@@ -49,21 +51,47 @@
 // A template that includes `[a, b]` resolves as
 // `((a's own closure) ⊕ (b's own closure)) ⊕ self`.
 //
-// The merge is `merge_entity_config_toml`, so every rule it documents holds
-// between fragments too, including the one added by `68bda1be`: a fragment that
-// authors `doctrine = []` **clears** whatever earlier fragments contributed
-// (that is a fragment's only subtractive lever), while a fragment that omits
-// the key leaves the accumulator alone, and a fragment that authors a non-empty
-// `doctrine` merges by `id` into what came before.
+// ## Array semantics (issue #911 — this SUPERSEDES #869's "everything else
+// replaces wholesale")
 //
-// One authoring consequence worth stating plainly, because it is the trap
-// #878's migration will meet first: every array OTHER than those two replaces
-// wholesale — `tags`, `[[station]]`, `[[system]]`, `[[shield_arc]]`,
-// `[[weapons_console.phaser_banks]]`, and the rest. A hull that includes a
-// systems fragment and then declares its own `[[system]]` blocks replaces the
-// fragment's whole suite rather than adding to it. That is `merge_toml`'s
-// long-standing array rule, shared with instance overrides; widening it would
-// change override semantics too, and is deliberately not in this issue's scope.
+// This layer merges under `MergePolicy::ComposeFragments`, the instance-override
+// layer under `MergePolicy::InstanceOverride`. That is the seam #869 did not
+// have, and the reason it put array extension out of scope: with one shared
+// rule, letting a hull EXTEND a fragment's `[[system]]` suite would have
+// silently let every world override extend it too.
+//
+// What a fragment author writes, and what it does:
+//
+// * **Extend** — declare an entry with an `id` (or, for `[[station.rating]]`, a
+//   `name`) that no earlier fragment used. It is APPENDED. This is the case
+//   #911 exists for: "the library's systems, plus two of my own", with no new
+//   syntax and no marker.
+// * **Replace one entry** — declare an entry whose key MATCHES an inherited
+//   one. It deep-merges into it, **at the inherited entry's position**, so
+//   fields you do not mention survive and `[[shield_arc]]`'s load-bearing order
+//   is preserved.
+// * **Remove one entry** — declare `{ id = "…", _remove = true }`. The
+//   inherited entry is dropped and the tombstone itself never reaches the
+//   resolved document (the marker is stripped exactly as `includes` is, because
+//   `EntityConfig` is `deny_unknown_fields`). A tombstone matching nothing is a
+//   no-op.
+// * **Clear the whole list** — author an empty array (`doctrine = []`,
+//   `system = []`). Unchanged from #869, and it still beats the element-wise
+//   rules.
+// * **Leave it alone** — omit the key. An absent key never reaches the merge.
+//
+// Which arrays reconcile is one table, `entity_override::COMPOSE_KEYED_ARRAYS`,
+// keyed on the dotted, index-free path: `system`/`station`/`shield_arc`/
+// `weapons_console.{phaser,blaster}_banks`/`torpedoes.tubes`/
+// `behaviour.doctrine` by `id`, and `station.rating` by `name`. **Provenance
+// below reads the SAME table** — see `record_leaves`.
+//
+// `tags` has no key (bare strings), so it UNIONS here and REPLACES at the
+// instance layer; that asymmetry is deliberate and is what the policy seam is
+// for. Arrays with no stable identity — `*.ai.rule`, `*_ai.state[].transition`,
+// `*.selector.score`, `mesh.lod`, `hull.system_hull` — keep replacing
+// wholesale. **A fragment contributing an AI policy contributes it WHOLE**;
+// that is the intended granularity.
 //
 // ## Paths
 //
@@ -76,17 +104,15 @@
 use std::collections::BTreeMap;
 
 use crate::entity_config::EntityConfig;
+use crate::entity_override::{ArrayRule, MergePolicy};
 use crate::world::validate::{line_of, Severity, SourceLocation, WorldFinding};
 
 /// The authored key that lists a template's ordered includes.
 pub const INCLUDES_KEY: &str = "includes";
 
-/// `behaviour.state` reconciles by `name` in the merge, so provenance addresses
-/// its elements by name rather than by index.
-const STATE_ARRAY: &str = "behaviour.state";
-/// `behaviour.doctrine` reconciles by `id` in the merge, so provenance
-/// addresses its elements by id rather than by index.
-const DOCTRINE_ARRAY: &str = "behaviour.doctrine";
+/// The layer this resolver merges at (issue #911). Fragments compose; a world's
+/// `[[entity]].overrides` do not — see [`MergePolicy`].
+const POLICY: MergePolicy = MergePolicy::ComposeFragments;
 
 // ── Source of template text ──────────────────────────────────────────────────
 
@@ -300,15 +326,16 @@ pub struct FieldOrigin {
 ///
 /// # Field addressing
 ///
-/// Leaf paths are dotted (`hull.hull_integrity`). The two arrays the merge
-/// reconciles by key are addressed by that key rather than by index, because
-/// their positions are not stable across a merge:
+/// Leaf paths are dotted (`hull.hull_integrity`). Every array the merge
+/// reconciles by key is addressed by that key rather than by index, because
+/// positions are not stable across a merge:
 ///
-/// * `behaviour.state[name=patrol].target_speed`
 /// * `behaviour.doctrine[id=destroy-hostiles].base_priority`
+/// * `system[id=helm-thrust].ai_only`
+/// * `station[id=bridge].rating[name=tactical].level`
 ///
-/// Every other array is a merge leaf (arrays replace wholesale), so it is
-/// recorded at its own path with no element addressing — `tags`, and a cleared
+/// Every other array is a merge leaf, so it is recorded at its own path with no
+/// element addressing — `tags`, `captain_console.ai.rule`, and a cleared
 /// `behaviour.doctrine` (`= []`) alike.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Provenance {
@@ -346,13 +373,34 @@ impl Provenance {
 
     /// Record everything `value` authored, attributing it to `step`.
     fn record(&mut self, value: &toml::Value, step: MergeStep) {
-        record_leaves("", value, &step, &mut self.fields);
+        record_leaves("", "", value, &step, &mut self.fields);
         self.order.push(step);
     }
 }
 
+/// Walk one fragment's contribution, recording who authored each leaf.
+///
+/// # Two paths, and why
+///
+/// `prefix` is the PROVENANCE address, which carries element keys
+/// (`station[id=bridge].rating[name=tactical]`). `merge_path` is the dotted,
+/// index-free path the MERGE judges by (`station.rating`). They have to be
+/// separate strings because the identity table is keyed on the second, and
+/// consulting it with the first would never match.
+///
+/// # Why this must read the merge's own table (issue #911)
+///
+/// Before #911 this function carried its own copy of the keyed-array knowledge
+/// — a two-arm `match` on `behaviour.state` / `behaviour.doctrine`. The moment
+/// the merge started reconciling `[[system]]` by `id`, that copy would have
+/// gone stale in the most damaging direction: a merged-in `[[system]]` array
+/// recorded as a wholesale leaf makes [`insert_leaf`]'s `retain` prune EVERY
+/// field an earlier fragment contributed to that array, so provenance would
+/// confidently report a system suite as authored by whichever fragment touched
+/// it last. Both now read [`MergePolicy::array_rule`].
 fn record_leaves(
     prefix: &str,
+    merge_path: &str,
     value: &toml::Value,
     step: &MergeStep,
     out: &mut BTreeMap<String, FieldOrigin>,
@@ -374,20 +422,25 @@ fn record_leaves(
             // pruned.
             out.remove(prefix);
             for (key, child) in table {
+                if key == crate::entity_override::REMOVE_KEY {
+                    // The tombstone marker is authoring metadata, stripped from
+                    // the resolved document; it is not a field anyone authored.
+                    continue;
+                }
                 let path = join_field(prefix, key);
-                record_leaves(&path, child, step, out);
+                let merge_child = if merge_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{merge_path}.{key}")
+                };
+                record_leaves(&path, &merge_child, child, step, out);
             }
         }
         toml::Value::Array(items) => {
-            let element_key = match prefix {
-                STATE_ARRAY => Some("name"),
-                DOCTRINE_ARRAY => Some("id"),
-                _ => None,
-            };
-            match element_key {
+            match POLICY.array_rule(merge_path) {
                 // A keyed array reconciles element-by-element, so record the
                 // elements and leave siblings from earlier fragments intact.
-                Some(key) if !items.is_empty() => {
+                ArrayRule::Keyed(key) if !items.is_empty() => {
                     out.remove(prefix);
                     for (index, element) in items.iter().enumerate() {
                         let addressed = element
@@ -395,11 +448,19 @@ fn record_leaves(
                             .and_then(|v| v.as_str())
                             .map(|id| format!("{prefix}[{key}={id}]"))
                             .unwrap_or_else(|| format!("{prefix}[{index}]"));
-                        record_leaves(&addressed, element, step, out);
+                        if crate::entity_override::is_removal(element) {
+                            // A removal is the opposite of authoring: prune the
+                            // entry an earlier fragment recorded rather than
+                            // claiming it.
+                            out.retain(|k, _| k != &addressed && !is_descendant(k, &addressed));
+                            continue;
+                        }
+                        record_leaves(&addressed, merge_path, element, step, out);
                     }
                 }
-                // Everything else replaces wholesale — including an authored
-                // empty array, which is how a fragment CLEARS a list.
+                // Everything else is a merge leaf — replaced or unioned
+                // wholesale — including an authored empty array, which is how a
+                // fragment CLEARS a list.
                 _ => insert_leaf(prefix, origin(), out),
             }
         }
@@ -642,9 +703,21 @@ fn resolve_with(
         return Ok(PreloadStep::AwaitingIncludes(ctx.missing));
     }
 
-    let value = ctx
-        .accumulator
-        .unwrap_or_else(|| toml::Value::Table(toml::value::Table::new()));
+    // Strip the `_remove` tombstone for the same reason `take_includes` strips
+    // `includes`: an authoring marker must not exist at runtime, and
+    // `EntityConfig` is `deny_unknown_fields`.
+    //
+    // `merge_entity_config_toml_with` already strips under this policy, and
+    // every composed closure ends in a merge, so the ONLY document this catches
+    // is an UNCOMPOSED root that authors a tombstone — no accumulator, no
+    // merge, nothing to strip it. That document is an authoring error (there is
+    // nothing to remove), but it must not be one that leaks a marker into
+    // `value` while `toml` is served verbatim from `root_text`. Pinned by
+    // `an_uncomposed_template_never_leaks_a_tombstone_into_its_value`.
+    let value = crate::entity_override::strip_removals(
+        &ctx.accumulator
+            .unwrap_or_else(|| toml::Value::Table(toml::value::Table::new())),
+    );
     let composed = ctx.provenance.order.len() > 1;
     let toml_text = if composed {
         toml::to_string(&value).map_err(|e| {
@@ -778,10 +851,36 @@ fn visit(
         source: path.to_string(),
         chain: ctx.stack.clone(),
     };
-    ctx.accumulator = Some(match ctx.accumulator.take() {
-        None => value.clone(),
-        Some(accumulated) => crate::entity_override::merge_entity_config_toml(&accumulated, &value),
-    });
+    // The merge is fallible for exactly one reason (issue #911): a `_remove`
+    // tombstone reaching a policy that does not honour it. `POLICY` here is
+    // `ComposeFragments`, which DOES honour it, so this cannot fail today. It is
+    // mapped onto the include chain rather than unwrapped so that changing
+    // `POLICY` yields a located diagnostic instead of a panic in the resolver.
+    let merged = match ctx.accumulator.take() {
+        None => Ok(value.clone()),
+        Some(accumulated) => {
+            crate::entity_override::merge_entity_config_toml_with(&accumulated, &value, POLICY)
+        }
+    };
+    let merged = match merged {
+        Ok(merged) => merged,
+        Err(message) => {
+            let mut chain = ctx.stack.clone();
+            ctx.stack.pop();
+            chain.push(path.to_string());
+            return Err(IncludeError::new(
+                "include-invalid-template",
+                chain,
+                SourceLocation {
+                    file: path.to_string(),
+                    line: line_of(&text, crate::entity_override::REMOVE_KEY),
+                    reference: path.to_string(),
+                },
+                message,
+            ));
+        }
+    };
+    ctx.accumulator = Some(merged);
     ctx.provenance.record(&value, step);
     ctx.stack.pop();
     Ok(())
@@ -1271,8 +1370,21 @@ base_priority = 90.0
         );
     }
 
+    /// `behaviour.state` was reconciled by `name` before #911; it is not any
+    /// more, and it must not be.
+    ///
+    /// The FSM was dissolved in #572: `BehaviourConfig` is
+    /// `deny_unknown_fields` with no `state` field, so a resolved document
+    /// carrying `[[behaviour.state]]` cannot parse and no shipped hull or
+    /// fragment has one. #911 retired the special case rather than generalising
+    /// a corpse. The `name`-keyed MECHANISM is alive and tested through
+    /// `[[station.rating]]` — see `nested_arrays_reconcile_under_a_composed_chain`.
+    ///
+    /// Re-pointed rather than deleted so the retirement is a checked claim: if
+    /// `state` ever comes back, this fails and sends the author to the identity
+    /// table.
     #[test]
-    fn state_merges_by_name_across_fragments() {
+    fn state_is_retired_and_no_longer_merges_by_name_across_fragments() {
         let r = resolve(
             "e/hull.toml",
             &[
@@ -1307,9 +1419,17 @@ target_speed = 0.9
             .unwrap()
             .as_array()
             .unwrap();
-        assert_eq!(states.len(), 2);
-        assert_eq!(states[0].get("target_speed").unwrap().as_float(), Some(0.9));
-        assert_eq!(states[1].get("target_speed").unwrap().as_float(), Some(0.0));
+        assert_eq!(
+            states.len(),
+            1,
+            "an array with no identity entry replaces wholesale"
+        );
+        assert_eq!(states[0].get("name").unwrap().as_str(), Some("patrol"));
+        assert!(
+            EntityConfig::from_toml(&r.toml).is_err(),
+            "and the resolved document does not parse either way — which is why \
+             there was nothing to generalise"
+        );
     }
 
     /// `68bda1be`'s empty-array rule has to mean something coherent between
@@ -1385,28 +1505,372 @@ base_priority = 40.0
         assert_eq!(doctrine.len(), 1, "an absent key never reaches the merge");
     }
 
+    fn strings_at(r: &ResolvedTemplate, key: &str) -> Vec<String> {
+        r.value
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn ids_at(r: &ResolvedTemplate, key: &str) -> Vec<String> {
+        r.value
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// #869 asserted that `tags` REPLACED between fragments. #911 changes that
+    /// deliberately: `tags` has no key, so at the compose layer it can only
+    /// union, and union is what a fragment library needs.
+    ///
+    /// This is a behaviour change confined to the compose layer.
+    /// `entity_override::instance_override_tags_replace_they_do_not_union` pins
+    /// the other half, which is the one three shipped worlds depend on.
     #[test]
-    fn plain_arrays_replace_wholesale_between_fragments() {
+    fn tags_union_between_fragments() {
         let r = resolve(
             "e/hull.toml",
             &[
                 ("e/base.toml", "tags = [\"ship\", \"npc\"]\n"),
                 (
                     "e/hull.toml",
-                    "includes = [\"base.toml\"]\ntags = [\"scenery\"]\n",
+                    "includes = [\"base.toml\"]\ntags = [\"npc\", \"scenery\"]\n",
                 ),
             ],
         );
-        let tags: Vec<&str> = r
+        assert_eq!(
+            strings_at(&r, "tags"),
+            vec!["ship", "npc", "scenery"],
+            "the hull ADDS to the fragment's tags; a tag both declare is not \
+             duplicated"
+        );
+    }
+
+    /// …and an authored empty array is still a fragment's lever to clear them.
+    #[test]
+    fn a_fragment_authoring_empty_tags_clears_them() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                ("e/base.toml", "tags = [\"ship\", \"npc\"]\n"),
+                ("e/hull.toml", "includes = [\"base.toml\"]\ntags = []\n"),
+            ],
+        );
+        assert!(strings_at(&r, "tags").is_empty());
+    }
+
+    /// Arrays with no stable identity keep replacing wholesale between
+    /// fragments. A fragment contributing an AI policy contributes it WHOLE.
+    #[test]
+    fn keyless_arrays_still_replace_wholesale_between_fragments() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/base.toml",
+                    "[[captain_console.ai.rule]]\nchannel = \"a\"\npriority = 1\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"base.toml\"]\n[[captain_console.ai.rule]]\nchannel = \"b\"\npriority = 2\n",
+                ),
+            ],
+        );
+        let rules = r
             .value
-            .get("tags")
+            .get("captain_console")
+            .unwrap()
+            .get("ai")
+            .unwrap()
+            .get("rule")
             .unwrap()
             .as_array()
+            .unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].get("channel").unwrap().as_str(), Some("b"));
+    }
+
+    // ── Array extension across a composed chain (issue #911) ─────────────────
+
+    /// The issue in one test: "the library's systems, plus two of my own."
+    #[test]
+    fn a_hull_extends_a_fragments_system_suite_instead_of_replacing_it() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/systems.toml",
+                    "[[system]]\nid = \"helm-thrust\"\nkind = \"helm_thrust\"\n\
+                     [[system]]\nid = \"power-reactor\"\nkind = \"power_reactor\"\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"systems.toml\"]\n\
+                     [[system]]\nid = \"phaser-dorsal\"\nkind = \"phaser_bank\"\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            ids_at(&r, "system"),
+            vec!["helm-thrust", "power-reactor", "phaser-dorsal"],
+            "a hull needing one extra system no longer has to restate the suite \
+             — and so no longer silently opts out of future library changes"
+        );
+    }
+
+    /// Replace-in-place and remove, through a THREE-deep chain, so the rules
+    /// are shown to survive an intermediate fragment rather than only working
+    /// between a hull and its direct include.
+    #[test]
+    fn a_composed_chain_specialises_and_removes_inherited_entries() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/library.toml",
+                    "[[system]]\nid = \"helm-thrust\"\nkind = \"helm_thrust\"\nai_only = true\n\
+                     [[system]]\nid = \"power-reactor\"\nkind = \"power_reactor\"\n\
+                     [[system]]\nid = \"legacy-probe\"\nkind = \"sensor_probe\"\n",
+                ),
+                (
+                    "e/class.toml",
+                    "includes = [\"library.toml\"]\n\
+                     [[system]]\nid = \"legacy-probe\"\n_remove = true\n\
+                     [[system]]\nid = \"phaser-dorsal\"\nkind = \"phaser_bank\"\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"class.toml\"]\n\
+                     [[system]]\nid = \"helm-thrust\"\nai_only = false\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            ids_at(&r, "system"),
+            vec!["helm-thrust", "power-reactor", "phaser-dorsal"],
+            "the mid fragment's removal and append both survive to the hull"
+        );
+        let thrust = &r.value.get("system").unwrap().as_array().unwrap()[0];
+        assert_eq!(thrust.get("ai_only").unwrap().as_bool(), Some(false));
+        assert_eq!(
+            thrust.get("kind").unwrap().as_str(),
+            Some("helm_thrust"),
+            "a key only the library declared survives two levels of merge"
+        );
+        assert!(
+            !r.toml.contains(crate::entity_override::REMOVE_KEY),
+            "the tombstone marker must never reach the resolved document"
+        );
+    }
+
+    /// A tombstone in the FIRST fragment of a closure never meets a merge — it
+    /// is the value the accumulator is seeded with. It must still be stripped,
+    /// which is what the resolver's own strip site is for.
+    #[test]
+    fn an_unmatched_tombstone_never_reaches_the_resolved_document() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/frag.toml",
+                    "[[system]]\nid = \"never-declared\"\n_remove = true\n\
+                     [[system]]\nid = \"real\"\nkind = \"power_reactor\"\n",
+                ),
+                ("e/hull.toml", "includes = [\"frag.toml\"]\nclass = \"x\"\n"),
+            ],
+        );
+        assert_eq!(ids_at(&r, "system"), vec!["real"]);
+        assert!(!r.toml.contains(crate::entity_override::REMOVE_KEY));
+        assert!(!r
+            .value
+            .to_string()
+            .contains(crate::entity_override::REMOVE_KEY));
+    }
+
+    /// The one document the merge cannot clean: an UNCOMPOSED root with a
+    /// tombstone. It never meets an accumulator, so the resolver's own strip
+    /// site is the only thing standing between it and `value`.
+    ///
+    /// Authoring a tombstone here is a mistake (there is nothing inherited to
+    /// remove), and the resolved `toml` is served verbatim from `root_text`, so
+    /// `parse()` rejects it loudly. What must NOT happen is `value` and `toml`
+    /// disagreeing about whether the marker is there.
+    #[test]
+    fn an_uncomposed_template_never_leaks_a_tombstone_into_its_value() {
+        let body = "class = \"solo\"\n[[system]]\nid = \"ghost\"\n_remove = true\n";
+        let r = resolve("e/hull.toml", &[("e/hull.toml", body)]);
+        assert!(!r.is_composed());
+        assert!(
+            !r.value
+                .to_string()
+                .contains(crate::entity_override::REMOVE_KEY),
+            "no `_remove` may survive into the resolved value, composed or not"
+        );
+        assert_eq!(
+            r.toml, body,
+            "an uncomposed template is still served verbatim — byte-identity is \
+             not traded away for the strip"
+        );
+        assert!(
+            r.parse().is_err(),
+            "and the verbatim bytes still carry the marker, so the mistake is \
+             rejected rather than silently absorbed"
+        );
+    }
+
+    /// Nested arrays under a composed chain: `[[station.rating]]` reconciles by
+    /// `name` INSIDE a `[[station]]` reconciled by `id`.
+    #[test]
+    fn nested_arrays_reconcile_under_a_composed_chain() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/frag.toml",
+                    "[[station]]\nid = \"bridge\"\n\
+                     [[station.rating]]\nname = \"helm\"\nlevel = 1\n\
+                     [[station.rating]]\nname = \"tactical\"\nlevel = 1\n\
+                     [[station]]\nid = \"engineering\"\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"frag.toml\"]\n\
+                     [[station]]\nid = \"bridge\"\n\
+                     [[station.rating]]\nname = \"tactical\"\nlevel = 3\n",
+                ),
+            ],
+        );
+        assert_eq!(ids_at(&r, "station"), vec!["bridge", "engineering"]);
+        let ratings = r.value.get("station").unwrap().as_array().unwrap()[0]
+            .get("rating")
             .unwrap()
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect();
-        assert_eq!(tags, vec!["scenery"]);
+            .as_array()
+            .unwrap();
+        assert_eq!(ratings.len(), 2, "the unmentioned rating survives");
+        assert_eq!(ratings[0].get("level").unwrap().as_integer(), Some(1));
+        assert_eq!(ratings[1].get("level").unwrap().as_integer(), Some(3));
+    }
+
+    /// `[[shield_arc]]` order is load-bearing (`ShieldSystem::from_arcs` maps
+    /// arcs positionally; the FIRST arc's frequency seeds the ship-wide shield
+    /// frequency). Stated as a guarantee of composition, not left to chance.
+    #[test]
+    fn shield_arc_order_survives_composition() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/frag.toml",
+                    "[[shield_arc]]\nid = \"fore\"\nfrequency = 1.0\n\
+                     [[shield_arc]]\nid = \"aft\"\nfrequency = 2.0\n",
+                ),
+                (
+                    // Specialises the FIRST arc: an override that only touched
+                    // the last one would pass even if matched entries moved.
+                    "e/hull.toml",
+                    "includes = [\"frag.toml\"]\n\
+                     [[shield_arc]]\nid = \"fore\"\nfrequency = 9.0\n\
+                     [[shield_arc]]\nid = \"dorsal\"\nfrequency = 5.0\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            ids_at(&r, "shield_arc"),
+            vec!["fore", "aft", "dorsal"],
+            "specialised arcs hold their template position; new arcs append AFTER"
+        );
+        let arcs = r.value.get("shield_arc").unwrap().as_array().unwrap();
+        assert_eq!(
+            arcs[0].get("frequency").unwrap().as_float(),
+            Some(9.0),
+            "the ship-wide shield frequency is seeded from whichever arc is \
+             FIRST, so composition must not reorder them"
+        );
+        assert_eq!(arcs[1].get("id").unwrap().as_str(), Some("aft"));
+    }
+
+    /// Provenance is driven from the SAME identity table as the merge. If it
+    /// were not, `system` would be recorded as a wholesale leaf and
+    /// `insert_leaf`'s prune would erase every field the library fragment
+    /// contributed to the systems it did not touch.
+    #[test]
+    fn provenance_addresses_every_reconciled_array_by_key_not_just_doctrine() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/frag.toml",
+                    "[[system]]\nid = \"helm-thrust\"\nkind = \"helm_thrust\"\nai_only = true\n\
+                     [[system]]\nid = \"power-reactor\"\nkind = \"power_reactor\"\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"frag.toml\"]\n[[system]]\nid = \"helm-thrust\"\nai_only = false\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            r.provenance
+                .origin("system[id=helm-thrust].ai_only")
+                .expect("the hull's specialisation is recorded")
+                .source,
+            "e/hull.toml"
+        );
+        assert_eq!(
+            r.provenance
+                .origin("system[id=helm-thrust].kind")
+                .expect("a key the hull never mentioned is still recorded")
+                .source,
+            "e/frag.toml",
+            "if provenance recorded `system` as a wholesale leaf, this field \
+             would have been pruned"
+        );
+        assert_eq!(
+            r.provenance
+                .origin("system[id=power-reactor].kind")
+                .expect("an untouched sibling is still recorded")
+                .source,
+            "e/frag.toml"
+        );
+    }
+
+    /// A removal is the opposite of authoring: provenance must stop reporting
+    /// fields of an entry that no longer exists.
+    #[test]
+    fn provenance_prunes_an_entry_a_later_fragment_removed() {
+        let r = resolve(
+            "e/hull.toml",
+            &[
+                (
+                    "e/frag.toml",
+                    "[[system]]\nid = \"legacy\"\nkind = \"sensor_probe\"\n",
+                ),
+                (
+                    "e/hull.toml",
+                    "includes = [\"frag.toml\"]\n[[system]]\nid = \"legacy\"\n_remove = true\n",
+                ),
+            ],
+        );
+        assert!(ids_at(&r, "system").is_empty());
+        assert!(
+            r.provenance.origin("system[id=legacy].kind").is_none(),
+            "a removed entry must not still report a field that no longer exists"
+        );
+        assert!(
+            r.provenance.origin("system[id=legacy]._remove").is_none(),
+            "the marker is authoring metadata, not an authored field"
+        );
     }
 
     // ── Cycles and missing paths ─────────────────────────────────────────────

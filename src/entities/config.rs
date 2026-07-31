@@ -4328,7 +4328,7 @@ impl EntityConfig {
         //
         // ── Overrides merge per-field, so flipping a kind can trip this ──
         //
-        // An override reaches this check already merged: `merge_id_array`
+        // An override reaches this check already merged: `merge_keyed_array`
         // (`src/entities/entity_override.rs`) deep-merges a doctrine override
         // into the template entry that shares its `id`, field by field. Change
         // an existing entry's `directive_kind` and the template's directive
@@ -4339,8 +4339,10 @@ impl EntityConfig {
         // this check rejects.
         //
         // The escape hatch is to clear the stale field inside the same override
-        // entry — `directive_anchors = []` — because `merge_toml` replaces
-        // arrays wholesale rather than merging them.
+        // entry — `directive_anchors = []`. That still works after issue #911:
+        // `behaviour.doctrine.directive_anchors` is in neither identity table,
+        // so a nested array inside a reconciled entry keeps replacing wholesale
+        // at both merge layers.
         //
         // That matters most on the `spawn_entity` path, where the rejection is
         // NOT fatal: `world::dispatch::dispatch_spawn_entity` warns and keeps

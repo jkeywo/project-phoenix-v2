@@ -44,6 +44,14 @@ pub fn resolve_entity(
 /// `[[shield_arc]]` blocks that a plain `toml::to_string` would drop (they live
 /// in `#[serde(skip)]` fields), so the merged config keeps the template's whole
 /// system suite instead of spawning a hull with no stations or weapons.
+///
+/// # Errors
+///
+/// Besides a serialise/parse failure, an override carrying the `_remove`
+/// tombstone is rejected outright (issue #911): that marker is a
+/// fragment-composition feature, and an instance override that writes one would
+/// otherwise be a silent no-op — see
+/// [`crate::entity_override::reject_unhonoured_removals`].
 pub fn apply_overrides(
     template: &EntityConfig,
     overrides: &toml::Value,
@@ -52,7 +60,8 @@ pub fn apply_overrides(
         .to_toml_value()
         .map_err(|e| format!("template serialise error: {e}"))?;
 
-    let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides);
+    let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides)
+        .map_err(|e| format!("override rejected: {e}"))?;
     let merged_str =
         toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
     EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))
@@ -552,6 +561,187 @@ size_max = 2.0
                 .is_some_and(|s| s.systems.iter().any(|sys| sys.kind == "helm_thrust")),
             "the fragment's systems survive the instance merge (issue #838's round trip)"
         );
+    }
+
+    // ── AC-4: every shipped world override behaves byte-identically ──────────
+    //
+    // `include_resolve::shipped_tree::every_shipped_template_resolves_to_its_own_bytes`
+    // is the walk for TEMPLATES. This is the walk for the other layer, and it
+    // is the one issue #911 could plausibly have broken: the merge that world
+    // overrides use grew a policy parameter, and if the default policy drifted
+    // by so much as one array path, a hostile would quietly become hailable or
+    // a hull would lose its weapons suite.
+    //
+    // Proved DIFFERENTIALLY rather than by inspection or by a snapshot: the
+    // pre-#911 algorithm is reproduced verbatim below and both are run over
+    // every override the shipped worlds actually author.
+
+    /// `merge_entity_config_toml` exactly as it stood before issue #911 —
+    /// `merge_toml` (arrays replace wholesale), then a post-process that
+    /// re-applies the by-`name` merge to `behaviour.state` and the by-`id`
+    /// merge to `behaviour.doctrine`, each skipped for an empty override array.
+    ///
+    /// Copied from the commit before this one so the comparison is against what
+    /// SHIPPED, not against a paraphrase of it.
+    fn legacy_merge(template: &toml::Value, override_: &toml::Value) -> toml::Value {
+        fn legacy_keyed(
+            template: &[toml::Value],
+            overrides: &[toml::Value],
+            key: &str,
+        ) -> Vec<toml::Value> {
+            let mut result = template.to_vec();
+            for o_entry in overrides {
+                match o_entry.get(key).and_then(|v| v.as_str()) {
+                    Some(id) => {
+                        let pos = result
+                            .iter()
+                            .position(|e| e.get(key).and_then(|v| v.as_str()) == Some(id));
+                        match pos {
+                            Some(i) => {
+                                result[i] = crate::entity_override::merge_toml(&result[i], o_entry)
+                            }
+                            None => result.push(o_entry.clone()),
+                        }
+                    }
+                    None => result.push(o_entry.clone()),
+                }
+            }
+            result
+        }
+
+        let mut result = crate::entity_override::merge_toml(template, override_);
+        let t_beh = template.get("behaviour").and_then(|v| v.as_table());
+        let o_beh = override_.get("behaviour").and_then(|v| v.as_table());
+        if let (Some(tb), Some(ob)) = (t_beh, o_beh) {
+            for (field, key) in [("state", "name"), ("doctrine", "id")] {
+                if let (Some(t_items), Some(o_items)) = (
+                    tb.get(field).and_then(|v| v.as_array()),
+                    ob.get(field)
+                        .and_then(|v| v.as_array())
+                        .filter(|a| !a.is_empty()),
+                ) {
+                    let merged = legacy_keyed(t_items, o_items, key);
+                    if let Some(beh) = result
+                        .as_table_mut()
+                        .and_then(|t| t.get_mut("behaviour"))
+                        .and_then(|v| v.as_table_mut())
+                    {
+                        beh.insert(field.to_string(), toml::Value::Array(merged));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Every `(template, overrides)` pair the shipped worlds author, from both
+    /// `[[entity]].overrides` and `[[trigger]]` `spawn_entity` actions — the
+    /// two places an override is written.
+    fn shipped_override_pairs() -> Vec<(String, String, toml::Value)> {
+        fn walk(world: &str, value: &toml::Value, out: &mut Vec<(String, String, toml::Value)>) {
+            match value {
+                toml::Value::Table(t) => {
+                    if let (Some(path), Some(over)) = (
+                        t.get("template_path").and_then(|v| v.as_str()),
+                        t.get("overrides"),
+                    ) {
+                        out.push((world.to_string(), path.to_string(), over.clone()));
+                    }
+                    for v in t.values() {
+                        walk(world, v, out);
+                    }
+                }
+                toml::Value::Array(items) => {
+                    for v in items {
+                        walk(world, v, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut out = Vec::new();
+        let mut worlds: Vec<std::path::PathBuf> = std::fs::read_dir("assets/worlds")
+            .expect("assets/worlds must be readable")
+            .map(|e| e.expect("readable dir entry").path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
+        worlds.sort();
+        for path in worlds {
+            let world = path.to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(&path).expect("world readable");
+            let value: toml::Value =
+                toml::from_str(&text).unwrap_or_else(|e| panic!("{world} must be valid TOML: {e}"));
+            walk(&world, &value, &mut out);
+        }
+        out
+    }
+
+    /// **AC-4, the instance-override half.** Every override the shipped worlds
+    /// author merges to a byte-identical document under the new merge and the
+    /// pre-#911 one.
+    ///
+    /// The mutation guard, measured rather than assumed: let `tags` union at
+    /// the instance layer and this fails, on `default.toml`, `patrol.toml` and
+    /// `reinforcements.toml`, whose `tags` overrides exist precisely to DROP
+    /// `ship_harrow_patrol`'s `comms_contact`.
+    ///
+    /// What it does NOT guard, stated so nobody reads it as more: **no shipped
+    /// world override touches `[[system]]`, `[[station]]`, `[[shield_arc]]` or
+    /// a weapon bank**, so widening the instance layer to those arrays passes
+    /// this walk untouched. That case is guarded by
+    /// `entity_override::the_two_layers_disagree_only_where_they_are_meant_to`,
+    /// which pins the table itself; the two tests are complementary, not
+    /// redundant.
+    #[test]
+    fn every_shipped_world_override_merges_identically_to_the_pre_911_algorithm() {
+        let pairs = shipped_override_pairs();
+        assert!(
+            pairs.len() >= 10,
+            "the walk found only {} shipped overrides — it is not reaching the \
+             content it is supposed to be guarding",
+            pairs.len()
+        );
+        let mut checked = 0usize;
+        for (world, template_path, overrides) in &pairs {
+            // A template the walk cannot load is a different defect with its
+            // own diagnostics; this test is about the MERGE.
+            let Some(template) = FsTemplateLoader.load_template(template_path) else {
+                continue;
+            };
+            let template_value = template
+                .to_toml_value()
+                .unwrap_or_else(|e| panic!("{template_path} must serialise: {e}"));
+            let new = crate::entity_override::merge_entity_config_toml(&template_value, overrides)
+                .unwrap_or_else(|e| panic!("{world} overriding {template_path} is rejected: {e}"));
+            let old = legacy_merge(&template_value, overrides);
+            assert_eq!(
+                toml::to_string(&new).unwrap(),
+                toml::to_string(&old).unwrap(),
+                "{world} overrides {template_path} differently after issue #911"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 10,
+            "only {checked} of {} shipped overrides had a loadable template, so \
+             the differential is guarding almost nothing",
+            pairs.len()
+        );
+    }
+
+    /// …and the same documents still PARSE, which the value comparison above
+    /// cannot tell you on its own.
+    #[test]
+    fn every_shipped_world_override_still_resolves_to_a_valid_entity() {
+        for (world, template_path, overrides) in shipped_override_pairs() {
+            let Some(template) = FsTemplateLoader.load_template(&template_path) else {
+                continue;
+            };
+            apply_overrides(&template, &overrides).unwrap_or_else(|e| {
+                panic!("{world} overriding {template_path} no longer resolves: {e}")
+            });
+        }
     }
 
     /// The real impls must also be usable as `&dyn TemplateLoader`, not just

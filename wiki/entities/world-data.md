@@ -79,11 +79,102 @@ Optional top-level `[ambient_light]` block on the world TOML. Applied by the `sp
 An entity template may declare an ordered top-level `includes = ["...", ...]`. The
 paths resolve **relative to the declaring template**, are lexically canonicalised
 (`\` → `/`, `.`/`..` collapsed), and are merged depth-first in declared order, with
-the declaring template merged **last** so the includer wins. The merge is the same
-`entity_override::merge_entity_config_toml` an instance override uses, so
-`behaviour.state` reconciles by `name`, `behaviour.doctrine` by `id`, an authored
-empty array clears, and every other array (`tags`, `[[system]]`, `[[station]]`,
-`[[shield_arc]]`, weapon banks) replaces wholesale.
+the declaring template merged **last** so the includer wins.
+
+### The two layers no longer share one array rule (issue #911)
+
+Both layers call `entity_override::merge_entity_config_toml_with`, but they pass
+**different `MergePolicy` values**, and this is the one place where "composing
+fragments" and "overriding an instance" genuinely mean different things. Before
+#911 there was a single shared rule, and that sharing is exactly why #869 could
+not let a hull extend a fragment's arrays: widening the rule for fragments would
+have widened it for every world override too.
+
+| | `ComposeFragments` (`includes`) | `InstanceOverride` (`[[entity]].overrides`) |
+|---|---|---|
+| `behaviour.doctrine` | by `id` | by `id` |
+| `[[system]]`, `[[station]]`, `[[shield_arc]]`, `[[weapons_console.phaser_banks]]`, `[[weapons_console.blaster_banks]]`, `[[torpedoes.tubes]]` | by `id` | replaces wholesale |
+| `[[station.rating]]` | by `name` | replaces wholesale |
+| `tags` | **unions** | **replaces** |
+| `*.ai.rule`, `*_ai.state`, `*.selector.score`, `mesh.lod`, `hull.system_hull` | replaces wholesale | replaces wholesale |
+| `{ id = "…", _remove = true }` | removes that entry | not honoured — **the merge rejects the whole override** |
+| authored `[]` | clears the list | clears the list |
+| omitted key | leaves it alone | leaves it alone |
+
+`tags` is the asymmetry to understand, because it is the one array with no key:
+bare strings can only union or replace. A fragment library wants union. A world
+override needs replace, because replace is the only way to take a tag *away* —
+`default.toml`, `patrol.toml` and `reinforcements.toml` all override
+`ship_harrow_patrol`'s tags precisely to drop `comms_contact`, and tags are
+behaviourally live.
+
+The tombstone is a **compose-layer marker only**, and writing one in a world
+`[[entity]].overrides` is an error rather than a no-op:
+`merge_entity_config_toml_with` returns `Result` and rejects any `_remove` key,
+at any depth, under `InstanceOverride`. It has to: relying on the parser to
+catch a stray marker does not work. `behaviour.doctrine` is the one array that
+reconciles at that layer, so a tombstone written there deep-merges *into* the
+matching template entry — and `DoctrineObjective` is **not**
+`deny_unknown_fields`, so serde ignores it, the load succeeds, and the doctrine
+the author asked to remove is still there. Nothing in `src/ship/config.rs` is
+`deny_unknown_fields` either. A subtractive marker that silently does nothing is
+the exact failure mode #838 existed to end, so the rejection lives in the merge,
+where the guarantee is stated.
+
+To take an entry away in a world override, restate the array without it, or
+clear the whole array with `[]`.
+
+`behaviour.state` was reconciled by `name` before #911 and is not any more. The
+FSM was dissolved in #572, `BehaviourConfig` is `deny_unknown_fields` with no
+`state` field, and no shipped hull or fragment has one — a resolved document
+carrying `[[behaviour.state]]` does not parse. The special case was retired
+rather than generalised.
+
+### What a fragment author writes
+
+```toml
+includes = ["fragments/escort_systems.toml"]
+
+# EXTEND — a new id is appended to the fragment's suite.
+[[system]]
+id = "phaser-dorsal"
+kind = "phaser_bank"
+
+# REPLACE ONE ENTRY — a matching id deep-merges in place, keeping the
+# fragment's other fields AND the entry's position.
+[[system]]
+id = "helm-thrust"
+ai_only = false
+
+# REMOVE ONE ENTRY — the tombstone. Never reaches the resolved document.
+[[system]]
+id = "legacy-probe"
+_remove = true
+
+# CLEAR THE LIST — still the whole-array lever, and it still wins.
+shield_arc = []
+```
+
+Position is a **guarantee**, not a side effect: `[[shield_arc]]` order is
+load-bearing (`ShieldSystem::from_arcs` maps arcs positionally, `focused_facing`
+is a positional index, and the first arc's `frequency` seeds the ship-wide
+shield frequency), so a specialised entry stays where the fragment put it and
+only genuinely new entries append.
+
+Arrays with no stable identity keep replacing wholesale, deliberately: the only
+candidate key for `*.ai.rule` is the composite `(channel, priority)`, so an
+author bumping a priority would silently "rename" a rule and get an append
+instead of an edit. **A fragment contributing an AI policy contributes it
+whole** — that is the intended granularity.
+
+### Known divergence: the browser override editor (issue #910)
+
+`editor/override-editor.js`'s `deepMerge` is a hand-rolled JS reimplementation
+of the merge with **no by-id casing at all**. It was already divergent from Rust
+before #911 — it does not reconcile `behaviour.doctrine` by `id`, which has been
+Rust's behaviour since `68bda1be` — and #911 widens the gap on the compose side.
+Pre-existing, larger than #911, and tracked as **#910**; recorded here because
+it was not written down anywhere.
 
 Resolution is pure and lives in `src/entities/include_resolve.rs`. It returns one
 resolved TOML document plus **provenance** — which template authored each dotted

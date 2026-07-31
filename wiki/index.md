@@ -22,3 +22,8 @@ Current implementation orientation only. For intended design use [`pasm/spec/`](
 
 - [Model Viewer](./concepts/model-viewer.md) — standalone shader/lighting iteration harness (`npm run dev:viewer`)
 - [Build & Deployment](./concepts/build-and-deployment.md)
+
+## Audits
+
+- [Information-Parity Audit](./concepts/information-parity-audit.md) — every Backfill fact against its console counterpart
+- [PASM Coverage Audit](./concepts/pasm-coverage-audit.md), [PASM Midpoint Audit](./concepts/pasm-midpoint-audit.md)

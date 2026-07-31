@@ -4583,12 +4583,14 @@ station = "pilot"
     /// icon. Uses the checked-in template so it regresses on the TOML edits too.
     #[test]
     fn player_spawn_injects_player_tag_and_icon_over_template() {
-        use crate::entity_config::EntityConfig;
         use crate::entity_spawner::{EntityTagsSection, RadarAppearanceSection};
         use bevy::prelude::*;
 
-        let toml = include_str!("../assets/entities/alliance_cruiser.toml");
-        let config = EntityConfig::from_toml(toml).expect("cruiser template must parse");
+        // Through the resolver (issue #876): this hull is COMPOSED, so its baked
+        // bytes are no longer the document that spawns.
+        let config =
+            crate::entity_includes::load_entity_config("assets/entities/alliance_cruiser.toml")
+                .expect("cruiser template must compose and parse");
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);

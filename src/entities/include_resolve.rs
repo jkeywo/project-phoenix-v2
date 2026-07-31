@@ -2937,6 +2937,85 @@ directive_kind = "Destroy"
             );
         }
 
+        /// **The RUNTIME twin of [`include_str_baked_hulls_are_all_uncomposed`].**
+        ///
+        /// That test catches a hull whose bytes are baked at COMPILE time and
+        /// then parsed as if they were the whole document. It cannot see the
+        /// other half of the same mistake: text read at RUN time and parsed the
+        /// same way. No source scan can enumerate those — the path is a variable,
+        /// not a literal — so they have to be caught by driving the entry point.
+        ///
+        /// There is one such entry point over shipped hulls, and it broke twice.
+        /// `server::bridge::validate_ship_stations` is the browser's pre-start
+        /// ship gate: `server.html` fetches the chosen hull and hands the gate
+        /// the path and those raw bytes, and nothing may start until it passes.
+        /// While it parsed the fetched text directly, the first hull to declare
+        /// `includes` became unselectable in the browser — with the native and
+        /// headless suites, and every other CI gate, staying green, because the
+        /// only host that reads a hull as raw text is the browser. The failure
+        /// surfaced as a crashed page in Playwright.
+        ///
+        /// So: every crewed shipped hull, through the real gate, over exactly
+        /// what the page passes it. A hull with `[[station]]` blocks is one a
+        /// host can pick, and a hull a host can pick must boot.
+        ///
+        /// # What makes this non-vacuous
+        ///
+        /// The `composed` count. Over an all-uncomposed tree this test passes
+        /// just as happily against a gate that parses the raw text — it would
+        /// report success on exactly the tree where it guards nothing. Requiring
+        /// at least one COMPOSED crewed hull ties the guard to the thing it is
+        /// guarding: the difference between the authored file and the document
+        /// the game runs.
+        #[test]
+        fn every_shipped_hull_passes_the_browser_station_gate() {
+            let mut crewed: Vec<&String> = Vec::new();
+            let mut composed = 0usize;
+            let templates = shipped_templates();
+            for path in &templates {
+                let raw = std::fs::read_to_string(path)
+                    .unwrap_or_else(|e| panic!("{path} must be readable: {e}"));
+                let resolved =
+                    resolve_from_disk(path).unwrap_or_else(|e| panic!("{path} must resolve: {e}"));
+                // Read the crewed-hull predicate off the RESOLVED document, not
+                // off a parse: a template that fails to parse must reach the
+                // gate and be reported by it, not skipped by this filter.
+                if resolved.value.get("station").is_none() {
+                    continue;
+                }
+                crewed.push(path);
+                if resolved.is_composed() {
+                    composed += 1;
+                }
+                crate::server::bridge::validate_ship_stations(path, &raw).unwrap_or_else(|e| {
+                    panic!(
+                        "{path} declares `[[station]]`, so a host can select it and the \
+                         browser's pre-start gate must accept it. Driven over exactly what \
+                         `server.html` passes — the template path and the RAW bytes at that \
+                         path — it did not: {e}\n\
+                         If this says `unknown field `includes``, the gate is parsing the \
+                         authored file instead of resolving it: the file on disk is only \
+                         half a composed hull."
+                    )
+                });
+            }
+            assert!(
+                crewed.len() >= 8,
+                "only {} shipped templates declare `[[station]]`, so this walk has \
+                 stopped finding the crewed hulls it is supposed to be driving \
+                 through the gate: {crewed:?}",
+                crewed.len()
+            );
+            assert!(
+                composed > 0,
+                "none of the {} crewed hulls this gate accepted is COMPOSED, so a gate \
+                 that parsed the raw authored text would pass this test unchanged and \
+                 it has stopped guarding anything. Composition of a shipped hull is \
+                 what it exists to catch.",
+                crewed.len()
+            );
+        }
+
         /// A fragment is not a hull, and the scan must not call one the other.
         ///
         /// `src/world/validate.rs` bakes `fragments/ai/fleet_baseline.toml`,

@@ -2732,7 +2732,12 @@ function finishInit() {
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        try { wasm_validate_stations(toml); } catch (err) {
+        // The PATH is passed alongside the text because a hull may declare
+        // `includes` (issue #875): the gate resolves the include closure out
+        // of the preloaded raw templates, and relative include references are
+        // resolved against this path. Passing text alone would reject every
+        // composed hull.
+        try { wasm_validate_stations(templatePath, toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2750,7 +2755,7 @@ function finishInit() {
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
         wasm_select_ship('assets/entities/alliance_cruiser.toml');
-        try { wasm_validate_stations(toml); } catch (err) {
+        try { wasm_validate_stations('assets/entities/alliance_cruiser.toml', toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2764,7 +2769,7 @@ function finishInit() {
     fetch(templatePath)
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(toml => {
-        try { wasm_validate_stations(toml); } catch (err) {
+        try { wasm_validate_stations(templatePath, toml); } catch (err) {
           showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
           return;
         }
@@ -2791,7 +2796,7 @@ function finishInit() {
         fetch(template_path)
           .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
           .then(toml => {
-            try { wasm_validate_stations(toml); } catch (err) {
+            try { wasm_validate_stations(template_path, toml); } catch (err) {
               showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
               return;
             }

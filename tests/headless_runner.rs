@@ -2188,3 +2188,206 @@ fn a_targeted_destroy_objective_does_not_cancel_the_hulls_own_attack_pass() {
         "the hull drifted {worst_escape_heading_error:.2} rad off the escape          heading it froze at the merge, over {escape_ticks} escape-leg ticks          (closest approach {min_range:.1}). Holding that heading IS the          commitment; a hull whose own backfilled Navigation stood its doctrine          down turns back onto its waypoint and ends up flying the reciprocal."
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #876 — the other two composed player hulls, end to end
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One tick's reading of a composed hull's own doctrine, taken off the ship
+/// rather than inferred from where it ended up.
+///
+/// `HelmPassSurface` is published by the ship's own Steering POLICY (the planner
+/// never writes it), so the leg booleans say which leg the DOCTRINE reached;
+/// physics says whether the planner then flew it. `ShipRedAlert` is the switch
+/// `posture` is seeded from, so sampling the two together is what makes "when
+/// clear / at red alert" a measurement rather than a hope.
+struct DoctrineSample {
+    red_alert: bool,
+    surface: Option<project_phoenix::ship::helm_ai::HelmPassSurface>,
+    self_pos: [f32; 2],
+    self_yaw: f32,
+    hostile_pos: Option<[f32; 2]>,
+}
+
+/// Tick the app once and read the LocalShip's doctrine surface, its physics and
+/// the one hostile it is fighting.
+///
+/// The hostile is "the ship that is not the LocalShip" — `probe_duel.toml`
+/// spawns exactly one — and it is needed because every geometric claim below is
+/// about the RELATIVE geometry the doctrine is flying, never a world position.
+fn sample_doctrine(app: &mut App) -> Option<DoctrineSample> {
+    use project_phoenix::ship::helm_ai::HelmPassSurface;
+    use project_phoenix::ship::state::ShipRedAlert;
+
+    run(app, 1);
+    let (self_pos, self_yaw, red_alert, surface) = {
+        let mut q = app.world_mut().query_filtered::<(
+            &ShipPhysics,
+            Option<&ShipRedAlert>,
+            Option<&HelmPassSurface>,
+        ), With<LocalShip>>();
+        let (physics, alert, pass) = q.single(app.world()).ok()?;
+        (
+            [physics.x, physics.z],
+            physics.yaw,
+            alert.is_some_and(|a| a.0),
+            pass.cloned(),
+        )
+    };
+    let hostile_pos = {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ShipPhysics, Without<LocalShip>>();
+        q.iter(app.world()).map(|p| [p.x, p.z]).next()
+    };
+    Some(DoctrineSample {
+        red_alert,
+        surface,
+        self_pos,
+        self_yaw,
+        hostile_pos,
+    })
+}
+
+/// World bearing from one planar point to another, in the same frame
+/// `ShipPhysics::yaw` is expressed in (forward is `-Z`, starboard `+X`).
+fn bearing_to(from: [f32; 2], to: [f32; 2]) -> f32 {
+    (to[0] - from[0]).atan2(-(to[1] - from[1]))
+}
+
+fn wrap_pi(a: f32) -> f32 {
+    (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
+/// **The composed player battleship takes a predictive firing position, and only
+/// once the alert is up (issue #876 AC2).**
+///
+/// `alliance_battleship.toml` takes Engines, Steering and Impulse from
+/// `fragments/ai/movement_artillery.toml` and tunes the envelope by `param`
+/// alone.
+///
+/// The discriminating metric is the LEAD. Holding station at range looks much
+/// like ordinary doctrine travel at `maintain_range = 38` — both end up slow and
+/// pointed roughly at the enemy. What only `hold_artillery_position` does is
+/// point the bow at where the target WILL BE when this hull's bolt arrives, so
+/// against a moving target the bow sits off the live bearing by a real angle.
+/// A hull flying ordinary travel drives that error into its deadband instead.
+#[test]
+fn the_composed_player_battleship_holds_a_leading_gun_line_only_at_red_alert() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        ship_path: "assets/entities/alliance_battleship.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(45.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the composed battleship must build an app");
+
+    let mut clear_ticks = 0usize;
+    let mut hold_ticks = 0usize;
+    let mut hold_while_clear = 0usize;
+    let mut defensive_ring_ticks = 0usize;
+    let mut worst_lead = 0.0f32;
+    let mut lead_ticks = 0usize;
+    let mut lead_speed = 0.0f32;
+    let mut hold_speed = f32::NAN;
+    let mut deadband = f32::NAN;
+
+    for _ in 0..args.max_ticks {
+        let Some(s) = sample_doctrine(&mut app) else {
+            continue;
+        };
+        if !s.red_alert {
+            clear_ticks += 1;
+        }
+        let Some(pass) = s.surface else {
+            continue;
+        };
+        if pass.recover {
+            defensive_ring_ticks += 1;
+        }
+        if !pass.artillery_hold {
+            continue;
+        }
+        hold_ticks += 1;
+        lead_speed = pass.artillery_lead_speed;
+        hold_speed = pass.artillery_hold_speed;
+        deadband = pass.tracking_deadband_rad;
+        if !s.red_alert {
+            hold_while_clear += 1;
+        }
+        if let Some(hostile) = s.hostile_pos {
+            let error = wrap_pi(bearing_to(s.self_pos, hostile) - s.self_yaw).abs();
+            worst_lead = worst_lead.max(error);
+            if error > deadband {
+                lead_ticks += 1;
+            }
+        }
+    }
+
+    assert!(
+        clear_ticks > 0,
+        "the alert was up from the first tick, so this run never observed the \
+         doctrine's defensive half at all"
+    );
+    // The posture gate, as an INVARIANT rather than as this test's mutation
+    // canary: the gate's own proof is
+    // `authored_ai_pins::the_artillery_doctrine_rests_defensive_until_red_alert`,
+    // which fails by name when the guard is removed. In this world the hostile
+    // spawns at the band's own inner edge, so a hull with the gate mutated out
+    // still cannot reach `hold` before its captain calls the alert — which is
+    // exactly why the guard needs a unit truth table and not only a live run.
+    assert_eq!(
+        hold_while_clear, 0,
+        "the battleship established its firing position on {hold_while_clear} \
+         ticks with the alert DOWN. The doctrine holds position at standoff range \
+         until the captain presses it."
+    );
+    assert!(
+        hold_ticks > 100,
+        "only {hold_ticks} ticks on the gun line in 45 s of a live engagement. A \
+         composed hull whose travel axes failed to compose still loads, still \
+         backfills and still reports every station crewed — it just publishes no \
+         leg and flies ordinary doctrine travel."
+    );
+    assert!(
+        defensive_ring_ticks > 0,
+        "the hull never once held its standoff ring, so `shadow` resolved no yaw \
+         verb: the six recovery scalars the fragment authors did not reach the \
+         host and the defensive leg is flying nothing."
+    );
+    // The hull's OWN armament reached the host: the lead is solved at the flight
+    // speed of this ship's longest-reaching blaster, which is a reading of the
+    // weapon rather than an authored copy of its speed.
+    assert!(
+        lead_speed > 0.0,
+        "the artillery hold published a lead speed of {lead_speed}, so the \
+         intercept degenerates to aiming at the live position — this hull's \
+         blaster bank did not reach the planner"
+    );
+    assert_eq!(
+        hold_speed, 0.0,
+        "the authored hold throttle did not reach the host: an artillery platform \
+         that keeps closing is not an artillery platform"
+    );
+    // THE DISCRIMINATOR, and it is a MAJORITY rather than a maximum: one tick of
+    // large bearing error proves nothing (a shove from a collision turns a
+    // station-keeping hull too), but a bow that sits outside its own authored
+    // tracking deadband for most of the phase is a bow that is deliberately not
+    // on the target. The threshold is `tracking_deadband_rad` as the host
+    // published it, so a designer retuning this hull's steering response retunes
+    // the test with it — and it is exactly the error an ordinary tracking leg
+    // drives to zero and holds.
+    //
+    // Deliberately NOT a speed assertion. That `artillery_hold_speed` reached the
+    // host is asserted above, off the surface, which is the authored claim; the
+    // hull's MEASURED speed is not, because a shove — a collision, a torpedo
+    // detonation — gives a station-keeping ship real momentum it never commanded,
+    // and a run of this world contains several.
+    assert!(
+        lead_ticks * 2 > hold_ticks,
+        "the battleship's bow sat outside its own {deadband:.3} rad tracking          deadband on only {lead_ticks} of {hold_ticks} holding ticks (worst          {worst_lead:.3} rad). Pointing at the INTERCEPT rather than at the ship          is the whole of what `hold_artillery_position` does; a hull tracking the          live bearing drives that error into the deadband and stays there."
+    );
+}

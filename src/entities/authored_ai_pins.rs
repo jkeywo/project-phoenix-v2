@@ -309,6 +309,33 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     ("alliance_destroyer", "engines"),
     ("alliance_destroyer", "steering"),
     ("alliance_destroyer", "boost"),
+    // ── The composed artillery doctrine (issue #876) ─────────────────────────
+    //
+    // The player battleship takes `fragments/ai/movement_artillery.toml` by
+    // `includes` plus a two-key `param` table and nothing else: it holds a
+    // standoff ring while the alert is down and a predictive firing position
+    // once it is up.
+    //
+    // Note what is NOT listed: BOOST. A gun line has no leg that engages the
+    // drive, so this hull keeps the fleet baseline's `idle = true` — which is why
+    // `boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it` still names
+    // two hulls after this issue rather than three. A movement fragment owes
+    // `idle = false` only when it supplies a boost machine.
+    //
+    // The player CRUISER is deliberately absent from this list. #876 composed it
+    // onto the library too, but onto the fleet baseline's stateless travel axes —
+    // see the note on `includes` in `alliance_cruiser.toml` — so it is one of the
+    // hulls the baseline is derived FROM rather than a departure from it.
+    ("alliance_battleship", "engines"),
+    ("alliance_battleship", "steering"),
+    // …and IMPULSE, which the artillery fragment authors idle for the same
+    // reason `ship_harrow_warhawk` does inline: the authored hold band lies
+    // inside the impulse drive's default cruise window, and an engaged drive
+    // hard-overrides commanded throttle, so a permitting policy would sail the
+    // hull through its own gun line. Two hulls depart from the impulse baseline
+    // now, and they depart identically — which the unanimity requirement on the
+    // hulls that are NOT listed is what makes meaningful.
+    ("alliance_battleship", "impulse"),
     // The broadside orbit: a stateful engines/steering pair, plus two tubes
     // that hold fire until the target's striking arc is actually down.
     ("ship_harrow_cruiser", "engines"),
@@ -757,17 +784,32 @@ fn captain_guard_truth_table() {
     );
 }
 
-/// The shipped cruiser as TEXT, for the mutation proof below.
+/// The shipped cruiser as TEXT, for the mutation proof below — the RESOLVED
+/// document rather than the file (issue #876).
 ///
-/// `include_str!` rather than the include-resolving loader on purpose: the
-/// mutation being modelled is an edit a designer would make to this file, so it
-/// has to be applied to the bytes they would edit.
-const CRUISER_TOML: &str = include_str!("../../assets/entities/alliance_cruiser.toml");
+/// It was `include_str!` on the argument that the mutation models an edit a
+/// designer would make to that file. Since #876 the cruiser is COMPOSED and the
+/// rule being deleted lives in `fragments/ai/captain_alliance.toml`, so the file
+/// a designer would edit is the FRAGMENT — and the resolved document is where
+/// that edit lands. It is also the only text `EntityConfig::from_toml` will
+/// accept, since the raw file now carries an `includes` key the parser rejects.
+fn cruiser_toml() -> String {
+    let path = crate_root().join("assets/entities/alliance_cruiser.toml");
+    let key = path.to_string_lossy().replace('\\', "/");
+    crate::entity_includes::resolve_from_disk(&key)
+        .expect("alliance_cruiser must compose")
+        .toml
+}
 
-/// The whole first-contact rule (issue #912), exactly as all four Alliance hulls
-/// author it — rule header included, because deleting a rule is what a designer
-/// choosing a passive hull actually does.
-const FIRST_CONTACT_RULE: &str = "\n[[captain_console.ai.rule]]\npriority = 5\nchannel = \"red_alert\"\nwhen = \"fact(hostile_contact) > 0 and fact(hostile_range) < param(alert_on_hostile_within)\"\nverb = \"set_red_alert\"\nvalue = true\n";
+/// The whole first-contact rule (issue #912), rule header included, because
+/// deleting a rule is what a designer choosing a passive hull actually does.
+///
+/// Spelled as the RESOLVED document renders it (issue #876), not as
+/// `fragments/ai/captain_alliance.toml` authors it: a composed template is
+/// re-serialised through `toml::to_string`, which orders a table's keys
+/// alphabetically. `without_block` asserts the text is present exactly once, so
+/// a rendering change fails loudly here rather than silently deleting nothing.
+const FIRST_CONTACT_RULE: &str = "\n[[captain_console.ai.rule]]\nchannel = \"red_alert\"\npriority = 5\nvalue = true\nverb = \"set_red_alert\"\nwhen = \"fact(hostile_contact) > 0 and fact(hostile_range) < param(alert_on_hostile_within)\"\n";
 
 /// Delete one authored block from a shipped hull, asserting it was actually
 /// there — a silently-missed removal would turn the mutation below into a
@@ -810,7 +852,8 @@ fn captain_policy_of(toml: &str) -> AiPolicy {
 /// which is what the two halves below show.
 #[test]
 fn removing_the_authored_first_contact_rule_restores_return_fire_only() {
-    let shipped = captain_policy_of(CRUISER_TOML);
+    let cruiser = cruiser_toml();
+    let shipped = captain_policy_of(&cruiser);
     let reach = param(&shipped, "alert_on_hostile_within");
     let window = param(&shipped, "combat_window_secs");
     let first_contact = facts(&[("hostile_contact", 1.0), ("hostile_range", reach / 2.0)]);
@@ -823,7 +866,7 @@ fn removing_the_authored_first_contact_rule_restores_return_fire_only() {
          authored reach."
     );
 
-    let passive = captain_policy_of(&without_block(CRUISER_TOML, FIRST_CONTACT_RULE));
+    let passive = captain_policy_of(&without_block(&cruiser, FIRST_CONTACT_RULE));
     assert_eq!(
         resolve(&passive, "red_alert", &first_contact),
         Some(AiPolicyVerb::SetRedAlert(false)),
@@ -1212,6 +1255,329 @@ fn every_aggressive_leg_of_the_class_doctrine_can_return_to_the_defensive_one() 
              the captain."
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The composed ARTILLERY doctrine (issue #876)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The two copies of the composed artillery machine, keyed by the axis they fly.
+/// Read off the SHIPPED hull, so a retune in TOML retunes these pins with it.
+///
+/// Two, not three: a gun line has no leg that engages the boost drive, so
+/// `fragments/ai/movement_artillery.toml` leaves `[helm_console.boost_ai]` alone
+/// and this hull keeps the fleet baseline's `idle = true`. That absence is
+/// asserted by `boost_is_the_only_idle_baseline_and_two_hulls_depart_from_it`
+/// continuing to name two hulls rather than three.
+fn artillery_policies() -> Vec<(&'static str, AiPolicy)> {
+    let hull = entity("alliance_battleship");
+    let helm = hull
+        .helm_console
+        .as_ref()
+        .expect("the player battleship authors `[helm_console]`");
+    vec![
+        (
+            "engines",
+            policy(
+                helm.engines_ai
+                    .as_ref()
+                    .expect("composed from movement_artillery.toml"),
+            ),
+        ),
+        (
+            "steering",
+            policy(
+                helm.steering_ai
+                    .as_ref()
+                    .expect("composed from movement_artillery.toml"),
+            ),
+        ),
+    ]
+}
+
+/// **The posture truth table for the artillery doctrine (issue #876 AC2/AC4).**
+///
+/// The same claim `posture_guard_truth_table` makes about the attack pass, and
+/// the same #779 failure shape it exists to catch: `posture` is a fact NAME, so a
+/// misspelling here or in `helm_ai::seed_helm_actuator_facts` parses, validates
+/// and reads false for ever — presenting as a battleship that holds a polite
+/// standoff ring and never once takes up a firing position, with every other test
+/// still green.
+///
+/// One difference from the attack pass, and it is doctrine rather than oversight:
+/// NO leg of a gun line is a commitment. The pass defers its posture drop to the
+/// end of the escape dwell because the escape flies a frozen heading; nothing
+/// here flies anything the hull is owed, so the drop is the highest-priority exit
+/// from every aggressive leg and is asserted as such below.
+///
+/// The threshold comes out of the authored `param` rather than a literal, so a
+/// designer who adds an intermediate rung to the posture ladder and retunes
+/// `press_posture` retunes this test with it (AGENTS.md rule #11).
+#[test]
+fn the_artillery_doctrine_rests_defensive_until_red_alert() {
+    for (axis, p) in artillery_policies() {
+        let press = param(&p, "press_posture");
+        assert!(
+            press > 0.0,
+            "{axis}: `press_posture` must be a live threshold, not zero — at zero \
+             the defensive rung (0.0) would satisfy `>=` and the gate would be open \
+             for ever."
+        );
+        let machine = p.machine().expect("a state machine");
+        assert_eq!(
+            machine.initial, "shadow",
+            "{axis}: the doctrine RESTS defensive. A machine that booted into an \
+             aggressive leg would press once before the first posture reading \
+             arrived."
+        );
+
+        let pressed = facts(&[("posture", press)]);
+        let clear = facts(&[("posture", press - 1.0)]);
+        let unseeded = facts(&[]);
+        let memory = machine_memory(&p, 0.0);
+
+        assert_eq!(
+            p.resolve_transition("shadow", &pressed, &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("acquire"),
+            "{axis}/shadow: red alert ⇒ the class doctrine is licensed and the hull \
+             leaves the standoff ring."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &clear, &memory, &[]),
+            None,
+            "{axis}/shadow: alert DOWN ⇒ hold position at range. This is the half \
+             that makes the assertion above mean something — without it `shadow` \
+             could be a state the hull leaves unconditionally."
+        );
+        assert_eq!(
+            p.resolve_transition("shadow", &unseeded, &memory, &[]),
+            None,
+            "{axis}/shadow: with NO posture reading at all the comparison reads \
+             false and the hull stays defensive. The gate fails CLOSED, so a typo \
+             in the fact name cannot make a hull aggressive."
+        );
+
+        // Every aggressive leg, and the drop outranks everything in each of them.
+        for state in &machine.states {
+            if state.id == "shadow" {
+                continue;
+            }
+            assert_eq!(
+                p.resolve_transition(&state.id, &clear, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{}: the alert going down must outrank everything else in \
+                 this leg. Nothing in a gun line is a commitment the hull is owed, \
+                 so a captain standing the alert down breaks it off at the next \
+                 tick.",
+                state.id
+            );
+            assert_ne!(
+                p.resolve_transition(&state.id, &pressed, &memory, &[])
+                    .map(|t| t.to.as_str()),
+                Some("shadow"),
+                "{axis}/{}: at red alert the break-off guard must NOT fire, or the \
+                 doctrine could never take up its position at all.",
+                state.id
+            );
+        }
+
+        // …and the reverse: the defensive leg's ONLY way out is the posture gate.
+        let shadow = machine.state("shadow").expect("the defensive leg");
+        assert_eq!(
+            shadow.transitions.len(),
+            1,
+            "{axis}/shadow: the standoff leg must have exactly one exit, and it \
+             must be the posture gate. A second exit is a way to start a fight \
+             without the captain."
+        );
+    }
+}
+
+/// **The artillery doctrine's legs are the ones the HOST reads (issue #876
+/// AC2).**
+///
+/// The host never learns a state's NAME: it reads which leg is being flown off
+/// the Steering axis's yaw verb, and gates each leg on its own complete authored
+/// scalar set. So a fragment whose states are all present but whose verbs drifted
+/// would validate, spawn, and fly ordinary doctrine travel for ever.
+///
+/// The `shadow` fallback is asserted in both directions on purpose. With a target
+/// the leg is a ring; WITHOUT one there is no centre to hold a ring around and no
+/// reach to derive its radius from, so the axis has to hand back to ordinary
+/// doctrine travel — and if that second rule were missing the channel would
+/// resolve to "hold" and a targetless hull would coast on its last steering input
+/// for ever.
+#[test]
+fn the_artillery_doctrine_flies_a_ring_when_clear_and_a_gun_line_when_pressed() {
+    let (_, steering) = artillery_policies()
+        .into_iter()
+        .find(|(axis, _)| *axis == "steering")
+        .expect("the doctrine authors a Steering machine");
+    let memory = machine_memory(&steering, 0.0);
+    let yaw = |state: &str, f: &AiFacts| {
+        steering
+            .resolve_channel_in_state(state, "yaw", f, &memory, &[])
+            .cloned()
+    };
+    let with_target = facts(&[("target_valid", 1.0)]);
+    let no_target = facts(&[("target_valid", 0.0)]);
+
+    assert_eq!(
+        yaw("shadow", &with_target),
+        Some(AiPolicyVerb::HoldRecoveryOrbit),
+        "clear, with something to stand off FROM ⇒ hold the wide ring the hull's \
+         `safe_range_margin` puts beyond the target's own reach."
+    );
+    assert_eq!(
+        yaw("shadow", &no_target),
+        Some(AiPolicyVerb::ActuateDesiredFacing),
+        "clear, with NOTHING to stand off from ⇒ ordinary doctrine travel. A ring \
+         needs a centre."
+    );
+    for leg in ["acquire", "reposition"] {
+        assert_eq!(
+            yaw(leg, &with_target),
+            Some(AiPolicyVerb::ActuateDesiredFacing),
+            "{leg}: the bow goes on the TARGET on the way in, not on a lead — \
+             nothing is being fired at this range, and a run-in aimed at an \
+             intercept arrives off to one side of it."
+        );
+    }
+    assert_eq!(
+        yaw("hold", &with_target),
+        Some(AiPolicyVerb::HoldArtilleryPosition),
+        "THE manoeuvre: translational station on the authored throttle with the \
+         bow on a PREDICTED intercept. This is the verb the host gates the whole \
+         artillery arm on."
+    );
+}
+
+/// **Issue #876 AC3, as a relation rather than as a number.** The battleship
+/// specialises the shared artillery doctrine by `param` alone, and what it
+/// specialises is its own GUN.
+///
+/// Nothing here restates an authored value (AGENTS.md #11). Every assertion is a
+/// relation between two things the content already says, so a designer retuning
+/// the envelope or the weapon retunes the test with it — and each relation is one
+/// the doctrine would silently half-fly if it broke:
+///
+/// * the two axes must AGREE, because they are two independent copies of one
+///   machine that reach their legs by reading the same facts. A copy left on the
+///   fragment's default would take up its position at a different range from the
+///   other and the axes would disagree about which leg they are flying.
+/// * the inner edge must sit below the outer one, because the gap between them IS
+///   the hysteresis; equal, the hull would chatter between closing and holding
+///   every time the target drifted across the line.
+/// * the outer edge must not reach past the hull's own artillery piece, or the
+///   doctrine would hold a gun line from outside the range at which its bolt
+///   still exists.
+#[test]
+fn the_battleship_tunes_the_artillery_envelope_to_its_own_gun() {
+    let hull = entity("alliance_battleship");
+    let policies = artillery_policies();
+    let hold: Vec<f64> = policies
+        .iter()
+        .map(|(_, p)| param(p, "artillery_hold_range"))
+        .collect();
+    let max: Vec<f64> = policies
+        .iter()
+        .map(|(_, p)| param(p, "max_artillery_range"))
+        .collect();
+    assert_eq!(
+        hold[0], hold[1],
+        "the Engines and Steering copies disagree about the inner edge of the \
+         band, so they will take up the firing position at different ranges"
+    );
+    assert_eq!(
+        max[0], max[1],
+        "the Engines and Steering copies disagree about the outer edge of the band"
+    );
+    assert!(
+        hold[0] < max[0],
+        "the inner edge ({}) must sit below the outer one ({}) — the gap between \
+         them is the hysteresis that stops the hull chattering between closing \
+         and holding",
+        hold[0],
+        max[0]
+    );
+
+    let longest_bolt = hull
+        .weapons_console
+        .as_ref()
+        .expect("the battleship carries weapons")
+        .blaster_banks
+        .iter()
+        .map(|b| b.range)
+        .fold(0.0_f32, f32::max);
+    assert!(longest_bolt > 0.0, "the battleship mounts a blaster bank");
+    assert!(
+        max[0] <= longest_bolt as f64,
+        "the gun line's outer edge ({}) reaches past this hull's longest blaster \
+         ({longest_bolt}), so the doctrine would hold a firing position from \
+         outside the range at which its own bolt still exists. The envelope \
+         belongs to the WEAPON.",
+        max[0]
+    );
+}
+
+/// **The artillery doctrine switches the impulse drive off, and it has to.**
+///
+/// The sibling of `config::tests::harrow_warhawk_holds_its_impulse_drive_idle`,
+/// pointed at the hull that takes the same doctrine through `includes` instead of
+/// authoring it inline. Both halves matter and both are asserted:
+///
+/// * the declaration is an explicit IDLE carrying no rules and no states. The
+///   fragment has to author `rule = []` as well as `idle = true`, because `idle`
+///   deep-merges as a plain scalar over the fleet baseline's unconditional
+///   permit and an idle policy carrying an inherited rule is a contradiction
+///   content validation rejects — so this is where a merge that dropped that one
+///   line shows up.
+/// * the band still lies inside the drive's default cruise window, which is the
+///   reason the idle is needed at all: an engaged drive hard-overrides commanded
+///   throttle, so the hull would sail through its own gun line. If a future
+///   retune moved the band clear, this assertion is what says so rather than
+///   leaving the idle looking like superstition.
+#[test]
+fn the_composed_battleship_holds_its_impulse_drive_idle() {
+    let hull = entity("alliance_battleship");
+    let helm = hull
+        .helm_console
+        .as_ref()
+        .expect("the battleship authors `[helm_console]`");
+    let impulse = helm.impulse_ai.as_ref().expect(
+        "the battleship must resolve a `[helm_console.impulse_ai]`: since #885b \
+         stage 5d an absent block is a load error, and the fleet baseline's \
+         unconditional permit is exactly what the artillery fragment replaces",
+    );
+    let decoded = policy(impulse);
+    assert!(
+        decoded.idle,
+        "the declaration must be an explicit idle — the impulse channel resolving \
+         to nothing, whatever geometry or doctrine the host is handed"
+    );
+    assert!(
+        impulse.rule.is_empty() && impulse.state.is_empty(),
+        "an idle declaration carries no rules and no states (content validation \
+         rejects the contradiction), so anything here is the fleet baseline's \
+         permit surviving the merge"
+    );
+
+    let (_, steering) = artillery_policies()
+        .into_iter()
+        .find(|(axis, _)| *axis == "steering")
+        .expect("the doctrine authors a Steering machine");
+    let band = param(&steering, "artillery_hold_range");
+    assert!(
+        (helm.impulse_cancel_distance as f64) < band
+            && band < (helm.impulse_engage_distance as f64),
+        "the hold range ({band}) sits inside the impulse cruise window (engage {}, \
+         cancel {}) — if a retune ever moves it clear, revisit whether the idle \
+         above is still earning its place",
+        helm.impulse_engage_distance,
+        helm.impulse_cancel_distance
+    );
 }
 
 /// Power: the elevate rules need BOTH their trigger and their battery reserve;

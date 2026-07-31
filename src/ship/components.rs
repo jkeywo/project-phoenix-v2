@@ -210,16 +210,32 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
 }
 
-/// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml` (embedded at compile time).
+/// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.
 ///
-/// Panics if the file fails validation — the server cannot start without a valid ship
-/// configuration.
+/// Through the include resolver rather than `include_str!` (issue #876). That
+/// hull is COMPOSED, so the bytes on disk are only half of it, and a baked site
+/// can never see resolution: `include_str!` runs at compile time and the
+/// resolver needs a fragment source at run time.
+/// [`crate::entity_includes::HostFragmentSource`] is the one source that
+/// compiles on both targets — on native it falls through to the filesystem, on
+/// WASM it reads the raw templates the host has already delivered.
+///
+/// This is a FALLBACK: every real boot inserts `PendingShipConfig` ahead of it
+/// (`server::bridge::wasm_init` from `wasm_validate_stations`, `headless::app`
+/// from `--ship`), so it is reached only by `ShipConfigComponent::default()` and
+/// by a lobby that was handed no selection at all.
+///
+/// Panics if the file fails to compose or validate — the server cannot start
+/// without a valid ship configuration, which is the contract this always had.
 pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
-    let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
+    const HULL: &str = "assets/entities/alliance_battleship.toml";
+    let resolved =
+        crate::entity_includes::resolve_template(HULL, &crate::entity_includes::HostFragmentSource)
+            .unwrap_or_else(|e| panic!("ship_config: {HULL} failed to compose: {e}"));
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
-    match crate::ship::config::parse_and_validate(toml_str, &kinds) {
+    match crate::ship::config::parse_and_validate(&resolved.toml, &kinds) {
         Ok(config) => {
             bevy::log::info!(
                 "ship_config: loaded {} stations, {} systems",

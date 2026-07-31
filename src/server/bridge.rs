@@ -368,15 +368,81 @@ pub fn wasm_get_instagib() -> bool {
 
 // ── Public WASM API ────────────────────────────────────────────────────────
 
-/// Called by JS with the raw ship entity TOML content to validate the
-/// `[[station]]`/`[[system]]` schema before starting the server.
+/// The host page's pre-start ship gate, without the wasm plumbing.
 ///
-/// Parses through `EntityConfig::from_toml` (not the raw `ShipConfig`
-/// parser) so that `[[shield_arc]]` blocks are synthesised into their
-/// matching `[[system]]` entries before validation. Ships whose ratings
-/// reference a synthesised arc system (e.g. the Courier's single "Std"
-/// rating automating `shield-arc-fore`/`shield-arc-aft`) would otherwise
-/// fail validation here even though the real in-game config is valid.
+/// Given the template path the host is about to fly and the raw bytes it
+/// fetched from that path, produce the validated
+/// [`ShipConfig`](crate::ship::config::ShipConfig) — or the reason the hull
+/// cannot be flown.
+///
+/// # Why this resolves rather than parsing the delivered text
+///
+/// The text JS fetches is the hull's **authored** document, which since issue
+/// #875 may declare `includes`. `EntityConfig` is `deny_unknown_fields`, so
+/// parsing that text directly rejects every composed hull — and the document
+/// the game actually runs is the RESOLVED one, so parsing the authored text
+/// would validate a document that is not the one being validated for.
+/// Resolution goes through [`crate::entity_includes::HostFragmentSource`], the
+/// one source that compiles on both targets: on WASM it reads the raw templates
+/// the host has already delivered, on native it falls through to the filesystem.
+///
+/// # Why the fragments are guaranteed to be there
+///
+/// This runs from `finishInit()`, and `finishInit()` is only ever reached when
+/// `wasm_load_config` reports preload complete — which requires the preload
+/// queue AND the in-flight set to be empty. A composed hull's fragments are
+/// queued through that same pair (`config_cache::wasm_load_config` feeds
+/// `preload_step`'s `AwaitingIncludes` back into `queue_and_fire`), and every
+/// selectable hull is in the preload set because `world::config`'s
+/// `entity_template_paths` walks `available_ships[*].template_path`. So by the
+/// time the gate runs, the hull's whole include closure is in
+/// `RAW_TEMPLATE_TOML`. An unresolved include here is therefore a real fault,
+/// not a race, and is reported as one — the gate is not allowed to shrug.
+///
+/// The delivered text is recorded only when the host has NOT already delivered
+/// that path, so a hull the preload never queued (a world with no
+/// `[[available_ships]]`, which falls back to a hard-coded hull) can still be
+/// validated, while a mod pack's overridden bytes — recorded by
+/// `wasm_load_config`, which applies the overlay — are never clobbered by the
+/// plain HTTP text fetched here.
+///
+/// Parses through `EntityConfig` (not the raw `ShipConfig` parser) so that
+/// `[[shield_arc]]` blocks are synthesised into their matching `[[system]]`
+/// entries before validation. Ships whose ratings reference a synthesised arc
+/// system (e.g. the Courier's single "Std" rating automating
+/// `shield-arc-fore`/`shield-arc-aft`) would otherwise fail validation here even
+/// though the real in-game config is valid.
+///
+/// Ungated, and free of Bevy and wasm_bindgen types, so `cargo test` can drive
+/// the browser's gate over every shipped hull — see
+/// `every_shipped_hull_passes_the_browser_station_gate`.
+pub fn validate_ship_stations(
+    template_path: &str,
+    toml_str: &str,
+) -> Result<crate::ship::config::ShipConfig, String> {
+    if !crate::config_cache::is_raw_template_delivered(template_path) {
+        crate::config_cache::record_raw_template(template_path, toml_str.to_string());
+    }
+    let resolved = crate::entity_includes::resolve_template(
+        template_path,
+        &crate::entity_includes::HostFragmentSource,
+    )
+    .map_err(|e| format!("Station config validation failed: {e}"))?;
+    let entity_config = resolved
+        .parse()
+        .map_err(|e| format!("Station config validation failed: {e}"))?;
+    entity_config.ship_config.ok_or_else(|| {
+        "Station config validation failed: ship has no [[station]] blocks".to_string()
+    })
+}
+
+/// Called by JS with the chosen ship template path and the raw TOML content it
+/// fetched from that path, to validate the `[[station]]`/`[[system]]` schema
+/// before starting the server.
+///
+/// The path is load-bearing: it is what the include closure is resolved
+/// against. See [`validate_ship_stations`] for why the delivered text alone is
+/// not enough.
 ///
 /// On success, stores the parsed `ShipStations` internally and returns
 /// `Ok(JsValue::UNDEFINED)`. On failure, returns `Err(JsValue)` with a
@@ -384,12 +450,9 @@ pub fn wasm_get_instagib() -> bool {
 /// an error.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
-    let entity_config = crate::entities::config::EntityConfig::from_toml(toml_str)
-        .map_err(|e| JsValue::from_str(&format!("Station config validation failed: {}", e)))?;
-    let ship_config = entity_config.ship_config.ok_or_else(|| {
-        JsValue::from_str("Station config validation failed: ship has no [[station]] blocks")
-    })?;
+pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsValue, JsValue> {
+    let ship_config =
+        validate_ship_stations(template_path, toml_str).map_err(|e| JsValue::from_str(&e))?;
     let stations = crate::stations_config::stations_from_ship_config(&ship_config);
     SHIP_STATIONS.with(|slot| {
         *slot.borrow_mut() = Some(stations);

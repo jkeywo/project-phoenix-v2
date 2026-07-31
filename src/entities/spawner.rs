@@ -2370,11 +2370,13 @@ ai_only = true
     /// so it regresses if the `player` tag / `playerShip` icon creep back in.
     #[test]
     fn world_spawned_alliance_hull_has_no_player_identity() {
-        use crate::entity_config::EntityConfig;
         use bevy::prelude::*;
 
-        let toml = include_str!("../../assets/entities/alliance_cruiser.toml");
-        let config = EntityConfig::from_toml(toml).expect("cruiser template must parse");
+        // Through the resolver (issue #876): this hull is COMPOSED, so its baked
+        // bytes are no longer the document the game spawns.
+        let config =
+            crate::entity_includes::load_entity_config("assets/entities/alliance_cruiser.toml")
+                .expect("cruiser template must compose and parse");
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);

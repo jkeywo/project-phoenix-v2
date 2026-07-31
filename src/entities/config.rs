@@ -5415,8 +5415,7 @@ radius = 100.0
     /// silently change how the game sounds.
     #[test]
     fn cruiser_audio_preserves_legacy_volumes() {
-        let toml_str = include_str!("../../assets/entities/alliance_cruiser.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("must parse");
+        let config = shipped_hull("alliance_cruiser");
         let audio = config.audio.as_ref().expect("[audio]");
         assert_eq!(audio.ambient.as_ref().unwrap().volume, 0.25);
         assert_eq!(audio.engine.as_ref().unwrap().volume_at_full_thrust, 0.15);
@@ -5727,9 +5726,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
     #[test]
     fn battleship_toml_parses_with_federation_faction() {
-        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config =
-            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let config = shipped_hull("alliance_battleship");
         let faction = config
             .faction
             .expect("alliance_battleship must declare a faction");
@@ -6126,8 +6123,7 @@ automated_systems = []
 
     #[test]
     fn battleship_toml_produces_five_shield_arcs() {
-        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("alliance_battleship must parse");
+        let config = shipped_hull("alliance_battleship");
         assert_eq!(
             config.shield_arcs.len(),
             5,
@@ -7679,9 +7675,7 @@ count = 99
     fn battleship_toml_torpedoes_block_parses_correctly() {
         // Verify the [torpedoes] block in alliance_battleship.toml parses
         // and produces the expected runtime values.
-        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config =
-            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let config = shipped_hull("alliance_battleship");
         let t = config
             .torpedoes
             .expect("alliance_battleship must have [torpedoes]");
@@ -7761,9 +7755,7 @@ travel_duration_secs = 9.0
         // from RepairTimings::default(), this test fails so the owner can
         // confirm the change is intentional. (The defaults themselves match
         // the historical hardcoded constants in `repair_teams.rs`.)
-        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config =
-            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let config = shipped_hull("alliance_battleship");
         let r = config
             .repair
             .expect("alliance_battleship must have [repair]");
@@ -7873,9 +7865,7 @@ max_hp = 250
     fn battleship_toml_shields_base_block_parses_correctly() {
         // Verify the [shields_console.base] block in alliance_battleship.toml
         // parses and produces the expected runtime values.
-        let toml_str = include_str!("../../assets/entities/alliance_battleship.toml");
-        let config =
-            EntityConfig::from_toml(toml_str).expect("alliance_battleship.toml must parse");
+        let config = shipped_hull("alliance_battleship");
         let base = config
             .shields_console
             .expect("alliance_battleship must have [shields_console]")

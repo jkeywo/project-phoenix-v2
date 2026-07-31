@@ -1,0 +1,515 @@
+# The ARTILLERY class movement doctrine, as a reusable library fragment
+# (issue #876).
+#
+# A FRAGMENT, not a hull — see the header of
+# `fragments/ai/captain_red_alert_aggressive.toml`. It is never parsed alone;
+# `include_resolve` merges it into a declaring template and only the resolved
+# document is validated and spawned.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What a hull writes to use this
+# ═════════════════════════════════════════════════════════════════════════════
+#
+#     includes = [
+#       "fragments/ai/fleet_baseline.toml",
+#       "fragments/ai/captain_alliance.toml",
+#       "fragments/ai/movement_artillery.toml",
+#     ]
+#
+#     [helm_console.steering_ai.param]
+#     max_artillery_range = 50.0
+#     artillery_hold_range = 45.0
+#
+# …and nothing else. Order matters: this fragment REPLACES the fleet baseline's
+# two travel axes and its Impulse policy, so it must be listed after it (a
+# template's includes merge in declared order, and the declaring template itself
+# merges last).
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# What this owns, and what it deliberately leaves alone
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The WHOLE of `[helm_console.engines_ai]` and `[helm_console.steering_ai]` —
+# two independent copies of ONE machine, which agree by reading the same
+# host-seeded facts rather than by sharing state. They ship together because a
+# copy that disagreed with the other about a threshold would reach a different
+# leg on the same tick, which is a silent failure with no test that could name
+# it.
+#
+# …and the WHOLE of `[helm_console.impulse_ai]`, as an explicit IDLE. That is not
+# a hull's quirk smuggled into a shared file, it is the doctrine: an artillery
+# platform that lights an engine is leaving the firing position it just took up.
+# It is also load-bearing rather than decorative — see the next section.
+#
+# NOT `[helm_console.boost_ai]`. No leg of a gun line engages the drive either,
+# so the fleet baseline's `idle = true` is exactly the right declaration and this
+# fragment leaves it standing. `movement_attack_pass.toml` owes `idle = false`
+# because it SUPPLIES a boost machine; a movement fragment that supplies none
+# owes nothing.
+#
+# One fragment owns entire policy blocks because since #911 an array with no
+# stable identity — and `*.ai.rule` and `*_ai.state[].transition` are both — still
+# REPLACES wholesale on compose. Two fragments cannot each contribute a rule to
+# the same policy; the second would wipe the first. Specialisation therefore runs
+# entirely through `param`, an ordinary table that deep-merges.
+#
+# `rule = []` appears three times, on Engines, on Steering and on Impulse, and it
+# is load-bearing on all three. On the two travel axes it clears the rules
+# `fleet_baseline.toml` authors, because a policy carrying BOTH top-level rules
+# and states is rejected at load (`validate_fine_system_ai_policy`). On Impulse it
+# clears the baseline's unconditional permit, because `idle` deep-merges as a
+# plain scalar and an idle declaration carrying an inherited rule is the same
+# rejected contradiction from the other side.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# Why the impulse drive has to be switched off HERE
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# `entities::spawner` attaches an `ImpulseConfigResource` to every hull that
+# declares a `[helm_console]`, taking the parse defaults — engage at 200 units,
+# cancel at 40. An artillery hold band lives inside that window on every hull
+# small enough to want one, so without this idle the hull would fly its run-in,
+# engage impulse somewhere around 200 with its bow lined up, reach the hold range
+# and command `SetThrust{0.0}` every tick — and be ignored, because the impulse
+# autopilot in `integrate_ship_physics` hard-OVERRIDES commanded throttle with
+# `thrust = 1.0` for as long as the drive is engaged. The hull sails through its
+# own gun line at max speed and stops at the drive's own release range, and the
+# authored `max_yaw_rate` goes with it, since the same autopilot scales steering
+# by the impulse multiplier. That is issue #792's finding on
+# `ship_harrow_warhawk.toml`, the hand-authored ancestor of this fragment.
+#
+# ## Why an `impulse_ai` idle and not `use_impulse = false`
+#
+# `[[behaviour.doctrine]] use_impulse = false` reads like the obvious lever and is
+# the wrong one, because doctrine is the part of a hull a SCENARIO replaces.
+# Shipped worlds hand hulls a doctrine list of their own and do not author
+# `use_impulse`, and `effective_use_impulse()` defaults to TRUE for every
+# non-Patrol directive — so each of them would silently switch the drive back on
+# in exactly the scenarios the hull is fought in. A tightened
+# `impulse_engage_distance` has the same shape of problem from the other end: it
+# is a geometry that has to stay correct against a band a designer retunes.
+#
+# The `impulse` fine system's own policy is not doctrine and no shipped scenario
+# overrides it. An explicit `idle` is a legal, distinct-from-silence declaration:
+# `ai_helm_impulse` resolves the channel to nothing and emits neither
+# `StartImpulseCharge` nor `CancelImpulse`, whatever geometry or doctrine it is
+# handed.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The doctrine
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# A gun line with a posture gate over it.
+#
+#   shadow     → the DEFENSIVE resting leg. HOLDS POSITION AT RANGE: a wide,
+#                slow ring around the target at
+#                `target_direct_fire_range + safe_range_margin`, outside the
+#                other ship's guns by an authored margin, and it never closes.
+#                This is where a hull sits whenever its captain has not called
+#                red alert.
+#   acquire    → a target has appeared. Decides in one tick whether it is already
+#                inside the band or has to be closed on.
+#   reposition → the run-in. Tracks the target and lets ordinary doctrine travel
+#                carry the hull in (this fragment authors no pass throttles, so
+#                the planner's fallback pass arm is not published at all). The bow
+#                is on the TARGET rather than on a lead solution, which is
+#                correct: nothing is being fired at this range, and a run-in aimed
+#                at an intercept would arrive off to one side of it.
+#   hold       → THE PREDICTIVE FIRING POSITION, and what the posture gate buys.
+#                Translational station on the authored `artillery_hold_speed`
+#                while the bow pivots onto where the target WILL BE when this
+#                hull's own bolt arrives — not where it is now.
+#
+# ── The band, and why it is two numbers ──────────────────────────────────────
+#
+# `artillery_hold_range` is the INNER edge: the run-in ends there and the firing
+# position is taken. `max_artillery_range` is the OUTER edge: the hold ends there
+# and the hull repositions. The gap between them is the hysteresis — one threshold
+# would have the hull chattering between closing and holding every time the target
+# drifted across it.
+#
+# Note what is ABSENT from the hold's exits: nothing fires when the range SHRINKS.
+# A ship closing on an artillery platform cannot make it give ground.
+#
+# ── The posture gate (issue #876) ────────────────────────────────────────────
+#
+# `posture` is host-seeded on every helm policy host from this ship's own red
+# alert: 0 DEFENSIVE, 1 PRESSED. Every leg of the aggressive half carries a
+# transition back to `shadow` on `fact(posture) < param(press_posture)` at the
+# HIGHEST priority in the state — nothing in a gun line is a commitment that
+# outranks the captain standing the alert down.
+#
+# It is compared against an authored `press_posture` rather than a literal so a
+# future intermediate rung on the posture ladder does not have to touch a guard.
+#
+# ═════════════════════════════════════════════════════════════════════════════
+# The parameter surface
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# ENVELOPE    `max_artillery_range` / `artillery_hold_range` — the outer and inner
+#             edges of the gun line. THE knobs: they belong to the including
+#             hull's artillery piece and nothing else, so a hull whose bow gun
+#             reaches 50 units and one whose reaches 200 differ here and nowhere.
+#             `artillery_hold_speed` is the throttle held there.
+# SAFE RANGE  `safe_range_margin` — world units of daylight wanted BEYOND the
+#             target's own longest direct-fire reach, plus `orbit_speed`,
+#             `orbit_spiral_gain`, `safe_ring_tolerance`,
+#             `safe_distance_window_ticks` and `reengage_speed` shaping how the
+#             defensive ring is held.
+# POSTURE     `press_posture` — the rung at which the aggressive half unlocks.
+# FIRE GATE   NOT here: it is `min_alert_to_fire` on each `*.ai` block inside the
+#             hull's own `[[weapons_console.*_banks]]` / `[[torpedoes.tubes]]`
+#             entries. Those arrays merge by `id`, so a shared fragment could
+#             only name bank ids it cannot know, and an unmatched id APPENDS a
+#             bank with no geometry. The fire gate is one authored predicate
+#             repeated per weapon, by design (issue #872).
+#
+# The LEAD the hold predicts with is NOT authored anywhere: `artillery_lead_speed`
+# is read host-side off the including hull's own blaster banks, because it is a
+# reading of the armament rather than a decision about the manoeuvre. A hull with
+# no bank publishes zero, which is exactly when there is no flight time to lead by.
+#
+# Every value below is a DEFAULT for the class, and every one is authored: there
+# is no Rust fallback for any of them. The host gates each leg on its OWN complete
+# scalar set and declines the whole arm on a missing name rather than flying at an
+# invented number:
+#
+#   * `max_artillery_range` / `artillery_hold_range` / `artillery_hold_speed`
+#     gate the firing position (`ARTILLERY_PARAMS`);
+#   * the SIX recovery scalars gate the defensive ring (`RECOVERY_PARAMS`), and
+#     they gate as one unit. `reengage_speed` names the throttle of a pivot leg
+#     this doctrine never flies; it is authored anyway because omitting it
+#     declines the standoff ring `shadow` is entirely made of.
+#
+# The shared thresholds are restated on each axis because content validation
+# rejects an undeclared `param(...)`, and because these are two independent
+# machines rather than one machine with two readers.
+
+# ── Engines (longitudinal) ───────────────────────────────────────────────────
+#
+# The throttle axis. Every state authors the same unconditional "actuate the
+# planner's desired travel": which THROTTLE that resolves to is the Steering
+# axis's verb's business (`artillery_hold_speed` on the gun line, `orbit_speed` on
+# the defensive ring, ordinary doctrine travel while closing), so this axis needs
+# no knowledge of which leg it is flying.
+[helm_console.engines_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.engines_ai.param]
+# Restated on this axis because its OWN guards reference them; content validation
+# rejects an undeclared `param(...)`. Engines runs an independent copy of the
+# machine from the SAME shared fact snapshot, so it reaches each leg on its own
+# reading rather than by consulting Steering's state — the two axes are separate
+# fine systems and neither may read the other's memory.
+max_artillery_range = 200.0
+artillery_hold_range = 180.0
+# The posture rung at which the aggressive half of the doctrine unlocks.
+press_posture = 1.0
+
+# Host-written private memory (issue #882: the host writes, the policy reads —
+# there is no authored write verb). `min_range_seen` starts effectively infinite
+# so the first folded range always wins the minimum.
+[helm_console.engines_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+
+[[helm_console.engines_ai.state]]
+id = "shadow"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.engines_ai.state]]
+id = "acquire"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # A target that appears ALREADY inside the band is not something to close on.
+  # Higher priority than the reposition arm below so the two cannot both fire on
+  # the tick a target resolves inside it.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "hold"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
+
+[[helm_console.engines_ai.state]]
+id = "reposition"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  # Losing the target outranks the run-in: there is no position to take up against
+  # nothing.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # The run-in ends at the INNER edge of the band, never at the outer one — see
+  # the header for why the two are different numbers.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "hold"
+  when = "fact(range_to_target) <= param(artillery_hold_range)"
+
+[[helm_console.engines_ai.state]]
+id = "hold"
+
+  [[helm_console.engines_ai.state.rule]]
+  priority = 0
+  channel = "longitudinal"
+  when = "true"
+  verb = "actuate_desired_travel"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.engines_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  # The ONLY way out of the hold that does not involve losing the target or the
+  # alert. Note what is absent: nothing here fires when the range SHRINKS.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(range_to_target) > param(max_artillery_range)"
+
+# ── Steering (yaw) ───────────────────────────────────────────────────────────
+#
+# The axis that carries the manoeuvre, because the host reads WHICH leg is being
+# flown off this axis's verb — never off a state's name, so these states could be
+# called anything.
+#
+#   hold_recovery_orbit      → hold a wide ring derived from the target's own
+#                              reach plus this hull's authored margin: the
+#                              defensive leg
+#   actuate_desired_facing   → re-solve against the moving target every tick
+#   hold_artillery_position  → neither "track the target" nor "hold a ring" but
+#                              "point at where it WILL BE when my bolt gets
+#                              there", with translational station held on the
+#                              authored throttle
+[helm_console.steering_ai]
+initial_state = "shadow"
+rule = []
+
+[helm_console.steering_ai.param]
+press_posture = 1.0
+# ── The three scalars the HOST reads off this axis to fly the GUN LINE ────────
+# Steering owns them because Steering's yaw verb is what tells the host which leg
+# is being flown. Omit ANY ONE and the host declines the artillery arm outright —
+# the hull falls back to ordinary doctrine travel rather than holding a position
+# at an invented range or an invented throttle.
+#
+# The outer edge of the envelope, world units. Authored separately from the bow
+# bank's own `range` on purpose: `range` is where a bolt stops existing, this is
+# where a designer decided the gun line stops being worth holding.
+max_artillery_range = 200.0
+# The inner edge — ninety per cent of the outer one at the class default, authored
+# as a real value because a designer tunes the band and not a ratio buried in
+# Rust. Repositioning stops here.
+artillery_hold_range = 180.0
+# Throttle fraction flown while the position is held. Authored ZERO: an artillery
+# platform that keeps closing is not an artillery platform. It needs a name of its
+# own rather than borrowing another leg's throttle because an unauthored param and
+# an authored 0.0 are the same number and opposite intents, so the host gates on
+# the NAME being present.
+artillery_hold_speed = 0.0
+# Steering response. A tight deadband because the whole of the hold's output is
+# yaw: a lead solution the hull declines to chase inside 0.03 rad is a lead
+# solution several units wide at artillery range, which is most of a ship. The
+# saturation angle is wide, because a heavy hull correcting a small lead error at
+# full steering authority would oscillate around the solution rather than settle
+# on it.
+tracking_deadband_rad = 0.03
+tracking_full_steer_rad = 0.6
+# ── The six scalars the HOST reads off this axis to fly the DEFENSIVE ring ────
+# Gated as one unit (`RECOVERY_PARAMS`): omit any one and the host declines the
+# standoff arm outright, which would leave `shadow` — the leg this doctrine rests
+# in whenever the alert is down — flying nothing at all.
+#
+# World units added to the TARGET's own longest usable direct-fire range to get
+# the ring. The ring is therefore a property of the fight, not of this file: all a
+# hull authors is how much daylight it wants beyond the other ship's guns. THE
+# safe-range knob, and the counterpart of `artillery_hold_range`, which is a
+# property of the hull's own gun instead.
+safe_range_margin = 70.0
+# Throttle fraction flown on the defensive ring. Deliberately LOW — this is a hull
+# holding position at range, not patrolling one — but not zero: a ship parked
+# inside a hostile's reach is not standing off from it, it is a target.
+orbit_speed = 0.35
+# Radians of heading offset per unit of FRACTIONAL radial error. Fractional so the
+# same gain behaves identically on a 100-unit ring and a 400-unit one, and gentle
+# because a slow hull hunting a wide ring is the failure mode here.
+orbit_spiral_gain = 1.2
+# World units inside the ring that still count as "at safe distance" when the
+# distance history is folded. Absorbs the spiral's own overshoot, so a converging
+# orbit is not read as a breach.
+safe_ring_tolerance = 20.0
+# Length of the bounded distance history, in shared AI ticks. At the default 30 Hz
+# helm cadence this is two seconds of held standoff — the "maintained" in
+# "maintained safe distance".
+safe_distance_window_ticks = 60.0
+# Throttle flown on the re-entry pivot. This doctrine authors no leg that flies
+# it — there is no shield-recovery arm here — but the six gate as ONE unit, so
+# omitting it would decline the defensive ring along with it. Authored ZERO, which
+# is the same statement `artillery_hold_speed` makes: if a future leg ever reaches
+# for it, a cold turn is what it should get.
+reengage_speed = 0.0
+
+[helm_console.steering_ai.memory]
+min_range_seen = 1000000.0
+escape_heading_rad = 0.0
+# Host-written on the tick the defensive ring is entered, from the seeded
+# composite key. Declared here so its pre-engagement value is authored rather than
+# implicit; no guard reads it — the host does, when it publishes the pass surface.
+# The gun line itself never circles anything, so this slot belongs to `shadow`
+# alone.
+orbit_direction = 1.0
+
+[[helm_console.steering_ai.state]]
+id = "shadow"
+
+  # The defensive ring — but only against something to hold a ring AROUND. With
+  # no target the standoff has no centre and the host has no reach to derive one
+  # from, so the fallback hands the axis back to ordinary doctrine travel and the
+  # hull flies its `[behaviour]` doctrine (patrol, hold station, a Navigation
+  # waypoint) exactly as an unbackfilled one would. Without this second rule the
+  # channel would resolve to "hold" and a targetless hull would coast on its last
+  # steering input for ever.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 10
+  channel = "yaw"
+  when = "fact(target_valid) > 0"
+  verb = "hold_recovery_orbit"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(posture) >= param(press_posture)"
+
+[[helm_console.steering_ai.state]]
+id = "acquire"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "hold"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(artillery_hold_range)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(target_valid) > 0 and fact(range_to_target) > param(artillery_hold_range)"
+
+[[helm_console.steering_ai.state]]
+id = "reposition"
+
+  # Ordinary target tracking on the way in. The bow is on the target rather than
+  # on a lead solution, which is correct: nothing is being fired at this range, and
+  # a run-in aimed at an intercept would arrive off to one side of it.
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "actuate_desired_facing"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "hold"
+  when = "fact(range_to_target) <= param(artillery_hold_range)"
+
+# THE PREDICTIVE FIRING POSITION.
+[[helm_console.steering_ai.state]]
+id = "hold"
+
+  [[helm_console.steering_ai.state.rule]]
+  priority = 0
+  channel = "yaw"
+  when = "true"
+  verb = "hold_artillery_position"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 20
+  to = "shadow"
+  when = "fact(posture) < param(press_posture)"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 10
+  to = "acquire"
+  when = "fact(target_valid) < 1"
+
+  [[helm_console.steering_ai.state.transition]]
+  priority = 0
+  to = "reposition"
+  when = "fact(range_to_target) > param(max_artillery_range)"
+
+# ── Impulse ──────────────────────────────────────────────────────────────────
+#
+# Switched OFF, and see the header for why it is switched off here rather than in
+# `[[behaviour.doctrine]]`. `rule = []` clears the fleet baseline's unconditional
+# permit — `idle` deep-merges as a plain scalar, and an idle declaration carrying
+# an inherited rule is a contradiction content validation rejects.
+[helm_console.impulse_ai]
+idle = true
+rule = []

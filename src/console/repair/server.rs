@@ -1450,9 +1450,11 @@ mod tests {
     /// would fail this test.
     #[test]
     fn repair_teams_resource_reflects_battleship_toml_repair_block() {
-        let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
-        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-            .expect("alliance_battleship.toml must parse");
+        // Through the resolver (issue #876): this hull is COMPOSED, so its baked
+        // bytes are no longer the document `spawn_game_start_entities` reads.
+        let config =
+            crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
+                .expect("alliance_battleship.toml must compose and parse");
         let rc = config
             .repair
             .expect("alliance_battleship must declare [repair]");

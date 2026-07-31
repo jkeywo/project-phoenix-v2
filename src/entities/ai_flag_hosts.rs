@@ -1093,7 +1093,22 @@ mod tests {
 
     // ── Through the real entity-load path, on a real shipped hull ───────────
 
-    const CRUISER: &str = include_str!("../../assets/entities/alliance_cruiser.toml");
+    /// The shipped cruiser as loadable TEXT — the RESOLVED document, not the
+    /// file (issue #876).
+    ///
+    /// `include_str!` bakes bytes at compile time, so a baked site can never see
+    /// include resolution, and `alliance_cruiser` is a COMPOSED hull since #876:
+    /// its `[captain_console.ai]` comes from `fragments/ai/captain_alliance.toml`
+    /// and its `[power.ai_policy]` from `fragments/ai/fleet_baseline.toml`. Both
+    /// mutations below substitute a guard inside one of those blocks, so the
+    /// resolved document is the only text that carries them — and it is also the
+    /// only text `EntityConfig::from_toml` accepts, since the raw file now
+    /// carries an `includes` key the parser rejects.
+    fn cruiser() -> String {
+        crate::entity_includes::resolve_from_disk("assets/entities/alliance_cruiser.toml")
+            .expect("alliance_cruiser must compose")
+            .toml
+    }
 
     /// Substitute one authored guard in a shipped hull, asserting the target was
     /// actually there — a silently-missed replacement would turn the mutation
@@ -1112,11 +1127,12 @@ mod tests {
     #[test]
     fn a_flag_guard_on_a_shipped_hull_fails_to_load() {
         // Sanity: the unmutated hull loads, so the failure below is the guard.
-        crate::entities::config::EntityConfig::from_toml(CRUISER)
+        let cruiser = cruiser();
+        crate::entities::config::EntityConfig::from_toml(&cruiser)
             .expect("alliance_cruiser loads as shipped");
 
         let mutated = with_guard(
-            CRUISER,
+            &cruiser,
             r#"when = "fact(secs_since_combat) < param(combat_window_secs)""#,
             r#"when = "fact(secs_since_combat) < param(combat_window_secs) and flag(battle_stations)""#,
         );
@@ -1138,7 +1154,7 @@ mod tests {
     #[test]
     fn a_flag_guard_on_a_plumbed_host_of_a_shipped_hull_still_loads() {
         let mutated = with_guard(
-            CRUISER,
+            &cruiser(),
             r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons)""#,
             r#"when = "fact(red_alert) > 0 and fact(battery_pct) >= param(min_reserve_weapons) and flag(weapons_free)""#,
         );
@@ -1230,7 +1246,7 @@ mod tests {
     #[test]
     fn a_history_guard_on_an_unfolded_host_fails_to_load() {
         let mutated = with_guard(
-            CRUISER,
+            &cruiser(),
             r#"when = "fact(secs_since_combat) < param(combat_window_secs)""#,
             r#"when = "history(min, secs_since_combat, 30) < param(combat_window_secs)""#,
         );
@@ -1329,7 +1345,8 @@ mod tests {
     /// one.
     #[test]
     fn removing_the_authored_fire_gate_removes_the_gate() {
-        let shipped = phaser_banks_fire_with_the_alert_down(CRUISER);
+        let cruiser = cruiser();
+        let shipped = phaser_banks_fire_with_the_alert_down(&cruiser);
         assert_eq!(
             shipped.len(),
             2,
@@ -1341,7 +1358,7 @@ mod tests {
         );
 
         let ungated = with_guard_everywhere(
-            CRUISER,
+            &cruiser,
             FIRE_GATE,
             r#"when = "true""#,
             CRUISER_GATED_WEAPONS,

@@ -20,30 +20,47 @@
 # ── Promoted from fixture to SHIPPED library spine (issue #875) ──────────────
 #
 # This was a #869/#885b mechanism fixture. It is now the ship-level spine of the
-# backfill fragment library, and `assets/entities/alliance_destroyer.toml` — the
+# backfill fragment library. `assets/entities/alliance_destroyer.toml` — the
 # first composed shipped hull — takes ELEVEN of those fourteen from here: all
 # but the three travel axes, which `ai/movement_attack_pass.toml` replaces
 # wholesale (see the contract below).
-# Nothing about the file changed; what changed is that a shipped hull now
-# depends on it, so a retune here retunes that hull. #878 moves the rest of the
-# fleet onto it.
+#
+# Issue #876 added the other two player hulls. `alliance_battleship.toml` takes
+# eleven — all but Engines, Steering and Impulse, which
+# `ai/movement_artillery.toml` replaces — and `alliance_cruiser.toml` takes all
+# FOURTEEN, because it composes no class movement fragment at all (see the note
+# on `includes` in that hull). Nothing about the file changed; what changed is
+# that three shipped hulls now depend on it, so a retune here retunes all three.
+# #878 moves the rest of the fleet onto it.
 #
 # ── The three travel axes below are REPLACEABLE, and the contract for it ─────
 #
 # `engines_ai`, `steering_ai` and `boost_ai` are the fleet's stateless defaults:
 # actuate on every axis, and take no AI boost action at all. A hull with a class
-# movement doctrine — see `ai/movement_attack_pass.toml` — includes this file
-# and then a movement fragment that REPLACES all three whole, which it must do
-# explicitly:
+# movement doctrine — see `ai/movement_attack_pass.toml` and
+# `ai/movement_artillery.toml` — includes this file and then a movement fragment
+# that REPLACES the axes it supplies a machine for, which it must do explicitly:
 #
 #   * `rule = []` on Engines and Steering, because a policy carrying both
-#     top-level rules and states is rejected at load;
-#   * `idle = false` on Boost, because `idle` is mutually exclusive with
-#     `state`, and it deep-merges as a plain scalar — a movement fragment that
-#     forgot this line would compose into a hull that validates, spawns, and
-#     never boosts.
+#     top-level rules and states is rejected at load. EVERY movement fragment
+#     owes these two: a class doctrine is a machine on both travel axes or it is
+#     not a class doctrine.
+#   * `idle = false` on Boost, but ONLY from a fragment that supplies a boost
+#     machine, because `idle` is mutually exclusive with `state` and deep-merges
+#     as a plain scalar — a fragment with boost states that forgot this line
+#     would compose into a hull that validates, spawns, and never boosts. A
+#     doctrine with no boost leg — a gun line, say, where lighting a drive
+#     abandons the firing position — says so by leaving this block alone, and
+#     the hull keeps a Boost policy that honestly declares it takes no AI boost
+#     action.
 #
-# The rest of this file — the selectors, Shields, Power, Comms and the three
+# `impulse_ai` is on the same footing as Boost, from the other direction:
+# `ai/movement_artillery.toml` REPLACES it with an explicit idle (`idle = true`
+# AND `rule = []`, because the inherited permit below would otherwise be the same
+# rejected contradiction), since an artillery hold band sits inside the impulse
+# drive's cruise window and an engaged drive overrides commanded throttle.
+#
+# The rest of this file — the selectors, Shields, Power, Comms and the remaining
 # secondary helm axes — is not specialised by any class doctrine, which is why
 # they sit here rather than in the movement fragments.
 #

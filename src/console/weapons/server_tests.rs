@@ -1923,9 +1923,11 @@ fn torpedo_system_resource_reflects_battleship_toml_torpedoes_block() {
     // TorpedoSystem the same way `spawn_game_start_entities` does
     // (parse alliance_battleship.toml → TorpedoesConfig::to_runtime → TorpedoSystem)
     // and assert the magazine size matches the TOML.
-    let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
-    let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-        .expect("alliance_battleship.toml must parse");
+    // Through the resolver (issue #876): this hull is COMPOSED, so its baked
+    // bytes are no longer the document `spawn_game_start_entities` reads.
+    let config =
+        crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
+            .expect("alliance_battleship.toml must compose and parse");
     let tc = config
         .torpedoes
         .expect("alliance_battleship must declare [torpedoes]");
@@ -1946,9 +1948,11 @@ fn phaser_combat_config_resource_reflects_battleship_toml_weapons_console() {
     // (parse alliance_battleship.toml → PhaserCombatConfig::from_weapons_console
     // → PhaserCombatConfigResource) and assert the resulting per-bank
     // values are exactly what the TOML says.
-    let toml_str = include_str!("../../../assets/entities/alliance_battleship.toml");
-    let config = crate::entity_config::EntityConfig::from_toml(toml_str)
-        .expect("alliance_battleship.toml must parse");
+    // Through the resolver (issue #876): this hull is COMPOSED, so its baked
+    // bytes are no longer the document `spawn_game_start_entities` reads.
+    let config =
+        crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
+            .expect("alliance_battleship.toml must compose and parse");
     let wc = config
         .weapons_console
         .expect("alliance_battleship must declare [weapons_console]");
@@ -12157,8 +12161,13 @@ fn reach_is_never_negative() {
 
 /// The authored phaser banks of a shipped hull, exactly as the TOML declares
 /// them — arcs included, so a hull retuned in `assets/` is felt here.
-fn shipped_bank_configs(toml_str: &str) -> Vec<crate::entity_config::PhaserBankConfig> {
-    let cfg = crate::entity_config::EntityConfig::from_toml(toml_str).expect("hull must parse");
+///
+/// Takes a hull STEM rather than baked text (issue #876): `include_str!` bakes
+/// bytes at compile time, so a baked site can never see include resolution, and
+/// `alliance_cruiser` is a COMPOSED hull since #876.
+fn shipped_bank_configs(stem: &str) -> Vec<crate::entity_config::PhaserBankConfig> {
+    let cfg = crate::entity_includes::load_entity_config(&format!("assets/entities/{stem}.toml"))
+        .unwrap_or_else(|e| panic!("{stem} must compose and parse: {e}"));
     let banks = cfg
         .weapons_console
         .as_ref()
@@ -12172,19 +12181,19 @@ fn shipped_bank_configs(toml_str: &str) -> Vec<crate::entity_config::PhaserBankC
 /// The authored phaser banks of a shipped hull, paired with an unconditional
 /// fire policy — the shape `spawn_policy_phaser_npc_at` takes.
 fn shipped_banks(
-    toml_str: &str,
+    stem: &str,
 ) -> Vec<(
     crate::entity_config::PhaserBankConfig,
     crate::ai::policy::AiPolicy,
 )> {
-    shipped_bank_configs(toml_str)
+    shipped_bank_configs(stem)
         .into_iter()
         .map(|b| (b, phaser_bank_fire_policy("true")))
         .collect()
 }
 
-const HARROW_CRUISER_TOML: &str = include_str!("../../../assets/entities/ship_harrow_cruiser.toml");
-const ALLIANCE_CRUISER_TOML: &str = include_str!("../../../assets/entities/alliance_cruiser.toml");
+const HARROW_CRUISER_HULL: &str = "ship_harrow_cruiser";
+const ALLIANCE_CRUISER_HULL: &str = "alliance_cruiser";
 
 /// Broadly abeam to starboard but deliberately **off** the beam line. The ship
 /// sits at the origin at yaw 0, so forward is `-Z` and starboard is `+X`; this
@@ -12236,7 +12245,7 @@ fn both_270_degree_banks_burn_at_once_on_a_target_abeam() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007a1",
         target_uuid,
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     app.update();
@@ -12347,7 +12356,7 @@ fn the_player_hulls_270_degree_banks_both_light_on_the_manual_fire_path() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007b1",
         target_uuid,
-        shipped_bank_configs(ALLIANCE_CRUISER_TOML),
+        shipped_bank_configs(ALLIANCE_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     app.update();
@@ -12391,7 +12400,7 @@ fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007b3",
         "cc000000-0000-0000-0000-0000000007b4",
-        shipped_banks(ALLIANCE_CRUISER_TOML),
+        shipped_banks(ALLIANCE_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     app.update();
@@ -12416,7 +12425,7 @@ fn a_target_in_one_arc_only_lights_the_bank_that_bears() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007c1",
         "cc000000-0000-0000-0000-0000000007c2",
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         DEAD_AHEAD,
     );
     app.update();
@@ -12437,7 +12446,7 @@ fn an_unavailable_bank_does_not_stop_its_sibling_broadside() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007d1",
         "cc000000-0000-0000-0000-0000000007d2",
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     // Take the aft bank off AI. `spawn_policy_phaser_npc_at` put every bank on
@@ -12470,7 +12479,7 @@ fn a_bank_on_cooldown_does_not_stop_its_sibling_broadside() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007e1",
         "cc000000-0000-0000-0000-0000000007e2",
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     {
@@ -12496,7 +12505,7 @@ fn a_burning_bank_is_not_relit_while_its_sibling_may_still_open_fire() {
         &mut app,
         "cc000000-0000-0000-0000-0000000007f1",
         "cc000000-0000-0000-0000-0000000007f2",
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         DEAD_AHEAD,
     );
     app.update();
@@ -12554,7 +12563,7 @@ fn each_live_broadside_bank_announces_its_own_beam_on_the_wire() {
         &mut app,
         "cc000000-0000-0000-0000-000000000801",
         target_uuid,
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     let out = tick(&mut app);
@@ -12591,7 +12600,7 @@ fn every_live_broadside_bank_draws_its_own_power() {
         &mut app,
         "cc000000-0000-0000-0000-000000000811",
         "cc000000-0000-0000-0000-000000000812",
-        shipped_banks(HARROW_CRUISER_TOML),
+        shipped_banks(HARROW_CRUISER_HULL),
         OFF_BOUNDARY_STARBOARD,
     );
     app.update();

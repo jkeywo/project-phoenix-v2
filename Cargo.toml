@@ -16,10 +16,16 @@ required-features = ["headless"]
 
 # Asset budgets and baseline comparison (issue #868). Native only, and needs no
 # simulation — it reads what is on disk and what a capture recorded, so it is
-# not gated on the headless feature the way the runner is.
+# not gated on the headless feature the way the runner is. It carries its own
+# gate instead: an UNgated bin is a second wasm target artifact, and Trunk
+# refuses to guess between it and the cdylib ("found more than one target
+# artifact"), which broke every browser build and skipped the smoke suite with
+# it. Any native-only bin added here needs a `required-features` for the same
+# reason.
 [[bin]]
 name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
+required-features = ["perf"]
 
 [profile.release]
 opt-level = 3
@@ -53,6 +59,10 @@ debug = ["bevy/debug"]
 # features are per-package, so bevy's render stack is still *compiled*; headless
 # only avoids instantiating `RenderPlugin`.
 headless = []
+# Perf feature: builds the `phoenix-perf` asset-budget and baseline tool. It
+# exists to keep that binary out of the wasm target list rather than to gate any
+# code — see the `[[bin]]` note above.
+perf = []
 
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgl2", "webp"] }

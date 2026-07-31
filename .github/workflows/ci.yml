@@ -305,7 +305,7 @@ jobs:
       - name: Build headless runner and perf tool
         run: |
           cargo build --release --features headless --bin phoenix-headless
-          cargo build --release --bin phoenix-perf
+          cargo build --release --features perf --bin phoenix-perf
 
       - name: Measure the default headless scenario
         run: |
